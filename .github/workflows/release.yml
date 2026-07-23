@@ -16,7 +16,6 @@ env:
 jobs:
   build-binaries:
     name: Build ${{ matrix.target }}
-    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -96,7 +95,6 @@ jobs:
 
   build-image-inputs:
     name: Build Docker input ${{ matrix.arch }}
-    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -172,7 +170,6 @@ jobs:
   build-images:
     name: Publish Docker image ${{ matrix.arch }}
     needs:
-      - prepare
       - build-image-inputs
     strategy:
       fail-fast: false
@@ -232,7 +229,6 @@ jobs:
   publish-manifest:
     name: Publish multi-architecture manifest
     needs:
-      - prepare
       - build-images
     runs-on: ubuntu-24.04
     permissions:
@@ -268,7 +264,6 @@ jobs:
   release:
     name: Create GitHub Release
     needs:
-      - prepare
       - build-binaries
       - publish-manifest
     runs-on: ubuntu-24.04
