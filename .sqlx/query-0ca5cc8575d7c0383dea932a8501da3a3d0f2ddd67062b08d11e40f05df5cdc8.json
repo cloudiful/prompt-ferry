@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM usage_charge_lines\nWHERE charge_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0ca5cc8575d7c0383dea932a8501da3a3d0f2ddd67062b08d11e40f05df5cdc8"
+}

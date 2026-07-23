@@ -1,0 +1,87 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT date_trunc('month', c.created_at) AS \"month!\",\n       COUNT(*)::BIGINT AS \"request_count!\",\n       COUNT(*) FILTER (WHERE c.usage_status = 'known')::BIGINT AS \"known_count!\",\n       COUNT(*) FILTER (WHERE c.usage_status = 'unknown')::BIGINT AS \"unknown_count!\",\n       COUNT(*) FILTER (WHERE c.pricing_status = 'priced')::BIGINT AS \"priced_count!\",\n       COUNT(*) FILTER (WHERE c.pricing_status = 'unpriced')::BIGINT AS \"unpriced_count!\",\n       COALESCE(SUM(c.provider_cost), 0)::NUMERIC AS \"provider_cost!\",\n       COALESCE(SUM(c.customer_amount), 0)::NUMERIC AS \"customer_amount!\",\n       COALESCE(SUM(c.adjusted_amount), 0)::NUMERIC AS \"adjusted_amount!\"\nFROM usage_charges c\nWHERE ($1::BIGINT IS NULL OR c.user_id = $1)\n  AND ($2::BIGINT IS NULL OR c.client_key_id = $2)\n  AND ($3::TEXT IS NULL OR c.requested_model = $3)\n  AND ($4::UUID IS NULL OR c.endpoint_id = $4)\n  AND ($5::TEXT IS NULL OR c.usage_status = $5)\n  AND ($6::TEXT IS NULL OR c.pricing_status = $6)\n  AND ($7::UUID IS NULL OR c.request_id = $7)\n  AND ($8::TIMESTAMPTZ IS NULL OR c.created_at >= $8)\n  AND ($9::TIMESTAMPTZ IS NULL OR c.created_at < $9)\nGROUP BY date_trunc('month', c.created_at)\nORDER BY date_trunc('month', c.created_at) ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "month!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "known_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "unknown_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "priced_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "unpriced_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "provider_cost!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "customer_amount!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "adjusted_amount!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "635c731fdb501455af1bece539328b6b849d7e8825daf7ba5a2400345112ee2d"
+}

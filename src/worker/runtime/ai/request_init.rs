@@ -28,10 +28,10 @@ pub(super) async fn initialize_request(
     let request_id =
         uuid::Uuid::parse_str(&request.request_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
     let request_model = model_from_body(&request.body);
-    let client_key_label = if let (Some(state), Some(key_hash)) =
+    let client_key_identity = if let (Some(state), Some(key_hash)) =
         (services.admin_state(), request.client_key_hash.as_deref())
     {
-        crate::db::get_client_key_label_by_hash(&state.pool, key_hash).await?
+        crate::db::get_client_key_identity_by_hash(&state.pool, key_hash).await?
     } else {
         None
     };
@@ -69,7 +69,8 @@ pub(super) async fn initialize_request(
             request_id,
             started,
             request_model,
-            client_key_label,
+            client_key_identity.as_ref().map(|value| value.key_id),
+            client_key_identity.map(|value| value.label),
             request.user_id.filter(|id| *id > 0),
             services.runtime_state.worker_instance_id(),
             request_prompt_log,

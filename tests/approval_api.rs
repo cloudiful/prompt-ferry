@@ -164,7 +164,7 @@ async fn insert_request_record(pool: &PgPool, user_id: i64, model: &str) -> anyh
                 db::UsageEventKind::Request,
                 db::RequestRecordState::Completed,
             )
-            .with_request_actor(Some(user_id), None, None)
+            .with_request_actor(Some(user_id), None, None, None)
             .with_model(Some(model.to_string()))
             .with_timing(Some(200), Some(true), Some(10), Some(1))
             .with_usage(Some(1), Some(2), Some(3), Some(0), None, None),
@@ -184,7 +184,7 @@ async fn insert_mcp_request_record(
                 db::UsageEventKind::Request,
                 db::RequestRecordState::Completed,
             )
-            .with_request_actor(Some(user_id), None, None)
+            .with_request_actor(Some(user_id), None, None, None)
             .with_mcp_context(
                 None,
                 Some(server_name.to_string()),
@@ -391,7 +391,7 @@ async fn endpoint_key_override_and_request_snapshot_are_preserved() -> anyhow::R
     let record_id = db::record_request_record(
         &schema.pool,
         db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
-            .with_request_actor(Some(admin.user_id), None, None)
+            .with_request_actor(Some(admin.user_id), None, None, None)
             .with_route(Some(endpoint.endpoint_id), None)
             .with_endpoint_key(Some(primary.key_id), Some(primary.key_label.clone()))
             .with_model(Some("gpt-endpoint-key".to_string()))

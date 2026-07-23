@@ -54,6 +54,58 @@ pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::extract_usage;
+
+    #[test]
+    fn extracts_openai_chat_usage_and_cache_read_tokens() {
+        let usage = extract_usage(&json!({
+            "usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 20,
+                "total_tokens": 140,
+                "prompt_tokens_details": { "cached_tokens": 30 }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.input_tokens, Some(120));
+        assert_eq!(usage.output_tokens, Some(20));
+        assert_eq!(usage.cache_read_tokens, Some(30));
+        assert_eq!(usage.cache_write_tokens, None);
+    }
+
+    #[test]
+    fn extracts_openai_responses_usage_and_separate_cache_meters() {
+        let usage = extract_usage(&json!({
+            "usage": {
+                "input_tokens": 120,
+                "output_tokens": 20,
+                "input_tokens_details": {
+                    "cached_tokens": 30,
+                    "cache_read_tokens": 30,
+                    "cache_write_tokens": 7
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.input_tokens, Some(120));
+        assert_eq!(usage.output_tokens, Some(20));
+        assert_eq!(usage.cache_read_tokens, Some(30));
+        assert_eq!(usage.cache_write_tokens, Some(7));
+    }
+
+    #[test]
+    fn returns_unknown_when_provider_has_no_usage_fields() {
+        assert!(extract_usage(&json!({ "usage": {} })).is_none());
+        assert!(extract_usage(&json!({})).is_none());
+    }
+}
+
 pub(super) fn extract_output_text(value: &Value) -> String {
     let mut parts = Vec::new();
     if let Some(text) = value

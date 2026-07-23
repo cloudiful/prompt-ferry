@@ -1,0 +1,209 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT price_rule_id, price_side, public_model, endpoint_id, upstream_model,\n       input_rate, cache_read_rate, cache_write_rate, output_rate, currency,\n       effective_from, effective_to, enabled, created_by_user_id, created_at, updated_at\nFROM billing_price_rules\nORDER BY price_side, COALESCE(public_model, upstream_model), effective_from DESC, created_at DESC\nLIMIT $1 OFFSET $2\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "price_rule_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "price_rule_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "price_side",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "price_side"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "public_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "public_model"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "upstream_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "upstream_model"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "input_rate",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "input_rate"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "cache_read_rate",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "cache_read_rate"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_write_rate",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "cache_write_rate"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "output_rate",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "output_rate"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "currency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "effective_from",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "effective_from"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "effective_to",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "effective_to"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "created_by_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "created_by_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "9e085162c1a717ec9ec34d90b0a98281b7b0c967a11aea247d1486cd4e6de4e0"
+}

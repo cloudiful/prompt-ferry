@@ -55,6 +55,142 @@ export type AvailableModelsResponse = {
     models: Array<AvailableModel>;
 };
 
+export type BillingAdjustmentRequest = {
+    amount: string;
+    reason: string;
+};
+
+export type BillingAdjustmentResponse = {
+    adjustment_id: number;
+    amount: string;
+    created_at: string;
+    created_by_user_id?: number | null;
+    reason: string;
+};
+
+export type BillingBreakdownResponse = {
+    adjusted_amount: string;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    grouping_key: string;
+    input_tokens: number;
+    output_tokens: number;
+    provider_cost?: string | null;
+    request_count: number;
+};
+
+export type BillingChargeDetailResponse = {
+    adjustments: Array<BillingAdjustmentResponse>;
+    charge: BillingChargeResponse;
+    lines: Array<BillingChargeLineResponse>;
+};
+
+export type BillingChargeLineResponse = {
+    amount: string;
+    line_id: number;
+    meter: string;
+    price_rule_id?: string | null;
+    price_side: string;
+    token_count: number;
+    unit_rate: string;
+};
+
+export type BillingChargePageResponse = {
+    charges: Array<BillingChargeResponse>;
+    total: number;
+};
+
+export type BillingChargeResponse = {
+    adjusted_amount?: string | null;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    charge_id: number;
+    client_key_id?: number | null;
+    client_key_label?: string | null;
+    created_at: string;
+    currency: string;
+    customer_amount?: string | null;
+    endpoint_id?: string | null;
+    endpoint_key_id?: string | null;
+    endpoint_name?: string | null;
+    gross_margin?: string | null;
+    input_tokens: number;
+    output_tokens: number;
+    pricing_status: string;
+    provider_cost?: string | null;
+    request_id: string;
+    requested_model?: string | null;
+    updated_at: string;
+    upstream_model?: string | null;
+    usage_status: string;
+    user_id?: number | null;
+    user_login_name?: string | null;
+};
+
+export type BillingPriceRulePageResponse = {
+    rules: Array<BillingPriceRuleResponse>;
+};
+
+export type BillingPriceRulePatch = {
+    enabled: boolean;
+};
+
+export type BillingPriceRuleRequest = {
+    cache_read_rate: string;
+    cache_write_rate: string;
+    effective_from: string;
+    endpoint_id?: string | null;
+    input_rate: string;
+    output_rate: string;
+    price_side: BillingPriceSide;
+    public_model?: string | null;
+    upstream_model?: string | null;
+};
+
+export type BillingPriceRuleResponse = {
+    cache_read_rate: string;
+    cache_write_rate: string;
+    created_at: string;
+    created_by_user_id?: number | null;
+    currency: string;
+    effective_from: string;
+    effective_to?: string | null;
+    enabled: boolean;
+    endpoint_id?: string | null;
+    input_rate: string;
+    output_rate: string;
+    price_rule_id: string;
+    price_side: string;
+    public_model?: string | null;
+    updated_at: string;
+    upstream_model?: string | null;
+};
+
+export type BillingPriceSide = 'cost' | 'sale';
+
+export type BillingRepriceRequest = {
+    limit?: number | null;
+};
+
+export type BillingRepriceResponse = {
+    repriced: number;
+};
+
+export type BillingSummaryResponse = {
+    adjusted_amount: string;
+    by_client_key: Array<BillingBreakdownResponse>;
+    by_model: Array<BillingBreakdownResponse>;
+    currency: string;
+    customer_amount: string;
+    gross_margin?: string | null;
+    known_count: number;
+    priced_count: number;
+    provider_cost?: string | null;
+    request_count: number;
+    unknown_count: number;
+    unpriced_count: number;
+};
+
 export type BridgeEncryptionMode = 'off' | 'required';
 
 export type BridgeStatus = {
@@ -1051,6 +1187,201 @@ export type RejectApprovalResponses = {
 };
 
 export type RejectApprovalResponse = RejectApprovalResponses[keyof RejectApprovalResponses];
+
+export type ListBillingChargesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+        user_id?: number;
+        client_key_id?: number;
+        requested_model?: string;
+        endpoint_id?: string;
+        usage_status?: string;
+        pricing_status?: string;
+        request_id?: string;
+        start_at?: string;
+        end_at?: string;
+    };
+    url: '/api/v1/admin/billing/charges';
+};
+
+export type ListBillingChargesResponses = {
+    /**
+     * Billing charges
+     */
+    200: BillingChargePageResponse;
+};
+
+export type ListBillingChargesResponse = ListBillingChargesResponses[keyof ListBillingChargesResponses];
+
+export type BillingChargeDetailData = {
+    body?: never;
+    path: {
+        /**
+         * Charge ID
+         */
+        charge_id: number;
+    };
+    query?: never;
+    url: '/api/v1/admin/billing/charges/{charge_id}';
+};
+
+export type BillingChargeDetailResponses = {
+    /**
+     * Billing charge detail
+     */
+    200: BillingChargeDetailResponse;
+};
+
+export type BillingChargeDetailResponse2 = BillingChargeDetailResponses[keyof BillingChargeDetailResponses];
+
+export type AddBillingAdjustmentData = {
+    body: BillingAdjustmentRequest;
+    path: {
+        /**
+         * Charge ID
+         */
+        charge_id: number;
+    };
+    query?: never;
+    url: '/api/v1/admin/billing/charges/{charge_id}/adjustments';
+};
+
+export type AddBillingAdjustmentResponses = {
+    /**
+     * Created billing adjustment
+     */
+    200: BillingAdjustmentResponse;
+};
+
+export type AddBillingAdjustmentResponse = AddBillingAdjustmentResponses[keyof AddBillingAdjustmentResponses];
+
+export type ExportBillingData = {
+    body?: never;
+    path?: never;
+    query?: {
+        kind?: string;
+        user_id?: number;
+        client_key_id?: number;
+        requested_model?: string;
+        endpoint_id?: string;
+        usage_status?: string;
+        pricing_status?: string;
+        request_id?: string;
+        start_at?: string;
+        end_at?: string;
+    };
+    url: '/api/v1/admin/billing/export';
+};
+
+export type ExportBillingResponses = {
+    /**
+     * Billing CSV export
+     */
+    200: string;
+};
+
+export type ExportBillingResponse = ExportBillingResponses[keyof ExportBillingResponses];
+
+export type ListBillingPriceRulesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+    };
+    url: '/api/v1/admin/billing/price-rules';
+};
+
+export type ListBillingPriceRulesResponses = {
+    /**
+     * Billing price rules
+     */
+    200: BillingPriceRulePageResponse;
+};
+
+export type ListBillingPriceRulesResponse = ListBillingPriceRulesResponses[keyof ListBillingPriceRulesResponses];
+
+export type CreateBillingPriceRuleData = {
+    body: BillingPriceRuleRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/billing/price-rules';
+};
+
+export type CreateBillingPriceRuleResponses = {
+    /**
+     * Created billing price rule
+     */
+    200: BillingPriceRuleResponse;
+};
+
+export type CreateBillingPriceRuleResponse = CreateBillingPriceRuleResponses[keyof CreateBillingPriceRuleResponses];
+
+export type PatchBillingPriceRuleData = {
+    body: BillingPriceRulePatch;
+    path: {
+        /**
+         * Price rule ID
+         */
+        price_rule_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/billing/price-rules/{price_rule_id}';
+};
+
+export type PatchBillingPriceRuleResponses = {
+    /**
+     * Updated price rule status
+     */
+    200: BillingPriceRuleResponse;
+};
+
+export type PatchBillingPriceRuleResponse = PatchBillingPriceRuleResponses[keyof PatchBillingPriceRuleResponses];
+
+export type RepriceBillingData = {
+    body: BillingRepriceRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/billing/reprice-unpriced';
+};
+
+export type RepriceBillingResponses = {
+    /**
+     * Repricing result
+     */
+    200: BillingRepriceResponse;
+};
+
+export type RepriceBillingResponse = RepriceBillingResponses[keyof RepriceBillingResponses];
+
+export type BillingSummaryData = {
+    body?: never;
+    path?: never;
+    query?: {
+        user_id?: number;
+        client_key_id?: number;
+        requested_model?: string;
+        endpoint_id?: string;
+        usage_status?: string;
+        pricing_status?: string;
+        request_id?: string;
+        start_at?: string;
+        end_at?: string;
+    };
+    url: '/api/v1/admin/billing/summary';
+};
+
+export type BillingSummaryResponses = {
+    /**
+     * Billing summary
+     */
+    200: BillingSummaryResponse;
+};
+
+export type BillingSummaryResponse2 = BillingSummaryResponses[keyof BillingSummaryResponses];
 
 export type DeleteConversationEndpointOverrideData = {
     body?: never;

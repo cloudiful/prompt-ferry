@@ -3,6 +3,8 @@ mod approvals;
 #[allow(dead_code)]
 mod auth;
 #[allow(dead_code)]
+mod billing;
+#[allow(dead_code)]
 mod bridge;
 mod doc;
 mod doc_groups;

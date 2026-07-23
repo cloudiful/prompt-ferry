@@ -103,6 +103,26 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
         .route("/admin/request-records/series", get(usage_series))
         .route("/admin/request-records/prune", post(prune_usage_events))
         .route(
+            "/admin/billing/price-rules",
+            get(list_billing_price_rules).post(create_billing_price_rule),
+        )
+        .route(
+            "/admin/billing/price-rules/{price_rule_id}",
+            patch(patch_billing_price_rule),
+        )
+        .route("/admin/billing/summary", get(billing_summary))
+        .route("/admin/billing/charges", get(list_billing_charges))
+        .route(
+            "/admin/billing/charges/{charge_id}",
+            get(billing_charge_detail),
+        )
+        .route(
+            "/admin/billing/charges/{charge_id}/adjustments",
+            post(add_billing_adjustment),
+        )
+        .route("/admin/billing/reprice-unpriced", post(reprice_billing))
+        .route("/admin/billing/export", get(export_billing))
+        .route(
             "/admin/conversations/{conversation_id}/endpoint-override",
             get(get_conversation_endpoint_override)
                 .put(set_conversation_endpoint_override)

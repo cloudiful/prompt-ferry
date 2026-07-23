@@ -2,6 +2,8 @@
 mod approvals;
 #[path = "types/auth_users.rs"]
 mod auth_users;
+#[path = "types/billing.rs"]
+mod billing;
 #[path = "types/endpoints.rs"]
 mod endpoints;
 #[path = "types/mcp.rs"]
@@ -20,6 +22,7 @@ use axum::{http::StatusCode, response::Response};
 
 pub use approvals::*;
 pub use auth_users::*;
+pub use billing::*;
 pub use endpoints::*;
 pub use mcp::*;
 pub use model_routes::*;

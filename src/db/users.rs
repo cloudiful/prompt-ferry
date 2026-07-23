@@ -2,7 +2,7 @@ use anyhow::Result;
 use sqlx::PgPool;
 
 use crate::{
-    db::types::{ClientKey, User, UserCreate, UserPassword, UserUpdate},
+    db::types::{ClientKey, ClientKeyIdentity, User, UserCreate, UserPassword, UserUpdate},
     keys::hash_password,
 };
 
@@ -139,6 +139,19 @@ pub async fn get_client_key_label_by_hash(pool: &PgPool, key_hash: &str) -> Resu
             .fetch_optional(pool)
             .await?,
     )
+}
+
+pub async fn get_client_key_identity_by_hash(
+    pool: &PgPool,
+    key_hash: &str,
+) -> Result<Option<ClientKeyIdentity>> {
+    Ok(sqlx::query_file_as!(
+        ClientKeyIdentity,
+        "src/sql/users/get_client_key_identity_by_hash.sql",
+        key_hash,
+    )
+    .fetch_optional(pool)
+    .await?)
 }
 
 pub async fn update_client_key(

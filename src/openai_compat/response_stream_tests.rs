@@ -308,6 +308,37 @@ data: {"type":"message_stop"}
 }
 
 #[test]
+fn preserves_anthropic_stream_cache_read_and_write_usage() {
+    let mut adapter = AnthropicResponseStreamAdapter::new();
+    let output = adapter
+        .push_chunk(br#"data: {"type":"message_start","message":{"id":"msg_123","model":"claude-sonnet-4-5","usage":{"input_tokens":5,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}}
+data: {"type":"message_delta","usage":{"output_tokens":2}}
+data: {"type":"message_stop"}
+
+"#)
+        .unwrap();
+
+    let events = parse_sse_events(&String::from_utf8(output.concat()).unwrap());
+    let completed = events
+        .iter()
+        .find(|event| event["type"].as_str() == Some("response.completed"))
+        .unwrap();
+
+    assert_eq!(
+        completed["response"]["usage"]["input_tokens"].as_i64(),
+        Some(12)
+    );
+    assert_eq!(
+        completed["response"]["usage"]["input_tokens_details"]["cache_read_tokens"].as_i64(),
+        Some(3)
+    );
+    assert_eq!(
+        completed["response"]["usage"]["input_tokens_details"]["cache_write_tokens"].as_i64(),
+        Some(4)
+    );
+}
+
+#[test]
 fn leaves_anthropic_stream_usage_null_when_upstream_omits_usage() {
     let mut adapter = AnthropicResponseStreamAdapter::new();
     let output = adapter

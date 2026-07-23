@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO usage_charge_adjustments (charge_id, amount, reason, created_by_user_id)\nVALUES ($1, $2, $3, $4)\nRETURNING adjustment_id, charge_id, amount, reason, created_by_user_id, created_at\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "adjustment_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_charge_adjustments",
+            "name": "adjustment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "charge_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_charge_adjustments",
+            "name": "charge_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "amount",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "usage_charge_adjustments",
+            "name": "amount"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charge_adjustments",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_by_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_charge_adjustments",
+            "name": "created_by_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "usage_charge_adjustments",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Numeric",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "f6a6bfe26f7b8b52cf6cdb1aa1be2000fea8976fd34bbaf018a95fc4217e89f6"
+}

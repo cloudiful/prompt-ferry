@@ -1,4 +1,5 @@
 mod approvals;
+mod billing;
 mod budgets;
 mod connection;
 mod endpoints;
@@ -16,6 +17,7 @@ pub use approvals::{
     create_flagged_approval_request, get_approval_request, list_approval_requests_page,
     record_approval_webhook_result, resolve_approval_request,
 };
+pub use billing::*;
 pub use budgets::{RequestBudgetCounts, RequestBudgetScope, request_budget_counts};
 pub use connection::{connect, connect_with_max_connections, migrate};
 pub use endpoints::{
@@ -77,7 +79,7 @@ pub use usage::{
 };
 pub use users::{
     bootstrap_admin, count_client_keys, create_client_key, create_user, delete_client_key,
-    delete_user, get_active_user, get_client_key_label_by_hash, get_user_endpoint_setting,
-    get_user_password_by_login, list_client_keys, list_users, reset_password, update_client_key,
-    update_user,
+    delete_user, get_active_user, get_client_key_identity_by_hash, get_client_key_label_by_hash,
+    get_user_endpoint_setting, get_user_password_by_login, list_client_keys, list_users,
+    reset_password, update_client_key, update_user,
 };

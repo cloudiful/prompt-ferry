@@ -98,6 +98,347 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApprovalRequest'
+  /api/v1/admin/billing/charges:
+    get:
+      tags:
+      - billing
+      operationId: list_billing_charges
+      parameters:
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: client_key_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: requested_model
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: endpoint_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: usage_status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: pricing_status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: request_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: start_at
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: end_at
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: Billing charges
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingChargePageResponse'
+  /api/v1/admin/billing/charges/{charge_id}:
+    get:
+      tags:
+      - billing
+      operationId: billing_charge_detail
+      parameters:
+      - name: charge_id
+        in: path
+        description: Charge ID
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Billing charge detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingChargeDetailResponse'
+  /api/v1/admin/billing/charges/{charge_id}/adjustments:
+    post:
+      tags:
+      - billing
+      operationId: add_billing_adjustment
+      parameters:
+      - name: charge_id
+        in: path
+        description: Charge ID
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BillingAdjustmentRequest'
+        required: true
+      responses:
+        '200':
+          description: Created billing adjustment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingAdjustmentResponse'
+  /api/v1/admin/billing/export:
+    get:
+      tags:
+      - billing
+      operationId: export_billing
+      parameters:
+      - name: kind
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: client_key_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: requested_model
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: endpoint_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: usage_status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: pricing_status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: request_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: start_at
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: end_at
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: Billing CSV export
+          content:
+            text/csv:
+              schema:
+                type: string
+  /api/v1/admin/billing/price-rules:
+    get:
+      tags:
+      - billing
+      operationId: list_billing_price_rules
+      parameters:
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Billing price rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingPriceRulePageResponse'
+    post:
+      tags:
+      - billing
+      operationId: create_billing_price_rule
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BillingPriceRuleRequest'
+        required: true
+      responses:
+        '200':
+          description: Created billing price rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingPriceRuleResponse'
+  /api/v1/admin/billing/price-rules/{price_rule_id}:
+    patch:
+      tags:
+      - billing
+      operationId: patch_billing_price_rule
+      parameters:
+      - name: price_rule_id
+        in: path
+        description: Price rule ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BillingPriceRulePatch'
+        required: true
+      responses:
+        '200':
+          description: Updated price rule status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingPriceRuleResponse'
+  /api/v1/admin/billing/reprice-unpriced:
+    post:
+      tags:
+      - billing
+      operationId: reprice_billing
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BillingRepriceRequest'
+        required: true
+      responses:
+        '200':
+          description: Repricing result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingRepriceResponse'
+  /api/v1/admin/billing/summary:
+    get:
+      tags:
+      - billing
+      operationId: billing_summary
+      parameters:
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: client_key_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: requested_model
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: endpoint_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: usage_status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: pricing_status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: request_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: start_at
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: end_at
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: Billing summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingSummaryResponse'
   /api/v1/admin/conversations/{conversation_id}/endpoint-override:
     get:
       tags:
@@ -1858,6 +2199,422 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AvailableModel'
+    BillingAdjustmentRequest:
+      type: object
+      required:
+      - amount
+      - reason
+      properties:
+        amount:
+          type: string
+        reason:
+          type: string
+    BillingAdjustmentResponse:
+      type: object
+      required:
+      - adjustment_id
+      - amount
+      - reason
+      - created_at
+      properties:
+        adjustment_id:
+          type: integer
+          format: int64
+        amount:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        created_by_user_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        reason:
+          type: string
+    BillingBreakdownResponse:
+      type: object
+      required:
+      - grouping_key
+      - request_count
+      - input_tokens
+      - cache_read_tokens
+      - cache_write_tokens
+      - output_tokens
+      - adjusted_amount
+      properties:
+        adjusted_amount:
+          type: string
+        cache_read_tokens:
+          type: integer
+          format: int64
+        cache_write_tokens:
+          type: integer
+          format: int64
+        grouping_key:
+          type: string
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        provider_cost:
+          type:
+          - string
+          - 'null'
+        request_count:
+          type: integer
+          format: int64
+    BillingChargeDetailResponse:
+      type: object
+      required:
+      - charge
+      - lines
+      - adjustments
+      properties:
+        adjustments:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingAdjustmentResponse'
+        charge:
+          $ref: '#/components/schemas/BillingChargeResponse'
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingChargeLineResponse'
+    BillingChargeLineResponse:
+      type: object
+      required:
+      - line_id
+      - price_side
+      - meter
+      - token_count
+      - unit_rate
+      - amount
+      properties:
+        amount:
+          type: string
+        line_id:
+          type: integer
+          format: int64
+        meter:
+          type: string
+        price_rule_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        price_side:
+          type: string
+        token_count:
+          type: integer
+          format: int64
+        unit_rate:
+          type: string
+    BillingChargePageResponse:
+      type: object
+      required:
+      - total
+      - charges
+      properties:
+        charges:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingChargeResponse'
+        total:
+          type: integer
+          format: int64
+    BillingChargeResponse:
+      type: object
+      required:
+      - charge_id
+      - request_id
+      - usage_status
+      - pricing_status
+      - currency
+      - input_tokens
+      - cache_read_tokens
+      - cache_write_tokens
+      - output_tokens
+      - created_at
+      - updated_at
+      properties:
+        adjusted_amount:
+          type:
+          - string
+          - 'null'
+        cache_read_tokens:
+          type: integer
+          format: int64
+        cache_write_tokens:
+          type: integer
+          format: int64
+        charge_id:
+          type: integer
+          format: int64
+        client_key_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        client_key_label:
+          type:
+          - string
+          - 'null'
+        created_at:
+          type: string
+          format: date-time
+        currency:
+          type: string
+        customer_amount:
+          type:
+          - string
+          - 'null'
+        endpoint_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        endpoint_key_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        endpoint_name:
+          type:
+          - string
+          - 'null'
+        gross_margin:
+          type:
+          - string
+          - 'null'
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        pricing_status:
+          type: string
+        provider_cost:
+          type:
+          - string
+          - 'null'
+        request_id:
+          type: string
+          format: uuid
+        requested_model:
+          type:
+          - string
+          - 'null'
+        updated_at:
+          type: string
+          format: date-time
+        upstream_model:
+          type:
+          - string
+          - 'null'
+        usage_status:
+          type: string
+        user_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        user_login_name:
+          type:
+          - string
+          - 'null'
+    BillingPriceRulePageResponse:
+      type: object
+      required:
+      - rules
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingPriceRuleResponse'
+    BillingPriceRulePatch:
+      type: object
+      required:
+      - enabled
+      properties:
+        enabled:
+          type: boolean
+    BillingPriceRuleRequest:
+      type: object
+      required:
+      - price_side
+      - input_rate
+      - cache_read_rate
+      - cache_write_rate
+      - output_rate
+      - effective_from
+      properties:
+        cache_read_rate:
+          type: string
+        cache_write_rate:
+          type: string
+        effective_from:
+          type: string
+          format: date-time
+        endpoint_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        input_rate:
+          type: string
+        output_rate:
+          type: string
+        price_side:
+          $ref: '#/components/schemas/BillingPriceSide'
+        public_model:
+          type:
+          - string
+          - 'null'
+        upstream_model:
+          type:
+          - string
+          - 'null'
+    BillingPriceRuleResponse:
+      type: object
+      required:
+      - price_rule_id
+      - price_side
+      - input_rate
+      - cache_read_rate
+      - cache_write_rate
+      - output_rate
+      - currency
+      - effective_from
+      - enabled
+      - created_at
+      - updated_at
+      properties:
+        cache_read_rate:
+          type: string
+        cache_write_rate:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        created_by_user_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        currency:
+          type: string
+        effective_from:
+          type: string
+          format: date-time
+        effective_to:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        enabled:
+          type: boolean
+        endpoint_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        input_rate:
+          type: string
+        output_rate:
+          type: string
+        price_rule_id:
+          type: string
+          format: uuid
+        price_side:
+          type: string
+        public_model:
+          type:
+          - string
+          - 'null'
+        updated_at:
+          type: string
+          format: date-time
+        upstream_model:
+          type:
+          - string
+          - 'null'
+    BillingPriceSide:
+      type: string
+      enum:
+      - cost
+      - sale
+    BillingRepriceRequest:
+      type: object
+      properties:
+        limit:
+          type:
+          - integer
+          - 'null'
+          format: int64
+    BillingRepriceResponse:
+      type: object
+      required:
+      - repriced
+      properties:
+        repriced:
+          type: integer
+          format: int64
+          minimum: 0
+    BillingSummaryResponse:
+      type: object
+      required:
+      - currency
+      - request_count
+      - known_count
+      - unknown_count
+      - priced_count
+      - unpriced_count
+      - customer_amount
+      - adjusted_amount
+      - by_client_key
+      - by_model
+      properties:
+        adjusted_amount:
+          type: string
+        by_client_key:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingBreakdownResponse'
+        by_model:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingBreakdownResponse'
+        currency:
+          type: string
+        customer_amount:
+          type: string
+        gross_margin:
+          type:
+          - string
+          - 'null'
+        known_count:
+          type: integer
+          format: int64
+        priced_count:
+          type: integer
+          format: int64
+        provider_cost:
+          type:
+          - string
+          - 'null'
+        request_count:
+          type: integer
+          format: int64
+        unknown_count:
+          type: integer
+          format: int64
+        unpriced_count:
+          type: integer
+          format: int64
     BridgeEncryptionMode:
       type: string
       enum:
@@ -4712,3 +5469,5 @@ tags:
   description: Manual approval workflow
 - name: bridge
   description: Bridge runtime status
+- name: billing
+  description: Usage billing and pricing

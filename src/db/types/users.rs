@@ -36,6 +36,12 @@ pub struct ClientKey {
     pub secret: Option<String>,
 }
 
+#[derive(Debug, Clone, FromRow)]
+pub struct ClientKeyIdentity {
+    pub key_id: i64,
+    pub label: String,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UserCreate {
     pub login_name: String,

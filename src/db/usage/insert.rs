@@ -1,4 +1,5 @@
 use super::*;
+use tracing::warn;
 
 pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) -> Result<i64> {
     let ref_full = input.request_full_json.clone();
@@ -83,6 +84,9 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
         input.lease_expires_at,
         input.last_heartbeat_at,
         input.response_capture_truncated,
+        input.client_key_id,
+        input.requested_model,
+        input.upstream_model,
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -99,6 +103,10 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
     }
 
     tx.commit().await?;
+
+    if let Err(err) = crate::db::record_usage_charge(pool, event_id, &input).await {
+        warn!(error = %err, event_id, "failed to persist usage billing snapshot");
+    }
 
     if input.request_state.is_terminal() {
         delete_request_record_lease(pool, input.request_id).await?;
@@ -210,7 +218,7 @@ mod tests {
     fn request_record_sql_placeholders_match_bind_count() {
         let upsert_sql = include_str!("../../sql/usage/upsert_request_record.sql");
 
-        assert_eq!(insert_column_count(upsert_sql), 75);
-        assert_eq!(max_placeholder(upsert_sql), 75);
+        assert_eq!(insert_column_count(upsert_sql), 78);
+        assert_eq!(max_placeholder(upsert_sql), 78);
     }
 }

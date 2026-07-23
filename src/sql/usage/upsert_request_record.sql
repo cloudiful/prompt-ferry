@@ -16,7 +16,8 @@ INSERT INTO request_records(
     provider_response_id, provider_conversation_key, base_checkpoint_event_id,
     response_prompt, upstream_error_body, error_code, error_message,
     failure_family, mcp_bearer_token_slot, route_selection_reason, owner_worker_id,
-    lease_expires_at, last_heartbeat_at, response_capture_truncated
+    lease_expires_at, last_heartbeat_at, response_capture_truncated,
+    client_key_id, requested_model, upstream_model
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
@@ -24,7 +25,7 @@ VALUES (
     $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44,
     $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58,
     $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72,
-    $73, $74, $75
+    $73, $74, $75, $76, $77, $78
 )
 ON CONFLICT (request_id) WHERE event_kind = 'request'
 DO UPDATE SET
@@ -114,5 +115,8 @@ DO UPDATE SET
     lease_expires_at = COALESCE(EXCLUDED.lease_expires_at, request_records.lease_expires_at),
     last_heartbeat_at = COALESCE(EXCLUDED.last_heartbeat_at, request_records.last_heartbeat_at),
     response_capture_truncated = request_records.response_capture_truncated OR EXCLUDED.response_capture_truncated,
+    client_key_id = COALESCE(EXCLUDED.client_key_id, request_records.client_key_id),
+    requested_model = COALESCE(EXCLUDED.requested_model, request_records.requested_model),
+    upstream_model = COALESCE(EXCLUDED.upstream_model, request_records.upstream_model),
     updated_at = NOW()
 RETURNING event_id

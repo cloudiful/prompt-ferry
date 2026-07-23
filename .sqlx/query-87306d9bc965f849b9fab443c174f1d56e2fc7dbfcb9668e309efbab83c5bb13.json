@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(\n    (SELECT created_at FROM usage_charges WHERE event_id = $1),\n    (SELECT created_at FROM request_records WHERE event_id = $1),\n    NOW()\n) AS \"created_at!\"\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "created_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "87306d9bc965f849b9fab443c174f1d56e2fc7dbfcb9668e309efbab83c5bb13"
+}

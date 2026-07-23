@@ -1,0 +1,104 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.charge_id AS \"charge_id!\", c.requested_model, c.upstream_model, c.endpoint_id,\n       c.created_at AS \"created_at!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'input'), 0)::BIGINT AS \"input_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_read'), 0)::BIGINT AS \"cache_read_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_write'), 0)::BIGINT AS \"cache_write_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'output'), 0)::BIGINT AS \"output_tokens!\"\nFROM usage_charges c\nLEFT JOIN usage_charge_lines l ON l.charge_id = c.charge_id\nWHERE c.usage_status = 'known' AND c.pricing_status = 'unpriced'\nGROUP BY c.charge_id\nORDER BY c.created_at ASC\nLIMIT $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "charge_id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "charge_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "requested_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "requested_model"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "upstream_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "upstream_model"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "1179cd4c32c4e5f43bcc19d9e99f2a93b0d824d0172e26e1f071e328d084c82c"
+}

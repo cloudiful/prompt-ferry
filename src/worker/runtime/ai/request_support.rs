@@ -96,6 +96,7 @@ pub(super) fn ai_route_usage_log(
             route_ctx.route.endpoint_key_label.clone(),
         )
         .with_route_selection(route_ctx.route_selection_reason)
+        .with_upstream_model(route_ctx.route.upstream_model.clone())
         .with_upstream_redaction(
             request_ctx.request_prompt_log.upstream_redaction_enabled,
             request_ctx

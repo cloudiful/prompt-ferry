@@ -97,6 +97,9 @@ pub struct RequestRecordCreate {
     pub owner_worker_id: Option<Uuid>,
     pub lease_expires_at: Option<DateTime<Utc>>,
     pub last_heartbeat_at: Option<DateTime<Utc>>,
+    pub client_key_id: Option<i64>,
+    pub requested_model: Option<String>,
+    pub upstream_model: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -244,6 +247,9 @@ impl RequestRecordCreate {
             owner_worker_id: None,
             lease_expires_at: None,
             last_heartbeat_at: None,
+            client_key_id: None,
+            requested_model: None,
+            upstream_model: None,
         }
     }
 
@@ -260,10 +266,12 @@ impl RequestRecordCreate {
     pub fn with_request_actor(
         mut self,
         user_id: Option<i64>,
+        client_key_id: Option<i64>,
         client_key_label: Option<String>,
         request_user_agent: Option<String>,
     ) -> Self {
         self.user_id = user_id;
+        self.client_key_id = client_key_id;
         self.client_key_label = client_key_label;
         self.request_user_agent = request_user_agent;
         self
@@ -321,6 +329,16 @@ impl RequestRecordCreate {
 
     pub fn with_model(mut self, model: Option<String>) -> Self {
         self.model = model;
+        self
+    }
+
+    pub fn with_billing_models(
+        mut self,
+        requested_model: Option<String>,
+        upstream_model: Option<String>,
+    ) -> Self {
+        self.requested_model = requested_model;
+        self.upstream_model = upstream_model;
         self
     }
 

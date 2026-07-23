@@ -126,6 +126,13 @@ export const navItems: NavItem[] = [
     ],
   },
   {
+    section: 'billing',
+    labelKey: 'billing',
+    iconActive: 'i-lucide-receipt-text',
+    iconInactive: 'i-lucide-receipt',
+    loader: () => import('./pages/BillingPage.vue'),
+  },
+  {
     section: 'approvals',
     labelKey: 'approvals',
     iconActive: 'i-lucide-clipboard-check',

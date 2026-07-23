@@ -19,6 +19,7 @@ pub struct UsageRedactionSummary {
 #[derive(Debug, Clone)]
 pub struct UsageRequestMetadata {
     pub user_id: Option<i64>,
+    pub client_key_id: Option<i64>,
     pub client_key_label: Option<String>,
     pub request_user_agent: Option<String>,
     pub path: String,
@@ -62,6 +63,7 @@ impl Default for UsageRequestMetadata {
     fn default() -> Self {
         Self {
             user_id: None,
+            client_key_id: None,
             client_key_label: None,
             request_user_agent: None,
             path: String::new(),
@@ -109,6 +111,7 @@ pub struct UsageLog {
     pub request_state: db::RequestRecordState,
     pub request_id: uuid::Uuid,
     pub user_id: Option<i64>,
+    pub client_key_id: Option<i64>,
     pub client_key_label: Option<String>,
     pub request_user_agent: Option<String>,
     pub endpoint_id: Option<uuid::Uuid>,
@@ -126,6 +129,8 @@ pub struct UsageLog {
     pub http_request_decompressed_bytes: Option<i64>,
     pub http_request_compression_ratio: Option<f64>,
     pub model: Option<String>,
+    pub requested_model: Option<String>,
+    pub upstream_model: Option<String>,
     pub status: Option<i32>,
     pub ok: Option<bool>,
     pub duration_ms: Option<i64>,
@@ -218,6 +223,7 @@ impl UsageLog {
             request_state: db::RequestRecordState::Received,
             request_id,
             user_id: metadata.user_id,
+            client_key_id: metadata.client_key_id,
             client_key_label: metadata.client_key_label,
             request_user_agent: metadata.request_user_agent,
             endpoint_id: None,
@@ -234,7 +240,9 @@ impl UsageLog {
             http_request_compressed_bytes: metadata.http_request_compressed_bytes,
             http_request_decompressed_bytes: metadata.http_request_decompressed_bytes,
             http_request_compression_ratio: metadata.http_request_compression_ratio,
-            model,
+            model: model.clone(),
+            requested_model: model,
+            upstream_model: None,
             status: None,
             ok: None,
             duration_ms: None,
@@ -328,7 +336,17 @@ impl UsageLog {
     }
 
     pub fn with_model(mut self, model: Option<String>) -> Self {
-        self.model = model;
+        if model.is_some() {
+            self.model = model.clone();
+            self.upstream_model = model;
+        }
+        self
+    }
+
+    pub fn with_upstream_model(mut self, model: Option<String>) -> Self {
+        if model.is_some() {
+            self.upstream_model = model;
+        }
         self
     }
 

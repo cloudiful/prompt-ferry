@@ -1,5 +1,6 @@
 import { approvalMessages } from './modules/approvals'
 import { authMessages } from './modules/auth'
+import { billingMessages } from './modules/billing'
 import { coreMessages } from './modules/core'
 import { endpointMessages } from './modules/endpoints'
 import { mcpMessages } from './modules/mcp'
@@ -27,6 +28,7 @@ const modules = [
   approvalMessages,
   settingsMessages,
   usageMessages,
+  billingMessages,
 ] as const
 
 function mergeLocale(locale: Locale) {

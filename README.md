@@ -223,11 +223,39 @@ Managed mode provides:
 - User-scoped model visibility through `GET /v1/models`.
 - Endpoint and API-key selection for conversation routing.
 - Usage detail, request replay, retention cleanup, and redaction settings.
+- Auditable usage billing with token snapshots, CNY cost/customer pricing, and CSV exports.
 - Optional review policies: allow, manual approval, fail-open, and fail-closed.
 - Relay-side public IP allowlisting.
 
 Request bodies up to 256 MiB are accepted on the AI endpoints. Configure the
 same or a larger limit on any reverse proxy in front of the relay.
+
+### Usage billing
+
+The managed admin console exposes a Billing workspace for administrators and
+ordinary users. It records a request-level billing snapshot when a provider
+returns usage and never estimates tokens with a tokenizer. The four billable
+meters are ordinary input, cache read, cache write, and output tokens.
+
+Administrators maintain immutable CNY price versions in the workspace. Sale
+prices match the public model; provider costs match the selected endpoint and
+upstream model. Rates are strings expressed per million tokens. Creating a new
+version or disabling a version does not rewrite historical snapshots. Missing
+usage is shown as `unknown`, and missing prices as `unpriced`; administrators
+can explicitly reprice unpriced snapshots after adding rules.
+
+Billing API routes are available under `/api/v1/admin/billing`:
+
+- `GET/POST /price-rules` and `PATCH /price-rules/{id}` manage price versions.
+- `GET /summary`, `GET /charges`, and `GET /charges/{charge_id}` expose scoped summaries and snapshots.
+- `POST /charges/{charge_id}/adjustments` records an administrator adjustment.
+- `POST /reprice-unpriced` retries snapshots without a complete price match.
+- `GET /export?kind=details|monthly` returns CSV data.
+
+Normal users are always scoped to their own data and receive customer amounts
+without upstream cost or margin fields. Clearing request payloads or usage
+details does not delete billing snapshots or adjustment audit records; those
+records follow the independent billing retention policy.
 
 ## Production Security
 

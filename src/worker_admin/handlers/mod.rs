@@ -1,5 +1,6 @@
 mod approvals;
 mod auth;
+mod billing;
 mod endpoints;
 mod mcp;
 mod me;
@@ -60,8 +61,8 @@ pub(super) use crate::{
 use tower_http::cors::CorsLayer;
 
 use self::{
-    approvals::*, auth::*, endpoints::*, mcp::*, model_routes::*, relays::*, settings::*, usage::*,
-    users::*,
+    approvals::*, auth::*, billing::*, endpoints::*, mcp::*, model_routes::*, relays::*,
+    settings::*, usage::*, users::*,
 };
 
 pub(super) use self::support::*;

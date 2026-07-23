@@ -435,43 +435,45 @@ fn anthropic_content_to_output_items(content: Option<&Value>) -> Result<Vec<Valu
     Ok(output)
 }
 
-fn anthropic_usage_to_openai_usage(value: &Value) -> Value {
+fn anthropic_usage_to_openai_usage(value: &Value) -> Option<Value> {
     if let Some(usage) = value.get("usage").and_then(Value::as_object) {
-        let input_tokens = usage
-            .get("input_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
-        let output_tokens = usage
-            .get("output_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
-        let cache_read_tokens = usage
-            .get("cache_read_input_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
+        let input_tokens = usage.get("input_tokens").and_then(Value::as_i64);
+        let output_tokens = usage.get("output_tokens").and_then(Value::as_i64);
+        let cache_read_tokens = usage.get("cache_read_input_tokens").and_then(Value::as_i64);
         let cache_write_tokens = usage
             .get("cache_creation_input_tokens")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
-        return json!({
-            "input_tokens": input_tokens,
+            .and_then(Value::as_i64);
+        if [
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+        ]
+        .into_iter()
+        .all(|value| value.is_none())
+        {
+            return None;
+        }
+        let input_tokens = input_tokens.unwrap_or_default();
+        let output_tokens = output_tokens.unwrap_or_default();
+        let cache_read_tokens = cache_read_tokens.unwrap_or_default();
+        let cache_write_tokens = cache_write_tokens.unwrap_or_default();
+        let total_input_tokens = input_tokens + cache_read_tokens + cache_write_tokens;
+        return Some(json!({
+            "input_tokens": total_input_tokens,
             "output_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
+            "total_tokens": total_input_tokens + output_tokens,
             "input_tokens_details": {
-                "cached_tokens": cache_read_tokens + cache_write_tokens,
+                "cached_tokens": cache_read_tokens,
+                "cache_read_tokens": cache_read_tokens,
+                "cache_write_tokens": cache_write_tokens,
             },
             "output_tokens_details": {
                 "reasoning_tokens": 0,
             },
-        });
+        }));
     }
-    json!({
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "total_tokens": 0,
-        "input_tokens_details": {"cached_tokens": 0},
-        "output_tokens_details": {"reasoning_tokens": 0},
-    })
+    None
 }
 
 fn output_text_from_items(content: Option<&Value>) -> String {
@@ -597,5 +599,48 @@ mod tests {
         assert_eq!(value["output"][1]["type"].as_str(), Some("function_call"));
         assert_eq!(value["usage"]["input_tokens"].as_i64(), Some(2));
         assert_eq!(value["usage"]["output_tokens"].as_i64(), Some(3));
+    }
+
+    #[test]
+    fn preserves_anthropic_cache_read_and_write_usage() {
+        let body = br#"{
+            "id":"msg_123",
+            "model":"claude-sonnet-4-5",
+            "content":[],
+            "usage":{
+                "input_tokens":5,
+                "cache_read_input_tokens":3,
+                "cache_creation_input_tokens":4,
+                "output_tokens":2
+            }
+        }"#;
+        let value =
+            serde_json::from_slice::<Value>(&anthropic_response_to_responses(body).unwrap())
+                .unwrap();
+
+        assert_eq!(value["usage"]["input_tokens"].as_i64(), Some(12));
+        assert_eq!(
+            value["usage"]["input_tokens_details"]["cache_read_tokens"].as_i64(),
+            Some(3)
+        );
+        assert_eq!(
+            value["usage"]["input_tokens_details"]["cache_write_tokens"].as_i64(),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn leaves_usage_null_when_anthropic_does_not_report_tokens() {
+        let body = br#"{
+            "id":"msg_123",
+            "model":"claude-sonnet-4-5",
+            "content":[],
+            "usage":{}
+        }"#;
+        let value =
+            serde_json::from_slice::<Value>(&anthropic_response_to_responses(body).unwrap())
+                .unwrap();
+
+        assert!(value["usage"].is_null());
     }
 }

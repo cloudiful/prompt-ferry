@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE usage_charges\nSET adjusted_amount = COALESCE(customer_amount, 0) + $2,\n    pricing_status = 'adjusted',\n    updated_at = NOW()\nWHERE charge_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6e62ae70016eb1fa802d5c05383ef582f0ed08e00b1e59a3f9ab938ecc19dece"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO usage_charge_lines (\n    charge_id, price_side, meter, token_count, unit_rate, amount, price_rule_id\n)\nVALUES ($1, $2, $3, $4, $5, $6, $7)\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Int8",
+        "Numeric",
+        "Numeric",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c1fd0c05958336f9f56fc71c29c26dca681d7cc9d0e5d433634c17b486a949b8"
+}

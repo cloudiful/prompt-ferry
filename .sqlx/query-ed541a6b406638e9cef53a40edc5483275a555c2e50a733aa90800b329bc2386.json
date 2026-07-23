@@ -1,0 +1,208 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.charge_id AS \"charge_id!\", c.request_id AS \"request_id!\", u.login_name AS user_login_name, c.client_key_label,\n       c.requested_model, c.upstream_model, e.name AS endpoint_name,\n       c.usage_status AS \"usage_status!\", c.pricing_status AS \"pricing_status!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'input'), 0)::BIGINT AS \"input_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_read'), 0)::BIGINT AS \"cache_read_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_write'), 0)::BIGINT AS \"cache_write_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'output'), 0)::BIGINT AS \"output_tokens!\",\n       c.provider_cost, c.customer_amount, c.adjusted_amount, c.created_at AS \"created_at!\"\nFROM usage_charges c\nLEFT JOIN users u ON u.user_id = c.user_id\nLEFT JOIN provider_endpoints e ON e.endpoint_id = c.endpoint_id\nLEFT JOIN usage_charge_lines l ON l.charge_id = c.charge_id\nWHERE ($1::BIGINT IS NULL OR c.user_id = $1)\n  AND ($2::BIGINT IS NULL OR c.client_key_id = $2)\n  AND ($3::TEXT IS NULL OR c.requested_model = $3)\n  AND ($4::UUID IS NULL OR c.endpoint_id = $4)\n  AND ($5::TEXT IS NULL OR c.usage_status = $5)\n  AND ($6::TEXT IS NULL OR c.pricing_status = $6)\n  AND ($7::UUID IS NULL OR c.request_id = $7)\n  AND ($8::TIMESTAMPTZ IS NULL OR c.created_at >= $8)\n  AND ($9::TIMESTAMPTZ IS NULL OR c.created_at < $9)\nGROUP BY c.charge_id, u.login_name, e.name\nORDER BY c.created_at ASC, c.charge_id ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "charge_id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "charge_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "request_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "request_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "user_login_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "login_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "client_key_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "client_key_label"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "requested_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "requested_model"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "upstream_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "upstream_model"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "endpoint_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "usage_status!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "usage_status"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "pricing_status!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "pricing_status"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 13,
+        "name": "provider_cost",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "provider_cost"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "customer_amount",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "customer_amount"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "adjusted_amount",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "adjusted_amount"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "created_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "ed541a6b406638e9cef53a40edc5483275a555c2e50a733aa90800b329bc2386"
+}

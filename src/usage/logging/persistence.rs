@@ -64,7 +64,12 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         }
     }
     .with_state(log.event_kind, log.request_state)
-    .with_request_actor(log.user_id, log.client_key_label, log.request_user_agent)
+    .with_request_actor(
+        log.user_id,
+        log.client_key_id,
+        log.client_key_label,
+        log.request_user_agent,
+    )
     .with_http_request_compression(
         log.http_request_content_encoding,
         log.http_request_compressed,
@@ -81,6 +86,7 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         log.mcp_operation_name,
     )
     .with_model(log.model)
+    .with_billing_models(log.requested_model, log.upstream_model)
     .with_timing(log.status, log.ok, log.duration_ms, log.first_chunk_ms)
     .with_usage(
         log.usage.input_tokens,

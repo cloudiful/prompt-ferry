@@ -144,8 +144,11 @@ impl AnthropicResponseStreamAdapter {
             .map(str::to_string)
             .filter(|value| !value.is_empty());
         self.created_at = Some(chrono::Utc::now().timestamp());
-        if let Some(usage) = message.get("usage") {
-            self.usage = Some(anthropic_stream_usage_to_openai_usage(usage));
+        if let Some(usage) = message
+            .get("usage")
+            .and_then(anthropic_stream_usage_to_openai_usage)
+        {
+            self.usage = Some(usage);
         }
         self.ensure_response_created(output)
     }
@@ -369,8 +372,10 @@ impl AnthropicResponseStreamAdapter {
     }
 
     fn handle_message_delta(&mut self, value: &Value) -> Result<(), CompatError> {
-        if let Some(usage) = value.get("usage") {
-            let next_usage = anthropic_stream_usage_to_openai_usage(usage);
+        if let Some(next_usage) = value
+            .get("usage")
+            .and_then(anthropic_stream_usage_to_openai_usage)
+        {
             self.usage = Some(merge_openai_usage(self.usage.take(), next_usage));
         }
         Ok(())
@@ -678,34 +683,42 @@ fn normalize_partial_json_arguments(arguments: &str) -> String {
     "{}".to_string()
 }
 
-fn anthropic_stream_usage_to_openai_usage(usage: &Value) -> Value {
-    let input_tokens = usage
-        .get("input_tokens")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let output_tokens = usage
-        .get("output_tokens")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let cache_read_tokens = usage
-        .get("cache_read_input_tokens")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
+fn anthropic_stream_usage_to_openai_usage(usage: &Value) -> Option<Value> {
+    let input_tokens = usage.get("input_tokens").and_then(Value::as_i64);
+    let output_tokens = usage.get("output_tokens").and_then(Value::as_i64);
+    let cache_read_tokens = usage.get("cache_read_input_tokens").and_then(Value::as_i64);
     let cache_write_tokens = usage
         .get("cache_creation_input_tokens")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    json!({
-        "input_tokens": input_tokens,
+        .and_then(Value::as_i64);
+    if [
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+    ]
+    .into_iter()
+    .all(|value| value.is_none())
+    {
+        return None;
+    }
+    let input_tokens = input_tokens.unwrap_or_default();
+    let output_tokens = output_tokens.unwrap_or_default();
+    let cache_read_tokens = cache_read_tokens.unwrap_or_default();
+    let cache_write_tokens = cache_write_tokens.unwrap_or_default();
+    let total_input_tokens = input_tokens + cache_read_tokens + cache_write_tokens;
+    Some(json!({
+        "input_tokens": total_input_tokens,
         "output_tokens": output_tokens,
-        "total_tokens": input_tokens + output_tokens,
+        "total_tokens": total_input_tokens + output_tokens,
         "input_tokens_details": {
-            "cached_tokens": cache_read_tokens + cache_write_tokens,
+            "cached_tokens": cache_read_tokens,
+            "cache_read_tokens": cache_read_tokens,
+            "cache_write_tokens": cache_write_tokens,
         },
         "output_tokens_details": {
             "reasoning_tokens": 0,
         },
-    })
+    }))
 }
 
 fn merge_openai_usage(current: Option<Value>, next: Value) -> Value {
@@ -715,10 +728,18 @@ fn merge_openai_usage(current: Option<Value>, next: Value) -> Value {
         "output_tokens": next["output_tokens"].as_i64().unwrap_or(0).max(current["output_tokens"].as_i64().unwrap_or(0)),
         "total_tokens": next["total_tokens"].as_i64().unwrap_or(0).max(current["total_tokens"].as_i64().unwrap_or(0)),
         "input_tokens_details": {
-            "cached_tokens": next["input_tokens_details"]["cached_tokens"]
+            "cached_tokens": next["input_tokens_details"]["cache_read_tokens"]
                 .as_i64()
                 .unwrap_or(0)
-                .max(current["input_tokens_details"]["cached_tokens"].as_i64().unwrap_or(0)),
+                .max(current["input_tokens_details"]["cache_read_tokens"].as_i64().unwrap_or(0)),
+            "cache_read_tokens": next["input_tokens_details"]["cache_read_tokens"]
+                .as_i64()
+                .unwrap_or(0)
+                .max(current["input_tokens_details"]["cache_read_tokens"].as_i64().unwrap_or(0)),
+            "cache_write_tokens": next["input_tokens_details"]["cache_write_tokens"]
+                .as_i64()
+                .unwrap_or(0)
+                .max(current["input_tokens_details"]["cache_write_tokens"].as_i64().unwrap_or(0)),
         },
         "output_tokens_details": {
             "reasoning_tokens": next["output_tokens_details"]["reasoning_tokens"]

@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO usage_charges (\n    event_id, request_id, user_id, client_key_id, client_key_label,\n    requested_model, upstream_model, endpoint_id, endpoint_key_id,\n    usage_status, pricing_status, currency, provider_cost, customer_amount, adjusted_amount\n)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'CNY', $12, $13, $14)\nON CONFLICT (event_id)\nDO UPDATE SET\n    event_id = EXCLUDED.event_id,\n    request_id = EXCLUDED.request_id,\n    user_id = COALESCE(EXCLUDED.user_id, usage_charges.user_id),\n    client_key_id = COALESCE(EXCLUDED.client_key_id, usage_charges.client_key_id),\n    client_key_label = COALESCE(EXCLUDED.client_key_label, usage_charges.client_key_label),\n    requested_model = COALESCE(EXCLUDED.requested_model, usage_charges.requested_model),\n    upstream_model = COALESCE(EXCLUDED.upstream_model, usage_charges.upstream_model),\n    endpoint_id = COALESCE(EXCLUDED.endpoint_id, usage_charges.endpoint_id),\n    endpoint_key_id = COALESCE(EXCLUDED.endpoint_key_id, usage_charges.endpoint_key_id),\n    usage_status = EXCLUDED.usage_status,\n    pricing_status = CASE\n        WHEN EXISTS (SELECT 1 FROM usage_charge_adjustments WHERE charge_id = usage_charges.charge_id)\n            THEN 'adjusted'\n        ELSE EXCLUDED.pricing_status\n    END,\n    provider_cost = EXCLUDED.provider_cost,\n    customer_amount = EXCLUDED.customer_amount,\n    adjusted_amount = CASE\n        WHEN EXISTS (SELECT 1 FROM usage_charge_adjustments WHERE charge_id = usage_charges.charge_id)\n            THEN usage_charges.adjusted_amount\n        ELSE EXCLUDED.adjusted_amount\n    END,\n    updated_at = NOW()\nRETURNING charge_id\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "charge_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "charge_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Numeric",
+        "Numeric",
+        "Numeric"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "43d2e43ada77e3cf4733995ca6c9bd235dced836d58baecb224169695f68c442"
+}

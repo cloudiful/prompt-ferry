@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*)::BIGINT AS \"total!\"\nFROM usage_charges c\nWHERE ($1::BIGINT IS NULL OR c.user_id = $1)\n  AND ($2::BIGINT IS NULL OR c.client_key_id = $2)\n  AND ($3::TEXT IS NULL OR c.requested_model = $3)\n  AND ($4::UUID IS NULL OR c.endpoint_id = $4)\n  AND ($5::TEXT IS NULL OR c.usage_status = $5)\n  AND ($6::TEXT IS NULL OR c.pricing_status = $6)\n  AND ($7::UUID IS NULL OR c.request_id = $7)\n  AND ($8::TIMESTAMPTZ IS NULL OR c.created_at >= $8)\n  AND ($9::TIMESTAMPTZ IS NULL OR c.created_at < $9)\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "13b4b110acdf59ac5b59660b8970c96df16ac5551adc6edda95286d48a8d194e"
+}

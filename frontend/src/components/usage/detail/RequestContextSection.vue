@@ -23,10 +23,22 @@ defineProps<{
     <div class="grid gap-3">
       <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         <DetailKeyValue :label="t('status')">
-          <UBadge
-            :label="formatting.formatRequestStateLabel(event.request_state)"
-            :color="formatting.requestStateSeverity(event.request_state)"
-          />
+          <div class="flex flex-wrap items-center gap-1">
+            <UBadge
+              :label="formatting.formatRequestStateLabel(event.request_state)"
+              :color="formatting.requestStateSeverity(event.request_state)"
+            />
+            <UButton
+              v-if="event.request_category === 'ai'"
+              size="xs"
+              color="neutral"
+              variant="link"
+              icon="i-lucide-receipt-text"
+              :to="{ path: '/billing', query: { request_id: event.request_id } }"
+              :aria-label="t('requestLinkBilling')"
+              :label="t('requestLinkBilling')"
+            />
+          </div>
         </DetailKeyValue>
         <DetailKeyValue :label="t('tokens')">
           {{ formatting.formatCount(event.input_tokens) }} /

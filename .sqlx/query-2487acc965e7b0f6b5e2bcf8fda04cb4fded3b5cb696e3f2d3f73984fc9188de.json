@@ -1,0 +1,284 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.charge_id AS \"charge_id!\", c.event_id, c.request_id AS \"request_id!\", c.user_id, u.login_name AS user_login_name,\n       c.client_key_id, c.client_key_label, c.requested_model, c.upstream_model,\n       c.endpoint_id, e.name AS endpoint_name, c.endpoint_key_id,\n       c.usage_status AS \"usage_status!\", c.pricing_status AS \"pricing_status!\", c.currency AS \"currency!\", c.provider_cost,\n       c.customer_amount, c.adjusted_amount,\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'input'), 0)::BIGINT AS \"input_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_read'), 0)::BIGINT AS \"cache_read_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_write'), 0)::BIGINT AS \"cache_write_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'output'), 0)::BIGINT AS \"output_tokens!\",\n       c.created_at AS \"created_at!\", c.updated_at AS \"updated_at!\"\nFROM usage_charges c\nLEFT JOIN users u ON u.user_id = c.user_id\nLEFT JOIN provider_endpoints e ON e.endpoint_id = c.endpoint_id\nLEFT JOIN usage_charge_lines l ON l.charge_id = c.charge_id\nWHERE c.charge_id = $1\nGROUP BY c.charge_id, u.login_name, e.name\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "charge_id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "charge_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "request_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "request_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "user_login_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "login_name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "client_key_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "client_key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "client_key_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "client_key_label"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "requested_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "requested_model"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "upstream_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "upstream_model"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "endpoint_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "endpoint_key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "endpoint_key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "usage_status!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "usage_status"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "pricing_status!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "pricing_status"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "currency!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "provider_cost",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "provider_cost"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "customer_amount",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "customer_amount"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "adjusted_amount",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "adjusted_amount"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 19,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 20,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 21,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 22,
+        "name": "created_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "updated_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "2487acc965e7b0f6b5e2bcf8fda04cb4fded3b5cb696e3f2d3f73984fc9188de"
+}

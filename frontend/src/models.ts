@@ -110,6 +110,7 @@ export type NavigationSection =
   | 'relays'
   | 'redaction'
   | 'request-records'
+  | 'billing'
   | 'approvals'
   | 'settings'
 
