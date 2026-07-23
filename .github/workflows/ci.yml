@@ -13,4 +13,7 @@ concurrency:
 jobs:
   quality:
     uses: ./.github/workflows/_quality.yml
+    permissions:
+      contents: read
+      security-events: write
     secrets: inherit

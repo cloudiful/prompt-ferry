@@ -46,6 +46,9 @@ jobs:
     name: Release quality gate
     needs: prepare
     uses: ./.github/workflows/_quality.yml
+    permissions:
+      contents: read
+      security-events: write
     secrets: inherit
 
   build-binaries:
