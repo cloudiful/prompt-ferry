@@ -21,7 +21,7 @@ mod history;
 mod reconstruct;
 
 pub(super) use history::fallback_artifact_for_entry;
-#[allow(unused_imports)]
+#[cfg(test)]
 pub(super) use reconstruct::{
     replay_assistant_message, replayable_output_items, should_replay_reasoning,
 };

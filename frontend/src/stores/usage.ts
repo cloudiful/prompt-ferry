@@ -6,15 +6,11 @@ import {
 } from '../table-pagination'
 import type {
   RequestRecordCategory,
-  RequestRecordBucket,
   RequestRecordFacets,
-  RequestRecordSummary,
   RequestRecordsClearResponse,
 } from '../generated/admin-api'
 import { useLocale } from '../composables/useLocale'
 import type {
-  Option,
-  RequestRecordBucketGranularity,
   RequestRecordClearForm,
   RequestRecordFilterModel,
   RequestRecordRowView,
@@ -35,8 +31,6 @@ import {
   fetchUsageFacets,
   fetchUsageOverview,
   fetchUsageRecords,
-  fetchUsageSeries,
-  fetchUsageSummary,
   pruneUsageHistory,
 } from './usage-api'
 
@@ -49,11 +43,8 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
   }
   const overviewState = {
     overview: ref<RequestOverviewResponse | null>(null),
-    series: ref<RequestRecordBucket[]>([]),
-    summary: ref<RequestRecordSummary | null>(null),
   }
   const queryState = {
-    bucket: ref<RequestRecordBucketGranularity>('hour'),
     end: ref(''),
     filters: ref<RequestRecordFilterModel>(createDefaultRequestRecordFilters()),
     first: ref(0),
@@ -75,20 +66,6 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
   }
   const detailState = createRequestRecordDetailState()
 
-  const rangeOptions = computed<Option[]>(() => [
-    { label: '24h', value: '24h' },
-    { label: '7d', value: '7d' },
-    { label: '30d', value: '30d' },
-    { label: 'custom', value: 'custom' },
-  ])
-
-  const bucketOptions = computed<Option<RequestRecordBucketGranularity>[]>(
-    () => [
-      { label: 'minute', value: 'minute' },
-      { label: 'hour', value: 'hour' },
-      { label: 'day', value: 'day' },
-    ],
-  )
   const requestStateOptions = computed(() =>
     createUsageStateOptions({
       received: t('requestStateReceived'),
@@ -167,21 +144,6 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     }
   }
 
-  async function refreshSummary(): Promise<void> {
-    overviewState.summary.value = await fetchUsageSummary(
-      queryState.range.value,
-    )
-  }
-
-  async function refreshSeries(): Promise<void> {
-    overviewState.series.value = await fetchUsageSeries({
-      bucket: queryState.bucket.value,
-      range: queryState.range.value,
-      start: queryState.start.value,
-      end: queryState.end.value,
-    })
-  }
-
   async function refreshRecords(
     nextFirst = queryState.first.value,
     nextRows = queryState.rowsPerPage.value,
@@ -244,8 +206,6 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
   }
 
   return {
-    bucket: queryState.bucket,
-    bucketOptions,
     clearConversationOverride: detailState.clearConversationOverride,
     clearHistory,
     conversationOverride: detailState.conversationOverride,
@@ -265,14 +225,11 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     overrideSaving: detailState.overrideSaving,
     pruneHistory,
     range: queryState.range,
-    rangeOptions,
     recordsLoading: loadingState.records,
     refreshAll,
     refreshOverview,
     refreshPage,
     refreshRecords,
-    refreshSeries,
-    refreshSummary,
     requestCategory: queryState.requestCategory,
     requestFull: detailState.requestFull,
     requestFullLoading: detailState.requestFullLoading,
@@ -283,13 +240,11 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     rows: recordState.rows,
     rowsPerPage: queryState.rowsPerPage,
     saveConversationOverride: detailState.saveConversationOverride,
-    series: overviewState.series,
     sessionRouteOptions: detailState.sessionRouteOptions,
     setRequestCategory,
     sortField: queryState.sortField,
     sortOrder: queryState.sortOrder,
     start: queryState.start,
-    summary: overviewState.summary,
     total: queryState.total,
     usageWorkspaceView,
   }

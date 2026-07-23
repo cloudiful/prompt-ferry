@@ -96,7 +96,6 @@ declare module 'vue' {
     UsageFilterSelect: typeof import('./src/components/usage/UsageFilterSelect.vue')['default']
     UsagePanel: typeof import('./src/components/usage/UsagePanel.vue')['default']
     UsageTranscriptSection: typeof import('./src/components/usage/detail/UsageTranscriptSection.vue')['default']
-    UsageTrendChart: typeof import('./src/components/usage/UsageTrendChart.vue')['default']
     USelect: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Select.vue')['default']
     USelectMenu: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/SelectMenu.vue')['default']
     UsersPanel: typeof import('./src/components/users/UsersPanel.vue')['default']
@@ -104,6 +103,5 @@ declare module 'vue' {
     UTable: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Table.vue')['default']
     UTextarea: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Textarea.vue')['default']
     WorkspacePagerBar: typeof import('./src/components/shared/WorkspacePagerBar.vue')['default']
-    WorkspaceSpotlight: typeof import('./src/components/WorkspaceSpotlight.vue')['default']
   }
 }

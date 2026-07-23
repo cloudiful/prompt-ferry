@@ -1,8 +1,5 @@
 import type { RequestRecordCategory } from '../generated/admin-api'
-import type {
-  RequestRecordBucketGranularity,
-  RequestRecordFilterModel,
-} from '../models'
+import type { RequestRecordFilterModel } from '../models'
 
 export function createDefaultRequestRecordFilters(): RequestRecordFilterModel {
   return {
@@ -42,59 +39,5 @@ export function buildRequestRecordListQuery(input: {
     mcp_bearer_token_slot: filters.mcp_bearer_token_slot?.value ?? undefined,
     request_state: filters.request_state.value ?? undefined,
     redaction_applied: filters.redaction_applied.value ?? undefined,
-  }
-}
-
-export function resolveRequestRecordSeriesWindow(
-  range: string,
-  start: string,
-  end: string,
-): { start?: string; end?: string; limit: number } {
-  if (range === 'custom') {
-    return {
-      start: start || undefined,
-      end: end || undefined,
-      limit: 200,
-    }
-  }
-  if (range === '30d') {
-    return { limit: 30 * 24 }
-  }
-  if (range === '7d') {
-    return { limit: 7 * 24 }
-  }
-  return { limit: 24 }
-}
-
-export function createRequestRecordSummaryDays(range: string): number {
-  if (range === '30d') return 30
-  if (range === '7d') return 7
-  return 1
-}
-
-export function createRequestRecordSeriesQuery(input: {
-  bucket: RequestRecordBucketGranularity
-  requestCategory?: RequestRecordCategory
-  range: string
-  start: string
-  end: string
-}): {
-  bucket: RequestRecordBucketGranularity
-  request_category?: RequestRecordCategory
-  start?: string
-  end?: string
-  limit: number
-} {
-  const window = resolveRequestRecordSeriesWindow(
-    input.range,
-    input.start,
-    input.end,
-  )
-  return {
-    bucket: input.bucket,
-    end: window.end,
-    limit: window.limit,
-    request_category: input.requestCategory,
-    start: window.start,
   }
 }

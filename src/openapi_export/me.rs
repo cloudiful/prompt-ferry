@@ -2,7 +2,7 @@ use super::schemas::ErrorEnvelope;
 use crate::{
     db,
     worker_admin_types::{
-        AvailableModel, AvailableModelsResponse, CreateClientKeyRequest, CreateClientKeyResponse,
+        AvailableModelsResponse, CreateClientKeyRequest, CreateClientKeyResponse,
         UpdateClientKeyRequest,
     },
 };
@@ -68,6 +68,3 @@ pub(super) fn me_delete_client_key() {}
     tag = "me"
 )]
 pub(super) fn me_list_models() {}
-
-#[allow(dead_code)]
-fn _schema_refs(_: AvailableModel) {}

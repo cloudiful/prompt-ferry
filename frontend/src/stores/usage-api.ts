@@ -3,31 +3,22 @@ import {
   listRequestRecords,
   pruneRequestRecords,
   requestRecordFacets,
-  requestRecordSeries,
-  requestRecordSummary,
 } from '../generated/admin-api'
 import type {
-  RequestRecordBucket,
   RequestRecordCategory,
   RequestRecordFacets,
-  RequestRecordSummary,
   RequestRecordsClearResponse,
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
 import { createRequestRecordRowView } from '../admin-mappers'
 import { fetchRequestOverview } from '../api/request-overview'
 import type {
-  RequestRecordBucketGranularity,
   RequestRecordClearForm,
   RequestRecordFilterModel,
   RequestRecordRowView,
 } from '../models'
 import type { RequestOverviewResponse } from '../request-overview'
-import {
-  buildRequestRecordListQuery,
-  createRequestRecordSeriesQuery,
-  createRequestRecordSummaryDays,
-} from './request-records-query'
+import { buildRequestRecordListQuery } from './request-records-query'
 
 export async function fetchUsageOverview(input: {
   requestCategory: RequestRecordCategory
@@ -41,31 +32,6 @@ export async function fetchUsageOverview(input: {
     start: input.start || undefined,
     end: input.end || undefined,
   })
-}
-
-export async function fetchUsageSummary(
-  range: string,
-): Promise<RequestRecordSummary> {
-  const days = createRequestRecordSummaryDays(range)
-  return expectData(
-    await requestRecordSummary<true>(withData({ query: { days } })),
-  )
-}
-
-export async function fetchUsageSeries(input: {
-  bucket: RequestRecordBucketGranularity
-  requestCategory?: RequestRecordCategory
-  range: string
-  start: string
-  end: string
-}): Promise<RequestRecordBucket[]> {
-  return expectData(
-    await requestRecordSeries<true>(
-      withData({
-        query: createRequestRecordSeriesQuery(input),
-      }),
-    ),
-  )
 }
 
 export async function fetchUsageRecords(input: {

@@ -126,7 +126,6 @@ export type RequestRecordFilterModel = {
 }
 
 export type ApprovalFilter = ApprovalStatusFilter
-export type RequestRecordBucketGranularity = 'minute' | 'hour' | 'day'
 export type RequestRecordCategoryTab = RequestRecordCategory
 
 export type Option<T = string> = {
