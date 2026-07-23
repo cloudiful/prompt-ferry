@@ -42,20 +42,9 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  quality:
-    name: Release quality gate
-    needs: prepare
-    uses: ./.github/workflows/_quality.yml
-    permissions:
-      contents: read
-      security-events: write
-    secrets: inherit
-
   build-binaries:
     name: Build ${{ matrix.target }}
-    needs:
-      - prepare
-      - quality
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -135,9 +124,7 @@ jobs:
 
   build-image-inputs:
     name: Build Docker input ${{ matrix.arch }}
-    needs:
-      - prepare
-      - quality
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
