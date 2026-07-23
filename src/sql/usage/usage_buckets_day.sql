@@ -19,6 +19,7 @@ agg AS (
     WHERE event_kind = 'request'
       AND created_at >= bounds.start_at AND created_at < bounds.end_at + INTERVAL '1 day'
       AND ($4::BIGINT IS NULL OR user_id = $4)
+      AND ($5::TEXT IS NULL OR request_category = $5::TEXT)
     GROUP BY 1
 )
 SELECT buckets.bucket_at AS "bucket_at!",

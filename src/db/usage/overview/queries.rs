@@ -67,27 +67,17 @@ pub(super) async fn query_metrics(
     window: OverviewWindow,
     user: Option<&str>,
 ) -> Result<AggregateMetrics> {
-    let sql = format!(
-        "SELECT COUNT(*)::BIGINT AS request_count, \
-            COUNT(*) FILTER (WHERE rr.ok IS TRUE)::BIGINT AS success_count, \
-            COUNT(*) FILTER (WHERE rr.failure_family = 'empty_success')::BIGINT AS empty_success_count, \
-            COUNT(*) FILTER (WHERE rr.failure_family = 'rate_limit' OR rr.failure_family = 'quota')::BIGINT AS rate_limit_count, \
-            COUNT(*) FILTER (WHERE rr.failure_family = 'auth')::BIGINT AS auth_error_count, \
-            COUNT(*) FILTER (WHERE rr.failure_family = 'upstream_5xx' OR rr.failure_family = 'network')::BIGINT AS upstream_5xx_count, \
-            COUNT(*) FILTER (WHERE COALESCE(rr.cached_tokens, 0) > 0 OR COALESCE(rr.cache_read_tokens, 0) > 0)::BIGINT AS cache_hit_count, \
-            COUNT(DISTINCT rr.mcp_protocol_method)::BIGINT AS method_coverage_count, \
-            percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.duration_ms) FILTER (WHERE rr.duration_ms IS NOT NULL) AS p95_total_ms, \
-            percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.first_chunk_ms) FILTER (WHERE rr.first_chunk_ms IS NOT NULL) AS p95_first_token_ms{}",
-        base_where()
-    );
-    let row = sqlx::query_as::<_, MetricsRow>(sqlx::AssertSqlSafe(sql))
-        .bind(visible_user_id)
-        .bind(request_category.as_str())
-        .bind(window.start)
-        .bind(window.end)
-        .bind(user)
-        .fetch_one(pool)
-        .await?;
+    let row = sqlx::query_file_as!(
+        MetricsRow,
+        "src/sql/usage/overview/metrics.sql",
+        visible_user_id,
+        request_category.as_str(),
+        window.start,
+        window.end,
+        user,
+    )
+    .fetch_one(pool)
+    .await?;
     Ok(metrics_from_row(row))
 }
 
@@ -98,30 +88,34 @@ pub(super) async fn query_trend(
     window: OverviewWindow,
     user: Option<&str>,
 ) -> Result<Vec<OverviewTrendBucket>> {
-    let sql = format!(
-        "SELECT {} AS bucket_at, \
-            COUNT(*)::BIGINT AS request_count, \
-            COUNT(*) FILTER (WHERE rr.ok IS TRUE)::BIGINT AS success_count, \
-            COUNT(*) FILTER (WHERE rr.failure_family = 'empty_success')::BIGINT AS empty_success_count, \
-            COUNT(*) FILTER (WHERE rr.failure_family = 'rate_limit' OR rr.failure_family = 'quota')::BIGINT AS rate_limit_count, \
-            COUNT(*) FILTER (WHERE rr.failure_family = 'auth')::BIGINT AS auth_error_count, \
-            COUNT(*) FILTER (WHERE rr.failure_family = 'upstream_5xx' OR rr.failure_family = 'network')::BIGINT AS upstream_5xx_count, \
-            COUNT(*) FILTER (WHERE COALESCE(rr.cached_tokens, 0) > 0 OR COALESCE(rr.cache_read_tokens, 0) > 0)::BIGINT AS cache_hit_count, \
-            COUNT(DISTINCT rr.mcp_protocol_method)::BIGINT AS method_coverage_count, \
-            percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.duration_ms) FILTER (WHERE rr.duration_ms IS NOT NULL) AS p95_total_ms, \
-            percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.first_chunk_ms) FILTER (WHERE rr.first_chunk_ms IS NOT NULL) AS p95_first_token_ms \
-         {} GROUP BY 1 ORDER BY 1 ASC",
-        window.bucket.sql_expr(),
-        base_where()
-    );
-    let rows = sqlx::query_as::<_, TrendRow>(sqlx::AssertSqlSafe(sql))
-        .bind(visible_user_id)
-        .bind(request_category.as_str())
-        .bind(window.start)
-        .bind(window.end)
-        .bind(user)
-        .fetch_all(pool)
-        .await?;
+    let rows = match window.bucket {
+        OverviewBucket::Hour => {
+            sqlx::query_file_as!(
+                TrendRow,
+                "src/sql/usage/overview/trend_hour.sql",
+                visible_user_id,
+                request_category.as_str(),
+                window.start,
+                window.end,
+                user,
+            )
+            .fetch_all(pool)
+            .await?
+        }
+        OverviewBucket::Day => {
+            sqlx::query_file_as!(
+                TrendRow,
+                "src/sql/usage/overview/trend_day.sql",
+                visible_user_id,
+                request_category.as_str(),
+                window.start,
+                window.end,
+                user,
+            )
+            .fetch_all(pool)
+            .await?
+        }
+    };
     Ok(rows
         .into_iter()
         .map(|row| {
@@ -156,90 +150,126 @@ pub(super) async fn query_rankings(
     window: OverviewWindow,
     user: Option<&str>,
 ) -> Result<Vec<OverviewRankingGroup>> {
-    let groups = match request_category {
-        RequestRecordCategory::Ai => vec![
-            (
-                "by_endpoint",
-                "按 Endpoint",
-                "COALESCE(pe.name, rr.endpoint_id::TEXT, '(unknown)')",
-                "NULL::TEXT",
-                "rr.endpoint_id, pe.name",
-            ),
-            (
-                "by_model",
-                "按模型",
-                "COALESCE(rr.model, '(unknown)')",
-                "NULL::TEXT",
-                "rr.model",
-            ),
-            (
-                "by_endpoint_model",
-                "按 Endpoint × 模型",
-                "COALESCE(pe.name, rr.endpoint_id::TEXT, '(unknown)')",
-                "COALESCE(rr.model, '(unknown)')",
-                "rr.endpoint_id, pe.name, rr.model",
-            ),
-        ],
-        RequestRecordCategory::Mcp => vec![
-            (
-                "by_server",
-                "按 MCP Server",
-                "COALESCE(rr.mcp_server_name, ms.name, '(unknown)')",
-                "NULL::TEXT",
-                "rr.mcp_server_id, rr.mcp_server_name, ms.name",
-            ),
-            (
-                "by_token_slot",
-                "按 Token 槽位",
-                "COALESCE('Token #' || rr.mcp_bearer_token_slot::TEXT, '(unknown)')",
-                "NULL::TEXT",
-                "rr.mcp_bearer_token_slot",
-            ),
-            (
-                "by_server_token_slot",
-                "按 Server × Token 槽位",
-                "COALESCE(rr.mcp_server_name, ms.name, '(unknown)')",
-                "COALESCE('Token #' || rr.mcp_bearer_token_slot::TEXT, '(unknown)')",
-                "rr.mcp_server_id, rr.mcp_server_name, ms.name, rr.mcp_bearer_token_slot",
-            ),
-        ],
-    };
-    let mut output = Vec::with_capacity(groups.len());
-    for (key, title, label_expr, secondary_expr, group_expr) in groups {
-        let sql = format!(
-            "SELECT {label_expr} AS label, \
-                NULLIF({secondary_expr}, 'NULL') AS secondary_label, \
-                rr.endpoint_id, rr.model, rr.mcp_server_id, rr.mcp_bearer_token_slot, \
-                COUNT(*)::BIGINT AS request_count, \
-                COUNT(*) FILTER (WHERE rr.ok IS TRUE)::BIGINT AS success_count, \
-                COUNT(*) FILTER (WHERE rr.failure_family = 'empty_success')::BIGINT AS empty_success_count, \
-                COUNT(*) FILTER (WHERE rr.failure_family = 'rate_limit' OR rr.failure_family = 'quota')::BIGINT AS rate_limit_count, \
-                COUNT(*) FILTER (WHERE rr.failure_family = 'auth')::BIGINT AS auth_error_count, \
-                COUNT(*) FILTER (WHERE rr.failure_family = 'upstream_5xx' OR rr.failure_family = 'network')::BIGINT AS upstream_5xx_count, \
-                COUNT(*) FILTER (WHERE COALESCE(rr.cached_tokens, 0) > 0 OR COALESCE(rr.cache_read_tokens, 0) > 0)::BIGINT AS cache_hit_count, \
-                COUNT(DISTINCT rr.mcp_protocol_method)::BIGINT AS method_coverage_count, \
-                percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.duration_ms) FILTER (WHERE rr.duration_ms IS NOT NULL) AS p95_total_ms, \
-                percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.first_chunk_ms) FILTER (WHERE rr.first_chunk_ms IS NOT NULL) AS p95_first_token_ms \
-             {} GROUP BY {group_expr}, rr.endpoint_id, rr.model, rr.mcp_server_id, rr.mcp_bearer_token_slot \
-             ORDER BY request_count DESC, label ASC LIMIT 12",
-            base_where()
-        );
-        let rows = sqlx::query_as::<_, RankingSqlRow>(sqlx::AssertSqlSafe(sql))
-            .bind(visible_user_id)
-            .bind(request_category.as_str())
-            .bind(window.start)
-            .bind(window.end)
-            .bind(user)
-            .fetch_all(pool)
-            .await?;
-        output.push(OverviewRankingGroup {
-            key: key.to_string(),
-            title: title.to_string(),
-            rows: rows
-                .into_iter()
-                .map(|row| ranking_row(request_category, row))
-                .collect(),
-        });
+    let mut output = Vec::with_capacity(3);
+    match request_category {
+        RequestRecordCategory::Ai => {
+            let groups = [
+                (
+                    "by_endpoint",
+                    "按 Endpoint",
+                    sqlx::query_file_as!(
+                        RankingSqlRow,
+                        "src/sql/usage/overview/ranking_ai_endpoint.sql",
+                        visible_user_id,
+                        request_category.as_str(),
+                        window.start,
+                        window.end,
+                        user,
+                    )
+                    .fetch_all(pool)
+                    .await?,
+                ),
+                (
+                    "by_model",
+                    "按模型",
+                    sqlx::query_file_as!(
+                        RankingSqlRow,
+                        "src/sql/usage/overview/ranking_ai_model.sql",
+                        visible_user_id,
+                        request_category.as_str(),
+                        window.start,
+                        window.end,
+                        user,
+                    )
+                    .fetch_all(pool)
+                    .await?,
+                ),
+                (
+                    "by_endpoint_model",
+                    "按 Endpoint × 模型",
+                    sqlx::query_file_as!(
+                        RankingSqlRow,
+                        "src/sql/usage/overview/ranking_ai_endpoint_model.sql",
+                        visible_user_id,
+                        request_category.as_str(),
+                        window.start,
+                        window.end,
+                        user,
+                    )
+                    .fetch_all(pool)
+                    .await?,
+                ),
+            ];
+            for (key, title, rows) in groups {
+                output.push(OverviewRankingGroup {
+                    key: key.to_string(),
+                    title: title.to_string(),
+                    rows: rows
+                        .into_iter()
+                        .map(|row| ranking_row(request_category, row))
+                        .collect(),
+                });
+            }
+        }
+        RequestRecordCategory::Mcp => {
+            let groups = [
+                (
+                    "by_server",
+                    "按 MCP Server",
+                    sqlx::query_file_as!(
+                        RankingSqlRow,
+                        "src/sql/usage/overview/ranking_mcp_server.sql",
+                        visible_user_id,
+                        request_category.as_str(),
+                        window.start,
+                        window.end,
+                        user,
+                    )
+                    .fetch_all(pool)
+                    .await?,
+                ),
+                (
+                    "by_token_slot",
+                    "按 Token 槽位",
+                    sqlx::query_file_as!(
+                        RankingSqlRow,
+                        "src/sql/usage/overview/ranking_mcp_token_slot.sql",
+                        visible_user_id,
+                        request_category.as_str(),
+                        window.start,
+                        window.end,
+                        user,
+                    )
+                    .fetch_all(pool)
+                    .await?,
+                ),
+                (
+                    "by_server_token_slot",
+                    "按 Server × Token 槽位",
+                    sqlx::query_file_as!(
+                        RankingSqlRow,
+                        "src/sql/usage/overview/ranking_mcp_server_token_slot.sql",
+                        visible_user_id,
+                        request_category.as_str(),
+                        window.start,
+                        window.end,
+                        user,
+                    )
+                    .fetch_all(pool)
+                    .await?,
+                ),
+            ];
+            for (key, title, rows) in groups {
+                output.push(OverviewRankingGroup {
+                    key: key.to_string(),
+                    title: title.to_string(),
+                    rows: rows
+                        .into_iter()
+                        .map(|row| ranking_row(request_category, row))
+                        .collect(),
+                });
+            }
+        }
     }
     Ok(output)
 }
@@ -251,20 +281,17 @@ pub(super) async fn query_error_breakdown(
     window: OverviewWindow,
     user: Option<&str>,
 ) -> Result<Vec<OverviewErrorBreakdownRow>> {
-    let sql = format!(
-        "SELECT COALESCE(rr.failure_family, 'unknown') AS key, COUNT(*)::BIGINT AS count \
-         {} AND rr.failure_family IS NOT NULL \
-         GROUP BY 1 ORDER BY count DESC, key ASC",
-        base_where()
-    );
-    let rows = sqlx::query_as::<_, ErrorRow>(sqlx::AssertSqlSafe(sql))
-        .bind(visible_user_id)
-        .bind(request_category.as_str())
-        .bind(window.start)
-        .bind(window.end)
-        .bind(user)
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query_file_as!(
+        ErrorRow,
+        "src/sql/usage/overview/error_breakdown.sql",
+        visible_user_id,
+        request_category.as_str(),
+        window.start,
+        window.end,
+        user,
+    )
+    .fetch_all(pool)
+    .await?;
     let total = rows.iter().map(|row| row.count).sum::<i64>();
     Ok(rows
         .into_iter()

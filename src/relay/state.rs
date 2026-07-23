@@ -20,7 +20,25 @@ use tokio::{
 
 pub(crate) type WorkerSender = mpsc::Sender<BridgeMessage>;
 pub(crate) const RESPONSE_STREAM_BUFFER: usize = 64;
-pub(crate) const REALTIME_EVENT_BUFFER: usize = 128;
+pub(crate) const REALTIME_EVENT_BUFFER: usize = RESPONSE_STREAM_BUFFER;
+pub(crate) const RESPONSE_STREAM_MAX_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_WORKER_CONNECTIONS: usize = 4;
+
+#[derive(Clone)]
+pub(crate) struct WorkerSelection {
+    pub(crate) worker_id: usize,
+    pub(crate) sender: WorkerSender,
+}
+
+#[derive(Debug)]
+pub(crate) struct QueuedResponseChunk {
+    pub(crate) data: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub(crate) struct QueuedRealtimeEvent {
+    pub(crate) event: RealtimeServerEventMessage,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct RemoteAddr(pub SocketAddr);
@@ -66,6 +84,7 @@ impl RelayHandle {
 
 pub(crate) struct RelayState {
     pub(crate) workers: Mutex<HashMap<usize, WorkerSender>>,
+    pub(crate) worker_loads: Mutex<HashMap<usize, usize>>,
     pub(crate) pending: Mutex<HashMap<String, PendingRequest>>,
     pub(crate) pending_mcp: Mutex<HashMap<String, PendingMcpRequest>>,
     pub(crate) pending_realtime_sessions: Mutex<HashMap<String, PendingRealtimeSession>>,
@@ -77,17 +96,26 @@ pub(crate) struct RelayState {
 
 pub(crate) struct PendingRequest {
     pub(crate) start_tx: Option<oneshot::Sender<Result<ResponseStart, ResponseError>>>,
-    pub(crate) chunk_tx: mpsc::Sender<Result<Vec<u8>, ResponseError>>,
+    pub(crate) chunk_tx: mpsc::Sender<Result<QueuedResponseChunk, ResponseError>>,
+    pub(crate) worker_id: usize,
+    pub(crate) worker: WorkerSender,
+    pub(crate) queued_bytes: usize,
     pub(crate) awaiting_approval: bool,
 }
 
 pub(crate) struct PendingMcpRequest {
     pub(crate) start_tx: Option<oneshot::Sender<Result<McpResponseStart, ResponseError>>>,
-    pub(crate) chunk_tx: mpsc::Sender<Result<Vec<u8>, ResponseError>>,
+    pub(crate) chunk_tx: mpsc::Sender<Result<QueuedResponseChunk, ResponseError>>,
+    pub(crate) worker_id: usize,
+    pub(crate) worker: WorkerSender,
+    pub(crate) queued_bytes: usize,
 }
 
 pub(crate) struct PendingRealtimeSession {
-    pub(crate) event_tx: mpsc::Sender<Result<RealtimeServerEventMessage, ResponseError>>,
+    pub(crate) event_tx: mpsc::Sender<Result<QueuedRealtimeEvent, ResponseError>>,
+    pub(crate) worker_id: usize,
+    pub(crate) worker: WorkerSender,
+    pub(crate) queued_bytes: usize,
 }
 
 #[cfg(test)]
@@ -96,6 +124,7 @@ pub(crate) fn test_state() -> AppState {
         config: RelayConfig::default(),
         inner: Arc::new(RelayState {
             workers: Mutex::new(HashMap::new()),
+            worker_loads: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
             pending_mcp: Mutex::new(HashMap::new()),
             pending_realtime_sessions: Mutex::new(HashMap::new()),

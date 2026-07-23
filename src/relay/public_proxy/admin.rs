@@ -3,7 +3,8 @@ use crate::protocol::BridgeRequestStart;
 use super::super::{
     request_compression::HttpRequestCompressionContext,
     response_forward::{
-        bridge_error_response, choose_worker, remove_pending, request_deadline_unix_ms,
+        bridge_error_response, choose_worker, release_response_bytes, remove_pending,
+        request_deadline_unix_ms,
     },
     router::drain_body_then,
     state::{AppState, PendingRequest, RESPONSE_STREAM_BUFFER, RemoteAddr},
@@ -55,8 +56,8 @@ async fn proxy_request(
     }
 
     let request_id = Uuid::new_v4().to_string();
-    let worker = match choose_worker(&state).await {
-        Some(worker) => worker,
+    let selection = match choose_worker(&state).await {
+        Some(selection) => selection,
         None => {
             return drain_body_then(
                 body,
@@ -77,9 +78,13 @@ async fn proxy_request(
         PendingRequest {
             start_tx: Some(start_tx),
             chunk_tx,
+            worker_id: selection.worker_id,
+            worker: selection.sender.clone(),
+            queued_bytes: 0,
             awaiting_approval: false,
         },
     );
+    let worker = selection.sender;
 
     let bridge_request = BridgeRequestStart {
         request_id: request_id.clone(),
@@ -138,7 +143,11 @@ async fn proxy_request(
         let mut chunk_rx = chunk_rx;
         while let Some(item) = chunk_rx.recv().await {
             match item {
-                Ok(data) => yield Ok::<Bytes, std::io::Error>(Bytes::from(data)),
+                Ok(chunk) => {
+                    let data = chunk.data;
+                    release_response_bytes(&stream_state, &stream_request_id, data.len()).await;
+                    yield Ok::<Bytes, std::io::Error>(Bytes::from(data));
+                }
                 Err(err) => {
                     let body = serde_json::json!({
                         "error": {

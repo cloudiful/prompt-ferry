@@ -111,6 +111,14 @@ pub struct WorkerArgs {
     #[arg(long)]
     pub session_ttl_seconds: Option<u64>,
     #[arg(long)]
+    pub local_session_max_entries: Option<usize>,
+    #[arg(long)]
+    pub max_upstream_response_bytes: Option<usize>,
+    #[arg(long)]
+    pub max_raw_response_capture_bytes: Option<usize>,
+    #[arg(long)]
+    pub max_response_text_capture_bytes: Option<usize>,
+    #[arg(long)]
     pub endpoint_model_cache_ttl_seconds: Option<u64>,
 }
 

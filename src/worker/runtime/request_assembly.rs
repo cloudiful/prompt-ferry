@@ -3,13 +3,44 @@ use crate::protocol::{
     McpResponseStart, ResponseError,
 };
 use reqwest::StatusCode;
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+use tokio::sync::{Mutex, Notify, mpsc, oneshot};
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct RequestCancellation {
+    cancelled: Arc<AtomicBool>,
+    notify: Arc<Notify>,
+}
+
+impl RequestCancellation {
+    pub(super) fn cancel(&self) {
+        if !self.cancelled.swap(true, Ordering::Release) {
+            self.notify.notify_waiters();
+        }
+    }
+
+    pub(super) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub(super) async fn cancelled(&self) {
+        while !self.is_cancelled() {
+            self.notify.notified().await;
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(super) struct PendingIncomingRequest {
     pub(super) chunk_tx: mpsc::Sender<Vec<u8>>,
     pub(super) end_tx: Option<oneshot::Sender<RequestTransferStats>>,
+    pub(super) cancellation: RequestCancellation,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -164,7 +195,7 @@ pub(super) async fn collect_request_chunks(
 }
 
 pub(super) fn send_worker_shutdown_response(
-    out_tx: &mpsc::UnboundedSender<BridgeMessage>,
+    out_tx: &super::context::BridgeSender,
     request_id: &str,
 ) {
     let _ = out_tx.send(BridgeMessage::ResponseError(ResponseError {
@@ -176,7 +207,7 @@ pub(super) fn send_worker_shutdown_response(
 }
 
 pub(super) fn send_worker_shutdown_mcp_response(
-    out_tx: &mpsc::UnboundedSender<BridgeMessage>,
+    out_tx: &super::context::BridgeSender,
     request_id: &str,
 ) {
     let body = serde_json::json!({

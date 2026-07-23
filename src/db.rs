@@ -53,9 +53,9 @@ pub use settings::{
 };
 pub use types::*;
 pub use usage::{
-    OverviewBucket, OverviewWindow, RawPayloadMaintenanceReport, abort_request_records_by_ids,
-    abort_stale_request_records, allocate_conversation_seq, clear_usage_events,
-    decode_prompt_message_refs, delete_request_record_lease,
+    OverviewBucket, OverviewWindow, RawPayloadMaintenanceReport, RequestRecordStateInput,
+    abort_request_records_by_ids, abort_stale_request_records, allocate_conversation_seq,
+    clear_usage_events, decode_prompt_message_refs, delete_request_record_lease,
     find_request_record_tool_calls_by_call_ids, get_conversation_redaction_session,
     get_replayable_usage_event_by_provider_conversation_key,
     get_replayable_usage_event_locator_by_provider_conversation_key, get_usage_assistant_artifacts,

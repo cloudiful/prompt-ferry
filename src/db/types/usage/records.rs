@@ -126,6 +126,7 @@ pub struct RequestRecordDetail {
     pub failure_family: Option<RequestFailureFamily>,
     pub mcp_bearer_token_slot: Option<i16>,
     pub route_selection_reason: RouteSelectionReason,
+    pub response_capture_truncated: bool,
     #[serde(default)]
     pub tool_call_events: Vec<RequestRecordToolCall>,
     pub created_at: DateTime<Utc>,

@@ -239,7 +239,7 @@ async fn authorize_client(
             Ok(token) => token,
             Err(response) => {
                 warn!("client auth failed: missing or invalid bearer authorization");
-                return Err(response);
+                return Err(*response);
             }
         };
         if state.config.client_token.is_empty() {
@@ -272,7 +272,7 @@ async fn authorize_client(
                     route_count = routes.len(),
                     "client auth failed: missing or invalid bearer authorization"
                 );
-                return Err(response);
+                return Err(*response);
             }
         };
         let key_hash = hash_client_key(token);

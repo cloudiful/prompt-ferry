@@ -30,15 +30,6 @@ pub enum OverviewBucket {
     Day,
 }
 
-impl OverviewBucket {
-    pub(super) fn sql_expr(self) -> &'static str {
-        match self {
-            Self::Hour => "date_trunc('hour', rr.created_at)",
-            Self::Day => "date_trunc('day', rr.created_at)",
-        }
-    }
-}
-
 pub async fn request_records_overview(
     pool: &sqlx::PgPool,
     visible_user_id: Option<i64>,
@@ -61,17 +52,4 @@ pub async fn request_records_overview(
         heatmap,
         error_breakdown: errors,
     })
-}
-
-pub(super) fn base_where() -> &'static str {
-    " FROM request_records rr \
-      LEFT JOIN users u ON u.user_id = rr.user_id \
-      LEFT JOIN provider_endpoints pe ON pe.endpoint_id = rr.endpoint_id \
-      LEFT JOIN mcp_servers ms ON ms.server_id = rr.mcp_server_id \
-      WHERE rr.event_kind = 'request' \
-      AND rr.request_category = $2 \
-      AND ($1::BIGINT IS NULL OR rr.user_id = $1) \
-      AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3) \
-      AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4) \
-      AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5) "
 }

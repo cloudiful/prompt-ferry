@@ -1,4 +1,7 @@
-use super::{context::RuntimeServices, request_assembly::BufferedBridgeRequest};
+use super::{
+    context::{BridgeSender, RuntimeServices},
+    request_assembly::BufferedBridgeRequest,
+};
 use crate::protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseError, ResponseStart};
 use anyhow::Context;
 use axum::{
@@ -52,7 +55,7 @@ fn apply_request_headers(target: &mut HeaderMap, headers: &[(String, String)]) {
 }
 
 async fn stream_admin_response(
-    out_tx: &tokio::sync::mpsc::UnboundedSender<BridgeMessage>,
+    out_tx: &BridgeSender,
     request_id: &str,
     response: axum::response::Response,
 ) -> anyhow::Result<()> {
@@ -138,7 +141,7 @@ fn is_hop_by_hop_response_header(name: &header::HeaderName) -> bool {
 }
 
 fn send_static_response(
-    out_tx: &tokio::sync::mpsc::UnboundedSender<BridgeMessage>,
+    out_tx: &BridgeSender,
     request_id: &str,
     status: StatusCode,
     content_type: &str,

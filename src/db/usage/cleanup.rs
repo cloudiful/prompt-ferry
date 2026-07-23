@@ -70,7 +70,7 @@ async fn run_raw_payload_maintenance_locked(
         .map(|value| value.and_utc())
         .ok_or_else(|| anyhow::anyhow!("invalid raw payload retention cutoff"))?;
     let partitions_created =
-        crate::db::usage::raw_partitions::ensure_raw_payload_partitions(&mut **conn, now).await?;
+        crate::db::usage::raw_partitions::ensure_raw_payload_partitions(conn, now).await?;
     sqlx::query_file!(
         "src/sql/usage/clear_expired_raw_payload_metadata.sql",
         prune_cutoff,
@@ -78,9 +78,9 @@ async fn run_raw_payload_maintenance_locked(
     .execute(&mut **conn)
     .await?;
     let raw_rows_deleted =
-        prune_raw_payload_batches(&mut **conn, prune_cutoff, partial_partition_start).await?;
+        prune_raw_payload_batches(conn, prune_cutoff, partial_partition_start).await?;
     let partitions_dropped = crate::db::usage::raw_partitions::drop_expired_raw_payload_partitions(
-        &mut **conn,
+        conn,
         now - ChronoDuration::days(retention_days.max(1)),
     )
     .await?;

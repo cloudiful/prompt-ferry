@@ -82,6 +82,7 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
         input.owner_worker_id,
         input.lease_expires_at,
         input.last_heartbeat_at,
+        input.response_capture_truncated,
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -141,25 +142,26 @@ async fn insert_request_record_block_refs(
     Ok(())
 }
 
-pub async fn record_request_state(
-    pool: &PgPool,
-    request_id: uuid::Uuid,
-    request_state: RequestRecordState,
-    endpoint_id: Option<uuid::Uuid>,
-    model_route_rule_id: Option<uuid::Uuid>,
-    model: Option<&str>,
-    endpoint_key_id: Option<uuid::Uuid>,
-    endpoint_key_label: Option<&str>,
-) -> Result<()> {
+pub struct RequestRecordStateInput<'a> {
+    pub request_id: uuid::Uuid,
+    pub request_state: RequestRecordState,
+    pub endpoint_id: Option<uuid::Uuid>,
+    pub model_route_rule_id: Option<uuid::Uuid>,
+    pub model: Option<&'a str>,
+    pub endpoint_key_id: Option<uuid::Uuid>,
+    pub endpoint_key_label: Option<&'a str>,
+}
+
+pub async fn record_request_state(pool: &PgPool, input: RequestRecordStateInput<'_>) -> Result<()> {
     sqlx::query_file!(
         "src/sql/usage/update_request_record_state.sql",
-        request_state.as_str(),
-        endpoint_id,
-        model_route_rule_id,
-        model,
-        endpoint_key_id,
-        endpoint_key_label,
-        request_id,
+        input.request_state.as_str(),
+        input.endpoint_id,
+        input.model_route_rule_id,
+        input.model,
+        input.endpoint_key_id,
+        input.endpoint_key_label,
+        input.request_id,
     )
     .execute(pool)
     .await?;
@@ -208,7 +210,7 @@ mod tests {
     fn request_record_sql_placeholders_match_bind_count() {
         let upsert_sql = include_str!("../../sql/usage/upsert_request_record.sql");
 
-        assert_eq!(insert_column_count(upsert_sql), 74);
-        assert_eq!(max_placeholder(upsert_sql), 74);
+        assert_eq!(insert_column_count(upsert_sql), 75);
+        assert_eq!(max_placeholder(upsert_sql), 75);
     }
 }

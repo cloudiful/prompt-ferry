@@ -8,6 +8,7 @@ pub async fn usage_buckets(
     start: Option<DateTime<Utc>>,
     end: Option<DateTime<Utc>>,
     visible_user_id: Option<i64>,
+    request_category: Option<crate::db::RequestRecordCategory>,
 ) -> Result<Vec<RequestRecordBucket>> {
     let limit = limit.saturating_sub(1);
     match bucket {
@@ -18,6 +19,7 @@ pub async fn usage_buckets(
             start,
             end,
             visible_user_id,
+            request_category.map(crate::db::RequestRecordCategory::as_str),
         )
         .fetch_all(pool)
         .await?),
@@ -28,6 +30,7 @@ pub async fn usage_buckets(
             start,
             end,
             visible_user_id,
+            request_category.map(crate::db::RequestRecordCategory::as_str),
         )
         .fetch_all(pool)
         .await?),
@@ -38,6 +41,7 @@ pub async fn usage_buckets(
             start,
             end,
             visible_user_id,
+            request_category.map(crate::db::RequestRecordCategory::as_str),
         )
         .fetch_all(pool)
         .await?),

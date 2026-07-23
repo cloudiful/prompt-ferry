@@ -1,20 +1,19 @@
 use super::super::{
     admin_proxy::process_admin_request,
-    context::{RouteExecutionContext, RuntimeServices},
+    context::{FailurePayload, RouteExecutionContext, RuntimeServices},
     error_handling::safe_error,
     request_assembly::BufferedBridgeRequest,
 };
 use super::{
-    errors::{respond_with_budget_error, respond_with_client_error},
-    models::process_models_request,
-    request_attempts::{ForwardOutcome, forward_route_request},
+    errors::{respond_with_budget_error, respond_with_client_error, respond_with_local_error},
+    models::{ModelsRequestContext, process_models_request},
+    request_attempts::{ForwardOutcome, RouteForwardRequest, forward_route_request},
     request_init::initialize_request,
     request_routes::{RouteResolution, resolve_route},
     request_support::mark_function_call_outputs_received,
     review::handle_llm_review_gate,
 };
 use crate::{config::WorkerConfig, db, worker_usage::record_usage_event};
-use anyhow::anyhow;
 
 pub(in crate::worker::runtime) async fn process_request(
     request: BufferedBridgeRequest,
@@ -50,16 +49,16 @@ pub(in crate::worker::runtime) async fn process_request(
     if let Some(state) = services.admin_state()
         && request.path == "/v1/models"
     {
-        return process_models_request(
+        return process_models_request(ModelsRequestContext {
             state,
-            &services.client,
-            &services.out_tx,
-            &request,
-            request_ctx.request_id,
-            request_ctx.started,
-            request.user_id.unwrap_or_default(),
-            services.runtime_state.worker_instance_id(),
-        )
+            client: &services.client,
+            out_tx: &services.out_tx,
+            request: &request,
+            request_id: request_ctx.request_id,
+            started: request_ctx.started,
+            user_id: request.user_id.unwrap_or_default(),
+            owner_worker_id: services.runtime_state.worker_instance_id(),
+        })
         .await;
     }
 
@@ -71,20 +70,20 @@ pub(in crate::worker::runtime) async fn process_request(
 
     let (route, _endpoint_load_guard) =
         match resolve_route(&request, config, services, &request_ctx).await? {
-            RouteResolution::Ready { route, load_guard } => (route, load_guard),
+            RouteResolution::Ready { route, load_guard } => (*route, load_guard),
             RouteResolution::Responded => return Ok(()),
         };
 
-    let outcome = forward_route_request(
+    let outcome = forward_route_request(RouteForwardRequest {
         services,
-        &request,
-        &request_ctx,
-        &route,
-        &method,
+        request: &request,
+        request_ctx: &request_ctx,
+        route: &route,
+        method: &method,
         redact_content,
         content_logging_enabled,
         raw_content_logging_enabled,
-    )
+    })
     .await?;
     let route_ctx = RouteExecutionContext::new(&route);
     let err = match outcome {
@@ -112,7 +111,25 @@ pub(in crate::worker::runtime) async fn process_request(
             )
             .await;
         }
-        ForwardOutcome::TransportError(err) => err,
+        ForwardOutcome::TransportError(err) => {
+            if err.to_string().contains("upstream_response_too_large") {
+                return respond_with_local_error(
+                    services,
+                    &request,
+                    &request_ctx,
+                    FailurePayload {
+                        status: reqwest::StatusCode::BAD_GATEWAY,
+                        error_code: "upstream_response_too_large".to_string(),
+                        error_message: "upstream response exceeded the configured size limit"
+                            .to_string(),
+                        upstream_error_body: None,
+                        response_body: None,
+                    },
+                )
+                .await;
+            }
+            err
+        }
     };
     record_usage_event(
         services.admin_state(),
@@ -143,5 +160,5 @@ pub(in crate::worker::runtime) async fn process_request(
             ),
     )
     .await;
-    Err(anyhow!("upstream request failed"))
+    Err(err)
 }

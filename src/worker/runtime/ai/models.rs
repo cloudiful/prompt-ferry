@@ -3,6 +3,7 @@ use crate::{
     db,
     protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseStart},
     usage::truncate_chars,
+    worker::runtime::context::BridgeSender,
     worker::runtime::request_assembly::BufferedBridgeRequest,
     worker_admin::AdminState,
     worker_usage::{UsageLog, UsageRequestMetadata, record_usage_event},
@@ -12,19 +13,32 @@ use chrono::Utc;
 use futures::StreamExt;
 use reqwest::{Client, StatusCode};
 use std::{collections::HashSet, time::Instant};
-use tokio::sync::mpsc;
 use tracing::warn;
 
+pub(super) struct ModelsRequestContext<'a> {
+    pub(super) state: &'a AdminState,
+    pub(super) client: &'a Client,
+    pub(super) out_tx: &'a BridgeSender,
+    pub(super) request: &'a BufferedBridgeRequest,
+    pub(super) request_id: uuid::Uuid,
+    pub(super) started: Instant,
+    pub(super) user_id: i64,
+    pub(super) owner_worker_id: uuid::Uuid,
+}
+
 pub(super) async fn process_models_request(
-    state: &AdminState,
-    client: &Client,
-    out_tx: &mpsc::UnboundedSender<BridgeMessage>,
-    request: &BufferedBridgeRequest,
-    request_id: uuid::Uuid,
-    started: Instant,
-    user_id: i64,
-    owner_worker_id: uuid::Uuid,
+    context: ModelsRequestContext<'_>,
 ) -> anyhow::Result<()> {
+    let ModelsRequestContext {
+        state,
+        client,
+        out_tx,
+        request,
+        request_id,
+        started,
+        user_id,
+        owner_worker_id,
+    } = context;
     let routes = db::list_visible_endpoints(&state.pool, user_id).await?;
     if routes.is_empty() {
         return Err(anyhow!("route not found"));

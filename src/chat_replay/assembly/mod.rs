@@ -26,16 +26,30 @@ pub(super) use reconstruct::{
     replay_assistant_message, replayable_output_items, should_replay_reasoning,
 };
 
+pub struct ResponsesReplayRequest<'a> {
+    pub pool: &'a PgPool,
+    pub replay_cache: &'a ReplayCache,
+    pub user_id: Option<i64>,
+    pub resolved_parent_event_id: Option<i64>,
+    pub request_body: &'a [u8],
+    pub native_api: NativeApi,
+    pub route_base_url: &'a str,
+    pub current_request_model: Option<&'a str>,
+}
+
 pub async fn prepare_responses_replay_request(
-    pool: &PgPool,
-    replay_cache: &ReplayCache,
-    user_id: Option<i64>,
-    resolved_parent_event_id: Option<i64>,
-    request_body: &[u8],
-    native_api: NativeApi,
-    route_base_url: &str,
-    current_request_model: Option<&str>,
+    input: ResponsesReplayRequest<'_>,
 ) -> Result<Vec<u8>, CompatError> {
+    let ResponsesReplayRequest {
+        pool,
+        replay_cache,
+        user_id,
+        resolved_parent_event_id,
+        request_body,
+        native_api,
+        route_base_url,
+        current_request_model,
+    } = input;
     let request = NormalizedResponsesRequest::from_body(request_body)?;
     let parent = if let Some(parent_event_id) = resolved_parent_event_id {
         db::get_usage_event_chain_entry(pool, parent_event_id)

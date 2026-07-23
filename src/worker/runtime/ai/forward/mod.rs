@@ -24,19 +24,51 @@ use non_stream::{
 };
 use tracing::warn;
 
+#[derive(Clone, Copy)]
+pub(super) struct ResponseLoggingContext {
+    pub(super) redact_content: bool,
+    pub(super) content_logging_enabled: bool,
+    pub(super) raw_content_logging_enabled: bool,
+}
+
+pub(super) struct ResponseForwardContext<'a> {
+    pub(super) route_ctx: &'a RouteExecutionContext,
+    pub(super) request: &'a BufferedBridgeRequest,
+    pub(super) request_ctx: &'a RequestExecutionContext,
+    pub(super) upstream_redacted_request_json: Option<serde_json::Value>,
+    pub(super) upstream_restore_session: Option<crate::redact_upstream::UpstreamRedactionSession>,
+    pub(super) logging: ResponseLoggingContext,
+    pub(super) response_adapter: ResponseAdapter,
+    pub(super) services: &'a RuntimeServices,
+}
+
+impl ResponseForwardContext<'_> {
+    pub(super) fn cloned(&self) -> Self {
+        Self {
+            route_ctx: self.route_ctx,
+            request: self.request,
+            request_ctx: self.request_ctx,
+            upstream_redacted_request_json: self.upstream_redacted_request_json.clone(),
+            upstream_restore_session: self.upstream_restore_session.clone(),
+            logging: self.logging,
+            response_adapter: self.response_adapter,
+            services: self.services,
+        }
+    }
+}
+
 pub(super) async fn forward_upstream_response(
     response: reqwest::Response,
-    route_ctx: &RouteExecutionContext,
-    request: &BufferedBridgeRequest,
-    request_ctx: &RequestExecutionContext,
-    upstream_redacted_request_json: Option<serde_json::Value>,
-    upstream_restore_session: Option<crate::redact_upstream::UpstreamRedactionSession>,
-    redact_content: bool,
-    content_logging_enabled: bool,
-    raw_content_logging_enabled: bool,
-    response_adapter: ResponseAdapter,
-    services: &RuntimeServices,
+    context: ResponseForwardContext<'_>,
 ) -> anyhow::Result<()> {
+    let route_ctx = context.route_ctx;
+    let request = context.request;
+    let request_ctx = context.request_ctx;
+    let upstream_redacted_request_json = context.upstream_redacted_request_json.clone();
+    let upstream_restore_session = context.upstream_restore_session.clone();
+    let redact_content = context.logging.redact_content;
+    let response_adapter = context.response_adapter;
+    let services = context.services;
     let route = &route_ctx.route;
     let status = response.status();
     let upstream_content_type = response
@@ -115,15 +147,7 @@ pub(super) async fn forward_upstream_response(
     if response_adapter == ResponseAdapter::ChatToResponses && !is_sse {
         return forward_non_stream_chat_response(
             response,
-            route_ctx,
-            request,
-            request_ctx,
-            upstream_redacted_request_json,
-            upstream_restore_session,
-            redact_content,
-            content_logging_enabled,
-            raw_content_logging_enabled,
-            services,
+            context.cloned(),
             assistant_capture.as_mut(),
         )
         .await;
@@ -133,53 +157,18 @@ pub(super) async fn forward_upstream_response(
         && response_adapter == ResponseAdapter::AnthropicMessagesToResponses
         && !is_sse
     {
-        return forward_non_stream_anthropic_response(
-            response,
-            route_ctx,
-            request,
-            request_ctx,
-            upstream_redacted_request_json,
-            upstream_restore_session,
-            redact_content,
-            content_logging_enabled,
-            raw_content_logging_enabled,
-            services,
-            capture,
-        )
-        .await;
+        return forward_non_stream_anthropic_response(response, context.cloned(), capture).await;
     }
 
     if let Some(capture) = responses_capture.as_mut()
         && !is_sse
     {
-        return forward_non_stream_responses_response(
-            response,
-            route_ctx,
-            request,
-            request_ctx,
-            upstream_redacted_request_json,
-            upstream_restore_session,
-            redact_content,
-            content_logging_enabled,
-            raw_content_logging_enabled,
-            services,
-            capture,
-        )
-        .await;
+        return forward_non_stream_responses_response(response, context.cloned(), capture).await;
     }
 
     forward_streaming_response(
         response,
-        route_ctx,
-        request,
-        request_ctx,
-        upstream_redacted_request_json,
-        upstream_restore_session,
-        redact_content,
-        content_logging_enabled,
-        raw_content_logging_enabled,
-        response_adapter,
-        services,
+        context.cloned(),
         assistant_capture.as_mut(),
         responses_capture.as_mut(),
         upstream_content_type,

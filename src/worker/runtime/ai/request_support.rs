@@ -265,16 +265,16 @@ pub(super) async fn prepare_upstream_request_with_replay(
             "previous_response_id for chat-native continuations requires stored replay state",
         ));
     };
-    let translated = prepare_responses_replay_request(
-        &state.pool,
-        &state.replay_cache,
-        request.user_id.filter(|id| *id > 0),
-        parent_event_id,
-        prepared_body,
-        route.native_api,
-        &route.base_url,
-        effective_request_model,
-    )
+    let translated = prepare_responses_replay_request(crate::chat_replay::ResponsesReplayRequest {
+        pool: &state.pool,
+        replay_cache: &state.replay_cache,
+        user_id: request.user_id.filter(|id| *id > 0),
+        resolved_parent_event_id: parent_event_id,
+        request_body: prepared_body,
+        native_api: route.native_api,
+        route_base_url: &route.base_url,
+        current_request_model: effective_request_model,
+    })
     .await?;
     let mut prepared = match route.native_api {
         crate::config::NativeApi::Chat => PreparedUpstreamRequest {

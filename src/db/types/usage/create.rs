@@ -87,6 +87,7 @@ pub struct RequestRecordCreate {
     pub base_checkpoint_event_id: Option<i64>,
     pub response_prompt: Option<String>,
     pub response_raw_body: Option<String>,
+    pub response_capture_truncated: bool,
     pub upstream_error_body: Option<String>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
@@ -131,6 +132,7 @@ pub struct RequestRecordStorageInput {
     pub restore_session: EncryptedPayloadInput,
     pub response_prompt: Option<String>,
     pub response_raw_body: Option<String>,
+    pub response_capture_truncated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -232,6 +234,7 @@ impl RequestRecordCreate {
             base_checkpoint_event_id: None,
             response_prompt: None,
             response_raw_body: None,
+            response_capture_truncated: false,
             upstream_error_body: None,
             error_code: None,
             error_message: None,
@@ -390,6 +393,7 @@ impl RequestRecordCreate {
         self.restore_session = storage.restore_session;
         self.response_prompt = storage.response_prompt;
         self.response_raw_body = storage.response_raw_body;
+        self.response_capture_truncated = storage.response_capture_truncated;
         self
     }
 

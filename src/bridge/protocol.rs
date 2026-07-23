@@ -7,6 +7,7 @@ pub enum BridgeMessage {
     RequestStart(BridgeRequestStart),
     RequestChunk(BridgeRequestChunk),
     RequestEnd(BridgeRequestEnd),
+    RequestCancel(BridgeRequestCancel),
     ApprovalPending(ApprovalPending),
     RealtimeSessionStart(RealtimeSessionStart),
     RealtimeClientEvent(RealtimeClientEventMessage),
@@ -15,6 +16,7 @@ pub enum BridgeMessage {
     McpRequestStart(McpRequestStart),
     McpRequestChunk(McpRequestChunk),
     McpRequestEnd(McpRequestEnd),
+    McpRequestCancel(McpRequestCancel),
     McpResponseStart(McpResponseStart),
     McpResponseChunk(McpResponseChunk),
     McpResponseEnd(McpResponseEnd),
@@ -106,6 +108,12 @@ pub struct BridgeRequestEnd {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BridgeRequestCancel {
+    pub request_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ApprovalPending {
     pub request_id: String,
 }
@@ -142,6 +150,12 @@ pub struct McpRequestEnd {
     pub http_request_decompressed_bytes: Option<i64>,
     #[serde(default)]
     pub http_request_compression_ratio: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpRequestCancel {
+    pub request_id: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

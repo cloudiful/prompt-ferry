@@ -1,6 +1,5 @@
 use anyhow::Result;
 use chrono::Utc;
-use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -137,35 +136,9 @@ pub async fn record_approval_webhook_result(
 
 pub async fn create_flagged_approval_request(
     pool: &PgPool,
-    request_id: Uuid,
-    user_id: Option<i64>,
-    client_key_label: Option<String>,
-    path: String,
-    model: Option<String>,
-    review_reason: String,
-    review_categories: Vec<String>,
-    request_preview: String,
-    request_payload_json: Value,
-    request_deadline_unix_ms: i64,
-    wait_deadline_unix_ms: i64,
+    input: FlaggedApprovalRequestInput,
 ) -> Result<ApprovalRequest> {
-    create_approval_request(
-        pool,
-        ApprovalRequestCreate::flagged(FlaggedApprovalRequestInput {
-            request_id,
-            user_id,
-            client_key_label,
-            path,
-            model,
-            review_reason,
-            review_categories,
-            request_preview,
-            request_payload_json,
-            request_deadline_unix_ms,
-            wait_deadline_unix_ms,
-        }),
-    )
-    .await
+    create_approval_request(pool, ApprovalRequestCreate::flagged(input)).await
 }
 
 pub async fn approval_request_status(

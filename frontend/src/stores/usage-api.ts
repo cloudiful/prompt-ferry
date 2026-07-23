@@ -54,6 +54,7 @@ export async function fetchUsageSummary(
 
 export async function fetchUsageSeries(input: {
   bucket: RequestRecordBucketGranularity
+  requestCategory?: RequestRecordCategory
   range: string
   start: string
   end: string

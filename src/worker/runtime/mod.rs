@@ -42,9 +42,9 @@ use self::prompt_log::{
     RequestPromptLog, prepare_request_prompt_log, resolve_mcp_conversation_log,
 };
 use self::request_assembly::{
-    BufferedBridgeRequest, BufferedMcpRequest, PendingIncomingRequest, RequestTransferStats,
-    collect_request_chunks, forward_request_chunk, send_worker_shutdown_mcp_response,
-    send_worker_shutdown_response,
+    BufferedBridgeRequest, BufferedMcpRequest, PendingIncomingRequest, RequestCancellation,
+    RequestTransferStats, collect_request_chunks, forward_request_chunk,
+    send_worker_shutdown_mcp_response, send_worker_shutdown_response,
 };
 use self::routing::{
     discover_dynamic_model_route, materialize_route_api_key_selection, select_route_for_candidate,
@@ -66,6 +66,8 @@ const ERROR_BODY_SAMPLE_BYTES: usize = 32 * 1024;
 pub(super) struct WorkerRuntimeState {
     pending_requests: Arc<Mutex<HashMap<String, PendingIncomingRequest>>>,
     pending_mcp_requests: Arc<Mutex<HashMap<String, PendingIncomingRequest>>>,
+    request_cancellations: Arc<Mutex<HashMap<String, RequestCancellation>>>,
+    mcp_request_cancellations: Arc<Mutex<HashMap<String, RequestCancellation>>>,
     pending_realtime_sessions:
         Arc<Mutex<HashMap<String, tokio::sync::mpsc::Sender<RealtimeInboundMessage>>>>,
     control: RuntimeControl,
@@ -86,6 +88,8 @@ impl Default for WorkerRuntimeState {
         Self {
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
             pending_mcp_requests: Arc::new(Mutex::new(HashMap::new())),
+            request_cancellations: Arc::new(Mutex::new(HashMap::new())),
+            mcp_request_cancellations: Arc::new(Mutex::new(HashMap::new())),
             pending_realtime_sessions: Arc::new(Mutex::new(HashMap::new())),
             control: RuntimeControl::new(),
             endpoint_load: EndpointLoadTracker::default(),

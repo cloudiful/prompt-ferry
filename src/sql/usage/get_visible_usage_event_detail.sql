@@ -74,7 +74,8 @@ SELECT
     ue.failure_family AS "failure_family: _",
     ue.mcp_bearer_token_slot,
     ue.route_selection_reason AS "route_selection_reason: _",
-    ue.created_at AS "created_at!"
+    ue.created_at AS "created_at!",
+    ue.response_capture_truncated AS "response_capture_truncated!"
 FROM request_records ue
 LEFT JOIN users u ON u.user_id = ue.user_id
 LEFT JOIN provider_endpoints pe ON pe.endpoint_id = ue.endpoint_id

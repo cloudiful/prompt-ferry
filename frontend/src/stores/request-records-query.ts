@@ -74,11 +74,13 @@ export function createRequestRecordSummaryDays(range: string): number {
 
 export function createRequestRecordSeriesQuery(input: {
   bucket: RequestRecordBucketGranularity
+  requestCategory?: RequestRecordCategory
   range: string
   start: string
   end: string
 }): {
   bucket: RequestRecordBucketGranularity
+  request_category?: RequestRecordCategory
   start?: string
   end?: string
   limit: number
@@ -92,6 +94,7 @@ export function createRequestRecordSeriesQuery(input: {
     bucket: input.bucket,
     end: window.end,
     limit: window.limit,
+    request_category: input.requestCategory,
     start: window.start,
   }
 }

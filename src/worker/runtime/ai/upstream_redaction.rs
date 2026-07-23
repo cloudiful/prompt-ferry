@@ -327,18 +327,19 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    #[allow(clippy::await_holding_lock)]
     async fn blocking_redaction_yields_to_the_async_runtime() {
-        let _guard = crate::redact::TEST_REDACTION_LOCK.lock().expect("lock");
-        apply_config(&RedactionConfig {
-            enabled: true,
-            rules: RedactionRules {
-                domain: true,
-                ..RedactionRules::default()
-            },
-            custom_strings: Vec::new(),
-        })
-        .expect("config");
+        {
+            let _guard = crate::redact::TEST_REDACTION_LOCK.lock().expect("lock");
+            apply_config(&RedactionConfig {
+                enabled: true,
+                rules: RedactionRules {
+                    domain: true,
+                    ..RedactionRules::default()
+                },
+                custom_strings: Vec::new(),
+            })
+            .expect("config");
+        }
         let body = serde_json::to_vec(&json!({
             "model": "gpt-test",
             "instructions": "contact a.example.com ".repeat(1_000),

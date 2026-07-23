@@ -139,17 +139,19 @@ async fn create_pending_approval(
 ) -> anyhow::Result<db::ApprovalRequest> {
     db::create_flagged_approval_request(
         pool,
-        Uuid::new_v4(),
-        Some(user_id),
-        Some("ops-key".to_string()),
-        "/v1/chat/completions".to_string(),
-        Some("gpt-test".to_string()),
-        "needs human review".to_string(),
-        vec!["policy".to_string()],
-        "user: hello".to_string(),
-        serde_json::json!({ "model": "gpt-test", "messages": [{ "role": "user", "content": "hello" }] }),
-        400_000,
-        300_000,
+        db::FlaggedApprovalRequestInput {
+            request_id: Uuid::new_v4(),
+            user_id: Some(user_id),
+            client_key_label: Some("ops-key".to_string()),
+            path: "/v1/chat/completions".to_string(),
+            model: Some("gpt-test".to_string()),
+            review_reason: "needs human review".to_string(),
+            review_categories: vec!["policy".to_string()],
+            request_preview: "user: hello".to_string(),
+            request_payload_json: serde_json::json!({ "model": "gpt-test", "messages": [{ "role": "user", "content": "hello" }] }),
+            request_deadline_unix_ms: 400_000,
+            wait_deadline_unix_ms: 300_000,
+        },
     )
     .await
 }

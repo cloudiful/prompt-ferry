@@ -71,7 +71,7 @@ pub(super) async fn usage_summary(
     };
     let days = match parse_usage_summary_days(query.days) {
         Ok(days) => days,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let visible_user_id = (!user.is_admin).then_some(user.user_id);
     match db::request_record_summary(&state.pool, days, visible_user_id).await {
@@ -91,7 +91,7 @@ pub(super) async fn usage_overview(
     };
     let window = match parse_overview_window(query.range, query.start, query.end) {
         Ok(window) => window,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     match db::request_records_overview(
         &state.pool,
@@ -128,7 +128,7 @@ pub(super) async fn usage_events(
     let (date_start, date_end) = match query.date.as_deref() {
         Some(value) if !value.is_empty() => match parse_usage_date_range(value) {
             Ok(range) => range,
-            Err(response) => return response,
+            Err(response) => return *response,
         },
         _ => (None, None),
     };
@@ -320,7 +320,7 @@ pub(super) async fn usage_series(
     };
     let bucket = match parse_usage_series_bucket(query.bucket) {
         Ok(bucket) => bucket,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let limit = query.limit.unwrap_or(24).clamp(1, 120);
     match db::usage_buckets(
@@ -330,6 +330,7 @@ pub(super) async fn usage_series(
         query.start,
         query.end,
         (!user.is_admin).then_some(user.user_id),
+        query.request_category,
     )
     .await
     {
@@ -349,7 +350,7 @@ pub(super) async fn clear_usage_events(
     };
     let clear_query = match build_usage_clear_query(&user, body) {
         Ok(query) => query,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     match db::clear_usage_events(&state.pool, clear_query).await {
         Ok((deleted, deleted_prompt_blocks)) => Json(UsageClearResponse {

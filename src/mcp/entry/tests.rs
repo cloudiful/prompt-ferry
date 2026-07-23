@@ -42,6 +42,22 @@ fn dyn_store(store: &Arc<TestSessionStore>) -> Arc<dyn SessionStore> {
     store.clone()
 }
 
+fn request<'a>(
+    method: &'a str,
+    path: &'a str,
+    headers: &'a [(String, String)],
+    body: &'a [u8],
+) -> McpRequestContext<'a> {
+    McpRequestContext {
+        user_id: None,
+        server_name: None,
+        method,
+        path,
+        headers,
+        body,
+    }
+}
+
 fn test_pool() -> sqlx::PgPool {
     PgPoolOptions::new()
         .connect_lazy("postgres://postgres:postgres@127.0.0.1/prompt_ferry_test")
@@ -126,12 +142,12 @@ async fn aggregate_initialize_returns_session_header() {
         handle_stream(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[],
-            br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[],
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            ),
         )
         .await
         .unwrap(),
@@ -156,12 +172,12 @@ async fn aggregate_initialized_requires_session_and_returns_accepted() {
         handle_stream(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[],
-            br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[],
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            ),
         )
         .await
         .unwrap(),
@@ -177,15 +193,15 @@ async fn aggregate_initialized_requires_session_and_returns_accepted() {
         handle_stream(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[
-                ("mcp-session-id".to_string(), session_id),
-                ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
-            ],
-            br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[
+                    ("mcp-session-id".to_string(), session_id),
+                    ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+                ],
+                br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            ),
         )
         .await
         .unwrap(),
@@ -203,12 +219,12 @@ async fn get_root_stream_returns_event_stream_with_valid_session() {
         handle_stream(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[],
-            br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[],
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            ),
         )
         .await
         .unwrap(),
@@ -223,16 +239,16 @@ async fn get_root_stream_returns_event_stream_with_valid_session() {
     let response = handle_stream(
         &pool,
         &cache,
-        None,
-        None,
-        "GET",
-        "/mcp",
-        &[
-            ("accept".to_string(), "text/event-stream".to_string()),
-            ("mcp-session-id".to_string(), session_id),
-            ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
-        ],
-        &[],
+        request(
+            "GET",
+            "/mcp",
+            &[
+                ("accept".to_string(), "text/event-stream".to_string()),
+                ("mcp-session-id".to_string(), session_id),
+                ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+            ],
+            &[],
+        ),
     )
     .await
     .unwrap();
@@ -257,12 +273,12 @@ async fn get_root_stream_starts_with_sse_retry_priming_event() {
         handle_stream(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[],
-            br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[],
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            ),
         )
         .await
         .unwrap(),
@@ -278,16 +294,16 @@ async fn get_root_stream_starts_with_sse_retry_priming_event() {
         handle_stream(
             &pool,
             &cache,
-            None,
-            None,
-            "GET",
-            "/mcp",
-            &[
-                ("accept".to_string(), "text/event-stream".to_string()),
-                ("mcp-session-id".to_string(), session_id),
-                ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
-            ],
-            &[],
+            request(
+                "GET",
+                "/mcp",
+                &[
+                    ("accept".to_string(), "text/event-stream".to_string()),
+                    ("mcp-session-id".to_string(), session_id),
+                    ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+                ],
+                &[],
+            ),
         )
         .await
         .unwrap(),
@@ -310,12 +326,12 @@ async fn get_root_without_session_returns_legacy_sse_unsupported() {
         handle_stream(
             &pool,
             &cache,
-            None,
-            None,
-            "GET",
-            "/mcp",
-            &[("accept".to_string(), "text/event-stream".to_string())],
-            &[],
+            request(
+                "GET",
+                "/mcp",
+                &[("accept".to_string(), "text/event-stream".to_string())],
+                &[],
+            ),
         )
         .await
         .unwrap(),
@@ -339,12 +355,12 @@ async fn get_root_stream_accepts_last_event_id_for_resume() {
         handle_stream(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[],
-            br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[],
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            ),
         )
         .await
         .unwrap(),
@@ -359,17 +375,17 @@ async fn get_root_stream_accepts_last_event_id_for_resume() {
     let response = handle_stream(
         &pool,
         &cache,
-        None,
-        None,
-        "GET",
-        "/mcp",
-        &[
-            ("accept".to_string(), "text/event-stream".to_string()),
-            ("mcp-session-id".to_string(), session_id),
-            ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
-            ("last-event-id".to_string(), "event-1".to_string()),
-        ],
-        &[],
+        request(
+            "GET",
+            "/mcp",
+            &[
+                ("accept".to_string(), "text/event-stream".to_string()),
+                ("mcp-session-id".to_string(), session_id),
+                ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+                ("last-event-id".to_string(), "event-1".to_string()),
+            ],
+            &[],
+        ),
     )
     .await
     .unwrap();
@@ -388,12 +404,12 @@ async fn delete_root_session_closes_existing_session() {
         handle_stream(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[],
-            br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[],
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            ),
         )
         .await
         .unwrap(),
@@ -409,15 +425,15 @@ async fn delete_root_session_closes_existing_session() {
         handle_stream(
             &pool,
             &cache,
-            None,
-            None,
-            "DELETE",
-            "/mcp",
-            &[
-                ("mcp-session-id".to_string(), session_id.clone()),
-                ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
-            ],
-            &[],
+            request(
+                "DELETE",
+                "/mcp",
+                &[
+                    ("mcp-session-id".to_string(), session_id.clone()),
+                    ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+                ],
+                &[],
+            ),
         )
         .await
         .unwrap(),
@@ -430,15 +446,15 @@ async fn delete_root_session_closes_existing_session() {
         handle_stream(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[
-                ("mcp-session-id".to_string(), session_id),
-                ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
-            ],
-            br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[
+                    ("mcp-session-id".to_string(), session_id),
+                    ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+                ],
+                br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            ),
         )
         .await
         .unwrap(),
@@ -465,12 +481,12 @@ async fn initialize_persists_session_state_to_store() {
         handle_stream_with_session_store(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[],
-            br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[],
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            ),
             Some(dyn_store(&store)),
         )
         .await
@@ -504,15 +520,15 @@ async fn missing_session_restores_from_store() {
         handle_stream_with_session_store(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[
-                ("mcp-session-id".to_string(), session_id),
-                ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
-            ],
-            br#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[
+                    ("mcp-session-id".to_string(), session_id),
+                    ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+                ],
+                br#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
+            ),
             Some(dyn_store(&store)),
         )
         .await
@@ -532,18 +548,18 @@ async fn store_miss_returns_session_not_found_code() {
         handle_stream_with_session_store(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[
-                (
-                    "mcp-session-id".to_string(),
-                    uuid::Uuid::new_v4().to_string(),
-                ),
-                ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
-            ],
-            br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[
+                    (
+                        "mcp-session-id".to_string(),
+                        uuid::Uuid::new_v4().to_string(),
+                    ),
+                    ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+                ],
+                br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            ),
             Some(dyn_store(&store)),
         )
         .await
@@ -565,12 +581,12 @@ async fn delete_session_removes_session_state_from_store() {
         handle_stream_with_session_store(
             &pool,
             &cache,
-            None,
-            None,
-            "POST",
-            "/mcp",
-            &[],
-            br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            request(
+                "POST",
+                "/mcp",
+                &[],
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            ),
             Some(dyn_store(&store)),
         )
         .await
@@ -587,15 +603,15 @@ async fn delete_session_removes_session_state_from_store() {
         handle_stream_with_session_store(
             &pool,
             &cache,
-            None,
-            None,
-            "DELETE",
-            "/mcp",
-            &[
-                ("mcp-session-id".to_string(), session_id.clone()),
-                ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
-            ],
-            &[],
+            request(
+                "DELETE",
+                "/mcp",
+                &[
+                    ("mcp-session-id".to_string(), session_id.clone()),
+                    ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+                ],
+                &[],
+            ),
             Some(dyn_store(&store)),
         )
         .await

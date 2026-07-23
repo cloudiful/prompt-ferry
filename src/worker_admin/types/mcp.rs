@@ -114,8 +114,10 @@ impl McpServerRequest {
         existing_server_id: Option<Uuid>,
         user: &SessionUser,
     ) -> Result<(), Response> {
-        validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")?;
-        validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")?;
+        validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")
+            .map_err(|response| *response)?;
+        validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")
+            .map_err(|response| *response)?;
         let name = self.name.trim();
         if name.is_empty() {
             return Err(error(

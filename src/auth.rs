@@ -4,49 +4,49 @@ use axum::{
 };
 use serde_json::json;
 
-pub fn bearer_token(headers: &HeaderMap) -> Result<&str, Response> {
+pub fn bearer_token(headers: &HeaderMap) -> Result<&str, Box<Response>> {
     let Some(value) = headers.get(http::header::AUTHORIZATION) else {
-        return Err(error_response(
+        return Err(Box::new(error_response(
             StatusCode::UNAUTHORIZED,
             "missing_authorization",
             "missing Authorization header",
-        ));
+        )));
     };
 
     let Ok(value) = value.to_str() else {
-        return Err(error_response(
+        return Err(Box::new(error_response(
             StatusCode::UNAUTHORIZED,
             "invalid_authorization",
             "invalid Authorization header",
-        ));
+        )));
     };
 
     value.strip_prefix("Bearer ").ok_or_else(|| {
-        error_response(
+        Box::new(error_response(
             StatusCode::UNAUTHORIZED,
             "invalid_authorization",
             "Authorization must use Bearer token",
-        )
+        ))
     })
 }
 
-pub fn check_bearer(headers: &HeaderMap, expected: &str) -> Result<(), Response> {
+pub fn check_bearer(headers: &HeaderMap, expected: &str) -> Result<(), Box<Response>> {
     if expected.is_empty() {
-        return Err(error_response(
+        return Err(Box::new(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "auth_not_configured",
             "authentication token is not configured",
-        ));
+        )));
     }
 
     let token = bearer_token(headers)?;
 
     if token != expected {
-        return Err(error_response(
+        return Err(Box::new(error_response(
             StatusCode::FORBIDDEN,
             "forbidden",
             "invalid token",
-        ));
+        )));
     }
 
     Ok(())

@@ -27,6 +27,10 @@ pub struct WorkerConfig {
     pub valkey_url: String,
     pub valkey_ttl_seconds: u64,
     pub session_ttl_seconds: u64,
+    pub local_session_max_entries: usize,
+    pub max_upstream_response_bytes: usize,
+    pub max_raw_response_capture_bytes: usize,
+    pub max_response_text_capture_bytes: usize,
     pub endpoint_model_cache_ttl_seconds: u64,
 }
 
@@ -53,6 +57,10 @@ impl Default for WorkerConfig {
             valkey_url: String::new(),
             valkey_ttl_seconds: 24 * 60 * 60,
             session_ttl_seconds: 7 * 24 * 60 * 60,
+            local_session_max_entries: 10_000,
+            max_upstream_response_bytes: 64 * 1024 * 1024,
+            max_raw_response_capture_bytes: 4 * 1024 * 1024,
+            max_response_text_capture_bytes: 1024 * 1024,
             endpoint_model_cache_ttl_seconds: 300,
         }
     }
@@ -116,6 +124,18 @@ impl WorkerConfig {
         }
         if let Some(ttl) = args.session_ttl_seconds {
             self.session_ttl_seconds = ttl;
+        }
+        if let Some(max_entries) = args.local_session_max_entries {
+            self.local_session_max_entries = max_entries.max(1);
+        }
+        if let Some(bytes) = args.max_upstream_response_bytes {
+            self.max_upstream_response_bytes = bytes.max(1);
+        }
+        if let Some(bytes) = args.max_raw_response_capture_bytes {
+            self.max_raw_response_capture_bytes = bytes.max(1);
+        }
+        if let Some(bytes) = args.max_response_text_capture_bytes {
+            self.max_response_text_capture_bytes = bytes.max(1);
         }
         if let Some(ttl) = args.endpoint_model_cache_ttl_seconds {
             self.endpoint_model_cache_ttl_seconds = ttl.max(1);

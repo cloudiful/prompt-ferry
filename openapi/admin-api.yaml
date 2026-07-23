@@ -844,6 +844,11 @@ paths:
       - request-records
       operationId: request_record_series
       parameters:
+      - name: request_category
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/RequestRecordCategory'
       - name: bucket
         in: query
         required: false
@@ -3746,6 +3751,7 @@ components:
       - has_full_request
       - has_parent
       - route_selection_reason
+      - response_capture_truncated
       - created_at
       properties:
         assistant_message_json: {}
@@ -3955,6 +3961,8 @@ components:
           type:
           - string
           - 'null'
+        response_capture_truncated:
+          type: boolean
         response_prompt:
           type:
           - string

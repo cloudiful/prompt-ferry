@@ -159,6 +159,7 @@ pub fn apps(config: RelayConfig) -> (Router, Router, RelayHandle) {
 fn relay_state() -> Arc<RelayState> {
     Arc::new(RelayState {
         workers: Mutex::new(HashMap::new()),
+        worker_loads: Mutex::new(HashMap::new()),
         pending: Mutex::new(HashMap::new()),
         pending_mcp: Mutex::new(HashMap::new()),
         pending_realtime_sessions: Mutex::new(HashMap::new()),

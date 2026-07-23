@@ -77,6 +77,7 @@ pub struct RequestRecordsClearRequest {
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct RequestRecordSeriesQuery {
+    pub request_category: Option<db::RequestRecordCategory>,
     pub bucket: Option<String>,
     pub limit: Option<i64>,
     pub start: Option<chrono::DateTime<chrono::Utc>>,

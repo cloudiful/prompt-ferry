@@ -62,29 +62,21 @@ pub enum McpTransportResponse {
     },
 }
 
+pub struct McpRequestContext<'a> {
+    pub user_id: Option<i64>,
+    pub server_name: Option<&'a str>,
+    pub method: &'a str,
+    pub path: &'a str,
+    pub headers: &'a [(String, String)],
+    pub body: &'a [u8],
+}
+
 pub async fn handle(
     pool: &sqlx::PgPool,
     cache: &McpCatalogCache,
-    user_id: Option<i64>,
-    server_name: Option<&str>,
-    method: &str,
-    path: &str,
-    headers: &[(String, String)],
-    body: &[u8],
+    request: McpRequestContext<'_>,
 ) -> anyhow::Result<(u16, String, Vec<(String, String)>, Vec<u8>)> {
-    match handle_stream_with_session_store(
-        pool,
-        cache,
-        user_id,
-        server_name,
-        method,
-        path,
-        headers,
-        body,
-        None,
-    )
-    .await?
-    {
+    match handle_stream_with_session_store(pool, cache, request, None).await? {
         McpTransportResponse::Buffered {
             status,
             content_type,
@@ -111,38 +103,25 @@ pub async fn handle(
 pub async fn handle_stream(
     pool: &sqlx::PgPool,
     cache: &McpCatalogCache,
-    user_id: Option<i64>,
-    server_name: Option<&str>,
-    method: &str,
-    path: &str,
-    headers: &[(String, String)],
-    body: &[u8],
+    request: McpRequestContext<'_>,
 ) -> anyhow::Result<McpTransportResponse> {
-    handle_stream_with_session_store(
-        pool,
-        cache,
+    handle_stream_with_session_store(pool, cache, request, None).await
+}
+
+pub async fn handle_stream_with_session_store(
+    pool: &sqlx::PgPool,
+    cache: &McpCatalogCache,
+    request: McpRequestContext<'_>,
+    session_store: Option<Arc<dyn SessionStore>>,
+) -> anyhow::Result<McpTransportResponse> {
+    let McpRequestContext {
         user_id,
         server_name,
         method,
         path,
         headers,
         body,
-        None,
-    )
-    .await
-}
-
-pub async fn handle_stream_with_session_store(
-    pool: &sqlx::PgPool,
-    cache: &McpCatalogCache,
-    user_id: Option<i64>,
-    server_name: Option<&str>,
-    method: &str,
-    path: &str,
-    headers: &[(String, String)],
-    body: &[u8],
-    session_store: Option<Arc<dyn SessionStore>>,
-) -> anyhow::Result<McpTransportResponse> {
+    } = request;
     super::transport::with_tracked_token_slot(async {
         if !matches!(
             method.to_ascii_uppercase().as_str(),

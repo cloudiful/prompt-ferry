@@ -182,7 +182,7 @@ async fn resolve_realtime_route(
     let (route, load_guard) = match resolve_route(&fake_request, config, services, &request_ctx)
         .await?
     {
-        super::request_routes::RouteResolution::Ready { route, load_guard } => (route, load_guard),
+        super::request_routes::RouteResolution::Ready { route, load_guard } => (*route, load_guard),
         super::request_routes::RouteResolution::Responded => {
             return Err(anyhow!("realtime route was rejected by budget gate"));
         }

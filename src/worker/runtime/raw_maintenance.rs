@@ -219,6 +219,21 @@ async fn monitor_valkey_health(url: String) -> anyhow::Result<()> {
     }
 }
 
+async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<()> {
+    match db::run_raw_payload_maintenance(&dependencies.pool, dependencies.retention_days).await {
+        Ok(Some(report)) => info!(
+            partitions_created = report.partitions_created,
+            raw_rows_deleted = report.raw_rows_deleted,
+            partitions_dropped = report.partitions_dropped,
+            retention_days = dependencies.retention_days,
+            "raw payload maintenance completed"
+        ),
+        Ok(None) => {}
+        Err(error) => return Err(error),
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,19 +281,4 @@ mod tests {
         assert_eq!(VALKEY_HEALTH_FAILURE_LIMIT, 3);
         assert!(VALKEY_HEALTH_RETRY_BACKOFF < VALKEY_HEALTH_CHECK_TIMEOUT);
     }
-}
-
-async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<()> {
-    match db::run_raw_payload_maintenance(&dependencies.pool, dependencies.retention_days).await {
-        Ok(Some(report)) => info!(
-            partitions_created = report.partitions_created,
-            raw_rows_deleted = report.raw_rows_deleted,
-            partitions_dropped = report.partitions_dropped,
-            retention_days = dependencies.retention_days,
-            "raw payload maintenance completed"
-        ),
-        Ok(None) => {}
-        Err(error) => return Err(error),
-    }
-    Ok(())
 }

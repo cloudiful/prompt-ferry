@@ -3,14 +3,13 @@ use crate::{
     db::{self, ModelRouteCandidate, ModelRouteCandidateTarget},
     mcp::targeting::McpRequestMetadata,
     redact::{self, RedactionConfig, TEST_REDACTION_LOCK},
-    worker::runtime::context::RuntimeServices,
+    worker::runtime::context::{ResponseLimits, RuntimeServices},
     worker_admin_types::{RequestContentLoggingMode, RequestContentLoggingResponse},
 };
 use anyhow::anyhow;
 use base64::Engine as _;
 use chrono::Utc;
 use redactor::RedactionRules;
-use tokio::sync::mpsc;
 
 use super::connect::is_expected_relay_disconnect;
 use super::routing::{
@@ -257,9 +256,14 @@ fn session_affinity_without_stable_identifier_falls_back_to_first_target() {
 #[tokio::test]
 async fn session_affinity_continuation_selects_preferred_target() {
     let runtime_state = WorkerRuntimeState::default();
-    let (out_tx, _out_rx) = mpsc::unbounded_channel();
-    let services =
-        RuntimeServices::new(None, out_tx, reqwest::Client::new(), runtime_state.clone());
+    let out_tx = super::context::BridgeSender::test_sender();
+    let services = RuntimeServices::new(
+        None,
+        out_tx,
+        reqwest::Client::new(),
+        runtime_state.clone(),
+        ResponseLimits::default(),
+    );
     let mut candidate = session_affinity_candidate();
     candidate.session_affinity_lock_after_turns = 1;
     let preferred = candidate.targets[0].endpoint_id;
@@ -296,9 +300,14 @@ async fn session_affinity_continuation_selects_preferred_target() {
 #[tokio::test]
 async fn session_affinity_early_turn_uses_least_loaded_endpoint() {
     let runtime_state = WorkerRuntimeState::default();
-    let (out_tx, _out_rx) = mpsc::unbounded_channel();
-    let services =
-        RuntimeServices::new(None, out_tx, reqwest::Client::new(), runtime_state.clone());
+    let out_tx = super::context::BridgeSender::test_sender();
+    let services = RuntimeServices::new(
+        None,
+        out_tx,
+        reqwest::Client::new(),
+        runtime_state.clone(),
+        ResponseLimits::default(),
+    );
     let candidate = session_affinity_candidate();
     let busy = candidate.targets[0].endpoint_id;
     let idle = candidate.targets[1].endpoint_id;
@@ -343,9 +352,14 @@ async fn session_affinity_early_turn_uses_least_loaded_endpoint() {
 #[tokio::test]
 async fn session_affinity_locks_after_configured_turn() {
     let runtime_state = WorkerRuntimeState::default();
-    let (out_tx, _out_rx) = mpsc::unbounded_channel();
-    let services =
-        RuntimeServices::new(None, out_tx, reqwest::Client::new(), runtime_state.clone());
+    let out_tx = super::context::BridgeSender::test_sender();
+    let services = RuntimeServices::new(
+        None,
+        out_tx,
+        reqwest::Client::new(),
+        runtime_state.clone(),
+        ResponseLimits::default(),
+    );
     let candidate = session_affinity_candidate();
     let preferred = candidate.targets[0].endpoint_id;
     let _preferred_busy_guard = runtime_state.reserve_endpoint(preferred).unwrap();
@@ -386,9 +400,14 @@ async fn session_affinity_locks_after_configured_turn() {
 #[tokio::test]
 async fn force_passthrough_disables_early_session_load_balancing() {
     let runtime_state = WorkerRuntimeState::default();
-    let (out_tx, _out_rx) = mpsc::unbounded_channel();
-    let services =
-        RuntimeServices::new(None, out_tx, reqwest::Client::new(), runtime_state.clone());
+    let out_tx = super::context::BridgeSender::test_sender();
+    let services = RuntimeServices::new(
+        None,
+        out_tx,
+        reqwest::Client::new(),
+        runtime_state.clone(),
+        ResponseLimits::default(),
+    );
     let mut candidate = session_affinity_candidate();
     candidate.targets[1].responses_continuation_policy =
         crate::db::ResponsesContinuationPolicy::ForcePassthrough;
@@ -431,9 +450,14 @@ async fn force_passthrough_disables_early_session_load_balancing() {
 #[tokio::test]
 async fn selected_route_carries_target_upstream_model_override() {
     let runtime_state = WorkerRuntimeState::default();
-    let (out_tx, _out_rx) = mpsc::unbounded_channel();
-    let services =
-        RuntimeServices::new(None, out_tx, reqwest::Client::new(), runtime_state.clone());
+    let out_tx = super::context::BridgeSender::test_sender();
+    let services = RuntimeServices::new(
+        None,
+        out_tx,
+        reqwest::Client::new(),
+        runtime_state.clone(),
+        ResponseLimits::default(),
+    );
     let mut candidate = sample_candidate();
     let preferred = rendezvous_target(&candidate, Some("key-a"))
         .expect("preferred target")

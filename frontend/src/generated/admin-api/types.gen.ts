@@ -742,6 +742,7 @@ export type RequestRecordDetail = {
     request_state: RequestRecordState;
     request_storage_mode: string;
     request_user_agent?: string | null;
+    response_capture_truncated: boolean;
     response_prompt?: string | null;
     response_raw_body?: string | null;
     route_selection_reason: RouteSelectionReason;
@@ -1717,6 +1718,7 @@ export type RequestRecordSeriesData = {
     body?: never;
     path?: never;
     query?: {
+        request_category?: RequestRecordCategory;
         bucket?: string;
         limit?: number;
         start?: string;

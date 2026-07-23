@@ -97,9 +97,7 @@ impl McpCatalogCache {
                 return self.local_snapshot(server).await;
             }
         };
-        let Some(value) = value else {
-            return None;
-        };
+        let value = value?;
         let stored: StoredCatalog = match serde_json::from_str(&value) {
             Ok(stored) => stored,
             Err(err) => {
@@ -181,6 +179,12 @@ impl McpCatalogCache {
 
     pub async fn finish_refresh(&self, server_id: Uuid) {
         self.refreshing.write().await.remove(&server_id);
+    }
+}
+
+impl Default for McpCatalogCache {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

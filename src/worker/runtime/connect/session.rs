@@ -22,6 +22,7 @@ use crate::{
     config::WorkerConfig,
     protocol::BridgeMessage,
     tls,
+    worker::runtime::context::{BridgeSender, ResponseLimits},
     worker::runtime::{
         RELAY_RECONNECT_DELAY_SECONDS, SHUTDOWN_DRAIN_TIMEOUT_SECONDS, WorkerRuntimeState,
         handle_relay_bridge_message,
@@ -151,9 +152,19 @@ pub(super) async fn connect_once(
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (mut write_cipher, mut read_cipher) =
         negotiate_bridge_encryption(&mut ws_tx, &mut ws_rx, relay).await?;
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<BridgeMessage>();
+    let (out_tx, mut control_rx, mut data_rx) = BridgeSender::channel();
+    let (admin_tx, mut admin_rx) = mpsc::unbounded_channel::<BridgeMessage>();
+    let admin_out_tx = out_tx.clone();
+    let admin_forward_task = tokio::spawn(async move {
+        while let Some(message) = admin_rx.recv().await {
+            if admin_out_tx.send(message).is_err() {
+                break;
+            }
+        }
+    });
+    let writer_out_tx = out_tx.clone();
     if let Some(state) = admin_state.as_ref() {
-        worker_admin::set_bridge_sender(state, &relay.relay_key, Some(out_tx.clone())).await;
+        worker_admin::set_bridge_sender(state, &relay.relay_key, Some(admin_tx)).await;
         mark_relay_connected(state, relay).await;
         worker_admin::publish_snapshot(state).await?;
     }
@@ -162,12 +173,30 @@ pub(super) async fn connect_once(
         let mut heartbeat = tokio::time::interval(Duration::from_secs(30));
         loop {
             tokio::select! {
-                Some(message) = out_rx.recv() => {
+                Some(message) = control_rx.recv() => {
                     let payload = if let Some(cipher) = write_cipher.as_mut() {
                         cipher.encrypt_message(&message)
                     } else {
                         bridge_wire::encode_message(&message)
                     };
+                    let payload = match payload {
+                        Ok(payload) => payload,
+                        Err(err) => {
+                            error!(error = %err, "failed to encode bridge message");
+                            break;
+                        }
+                    };
+                    if ws_tx.send(Message::Binary(payload.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Some(item) = data_rx.recv() => {
+                    let payload = if let Some(cipher) = write_cipher.as_mut() {
+                        cipher.encrypt_message(&item.message)
+                    } else {
+                        bridge_wire::encode_message(&item.message)
+                    };
+                    writer_out_tx.release_data(item.bytes);
                     let payload = match payload {
                         Ok(payload) => payload,
                         Err(err) => {
@@ -213,6 +242,7 @@ pub(super) async fn connect_once(
                             out_tx.clone(),
                             client.clone(),
                             runtime_state.clone(),
+                            ResponseLimits::from(&config),
                         );
                         handle_relay_bridge_message(message, &config, &services).await;
                     }
@@ -236,6 +266,7 @@ pub(super) async fn connect_once(
     }
 
     write_task.abort();
+    admin_forward_task.abort();
     if let Some(state) = admin_state.as_ref() {
         worker_admin::set_bridge_sender(state, &relay.relay_key, None).await;
     }

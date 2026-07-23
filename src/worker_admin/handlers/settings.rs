@@ -11,7 +11,7 @@ pub(super) async fn get_redaction_setting(
     };
     let (scope, user_id) = match resolve_redaction_scope(&user, query) {
         Ok(target) => target,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let config = match scope {
         RedactionScope::Global => match db::get_redaction_config(&state.pool).await {
@@ -49,7 +49,7 @@ pub(super) async fn set_redaction_setting(
     };
     let (scope, user_id) = match resolve_redaction_scope(&user, query) {
         Ok(target) => target,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let config = body.0.normalized();
     if let Err(err) = config.validate() {
@@ -124,7 +124,7 @@ pub(super) async fn list_redaction_custom_strings(
         },
     ) {
         Ok(target) => target,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let (first, rows) = normalize_redaction_page(query.first, query.rows);
     match db::list_redaction_custom_string_rules(
@@ -160,27 +160,27 @@ pub(super) async fn list_redaction_custom_strings(
 fn resolve_redaction_scope(
     user: &SessionUser,
     query: RedactionSettingQuery,
-) -> Result<(RedactionScope, Option<i64>), Response> {
+) -> Result<(RedactionScope, Option<i64>), Box<Response>> {
     let scope = query.scope.unwrap_or(if user.is_admin {
         RedactionScope::Global
     } else {
         RedactionScope::User
     });
     match scope {
-        RedactionScope::Global if !user.is_admin => Err(error(
+        RedactionScope::Global if !user.is_admin => Err(Box::new(error(
             StatusCode::FORBIDDEN,
             "forbidden",
             "admin required for global redaction rules",
-        )),
+        ))),
         RedactionScope::Global => Ok((scope, None)),
         RedactionScope::User => {
             let target_user_id = query.user_id.unwrap_or(user.user_id);
             if !user.is_admin && target_user_id != user.user_id {
-                return Err(error(
+                return Err(Box::new(error(
                     StatusCode::FORBIDDEN,
                     "forbidden",
                     "cannot access another user's redaction rules",
-                ));
+                )));
             }
             Ok((scope, Some(target_user_id)))
         }
@@ -308,7 +308,7 @@ pub(super) async fn set_relay_ip_whitelist(
     }
     let policy = match validate_relay_ip_policy(body) {
         Ok(policy) => policy,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     if let Err(err) = db::set_json_setting(&state.pool, "relay_ip_whitelist", &policy).await {
         return internal(&state, err);

@@ -134,6 +134,7 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         restore_session,
         response_prompt,
         response_raw_body,
+        response_capture_truncated: log.response_capture_truncated,
     })
     .with_provider_response(log.provider_response_id, log.provider_conversation_key)
     .with_error(upstream_error_body, log.error_code, error_message)

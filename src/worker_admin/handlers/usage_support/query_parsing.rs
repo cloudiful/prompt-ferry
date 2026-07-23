@@ -7,27 +7,27 @@ type UsageDateRange = (
 
 pub(in crate::worker_admin::handlers) fn parse_usage_date_range(
     value: &str,
-) -> Result<UsageDateRange, Response> {
+) -> Result<UsageDateRange, Box<Response>> {
     let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
-        error(
+        Box::new(error(
             StatusCode::BAD_REQUEST,
             "invalid_date",
             "date must be in YYYY-MM-DD format",
-        )
+        ))
     })?;
     let Some(start_naive) = date.and_hms_opt(0, 0, 0) else {
-        return Err(error(
+        return Err(Box::new(error(
             StatusCode::BAD_REQUEST,
             "invalid_date",
             "date must be in YYYY-MM-DD format",
-        ));
+        )));
     };
     let Some(end_naive) = date.succ_opt().and_then(|next| next.and_hms_opt(0, 0, 0)) else {
-        return Err(error(
+        return Err(Box::new(error(
             StatusCode::BAD_REQUEST,
             "invalid_date",
             "date must be in YYYY-MM-DD format",
-        ));
+        )));
     };
     Ok((Some(start_naive.and_utc()), Some(end_naive.and_utc())))
 }
@@ -36,7 +36,7 @@ pub(in crate::worker_admin::handlers) fn parse_overview_window(
     range: Option<RequestRecordOverviewRange>,
     start: Option<chrono::DateTime<chrono::Utc>>,
     end: Option<chrono::DateTime<chrono::Utc>>,
-) -> Result<db::OverviewWindow, Response> {
+) -> Result<db::OverviewWindow, Box<Response>> {
     let now = chrono::Utc::now();
     let range = range.unwrap_or(RequestRecordOverviewRange::Last24h);
     let (start, end) = match range {
@@ -45,13 +45,15 @@ pub(in crate::worker_admin::handlers) fn parse_overview_window(
         RequestRecordOverviewRange::Last30d => (Some(now - chrono::Duration::days(30)), Some(now)),
         RequestRecordOverviewRange::Custom => {
             let Some(start) = start else {
-                return Err(bad_request("custom overview range requires start"));
+                return Err(Box::new(bad_request(
+                    "custom overview range requires start",
+                )));
             };
             let Some(end) = end else {
-                return Err(bad_request("custom overview range requires end"));
+                return Err(Box::new(bad_request("custom overview range requires end")));
             };
             if start >= end {
-                return Err(bad_request("overview start must be before end"));
+                return Err(Box::new(bad_request("overview start must be before end")));
             }
             (Some(start), Some(end))
         }
@@ -70,29 +72,29 @@ pub(in crate::worker_admin::handlers) fn parse_overview_window(
 
 pub(in crate::worker_admin::handlers) fn parse_usage_summary_days(
     days: Option<i64>,
-) -> Result<i64, Response> {
+) -> Result<i64, Box<Response>> {
     match days.unwrap_or(1) {
         1 | 7 | 30 => Ok(days.unwrap_or(1)),
-        _ => Err(error(
+        _ => Err(Box::new(error(
             StatusCode::BAD_REQUEST,
             "invalid_days",
             "days must be 1, 7, or 30",
-        )),
+        ))),
     }
 }
 
 pub(in crate::worker_admin::handlers) fn parse_usage_series_bucket(
     bucket: Option<String>,
-) -> Result<String, Response> {
+) -> Result<String, Box<Response>> {
     let bucket = bucket.unwrap_or_else(|| "hour".to_string());
     if matches!(bucket.as_str(), "minute" | "hour" | "day") {
         Ok(bucket)
     } else {
-        Err(error(
+        Err(Box::new(error(
             StatusCode::BAD_REQUEST,
             "invalid_bucket",
             "bucket must be minute, hour, or day",
-        ))
+        )))
     }
 }
 
@@ -127,24 +129,24 @@ pub(in crate::worker_admin::handlers) fn build_request_record_query(
 pub(in crate::worker_admin::handlers) fn build_usage_clear_query(
     user: &SessionUser,
     body: UsageClearRequest,
-) -> Result<db::UsageClearQuery, Response> {
+) -> Result<db::UsageClearQuery, Box<Response>> {
     if body
         .start_at
         .zip(body.end_at)
         .is_some_and(|(start, end)| start > end)
     {
-        return Err(error(
+        return Err(Box::new(error(
             StatusCode::BAD_REQUEST,
             "invalid_range",
             "start_at must be earlier than or equal to end_at",
-        ));
+        )));
     }
     if !body.delete_all.unwrap_or(false) && body.start_at.is_none() && body.end_at.is_none() {
-        return Err(error(
+        return Err(Box::new(error(
             StatusCode::BAD_REQUEST,
             "range_required",
             "provide start_at/end_at or set delete_all=true",
-        ));
+        )));
     }
 
     Ok(match body.scope.unwrap_or(UsageClearScope::CurrentUser) {
@@ -157,7 +159,11 @@ pub(in crate::worker_admin::handlers) fn build_usage_clear_query(
         },
         UsageClearScope::AllUsers => {
             if !user.is_admin {
-                return Err(error(StatusCode::FORBIDDEN, "forbidden", "admin required"));
+                return Err(Box::new(error(
+                    StatusCode::FORBIDDEN,
+                    "forbidden",
+                    "admin required",
+                )));
             }
             db::UsageClearQuery {
                 scope: db::UsageClearScope::AllUsers,
@@ -169,14 +175,18 @@ pub(in crate::worker_admin::handlers) fn build_usage_clear_query(
         }
         UsageClearScope::TargetUser => {
             if !user.is_admin {
-                return Err(error(StatusCode::FORBIDDEN, "forbidden", "admin required"));
+                return Err(Box::new(error(
+                    StatusCode::FORBIDDEN,
+                    "forbidden",
+                    "admin required",
+                )));
             }
             let Some(target_user_id) = body.user_id else {
-                return Err(error(
+                return Err(Box::new(error(
                     StatusCode::BAD_REQUEST,
                     "user_required",
                     "user_id is required",
-                ));
+                )));
             };
             db::UsageClearQuery {
                 scope: db::UsageClearScope::TargetUser,

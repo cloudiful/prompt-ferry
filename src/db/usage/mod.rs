@@ -44,7 +44,7 @@ pub use detail::{
     latest_usage_event_locator_by_conversation,
     latest_usage_event_locator_by_provider_conversation_key,
 };
-pub use insert::{record_request_record, record_request_state};
+pub use insert::{RequestRecordStateInput, record_request_record, record_request_state};
 pub use overview::{OverviewBucket, OverviewWindow, request_records_overview};
 pub use prompt_blocks::{
     decode_prompt_message_refs, get_usage_prompt_blocks, upsert_usage_prompt_block,

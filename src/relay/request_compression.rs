@@ -28,7 +28,7 @@ pub(crate) struct HttpRequestTransferStats {
 }
 
 impl HttpRequestCompressionContext {
-    pub(crate) fn from_headers(headers: &HeaderMap) -> Result<Self, Response> {
+    pub(crate) fn from_headers(headers: &HeaderMap) -> Result<Self, Box<Response>> {
         let content_encoding = headers
             .get(header::CONTENT_ENCODING)
             .and_then(|value| value.to_str().ok())
@@ -47,11 +47,11 @@ impl HttpRequestCompressionContext {
                 compressed_bytes: parse_content_length(headers),
                 compressed_bytes_counter: None,
             }),
-            Some(other) => Err(error_response(
+            Some(other) => Err(Box::new(error_response(
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 "unsupported_content_encoding",
                 &format!("unsupported Content-Encoding: {other}"),
-            )),
+            ))),
         }
     }
 
@@ -92,7 +92,7 @@ fn parse_content_length(headers: &HeaderMap) -> Option<i64> {
 pub(crate) async fn capture_request_compression(mut request: Request, next: Next) -> Response {
     let mut compression = match HttpRequestCompressionContext::from_headers(request.headers()) {
         Ok(compression) => compression,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     if compression.compressed && compression.compressed_bytes.is_none() {

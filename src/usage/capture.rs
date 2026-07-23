@@ -17,6 +17,8 @@ pub struct UsageCapture {
     pub provider_conversation_key: Option<String>,
     pub usage: TokenUsage,
     pub response_text: String,
+    pub response_text_truncated: bool,
+    max_response_text_capture_bytes: usize,
     sse_decoder: Utf8LineDecoder,
     sse_decode_failed: bool,
     json_body: Vec<u8>,
@@ -33,12 +35,19 @@ impl UsageCapture {
             provider_conversation_key: None,
             usage: TokenUsage::default(),
             response_text: String::new(),
+            response_text_truncated: false,
+            max_response_text_capture_bytes: 1024 * 1024,
             sse_decoder: Utf8LineDecoder::default(),
             sse_decode_failed: false,
             json_body: Vec::new(),
             json_body_truncated: false,
             saw_content: false,
         }
+    }
+
+    pub fn set_response_text_capture_limit(&mut self, limit: usize) {
+        self.max_response_text_capture_bytes = limit.max(1);
+        self.truncate_response_text();
     }
 
     pub fn observe_chunk(&mut self, chunk: &[u8]) -> bool {
@@ -135,5 +144,18 @@ impl UsageCapture {
         if text::has_content(payload) || text::has_content(value) {
             self.saw_content = true;
         }
+        self.truncate_response_text();
+    }
+
+    fn truncate_response_text(&mut self) {
+        if self.response_text.len() <= self.max_response_text_capture_bytes {
+            return;
+        }
+        let mut end = self.max_response_text_capture_bytes;
+        while !self.response_text.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.response_text.truncate(end);
+        self.response_text_truncated = true;
     }
 }

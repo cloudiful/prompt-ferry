@@ -60,7 +60,7 @@ pub(super) async fn create_relay(
     }
     let input = match resolve_create_relay_input(&state, body).await {
         Ok(input) => input,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let relay = match db::create_managed_relay(&state.pool, input).await {
         Ok(relay) => relay,
@@ -97,7 +97,7 @@ pub(super) async fn update_relay(
     }
     let input = match resolve_update_relay_input(&state, existing, body).await {
         Ok(input) => input,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let relay = match db::update_managed_relay(&state.pool, relay_id, input).await {
         Ok(Some(relay)) => relay,

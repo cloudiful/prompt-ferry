@@ -144,8 +144,6 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     loadingState.page.value = true
     try {
       await Promise.all([
-        refreshSummary(),
-        refreshSeries(),
         refreshOverview(),
         refreshRecords(),
         refreshFacets(),

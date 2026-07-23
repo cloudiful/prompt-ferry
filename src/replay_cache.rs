@@ -1,4 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
@@ -37,10 +41,28 @@ struct RedisBackend {
     session_ttl_seconds: u64,
 }
 
-#[derive(Default)]
 struct LocalBackend {
-    sessions: Mutex<HashMap<String, SessionUser>>,
+    sessions: Mutex<HashMap<String, LocalSessionEntry>>,
+    session_ttl: Duration,
+    max_session_entries: usize,
     replay_snapshots: Mutex<HashMap<Uuid, ReplaySnapshotValue>>,
+}
+
+struct LocalSessionEntry {
+    user: SessionUser,
+    expires_at: Instant,
+    last_access: u64,
+}
+
+impl LocalBackend {
+    fn new(session_ttl_seconds: u64, max_session_entries: usize) -> Self {
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+            session_ttl: Duration::from_secs(session_ttl_seconds.max(1)),
+            max_session_entries: max_session_entries.max(1),
+            replay_snapshots: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -78,29 +100,39 @@ impl Default for ReplayCache {
 }
 
 impl ReplayCache {
-    fn local_sessions_only() -> Self {
+    fn local_sessions_only(config: &WorkerConfig, reason: &str) -> Self {
+        warn!(
+            backend = "local",
+            reason,
+            max_entries = config.local_session_max_entries,
+            ttl_seconds = config.session_ttl_seconds,
+            "using local session fallback; backend will not switch at runtime"
+        );
         Self {
-            backend: ReplayCacheBackend::Local(Arc::new(LocalBackend::default())),
+            backend: ReplayCacheBackend::Local(Arc::new(LocalBackend::new(
+                config.session_ttl_seconds,
+                config.local_session_max_entries,
+            ))),
         }
     }
 
     pub async fn from_config(config: &WorkerConfig) -> Self {
         let url = config.valkey_url.trim();
         if url.is_empty() {
-            return Self::local_sessions_only();
+            return Self::local_sessions_only(config, "valkey_not_configured");
         }
         let client = match redis::Client::open(url) {
             Ok(client) => client,
             Err(err) => {
                 warn!(error = %err, valkey_url = url, "failed to open valkey client; falling back to local in-memory sessions");
-                return Self::local_sessions_only();
+                return Self::local_sessions_only(config, "valkey_client_open_failed");
             }
         };
         let manager = match client.get_connection_manager().await {
             Ok(manager) => manager,
             Err(err) => {
                 warn!(error = %err, valkey_url = url, "failed to connect valkey; falling back to local in-memory sessions");
-                return Self::local_sessions_only();
+                return Self::local_sessions_only(config, "valkey_connection_failed");
             }
         };
         Self {
@@ -122,7 +154,10 @@ impl ReplayCache {
 
     pub fn for_tests() -> Self {
         Self {
-            backend: ReplayCacheBackend::Local(Arc::new(LocalBackend::default())),
+            backend: ReplayCacheBackend::Local(Arc::new(LocalBackend::new(
+                7 * 24 * 60 * 60,
+                10_000,
+            ))),
         }
     }
 
@@ -209,11 +244,38 @@ impl ReplayCache {
         match &self.backend {
             ReplayCacheBackend::Disabled => Err(anyhow!("session backend unavailable")),
             ReplayCacheBackend::Local(inner) => {
-                inner
-                    .sessions
-                    .lock()
-                    .await
-                    .insert(session_id.to_string(), user.clone());
+                let mut sessions = inner.sessions.lock().await;
+                let now = Instant::now();
+                let before_cleanup = sessions.len();
+                sessions.retain(|_, entry| entry.expires_at > now);
+                let expired_count = before_cleanup.saturating_sub(sessions.len());
+                let access = sessions
+                    .values()
+                    .map(|entry| entry.last_access)
+                    .max()
+                    .unwrap_or_default()
+                    .saturating_add(1);
+                if sessions.len() >= inner.max_session_entries
+                    && !sessions.contains_key(session_id)
+                    && let Some(oldest) = sessions
+                        .iter()
+                        .min_by_key(|(_, entry)| entry.last_access)
+                        .map(|(id, _)| id.clone())
+                {
+                    sessions.remove(&oldest);
+                    warn!(evicted = 1, "local session capacity eviction");
+                }
+                sessions.insert(
+                    session_id.to_string(),
+                    LocalSessionEntry {
+                        user: user.clone(),
+                        expires_at: now + inner.session_ttl,
+                        last_access: access,
+                    },
+                );
+                if expired_count != 0 {
+                    tracing::debug!(expired = expired_count, "local session expiry cleanup");
+                }
                 Ok(())
             }
             ReplayCacheBackend::Redis(inner) => {
@@ -233,7 +295,37 @@ impl ReplayCache {
         match &self.backend {
             ReplayCacheBackend::Disabled => Err(anyhow!("session backend unavailable")),
             ReplayCacheBackend::Local(inner) => {
-                Ok(inner.sessions.lock().await.get(session_id).cloned())
+                let mut sessions = inner.sessions.lock().await;
+                let now = Instant::now();
+                let expired_ids = sessions
+                    .iter()
+                    .filter(|(_, entry)| entry.expires_at <= now)
+                    .map(|(id, _)| id.clone())
+                    .collect::<Vec<_>>();
+                for id in &expired_ids {
+                    sessions.remove(id);
+                }
+                let next_access = sessions
+                    .values()
+                    .map(|value| value.last_access)
+                    .max()
+                    .unwrap_or_default()
+                    .saturating_add(1);
+                let Some(entry) = sessions.get_mut(session_id) else {
+                    if !expired_ids.is_empty() {
+                        tracing::debug!(
+                            expired = expired_ids.len(),
+                            "local session expiry cleanup"
+                        );
+                    }
+                    return Ok(None);
+                };
+                entry.last_access = next_access;
+                entry.expires_at = now + inner.session_ttl;
+                if !expired_ids.is_empty() {
+                    tracing::debug!(expired = expired_ids.len(), "local session expiry cleanup");
+                }
+                Ok(Some(entry.user.clone()))
             }
             ReplayCacheBackend::Redis(inner) => {
                 let key = session_cache_key(session_id);

@@ -10,7 +10,7 @@ use reqwest::StatusCode;
 use tokio::sync::{mpsc, oneshot};
 
 use super::context::RuntimeServices;
-use super::request_assembly::{BufferedBridgeRequest, PendingIncomingRequest};
+use super::request_assembly::{BufferedBridgeRequest, PendingIncomingRequest, RequestCancellation};
 
 pub(super) async fn handle_relay_bridge_message(
     message: BridgeMessage,
@@ -25,13 +25,21 @@ pub(super) async fn handle_relay_bridge_message(
             };
             let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>(REQUEST_STREAM_BUFFER);
             let (end_tx, end_rx) = oneshot::channel::<RequestTransferStats>();
+            let cancellation = RequestCancellation::default();
             services.runtime_state.pending_requests.lock().await.insert(
                 request.request_id.clone(),
                 PendingIncomingRequest {
                     chunk_tx,
                     end_tx: Some(end_tx),
+                    cancellation: cancellation.clone(),
                 },
             );
+            services
+                .runtime_state
+                .request_cancellations
+                .lock()
+                .await
+                .insert(request.request_id.clone(), cancellation.clone());
             let config = config.clone();
             let services = services.clone();
             tokio::spawn(async move {
@@ -43,23 +51,43 @@ pub(super) async fn handle_relay_bridge_message(
                     end_rx,
                 )
                 .await;
+                if cancellation.is_cancelled() {
+                    services
+                        .runtime_state
+                        .request_cancellations
+                        .lock()
+                        .await
+                        .remove(&request.request_id);
+                    return;
+                }
                 let request_id = request.request_id.clone();
                 let request = BufferedBridgeRequest::from_parts(request, body, stats);
-                if let Err(err) = process_request(request.clone(), &config, &services).await {
-                    let redact_enabled = services.admin_state().is_some_and(|state| {
-                        state
-                            .redaction_enabled
-                            .load(std::sync::atomic::Ordering::SeqCst)
-                    });
-                    let _ = services
-                        .out_tx
-                        .send(BridgeMessage::ResponseError(ResponseError {
-                            request_id,
-                            status: StatusCode::BAD_GATEWAY.as_u16(),
-                            code: "upstream_error".to_string(),
-                            message: safe_error(&err, redact_enabled, request.user_id),
-                        }));
+                tokio::select! {
+                    _ = cancellation.cancelled() => {}
+                    result = process_request(request.clone(), &config, &services) => {
+                        if let Err(err) = result {
+                            let redact_enabled = services.admin_state().is_some_and(|state| {
+                                state
+                                    .redaction_enabled
+                                    .load(std::sync::atomic::Ordering::SeqCst)
+                            });
+                            let _ = services
+                                .out_tx
+                                .send(BridgeMessage::ResponseError(ResponseError {
+                                    request_id: request_id.clone(),
+                                    status: StatusCode::BAD_GATEWAY.as_u16(),
+                                    code: "upstream_error".to_string(),
+                                    message: safe_error(&err, redact_enabled, request.user_id),
+                                }));
+                        }
+                    }
                 }
+                services
+                    .runtime_state
+                    .request_cancellations
+                    .lock()
+                    .await
+                    .remove(&request_id);
             });
         }
         BridgeMessage::RequestChunk(chunk) => {
@@ -82,6 +110,14 @@ pub(super) async fn handle_relay_bridge_message(
             )
             .await;
         }
+        BridgeMessage::RequestCancel(cancel) => {
+            cancel_request(
+                &services.runtime_state.pending_requests,
+                &services.runtime_state.request_cancellations,
+                &cancel.request_id,
+            )
+            .await;
+        }
         BridgeMessage::McpRequestStart(request) => {
             let Some(active_guard) = services.runtime_state.try_track_request() else {
                 send_worker_shutdown_mcp_response(&services.out_tx, &request.request_id);
@@ -89,6 +125,7 @@ pub(super) async fn handle_relay_bridge_message(
             };
             let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>(REQUEST_STREAM_BUFFER);
             let (end_tx, end_rx) = oneshot::channel::<RequestTransferStats>();
+            let cancellation = RequestCancellation::default();
             services
                 .runtime_state
                 .pending_mcp_requests
@@ -99,8 +136,15 @@ pub(super) async fn handle_relay_bridge_message(
                     PendingIncomingRequest {
                         chunk_tx,
                         end_tx: Some(end_tx),
+                        cancellation: cancellation.clone(),
                     },
                 );
+            services
+                .runtime_state
+                .mcp_request_cancellations
+                .lock()
+                .await
+                .insert(request.request_id.clone(), cancellation.clone());
             let services = services.clone();
             tokio::spawn(async move {
                 let _active_guard = active_guard;
@@ -111,11 +155,28 @@ pub(super) async fn handle_relay_bridge_message(
                     end_rx,
                 )
                 .await;
-                mcp::handle_mcp_request(
-                    super::request_assembly::BufferedMcpRequest::from_parts(request, body, stats),
-                    &services,
-                )
-                .await;
+                if cancellation.is_cancelled() {
+                    services
+                        .runtime_state
+                        .mcp_request_cancellations
+                        .lock()
+                        .await
+                        .remove(&request.request_id);
+                    return;
+                }
+                let request_id = request.request_id.clone();
+                let request =
+                    super::request_assembly::BufferedMcpRequest::from_parts(request, body, stats);
+                tokio::select! {
+                    _ = cancellation.cancelled() => {}
+                    _ = mcp::handle_mcp_request(request, &services) => {}
+                }
+                services
+                    .runtime_state
+                    .mcp_request_cancellations
+                    .lock()
+                    .await
+                    .remove(&request_id);
             });
         }
         BridgeMessage::McpRequestChunk(chunk) => {
@@ -135,6 +196,14 @@ pub(super) async fn handle_relay_bridge_message(
                     http_request_decompressed_bytes: end.http_request_decompressed_bytes,
                     http_request_compression_ratio: end.http_request_compression_ratio,
                 },
+            )
+            .await;
+        }
+        BridgeMessage::McpRequestCancel(cancel) => {
+            cancel_request(
+                &services.runtime_state.pending_mcp_requests,
+                &services.runtime_state.mcp_request_cancellations,
+                &cancel.request_id,
             )
             .await;
         }
@@ -218,6 +287,23 @@ async fn finish_request_transfer(
         && let Some(end_tx) = pending.end_tx.take()
     {
         let _ = end_tx.send(stats);
+    }
+}
+
+async fn cancel_request(
+    pending_requests: &std::sync::Arc<
+        tokio::sync::Mutex<std::collections::HashMap<String, PendingIncomingRequest>>,
+    >,
+    cancellations: &std::sync::Arc<
+        tokio::sync::Mutex<std::collections::HashMap<String, RequestCancellation>>,
+    >,
+    request_id: &str,
+) {
+    if let Some(pending) = pending_requests.lock().await.remove(request_id) {
+        pending.cancellation.cancel();
+    }
+    if let Some(cancellation) = cancellations.lock().await.remove(request_id) {
+        cancellation.cancel();
     }
 }
 

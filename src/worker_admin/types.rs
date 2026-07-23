@@ -27,13 +27,16 @@ pub use relays::*;
 pub use settings::*;
 pub use usage::*;
 
-fn validate_request_budget_limit(value: Option<i32>, field_name: &str) -> Result<(), Response> {
+fn validate_request_budget_limit(
+    value: Option<i32>,
+    field_name: &str,
+) -> Result<(), Box<Response>> {
     if value.is_some_and(|limit| limit <= 0) {
-        return Err(error(
+        return Err(Box::new(error(
             StatusCode::BAD_REQUEST,
             "invalid_budget_limit",
             &format!("{field_name} must be greater than 0"),
-        ));
+        )));
     }
     Ok(())
 }

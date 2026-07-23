@@ -11,6 +11,7 @@ use super::super::{
 };
 use super::{
     forward::forward_upstream_response,
+    forward::{ResponseForwardContext, ResponseLoggingContext},
     request_support::{log_prepared_upstream_request, prepare_upstream_request_with_replay},
     upstream::send_upstream_request,
 };
@@ -26,16 +27,30 @@ pub(super) enum ForwardOutcome {
     TransportError(anyhow::Error),
 }
 
+pub(super) struct RouteForwardRequest<'a> {
+    pub(super) services: &'a RuntimeServices,
+    pub(super) request: &'a BufferedBridgeRequest,
+    pub(super) request_ctx: &'a RequestExecutionContext,
+    pub(super) route: &'a db::RouteConfig,
+    pub(super) method: &'a Method,
+    pub(super) redact_content: bool,
+    pub(super) content_logging_enabled: bool,
+    pub(super) raw_content_logging_enabled: bool,
+}
+
 pub(super) async fn forward_route_request(
-    services: &RuntimeServices,
-    request: &BufferedBridgeRequest,
-    request_ctx: &RequestExecutionContext,
-    route: &db::RouteConfig,
-    method: &Method,
-    redact_content: bool,
-    content_logging_enabled: bool,
-    raw_content_logging_enabled: bool,
+    input: RouteForwardRequest<'_>,
 ) -> anyhow::Result<ForwardOutcome> {
+    let RouteForwardRequest {
+        services,
+        request,
+        request_ctx,
+        route,
+        method,
+        redact_content,
+        content_logging_enabled,
+        raw_content_logging_enabled,
+    } = input;
     let route_ctx = RouteExecutionContext::new(route);
     if let Some(state) = services.admin_state()
         && !route.route_id.is_nil()
@@ -75,13 +90,15 @@ pub(super) async fn forward_route_request(
     if let Some(state) = services.admin_state() {
         let _ = db::record_request_state(
             &state.pool,
-            request_ctx.request_id,
-            db::RequestRecordState::UpstreamProcessing,
-            Some(route.route_id).filter(|id| !id.is_nil()),
-            route.model_route_rule_id,
-            request_ctx.request_model.as_deref(),
-            route.endpoint_key_id,
-            route.endpoint_key_label.as_deref(),
+            db::RequestRecordStateInput {
+                request_id: request_ctx.request_id,
+                request_state: db::RequestRecordState::UpstreamProcessing,
+                endpoint_id: Some(route.route_id).filter(|id| !id.is_nil()),
+                model_route_rule_id: route.model_route_rule_id,
+                model: request_ctx.request_model.as_deref(),
+                endpoint_key_id: route.endpoint_key_id,
+                endpoint_key_label: route.endpoint_key_label.as_deref(),
+            },
         )
         .await;
     }
@@ -97,17 +114,21 @@ pub(super) async fn forward_route_request(
     match response {
         Ok(response) => {
             handle_attempt_response(
-                services,
-                request,
-                request_ctx,
-                route_ctx,
                 response,
-                prepared.upstream_redacted_request_json.clone(),
-                prepared.upstream_restore_session.clone(),
-                redact_content,
-                content_logging_enabled,
-                raw_content_logging_enabled,
-                prepared.response_adapter,
+                ResponseForwardContext {
+                    route_ctx: &route_ctx,
+                    request,
+                    request_ctx,
+                    upstream_redacted_request_json: prepared.upstream_redacted_request_json.clone(),
+                    upstream_restore_session: prepared.upstream_restore_session.clone(),
+                    logging: ResponseLoggingContext {
+                        redact_content,
+                        content_logging_enabled,
+                        raw_content_logging_enabled,
+                    },
+                    response_adapter: prepared.response_adapter,
+                    services,
+                },
             )
             .await
         }
@@ -118,31 +139,11 @@ pub(super) async fn forward_route_request(
 }
 
 async fn handle_attempt_response(
-    services: &RuntimeServices,
-    request: &BufferedBridgeRequest,
-    request_ctx: &RequestExecutionContext,
-    route_ctx: RouteExecutionContext,
     response: reqwest::Response,
-    upstream_redacted_request_json: Option<serde_json::Value>,
-    upstream_restore_session: Option<crate::redact_upstream::UpstreamRedactionSession>,
-    redact_content: bool,
-    content_logging_enabled: bool,
-    raw_content_logging_enabled: bool,
-    response_adapter: crate::upstream_adapter::ResponseAdapter,
+    context: ResponseForwardContext<'_>,
 ) -> anyhow::Result<ForwardOutcome> {
-    forward_upstream_response(
-        response,
-        &route_ctx,
-        request,
-        request_ctx,
-        upstream_redacted_request_json,
-        upstream_restore_session,
-        redact_content,
-        content_logging_enabled,
-        raw_content_logging_enabled,
-        response_adapter,
-        services,
-    )
-    .await?;
-    Ok(ForwardOutcome::Handled)
+    match forward_upstream_response(response, context).await {
+        Ok(()) => Ok(ForwardOutcome::Handled),
+        Err(err) => Ok(ForwardOutcome::TransportError(err)),
+    }
 }

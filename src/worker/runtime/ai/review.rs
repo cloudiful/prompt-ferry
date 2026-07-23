@@ -62,28 +62,32 @@ pub(super) async fn handle_llm_review_gate(
             );
             let approval = db::create_flagged_approval_request(
                 &state.pool,
-                request_ctx.request_id,
-                request_ctx.user_id,
-                request_ctx.client_key_label.clone(),
-                request.path.clone(),
-                request_ctx.request_model.clone(),
-                result.reason.clone(),
-                result.categories.clone(),
-                request_preview,
-                payload_json,
-                request.request_deadline_unix_ms,
-                wait_deadline_unix_ms,
+                db::FlaggedApprovalRequestInput {
+                    request_id: request_ctx.request_id,
+                    user_id: request_ctx.user_id,
+                    client_key_label: request_ctx.client_key_label.clone(),
+                    path: request.path.clone(),
+                    model: request_ctx.request_model.clone(),
+                    review_reason: result.reason.clone(),
+                    review_categories: result.categories.clone(),
+                    request_preview,
+                    request_payload_json: payload_json,
+                    request_deadline_unix_ms: request.request_deadline_unix_ms,
+                    wait_deadline_unix_ms,
+                },
             )
             .await?;
             let _ = db::record_request_state(
                 &state.pool,
-                request_ctx.request_id,
-                db::RequestRecordState::AwaitingApproval,
-                None,
-                None,
-                request_ctx.request_model.as_deref(),
-                None,
-                None,
+                db::RequestRecordStateInput {
+                    request_id: request_ctx.request_id,
+                    request_state: db::RequestRecordState::AwaitingApproval,
+                    endpoint_id: None,
+                    model_route_rule_id: None,
+                    model: request_ctx.request_model.as_deref(),
+                    endpoint_key_id: None,
+                    endpoint_key_label: None,
+                },
             )
             .await;
             spawn_approval_webhook(

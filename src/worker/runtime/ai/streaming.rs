@@ -1,8 +1,6 @@
 use super::super::{
-    RequestExecutionContext,
-    context::{RouteExecutionContext, RuntimeServices},
+    context::{BridgeSender, RouteExecutionContext},
     error_handling::{PassthroughSseFilter, ResponsesSseTerminal, safe_error},
-    request_assembly::BufferedBridgeRequest,
 };
 use super::{
     artifact::{persist_assistant_artifact, resolve_assistant_artifact},
@@ -14,7 +12,6 @@ use crate::{
     db,
     openai_compat::{AnthropicResponseStreamAdapter, ChatResponseStreamAdapter, CompatError},
     protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseStart},
-    redact_upstream::UpstreamRedactionSession,
     upstream_adapter::ResponseAdapter,
     usage::UsageCapture,
     worker::stream_delta_batcher::StreamDeltaBatcher,
@@ -22,12 +19,10 @@ use crate::{
 };
 use anyhow::anyhow;
 use futures::StreamExt;
-use tokio::{
-    sync::mpsc,
-    time::{self, MissedTickBehavior},
-};
+use tokio::time::{self, MissedTickBehavior};
 use tracing::{debug, error, info, warn};
 
+use super::forward::ResponseForwardContext;
 use super::stream_restore::SseRestoreFilter;
 use super::streaming_terminal::{failure_details, finish_failure};
 use super::upstream_restore::restore_ai_response_json_blocking;
@@ -169,26 +164,26 @@ fn response_adapter_name(adapter: ResponseAdapter) -> &'static str {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn forward_streaming_response(
     response: reqwest::Response,
-    route_ctx: &RouteExecutionContext,
-    request: &BufferedBridgeRequest,
-    request_ctx: &RequestExecutionContext,
-    upstream_redacted_request_json: Option<serde_json::Value>,
-    upstream_restore_session: Option<UpstreamRedactionSession>,
-    redact_content: bool,
-    content_logging_enabled: bool,
-    raw_content_logging_enabled: bool,
-    response_adapter: ResponseAdapter,
-    services: &RuntimeServices,
+    context: ResponseForwardContext<'_>,
     mut assistant_capture: Option<&mut AssistantArtifactCapture>,
     mut responses_capture: Option<&mut ResponsesArtifactCapture>,
     upstream_content_type: Option<String>,
     is_sse: bool,
 ) -> anyhow::Result<()> {
+    let route_ctx = context.route_ctx;
+    let request = context.request;
+    let request_ctx = context.request_ctx;
+    let upstream_redacted_request_json = context.upstream_redacted_request_json.clone();
+    let upstream_restore_session = context.upstream_restore_session.clone();
+    let redact_content = context.logging.redact_content;
+    let content_logging_enabled = context.logging.content_logging_enabled;
+    let raw_content_logging_enabled = context.logging.raw_content_logging_enabled;
+    let response_adapter = context.response_adapter;
+    let services = context.services;
     let emits_sse = response_adapter != ResponseAdapter::Passthrough || is_sse;
-    if !emits_sse && let Some(session) = upstream_restore_session.clone() {
+    if !emits_sse && upstream_restore_session.is_some() {
         debug!(
             request_id = %request.request_id,
             path = %request.path,
@@ -198,16 +193,7 @@ pub(super) async fn forward_streaming_response(
         );
         return forward_buffered_non_sse_response(
             response,
-            route_ctx,
-            request,
-            request_ctx,
-            upstream_redacted_request_json,
-            session,
-            redact_content,
-            content_logging_enabled,
-            raw_content_logging_enabled,
-            response_adapter,
-            services,
+            context.cloned(),
             assistant_capture,
             responses_capture,
             upstream_content_type,
@@ -220,6 +206,8 @@ pub(super) async fn forward_streaming_response(
         ResponseAdapter::ChatToResponses | ResponseAdapter::AnthropicMessagesToResponses
     ) || is_sse;
     let mut capture = UsageCapture::new(capture_is_sse, request_ctx.request_model.clone());
+    capture
+        .set_response_text_capture_limit(services.response_limits.max_response_text_capture_bytes);
     let response_content_type = if matches!(
         response_adapter,
         ResponseAdapter::ChatToResponses | ResponseAdapter::AnthropicMessagesToResponses
@@ -266,6 +254,8 @@ pub(super) async fn forward_streaming_response(
 
     let mut stream = response.bytes_stream();
     let mut raw_response_body = Vec::new();
+    let mut upstream_response_bytes = 0usize;
+    let mut raw_response_capture_truncated = false;
     let mut first_chunk_ms = None;
     let mut chat_stream_adapter =
         (response_adapter == ResponseAdapter::ChatToResponses).then(ChatResponseStreamAdapter::new);
@@ -311,7 +301,7 @@ pub(super) async fn forward_streaming_response(
     }
     let emit_output_chunks = |output_chunks: Vec<Vec<u8>>,
                               capture: &mut UsageCapture,
-                              out_tx: &mpsc::UnboundedSender<BridgeMessage>,
+                              out_tx: &BridgeSender,
                               first_chunk_ms: &mut Option<i64>,
                               stream_diag: &mut UpstreamStreamDiag|
      -> anyhow::Result<()> {
@@ -398,6 +388,9 @@ pub(super) async fn forward_streaming_response(
                                     response_prompt,
                                     response_raw_body,
                                 )
+                                .with_response_capture_truncated(
+                                    capture.response_text_truncated || raw_response_capture_truncated,
+                                )
                                 .with_error(
                                     Some("upstream_stream_error".to_string()),
                                     Some(safe_err.clone()),
@@ -410,9 +403,20 @@ pub(super) async fn forward_streaming_response(
                         return Err(err);
                     }
                 };
+                upstream_response_bytes = upstream_response_bytes
+                    .checked_add(chunk.len())
+                    .ok_or_else(|| anyhow!("upstream_response_too_large"))?;
+                if upstream_response_bytes > services.response_limits.max_upstream_response_bytes {
+                    return Err(anyhow!("upstream_response_too_large"));
+                }
                 stream_diag.record_upstream_chunk(chunk.len());
                 if raw_content_logging_enabled {
-                    raw_response_body.extend_from_slice(&chunk);
+                    append_limited_capture(
+                        &mut raw_response_body,
+                        &chunk,
+                        services.response_limits.max_raw_response_capture_bytes,
+                        &mut raw_response_capture_truncated,
+                    );
                 }
                 if let Some(capture) = assistant_capture.as_mut() {
                     capture.observe_chunk(&chunk);
@@ -604,18 +608,10 @@ pub(super) async fn forward_streaming_response(
         let (code, message) = failure_details(responses_stream_terminal);
         finish_failure(
             responses_stream_terminal,
-            services,
-            request,
-            request_ctx,
-            route_ctx,
+            &context,
             status.as_u16(),
             &mut capture,
             &raw_response_body,
-            content_logging_enabled,
-            raw_content_logging_enabled,
-            redact_content,
-            upstream_redacted_request_json,
-            upstream_restore_session,
             first_chunk_ms,
         )
         .await?;
@@ -696,6 +692,9 @@ pub(super) async fn forward_streaming_response(
                 }),
                 response_prompt.clone(),
                 response_raw_body,
+            )
+            .with_response_capture_truncated(
+                capture.response_text_truncated || raw_response_capture_truncated,
             ),
     )
     .await;
@@ -716,23 +715,26 @@ pub(super) async fn forward_streaming_response(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn forward_buffered_non_sse_response(
     response: reqwest::Response,
-    route_ctx: &RouteExecutionContext,
-    request: &BufferedBridgeRequest,
-    request_ctx: &RequestExecutionContext,
-    upstream_redacted_request_json: Option<serde_json::Value>,
-    upstream_restore_session: UpstreamRedactionSession,
-    redact_content: bool,
-    content_logging_enabled: bool,
-    raw_content_logging_enabled: bool,
-    response_adapter: ResponseAdapter,
-    services: &RuntimeServices,
+    context: ResponseForwardContext<'_>,
     mut assistant_capture: Option<&mut AssistantArtifactCapture>,
     mut responses_capture: Option<&mut ResponsesArtifactCapture>,
     upstream_content_type: Option<String>,
 ) -> anyhow::Result<()> {
+    let route_ctx = context.route_ctx;
+    let request = context.request;
+    let request_ctx = context.request_ctx;
+    let upstream_redacted_request_json = context.upstream_redacted_request_json.clone();
+    let upstream_restore_session = context
+        .upstream_restore_session
+        .clone()
+        .ok_or_else(|| anyhow!("missing upstream restore session"))?;
+    let redact_content = context.logging.redact_content;
+    let content_logging_enabled = context.logging.content_logging_enabled;
+    let raw_content_logging_enabled = context.logging.raw_content_logging_enabled;
+    let response_adapter = context.response_adapter;
+    let services = context.services;
     let status = response.status();
     let response_content_type = upstream_content_type;
     let mut stream_diag = UpstreamStreamDiag::new(
@@ -745,6 +747,8 @@ async fn forward_buffered_non_sse_response(
     let mut stream = response.bytes_stream();
     let mut raw_response_body = Vec::new();
     let mut output = Vec::new();
+    let mut upstream_response_bytes = 0usize;
+    let mut raw_response_capture_truncated = false;
 
     while let Some(chunk) = stream.next().await {
         let chunk = match chunk {
@@ -756,11 +760,21 @@ async fn forward_buffered_non_sse_response(
                 return Err(err);
             }
         };
+        upstream_response_bytes = upstream_response_bytes
+            .checked_add(chunk.len())
+            .ok_or_else(|| anyhow!("upstream_response_too_large"))?;
+        if upstream_response_bytes > services.response_limits.max_upstream_response_bytes {
+            return Err(anyhow!("upstream_response_too_large"));
+        }
         stream_diag.record_upstream_chunk(chunk.len());
         output.reserve(chunk.len());
         if raw_content_logging_enabled {
-            raw_response_body.reserve(chunk.len());
-            raw_response_body.extend_from_slice(&chunk);
+            append_limited_capture(
+                &mut raw_response_body,
+                &chunk,
+                services.response_limits.max_raw_response_capture_bytes,
+                &mut raw_response_capture_truncated,
+            );
         }
         if let Some(capture) = assistant_capture.as_mut() {
             capture.observe_chunk(&chunk);
@@ -809,6 +823,8 @@ async fn forward_buffered_non_sse_response(
             .is_some_and(|value| value.contains("text/event-stream")),
         request_ctx.request_model.clone(),
     );
+    capture
+        .set_response_text_capture_limit(services.response_limits.max_response_text_capture_bytes);
     let _ = capture.observe_chunk(&restored_output);
     capture.finish();
 
@@ -897,6 +913,9 @@ async fn forward_buffered_non_sse_response(
                 }),
                 response_prompt.clone(),
                 response_raw_body,
+            )
+            .with_response_capture_truncated(
+                capture.response_text_truncated || raw_response_capture_truncated,
             ),
     )
     .await;
@@ -915,4 +934,13 @@ async fn forward_buffered_non_sse_response(
     )
     .await;
     Ok(())
+}
+
+fn append_limited_capture(output: &mut Vec<u8>, chunk: &[u8], limit: usize, truncated: &mut bool) {
+    let remaining = limit.saturating_sub(output.len());
+    let take = remaining.min(chunk.len());
+    output.extend_from_slice(&chunk[..take]);
+    if take < chunk.len() {
+        *truncated = true;
+    }
 }

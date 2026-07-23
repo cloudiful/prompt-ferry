@@ -17,6 +17,13 @@ use super::{
 };
 use crate::mcp::targeting::{PrefixedTarget, parse_prefixed_name, parse_resource_target};
 
+struct AggregateCallContext<'a> {
+    user_id: Option<i64>,
+    conversation_id: Option<&'a str>,
+    request_id: &'a RequestId,
+    method: &'a str,
+}
+
 impl ProxyService {
     pub(super) async fn list_tools_for_scope(
         &self,
@@ -67,10 +74,12 @@ impl ProxyService {
             return Err(ErrorData::invalid_params("name must be server__name", None));
         };
         self.forward_aggregate_call(
-            scope.user_id,
-            scope.conversation_id.as_deref(),
-            request_id,
-            "tools/call",
+            AggregateCallContext {
+                user_id: scope.user_id,
+                conversation_id: scope.conversation_id.as_deref(),
+                request_id,
+                method: "tools/call",
+            },
             params,
             target,
             |params, upstream_name| params.name = upstream_name.into(),
@@ -104,10 +113,12 @@ impl ProxyService {
             ));
         };
         self.forward_aggregate_call(
-            scope.user_id,
-            scope.conversation_id.as_deref(),
-            request_id,
-            "resources/read",
+            AggregateCallContext {
+                user_id: scope.user_id,
+                conversation_id: scope.conversation_id.as_deref(),
+                request_id,
+                method: "resources/read",
+            },
             params,
             target,
             |params, upstream_name| params.uri = upstream_name,
@@ -137,10 +148,12 @@ impl ProxyService {
             return Err(ErrorData::invalid_params("name must be server__name", None));
         };
         self.forward_aggregate_call(
-            scope.user_id,
-            scope.conversation_id.as_deref(),
-            request_id,
-            "prompts/get",
+            AggregateCallContext {
+                user_id: scope.user_id,
+                conversation_id: scope.conversation_id.as_deref(),
+                request_id,
+                method: "prompts/get",
+            },
             params,
             target,
             |params, upstream_name| params.name = upstream_name,
@@ -221,10 +234,7 @@ impl ProxyService {
 
     async fn forward_aggregate_call<T, P, Rewrite, Validate>(
         &self,
-        user_id: Option<i64>,
-        conversation_id: Option<&str>,
-        request_id: &RequestId,
-        method: &str,
+        context: AggregateCallContext<'_>,
         mut params: P,
         target: PrefixedTarget,
         rewrite: Rewrite,
@@ -237,14 +247,14 @@ impl ProxyService {
         Validate: FnOnce(&McpServer, &str) -> Result<(), ErrorData>,
     {
         let server = self
-            .load_server_by_name(user_id, &target.server_name)
+            .load_server_by_name(context.user_id, &target.server_name)
             .await?;
         validate(&server, &target.upstream_name)?;
         rewrite(&mut params, target.upstream_name);
         let response = filtering::call_server_filtered(
             &server,
-            json_request(request_id, method, required_params(params)?),
-            conversation_id,
+            json_request(context.request_id, context.method, required_params(params)?),
+            context.conversation_id,
         )
         .await
         .map_err(super::internal_error)?;

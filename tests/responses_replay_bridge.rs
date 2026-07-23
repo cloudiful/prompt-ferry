@@ -16,7 +16,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use axum::http::StatusCode;
 use chrono::Utc;
-use prompt_ferry::chat_replay::prepare_responses_replay_request;
+use prompt_ferry::chat_replay::{ResponsesReplayRequest, prepare_responses_replay_request};
 use prompt_ferry::config::NativeApiSource;
 use prompt_ferry::db;
 use prompt_ferry::replay_cache::{ReplayCache, ReplaySnapshotValue};
@@ -682,16 +682,16 @@ async fn falls_back_to_pg_snapshot_when_local_cache_snapshot_is_stale() -> anyho
         "input": "turn 34",
         "stream": false
     }))?;
-    let replayed = prepare_responses_replay_request(
-        &schema.pool,
-        &replay_cache,
-        latest.user_id,
-        Some(latest.event_id),
-        &request_body,
-        prompt_ferry::config::NativeApi::Responses,
-        "http://example.test",
-        Some("gpt-test"),
-    )
+    let replayed = prepare_responses_replay_request(ResponsesReplayRequest {
+        pool: &schema.pool,
+        replay_cache: &replay_cache,
+        user_id: latest.user_id,
+        resolved_parent_event_id: Some(latest.event_id),
+        request_body: &request_body,
+        native_api: prompt_ferry::config::NativeApi::Responses,
+        route_base_url: "http://example.test",
+        current_request_model: Some("gpt-test"),
+    })
     .await
     .map_err(|err| anyhow::anyhow!("replay assembly failed: {}: {}", err.code, err.message))?;
 

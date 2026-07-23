@@ -1,61 +1,47 @@
 use super::super::super::{
-    MCP_ERROR_BODY_CAPTURE_BYTES, MCP_RESPONSE_BODY_CAPTURE_BYTES,
-    context::{FailurePayload, RuntimeServices},
+    MCP_ERROR_BODY_CAPTURE_BYTES, MCP_RESPONSE_BODY_CAPTURE_BYTES, context::FailurePayload,
     extract_mcp_error, format_mcp_response_body, record_mcp_request_event, redaction_enabled,
     safe_error,
 };
-use crate::{
-    db,
-    protocol::{BridgeMessage, McpResponseChunk, McpResponseEnd, McpResponseStart, ResponseError},
-    redact_upstream::UpstreamRedactionSession,
-    worker_admin_types::RequestContentLoggingResponse,
+use crate::protocol::{
+    BridgeMessage, McpResponseChunk, McpResponseEnd, McpResponseStart, ResponseError,
 };
 use futures::Stream;
 use reqwest::StatusCode;
 
-use crate::mcp::targeting::McpRequestMetadata;
 use crate::worker::runtime::ai::upstream_restore::restore_mcp_body_json_blocking;
 
 use super::restore_failure::handle_restore_failure;
-use super::{RequestExecutionContext, send_mcp_response};
+use super::send_mcp_response;
+use crate::worker::runtime::mcp_support::McpResponseContext;
 
 pub(super) async fn handle_streaming_transport_response<S>(
-    request: &super::BufferedMcpRequest,
-    request_ctx: &RequestExecutionContext,
-    metadata: &McpRequestMetadata,
-    request_content_logging: &RequestContentLoggingResponse,
-    redact_content: bool,
-    upstream_redacted_request_json: Option<serde_json::Value>,
-    upstream_restore_session: Option<UpstreamRedactionSession>,
-    state: &crate::worker_admin::AdminState,
-    server: Option<&db::McpServer>,
+    context: &McpResponseContext<'_>,
     status: u16,
     content_type: String,
     headers: Vec<(String, String)>,
     mut stream: S,
-    selected_token_slot: Option<i16>,
-    services: &RuntimeServices,
 ) where
     S: Stream<Item = anyhow::Result<bytes::Bytes>> + Unpin,
 {
+    let request = context.request;
+    let request_ctx = context.request_ctx;
+    let request_content_logging = context.request_content_logging;
+    let upstream_restore_session = context.upstream_restore_session.clone();
+    let services = context.services;
     if let Some(session) = upstream_restore_session.clone() {
         let mut body = Vec::new();
         while let Some(chunk) = futures::StreamExt::next(&mut stream).await {
             match chunk {
                 Ok(chunk) => body.extend_from_slice(&chunk),
                 Err(err) => {
-                    let error_message =
-                        safe_error(&err, redaction_enabled(Some(state)), request_ctx.user_id);
+                    let error_message = safe_error(
+                        &err,
+                        redaction_enabled(services.admin_state()),
+                        request_ctx.user_id,
+                    );
                     record_mcp_request_event(
-                        request_ctx,
-                        request,
-                        metadata,
-                        request_content_logging,
-                        redact_content,
-                        upstream_redacted_request_json,
-                        Some(session),
-                        selected_token_slot,
-                        server,
+                        context,
                         FailurePayload {
                             status: StatusCode::BAD_GATEWAY,
                             error_code: "mcp_stream_error".to_string(),
@@ -63,7 +49,6 @@ pub(super) async fn handle_streaming_transport_response<S>(
                             upstream_error_body: None,
                             response_body: None,
                         },
-                        services,
                     )
                     .await;
                     return;
@@ -74,21 +59,7 @@ pub(super) async fn handle_streaming_transport_response<S>(
             match restore_mcp_body_json_blocking(body.clone(), session.clone()).await {
                 Ok(restored_body) => restored_body,
                 Err(err) => {
-                    return handle_restore_failure(
-                        request,
-                        request_ctx,
-                        metadata,
-                        request_content_logging,
-                        redact_content,
-                        upstream_redacted_request_json,
-                        Some(session),
-                        selected_token_slot,
-                        server,
-                        err,
-                        body,
-                        services,
-                    )
-                    .await;
+                    return handle_restore_failure(context, err, body).await;
                 }
             };
         send_mcp_response(
@@ -112,15 +83,7 @@ pub(super) async fn handle_streaming_transport_response<S>(
             extract_mcp_error(status, &restored_body)
         };
         record_mcp_request_event(
-            request_ctx,
-            request,
-            metadata,
-            request_content_logging,
-            redact_content,
-            upstream_redacted_request_json,
-            Some(session),
-            selected_token_slot,
-            server,
+            context,
             FailurePayload {
                 status: StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
                 error_code,
@@ -128,7 +91,6 @@ pub(super) async fn handle_streaming_transport_response<S>(
                 upstream_error_body,
                 response_body,
             },
-            services,
         )
         .await;
         return;
@@ -183,8 +145,11 @@ pub(super) async fn handle_streaming_transport_response<S>(
                 }
             }
             Err(err) => {
-                let error_message =
-                    safe_error(&err, redaction_enabled(Some(state)), request_ctx.user_id);
+                let error_message = safe_error(
+                    &err,
+                    redaction_enabled(services.admin_state()),
+                    request_ctx.user_id,
+                );
                 let _ = services
                     .out_tx
                     .send(BridgeMessage::ResponseError(ResponseError {
@@ -236,57 +201,25 @@ pub(super) async fn handle_streaming_transport_response<S>(
             }
         }
     });
-    record_mcp_request_event(
-        request_ctx,
-        request,
-        metadata,
-        request_content_logging,
-        redact_content,
-        upstream_redacted_request_json,
-        upstream_restore_session,
-        selected_token_slot,
-        server,
-        failure,
-        services,
-    )
-    .await;
+    record_mcp_request_event(context, failure).await;
 }
 
 pub(super) async fn handle_buffered_transport_response(
-    request: &super::BufferedMcpRequest,
-    request_ctx: &RequestExecutionContext,
-    metadata: &McpRequestMetadata,
-    request_content_logging: &RequestContentLoggingResponse,
-    redact_content: bool,
-    upstream_redacted_request_json: Option<serde_json::Value>,
-    upstream_restore_session: Option<UpstreamRedactionSession>,
-    route_server: Option<&db::McpServer>,
+    context: &McpResponseContext<'_>,
     status: u16,
     content_type: String,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
-    selected_token_slot: Option<i16>,
-    services: &RuntimeServices,
 ) {
+    let request = context.request;
+    let request_content_logging = context.request_content_logging;
+    let upstream_restore_session = context.upstream_restore_session.clone();
+    let services = context.services;
     let body = if let Some(session) = upstream_restore_session.clone() {
         match restore_mcp_body_json_blocking(body.clone(), session.clone()).await {
             Ok(restored_body) => restored_body,
             Err(err) => {
-                handle_restore_failure(
-                    request,
-                    request_ctx,
-                    metadata,
-                    request_content_logging,
-                    redact_content,
-                    upstream_redacted_request_json,
-                    Some(session),
-                    selected_token_slot,
-                    route_server,
-                    err,
-                    body,
-                    services,
-                )
-                .await;
+                handle_restore_failure(context, err, body).await;
                 return;
             }
         }
@@ -314,15 +247,7 @@ pub(super) async fn handle_buffered_transport_response(
         body,
     );
     record_mcp_request_event(
-        request_ctx,
-        request,
-        metadata,
-        request_content_logging,
-        redact_content,
-        upstream_redacted_request_json,
-        upstream_restore_session,
-        selected_token_slot,
-        route_server,
+        context,
         FailurePayload {
             status: StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
             error_code,
@@ -330,7 +255,6 @@ pub(super) async fn handle_buffered_transport_response(
             upstream_error_body,
             response_body,
         },
-        services,
     )
     .await;
 }

@@ -117,8 +117,10 @@ impl ModelRouteRequest {
         state: &AdminState,
         existing_rule_id: Option<Uuid>,
     ) -> Result<(), Response> {
-        validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")?;
-        validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")?;
+        validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")
+            .map_err(|response| *response)?;
+        validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")
+            .map_err(|response| *response)?;
         if self
             .session_affinity_lock_after_turns
             .is_some_and(|turns| turns <= 0)

@@ -451,20 +451,19 @@ fn select_api_key(
             key.endpoint_id == endpoint_id && key.enabled && !key.api_key.trim().is_empty()
         })
         .collect::<Vec<_>>();
-    if let Some(override_key_id) = request_prompt_log.conversation_override_endpoint_key_id {
-        if let Some(key) = available_keys
+    if let Some(override_key_id) = request_prompt_log.conversation_override_endpoint_key_id
+        && let Some(key) = available_keys
             .iter()
             .find(|key| key.key_id == override_key_id && key.endpoint_id == endpoint_id)
-        {
-            return EndpointApiKeySelectionResult {
-                selection: db::EndpointApiKeySelection {
-                    key_id: (!key.key_id.is_nil()).then_some(key.key_id),
-                    key_label: (!key.key_id.is_nil()).then(|| key.key_label.clone()),
-                    secret: key.api_key.clone(),
-                },
-                invalid_conversation_override: false,
-            };
-        }
+    {
+        return EndpointApiKeySelectionResult {
+            selection: db::EndpointApiKeySelection {
+                key_id: (!key.key_id.is_nil()).then_some(key.key_id),
+                key_label: (!key.key_id.is_nil()).then(|| key.key_label.clone()),
+                secret: key.api_key.clone(),
+            },
+            invalid_conversation_override: false,
+        };
     }
     available_keys.sort_by(|left, right| {
         left.position

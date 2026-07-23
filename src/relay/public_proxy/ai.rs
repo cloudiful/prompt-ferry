@@ -14,7 +14,8 @@ use crate::{
 use super::super::{
     request_compression::{HttpRequestCompressionContext, HttpRequestTransferStats},
     response_forward::{
-        bridge_error_response, choose_worker, remove_pending, request_deadline_unix_ms,
+        bridge_error_response, choose_worker, release_response_bytes, remove_pending,
+        remove_realtime_pending, request_deadline_unix_ms,
     },
     router::drain_body_then,
     state::{
@@ -212,8 +213,8 @@ pub(super) async fn proxy_realtime(
             Ok(auth) => auth,
             Err(response) => return response,
         };
-    let worker = match choose_worker(&state).await {
-        Some(worker) => worker,
+    let selection = match choose_worker(&state).await {
+        Some(selection) => selection,
         None => {
             return crate::auth::error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -231,12 +232,15 @@ pub(super) async fn proxy_realtime(
         .map(str::to_string);
 
     let (event_tx, event_rx) = mpsc::channel(REALTIME_EVENT_BUFFER);
-    state
-        .inner
-        .pending_realtime_sessions
-        .lock()
-        .await
-        .insert(request_id.clone(), PendingRealtimeSession { event_tx });
+    state.inner.pending_realtime_sessions.lock().await.insert(
+        request_id.clone(),
+        PendingRealtimeSession {
+            event_tx,
+            worker_id: selection.worker_id,
+            worker: selection.sender.clone(),
+            queued_bytes: 0,
+        },
+    );
     let start = RealtimeSessionStart {
         request_id: request_id.clone(),
         model,
@@ -247,6 +251,7 @@ pub(super) async fn proxy_realtime(
         request_user_agent,
     };
     let state_clone = state.clone();
+    let worker = selection.sender;
     ws.on_upgrade(move |socket| async move {
         handle_realtime_socket(state_clone, worker, request_id, start, socket, event_rx).await;
     })
@@ -270,8 +275,8 @@ async fn proxy_request(
     };
 
     let request_id = Uuid::new_v4().to_string();
-    let worker = match choose_worker(&state).await {
-        Some(worker) => worker,
+    let selection = match choose_worker(&state).await {
+        Some(selection) => selection,
         None => {
             return drain_body_then(
                 body,
@@ -293,9 +298,13 @@ async fn proxy_request(
         PendingRequest {
             start_tx: Some(start_tx),
             chunk_tx,
+            worker_id: selection.worker_id,
+            worker: selection.sender.clone(),
+            queued_bytes: 0,
             awaiting_approval: false,
         },
     );
+    let worker = selection.sender;
 
     let route_user_id = route.as_ref().map(|route| route.user_id);
     let route_id = route.as_ref().map(|route| route.route_id.clone());
@@ -377,7 +386,9 @@ async fn proxy_request(
         );
         while let Some(item) = chunk_rx.recv().await {
             match item {
-                Ok(data) => {
+                Ok(chunk) => {
+                    let data = chunk.data;
+                    release_response_bytes(&stream_state, &stream_request_id, data.len()).await;
                     diag.record_chunk(data.len());
                     yield Ok::<Bytes, std::io::Error>(Bytes::from(data));
                 }
@@ -785,7 +796,7 @@ async fn handle_realtime_socket(
     start: RealtimeSessionStart,
     socket: axum::extract::ws::WebSocket,
     mut event_rx: mpsc::Receiver<
-        Result<crate::protocol::RealtimeServerEventMessage, crate::protocol::ResponseError>,
+        Result<crate::relay::state::QueuedRealtimeEvent, crate::protocol::ResponseError>,
     >,
 ) {
     if worker
@@ -793,12 +804,7 @@ async fn handle_realtime_socket(
         .await
         .is_err()
     {
-        state
-            .inner
-            .pending_realtime_sessions
-            .lock()
-            .await
-            .remove(&request_id);
+        remove_realtime_pending(&state, &request_id).await;
         return;
     }
     let (mut ws_tx, mut ws_rx) = socket.split();
@@ -837,7 +843,13 @@ async fn handle_realtime_socket(
             outbound = event_rx.recv() => {
                 match outbound {
                     Some(Ok(event)) => {
-                        if ws_tx.send(Message::Text(event.event_json.into())).await.is_err() {
+                        let event_json = event.event.event_json;
+                        crate::relay::response_forward::release_realtime_event_bytes(
+                            &state,
+                            &request_id,
+                            event_json.len(),
+                        ).await;
+                        if ws_tx.send(Message::Text(event_json.into())).await.is_err() {
                             break;
                         }
                     }
@@ -850,17 +862,5 @@ async fn handle_realtime_socket(
             }
         }
     }
-    state
-        .inner
-        .pending_realtime_sessions
-        .lock()
-        .await
-        .remove(&request_id);
-    let _ = worker
-        .send(BridgeMessage::RealtimeSessionClose(RealtimeSessionClose {
-            request_id,
-            code: None,
-            reason: Some("client websocket closed".to_string()),
-        }))
-        .await;
+    remove_realtime_pending(&state, &request_id).await;
 }

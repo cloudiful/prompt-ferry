@@ -79,8 +79,10 @@ pub(super) async fn resolve_endpoint_input(
     existing_api_key: Option<String>,
     existing_endpoint_api_keys: Option<Vec<db::EndpointApiKey>>,
 ) -> Result<EndpointCreate, Response> {
-    validate_request_budget_limit(body.daily_max_requests, "daily_max_requests")?;
-    validate_request_budget_limit(body.monthly_max_requests, "monthly_max_requests")?;
+    validate_request_budget_limit(body.daily_max_requests, "daily_max_requests")
+        .map_err(|response| *response)?;
+    validate_request_budget_limit(body.monthly_max_requests, "monthly_max_requests")
+        .map_err(|response| *response)?;
     let api_key = if body.api_key.trim().is_empty() {
         existing_api_key.unwrap_or_default()
     } else {
@@ -249,21 +251,25 @@ pub(super) fn parse_native_api(value: &str) -> NativeApi {
 pub(super) fn validate_request_budget_limit(
     value: Option<i32>,
     field_name: &str,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     if value.is_some_and(|limit| limit <= 0) {
-        return Err(error(
+        return Err(Box::new(error(
             StatusCode::BAD_REQUEST,
             "invalid_budget_limit",
             &format!("{field_name} must be greater than 0"),
-        ));
+        )));
     }
     Ok(())
 }
 
-pub(super) fn validate_relay_ip_policy(policy: RelayIpPolicy) -> Result<RelayIpPolicy, Response> {
+pub(super) fn validate_relay_ip_policy(
+    policy: RelayIpPolicy,
+) -> Result<RelayIpPolicy, Box<Response>> {
     let policy = ip_acl::normalize_policy(&policy);
     if let Err(err) = ip_acl::compile_policy(&policy) {
-        return Err(bad_request(&format!("invalid relay IP whitelist: {err}")));
+        return Err(Box::new(bad_request(&format!(
+            "invalid relay IP whitelist: {err}"
+        ))));
     }
     Ok(policy)
 }

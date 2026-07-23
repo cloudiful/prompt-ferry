@@ -161,6 +161,7 @@ pub struct UsageLog {
     pub upstream_restore_session: Option<UpstreamRedactionSession>,
     pub response_prompt: Option<String>,
     pub response_raw_body: Option<String>,
+    pub response_capture_truncated: bool,
     pub upstream_error_body: Option<String>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
@@ -269,6 +270,7 @@ impl UsageLog {
             upstream_restore_session: metadata.upstream_restore_session,
             response_prompt: None,
             response_raw_body: None,
+            response_capture_truncated: false,
             upstream_error_body: None,
             error_code: None,
             error_message: None,
@@ -360,6 +362,11 @@ impl UsageLog {
         self.provider_conversation_key = provider_conversation_key;
         self.response_prompt = response_prompt;
         self.response_raw_body = response_raw_body;
+        self
+    }
+
+    pub fn with_response_capture_truncated(mut self, truncated: bool) -> Self {
+        self.response_capture_truncated = truncated;
         self
     }
 

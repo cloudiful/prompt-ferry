@@ -1,9 +1,4 @@
-use super::super::super::{
-    RequestExecutionContext,
-    context::{RouteExecutionContext, RuntimeServices},
-    error_handling::maybe_redact_text,
-    request_assembly::BufferedBridgeRequest,
-};
+use super::super::super::{context::RuntimeServices, error_handling::maybe_redact_text};
 use super::super::{
     artifact::{persist_assistant_artifact, resolve_assistant_artifact},
     errors::respond_with_client_error,
@@ -15,13 +10,14 @@ use crate::{
     db,
     openai_compat::{CompatError, chat_response_to_responses},
     protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseStart},
-    redact_upstream::UpstreamRedactionSession,
     usage::UsageCapture,
     worker_usage::record_usage_event,
 };
-use anyhow::Context;
+use anyhow::{Context, anyhow};
+use futures::StreamExt;
 
 use super::super::upstream_restore::restore_ai_response_json_blocking;
+use super::ResponseForwardContext;
 
 pub(super) async fn send_json_response(
     services: &RuntimeServices,
@@ -56,19 +52,24 @@ pub(super) async fn send_json_response(
 
 pub(super) async fn forward_non_stream_chat_response(
     response: reqwest::Response,
-    route_ctx: &RouteExecutionContext,
-    request: &BufferedBridgeRequest,
-    request_ctx: &RequestExecutionContext,
-    upstream_redacted_request_json: Option<serde_json::Value>,
-    upstream_restore_session: Option<UpstreamRedactionSession>,
-    redact_content: bool,
-    content_logging_enabled: bool,
-    raw_content_logging_enabled: bool,
-    services: &RuntimeServices,
+    context: ResponseForwardContext<'_>,
     mut assistant_capture: Option<&mut AssistantArtifactCapture>,
 ) -> anyhow::Result<()> {
+    let route_ctx = context.route_ctx;
+    let request = context.request;
+    let request_ctx = context.request_ctx;
+    let upstream_redacted_request_json = context.upstream_redacted_request_json.clone();
+    let upstream_restore_session = context.upstream_restore_session.clone();
+    let redact_content = context.logging.redact_content;
+    let content_logging_enabled = context.logging.content_logging_enabled;
+    let raw_content_logging_enabled = context.logging.raw_content_logging_enabled;
+    let services = context.services;
     let status = response.status();
-    let body = response.bytes().await.unwrap_or_default();
+    let body = read_response_limited(
+        response,
+        services.response_limits.max_upstream_response_bytes,
+    )
+    .await?;
     if let Some(capture) = assistant_capture.as_mut() {
         capture.observe_chunk(&body);
         capture.finish();
@@ -108,14 +109,20 @@ pub(super) async fn forward_non_stream_chat_response(
         transformed
     };
     let mut capture = UsageCapture::new(false, request_ctx.request_model.clone());
+    capture
+        .set_response_text_capture_limit(services.response_limits.max_response_text_capture_bytes);
     let _ = capture.observe_chunk(&restored_body);
     capture.finish();
     let captured_artifact = assistant_capture
         .as_ref()
         .and_then(|capture| capture.artifact());
+    let raw_body_truncated = body.len() > services.response_limits.max_raw_response_capture_bytes;
+    let raw_body = &body[..body
+        .len()
+        .min(services.response_limits.max_raw_response_capture_bytes)];
     let (response_prompt, response_raw_body) = super::response_logging_payload(
         &capture.response_text,
-        &body,
+        raw_body,
         content_logging_enabled,
         raw_content_logging_enabled,
         redact_content,
@@ -169,7 +176,8 @@ pub(super) async fn forward_non_stream_chat_response(
                 }),
                 response_prompt.clone(),
                 response_raw_body,
-            ),
+            )
+            .with_response_capture_truncated(capture.response_text_truncated || raw_body_truncated),
     )
     .await;
     persist_assistant_artifact(
@@ -187,19 +195,24 @@ pub(super) async fn forward_non_stream_chat_response(
 
 pub(super) async fn forward_non_stream_responses_response(
     response: reqwest::Response,
-    route_ctx: &RouteExecutionContext,
-    request: &BufferedBridgeRequest,
-    request_ctx: &RequestExecutionContext,
-    upstream_redacted_request_json: Option<serde_json::Value>,
-    upstream_restore_session: Option<UpstreamRedactionSession>,
-    redact_content: bool,
-    content_logging_enabled: bool,
-    raw_content_logging_enabled: bool,
-    services: &RuntimeServices,
+    context: ResponseForwardContext<'_>,
     responses_capture: &mut ResponsesArtifactCapture,
 ) -> anyhow::Result<()> {
+    let route_ctx = context.route_ctx;
+    let request = context.request;
+    let request_ctx = context.request_ctx;
+    let upstream_redacted_request_json = context.upstream_redacted_request_json.clone();
+    let upstream_restore_session = context.upstream_restore_session.clone();
+    let redact_content = context.logging.redact_content;
+    let content_logging_enabled = context.logging.content_logging_enabled;
+    let raw_content_logging_enabled = context.logging.raw_content_logging_enabled;
+    let services = context.services;
     let status = response.status();
-    let body = response.bytes().await.unwrap_or_default();
+    let body = read_response_limited(
+        response,
+        services.response_limits.max_upstream_response_bytes,
+    )
+    .await?;
     responses_capture.observe_chunk(&body);
     responses_capture.finish();
     let restored_body = if let Some(session) = upstream_restore_session.clone() {
@@ -208,12 +221,18 @@ pub(super) async fn forward_non_stream_responses_response(
         body.to_vec()
     };
     let mut usage_capture = UsageCapture::new(false, request_ctx.request_model.clone());
+    usage_capture
+        .set_response_text_capture_limit(services.response_limits.max_response_text_capture_bytes);
     let _ = usage_capture.observe_chunk(&restored_body);
     usage_capture.finish();
     let captured_artifact = responses_capture.artifact();
+    let raw_body_truncated = body.len() > services.response_limits.max_raw_response_capture_bytes;
+    let raw_body = &body[..body
+        .len()
+        .min(services.response_limits.max_raw_response_capture_bytes)];
     let (response_prompt, response_raw_body) = super::response_logging_payload(
         &usage_capture.response_text,
-        &body,
+        raw_body,
         content_logging_enabled,
         raw_content_logging_enabled,
         redact_content,
@@ -271,6 +290,9 @@ pub(super) async fn forward_non_stream_responses_response(
                 }),
                 response_prompt.clone(),
                 response_raw_body,
+            )
+            .with_response_capture_truncated(
+                usage_capture.response_text_truncated || raw_body_truncated,
             ),
     )
     .await;
@@ -289,19 +311,24 @@ pub(super) async fn forward_non_stream_responses_response(
 
 pub(super) async fn forward_non_stream_anthropic_response(
     response: reqwest::Response,
-    route_ctx: &RouteExecutionContext,
-    request: &BufferedBridgeRequest,
-    request_ctx: &RequestExecutionContext,
-    upstream_redacted_request_json: Option<serde_json::Value>,
-    upstream_restore_session: Option<UpstreamRedactionSession>,
-    redact_content: bool,
-    content_logging_enabled: bool,
-    raw_content_logging_enabled: bool,
-    services: &RuntimeServices,
+    context: ResponseForwardContext<'_>,
     responses_capture: &mut ResponsesArtifactCapture,
 ) -> anyhow::Result<()> {
+    let route_ctx = context.route_ctx;
+    let request = context.request;
+    let request_ctx = context.request_ctx;
+    let upstream_redacted_request_json = context.upstream_redacted_request_json.clone();
+    let upstream_restore_session = context.upstream_restore_session.clone();
+    let redact_content = context.logging.redact_content;
+    let content_logging_enabled = context.logging.content_logging_enabled;
+    let raw_content_logging_enabled = context.logging.raw_content_logging_enabled;
+    let services = context.services;
     let status = response.status();
-    let body = response.bytes().await.unwrap_or_default();
+    let body = read_response_limited(
+        response,
+        services.response_limits.max_upstream_response_bytes,
+    )
+    .await?;
     let transformed = anthropic_response_to_responses(&body)
         .map_err(|err| anyhow::anyhow!("failed translating anthropic response: {}", err.message))?;
     let restored_body = if let Some(session) = upstream_restore_session.clone() {
@@ -312,12 +339,18 @@ pub(super) async fn forward_non_stream_anthropic_response(
     responses_capture.observe_chunk(&restored_body);
     responses_capture.finish();
     let mut usage_capture = UsageCapture::new(false, request_ctx.request_model.clone());
+    usage_capture
+        .set_response_text_capture_limit(services.response_limits.max_response_text_capture_bytes);
     let _ = usage_capture.observe_chunk(&restored_body);
     usage_capture.finish();
     let captured_artifact = responses_capture.artifact();
+    let raw_body_truncated = body.len() > services.response_limits.max_raw_response_capture_bytes;
+    let raw_body = &body[..body
+        .len()
+        .min(services.response_limits.max_raw_response_capture_bytes)];
     let (response_prompt, response_raw_body) = super::response_logging_payload(
         &usage_capture.response_text,
-        &body,
+        raw_body,
         content_logging_enabled,
         raw_content_logging_enabled,
         redact_content,
@@ -375,6 +408,9 @@ pub(super) async fn forward_non_stream_anthropic_response(
                 }),
                 response_prompt.clone(),
                 response_raw_body,
+            )
+            .with_response_capture_truncated(
+                usage_capture.response_text_truncated || raw_body_truncated,
             ),
     )
     .await;
@@ -389,4 +425,24 @@ pub(super) async fn forward_non_stream_anthropic_response(
     )
     .await;
     Ok(())
+}
+
+async fn read_response_limited(
+    response: reqwest::Response,
+    max_bytes: usize,
+) -> anyhow::Result<Vec<u8>> {
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("failed reading upstream response")?;
+        if body
+            .len()
+            .checked_add(chunk.len())
+            .is_none_or(|bytes| bytes > max_bytes)
+        {
+            return Err(anyhow!("upstream_response_too_large"));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }

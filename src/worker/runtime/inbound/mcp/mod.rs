@@ -2,6 +2,7 @@ mod redaction;
 mod restore_failure;
 mod streaming;
 
+use super::super::mcp_support::McpResponseContext;
 use super::super::{
     RequestExecutionContext, check_named_request_budget,
     context::{FailurePayload, RuntimeServices},
@@ -106,15 +107,18 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
             body.clone().into_bytes(),
         );
         record_mcp_request_event(
-            &request_ctx,
-            &request,
-            &metadata,
-            &request_content_logging,
-            redact_content,
-            None,
-            None,
-            None,
-            Some(server),
+            &McpResponseContext {
+                request: &request,
+                request_ctx: &request_ctx,
+                metadata: &metadata,
+                request_content_logging: &request_content_logging,
+                redact_content,
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+                selected_token_slot: None,
+                server: Some(server),
+                services,
+            },
             FailurePayload {
                 status: StatusCode::TOO_MANY_REQUESTS,
                 error_code: "budget_exceeded".to_string(),
@@ -122,7 +126,6 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
                 upstream_error_body: Some(body),
                 response_body: None,
             },
-            services,
         )
         .await;
         return;
@@ -158,15 +161,18 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
                         body.clone().into_bytes(),
                     );
                     record_mcp_request_event(
-                        &request_ctx,
-                        &request,
-                        &metadata,
-                        &request_content_logging,
-                        redact_content,
-                        None,
-                        None,
-                        None,
-                        server.as_ref(),
+                        &McpResponseContext {
+                            request: &request,
+                            request_ctx: &request_ctx,
+                            metadata: &metadata,
+                            request_content_logging: &request_content_logging,
+                            redact_content,
+                            upstream_redacted_request_json: None,
+                            upstream_restore_session: None,
+                            selected_token_slot: None,
+                            server: server.as_ref(),
+                            services,
+                        },
                         FailurePayload {
                             status: StatusCode::BAD_REQUEST,
                             error_code: "invalid_request".to_string(),
@@ -174,7 +180,6 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
                             upstream_error_body: Some(body),
                             response_body: None,
                         },
-                        services,
                     )
                     .await;
                     return;
@@ -186,15 +191,29 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
     let result = mcp::handle_stream_with_session_store(
         &state.pool,
         &state.mcp_catalog_cache,
-        request.user_id,
-        request.server_name.as_deref(),
-        &request.method,
-        &request.path,
-        &request.headers,
-        &effective_body,
+        mcp::McpRequestContext {
+            user_id: request.user_id,
+            server_name: request.server_name.as_deref(),
+            method: &request.method,
+            path: &request.path,
+            headers: &request.headers,
+            body: &effective_body,
+        },
         state.mcp_session_store.clone(),
     )
     .await;
+    let mut response_context = McpResponseContext {
+        request: &request,
+        request_ctx: &request_ctx,
+        metadata: &metadata,
+        request_content_logging: &request_content_logging,
+        redact_content,
+        upstream_redacted_request_json: upstream_redacted_request_json.clone(),
+        upstream_restore_session: upstream_restore_session.clone(),
+        selected_token_slot: None,
+        server: server.as_ref(),
+        services,
+    };
     match result {
         Ok(mcp::McpTransportResponse::Buffered {
             status,
@@ -203,21 +222,13 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
             body,
             selected_token_slot,
         }) => {
+            response_context.selected_token_slot = selected_token_slot;
             handle_buffered_transport_response(
-                &request,
-                &request_ctx,
-                &metadata,
-                &request_content_logging,
-                redact_content,
-                upstream_redacted_request_json.clone(),
-                upstream_restore_session.clone(),
-                server.as_ref(),
+                &response_context,
                 status,
                 content_type,
                 headers,
                 body,
-                selected_token_slot,
-                services,
             )
             .await;
         }
@@ -228,22 +239,13 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
             stream,
             selected_token_slot,
         }) => {
+            response_context.selected_token_slot = selected_token_slot;
             handle_streaming_transport_response(
-                &request,
-                &request_ctx,
-                &metadata,
-                &request_content_logging,
-                redact_content,
-                upstream_redacted_request_json.clone(),
-                upstream_restore_session.clone(),
-                state,
-                server.as_ref(),
+                &response_context,
                 status,
                 content_type,
                 headers,
                 stream,
-                selected_token_slot,
-                services,
             )
             .await;
         }
@@ -251,7 +253,7 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
             let body = serde_json::json!({
                 "error": {
                     "code": "mcp_error",
-                    "message": safe_error(&err, redaction_enabled(Some(state)), request_ctx.user_id),
+                    "message": safe_error(&err, redaction_enabled(services.admin_state()), request_ctx.user_id),
                 }
             })
             .to_string();
@@ -264,27 +266,18 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
                 body.clone().into_bytes(),
             );
             record_mcp_request_event(
-                &request_ctx,
-                &request,
-                &metadata,
-                &request_content_logging,
-                redact_content,
-                upstream_redacted_request_json,
-                upstream_restore_session,
-                None,
-                server.as_ref(),
+                &response_context,
                 FailurePayload {
                     status: StatusCode::BAD_GATEWAY,
                     error_code: "mcp_error".to_string(),
                     error_message: safe_error(
                         &err,
-                        redaction_enabled(Some(state)),
+                        redaction_enabled(services.admin_state()),
                         request_ctx.user_id,
                     ),
                     upstream_error_body: Some(body),
                     response_body: None,
                 },
-                services,
             )
             .await;
         }

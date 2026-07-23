@@ -1,5 +1,5 @@
 use crate::{
-    auth::{check_bearer, error_response},
+    auth::check_bearer,
     bridge_wire, ip_acl,
     protocol::{ApprovalPending, BridgeMessage, ConfigSnapshot, ResponseError},
 };
@@ -8,12 +8,12 @@ mod connection;
 
 use super::{
     response_forward::{
-        fail_all_pending, handle_mcp_response_chunk, handle_mcp_response_end,
+        fail_pending_for_worker, handle_mcp_response_chunk, handle_mcp_response_end,
         handle_mcp_response_error, handle_mcp_response_start, handle_realtime_server_event,
         handle_realtime_session_close, handle_realtime_session_error, handle_response_chunk,
         handle_response_end, handle_response_error, handle_response_start,
     },
-    state::{AppState, WorkerSender},
+    state::{AppState, MAX_WORKER_CONNECTIONS, WorkerSender},
 };
 use axum::{
     Router,
@@ -49,17 +49,8 @@ async fn worker_ws(
     ws: WebSocketUpgrade,
 ) -> Response {
     if let Err(response) = check_bearer(&headers, &state.config.worker_token) {
-        return response;
+        return *response;
     }
-    if !state.inner.workers.lock().await.is_empty() {
-        warn!("worker connection rejected: worker already connected");
-        return error_response(
-            StatusCode::CONFLICT,
-            "worker_already_connected",
-            "a worker is already connected",
-        );
-    }
-
     ws.max_message_size(bridge_wire::BRIDGE_WS_MAX_MESSAGE_BYTES)
         .max_frame_size(bridge_wire::BRIDGE_WS_MAX_FRAME_BYTES)
         .on_upgrade(move |socket| handle_worker_socket(state, socket))
@@ -117,8 +108,10 @@ async fn handle_worker_socket(state: AppState, socket: WebSocket) {
 
     write_task.abort();
     state.inner.workers.lock().await.remove(&worker_id);
-    fail_all_pending(
+    state.inner.worker_loads.lock().await.remove(&worker_id);
+    fail_pending_for_worker(
         &state,
+        worker_id,
         ResponseError {
             request_id: String::new(),
             status: StatusCode::BAD_GATEWAY.as_u16(),
@@ -153,14 +146,16 @@ pub(super) async fn handle_config_snapshot(state: &AppState, snapshot: ConfigSna
 
 async fn register_worker(state: &AppState, worker_id: usize, tx: WorkerSender) -> bool {
     let mut workers = state.inner.workers.lock().await;
-    if !workers.is_empty() {
+    if workers.len() >= MAX_WORKER_CONNECTIONS {
         warn!(
             worker_id,
-            "worker connection rejected: worker already connected"
+            max_workers = MAX_WORKER_CONNECTIONS,
+            "worker connection rejected: worker connection limit reached"
         );
         return false;
     }
     workers.insert(worker_id, tx);
+    state.inner.worker_loads.lock().await.insert(worker_id, 0);
     true
 }
 
@@ -191,10 +186,12 @@ async fn handle_worker_bridge_message(state: &AppState, message: BridgeMessage) 
         }
         BridgeMessage::RequestStart(_)
         | BridgeMessage::RequestChunk(_)
-        | BridgeMessage::RequestEnd(_) => warn!("worker sent unexpected request"),
+        | BridgeMessage::RequestEnd(_)
+        | BridgeMessage::RequestCancel(_) => warn!("worker sent unexpected request"),
         BridgeMessage::McpRequestStart(_)
         | BridgeMessage::McpRequestChunk(_)
-        | BridgeMessage::McpRequestEnd(_) => warn!("worker sent unexpected mcp request"),
+        | BridgeMessage::McpRequestEnd(_)
+        | BridgeMessage::McpRequestCancel(_) => warn!("worker sent unexpected mcp request"),
     }
 }
 
@@ -207,26 +204,31 @@ async fn mark_approval_pending(state: &AppState, pending: ApprovalPending) {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{response_forward::fail_all_pending, state::test_state};
+    use super::super::{response_forward::fail_pending_for_worker, state::test_state};
     use super::*;
     use tokio::sync::oneshot;
 
     #[tokio::test]
-    async fn fail_all_pending_uses_approval_interrupted_for_flagged_waiters() {
+    async fn fail_pending_for_worker_uses_approval_interrupted_for_flagged_waiters() {
         let state = test_state();
         let (start_tx, start_rx) = oneshot::channel();
         let (chunk_tx, _chunk_rx) = mpsc::channel(1);
+        let (worker, _worker_rx) = mpsc::channel(1);
         state.inner.pending.lock().await.insert(
             "req-1".to_string(),
             super::super::state::PendingRequest {
                 start_tx: Some(start_tx),
                 chunk_tx,
+                worker_id: 1,
+                worker,
+                queued_bytes: 0,
                 awaiting_approval: true,
             },
         );
 
-        fail_all_pending(
+        fail_pending_for_worker(
             &state,
+            1,
             ResponseError {
                 request_id: String::new(),
                 status: StatusCode::BAD_GATEWAY.as_u16(),
@@ -252,13 +254,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn register_worker_rejects_second_worker() {
+    async fn register_worker_accepts_workers_until_capacity() {
         let state = test_state();
-        let (first_tx, _first_rx) = mpsc::channel(1);
-        let (second_tx, _second_rx) = mpsc::channel(1);
-
-        assert!(register_worker(&state, 1, first_tx).await);
-        assert!(!register_worker(&state, 2, second_tx).await);
-        assert_eq!(state.inner.workers.lock().await.len(), 1);
+        for worker_id in 1..=MAX_WORKER_CONNECTIONS {
+            let (tx, _rx) = mpsc::channel(1);
+            assert!(register_worker(&state, worker_id, tx).await);
+        }
+        let (tx, _rx) = mpsc::channel(1);
+        assert!(!register_worker(&state, MAX_WORKER_CONNECTIONS + 1, tx).await);
+        assert_eq!(
+            state.inner.workers.lock().await.len(),
+            MAX_WORKER_CONNECTIONS
+        );
     }
 }
