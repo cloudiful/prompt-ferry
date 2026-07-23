@@ -52,7 +52,7 @@ jobs:
       CARGO_TERM_COLOR: always
       SQLX_OFFLINE: "true"
       TARGET: ${{ matrix.target }}
-      RELEASE_ARCHIVE: prompt-ferry-${{ needs.prepare.outputs.tag }}-${{ matrix.target }}.${{ matrix.archive_ext }}
+      RELEASE_ARCHIVE: prompt-ferry-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive_ext }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -61,6 +61,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
 
       - name: Set up MSVC environment
         if: matrix.msvc_arch != ''
@@ -95,31 +100,32 @@ jobs:
 
   build-image-inputs:
     name: Build Docker input ${{ matrix.arch }}
+    needs:
+      - build-binaries
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
             runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
           - arch: arm64
             runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     env:
-      CARGO_TERM_COLOR: always
-      SQLX_OFFLINE: "true"
+      BINARY_ARCHIVE: prompt-ferry-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@v2
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
         with:
-          key: docker-${{ matrix.arch }}
+          name: binary-${{ matrix.target }}
+          path: binary-artifact
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -139,15 +145,13 @@ jobs:
         working-directory: frontend
         run: bun install --no-save
 
-      - name: Build backend binary
-        run: cargo build --release --bin prompt-ferry
-
       - name: Prepare image input directory
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p ci-image-input/frontend-dist
-          install -Dm755 target/release/prompt-ferry ci-image-input/prompt-ferry
+          tar -xzf "binary-artifact/${BINARY_ARCHIVE}" -C binary-artifact
+          install -Dm755 binary-artifact/prompt-ferry ci-image-input/prompt-ferry
 
       - name: Export OpenAPI
         run: ci-image-input/prompt-ferry openapi export
@@ -211,7 +215,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ needs.prepare.outputs.tag }}-${{ matrix.arch }}
+            type=raw,value=${{ github.ref_name }}-${{ matrix.arch }}
             type=raw,value=latest-${{ matrix.arch }}
 
       - name: Build and push ${{ matrix.arch }} image
@@ -249,7 +253,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version_tag="${IMAGE_NAME}:${{ needs.prepare.outputs.tag }}"
+          version_tag="${IMAGE_NAME}:${{ github.ref_name }}"
           latest_tag="${IMAGE_NAME}:latest"
           docker buildx imagetools create \
             --tag "$version_tag" \
@@ -283,8 +287,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.prepare.outputs.tag }}
-          name: prompt-ferry ${{ needs.prepare.outputs.tag }}
+          tag_name: ${{ github.ref_name }}
+          name: prompt-ferry ${{ github.ref_name }}
           generate_release_notes: true
           files: |
             prompt-ferry-*
