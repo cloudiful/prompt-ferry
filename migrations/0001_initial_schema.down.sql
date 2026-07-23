@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS mcp_servers;
+DROP TABLE IF EXISTS model_route_targets;
+DROP TABLE IF EXISTS model_endpoint_rules;
+DROP TABLE IF EXISTS usage_assistant_artifacts;
+DROP TABLE IF EXISTS usage_events;
+DROP TABLE IF EXISTS usage_prompt_blocks;
+DROP TABLE IF EXISTS approval_requests;
+DROP TABLE IF EXISTS worker_settings;
+DROP TABLE IF EXISTS user_endpoint_settings;
+DROP TABLE IF EXISTS provider_endpoints;
+DROP TABLE IF EXISTS client_keys;
+DROP TABLE IF EXISTS users;

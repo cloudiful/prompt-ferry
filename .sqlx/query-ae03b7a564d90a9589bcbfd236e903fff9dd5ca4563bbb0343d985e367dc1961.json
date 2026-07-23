@@ -1,0 +1,160 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    tool_call_event_id,\n    parent_event_id,\n    conversation_id,\n    call_id,\n    tool_name,\n    arguments_json,\n    arguments_preview,\n    status,\n    sequence_in_turn,\n    mcp_request_event_id,\n    created_at,\n    updated_at\nFROM request_record_tool_calls\nWHERE parent_event_id = $1\nORDER BY sequence_in_turn ASC NULLS LAST, tool_call_event_id ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tool_call_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "tool_call_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "parent_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "parent_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "conversation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "call_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "call_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "tool_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "tool_name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "arguments_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "arguments_json"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "arguments_preview",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "arguments_preview"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "sequence_in_turn",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "sequence_in_turn"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "mcp_request_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "mcp_request_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "ae03b7a564d90a9589bcbfd236e903fff9dd5ca4563bbb0343d985e367dc1961"
+}

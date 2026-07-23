@@ -1,0 +1,195 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE provider_endpoints\nSET\n    scope = $2,\n    owner_user_id = $3,\n    name = $4,\n    base_url = $5,\n    native_api = $6,\n    native_api_source = $7,\n    daily_max_requests = $8,\n    monthly_max_requests = $9,\n    api_key = $10,\n    key_lb_enabled = $11,\n    enabled = $12,\n    updated_at = NOW()\nWHERE endpoint_id = $1\nRETURNING endpoint_id, scope, owner_user_id, name, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, created_at, updated_at\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "owner_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "base_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "base_url"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "native_api",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "native_api"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "native_api_source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "native_api_source"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "daily_max_requests",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "daily_max_requests"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "monthly_max_requests",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "monthly_max_requests"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "api_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "api_key"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "key_lb_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "key_lb_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4",
+        "Text",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8a6788b17418e11bb077b0f67bdcb57b53f3689c4729c892a633e98f21670e94"
+}

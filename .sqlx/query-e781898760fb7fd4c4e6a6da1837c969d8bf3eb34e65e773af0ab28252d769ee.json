@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO worker_settings(setting_key, setting_value)\nVALUES ('redaction_enabled', to_jsonb($1::BOOLEAN))\nON CONFLICT (setting_key) DO UPDATE\nSET setting_value = EXCLUDED.setting_value, updated_at = NOW()\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e781898760fb7fd4c4e6a6da1837c969d8bf3eb34e65e773af0ab28252d769ee"
+}

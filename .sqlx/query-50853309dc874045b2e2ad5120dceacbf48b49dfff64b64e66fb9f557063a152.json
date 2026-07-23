@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO conversation_redaction_sessions(\n    conversation_id,\n    session_ciphertext,\n    session_nonce,\n    session_key_version,\n    last_event_id\n)\nVALUES ($1, $2, $3, $4, $5)\nON CONFLICT (conversation_id)\nDO UPDATE SET\n    session_ciphertext = EXCLUDED.session_ciphertext,\n    session_nonce = EXCLUDED.session_nonce,\n    session_key_version = EXCLUDED.session_key_version,\n    last_event_id = COALESCE(EXCLUDED.last_event_id, conversation_redaction_sessions.last_event_id),\n    updated_at = NOW()\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Bytea",
+        "Int2",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "50853309dc874045b2e2ad5120dceacbf48b49dfff64b64e66fb9f557063a152"
+}

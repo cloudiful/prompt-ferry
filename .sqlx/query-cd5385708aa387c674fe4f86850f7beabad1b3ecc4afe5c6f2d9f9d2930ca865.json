@@ -1,0 +1,148 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rule_id, scope, owner_user_id, model_pattern, routing_strategy, session_affinity_lock_after_turns, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\nFROM model_endpoint_rules\nWHERE rule_id = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rule_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "rule_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "owner_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "model_pattern",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "model_pattern"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "routing_strategy",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "routing_strategy"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "session_affinity_lock_after_turns",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "session_affinity_lock_after_turns"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "daily_max_requests",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "daily_max_requests"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "monthly_max_requests",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "monthly_max_requests"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cd5385708aa387c674fe4f86850f7beabad1b3ecc4afe5c6f2d9f9d2930ca865"
+}

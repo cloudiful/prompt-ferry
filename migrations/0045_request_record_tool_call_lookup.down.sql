@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_request_record_tool_calls_call_parent;

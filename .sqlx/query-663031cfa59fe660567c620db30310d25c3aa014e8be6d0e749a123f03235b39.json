@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM model_endpoint_rules r\nWHERE NOT EXISTS (\n    SELECT 1\n    FROM model_route_targets t\n    WHERE t.rule_id = r.rule_id\n)\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "663031cfa59fe660567c620db30310d25c3aa014e8be6d0e749a123f03235b39"
+}

@@ -1,0 +1,1216 @@
+use std::{env, str::FromStr, time::Duration};
+
+use axum::{
+    body::{Body, to_bytes},
+    http::{Request, StatusCode, header},
+};
+use prompt_ferry::{
+    config::{NativeApi, NativeApiSource},
+    db,
+    keys::hash_password,
+    llm_review::{ApprovalResolution, LlmReviewSettings},
+    mcp::{McpCatalogCache, McpCatalogService},
+    protocol::BridgeMessage,
+    replay_cache::ReplayCache,
+    worker_admin,
+    worker_admin_state::{AdminState, AdminStateInit},
+    worker_admin_types::{RequestContentLoggingMode, RequestContentLoggingResponse, SessionUser},
+};
+use serde_json::Value;
+use sqlx::{
+    Executor, PgPool,
+    postgres::{PgConnectOptions, PgPoolOptions},
+};
+use tokio::sync::mpsc;
+use tower::ServiceExt;
+use uuid::Uuid;
+
+const TEST_DATABASE_URL_ENV: &str = "PROMPT_FERRY_TEST_DATABASE_URL";
+
+struct TestSchema {
+    pool: PgPool,
+    admin_pool: PgPool,
+    schema: String,
+}
+
+impl TestSchema {
+    async fn new() -> anyhow::Result<Self> {
+        let database_url = env::var(TEST_DATABASE_URL_ENV)?;
+        let schema = format!("pfy_test_{}", Uuid::new_v4().simple());
+
+        let base_options = PgConnectOptions::from_str(&database_url)?;
+        let admin_pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect_with(base_options.clone())
+            .await?;
+        admin_pool
+            .execute(sqlx::AssertSqlSafe(format!(
+                r#"CREATE SCHEMA "{}""#,
+                schema
+            )))
+            .await?;
+
+        let schema_options = base_options.options([("search_path", schema.as_str())]);
+        let pool = PgPoolOptions::new()
+            .max_connections(4)
+            .connect_with(schema_options)
+            .await?;
+        db::migrate(&pool).await?;
+
+        Ok(Self {
+            pool,
+            admin_pool,
+            schema,
+        })
+    }
+
+    async fn cleanup(&self) -> anyhow::Result<()> {
+        self.admin_pool
+            .execute(sqlx::AssertSqlSafe(format!(
+                r#"DROP SCHEMA IF EXISTS "{}" CASCADE"#,
+                self.schema
+            )))
+            .await?;
+        self.pool.close().await;
+        self.admin_pool.close().await;
+        Ok(())
+    }
+}
+
+fn test_database_configured() -> bool {
+    env::var(TEST_DATABASE_URL_ENV).is_ok()
+}
+
+async fn create_user(pool: &PgPool, login_name: &str, is_admin: bool) -> anyhow::Result<db::User> {
+    db::create_user(
+        pool,
+        db::UserCreate {
+            login_name: login_name.to_string(),
+            password_hash: hash_password("password-123")?,
+            display_name: login_name.to_string(),
+            is_admin,
+        },
+    )
+    .await
+}
+
+async fn admin_state(pool: PgPool, admin: &db::User) -> AdminState {
+    let replay_cache = ReplayCache::for_tests();
+    let state = AdminState::new(AdminStateInit {
+        pool: pool.clone(),
+        lease_pool: pool.clone(),
+        replay_cache: replay_cache.clone(),
+        configured_relays: vec!["ws://relay:8788/ws/worker".to_string()],
+        managed_mode: false,
+        relay_secret_manager: None,
+        redaction_enabled: false,
+        model_route_whitelist_enabled: true,
+        request_content_logging: RequestContentLoggingResponse {
+            mode: RequestContentLoggingMode::Off,
+            raw_retention_days: 3,
+        },
+        stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
+        llm_review_settings: LlmReviewSettings::default(),
+        mcp_catalog_cache: McpCatalogCache::new(),
+        mcp_catalog_service: McpCatalogService::new(pool.clone(), McpCatalogCache::new()),
+        mcp_session_store: None,
+        endpoint_model_cache: prompt_ferry::endpoint_models::EndpointModelCache::new(
+            Duration::from_secs(300),
+        ),
+    });
+    replay_cache
+        .write_session(
+            "test-session",
+            &SessionUser {
+                user_id: admin.user_id,
+                login_name: admin.login_name.clone(),
+                display_name: admin.display_name.clone(),
+                is_admin: true,
+            },
+        )
+        .await
+        .unwrap();
+    state
+}
+
+async fn create_pending_approval(
+    pool: &PgPool,
+    user_id: i64,
+) -> anyhow::Result<db::ApprovalRequest> {
+    db::create_flagged_approval_request(
+        pool,
+        Uuid::new_v4(),
+        Some(user_id),
+        Some("ops-key".to_string()),
+        "/v1/chat/completions".to_string(),
+        Some("gpt-test".to_string()),
+        "needs human review".to_string(),
+        vec!["policy".to_string()],
+        "user: hello".to_string(),
+        serde_json::json!({ "model": "gpt-test", "messages": [{ "role": "user", "content": "hello" }] }),
+        400_000,
+        300_000,
+    )
+    .await
+}
+
+async fn insert_request_record(pool: &PgPool, user_id: i64, model: &str) -> anyhow::Result<i64> {
+    db::record_request_record(
+        pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(Some(user_id), None, None)
+            .with_model(Some(model.to_string()))
+            .with_timing(Some(200), Some(true), Some(10), Some(1))
+            .with_usage(Some(1), Some(2), Some(3), Some(0), None, None),
+    )
+    .await
+}
+
+async fn insert_mcp_request_record(
+    pool: &PgPool,
+    user_id: i64,
+    server_name: &str,
+) -> anyhow::Result<i64> {
+    db::record_request_record(
+        pool,
+        db::RequestRecordCreate::mcp_request(Uuid::new_v4(), "/mcp")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(Some(user_id), None, None)
+            .with_mcp_context(
+                None,
+                Some(server_name.to_string()),
+                Some("tools/call".to_string()),
+                Some("demo__lookup".to_string()),
+            )
+            .with_timing(Some(200), Some(true), Some(8), None),
+    )
+    .await
+}
+
+fn auth_request(method: &str, path: String) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(path)
+        .header(header::COOKIE, "prompt_ferry_session=test-session")
+        .body(Body::empty())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn approve_endpoint_wakes_waiter_and_clears_payload() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let approval = create_pending_approval(&schema.pool, admin.user_id).await?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .approval_waiters
+        .lock()
+        .await
+        .insert(approval.approval_id, tx);
+
+    let app = worker_admin::router(state.clone());
+    let response = app
+        .oneshot(auth_request(
+            "POST",
+            format!("/api/v1/admin/approvals/{}/approve", approval.approval_id),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        ApprovalResolution::Approved
+    );
+
+    let stored = db::get_approval_request(&schema.pool, approval.approval_id)
+        .await?
+        .unwrap();
+    assert_eq!(stored.approval_status, "approved");
+    assert!(stored.request_payload_json.is_none());
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn login_succeeds_with_local_session_fallback_when_session_backend_is_disabled()
+-> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-login", true).await?;
+    let state = AdminState::new(AdminStateInit {
+        pool: schema.pool.clone(),
+        lease_pool: schema.pool.clone(),
+        replay_cache: ReplayCache::default(),
+        configured_relays: vec!["ws://relay:8788/ws/worker".to_string()],
+        managed_mode: false,
+        relay_secret_manager: None,
+        redaction_enabled: false,
+        model_route_whitelist_enabled: true,
+        request_content_logging: RequestContentLoggingResponse {
+            mode: RequestContentLoggingMode::Off,
+            raw_retention_days: 3,
+        },
+        stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
+        llm_review_settings: LlmReviewSettings::default(),
+        mcp_catalog_cache: McpCatalogCache::new(),
+        mcp_catalog_service: McpCatalogService::new(schema.pool.clone(), McpCatalogCache::new()),
+        mcp_session_store: None,
+        endpoint_model_cache: prompt_ferry::endpoint_models::EndpointModelCache::new(
+            Duration::from_secs(300),
+        ),
+    });
+    let app = worker_admin::router(state);
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "login_name": admin.login_name,
+                "password": "password-123"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("set-cookie header");
+    assert!(set_cookie.to_str()?.contains("prompt_ferry_session="));
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn auth_me_reads_session_from_valkey_backend() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-me", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let app = worker_admin::router(state);
+    let response = app
+        .oneshot(auth_request("GET", "/api/v1/auth/me".to_string()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn endpoint_key_override_and_request_snapshot_are_preserved() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping endpoint key integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-endpoint-key", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "endpoint-key-test".to_string(),
+            base_url: "http://endpoint-key.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "legacy-key".to_string(),
+            api_keys: vec![
+                db::EndpointApiKeyCreate {
+                    key_label: "primary".to_string(),
+                    api_key: "primary-secret".to_string(),
+                    position: 0,
+                    enabled: true,
+                },
+                db::EndpointApiKeyCreate {
+                    key_label: "secondary".to_string(),
+                    api_key: "secondary-secret".to_string(),
+                    position: 1,
+                    enabled: true,
+                },
+                db::EndpointApiKeyCreate {
+                    key_label: "disabled".to_string(),
+                    api_key: "disabled-secret".to_string(),
+                    position: 2,
+                    enabled: false,
+                },
+            ],
+            key_lb_enabled: true,
+            enabled: true,
+        },
+    )
+    .await?;
+    let primary = endpoint
+        .api_keys
+        .iter()
+        .find(|key| key.key_label == "primary")
+        .expect("primary endpoint key")
+        .clone();
+    let secondary = endpoint
+        .api_keys
+        .iter()
+        .find(|key| key.key_label == "secondary")
+        .expect("secondary endpoint key")
+        .clone();
+    let disabled = endpoint
+        .api_keys
+        .iter()
+        .find(|key| key.key_label == "disabled")
+        .expect("disabled endpoint key")
+        .clone();
+    let conversation_id = Uuid::new_v4();
+    let record_id = db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_request_actor(Some(admin.user_id), None, None)
+            .with_route(Some(endpoint.endpoint_id), None)
+            .with_endpoint_key(Some(primary.key_id), Some(primary.key_label.clone()))
+            .with_model(Some("gpt-endpoint-key".to_string()))
+            .with_request_context(db::RequestRecordContextInput {
+                conversation_id: Some(conversation_id),
+                parent_event_id: None,
+                conversation_seq: Some(1),
+                conversation_source: "session_header".to_string(),
+                client_installation_id: None,
+                normalized_item_count: None,
+                normalized_chain_hash: None,
+                normalized_first_ref_hash: None,
+                normalized_last_ref_hash: None,
+                base_checkpoint_event_id: None,
+            }),
+    )
+    .await?;
+
+    let mut request = auth_request(
+        "PUT",
+        format!("/api/v1/admin/conversations/{conversation_id}/endpoint-override"),
+    );
+    *request.body_mut() = Body::from(
+        serde_json::json!({
+            "endpoint_id": endpoint.endpoint_id,
+            "endpoint_key_id": secondary.key_id,
+        })
+        .to_string(),
+    );
+    request.headers_mut().insert(
+        header::CONTENT_TYPE,
+        "application/json".parse().expect("content type"),
+    );
+    let response = worker_admin::router(state.clone())
+        .oneshot(request)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    assert_eq!(body["endpoint_key_id"], secondary.key_id.to_string());
+    assert_eq!(body["endpoint_key_label"], "secondary");
+    assert!(body.get("api_key").is_none());
+
+    let mut invalid_request = auth_request(
+        "PUT",
+        format!("/api/v1/admin/conversations/{conversation_id}/endpoint-override"),
+    );
+    *invalid_request.body_mut() = Body::from(
+        serde_json::json!({
+            "endpoint_id": endpoint.endpoint_id,
+            "endpoint_key_id": disabled.key_id,
+        })
+        .to_string(),
+    );
+    invalid_request.headers_mut().insert(
+        header::CONTENT_TYPE,
+        "application/json".parse().expect("content type"),
+    );
+    let response = worker_admin::router(state.clone())
+        .oneshot(invalid_request)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    assert_eq!(body["error"]["code"], "invalid_endpoint_key");
+
+    let response = worker_admin::router(state.clone())
+        .oneshot(auth_request(
+            "GET",
+            format!("/api/v1/admin/request-records/{record_id}/session-route-options"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    assert_eq!(
+        body["override_endpoint_key_id"],
+        secondary.key_id.to_string()
+    );
+    assert_eq!(body["options"][0]["keys"][0]["key_label"], "primary");
+    assert!(body.to_string().contains("primary"));
+    assert!(!body.to_string().contains("primary-secret"));
+    assert!(!body.to_string().contains("secondary-secret"));
+
+    db::update_endpoint(
+        &schema.pool,
+        endpoint.endpoint_id,
+        db::EndpointCreate {
+            scope: endpoint.scope.clone(),
+            owner_user_id: endpoint.owner_user_id,
+            name: endpoint.name.clone(),
+            base_url: endpoint.base_url.clone(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: endpoint.daily_max_requests,
+            monthly_max_requests: endpoint.monthly_max_requests,
+            api_key: endpoint.api_key.clone(),
+            api_keys: vec![db::EndpointApiKeyCreate {
+                key_label: secondary.key_label.clone(),
+                api_key: secondary.api_key.clone(),
+                position: secondary.position,
+                enabled: true,
+            }],
+            key_lb_enabled: endpoint.key_lb_enabled,
+            enabled: endpoint.enabled,
+        },
+    )
+    .await?;
+    let override_after_key_delete =
+        db::get_conversation_endpoint_override(&schema.pool, conversation_id)
+            .await?
+            .expect("endpoint override after key deletion");
+    assert_eq!(override_after_key_delete.endpoint_id, endpoint.endpoint_id);
+    assert_eq!(override_after_key_delete.endpoint_key_id, None);
+    let detail = db::get_visible_usage_event_detail(&schema.pool, record_id, None)
+        .await?
+        .expect("request detail after key deletion");
+    assert_eq!(detail.endpoint_key_id, Some(primary.key_id));
+    assert_eq!(detail.endpoint_key_label.as_deref(), Some("primary"));
+
+    let response = worker_admin::router(state.clone())
+        .oneshot(auth_request(
+            "DELETE",
+            format!("/api/v1/admin/conversations/{conversation_id}/endpoint-override"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(
+        db::get_conversation_endpoint_override(&schema.pool, conversation_id)
+            .await?
+            .is_none()
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-models", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    let routed_endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "routed".to_string(),
+            base_url: "http://routed.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "routed-key".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    let extra_endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "extra".to_string(),
+            base_url: "http://extra.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "extra-key".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    db::create_model_endpoint_rule(
+        &schema.pool,
+        db::ModelEndpointRuleCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            model_pattern: "gpt-routed".to_string(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            session_affinity_lock_after_turns: 5,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            targets: vec![db::ModelRouteTargetCreate {
+                endpoint_id: routed_endpoint.endpoint_id,
+                enabled: true,
+                upstream_model: None,
+                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+            }],
+        },
+    )
+    .await?;
+
+    let visible_routes = db::list_visible_endpoints(&schema.pool, admin.user_id).await?;
+    for route in &visible_routes {
+        let model_id = if route.route_id == routed_endpoint.endpoint_id {
+            "gpt-routed"
+        } else if route.route_id == extra_endpoint.endpoint_id {
+            "gpt-extra"
+        } else {
+            continue;
+        };
+        state
+            .endpoint_model_cache
+            .put(
+                route,
+                prompt_ferry::endpoint_models::EndpointModelSnapshot::from_model_ids([model_id]),
+            )
+            .await;
+    }
+
+    let app = worker_admin::router(state);
+    let response = app
+        .oneshot(auth_request("GET", "/api/v1/me/models".to_string()))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "models": [{
+                "id": "gpt-routed",
+                "name": "gpt-routed"
+            }]
+        })
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "available-models-admin", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    let endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "glm".to_string(),
+            base_url: "http://glm.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "glm-key".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    db::create_model_endpoint_rule(
+        &schema.pool,
+        db::ModelEndpointRuleCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            model_pattern: "glm-5".to_string(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            session_affinity_lock_after_turns: 5,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            targets: vec![db::ModelRouteTargetCreate {
+                endpoint_id: endpoint.endpoint_id,
+                enabled: true,
+                upstream_model: None,
+                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+            }],
+        },
+    )
+    .await?;
+
+    let visible_routes = db::list_visible_endpoints(&schema.pool, admin.user_id).await?;
+    for route in &visible_routes {
+        if route.route_id == endpoint.endpoint_id {
+            state
+                .endpoint_model_cache
+                .put(
+                    route,
+                    prompt_ferry::endpoint_models::EndpointModelSnapshot::from_model_ids([
+                        "glm-5", "glm-5.1",
+                    ]),
+                )
+                .await;
+        }
+    }
+
+    let app = worker_admin::router(state);
+    let response = app
+        .oneshot(auth_request("GET", "/api/v1/me/models".to_string()))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "models": [{
+                "id": "glm-5",
+                "name": "glm-5"
+            }]
+        })
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn bridge_status_reports_multi_relay_connectivity() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "bridge-admin", true).await?;
+    let replay_cache = ReplayCache::for_tests();
+    let state = AdminState::new(AdminStateInit {
+        pool: schema.pool.clone(),
+        lease_pool: schema.pool.clone(),
+        replay_cache: replay_cache.clone(),
+        configured_relays: vec![
+            "ws://relay-a:8788/ws/worker".to_string(),
+            "ws://relay-b:8788/ws/worker".to_string(),
+        ],
+        managed_mode: false,
+        relay_secret_manager: None,
+        redaction_enabled: false,
+        model_route_whitelist_enabled: true,
+        request_content_logging: RequestContentLoggingResponse {
+            mode: RequestContentLoggingMode::Off,
+            raw_retention_days: 3,
+        },
+        stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
+        llm_review_settings: LlmReviewSettings::default(),
+        mcp_catalog_cache: McpCatalogCache::new(),
+        mcp_catalog_service: McpCatalogService::new(schema.pool.clone(), McpCatalogCache::new()),
+        mcp_session_store: None,
+        endpoint_model_cache: prompt_ferry::endpoint_models::EndpointModelCache::new(
+            Duration::from_secs(300),
+        ),
+    });
+    replay_cache
+        .write_session(
+            "test-session",
+            &SessionUser {
+                user_id: admin.user_id,
+                login_name: admin.login_name.clone(),
+                display_name: admin.display_name.clone(),
+                is_admin: true,
+            },
+        )
+        .await
+        .unwrap();
+    let (relay_a_tx, _relay_a_rx) = mpsc::unbounded_channel::<BridgeMessage>();
+    let (relay_b_tx, _relay_b_rx) = mpsc::unbounded_channel::<BridgeMessage>();
+    worker_admin::set_bridge_sender(&state, "ws://relay-a:8788/ws/worker", Some(relay_a_tx)).await;
+    worker_admin::set_bridge_sender(&state, "ws://relay-b:8788/ws/worker", Some(relay_b_tx)).await;
+
+    let app = worker_admin::router(state);
+    let response = app
+        .oneshot(auth_request("GET", "/api/v1/bridge/status".to_string()))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["configured_relays"], 2);
+    assert_eq!(value["connected_relays"], 2);
+    let relays = value["relays"].as_array().expect("relays array");
+    assert_eq!(relays.len(), 2);
+    assert_eq!(relays[0]["relay_url"], "ws://relay-a:8788/ws/worker");
+    assert_eq!(relays[0]["connected"], true);
+    assert_eq!(relays[1]["relay_url"], "ws://relay-b:8788/ws/worker");
+    assert_eq!(relays[1]["connected"], true);
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn logout_clears_valkey_session() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-logout", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let app = worker_admin::router(state.clone());
+    let logout_response = app
+        .oneshot(auth_request("POST", "/api/v1/auth/logout".to_string()))
+        .await
+        .unwrap();
+    assert_eq!(logout_response.status(), StatusCode::NO_CONTENT);
+    let app = worker_admin::router(state);
+    let me_response = app
+        .oneshot(auth_request("GET", "/api/v1/auth/me".to_string()))
+        .await
+        .unwrap();
+    assert_eq!(me_response.status(), StatusCode::UNAUTHORIZED);
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn reject_endpoint_wakes_waiter_and_clears_payload() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let approval = create_pending_approval(&schema.pool, admin.user_id).await?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .approval_waiters
+        .lock()
+        .await
+        .insert(approval.approval_id, tx);
+
+    let app = worker_admin::router(state.clone());
+    let response = app
+        .oneshot(auth_request(
+            "POST",
+            format!("/api/v1/admin/approvals/{}/reject", approval.approval_id),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        ApprovalResolution::Rejected
+    );
+
+    let stored = db::get_approval_request(&schema.pool, approval.approval_id)
+        .await?
+        .unwrap();
+    assert_eq!(stored.approval_status, "rejected");
+    assert!(stored.request_payload_json.is_none());
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_endpoint_filters_pending_and_resolved() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let pending = create_pending_approval(&schema.pool, admin.user_id).await?;
+    let resolved = create_pending_approval(&schema.pool, admin.user_id).await?;
+    db::resolve_approval_request(
+        &schema.pool,
+        resolved.approval_id,
+        prompt_ferry::llm_review::ApprovalStatus::Rejected,
+        Some(admin.user_id),
+    )
+    .await?;
+
+    let pending_body = to_bytes(
+        worker_admin::router(state.clone())
+            .oneshot(auth_request(
+                "GET",
+                "/api/v1/admin/approvals?status=pending&first=0&rows=10".to_string(),
+            ))
+            .await
+            .unwrap()
+            .into_body(),
+        usize::MAX,
+    )
+    .await?;
+    let pending_json: Value = serde_json::from_slice(&pending_body)?;
+    assert_eq!(pending_json.get("total").and_then(Value::as_i64), Some(1));
+    assert_eq!(
+        pending_json["approvals"][0]["approval_id"].as_str(),
+        Some(pending.approval_id.to_string().as_str())
+    );
+
+    let resolved_body = to_bytes(
+        worker_admin::router(state.clone())
+            .oneshot(auth_request(
+                "GET",
+                "/api/v1/admin/approvals?status=resolved&first=0&rows=10".to_string(),
+            ))
+            .await
+            .unwrap()
+            .into_body(),
+        usize::MAX,
+    )
+    .await?;
+    let resolved_json: Value = serde_json::from_slice(&resolved_body)?;
+    assert_eq!(resolved_json.get("total").and_then(Value::as_i64), Some(1));
+    assert_eq!(
+        resolved_json["approvals"][0]["approval_id"].as_str(),
+        Some(resolved.approval_id.to_string().as_str())
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn usage_facets_endpoint_returns_facets() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin", true).await?;
+    insert_request_record(&schema.pool, admin.user_id, "deepseek-v4-pro").await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    let app = worker_admin::router(state.clone());
+    let response = app
+        .oneshot(auth_request(
+            "GET",
+            "/api/v1/admin/request-records/facets".to_string(),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        value["models"]
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(Value::as_str),
+        Some("deepseek-v4-pro")
+    );
+    assert_eq!(
+        value["users"]
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(Value::as_str),
+        Some("admin")
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn usage_facets_endpoint_returns_mcp_server_facets() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin", true).await?;
+    insert_mcp_request_record(&schema.pool, admin.user_id, "local-tools").await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    let app = worker_admin::router(state.clone());
+    let response = app
+        .oneshot(auth_request(
+            "GET",
+            "/api/v1/admin/request-records/facets?request_category=mcp".to_string(),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        value["models"]
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(Value::as_str),
+        Some("local-tools")
+    );
+    assert_eq!(
+        value["users"]
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(Value::as_str),
+        Some("admin")
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn usage_event_detail_includes_assistant_artifact_fields() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin", true).await?;
+    let event_id = insert_request_record(&schema.pool, admin.user_id, "deepseek-v4-pro").await?;
+    db::upsert_usage_assistant_artifact(
+        &schema.pool,
+        db::UsageAssistantArtifactCreate {
+            event_id,
+            message_json: serde_json::json!({
+                "version": 1,
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "final answer",
+                    "reasoning_content": "internal reasoning"
+                },
+                "output_items": [
+                    { "type": "reasoning", "content": [{ "type": "reasoning_text", "text": "internal reasoning" }] },
+                    { "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "final answer" }] }
+                ]
+            }),
+            has_reasoning_content: true,
+            has_tool_calls: false,
+        },
+    )
+    .await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    let app = worker_admin::router(state.clone());
+    let response = app
+        .oneshot(auth_request(
+            "GET",
+            format!("/api/v1/admin/request-records/{event_id}"),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        value["assistant_message_json"]["reasoning_content"].as_str(),
+        Some("internal reasoning")
+    );
+    assert_eq!(
+        value["assistant_output_items_json"][0]["type"].as_str(),
+        Some("reasoning")
+    );
+    assert_eq!(value["has_reasoning_content"].as_bool(), Some(true));
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rejects_force_passthrough_for_chat_native_target() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "chat-upstream".to_string(),
+            base_url: "https://chat.example.com".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "secret".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+
+    let app = worker_admin::router(state.clone());
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/admin/model-routes")
+        .header(header::COOKIE, "prompt_ferry_session=test-session")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "scope": "admin",
+                "owner_user_id": null,
+                "model_pattern": "gpt-test",
+                "enabled": true,
+                "targets": [{
+                    "endpoint_id": endpoint.endpoint_id,
+                    "enabled": true,
+                    "responses_continuation_policy": "force_passthrough"
+                }]
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let json: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        json["error"]["code"].as_str(),
+        Some("invalid_target_continuation_policy")
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn defaults_force_passthrough_for_responses_native_target() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "responses-upstream".to_string(),
+            base_url: "https://responses.example.com".to_string(),
+            native_api: NativeApi::Responses,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "secret".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+
+    let app = worker_admin::router(state.clone());
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/admin/model-routes")
+        .header(header::COOKIE, "prompt_ferry_session=test-session")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "scope": "admin",
+                "owner_user_id": null,
+                "model_pattern": "gpt-test",
+                "enabled": true,
+                "targets": [{
+                    "endpoint_id": endpoint.endpoint_id,
+                    "enabled": true
+                }]
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let json: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        json["targets"][0]["responses_continuation_policy"].as_str(),
+        Some("force_passthrough")
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn abort_pending_helper_marks_records_aborted() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin", true).await?;
+    let approval = create_pending_approval(&schema.pool, admin.user_id).await?;
+
+    let affected = db::abort_pending_approval_requests(&schema.pool).await?;
+    assert_eq!(affected, 1);
+
+    let stored = db::get_approval_request(&schema.pool, approval.approval_id)
+        .await?
+        .unwrap();
+    assert_eq!(stored.approval_status, "aborted");
+    assert!(stored.request_payload_json.is_none());
+    schema.cleanup().await?;
+    Ok(())
+}

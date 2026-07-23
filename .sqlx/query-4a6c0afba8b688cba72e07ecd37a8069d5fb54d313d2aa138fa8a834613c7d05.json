@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO conversation_counters (\n    conversation_id,\n    next_seq,\n    updated_at\n)\nVALUES ($1, GREATEST(COALESCE($2, 1), 1) + 1, NOW())\nON CONFLICT (conversation_id)\nDO UPDATE SET\n    next_seq = GREATEST(conversation_counters.next_seq, GREATEST(COALESCE($2, 1), 1)) + 1,\n    updated_at = NOW()\nRETURNING next_seq - 1 AS \"conversation_seq!\"\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "conversation_seq!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4a6c0afba8b688cba72e07ecd37a8069d5fb54d313d2aa138fa8a834613c7d05"
+}

@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT event_id, endpoint_id, conversation_id, conversation_seq\nFROM request_records\nWHERE conversation_id = $1\n  AND user_id IS NOT DISTINCT FROM $2\n  AND request_state = 'completed'\nORDER BY conversation_seq DESC NULLS LAST, event_id DESC\nLIMIT 1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "conversation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "conversation_seq",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "conversation_seq"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "21dcd68dfdc4caf15ba58c88dd29eadabf1496587ff7214ee3a08226cfc7a3c0"
+}

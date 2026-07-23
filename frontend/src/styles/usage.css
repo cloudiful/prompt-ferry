@@ -1,0 +1,52 @@
+.ms-code {
+  @apply overflow-auto rounded-md border border-accented bg-muted p-3 text-xs leading-relaxed text-default;
+}
+
+.ms-code-compact {
+  @apply px-2.5 py-2 text-xs;
+}
+
+.ms-code-flat {
+  @apply rounded-none border-0 bg-transparent p-0;
+}
+
+.ms-markdown-log {
+  overscroll-behavior: contain;
+}
+
+.ms-markdown-log-scroll {
+  overflow: auto;
+}
+
+.ms-markdown-log :where(p, ul, blockquote, pre, h3, h4, h5, h6) {
+  margin: 0 0 0.65rem;
+}
+
+.ms-markdown-log :where(p, ul, blockquote, pre, h3, h4, h5, h6):last-child {
+  margin-bottom: 0;
+}
+
+.ms-markdown-log ul {
+  padding-left: 1.1rem;
+  list-style: disc;
+}
+
+.ms-markdown-log blockquote {
+  @apply border-l-2 border-accented pl-3 text-muted;
+}
+
+.ms-markdown-log pre {
+  @apply overflow-auto rounded-md bg-muted p-3;
+}
+
+.ms-markdown-log code {
+  @apply rounded bg-elevated px-1 py-0.5;
+}
+
+.ms-markdown-log pre code {
+  @apply bg-transparent p-0;
+}
+
+.ms-markdown-log :where(h3, h4, h5, h6) {
+  @apply font-bold text-highlighted;
+}

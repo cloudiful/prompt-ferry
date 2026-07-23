@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT endpoint_id AS \"endpoint_id?\"\nFROM user_endpoint_settings\nWHERE user_id = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "user_endpoint_settings",
+            "name": "endpoint_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "f9f58892188f9991f54bf41bd73f89b29a83dc64b670fb3a19cfb3ca81269bfe"
+}

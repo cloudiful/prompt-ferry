@@ -1,0 +1,112 @@
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
+use crate::{
+    llm_review::LlmReviewSettings,
+    protocol::RelayIpPolicy,
+    redact::{RedactionConfig, RedactionPreviewRequest, RedactionPreviewResponse},
+};
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RedactionScope {
+    Global,
+    User,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RedactionSettingQuery {
+    pub scope: Option<RedactionScope>,
+    pub user_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct RedactionRulePageQuery {
+    pub scope: Option<RedactionScope>,
+    pub user_id: Option<i64>,
+    pub first: Option<i64>,
+    pub rows: Option<i64>,
+    pub search: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RedactionSettingResponse {
+    pub scope: RedactionScope,
+    pub user_id: Option<i64>,
+    pub config: RedactionConfig,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RedactionSettingRequest(pub RedactionConfig);
+
+#[derive(Debug, Deserialize)]
+pub struct RedactionPreviewRequestBody(pub RedactionPreviewRequest);
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RedactionPreviewResponseBody {
+    pub preview: RedactionPreviewResponse,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RedactionCustomStringRuleRow {
+    pub array_index: i64,
+    pub pattern: String,
+    pub match_type: String,
+    pub scope: String,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RedactionCustomStringRulePageResponse {
+    pub items: Vec<RedactionCustomStringRuleRow>,
+    pub total: i64,
+    pub first: i64,
+    pub rows: i64,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestContentLoggingMode {
+    Off,
+    NormalizedOnly,
+    NormalizedAndRaw,
+}
+
+impl RequestContentLoggingMode {
+    pub fn captures_normalized(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+
+    pub fn captures_raw(self) -> bool {
+        matches!(self, Self::NormalizedAndRaw)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RequestContentLoggingResponse {
+    pub mode: RequestContentLoggingMode,
+    pub raw_retention_days: i32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct RequestContentLoggingRequest {
+    pub mode: RequestContentLoggingMode,
+    pub raw_retention_days: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RelayIpPolicyResponse {
+    pub allowed_cidrs: Vec<String>,
+    pub trusted_proxy_cidrs: Vec<String>,
+}
+
+pub type LlmReviewSettingsResponse = LlmReviewSettings;
+
+impl From<RelayIpPolicy> for RelayIpPolicyResponse {
+    fn from(value: RelayIpPolicy) -> Self {
+        Self {
+            allowed_cidrs: value.allowed_cidrs,
+            trusted_proxy_cidrs: value.trusted_proxy_cidrs,
+        }
+    }
+}

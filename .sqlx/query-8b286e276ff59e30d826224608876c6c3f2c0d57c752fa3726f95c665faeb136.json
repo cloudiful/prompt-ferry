@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT setting_value = 'true'::JSONB AS \"enabled!\"\nFROM worker_settings\nWHERE setting_key = 'redaction_enabled'\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "enabled!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8b286e276ff59e30d826224608876c6c3f2c0d57c752fa3726f95c665faeb136"
+}

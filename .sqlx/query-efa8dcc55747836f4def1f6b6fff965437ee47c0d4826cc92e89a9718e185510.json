@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT block_hash, role, content_json, preview_text, created_at\nFROM usage_prompt_blocks\nWHERE block_hash = ANY($1)\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "block_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_prompt_blocks",
+            "name": "block_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "role",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_prompt_blocks",
+            "name": "role"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "content_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "usage_prompt_blocks",
+            "name": "content_json"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "preview_text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "usage_prompt_blocks",
+            "name": "preview_text"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "usage_prompt_blocks",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "efa8dcc55747836f4def1f6b6fff965437ee47c0d4826cc92e89a9718e185510"
+}

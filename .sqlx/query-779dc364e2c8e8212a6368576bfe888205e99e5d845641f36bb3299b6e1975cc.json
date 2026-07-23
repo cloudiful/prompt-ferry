@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM request_record_leases\nWHERE request_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "779dc364e2c8e8212a6368576bfe888205e99e5d845641f36bb3299b6e1975cc"
+}

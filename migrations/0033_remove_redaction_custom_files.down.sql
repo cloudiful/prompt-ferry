@@ -1,0 +1,1 @@
+-- Data-only cleanup migration. Original custom_files values cannot be restored.

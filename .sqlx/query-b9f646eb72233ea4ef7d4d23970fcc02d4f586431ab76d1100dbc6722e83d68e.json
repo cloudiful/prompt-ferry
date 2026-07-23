@@ -1,0 +1,352 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rr.event_id, rr.request_id, rr.user_id, rr.endpoint_id, rr.path, rr.model, rr.conversation_id, rr.parent_event_id,\n       rr.conversation_seq, rr.conversation_source, rr.client_installation_id, rr.normalized_item_count,\n       rr.normalized_chain_hash, rr.normalized_first_ref_hash, rr.normalized_last_ref_hash,\n       rr.request_storage_mode, rr.request_full_json, rr.request_delta_json,\n       raw.request_raw_json, rr.request_has_previous_response_id,\n       rr.request_previous_response_id, rr.request_previous_response_parent_found,\n       rr.request_conversation_key, rr.request_conversation_parent_found,\n       rr.provider_response_id, rr.base_checkpoint_event_id, rr.response_prompt, raw.response_raw_body\nFROM request_records rr\nLEFT JOIN request_record_raw_payloads raw\n  ON raw.event_id = rr.event_id\n AND raw.created_at = rr.created_at\nWHERE rr.event_id = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "request_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "path",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "path"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "conversation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "parent_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "parent_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "conversation_seq",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "conversation_seq"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "conversation_source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "conversation_source"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "client_installation_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "client_installation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "normalized_item_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "normalized_item_count"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "normalized_chain_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "normalized_chain_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "normalized_first_ref_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "normalized_first_ref_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "normalized_last_ref_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "normalized_last_ref_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "request_storage_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_storage_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "request_full_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_full_json"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "request_delta_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_delta_json"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "request_raw_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "request_record_raw_payloads",
+            "name": "request_raw_json"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "request_has_previous_response_id",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_has_previous_response_id"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "request_previous_response_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_previous_response_id"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "request_previous_response_parent_found",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_previous_response_parent_found"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "request_conversation_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_conversation_key"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "request_conversation_parent_found",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_conversation_parent_found"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "provider_response_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "provider_response_id"
+          }
+        }
+      },
+      {
+        "ordinal": 25,
+        "name": "base_checkpoint_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "base_checkpoint_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 26,
+        "name": "response_prompt",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "response_prompt"
+          }
+        }
+      },
+      {
+        "ordinal": 27,
+        "name": "response_raw_body",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_record_raw_payloads",
+            "name": "response_raw_body"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "b9f646eb72233ea4ef7d4d23970fcc02d4f586431ab76d1100dbc6722e83d68e"
+}

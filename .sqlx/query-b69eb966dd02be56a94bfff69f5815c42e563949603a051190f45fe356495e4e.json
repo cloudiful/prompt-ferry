@@ -1,0 +1,800 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    ue.event_id AS \"record_id!\",\n    ue.request_id AS \"request_id!\",\n    ue.request_category AS \"request_category: _\",\n    ue.user_id,\n    u.login_name AS user_login_name,\n    ue.client_key_label,\n    ue.request_user_agent,\n    ue.http_request_content_encoding,\n    ue.http_request_compressed AS \"http_request_compressed!\",\n    ue.http_request_compressed_bytes,\n    ue.http_request_decompressed_bytes,\n    ue.http_request_compression_ratio,\n    ue.endpoint_id,\n    pe.name AS endpoint_name,\n    ue.endpoint_key_id,\n    ue.endpoint_key_label,\n    ue.mcp_server_id,\n    COALESCE(ue.mcp_server_name, ms.name) AS mcp_server_name,\n    ue.mcp_protocol_method,\n    ue.mcp_operation_name,\n    ue.path AS \"path!\",\n    ue.model,\n    ue.request_state AS \"request_state: _\",\n    ue.status,\n    ue.ok,\n    ue.duration_ms,\n    ue.first_chunk_ms,\n    ue.input_tokens,\n    ue.output_tokens,\n    ue.total_tokens,\n    ue.cached_tokens,\n    ue.cache_read_tokens,\n    ue.cache_write_tokens,\n    CASE WHEN ue.input_tokens > 0\n        THEN ue.cached_tokens::DOUBLE PRECISION / ue.input_tokens::DOUBLE PRECISION\n        ELSE NULL\n    END AS cache_rate,\n    ue.conversation_id,\n    ue.parent_event_id,\n    ue.conversation_seq,\n    ue.conversation_source AS \"conversation_source!\",\n    ue.storage_sanitized AS \"storage_sanitized!\",\n    ue.storage_sanitized_nul_count AS \"storage_sanitized_nul_count!\",\n    ue.redaction_applied AS \"applied!\",\n    ue.redaction_findings_count AS \"findings_count!\",\n    ue.redaction_replacements_count AS \"replacements_count!\",\n    COALESCE(ARRAY(\n        SELECT jsonb_array_elements_text(COALESCE(ue.redaction_types_json, '[]'::jsonb))\n    ), ARRAY[]::TEXT[]) AS \"types!\",\n    COALESCE(ARRAY(\n        SELECT jsonb_array_elements_text(COALESCE(ue.redaction_fields_json, '[]'::jsonb))\n    ), ARRAY[]::TEXT[]) AS \"fields!\",\n    ue.client_installation_id,\n    ue.normalized_item_count,\n    COALESCE(ue.request_storage_mode, 'full') AS \"request_storage_mode!\",\n    raw.request_raw_json,\n    ue.request_has_previous_response_id AS \"request_has_previous_response_id!\",\n    ue.request_previous_response_id,\n    ue.request_previous_response_parent_found,\n    ue.request_conversation_key,\n    ue.request_conversation_parent_found,\n    ue.provider_response_id,\n    (ue.request_full_json IS NOT NULL OR ue.request_delta_json IS NOT NULL) AS \"has_full_request!\",\n    (ue.parent_event_id IS NOT NULL) AS \"has_parent!\",\n    ue.response_prompt,\n    raw.response_raw_body,\n    ua.message_json -> 'assistant_message' AS assistant_message_json,\n    ua.message_json -> 'output_items' AS assistant_output_items_json,\n    ua.has_reasoning_content,\n    ue.upstream_error_body,\n    ue.error_code,\n    ue.error_message,\n    ue.failure_family AS \"failure_family: _\",\n    ue.mcp_bearer_token_slot,\n    ue.route_selection_reason AS \"route_selection_reason: _\",\n    ue.created_at AS \"created_at!\"\nFROM request_records ue\nLEFT JOIN users u ON u.user_id = ue.user_id\nLEFT JOIN provider_endpoints pe ON pe.endpoint_id = ue.endpoint_id\nLEFT JOIN mcp_servers ms ON ms.server_id = ue.mcp_server_id\nLEFT JOIN request_record_assistant_artifacts ua ON ua.event_id = ue.event_id\nLEFT JOIN request_record_raw_payloads raw\n  ON raw.event_id = ue.event_id\n AND raw.created_at = ue.created_at\nWHERE ue.event_id = $1\n  AND ($2::BIGINT IS NULL OR ue.user_id = $2)\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record_id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "request_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "request_category: _",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_category"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "user_login_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "login_name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "client_key_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "client_key_label"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "request_user_agent",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_user_agent"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "http_request_content_encoding",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "http_request_content_encoding"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "http_request_compressed!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "http_request_compressed"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "http_request_compressed_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "http_request_compressed_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "http_request_decompressed_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "http_request_decompressed_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "http_request_compression_ratio",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "http_request_compression_ratio"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "endpoint_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "endpoint_key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "endpoint_key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "endpoint_key_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "endpoint_key_label"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "mcp_server_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "mcp_server_id"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "mcp_server_name",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 18,
+        "name": "mcp_protocol_method",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "mcp_protocol_method"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "mcp_operation_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "mcp_operation_name"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "path!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "path"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "request_state: _",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_state"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "status",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "ok",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "ok"
+          }
+        }
+      },
+      {
+        "ordinal": 25,
+        "name": "duration_ms",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "duration_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 26,
+        "name": "first_chunk_ms",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "first_chunk_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 27,
+        "name": "input_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "input_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 28,
+        "name": "output_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "output_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 29,
+        "name": "total_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "total_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 30,
+        "name": "cached_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "cached_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 31,
+        "name": "cache_read_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "cache_read_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 32,
+        "name": "cache_write_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "cache_write_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 33,
+        "name": "cache_rate",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 34,
+        "name": "conversation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 35,
+        "name": "parent_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "parent_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 36,
+        "name": "conversation_seq",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "conversation_seq"
+          }
+        }
+      },
+      {
+        "ordinal": 37,
+        "name": "conversation_source!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "conversation_source"
+          }
+        }
+      },
+      {
+        "ordinal": 38,
+        "name": "storage_sanitized!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "storage_sanitized"
+          }
+        }
+      },
+      {
+        "ordinal": 39,
+        "name": "storage_sanitized_nul_count!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "storage_sanitized_nul_count"
+          }
+        }
+      },
+      {
+        "ordinal": 40,
+        "name": "applied!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "redaction_applied"
+          }
+        }
+      },
+      {
+        "ordinal": 41,
+        "name": "findings_count!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "redaction_findings_count"
+          }
+        }
+      },
+      {
+        "ordinal": 42,
+        "name": "replacements_count!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "redaction_replacements_count"
+          }
+        }
+      },
+      {
+        "ordinal": 43,
+        "name": "types!",
+        "type_info": "TextArray",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 44,
+        "name": "fields!",
+        "type_info": "TextArray",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 45,
+        "name": "client_installation_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "client_installation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 46,
+        "name": "normalized_item_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "normalized_item_count"
+          }
+        }
+      },
+      {
+        "ordinal": 47,
+        "name": "request_storage_mode!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 48,
+        "name": "request_raw_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "request_record_raw_payloads",
+            "name": "request_raw_json"
+          }
+        }
+      },
+      {
+        "ordinal": 49,
+        "name": "request_has_previous_response_id!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_has_previous_response_id"
+          }
+        }
+      },
+      {
+        "ordinal": 50,
+        "name": "request_previous_response_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_previous_response_id"
+          }
+        }
+      },
+      {
+        "ordinal": 51,
+        "name": "request_previous_response_parent_found",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_previous_response_parent_found"
+          }
+        }
+      },
+      {
+        "ordinal": 52,
+        "name": "request_conversation_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_conversation_key"
+          }
+        }
+      },
+      {
+        "ordinal": 53,
+        "name": "request_conversation_parent_found",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_conversation_parent_found"
+          }
+        }
+      },
+      {
+        "ordinal": 54,
+        "name": "provider_response_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "provider_response_id"
+          }
+        }
+      },
+      {
+        "ordinal": 55,
+        "name": "has_full_request!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 56,
+        "name": "has_parent!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 57,
+        "name": "response_prompt",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "response_prompt"
+          }
+        }
+      },
+      {
+        "ordinal": 58,
+        "name": "response_raw_body",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_record_raw_payloads",
+            "name": "response_raw_body"
+          }
+        }
+      },
+      {
+        "ordinal": 59,
+        "name": "assistant_message_json",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 60,
+        "name": "assistant_output_items_json",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 61,
+        "name": "has_reasoning_content",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_record_assistant_artifacts",
+            "name": "has_reasoning_content"
+          }
+        }
+      },
+      {
+        "ordinal": 62,
+        "name": "upstream_error_body",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "upstream_error_body"
+          }
+        }
+      },
+      {
+        "ordinal": 63,
+        "name": "error_code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "error_code"
+          }
+        }
+      },
+      {
+        "ordinal": 64,
+        "name": "error_message",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "error_message"
+          }
+        }
+      },
+      {
+        "ordinal": 65,
+        "name": "failure_family: _",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "failure_family"
+          }
+        }
+      },
+      {
+        "ordinal": 66,
+        "name": "mcp_bearer_token_slot",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "mcp_bearer_token_slot"
+          }
+        }
+      },
+      {
+        "ordinal": 67,
+        "name": "route_selection_reason: _",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "route_selection_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 68,
+        "name": "created_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      true,
+      true,
+      null,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      true,
+      true,
+      null,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b69eb966dd02be56a94bfff69f5815c42e563949603a051190f45fe356495e4e"
+}

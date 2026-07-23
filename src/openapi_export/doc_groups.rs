@@ -1,0 +1,304 @@
+use utoipa::OpenApi;
+
+#[allow(unused_imports)]
+use super::{
+    approvals::{
+        __path_approve_approval, __path_get_approval, __path_list_approvals,
+        __path_reject_approval, approve_approval, get_approval, list_approvals, reject_approval,
+    },
+    auth::{
+        __path_auth_login, __path_auth_logout, __path_auth_me, auth_login, auth_logout, auth_me,
+    },
+    bridge::{__path_bridge_status, bridge_status},
+    endpoints::{
+        __path_create_endpoint, __path_delete_endpoint, __path_list_endpoints,
+        __path_test_endpoint, __path_update_endpoint, create_endpoint, delete_endpoint,
+        list_endpoints, test_endpoint, update_endpoint,
+    },
+    mcp::{
+        __path_create_mcp_server, __path_delete_mcp_server, __path_get_mcp_catalog,
+        __path_list_mcp_servers, __path_test_mcp_server, __path_update_mcp_server,
+        create_mcp_server, delete_mcp_server, get_mcp_catalog, list_mcp_servers, test_mcp_server,
+        update_mcp_server,
+    },
+    me::{
+        __path_me_create_client_key, __path_me_delete_client_key, __path_me_list_client_keys,
+        __path_me_list_models, __path_me_update_client_key, me_create_client_key,
+        me_delete_client_key, me_list_client_keys, me_list_models, me_update_client_key,
+    },
+    model_routes::{
+        __path_create_model_route, __path_delete_model_route, __path_list_model_routes,
+        __path_test_model_route, __path_update_model_route, create_model_route, delete_model_route,
+        list_model_routes, test_model_route, update_model_route,
+    },
+    relays::{
+        __path_create_relay, __path_delete_relay, __path_get_relay, __path_list_relays,
+        __path_reconnect_relay, __path_update_relay, create_relay, delete_relay, get_relay,
+        list_relays, reconnect_relay, update_relay,
+    },
+    schemas::*,
+    settings::{
+        __path_get_endpoint_setting, __path_get_llm_review_setting,
+        __path_get_model_route_whitelist, __path_get_redaction_setting,
+        __path_get_relay_ip_whitelist, __path_get_request_content_logging,
+        __path_get_stream_delta_batching, __path_list_redaction_custom_strings,
+        __path_preview_redaction, __path_set_endpoint_setting, __path_set_llm_review_setting,
+        __path_set_model_route_whitelist, __path_set_redaction_setting,
+        __path_set_relay_ip_whitelist, __path_set_request_content_logging,
+        __path_set_stream_delta_batching, get_endpoint_setting, get_llm_review_setting,
+        get_model_route_whitelist, get_redaction_setting, get_relay_ip_whitelist,
+        get_request_content_logging, get_stream_delta_batching, list_redaction_custom_strings,
+        preview_redaction, set_endpoint_setting, set_llm_review_setting, set_model_route_whitelist,
+        set_redaction_setting, set_relay_ip_whitelist, set_request_content_logging,
+        set_stream_delta_batching,
+    },
+    usage::{
+        __path_clear_request_records, __path_delete_conversation_endpoint_override,
+        __path_get_conversation_endpoint_override, __path_list_request_records,
+        __path_prune_request_records, __path_request_record_detail, __path_request_record_facets,
+        __path_request_record_full, __path_request_record_overview, __path_request_record_series,
+        __path_request_record_session_route_options, __path_request_record_summary,
+        __path_set_conversation_endpoint_override, clear_request_records,
+        delete_conversation_endpoint_override, get_conversation_endpoint_override,
+        list_request_records, prune_request_records, request_record_detail, request_record_facets,
+        request_record_full, request_record_overview, request_record_series,
+        request_record_session_route_options, request_record_summary,
+        set_conversation_endpoint_override,
+    },
+    users::{
+        __path_create_client_key, __path_create_user, __path_delete_client_key, __path_delete_user,
+        __path_list_client_keys, __path_list_users, __path_reset_password,
+        __path_update_client_key, __path_update_user, create_client_key, create_user,
+        delete_client_key, delete_user, list_client_keys, list_users, reset_password,
+        update_client_key, update_user,
+    },
+};
+use crate::{
+    db,
+    llm_review::LlmReviewSettings,
+    protocol::RelayIpPolicy,
+    worker_admin_types::{
+        ApprovalPageResponse, AvailableModel, AvailableModelsResponse, BridgeStatus,
+        ConversationEndpointOverrideRequest, CreateClientKeyRequest, CreateClientKeyResponse,
+        CreateUserRequest, EndpointPageResponse, EndpointRequest, EndpointSettingRequest,
+        EndpointTestResponse, ManagedRelay, ManagedRelayListResponse, ManagedRelayPatchRequest,
+        ManagedRelayRequest, ManagedRelaySecretPatch, ManagedRelayStatus, McpCatalogItem,
+        McpCatalogResponse, McpServerRequest, McpTestResponse, MeResponse, ModelRoutePageResponse,
+        ModelRouteRequest, ModelRouteTargetRequest, ModelRouteTestRequest, ModelRouteTestResponse,
+        ModelRouteWhitelistRequest, ModelRouteWhitelistResponse, RelayIpPolicyResponse,
+        RequestContentLoggingRequest, RequestContentLoggingResponse, RequestRecordFullMessage,
+        RequestRecordFullResponse, RequestRecordOverviewRange, RequestRecordPruneResponse,
+        RequestRecordsClearRequest, RequestRecordsClearResponse, ResetPasswordRequest,
+        SessionRouteOptionsResponse, UpdateClientKeyRequest,
+    },
+};
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        auth_login,
+        auth_logout,
+        auth_me,
+        me_list_client_keys,
+        me_create_client_key,
+        me_update_client_key,
+        me_delete_client_key,
+        me_list_models,
+        list_users,
+        create_user,
+        update_user,
+        delete_user,
+        reset_password,
+        list_client_keys,
+        create_client_key,
+        update_client_key,
+        delete_client_key
+    ),
+    components(
+        schemas(
+            CreateClientKeyRequest,
+            CreateClientKeyResponse,
+            CreateUserRequest,
+            AvailableModel,
+            AvailableModelsResponse,
+            MeResponse,
+            ResetPasswordRequest,
+            UpdateClientKeyRequest,
+            db::ClientKey,
+            db::User,
+            db::UserUpdate
+        )
+    ),
+    tags(
+        (name = "auth", description = "Authentication and session"),
+        (name = "me", description = "Current user self-service"),
+        (name = "users", description = "Users and client keys")
+    )
+)]
+pub(super) struct IdentityApiDoc;
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        list_endpoints,
+        create_endpoint,
+        update_endpoint,
+        delete_endpoint,
+        test_endpoint,
+        list_model_routes,
+        create_model_route,
+        update_model_route,
+        delete_model_route,
+        test_model_route,
+        list_mcp_servers,
+        create_mcp_server,
+        update_mcp_server,
+        delete_mcp_server,
+        get_mcp_catalog,
+        test_mcp_server,
+        list_relays,
+        create_relay,
+        get_relay,
+        update_relay,
+        delete_relay,
+        reconnect_relay,
+        get_endpoint_setting,
+        set_endpoint_setting,
+        get_model_route_whitelist,
+        set_model_route_whitelist,
+        get_stream_delta_batching,
+        set_stream_delta_batching
+    ),
+    components(
+        schemas(
+            EndpointPageResponse,
+            EndpointRequest,
+            EndpointSettingRequest,
+            EndpointSettingResponse,
+            EndpointTestResponse,
+            McpCatalogItem,
+            McpCatalogResponse,
+            McpServerRequest,
+            McpTestResponse,
+            ManagedRelay,
+            ManagedRelayListResponse,
+            ManagedRelayPatchRequest,
+            ManagedRelayRequest,
+            ManagedRelaySecretPatch,
+            ManagedRelayStatus,
+            ModelRoutePageResponse,
+            ModelRouteRequest,
+            ModelRouteTargetRequest,
+            ModelRouteTestRequest,
+            ModelRouteTestResponse,
+            ModelRouteWhitelistRequest,
+            ModelRouteWhitelistResponse,
+            db::EndpointPage,
+            db::McpServer,
+            db::ModelEndpointRule,
+            db::ModelRoutePage,
+            db::ModelRouteRoutingStrategy,
+            db::ModelRouteTarget,
+            db::ProviderEndpoint
+        )
+    ),
+    tags(
+        (name = "endpoints", description = "Provider endpoints"),
+        (name = "model-routes", description = "Model route rules"),
+        (name = "mcp", description = "MCP server management"),
+        (name = "relays", description = "Managed relay topology")
+    )
+)]
+pub(super) struct RoutingApiDoc;
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        request_record_summary,
+        request_record_overview,
+        list_request_records,
+        request_record_facets,
+        clear_request_records,
+        request_record_detail,
+        request_record_session_route_options,
+        request_record_full,
+        request_record_series,
+        prune_request_records,
+        get_conversation_endpoint_override,
+        set_conversation_endpoint_override,
+        delete_conversation_endpoint_override,
+        get_redaction_setting,
+        set_redaction_setting,
+        list_redaction_custom_strings,
+        preview_redaction,
+            get_request_content_logging,
+            set_request_content_logging,
+            get_stream_delta_batching,
+            set_stream_delta_batching,
+            get_relay_ip_whitelist,
+            set_relay_ip_whitelist,
+            get_llm_review_setting,
+        set_llm_review_setting,
+        list_approvals,
+        get_approval,
+        approve_approval,
+        reject_approval,
+        bridge_status
+    ),
+    components(
+        schemas(
+            AppliedReplacementSchema,
+            ApprovalPageResponse,
+            BridgeStatus,
+            CustomStringMatchSchema,
+            CustomStringRuleSchema,
+            RedactionCustomStringRulePageResponseSchema,
+            RedactionCustomStringRuleRowSchema,
+            CustomStringScopeSchema,
+            ErrorBody,
+            ErrorEnvelope,
+            LlmReviewSettings,
+            RedactionConfigSchema,
+            RedactionFindingSchema,
+            RedactionInputKindSchema,
+            RedactionPreviewRequestSchema,
+            RedactionPreviewResponseSchema,
+            RedactionPreviewSchema,
+            RedactionRulesSchema,
+            RedactionScopeSchema,
+            RedactionSettingResponseSchema,
+            RedactionStatsSchema,
+            RelayIpPolicy,
+            RelayIpPolicyResponse,
+            SessionRouteOptionsResponse,
+            RequestRecordsClearRequest,
+            RequestRecordsClearResponse,
+            RequestContentLoggingRequest,
+            RequestContentLoggingResponse,
+            RequestRecordPruneResponse,
+            RequestRecordFullMessage,
+            RequestRecordFullResponse,
+            RequestRecordOverviewRange,
+            db::StreamDeltaBatchingSettings,
+            ConversationEndpointOverrideRequest,
+            db::ApprovalRequest,
+            db::ApprovalRequestPage,
+            db::ApprovalStatusFilter,
+            db::ConversationEndpointOverride,
+            db::SessionRouteOption,
+            db::RequestRecordBucket,
+            db::RequestRecordDetail,
+            db::RequestRecordFacets,
+            db::RequestRecordListRow,
+            db::RequestRecordPage,
+            db::RequestRecordSummary
+        )
+    ),
+    tags(
+        (name = "request-records", description = "Request record reporting"),
+        (name = "settings", description = "Worker and admin settings"),
+        (name = "approvals", description = "Manual approval workflow"),
+        (name = "bridge", description = "Bridge runtime status")
+    )
+)]
+pub(super) struct OperationsApiDoc;

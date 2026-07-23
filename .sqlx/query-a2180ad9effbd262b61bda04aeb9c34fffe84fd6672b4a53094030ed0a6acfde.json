@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT ON (e.endpoint_id) e.endpoint_id, e.base_url, e.api_key, e.key_lb_enabled, e.native_api\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\n  AND (\n      (r.scope = 'user' AND r.owner_user_id = $1)\n      OR (r.scope = 'admin' AND r.owner_user_id IS NULL)\n  )\nORDER BY\n  e.endpoint_id,\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  t.position ASC,\n  r.updated_at DESC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "base_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "base_url"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "api_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "api_key"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "key_lb_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "key_lb_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "native_api",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "native_api"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a2180ad9effbd262b61bda04aeb9c34fffe84fd6672b4a53094030ed0a6acfde"
+}

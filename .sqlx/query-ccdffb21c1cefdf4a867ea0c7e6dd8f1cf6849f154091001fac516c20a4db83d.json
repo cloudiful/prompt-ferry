@@ -1,0 +1,256 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy, r.session_affinity_lock_after_turns,\n       r.daily_max_requests, r.monthly_max_requests, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.key_lb_enabled, e.native_api,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.responses_continuation_policy\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.rule_id = $1\n  AND r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rule_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "rule_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "owner_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "model_pattern",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "model_pattern"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "routing_strategy",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "routing_strategy"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "session_affinity_lock_after_turns",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "session_affinity_lock_after_turns"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "daily_max_requests",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "daily_max_requests"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "monthly_max_requests",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "monthly_max_requests"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "target_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "model_route_targets",
+            "name": "target_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "endpoint_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "base_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "base_url"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "api_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "api_key"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "key_lb_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "key_lb_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "native_api",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "native_api"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "position",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "model_route_targets",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "target_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "model_route_targets",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "upstream_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_route_targets",
+            "name": "upstream_model"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "responses_continuation_policy",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_route_targets",
+            "name": "responses_continuation_policy"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "ccdffb21c1cefdf4a867ea0c7e6dd8f1cf6849f154091001fac516c20a4db83d"
+}

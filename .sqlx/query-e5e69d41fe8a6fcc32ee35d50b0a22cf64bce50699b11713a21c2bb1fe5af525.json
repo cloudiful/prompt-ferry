@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from managed_relays\nwhere relay_id = $1;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e5e69d41fe8a6fcc32ee35d50b0a22cf64bce50699b11713a21c2bb1fe5af525"
+}

@@ -1,0 +1,116 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO endpoint_api_keys(endpoint_id, key_label, api_key, position, enabled)\nVALUES ($1, $2, $3, $4, $5)\nRETURNING key_id, endpoint_id, key_label, api_key, position, enabled, created_at, updated_at\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "endpoint_api_keys",
+            "name": "key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "endpoint_api_keys",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "key_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "endpoint_api_keys",
+            "name": "key_label"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "api_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "endpoint_api_keys",
+            "name": "api_key"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "position",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "endpoint_api_keys",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "endpoint_api_keys",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "endpoint_api_keys",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "endpoint_api_keys",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "16967ab89c2689b54e8a2818828a8586af25db8af6f383dd770cbd50f954e4c6"
+}

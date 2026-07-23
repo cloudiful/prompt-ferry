@@ -1,0 +1,244 @@
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+use crate::{
+    db,
+    worker_admin_state::{AdminState, error, internal},
+};
+use axum::{http::StatusCode, response::Response};
+
+use super::{SessionUser, validate_request_budget_limit};
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct McpServerRequest {
+    pub scope: Option<String>,
+    pub owner_user_id: Option<i64>,
+    pub name: String,
+    pub aggregate_naming_mode: Option<String>,
+    pub transport: String,
+    pub url: Option<String>,
+    pub command: Option<String>,
+    pub args: Option<serde_json::Value>,
+    pub env_json: Option<serde_json::Value>,
+    pub bearer_tokens: Option<Vec<String>>,
+    pub http_headers_json: Option<serde_json::Value>,
+    pub tool_filter_mode: Option<String>,
+    pub allowed_tools: Option<serde_json::Value>,
+    pub disabled_tools: Option<serde_json::Value>,
+    pub disabled_resources: Option<serde_json::Value>,
+    pub daily_max_requests: Option<i32>,
+    pub monthly_max_requests: Option<i32>,
+    pub enabled: Option<bool>,
+    pub timeout_ms: Option<i32>,
+}
+
+impl McpServerRequest {
+    pub async fn validate_for_create(
+        &self,
+        state: &AdminState,
+        user: &SessionUser,
+    ) -> Result<(), Response> {
+        self.validate(state, None, user).await
+    }
+
+    pub async fn validate_for_update(
+        &self,
+        state: &AdminState,
+        existing_server_id: Uuid,
+        user: &SessionUser,
+    ) -> Result<(), Response> {
+        self.validate(state, Some(existing_server_id), user).await
+    }
+
+    pub fn into_input(
+        self,
+        user: &SessionUser,
+        existing_server: Option<&db::McpServer>,
+    ) -> db::McpServerInput {
+        let (scope, owner_user_id) = if user.is_admin {
+            (
+                self.scope.unwrap_or_else(|| "admin".to_string()),
+                self.owner_user_id,
+            )
+        } else {
+            ("user".to_string(), Some(user.user_id))
+        };
+        db::McpServerInput {
+            scope,
+            owner_user_id,
+            name: self.name,
+            aggregate_naming_mode: self
+                .aggregate_naming_mode
+                .unwrap_or_else(|| "passthrough_preferred".to_string()),
+            transport: self.transport,
+            url: self.url,
+            command: self.command,
+            args: self.args.unwrap_or_else(|| serde_json::json!([])),
+            env_json: self.env_json.unwrap_or_else(|| serde_json::json!({})),
+            bearer_tokens_json: self
+                .bearer_tokens
+                .map(|tokens| {
+                    serde_json::Value::Array(
+                        tokens
+                            .into_iter()
+                            .map(|token| token.trim().to_string())
+                            .filter(|token| !token.is_empty())
+                            .map(serde_json::Value::String)
+                            .collect(),
+                    )
+                })
+                .or_else(|| existing_server.map(|server| server.bearer_tokens_json.clone()))
+                .unwrap_or_else(|| serde_json::json!([])),
+            http_headers_json: self
+                .http_headers_json
+                .unwrap_or_else(|| serde_json::json!({})),
+            tool_filter_mode: self
+                .tool_filter_mode
+                .unwrap_or_else(|| "blacklist".to_string()),
+            allowed_tools: self.allowed_tools.unwrap_or_else(|| serde_json::json!([])),
+            disabled_tools: self.disabled_tools.unwrap_or_else(|| serde_json::json!([])),
+            disabled_resources: self
+                .disabled_resources
+                .unwrap_or_else(|| serde_json::json!([])),
+            daily_max_requests: self.daily_max_requests,
+            monthly_max_requests: self.monthly_max_requests,
+            enabled: self.enabled.unwrap_or(true),
+            timeout_ms: self.timeout_ms.unwrap_or(30_000).clamp(100, 300_000),
+        }
+    }
+
+    async fn validate(
+        &self,
+        state: &AdminState,
+        existing_server_id: Option<Uuid>,
+        user: &SessionUser,
+    ) -> Result<(), Response> {
+        validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")?;
+        validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")?;
+        let name = self.name.trim();
+        if name.is_empty() {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_name",
+                "mcp server name is required",
+            ));
+        }
+        let scope = if user.is_admin {
+            self.scope.as_deref().unwrap_or("admin")
+        } else {
+            "user"
+        };
+        if !matches!(scope, "admin" | "user") {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_scope",
+                "scope must be admin or user",
+            ));
+        }
+        if let Some(tool_filter_mode) = self.tool_filter_mode.as_deref()
+            && !matches!(tool_filter_mode, "blacklist" | "whitelist")
+        {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_tool_filter_mode",
+                "tool_filter_mode must be blacklist or whitelist",
+            ));
+        }
+        if let Some(aggregate_naming_mode) = self.aggregate_naming_mode.as_deref()
+            && !matches!(
+                aggregate_naming_mode,
+                "qualified_only" | "passthrough_preferred"
+            )
+        {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_aggregate_naming_mode",
+                "aggregate_naming_mode must be qualified_only or passthrough_preferred",
+            ));
+        }
+        let owner_user_id = if user.is_admin {
+            self.owner_user_id
+        } else {
+            Some(user.user_id)
+        };
+        if scope == "admin" && owner_user_id.is_some() {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_owner",
+                "admin mcp server cannot have owner",
+            ));
+        }
+        if scope == "user" && owner_user_id.is_none() {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_owner",
+                "user mcp server requires owner",
+            ));
+        }
+        if let Some(owner_user_id) = owner_user_id {
+            let owner = db::get_active_user(&state.pool, owner_user_id)
+                .await
+                .map_err(|err| internal(state, err))?;
+            if owner.is_none() {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_owner",
+                    "owner user not found or inactive",
+                ));
+            }
+        }
+        let servers = db::list_mcp_servers(&state.pool)
+            .await
+            .map_err(|err| internal(state, err))?;
+        if servers
+            .iter()
+            .any(|server| Some(server.server_id) != existing_server_id && server.name == name)
+        {
+            return Err(error(
+                StatusCode::CONFLICT,
+                "duplicate_mcp_server",
+                "mcp server name already exists",
+            ));
+        }
+        if let Some(tokens) = &self.bearer_tokens
+            && tokens.iter().any(|token| token.trim().is_empty())
+        {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_bearer_tokens",
+                "bearer_tokens must not contain empty values",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct McpTestResponse {
+    pub ok: bool,
+    pub message: String,
+    #[schema(value_type = u64)]
+    pub duration_ms: u128,
+    pub tool_count: usize,
+    pub resource_count: usize,
+    pub prompt_count: usize,
+    pub tools: Vec<McpCatalogItem>,
+    pub resources: Vec<McpCatalogItem>,
+    pub prompts: Vec<McpCatalogItem>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct McpCatalogResponse {
+    pub tools: Vec<McpCatalogItem>,
+    pub resources: Vec<McpCatalogItem>,
+    pub prompts: Vec<McpCatalogItem>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct McpCatalogItem {
+    pub name: String,
+    pub aggregate_names: Vec<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+}

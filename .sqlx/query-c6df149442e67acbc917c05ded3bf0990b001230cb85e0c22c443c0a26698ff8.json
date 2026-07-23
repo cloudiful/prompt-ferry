@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_record_leases (\n    request_id,\n    owner_worker_id,\n    lease_expires_at,\n    last_heartbeat_at\n)\nSELECT\n    $1,\n    $2,\n    $3,\n    $4\nFROM request_records\nWHERE request_id = $1\n  AND event_kind = 'request'\n  AND request_state IN ('received', 'awaiting_approval', 'upstream_processing')\nON CONFLICT (request_id) DO UPDATE\nSET\n    owner_worker_id = COALESCE(EXCLUDED.owner_worker_id, request_record_leases.owner_worker_id),\n    lease_expires_at = EXCLUDED.lease_expires_at,\n    last_heartbeat_at = EXCLUDED.last_heartbeat_at,\n    updated_at = NOW()\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c6df149442e67acbc917c05ded3bf0990b001230cb85e0c22c443c0a26698ff8"
+}

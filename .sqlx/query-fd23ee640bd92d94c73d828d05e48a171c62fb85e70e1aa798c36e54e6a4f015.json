@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "VACUUM (ANALYZE) request_record_raw_payloads;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "fd23ee640bd92d94c73d828d05e48a171c62fb85e70e1aa798c36e54e6a4f015"
+}

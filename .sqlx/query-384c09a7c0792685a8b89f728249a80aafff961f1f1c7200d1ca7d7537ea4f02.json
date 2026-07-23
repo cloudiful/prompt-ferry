@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT setting_value AS \"setting_value!\"\nFROM worker_settings\nWHERE setting_key = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "setting_value!",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "worker_settings",
+            "name": "setting_value"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "384c09a7c0792685a8b89f728249a80aafff961f1f1c7200d1ca7d7537ea4f02"
+}

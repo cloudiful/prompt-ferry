@@ -1,0 +1,294 @@
+<script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+import type { SortingState } from '@tanstack/vue-table'
+import { computed } from 'vue'
+import type { RequestRecordFilterModel, RequestRecordRowView } from '@/models'
+import type { RequestRecordFormatting } from '@/models/request-record-formatting'
+import type { UsageWorkspaceView } from '@/models/usage'
+import { REQUEST_RECORD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
+import TablePagination from '@/components/shared/TablePagination.vue'
+import UsageDetailDialog from './detail/UsageDetailDialog.vue'
+import UsageFilterSelect from './UsageFilterSelect.vue'
+
+const props = defineProps<{
+  formatting: RequestRecordFormatting
+  isAdmin: boolean
+  t: TranslateFn
+  workspace: UsageWorkspaceView
+}>()
+
+const filters = defineModel<RequestRecordFilterModel>('filters', {
+  required: true,
+})
+const detailVisible = defineModel<boolean>('detailVisible', { required: true })
+const emit = defineEmits<{
+  clearConversationOverride: []
+  filter: [event: TableFilterChange]
+  loadDetailRequestFull: []
+  openClearDialog: []
+  openDetail: [record: RequestRecordRowView]
+  page: [event: TablePageChange]
+  saveConversationOverride: [
+    selection: {
+      endpointId: string
+      endpointKeyId: string | null
+    },
+  ]
+  search: []
+  sort: [event: TableSortChange]
+}>()
+
+const columns = computed<TableColumn<RequestRecordRowView>[]>(() => [
+  { id: 'details' },
+  { accessorKey: 'request_date', header: props.t('date'), enableSorting: true },
+  { accessorKey: 'created_at', header: props.t('time'), enableSorting: true },
+  ...(props.isAdmin
+    ? [
+        {
+          accessorKey: 'user_key',
+          header: props.t('user'),
+          enableSorting: true,
+        },
+      ]
+    : []),
+  {
+    accessorKey: 'client_key_label',
+    header: props.t('clientKey'),
+    enableSorting: true,
+  },
+  { accessorKey: 'model_key', header: props.t('model'), enableSorting: true },
+  { accessorKey: 'target', header: props.t('upstream'), enableSorting: true },
+  {
+    accessorKey: 'request_state',
+    header: props.t('status'),
+    enableSorting: true,
+  },
+  { id: 'redaction', header: props.t('redaction') },
+  {
+    accessorKey: 'duration_ms',
+    header: props.t('totalLatency'),
+    enableSorting: true,
+  },
+  {
+    accessorKey: 'total_tokens',
+    header: props.t('tokenCacheSummary'),
+    enableSorting: true,
+  },
+  { id: 'throughput', header: `${props.t('throughput')} token/s` },
+  { accessorKey: 'error_message', header: props.t('error') },
+])
+
+const sorting = computed<SortingState>({
+  get: () =>
+    props.workspace.sort_order === 0
+      ? []
+      : [
+          {
+            id: props.workspace.sort_field,
+            desc: props.workspace.sort_order === -1,
+          },
+        ],
+  set: (value) => {
+    const sort = value[0]
+    emit('sort', {
+      sortField: sort?.id ?? 'created_at',
+      sortOrder: sort ? (sort.desc ? -1 : 1) : 0,
+    })
+  },
+})
+
+function applyFilter(): void {
+  emit('filter', {})
+}
+</script>
+
+<template>
+  <div class="grid gap-3">
+    <div class="grid gap-3 border-b border-default pb-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <h2 class="mr-auto text-sm font-semibold text-highlighted">
+          {{ t('recentRequests') }}
+        </h2>
+        <UInput
+          :model-value="filters.global.value ?? undefined"
+          class="min-w-64 flex-1"
+          icon="i-lucide-search"
+          :placeholder="t('search')"
+          @update:model-value="filters.global.value = String($event ?? '')"
+          @keydown.enter="$emit('search')"
+        />
+        <slot name="headerActions" />
+        <UButton
+          color="error"
+          variant="outline"
+          icon="i-lucide-trash-2"
+          :label="t('clearHistory')"
+          @click="$emit('openClearDialog')"
+        />
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <UsageFilterSelect
+          v-model="filters.request_date.value"
+          :options="workspace.facets.request_date_options"
+          :placeholder="t('allDates')"
+          @change="applyFilter"
+        />
+        <UsageFilterSelect
+          v-if="isAdmin"
+          v-model="filters.user_key.value"
+          :options="workspace.facets.request_user_options"
+          :placeholder="t('allUsers')"
+          @change="applyFilter"
+        />
+        <UsageFilterSelect
+          v-model="filters.model_key.value"
+          :options="workspace.facets.request_model_options"
+          :placeholder="t('allModels')"
+          @change="applyFilter"
+        />
+        <UsageFilterSelect
+          v-model="filters.request_state.value"
+          :options="workspace.facets.request_state_options"
+          :placeholder="t('allStatus')"
+          @change="applyFilter"
+        />
+        <UsageFilterSelect
+          v-model="filters.redaction_applied.value"
+          :options="workspace.facets.request_redaction_options"
+          :placeholder="t('allRedactionStates')"
+          @change="applyFilter"
+        />
+      </div>
+    </div>
+
+    <div class="min-w-0 overflow-x-auto">
+      <UTable
+        v-model:sorting="sorting"
+        :data="workspace.records"
+        :columns="columns"
+        :loading="workspace.records_loading"
+        class="min-w-[76rem]"
+      >
+        <template #empty>{{ t('noRequestRecords') }}</template>
+        <template #details-cell="{ row }">
+          <UButton
+            icon="i-lucide-chart-no-axes-column"
+            color="neutral"
+            variant="ghost"
+            :aria-label="t('viewDetails')"
+            @click="$emit('openDetail', row.original)"
+          />
+        </template>
+        <template #created_at-cell="{ row }">{{
+          formatting.formatTime(row.original.created_at)
+        }}</template>
+        <template #client_key_label-cell="{ row }">{{
+          row.original.client_key_label || '-'
+        }}</template>
+        <template #model_key-cell="{ row }">
+          <span class="font-semibold text-highlighted">{{
+            row.original.model_key
+          }}</span>
+        </template>
+        <template #target-cell="{ row }">
+          <div class="flex items-center gap-1 whitespace-nowrap">
+            <span class="font-semibold text-highlighted">{{
+              row.original.upstream_label
+            }}</span>
+            <UBadge
+              :label="`${t('session')} ${row.original.session_short_id}`"
+              variant="subtle"
+            />
+            <UBadge
+              v-if="row.original.conversation_seq"
+              :label="`#${row.original.conversation_seq}`"
+              variant="subtle"
+            />
+            <UBadge
+              v-if="row.original.is_first_turn"
+              :label="t('firstTurn')"
+              variant="subtle"
+            />
+          </div>
+        </template>
+        <template #request_state-cell="{ row }">
+          <div class="flex items-center gap-1 whitespace-nowrap">
+            <UBadge
+              :label="
+                formatting.formatRequestStateLabel(row.original.request_state)
+              "
+              :color="
+                formatting.requestStateSeverity(row.original.request_state)
+              "
+            />
+            <UBadge
+              :label="`HTTP ${row.original.status ?? '-'}`"
+              color="neutral"
+              variant="subtle"
+            />
+            <UBadge
+              v-if="row.original.storage_sanitized"
+              label="NUL"
+              color="warning"
+              variant="subtle"
+            />
+          </div>
+        </template>
+        <template #redaction-cell="{ row }">
+          <div
+            v-if="row.original.redaction.applied"
+            class="flex items-center gap-1"
+          >
+            <UBadge :label="t('redactionHit')" color="info" variant="subtle" />
+            <UBadge
+              :label="String(row.original.redaction.replacements_count)"
+              color="neutral"
+              variant="subtle"
+            />
+          </div>
+          <span v-else>-</span>
+        </template>
+        <template #duration_ms-cell="{ row }">{{
+          formatting.formatMs(row.original.duration_ms)
+        }}</template>
+        <template #total_tokens-cell="{ row }">
+          {{ formatting.formatCount(row.original.total_tokens) }} /
+          {{ formatting.formatCount(row.original.cached_tokens) }} /
+          {{ formatting.formatPercent(row.original.cache_rate) }}
+        </template>
+        <template #throughput-cell="{ row }">{{
+          formatting.formatOutputTokensPerSecond(row.original)
+        }}</template>
+        <template #error_message-cell="{ row }">
+          <UButton
+            v-if="row.original.error_message"
+            color="error"
+            variant="link"
+            class="max-w-56 truncate"
+            :label="`${row.original.error_code}: ${row.original.error_message}`"
+            @click="$emit('openDetail', row.original)"
+          />
+          <span v-else>-</span>
+        </template>
+      </UTable>
+    </div>
+
+    <TablePagination
+      :first="workspace.first"
+      :rows="workspace.rows_per_page"
+      :total="workspace.total"
+      :page-size-options="REQUEST_RECORD_PAGE_SIZE_OPTIONS"
+      @change="$emit('page', $event)"
+    />
+
+    <UsageDetailDialog
+      v-model:visible="detailVisible"
+      :detail="workspace.detail"
+      :formatting="formatting"
+      :t="t"
+      @clear-conversation-override="$emit('clearConversationOverride')"
+      @load-request-full="$emit('loadDetailRequestFull')"
+      @save-conversation-override="$emit('saveConversationOverride', $event)"
+    />
+  </div>
+</template>

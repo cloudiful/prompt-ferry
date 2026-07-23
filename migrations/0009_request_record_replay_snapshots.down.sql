@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS idx_request_record_replay_snapshots_conversation_seq;
+DROP TABLE IF EXISTS request_record_replay_snapshots;

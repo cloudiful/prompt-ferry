@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH selected_config AS (\n    SELECT\n        CASE\n            WHEN $1::BOOLEAN THEN COALESCE(\n                (SELECT setting_value\n                 FROM worker_settings\n                 WHERE setting_key = 'redaction_config'),\n                '{\"custom_strings\":[]}'::jsonb\n            )\n            ELSE COALESCE(\n                (SELECT config\n                 FROM user_redaction_configs\n                 WHERE user_id = $2),\n                '{\"custom_strings\":[]}'::jsonb\n            )\n        END AS config,\n        CASE\n            WHEN $1::BOOLEAN THEN (\n                SELECT updated_at\n                FROM worker_settings\n                WHERE setting_key = 'redaction_config'\n            )\n            ELSE (\n                SELECT updated_at\n                FROM user_redaction_configs\n                WHERE user_id = $2\n            )\n        END AS updated_at\n)\nSELECT\n    COUNT(elem.value)::BIGINT AS \"total!\",\n    selected_config.updated_at AS \"updated_at?\"\nFROM selected_config\nLEFT JOIN LATERAL jsonb_array_elements(\n    COALESCE(config -> 'custom_strings', '[]'::jsonb)\n) AS elem(value)\n    ON $3::TEXT IS NULL\n    OR BTRIM($3::TEXT) = ''\n    OR LOWER(elem.value ->> 'pattern') LIKE '%' || LOWER(BTRIM($3::TEXT)) || '%'\nGROUP BY selected_config.updated_at;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "updated_at?",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "580c8ad726c1fff9dd30421ca673399bc6992b67a79af15367c31c0e3d8d6751"
+}

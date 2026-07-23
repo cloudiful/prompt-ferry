@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT child.relname AS name\nFROM pg_inherits inheritance\nJOIN pg_class parent ON parent.oid = inheritance.inhparent\nJOIN pg_class child ON child.oid = inheritance.inhrelid\nWHERE parent.oid = 'request_record_raw_payloads'::regclass\n  AND child.relname <> 'request_record_raw_payloads_default'\nORDER BY child.relname;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "pg_class",
+            "name": "relname"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6ec9103d71c98b769d567b65b8c0188820dd802925dfbd43c553598813bc4e0f"
+}

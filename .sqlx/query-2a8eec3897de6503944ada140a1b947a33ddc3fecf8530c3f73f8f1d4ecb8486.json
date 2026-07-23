@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM model_route_targets\nWHERE rule_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2a8eec3897de6503944ada140a1b947a33ddc3fecf8530c3f73f8f1d4ecb8486"
+}

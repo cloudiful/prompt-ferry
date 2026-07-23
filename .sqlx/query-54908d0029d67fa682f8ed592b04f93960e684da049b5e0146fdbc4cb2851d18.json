@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM model_endpoint_rules\nWHERE rule_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "54908d0029d67fa682f8ed592b04f93960e684da049b5e0146fdbc4cb2851d18"
+}

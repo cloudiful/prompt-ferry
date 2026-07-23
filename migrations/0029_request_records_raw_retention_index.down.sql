@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_request_records_raw_retention_created_at;

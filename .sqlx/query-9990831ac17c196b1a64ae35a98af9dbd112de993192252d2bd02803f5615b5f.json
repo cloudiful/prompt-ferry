@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT event_id, message_json, has_reasoning_content, has_tool_calls, created_at\nFROM request_record_assistant_artifacts\nWHERE event_id = ANY($1)\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_record_assistant_artifacts",
+            "name": "event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "message_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "request_record_assistant_artifacts",
+            "name": "message_json"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "has_reasoning_content",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_record_assistant_artifacts",
+            "name": "has_reasoning_content"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "has_tool_calls",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "request_record_assistant_artifacts",
+            "name": "has_tool_calls"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_record_assistant_artifacts",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9990831ac17c196b1a64ae35a98af9dbd112de993192252d2bd02803f5615b5f"
+}

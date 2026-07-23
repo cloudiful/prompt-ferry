@@ -1,0 +1,5 @@
+ALTER TABLE request_records
+ADD COLUMN IF NOT EXISTS storage_sanitized BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE request_records
+ADD COLUMN IF NOT EXISTS storage_sanitized_nul_count INTEGER NOT NULL DEFAULT 0;

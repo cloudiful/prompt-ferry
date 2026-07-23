@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM client_keys\nWHERE user_id = $1\n  AND key_id = $2\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9ff85a8e1b9c9f7f16b5f1e373062eeb4ac93355610998e4ea776202cbc0b94d"
+}

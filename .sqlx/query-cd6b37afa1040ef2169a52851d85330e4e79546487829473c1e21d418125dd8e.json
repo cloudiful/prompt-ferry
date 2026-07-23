@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "VACUUM (ANALYZE) request_records;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "cd6b37afa1040ef2169a52851d85330e4e79546487829473c1e21d418125dd8e"
+}

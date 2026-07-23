@@ -1,0 +1,92 @@
+use serde_json::Value;
+
+pub(super) fn should_process_ai_string_field(
+    request_path: &str,
+    json_path: &str,
+    object_type: Option<&str>,
+    key: &str,
+    value: &Value,
+) -> bool {
+    if !matches!(value, Value::String(_)) {
+        return false;
+    }
+
+    match request_path {
+        "/v1/chat/completions" => should_process_chat_string_field(json_path, key),
+        "/v1/responses" => should_process_responses_string_field(json_path, object_type, key),
+        _ => false,
+    }
+}
+
+fn should_process_chat_string_field(json_path: &str, key: &str) -> bool {
+    (key == "content" && json_path.contains("/messages/"))
+        || (key == "text" && json_path.contains("/messages/") && json_path.contains("/content/"))
+        || (key == "arguments"
+            && (json_path.ends_with("/function")
+                || json_path.ends_with("/function_call")
+                || json_path.contains("/tool_calls/")))
+        || (key == "output" && json_path.contains("/messages/"))
+}
+
+fn should_process_responses_string_field(
+    json_path: &str,
+    object_type: Option<&str>,
+    key: &str,
+) -> bool {
+    match key {
+        "instructions" => json_path == "/instructions",
+        "input" => json_path == "/input",
+        "text" => matches!(
+            object_type,
+            Some("input_text") | Some("output_text") | Some("summary_text") | Some("refusal")
+        ),
+        "content" => json_path.contains("/input/") || json_path.contains("/output/"),
+        "arguments" => object_type == Some("function_call"),
+        "output" => object_type == Some("function_call_output"),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_process_ai_string_field;
+    use serde_json::Value;
+
+    #[test]
+    fn matches_top_level_responses_instructions_and_input() {
+        let value = Value::String("secret".to_string());
+        assert!(should_process_ai_string_field(
+            "/v1/responses",
+            "/instructions",
+            None,
+            "instructions",
+            &value,
+        ));
+        assert!(should_process_ai_string_field(
+            "/v1/responses",
+            "/input",
+            None,
+            "input",
+            &value,
+        ));
+    }
+
+    #[test]
+    fn matches_nested_chat_tool_call_arguments_but_not_name() {
+        let value = Value::String("secret".to_string());
+        assert!(should_process_ai_string_field(
+            "/v1/chat/completions",
+            "/messages/1/tool_calls/0/function",
+            None,
+            "arguments",
+            &value,
+        ));
+        assert!(!should_process_ai_string_field(
+            "/v1/chat/completions",
+            "/messages/1/tool_calls/0/function",
+            None,
+            "name",
+            &value,
+        ));
+    }
+}

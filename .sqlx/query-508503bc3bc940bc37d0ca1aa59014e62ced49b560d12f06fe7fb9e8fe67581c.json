@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH selected_config AS (\n    SELECT CASE\n        WHEN $1::BOOLEAN THEN COALESCE(\n            (SELECT setting_value\n             FROM worker_settings\n             WHERE setting_key = 'redaction_config'),\n            '{\"custom_strings\":[]}'::jsonb\n        )\n        ELSE COALESCE(\n            (SELECT config\n             FROM user_redaction_configs\n             WHERE user_id = $2),\n            '{\"custom_strings\":[]}'::jsonb\n        )\n    END AS config\n),\nrules AS (\n    SELECT\n        elem.value AS rule,\n        elem.ordinality::BIGINT - 1 AS array_index\n    FROM selected_config,\n         LATERAL jsonb_array_elements(\n             COALESCE(config -> 'custom_strings', '[]'::jsonb)\n         ) WITH ORDINALITY AS elem(value, ordinality)\n    WHERE $5::TEXT IS NULL\n       OR BTRIM($5::TEXT) = ''\n       OR LOWER(elem.value ->> 'pattern') LIKE '%' || LOWER(BTRIM($5::TEXT)) || '%'\n)\nSELECT\n    rule ->> 'pattern' AS \"pattern!\",\n    rule ->> 'match_type' AS \"match_type!\",\n    rule ->> 'scope' AS \"scope!\",\n    array_index AS \"array_index!\"\nFROM rules\nORDER BY array_index DESC\nOFFSET $3\nLIMIT $4;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pattern!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "match_type!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "array_index!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "508503bc3bc940bc37d0ca1aa59014e62ced49b560d12f06fe7fb9e8fe67581c"
+}

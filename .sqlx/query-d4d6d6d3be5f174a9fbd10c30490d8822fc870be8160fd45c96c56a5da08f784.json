@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE approval_requests\nSET\n    webhook_last_error = $2,\n    webhook_last_attempted_at = NOW(),\n    updated_at = NOW()\nWHERE approval_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d4d6d6d3be5f174a9fbd10c30490d8822fc870be8160fd45c96c56a5da08f784"
+}

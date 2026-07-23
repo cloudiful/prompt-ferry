@@ -1,0 +1,64 @@
+use anyhow::anyhow;
+use serde_json::Value;
+
+use super::{
+    filtering::{call_server, is_disabled_item},
+    protocol::json_error_value,
+    targeting::{load_visible_server, parse_prefixed_name, parse_resource_target},
+};
+
+pub(super) async fn route_prefixed(
+    pool: &sqlx::PgPool,
+    user_id: Option<i64>,
+    conversation_id: Option<&str>,
+    id: Value,
+    mut request: Value,
+    field: &str,
+    method: &str,
+) -> anyhow::Result<Value> {
+    let Some(name) = request
+        .pointer(&format!("/params/{field}"))
+        .and_then(Value::as_str)
+    else {
+        return Ok(json_error_value(id, -32602, "missing prefixed name"));
+    };
+    let Some(target) = parse_prefixed_name(name) else {
+        return Ok(json_error_value(id, -32602, "name must be server__name"));
+    };
+    request["params"][field] = Value::String(target.upstream_name.clone());
+    request["method"] = Value::String(method.to_string());
+    let server = load_visible_server(pool, user_id, &target.server_name)
+        .await?
+        .ok_or_else(|| anyhow!("mcp server not found or disabled"))?;
+    if method == "tools/call" && is_disabled_item(&server, "tools", &target.upstream_name) {
+        return Ok(json_error_value(id, -32602, "tool is disabled"));
+    }
+    call_server(&server, request, conversation_id).await
+}
+
+pub(super) async fn route_resource(
+    pool: &sqlx::PgPool,
+    user_id: Option<i64>,
+    conversation_id: Option<&str>,
+    id: Value,
+    mut request: Value,
+) -> anyhow::Result<Value> {
+    let Some(uri) = request.pointer("/params/uri").and_then(Value::as_str) else {
+        return Ok(json_error_value(id, -32602, "missing resource uri"));
+    };
+    let Some(target) = parse_resource_target(uri)? else {
+        return Ok(json_error_value(
+            id,
+            -32602,
+            "uri must start with mcp://server/",
+        ));
+    };
+    request["params"]["uri"] = Value::String(target.upstream_name.clone());
+    let server = load_visible_server(pool, user_id, &target.server_name)
+        .await?
+        .ok_or_else(|| anyhow!("mcp server not found or disabled"))?;
+    if is_disabled_item(&server, "resources", &target.upstream_name) {
+        return Ok(json_error_value(id, -32602, "resource is disabled"));
+    }
+    call_server(&server, request, conversation_id).await
+}

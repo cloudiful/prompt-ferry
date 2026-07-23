@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT key_hash, key_prefix, user_id\nFROM client_keys\nWHERE enabled = TRUE\nORDER BY key_id ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "key_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key_prefix",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "key_prefix"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "client_keys",
+            "name": "user_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f331abdcee458cec204978dd92094f24f54073e31608f489aee4ebb49bb63e03"
+}

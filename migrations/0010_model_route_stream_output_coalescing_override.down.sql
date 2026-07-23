@@ -1,0 +1,2 @@
+ALTER TABLE model_endpoint_rules
+DROP COLUMN IF EXISTS stream_output_coalescing_override_json;

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO usage_prompt_blocks(block_hash, role, content_json, preview_text)\nVALUES ($1, $2, $3, $4)\nON CONFLICT (block_hash) DO NOTHING\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "635eef51795358627ae8745a71646096f3e0ba26d856bbf3eebde4e08ce56d28"
+}

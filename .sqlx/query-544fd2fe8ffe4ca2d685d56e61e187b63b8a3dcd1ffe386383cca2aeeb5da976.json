@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    COUNT(*) FILTER (WHERE created_at >= $3)::BIGINT AS \"daily_count?\",\n    COUNT(*) FILTER (WHERE created_at >= $4)::BIGINT AS \"monthly_count?\"\nFROM request_records\nWHERE event_kind = 'request'\n  AND request_category = $1\n  AND mcp_server_id = $2\n  AND NOT (\n      request_state IN ('failed', 'aborted')\n      AND error_code = 'budget_exceeded'\n  )\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "daily_count?",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "monthly_count?",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "544fd2fe8ffe4ca2d685d56e61e187b63b8a3dcd1ffe386383cca2aeeb5da976"
+}

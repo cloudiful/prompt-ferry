@@ -1,0 +1,254 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select\n  relay_id,\n  name,\n  relay_url,\n  enabled,\n  tls_mode,\n  bridge_encryption_mode,\n  relay_ca_ciphertext,\n  relay_ca_nonce,\n  relay_ca_key_version,\n  client_cert_ciphertext,\n  client_cert_nonce,\n  client_cert_key_version,\n  client_key_ciphertext,\n  client_key_nonce,\n  client_key_key_version,\n  bridge_encryption_key_ciphertext,\n  bridge_encryption_key_nonce,\n  bridge_encryption_key_key_version,\n  created_at,\n  updated_at\nfrom managed_relays\norder by lower(name), created_at, relay_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "relay_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "relay_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "relay_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "relay_url"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "tls_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "tls_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "bridge_encryption_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "bridge_encryption_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "relay_ca_ciphertext",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "relay_ca_ciphertext"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "relay_ca_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "relay_ca_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "relay_ca_key_version",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "relay_ca_key_version"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "client_cert_ciphertext",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "client_cert_ciphertext"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "client_cert_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "client_cert_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "client_cert_key_version",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "client_cert_key_version"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "client_key_ciphertext",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "client_key_ciphertext"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "client_key_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "client_key_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "client_key_key_version",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "client_key_key_version"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "bridge_encryption_key_ciphertext",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "bridge_encryption_key_ciphertext"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "bridge_encryption_key_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "bridge_encryption_key_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "bridge_encryption_key_key_version",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "bridge_encryption_key_key_version"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "managed_relays",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "ee4cb90502a94f34275fbb1e489ba85f9327769be52677fa74ff0ed434935918"
+}

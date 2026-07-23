@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM usage_prompt_blocks upb\nWHERE NOT EXISTS (\n    SELECT 1\n    FROM request_record_block_refs ref\n    WHERE ref.block_hash = upb.block_hash\n);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "f15ca811594a12c43cc8ed0c64b9c5d0a5885b65a09fd09bb7ff865e1977cbc1"
+}

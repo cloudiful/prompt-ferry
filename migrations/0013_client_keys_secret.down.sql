@@ -1,0 +1,2 @@
+ALTER TABLE client_keys
+DROP COLUMN IF EXISTS secret;

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM conversation_endpoint_overrides\nWHERE conversation_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "25515e3ccc0fd7bb5346d067c10234e31ceffa3c22fc11ad0d0c93f057c061d1"
+}

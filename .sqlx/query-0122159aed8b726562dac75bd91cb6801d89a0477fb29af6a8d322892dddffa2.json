@@ -1,0 +1,299 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mcp_servers\nSET\n    scope = $2,\n    owner_user_id = $3,\n    name = $4,\n    aggregate_naming_mode = $5,\n    transport = $6,\n    url = $7,\n    command = $8,\n    args = $9,\n    env_json = $10,\n    bearer_tokens_json = $11,\n    http_headers_json = $12,\n    tool_filter_mode = $13,\n    allowed_tools = $14,\n    disabled_tools = $15,\n    disabled_resources = $16,\n    daily_max_requests = $17,\n    monthly_max_requests = $18,\n    enabled = $19,\n    timeout_ms = $20,\n    updated_at = NOW()\nWHERE server_id = $1\nRETURNING server_id, scope, owner_user_id, name, aggregate_naming_mode, transport, url, command, args, env_json, bearer_tokens_json, http_headers_json, tool_filter_mode, allowed_tools, disabled_tools, disabled_resources, daily_max_requests, monthly_max_requests, enabled, timeout_ms, created_at, updated_at\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "server_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "server_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "owner_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "aggregate_naming_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "aggregate_naming_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "transport",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "transport"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "command",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "command"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "args",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "args"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "env_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "env_json"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "bearer_tokens_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "bearer_tokens_json"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "http_headers_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "http_headers_json"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "tool_filter_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "tool_filter_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "allowed_tools",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "allowed_tools"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "disabled_tools",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "disabled_tools"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "disabled_resources",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "disabled_resources"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "daily_max_requests",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "daily_max_requests"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "monthly_max_requests",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "monthly_max_requests"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "timeout_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "timeout_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Int4",
+        "Int4",
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0122159aed8b726562dac75bd91cb6801d89a0477fb29af6a8d322892dddffa2"
+}

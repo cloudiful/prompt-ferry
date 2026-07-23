@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "LOCK TABLE request_record_raw_payloads_default IN SHARE MODE;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "9bb010f2f93e17bf55ca3e54fbe5bc9930f9cba55718d6fe179ac46be2e6d9ab"
+}

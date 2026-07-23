@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT event_id, conversation_id, conversation_seq, base_event_id, prompt_refs_json,\n       ref_count, byte_size, created_at\nFROM request_record_replay_snapshots\nWHERE conversation_id = $1\nORDER BY conversation_seq DESC, event_id DESC\nLIMIT 1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_record_replay_snapshots",
+            "name": "event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "conversation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_record_replay_snapshots",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "conversation_seq",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_record_replay_snapshots",
+            "name": "conversation_seq"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "base_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_record_replay_snapshots",
+            "name": "base_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "prompt_refs_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "request_record_replay_snapshots",
+            "name": "prompt_refs_json"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "ref_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_record_replay_snapshots",
+            "name": "ref_count"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "byte_size",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_record_replay_snapshots",
+            "name": "byte_size"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_record_replay_snapshots",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8e4c5758199f14909fe6e88a2b4546ca127cb7bdfa753cd5c58d54984ca0b2f8"
+}

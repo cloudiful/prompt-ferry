@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    COUNT(*) FILTER (WHERE created_at >= $3)::BIGINT AS \"daily_count?\",\n    COUNT(*) FILTER (WHERE created_at >= $4)::BIGINT AS \"monthly_count?\"\nFROM request_records\nWHERE event_kind = 'request'\n  AND request_category = $1\n  AND model_route_rule_id = $2\n  AND NOT (\n      request_state = 'failed'\n      AND error_code = 'budget_exceeded'\n  )\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "daily_count?",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "monthly_count?",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "3f448040d86b9480847e878d3b079d9123b74a57c07793242a7bb1d9843f2b92"
+}

@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-prompt_ferry}
+      POSTGRES_USER: ${POSTGRES_USER:-prompt_ferry}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  relay:
+    image: ${PROMPT_FERRY_IMAGE:?set PROMPT_FERRY_IMAGE in .env}
+    restart: unless-stopped
+    command: ["relay"]
+    environment:
+      PROMPT_FERRY_LOGGING__LEVEL: ${PROMPT_FERRY_LOGGING__LEVEL:-info}
+      PROMPT_FERRY_RELAY__BIND: 0.0.0.0:8787
+      PROMPT_FERRY_RELAY__WORKER_BIND: 0.0.0.0:8788
+      PROMPT_FERRY_RELAY__CLIENT_TOKEN: ${PROMPT_FERRY_RELAY__CLIENT_TOKEN:?set PROMPT_FERRY_RELAY__CLIENT_TOKEN in .env}
+      PROMPT_FERRY_RELAY__WORKER_TOKEN: ${PROMPT_FERRY_WORKER_TOKEN:?set PROMPT_FERRY_WORKER_TOKEN in .env}
+      PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS: ${PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS:-300}
+    ports:
+      - "127.0.0.1:${PROMPT_FERRY_RELAY_PORT:-8787}:8787"
+
+  worker:
+    image: ${PROMPT_FERRY_IMAGE:?set PROMPT_FERRY_IMAGE in .env}
+    restart: unless-stopped
+    command: ["worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      relay:
+        condition: service_started
+    environment:
+      PROMPT_FERRY_LOGGING__LEVEL: ${PROMPT_FERRY_LOGGING__LEVEL:-info}
+      PROMPT_FERRY_WORKER__RELAY_URLS: '["ws://relay:8788/ws/worker"]'
+      PROMPT_FERRY_WORKER__WORKER_TOKEN: ${PROMPT_FERRY_WORKER_TOKEN:?set PROMPT_FERRY_WORKER_TOKEN in .env}
+      PROMPT_FERRY_WORKER__DATABASE_URL: postgres://${POSTGRES_USER:-prompt_ferry}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-prompt_ferry}
+      PROMPT_FERRY_WORKER__ADMIN_BIND: 0.0.0.0:80
+      PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN: ${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN:-admin}
+      PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD: ${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD:?set PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD in .env}
+      PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY: ${PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY:?set PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY in .env}
+    ports:
+      - "127.0.0.1:${PROMPT_FERRY_WORKER_ADMIN_PORT:-8789}:80"
+
+volumes:
+  postgres-data:

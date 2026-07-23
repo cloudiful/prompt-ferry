@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_record_block_refs (event_id, block_hash)\nSELECT $1, refs.ref->>'block_hash'\nFROM jsonb_array_elements($2) refs(ref)\nWHERE refs.ref ? 'block_hash'\nON CONFLICT (event_id, block_hash) DO NOTHING;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7d88a555f2e52882bde19b5ebc01c032e8977451f25b6110fe32129beaddf4ed"
+}

@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    conversation_id,\n    session_ciphertext,\n    session_nonce,\n    session_key_version,\n    last_event_id,\n    created_at,\n    updated_at\nFROM conversation_redaction_sessions\nWHERE conversation_id = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "conversation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "conversation_redaction_sessions",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "session_ciphertext",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "conversation_redaction_sessions",
+            "name": "session_ciphertext"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "session_nonce",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "conversation_redaction_sessions",
+            "name": "session_nonce"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "session_key_version",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "conversation_redaction_sessions",
+            "name": "session_key_version"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "last_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "conversation_redaction_sessions",
+            "name": "last_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "conversation_redaction_sessions",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "conversation_redaction_sessions",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b1d629d21fa4b8d3acf28fc2e365a2376eccceffe99a5fc912e65e263775c3fe"
+}
