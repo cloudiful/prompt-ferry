@@ -21,6 +21,6 @@ SELECT
     updated_at
 FROM approval_requests
 WHERE approval_status <> 'pending'
-ORDER BY created_at DESC
+ORDER BY created_at DESC, approval_id DESC
 OFFSET $1
 LIMIT $2

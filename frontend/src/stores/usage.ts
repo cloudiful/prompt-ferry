@@ -158,6 +158,17 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
       })
       recordState.rows.value = page.rows
       queryState.total.value = page.total
+      queryState.first.value = page.first
+      queryState.rowsPerPage.value = page.rowsPerPage
+      if (
+        page.rows.length === 0 &&
+        page.total > 0 &&
+        page.first >= page.total
+      ) {
+        const previousFirst =
+          Math.floor((page.total - 1) / page.rowsPerPage) * page.rowsPerPage
+        await refreshRecords(previousFirst, page.rowsPerPage)
+      }
     } finally {
       loadingState.records.value = false
     }

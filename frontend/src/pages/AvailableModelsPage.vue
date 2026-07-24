@@ -6,6 +6,8 @@ import { useLocale } from '@/composables/useLocale'
 import { useNotifier } from '@/composables/useNotifier'
 import type { AvailableModel } from '@/generated/admin-api'
 import { useAvailableModelsStore } from '@/stores/available-models'
+import TablePagination from '@/components/shared/TablePagination.vue'
+import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
 const { t } = useLocale()
 const { notifyApiError } = useNotifier()
@@ -21,6 +23,18 @@ const columns = computed<TableColumn<AvailableModel>[]>(() => [
 async function refresh(): Promise<void> {
   try {
     await availableModelsStore.refresh()
+  } catch (cause) {
+    notifyApiError(cause)
+  }
+}
+
+function onPage(event: TablePageChange): void {
+  void refreshPage(event.first, event.rows)
+}
+
+async function refreshPage(first: number, rows: number): Promise<void> {
+  try {
+    await availableModelsStore.refresh(first, rows)
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -48,5 +62,12 @@ onMounted(async () => {
       </template>
     </PageIntro>
     <UTable :data="models" :columns="columns" :loading="busy" class="min-w-0" />
+    <TablePagination
+      :first="availableModelsStore.first"
+      :rows="availableModelsStore.rows"
+      :total="availableModelsStore.total"
+      :page-size-options="STANDARD_PAGE_SIZE_OPTIONS"
+      @change="onPage"
+    />
   </div>
 </template>

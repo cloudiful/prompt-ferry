@@ -15,6 +15,8 @@ pub struct ApprovalPageQuery {
 pub struct ApprovalPageResponse {
     pub total: i64,
     pub approvals: Vec<db::ApprovalRequest>,
+    pub first: i64,
+    pub rows: i64,
 }
 
 impl From<db::ApprovalRequestPage> for ApprovalPageResponse {
@@ -22,6 +24,8 @@ impl From<db::ApprovalRequestPage> for ApprovalPageResponse {
         Self {
             total: value.total,
             approvals: value.approvals,
+            first: value.first,
+            rows: value.rows,
         }
     }
 }

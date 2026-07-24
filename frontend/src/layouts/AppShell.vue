@@ -65,13 +65,9 @@ async function logout(): Promise<void> {
       :max-size="22"
       :default-size="17"
     >
-      <template #header="{ collapsed: isCollapsed }">
-        <div class="flex min-w-0 items-center gap-2 px-1">
-          <UIcon name="i-lucide-cable" class="size-5 shrink-0 text-primary" />
-          <span v-if="!isCollapsed" class="truncate font-semibold"
-            >Prompt Ferry</span
-          >
-          <UDashboardSidebarCollapse class="ml-auto" />
+      <template #header>
+        <div class="flex min-w-0 items-center justify-end px-1">
+          <UDashboardSidebarCollapse />
         </div>
       </template>
 

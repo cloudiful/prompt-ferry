@@ -77,7 +77,12 @@ pub async fn list_approval_requests_page(
             (total, approvals)
         }
     };
-    Ok(ApprovalRequestPage { total, approvals })
+    Ok(ApprovalRequestPage {
+        total,
+        approvals,
+        first,
+        rows,
+    })
 }
 
 pub async fn get_approval_request(

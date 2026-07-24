@@ -164,6 +164,8 @@ pub struct RequestRecordBucket {
 pub struct RequestRecordPage {
     pub total: i64,
     pub records: Vec<RequestRecordListRow>,
+    pub first: i64,
+    pub rows: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Default, ToSchema)]

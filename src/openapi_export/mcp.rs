@@ -1,12 +1,16 @@
 use crate::{
     db,
-    worker_admin_types::{McpCatalogResponse, McpServerRequest, McpTestResponse},
+    worker_admin_types::{
+        McpCatalogResponse, McpServerPageResponse, McpServerRequest, McpTestResponse,
+        TablePageQuery,
+    },
 };
 
 #[utoipa::path(
     get,
     path = "/api/v1/admin/mcp-servers",
-    responses((status = 200, body = [db::McpServer], description = "MCP servers")),
+    params(TablePageQuery),
+    responses((status = 200, body = McpServerPageResponse, description = "MCP servers")),
     tag = "mcp"
 )]
 pub(super) fn list_mcp_servers() {}

@@ -2,16 +2,17 @@ use super::schemas::ErrorEnvelope;
 use crate::{
     db,
     worker_admin_types::{
-        AvailableModelsResponse, CreateClientKeyRequest, CreateClientKeyResponse,
-        UpdateClientKeyRequest,
+        AvailableModelsResponse, ClientKeyPageResponse, CreateClientKeyRequest,
+        CreateClientKeyResponse, TablePageQuery, UpdateClientKeyRequest,
     },
 };
 
 #[utoipa::path(
     get,
     path = "/api/v1/me/client-keys",
+    params(TablePageQuery),
     responses(
-        (status = 200, body = [db::ClientKey], description = "Current user client keys"),
+        (status = 200, body = ClientKeyPageResponse, description = "Current user client keys"),
         (status = 401, body = ErrorEnvelope, description = "Unauthorized")
     ),
     tag = "me"
@@ -61,6 +62,7 @@ pub(super) fn me_delete_client_key() {}
 #[utoipa::path(
     get,
     path = "/api/v1/me/models",
+    params(TablePageQuery),
     responses(
         (status = 200, body = AvailableModelsResponse, description = "Available models for current user"),
         (status = 401, body = ErrorEnvelope, description = "Unauthorized")

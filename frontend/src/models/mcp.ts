@@ -68,10 +68,11 @@ export function createMcpWorkspaceView(
   options: {
     labels: McpViewLabels
     testResults: Record<string, McpTestResponse>
+    total?: number
   },
 ): McpServerWorkspaceView {
   return {
-    total_count: servers.length,
+    total_count: options.total ?? servers.length,
     list_items: servers.map((server) =>
       createMcpServerListItemView(server, {
         labels: options.labels,

@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   createRelay,
@@ -13,24 +13,49 @@ import type {
   ManagedRelayRequest,
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
+import {
+  STANDARD_PAGE_SIZE_OPTIONS,
+  useStoredPageSize,
+} from '../table-pagination'
 
 export const useRelaysStore = defineStore('relays', () => {
   const relays = ref<ManagedRelay[]>([])
   const loading = ref(false)
   const reconnectingRelayId = ref<string | null>(null)
+  const first = ref(0)
+  const rows = useStoredPageSize('relays', 10, STANDARD_PAGE_SIZE_OPTIONS)
+  const total = ref(0)
+  const connectedCount = ref(0)
+  const enabledCount = ref(0)
 
-  const connectedCount = computed(
-    () => relays.value.filter((relay) => relay.connected).length,
-  )
-  const enabledCount = computed(
-    () => relays.value.filter((relay) => relay.enabled).length,
-  )
-
-  async function refresh(): Promise<void> {
+  async function refresh(
+    nextFirst = first.value,
+    nextRows = rows.value,
+  ): Promise<void> {
+    first.value = nextFirst
+    rows.value = nextRows
     loading.value = true
     try {
-      const response = expectData(await listRelays<true>(withData()))
+      const response = expectData(
+        await listRelays<true>(
+          withData({ query: { first: first.value, rows: rows.value } }),
+        ),
+      )
       relays.value = response.relays
+      total.value = response.total
+      first.value = response.first
+      rows.value = response.rows
+      connectedCount.value = response.connected_count
+      enabledCount.value = response.enabled_count
+      if (
+        relays.value.length === 0 &&
+        total.value > 0 &&
+        first.value >= total.value
+      ) {
+        const previousFirst =
+          Math.floor((total.value - 1) / rows.value) * rows.value
+        await refresh(previousFirst, rows.value)
+      }
     } finally {
       loading.value = false
     }
@@ -85,6 +110,7 @@ export const useRelaysStore = defineStore('relays', () => {
   return {
     connectedCount,
     enabledCount,
+    first,
     loading,
     reconnectRelay,
     reconnectingRelayId,
@@ -92,5 +118,7 @@ export const useRelaysStore = defineStore('relays', () => {
     relays,
     removeRelay,
     saveRelay,
+    rows,
+    total,
   }
 })

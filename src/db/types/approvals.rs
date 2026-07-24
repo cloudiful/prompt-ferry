@@ -86,6 +86,8 @@ impl ApprovalRequestCreate {
 pub struct ApprovalRequestPage {
     pub total: i64,
     pub approvals: Vec<ApprovalRequest>,
+    pub first: i64,
+    pub rows: i64,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]

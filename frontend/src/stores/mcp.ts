@@ -35,7 +35,7 @@ export const useMcpStore = defineStore('mcp', () => {
   const testingServerId = ref('')
   const testResults = ref<Record<string, McpTestResponse>>({})
   const catalogCache = ref<Record<string, McpCatalogResponse>>({})
-  const serverTotal = computed(() => servers.value.length)
+  const serverTotal = ref(0)
   const selectedWorkspaceView = computed(() =>
     createMcpWorkspaceView(servers.value, {
       labels: {
@@ -51,32 +51,43 @@ export const useMcpStore = defineStore('mcp', () => {
         publicScope: t('publicScope'),
       },
       testResults: testResults.value,
+      total: serverTotal.value,
     }),
   )
 
-  function syncServerPage(): void {
-    if (serverTotal.value === 0) {
-      serverFirst.value = 0
-      return
-    }
-    if (serverFirst.value >= serverTotal.value) {
-      serverFirst.value =
-        Math.floor((serverTotal.value - 1) / serverRows.value) *
-        serverRows.value
-    }
+  async function setServerPage(first: number, rows: number): Promise<void> {
+    await refresh(first, rows)
   }
 
-  function setServerPage(first: number, rows: number): void {
-    serverRows.value = rows
-    serverFirst.value = first
-    syncServerPage()
-  }
-
-  async function refresh(): Promise<void> {
+  async function refresh(
+    nextFirst = serverFirst.value,
+    nextRows = serverRows.value,
+  ): Promise<void> {
+    serverFirst.value = nextFirst
+    serverRows.value = nextRows
     loading.value = true
     try {
-      servers.value = expectData(await listMcpServers<true>(withData()))
-      syncServerPage()
+      const response = expectData(
+        await listMcpServers<true>(
+          withData({
+            query: { first: serverFirst.value, rows: serverRows.value },
+          }),
+        ),
+      )
+      servers.value = response.servers
+      serverTotal.value = response.total
+      serverFirst.value = response.first
+      serverRows.value = response.rows
+      if (
+        servers.value.length === 0 &&
+        serverTotal.value > 0 &&
+        serverFirst.value >= serverTotal.value
+      ) {
+        const previousFirst =
+          Math.floor((serverTotal.value - 1) / serverRows.value) *
+          serverRows.value
+        await refresh(previousFirst, serverRows.value)
+      }
     } finally {
       loading.value = false
     }

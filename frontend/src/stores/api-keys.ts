@@ -4,7 +4,7 @@ import {
   createClientKey,
   deleteClientKey,
   listClientKeys,
-  listUsers,
+  listUserOptions,
   meCreateClientKey,
   meDeleteClientKey,
   meListClientKeys,
@@ -18,6 +18,10 @@ import type {
   User,
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
+import {
+  STANDARD_PAGE_SIZE_OPTIONS,
+  useStoredPageSize,
+} from '../table-pagination'
 
 export const SELF_USER_ID = 0
 
@@ -27,6 +31,9 @@ export const useApiKeysStore = defineStore('api-keys', () => {
   const keys = ref<ClientKey[]>([])
   const loading = ref(false)
   const usersLoading = ref(false)
+  const first = ref(0)
+  const rows = useStoredPageSize('api-keys', 10, STANDARD_PAGE_SIZE_OPTIONS)
+  const total = ref(0)
 
   const hasUsers = computed(() => users.value.length > 0)
   const selectedUser = computed(() =>
@@ -39,7 +46,7 @@ export const useApiKeysStore = defineStore('api-keys', () => {
   async function loadUsers(): Promise<User[]> {
     usersLoading.value = true
     try {
-      const loaded = expectData(await listUsers<true>(withData()))
+      const loaded = expectData(await listUserOptions<true>(withData())).users
       users.value = loaded
       return loaded
     } finally {
@@ -47,20 +54,41 @@ export const useApiKeysStore = defineStore('api-keys', () => {
     }
   }
 
-  async function loadKeys(forceUserId?: number): Promise<ClientKey[]> {
+  async function loadKeys(
+    forceUserId?: number,
+    nextFirst = first.value,
+    nextRows = rows.value,
+  ): Promise<ClientKey[]> {
     const targetUserId = forceUserId ?? selectedUserId.value
+    first.value = nextFirst
+    rows.value = nextRows
     loading.value = true
     try {
-      const loaded =
+      const page =
         targetUserId === SELF_USER_ID
-          ? expectData(await meListClientKeys<true>(withData()))
-          : expectData(
-              await listClientKeys<true>(
-                withData({ path: { user_id: targetUserId } }),
+          ? expectData(
+              await meListClientKeys<true>(
+                withData({ query: { first: first.value, rows: rows.value } }),
               ),
             )
-      keys.value = loaded
-      return loaded
+          : expectData(
+              await listClientKeys<true>(
+                withData({
+                  path: { user_id: targetUserId },
+                  query: { first: first.value, rows: rows.value },
+                }),
+              ),
+            )
+      keys.value = page.keys
+      total.value = page.total
+      first.value = page.first
+      rows.value = page.rows
+      if (keys.value.length === 0 && total.value > 0 && first.value >= total.value) {
+        const previousFirst =
+          Math.floor((total.value - 1) / rows.value) * rows.value
+        return await loadKeys(targetUserId, previousFirst, rows.value)
+      }
+      return page.keys
     } finally {
       loading.value = false
     }
@@ -68,7 +96,7 @@ export const useApiKeysStore = defineStore('api-keys', () => {
 
   async function changeSelectedUser(userId: number): Promise<void> {
     selectedUserId.value = userId
-    await loadKeys(userId)
+    await loadKeys(userId, 0, rows.value)
   }
 
   async function createKey(
@@ -135,15 +163,18 @@ export const useApiKeysStore = defineStore('api-keys', () => {
   return {
     changeSelectedUser,
     createKey,
+    first,
     hasUsers,
     keys,
     loadKeys,
     loadUsers,
     loading,
     removeKey,
+    rows,
     saveKey,
     selectedUser,
     selectedUserId,
+    total,
     users,
     usersLoading,
   }

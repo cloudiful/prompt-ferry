@@ -152,6 +152,15 @@ export const useRedactionStore = defineStore('redaction', () => {
     customStringFirst.value = response.first
     customStringRows.value = response.rows
     customStringUpdatedAt.value = response.updated_at ?? null
+    if (
+      response.items.length === 0 &&
+      response.total > 0 &&
+      response.first >= response.total
+    ) {
+      customStringFirst.value =
+        Math.floor((response.total - 1) / response.rows) * response.rows
+      await loadCustomStringPage()
+    }
   }
 
   async function refresh(): Promise<void> {
@@ -219,7 +228,9 @@ export const useRedactionStore = defineStore('redaction', () => {
       Number.MAX_SAFE_INTEGER,
       customStringSearch.value,
     ).total
-    if (customStringFirst.value >= total && total > 0) {
+    if (total === 0) {
+      customStringFirst.value = 0
+    } else if (customStringFirst.value >= total) {
       customStringFirst.value =
         Math.floor((total - 1) / customStringRows.value) *
         customStringRows.value

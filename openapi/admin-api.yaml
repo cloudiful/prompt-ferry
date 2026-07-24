@@ -643,15 +643,26 @@ paths:
       tags:
       - mcp
       operationId: list_mcp_servers
+      parameters:
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
       responses:
         '200':
           description: MCP servers
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/McpServer'
+                $ref: '#/components/schemas/McpServerPageResponse'
     post:
       tags:
       - mcp
@@ -862,6 +873,19 @@ paths:
       tags:
       - relays
       operationId: list_relays
+      parameters:
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
       responses:
         '200':
           description: Managed relay list
@@ -1306,15 +1330,26 @@ paths:
       tags:
       - users
       operationId: list_users
+      parameters:
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
       responses:
         '200':
           description: Users
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/UserPageResponse'
         '401':
           description: ''
           content:
@@ -1350,6 +1385,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/users/options:
+    get:
+      tags:
+      - users
+      operationId: list_user_options
+      responses:
+        '200':
+          description: User options
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserOptionsResponse'
         '401':
           description: ''
           content:
@@ -1428,15 +1487,25 @@ paths:
         schema:
           type: integer
           format: int64
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
       responses:
         '200':
           description: Client keys
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ClientKey'
+                $ref: '#/components/schemas/ClientKeyPageResponse'
         '404':
           description: ''
           content:
@@ -1632,15 +1701,26 @@ paths:
       tags:
       - me
       operationId: me_list_client_keys
+      parameters:
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
       responses:
         '200':
           description: Current user client keys
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ClientKey'
+                $ref: '#/components/schemas/ClientKeyPageResponse'
         '401':
           description: Unauthorized
           content:
@@ -1746,6 +1826,19 @@ paths:
       tags:
       - me
       operationId: me_list_models
+      parameters:
+      - name: first
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
       responses:
         '200':
           description: Available models for current user
@@ -2074,11 +2167,19 @@ components:
       required:
       - total
       - approvals
+      - first
+      - rows
       properties:
         approvals:
           type: array
           items:
             $ref: '#/components/schemas/ApprovalRequest'
+        first:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
         total:
           type: integer
           format: int64
@@ -2167,11 +2268,19 @@ components:
       required:
       - total
       - approvals
+      - first
+      - rows
       properties:
         approvals:
           type: array
           items:
             $ref: '#/components/schemas/ApprovalRequest'
+        first:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
         total:
           type: integer
           format: int64
@@ -2194,11 +2303,23 @@ components:
       type: object
       required:
       - models
+      - total
+      - first
+      - rows
       properties:
+        first:
+          type: integer
+          format: int64
         models:
           type: array
           items:
             $ref: '#/components/schemas/AvailableModel'
+        rows:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
     BillingAdjustmentRequest:
       type: object
       required:
@@ -2317,11 +2438,19 @@ components:
       required:
       - total
       - charges
+      - first
+      - rows
       properties:
         charges:
           type: array
           items:
             $ref: '#/components/schemas/BillingChargeResponse'
+        first:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
         total:
           type: integer
           format: int64
@@ -2430,11 +2559,23 @@ components:
       type: object
       required:
       - rules
+      - total
+      - first
+      - rows
       properties:
+        first:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
         rules:
           type: array
           items:
             $ref: '#/components/schemas/BillingPriceRuleResponse'
+        total:
+          type: integer
+          format: int64
     BillingPriceRulePatch:
       type: object
       required:
@@ -2675,6 +2816,27 @@ components:
         user_id:
           type: integer
           format: int64
+    ClientKeyPageResponse:
+      type: object
+      required:
+      - keys
+      - total
+      - first
+      - rows
+      properties:
+        first:
+          type: integer
+          format: int64
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClientKey'
+        rows:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
     ConversationEndpointOverride:
       type: object
       required:
@@ -2851,11 +3013,19 @@ components:
       required:
       - total
       - endpoints
+      - first
+      - rows
       properties:
         endpoints:
           type: array
           items:
             $ref: '#/components/schemas/ProviderEndpoint'
+        first:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
         total:
           type: integer
           format: int64
@@ -2864,11 +3034,19 @@ components:
       required:
       - total
       - endpoints
+      - first
+      - rows
       properties:
         endpoints:
           type: array
           items:
             $ref: '#/components/schemas/ProviderEndpoint'
+        first:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
         total:
           type: integer
           format: int64
@@ -3124,11 +3302,31 @@ components:
       type: object
       required:
       - relays
+      - total
+      - first
+      - rows
+      - connected_count
+      - enabled_count
       properties:
+        connected_count:
+          type: integer
+          format: int64
+        enabled_count:
+          type: integer
+          format: int64
+        first:
+          type: integer
+          format: int64
         relays:
           type: array
           items:
             $ref: '#/components/schemas/ManagedRelay'
+        rows:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
     ManagedRelayPatchRequest:
       type: object
       properties:
@@ -3387,6 +3585,27 @@ components:
           type:
           - string
           - 'null'
+    McpServerPageResponse:
+      type: object
+      required:
+      - servers
+      - total
+      - first
+      - rows
+      properties:
+        first:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
+        servers:
+          type: array
+          items:
+            $ref: '#/components/schemas/McpServer'
+        total:
+          type: integer
+          format: int64
     McpServerRequest:
       type: object
       required:
@@ -3569,11 +3788,19 @@ components:
       required:
       - total
       - routes
+      - first
+      - rows
       properties:
+        first:
+          type: integer
+          format: int64
         routes:
           type: array
           items:
             $ref: '#/components/schemas/ModelEndpointRule'
+        rows:
+          type: integer
+          format: int64
         total:
           type: integer
           format: int64
@@ -3582,11 +3809,19 @@ components:
       required:
       - total
       - routes
+      - first
+      - rows
       properties:
+        first:
+          type: integer
+          format: int64
         routes:
           type: array
           items:
             $ref: '#/components/schemas/ModelEndpointRule'
+        rows:
+          type: integer
+          format: int64
         total:
           type: integer
           format: int64
@@ -5067,11 +5302,19 @@ components:
       required:
       - total
       - records
+      - first
+      - rows
       properties:
+        first:
+          type: integer
+          format: int64
         records:
           type: array
           items:
             $ref: '#/components/schemas/RequestRecordListRow'
+        rows:
+          type: integer
+          format: int64
         total:
           type: integer
           format: int64
@@ -5431,6 +5674,36 @@ components:
         user_id:
           type: integer
           format: int64
+    UserOptionsResponse:
+      type: object
+      required:
+      - users
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+    UserPageResponse:
+      type: object
+      required:
+      - users
+      - total
+      - first
+      - rows
+      properties:
+        first:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
     UserUpdate:
       type: object
       properties:

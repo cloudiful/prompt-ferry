@@ -12,6 +12,27 @@ pub async fn list_managed_relays(pool: &PgPool) -> Result<Vec<ManagedRelayRow>> 
     )
 }
 
+pub async fn list_managed_relays_page(
+    pool: &PgPool,
+    first: i64,
+    rows: i64,
+) -> Result<(i64, i64, Vec<ManagedRelayRow>)> {
+    let counts = sqlx::query_file!("src/sql/relays/count_managed_relays.sql")
+        .fetch_one(pool)
+        .await?;
+    let first = first.max(0);
+    let rows = rows.clamp(1, 200);
+    let relays = sqlx::query_file_as!(
+        ManagedRelayRow,
+        "src/sql/relays/list_managed_relays_page.sql",
+        first,
+        rows,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok((counts.total, counts.enabled_count, relays))
+}
+
 pub async fn list_enabled_managed_relays(pool: &PgPool) -> Result<Vec<ManagedRelayRow>> {
     Ok(sqlx::query_file_as!(
         ManagedRelayRow,

@@ -13,6 +13,8 @@ export type AppliedReplacementSchema = {
 
 export type ApprovalPageResponse = {
     approvals: Array<ApprovalRequest>;
+    first: number;
+    rows: number;
     total: number;
 };
 
@@ -41,6 +43,8 @@ export type ApprovalRequest = {
 
 export type ApprovalRequestPage = {
     approvals: Array<ApprovalRequest>;
+    first: number;
+    rows: number;
     total: number;
 };
 
@@ -52,7 +56,10 @@ export type AvailableModel = {
 };
 
 export type AvailableModelsResponse = {
+    first: number;
     models: Array<AvailableModel>;
+    rows: number;
+    total: number;
 };
 
 export type BillingAdjustmentRequest = {
@@ -97,6 +104,8 @@ export type BillingChargeLineResponse = {
 
 export type BillingChargePageResponse = {
     charges: Array<BillingChargeResponse>;
+    first: number;
+    rows: number;
     total: number;
 };
 
@@ -128,7 +137,10 @@ export type BillingChargeResponse = {
 };
 
 export type BillingPriceRulePageResponse = {
+    first: number;
+    rows: number;
     rules: Array<BillingPriceRuleResponse>;
+    total: number;
 };
 
 export type BillingPriceRulePatch = {
@@ -211,6 +223,13 @@ export type ClientKey = {
     user_id: number;
 };
 
+export type ClientKeyPageResponse = {
+    first: number;
+    keys: Array<ClientKey>;
+    rows: number;
+    total: number;
+};
+
 export type ConversationEndpointOverride = {
     conversation_id: string;
     created_at: string;
@@ -276,11 +295,15 @@ export type EndpointApiKeyRequest = {
 
 export type EndpointPage = {
     endpoints: Array<ProviderEndpoint>;
+    first: number;
+    rows: number;
     total: number;
 };
 
 export type EndpointPageResponse = {
     endpoints: Array<ProviderEndpoint>;
+    first: number;
+    rows: number;
     total: number;
 };
 
@@ -375,7 +398,12 @@ export type ManagedRelay = {
 };
 
 export type ManagedRelayListResponse = {
+    connected_count: number;
+    enabled_count: number;
+    first: number;
     relays: Array<ManagedRelay>;
+    rows: number;
+    total: number;
 };
 
 export type ManagedRelayPatchRequest = {
@@ -460,6 +488,13 @@ export type McpServer = {
     url?: string | null;
 };
 
+export type McpServerPageResponse = {
+    first: number;
+    rows: number;
+    servers: Array<McpServer>;
+    total: number;
+};
+
 export type McpServerRequest = {
     aggregate_naming_mode?: string | null;
     allowed_tools?: unknown;
@@ -517,12 +552,16 @@ export type ModelEndpointRule = {
 };
 
 export type ModelRoutePage = {
+    first: number;
     routes: Array<ModelEndpointRule>;
+    rows: number;
     total: number;
 };
 
 export type ModelRoutePageResponse = {
+    first: number;
     routes: Array<ModelEndpointRule>;
+    rows: number;
     total: number;
 };
 
@@ -977,7 +1016,9 @@ export type RequestRecordOverviewResponse = {
 };
 
 export type RequestRecordPage = {
+    first: number;
     records: Array<RequestRecordListRow>;
+    rows: number;
     total: number;
 };
 
@@ -1097,6 +1138,17 @@ export type User = {
     login_name: string;
     updated_at: string;
     user_id: number;
+};
+
+export type UserOptionsResponse = {
+    users: Array<User>;
+};
+
+export type UserPageResponse = {
+    first: number;
+    rows: number;
+    total: number;
+    users: Array<User>;
 };
 
 export type UserUpdate = {
@@ -1583,7 +1635,10 @@ export type TestEndpointResponse = TestEndpointResponses[keyof TestEndpointRespo
 export type ListMcpServersData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+    };
     url: '/api/v1/admin/mcp-servers';
 };
 
@@ -1591,7 +1646,7 @@ export type ListMcpServersResponses = {
     /**
      * MCP servers
      */
-    200: Array<McpServer>;
+    200: McpServerPageResponse;
 };
 
 export type ListMcpServersResponse = ListMcpServersResponses[keyof ListMcpServersResponses];
@@ -1798,7 +1853,10 @@ export type UpdateModelRouteResponse = UpdateModelRouteResponses[keyof UpdateMod
 export type ListRelaysData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+    };
     url: '/api/v1/admin/relays';
 };
 
@@ -2151,7 +2209,10 @@ export type RequestRecordSessionRouteOptionsResponse = RequestRecordSessionRoute
 export type ListUsersData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+    };
     url: '/api/v1/admin/users';
 };
 
@@ -2166,7 +2227,7 @@ export type ListUsersResponses = {
     /**
      * Users
      */
-    200: Array<User>;
+    200: UserPageResponse;
 };
 
 export type ListUsersResponse = ListUsersResponses[keyof ListUsersResponses];
@@ -2194,6 +2255,29 @@ export type CreateUserResponses = {
 };
 
 export type CreateUserResponse = CreateUserResponses[keyof CreateUserResponses];
+
+export type ListUserOptionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/users/options';
+};
+
+export type ListUserOptionsErrors = {
+    401: ErrorEnvelope;
+    403: ErrorEnvelope;
+};
+
+export type ListUserOptionsError = ListUserOptionsErrors[keyof ListUserOptionsErrors];
+
+export type ListUserOptionsResponses = {
+    /**
+     * User options
+     */
+    200: UserOptionsResponse;
+};
+
+export type ListUserOptionsResponse = ListUserOptionsResponses[keyof ListUserOptionsResponses];
 
 export type DeleteUserData = {
     body?: never;
@@ -2257,7 +2341,10 @@ export type ListClientKeysData = {
          */
         user_id: number;
     };
-    query?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+    };
     url: '/api/v1/admin/users/{user_id}/client-keys';
 };
 
@@ -2271,7 +2358,7 @@ export type ListClientKeysResponses = {
     /**
      * Client keys
      */
-    200: Array<ClientKey>;
+    200: ClientKeyPageResponse;
 };
 
 export type ListClientKeysResponse = ListClientKeysResponses[keyof ListClientKeysResponses];
@@ -2477,7 +2564,10 @@ export type BridgeStatusResponse = BridgeStatusResponses[keyof BridgeStatusRespo
 export type MeListClientKeysData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+    };
     url: '/api/v1/me/client-keys';
 };
 
@@ -2494,7 +2584,7 @@ export type MeListClientKeysResponses = {
     /**
      * Current user client keys
      */
-    200: Array<ClientKey>;
+    200: ClientKeyPageResponse;
 };
 
 export type MeListClientKeysResponse = MeListClientKeysResponses[keyof MeListClientKeysResponses];
@@ -2599,7 +2689,10 @@ export type MeUpdateClientKeyResponse = MeUpdateClientKeyResponses[keyof MeUpdat
 export type MeListModelsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        first?: number;
+        rows?: number;
+    };
     url: '/api/v1/me/models';
 };
 

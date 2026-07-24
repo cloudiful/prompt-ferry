@@ -10,6 +10,14 @@ use axum::{http::StatusCode, response::Response};
 
 use super::{SessionUser, validate_request_budget_limit};
 
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct McpServerPageResponse {
+    pub servers: Vec<db::McpServer>,
+    pub total: i64,
+    pub first: i64,
+    pub rows: i64,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct McpServerRequest {
     pub scope: Option<String>,
@@ -190,13 +198,10 @@ impl McpServerRequest {
                 ));
             }
         }
-        let servers = db::list_mcp_servers(&state.pool)
+        let duplicate = db::get_mcp_server_by_name(&state.pool, name)
             .await
             .map_err(|err| internal(state, err))?;
-        if servers
-            .iter()
-            .any(|server| Some(server.server_id) != existing_server_id && server.name == name)
-        {
+        if duplicate.is_some_and(|server| Some(server.server_id) != existing_server_id) {
             return Err(error(
                 StatusCode::CONFLICT,
                 "duplicate_mcp_server",

@@ -1,18 +1,25 @@
 use super::*;
 use std::collections::HashSet;
 
-const CLIENT_KEY_LIMIT: i64 = 10;
-
 pub(super) async fn list_client_keys(
     State(state): State<AdminState>,
     headers: HeaderMap,
+    Query(query): Query<TablePageQuery>,
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
         Err(response) => return response,
     };
-    match db::list_client_keys(&state.pool, user.user_id).await {
-        Ok(keys) => Json(keys).into_response(),
+    let first = query.first.unwrap_or(0).max(0);
+    let rows = query.rows.unwrap_or(20).clamp(1, 200);
+    match db::list_client_keys_page(&state.pool, user.user_id, first, rows).await {
+        Ok((total, keys)) => Json(ClientKeyPageResponse {
+            keys,
+            total,
+            first,
+            rows,
+        })
+        .into_response(),
         Err(err) => internal(&state, err),
     }
 }
@@ -26,17 +33,6 @@ pub(super) async fn create_client_key(
         Ok(user) => user,
         Err(response) => return response,
     };
-    match db::count_client_keys(&state.pool, user.user_id).await {
-        Ok(count) if count >= CLIENT_KEY_LIMIT => {
-            return error(
-                StatusCode::BAD_REQUEST,
-                "client_key_limit_exceeded",
-                "client key limit exceeded",
-            );
-        }
-        Ok(_) => {}
-        Err(err) => return internal(&state, err),
-    }
     let (secret, prefix, hash) = generate_client_key();
     match db::create_client_key(
         &state.pool,
@@ -107,13 +103,30 @@ pub(super) async fn delete_client_key(
 pub(super) async fn list_available_models(
     State(state): State<AdminState>,
     headers: HeaderMap,
+    Query(query): Query<TablePageQuery>,
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
         Err(response) => return response,
     };
+    let first = query.first.unwrap_or(0).max(0);
+    let rows = query.rows.unwrap_or(20).clamp(1, 200);
     match available_models(&state, user.user_id).await {
-        Ok(models) => Json(AvailableModelsResponse { models }).into_response(),
+        Ok(models) => {
+            let total = i64::try_from(models.len()).unwrap_or(i64::MAX);
+            let models = models
+                .into_iter()
+                .skip(usize::try_from(first).unwrap_or(usize::MAX))
+                .take(usize::try_from(rows).unwrap_or(usize::MAX))
+                .collect();
+            Json(AvailableModelsResponse {
+                models,
+                total,
+                first,
+                rows,
+            })
+            .into_response()
+        }
         Err(err) => internal(&state, err),
     }
 }

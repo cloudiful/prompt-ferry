@@ -4,6 +4,7 @@ ORDER BY
   CASE WHEN scope = 'user' THEN 0 ELSE 1 END,
   owner_user_id NULLS FIRST,
   model_pattern ASC,
-  updated_at DESC
+  updated_at DESC,
+  rule_id ASC
 OFFSET $1
 LIMIT $2

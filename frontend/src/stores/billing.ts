@@ -25,13 +25,23 @@ import {
   endOfDate,
   startOfDate,
 } from '../models/billing'
-import { useStoredPageSize } from '../table-pagination'
+import {
+  STANDARD_PAGE_SIZE_OPTIONS,
+  useStoredPageSize,
+} from '../table-pagination'
 
 export const useBillingStore = defineStore('billing', () => {
   const summary = ref<BillingSummaryResponse | null>(null)
   const charges = ref<BillingChargeResponse[]>([])
   const total = ref(0)
   const priceRules = ref<BillingPriceRuleResponse[]>([])
+  const priceRuleFirst = ref(0)
+  const priceRuleRows = useStoredPageSize(
+    'billing-price-rules',
+    10,
+    STANDARD_PAGE_SIZE_OPTIONS,
+  )
+  const priceRuleTotal = ref(0)
   const endpoints = ref<
     Awaited<ReturnType<typeof fetchBillingEndpoints>>['endpoints']
   >([])
@@ -76,15 +86,47 @@ export const useBillingStore = defineStore('billing', () => {
       )
       charges.value = page.charges
       total.value = page.total
+      first.value = page.first
+      rows.value = page.rows
+      if (
+        charges.value.length === 0 &&
+        total.value > 0 &&
+        first.value >= total.value
+      ) {
+        const previousFirst = Math.floor((total.value - 1) / rows.value) * rows.value
+        await refreshCharges(previousFirst, rows.value)
+      }
     } finally {
       chargesLoading.value = false
     }
   }
 
-  async function refreshPriceRules(): Promise<void> {
+  async function refreshPriceRules(
+    nextFirst = priceRuleFirst.value,
+    nextRows = priceRuleRows.value,
+  ): Promise<void> {
+    priceRuleFirst.value = nextFirst
+    priceRuleRows.value = nextRows
     priceRulesLoading.value = true
     try {
-      priceRules.value = await fetchBillingPriceRules()
+      const page = await fetchBillingPriceRules(
+        priceRuleFirst.value,
+        priceRuleRows.value,
+      )
+      priceRules.value = page.rules
+      priceRuleTotal.value = page.total
+      priceRuleFirst.value = page.first
+      priceRuleRows.value = page.rows
+      if (
+        priceRules.value.length === 0 &&
+        priceRuleTotal.value > 0 &&
+        priceRuleFirst.value >= priceRuleTotal.value
+      ) {
+        const previousFirst =
+          Math.floor((priceRuleTotal.value - 1) / priceRuleRows.value) *
+          priceRuleRows.value
+        await refreshPriceRules(previousFirst, priceRuleRows.value)
+      }
     } finally {
       priceRulesLoading.value = false
     }
@@ -188,6 +230,9 @@ export const useBillingStore = defineStore('billing', () => {
     loading,
     openDetail,
     priceRules,
+    priceRuleFirst,
+    priceRuleRows,
+    priceRuleTotal,
     priceRulesLoading,
     refresh,
     refreshCharges,

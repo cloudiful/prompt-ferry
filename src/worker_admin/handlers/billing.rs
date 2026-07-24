@@ -17,10 +17,19 @@ pub(super) async fn list_billing_price_rules(
     let first = query.first.unwrap_or(0).clamp(0, 10_000);
     let rows = query.rows.unwrap_or(100).clamp(1, 1_000);
     match db::list_price_rules(&state.pool, rows, first).await {
-        Ok(rules) => Json(BillingPriceRulePageResponse {
-            rules: rules.into_iter().map(price_rule_response).collect(),
-        })
-        .into_response(),
+        Ok(rules) => {
+            let total = match db::count_price_rules(&state.pool).await {
+                Ok(total) => total,
+                Err(err) => return internal(&state, err),
+            };
+            Json(BillingPriceRulePageResponse {
+                rules: rules.into_iter().map(price_rule_response).collect(),
+                total,
+                first,
+                rows,
+            })
+            .into_response()
+        }
         Err(err) => internal(&state, err),
     }
 }
@@ -123,6 +132,8 @@ pub(super) async fn list_billing_charges(
                 .into_iter()
                 .map(|charge| charge_response(charge, user.is_admin))
                 .collect(),
+            first,
+            rows,
         })
         .into_response(),
         Err(err) => internal(&state, err),

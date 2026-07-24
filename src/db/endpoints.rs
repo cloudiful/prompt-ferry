@@ -66,6 +66,8 @@ pub async fn list_endpoints_page(pool: &PgPool, first: i64, rows: i64) -> Result
     Ok(EndpointPage {
         total,
         endpoints: attach_endpoint_api_keys(pool, endpoints).await?,
+        first: first.max(0),
+        rows: rows.clamp(1, 200),
     })
 }
 

@@ -70,6 +70,8 @@ pub struct TablePageQuery {
 pub struct EndpointPageResponse {
     pub total: i64,
     pub endpoints: Vec<db::ProviderEndpoint>,
+    pub first: i64,
+    pub rows: i64,
 }
 
 impl From<db::EndpointPage> for EndpointPageResponse {
@@ -77,6 +79,8 @@ impl From<db::EndpointPage> for EndpointPageResponse {
         Self {
             total: value.total,
             endpoints: value.endpoints,
+            first: value.first,
+            rows: value.rows,
         }
     }
 }

@@ -4,14 +4,21 @@ use super::{
     relay_validation::map_relay_db_error,
 };
 
-pub(super) async fn list_relays(State(state): State<AdminState>, headers: HeaderMap) -> Response {
+pub(super) async fn list_relays(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Query(query): Query<TablePageQuery>,
+) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    let relays = match db::list_managed_relays(&state.pool).await {
-        Ok(relays) => relays,
-        Err(err) => return internal(&state, err),
-    };
+    let first = query.first.unwrap_or(0).max(0);
+    let rows = query.rows.unwrap_or(20).clamp(1, 200);
+    let (total, enabled_count, relays) =
+        match db::list_managed_relays_page(&state.pool, first, rows).await {
+            Ok(page) => page,
+            Err(err) => return internal(&state, err),
+        };
     let runtime = state.managed_relay_statuses.read().await.clone();
     Json(ManagedRelayListResponse {
         relays: relays
@@ -23,6 +30,11 @@ pub(super) async fn list_relays(State(state): State<AdminState>, headers: Header
                 )
             })
             .collect(),
+        total,
+        first,
+        rows,
+        connected_count: runtime.values().filter(|status| status.connected).count() as i64,
+        enabled_count,
     })
     .into_response()
 }

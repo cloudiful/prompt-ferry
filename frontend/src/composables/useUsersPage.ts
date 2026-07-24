@@ -25,7 +25,10 @@ export function useUsersPage() {
   const usersWorkspace = computed(() =>
     createUsersWorkspaceView({
       busy: busy.value,
-      users: usersStore.users,
+      users: usersStore.pageUsers,
+      first: usersStore.first,
+      rows: usersStore.rows,
+      total: usersStore.total,
     }),
   )
   const resetPasswordDialogVisible = computed({
@@ -38,7 +41,15 @@ export function useUsersPage() {
   })
   async function refresh(): Promise<void> {
     try {
-      await usersStore.loadUsers()
+      await usersStore.loadPage()
+    } catch (cause) {
+      notifyApiError(cause)
+    }
+  }
+
+  async function onPage(event: TablePageChange): Promise<void> {
+    try {
+      await usersStore.loadPage(event.first, event.rows)
     } catch (cause) {
       notifyApiError(cause)
     }
@@ -112,6 +123,7 @@ export function useUsersPage() {
     createUserVisible,
     deleteUser,
     openResetPassword,
+    onPage,
     refresh,
     resetPasswordDialogVisible,
     resetPasswordUser,

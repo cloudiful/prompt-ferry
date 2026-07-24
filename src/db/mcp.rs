@@ -11,6 +11,28 @@ pub async fn list_mcp_servers(pool: &PgPool) -> Result<Vec<McpServer>> {
     )
 }
 
+pub async fn list_mcp_servers_page(
+    pool: &PgPool,
+    first: i64,
+    rows: i64,
+) -> Result<(i64, Vec<McpServer>)> {
+    let total = sqlx::query_file!("src/sql/mcp/count_mcp_servers.sql")
+        .fetch_one(pool)
+        .await?
+        .total;
+    let first = first.max(0);
+    let rows = rows.clamp(1, 200);
+    let servers = sqlx::query_file_as!(
+        McpServer,
+        "src/sql/mcp/list_mcp_servers_page.sql",
+        first,
+        rows,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok((total, servers))
+}
+
 pub async fn list_visible_mcp_servers(
     pool: &PgPool,
     user_id: Option<i64>,
@@ -51,6 +73,38 @@ pub async fn list_user_mcp_servers(pool: &PgPool, user_id: i64) -> Result<Vec<Mc
     Ok(
         sqlx::query_file_as!(McpServer, "src/sql/mcp/list_user_mcp_servers.sql", user_id,)
             .fetch_all(pool)
+            .await?,
+    )
+}
+
+pub async fn list_user_mcp_servers_page(
+    pool: &PgPool,
+    user_id: i64,
+    first: i64,
+    rows: i64,
+) -> Result<(i64, Vec<McpServer>)> {
+    let total = sqlx::query_file!("src/sql/mcp/count_user_mcp_servers.sql", user_id)
+        .fetch_one(pool)
+        .await?
+        .total;
+    let first = first.max(0);
+    let rows = rows.clamp(1, 200);
+    let servers = sqlx::query_file_as!(
+        McpServer,
+        "src/sql/mcp/list_user_mcp_servers_page.sql",
+        user_id,
+        first,
+        rows,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok((total, servers))
+}
+
+pub async fn get_mcp_server(pool: &PgPool, server_id: uuid::Uuid) -> Result<Option<McpServer>> {
+    Ok(
+        sqlx::query_file_as!(McpServer, "src/sql/mcp/get_mcp_server.sql", server_id,)
+            .fetch_optional(pool)
             .await?,
     )
 }

@@ -20,6 +20,8 @@ import type {
 } from '../generated/admin-api'
 import type { Option } from '../models'
 import { useRelaysStore } from '../stores/relays'
+import TablePagination from '@/components/shared/TablePagination.vue'
+import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
 const { t } = useLocale()
 const { notifyApiError, notifySuccess } = useNotifier()
@@ -90,6 +92,14 @@ function secretStateLabel(exists: boolean): string {
 async function refresh(): Promise<void> {
   try {
     await relayStore.refresh()
+  } catch (cause) {
+    notifyApiError(cause)
+  }
+}
+
+async function onPage(event: TablePageChange): Promise<void> {
+  try {
+    await relayStore.refresh(event.first, event.rows)
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -258,6 +268,13 @@ onMounted(refresh)
           </div>
         </template>
       </UTable>
+      <TablePagination
+        :first="relayStore.first"
+        :rows="relayStore.rows"
+        :total="relayStore.total"
+        :page-size-options="STANDARD_PAGE_SIZE_OPTIONS"
+        @change="onPage"
+      />
     </section>
 
     <RelayDialog

@@ -179,7 +179,12 @@ pub async fn list_request_records(
         .into_iter()
         .map(Into::into)
         .collect();
-    Ok(RequestRecordPage { total, records })
+    Ok(RequestRecordPage {
+        total,
+        records,
+        first,
+        rows,
+    })
 }
 
 pub async fn list_request_record_facets(

@@ -3,18 +3,27 @@ use super::*;
 pub(super) async fn list_mcp_servers(
     State(state): State<AdminState>,
     headers: HeaderMap,
+    Query(query): Query<TablePageQuery>,
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
         Err(response) => return response,
     };
+    let first = query.first.unwrap_or(0).max(0);
+    let rows = query.rows.unwrap_or(20).clamp(1, 200);
     let result = if user.is_admin {
-        db::list_mcp_servers(&state.pool).await
+        db::list_mcp_servers_page(&state.pool, first, rows).await
     } else {
-        db::list_user_mcp_servers(&state.pool, user.user_id).await
+        db::list_user_mcp_servers_page(&state.pool, user.user_id, first, rows).await
     };
     match result {
-        Ok(servers) => Json(servers).into_response(),
+        Ok((total, servers)) => Json(McpServerPageResponse {
+            servers,
+            total,
+            first,
+            rows,
+        })
+        .into_response(),
         Err(err) => internal(&state, err),
     }
 }
@@ -61,10 +70,8 @@ pub(super) async fn update_mcp_server(
         Err(response) => return response,
     };
     let existing = if user.is_admin {
-        match db::list_mcp_servers(&state.pool).await {
-            Ok(servers) => servers
-                .into_iter()
-                .find(|server| server.server_id == server_id),
+        match db::get_mcp_server(&state.pool, server_id).await {
+            Ok(server) => server,
             Err(err) => return internal(&state, err),
         }
     } else {
@@ -142,10 +149,8 @@ pub(super) async fn test_mcp_server(
         Err(response) => return response,
     };
     let server = if user.is_admin {
-        match db::list_mcp_servers(&state.pool).await {
-            Ok(servers) => servers
-                .into_iter()
-                .find(|server| server.server_id == server_id),
+        match db::get_mcp_server(&state.pool, server_id).await {
+            Ok(server) => server,
             Err(err) => return internal(&state, err),
         }
     } else {
@@ -232,10 +237,8 @@ pub(super) async fn get_mcp_catalog(
         Err(response) => return response,
     };
     let server = if user.is_admin {
-        match db::list_mcp_servers(&state.pool).await {
-            Ok(servers) => servers
-                .into_iter()
-                .find(|server| server.server_id == server_id),
+        match db::get_mcp_server(&state.pool, server_id).await {
+            Ok(server) => server,
             Err(err) => return internal(&state, err),
         }
     } else {

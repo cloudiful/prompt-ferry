@@ -58,10 +58,8 @@ impl McpCatalogService {
         &self,
         server_id: Uuid,
     ) -> anyhow::Result<(db::McpServer, super::ServerCatalogSnapshot)> {
-        let server = db::list_mcp_servers(&self.inner.pool)
+        let server = db::get_mcp_server(&self.inner.pool, server_id)
             .await?
-            .into_iter()
-            .find(|server| server.server_id == server_id)
             .ok_or_else(|| anyhow::anyhow!("mcp server not found"))?;
         if !server.enabled {
             self.inner.cache.invalidate(server_id).await;

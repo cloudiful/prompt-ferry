@@ -3,11 +3,14 @@ import type { TableColumn } from '@nuxt/ui'
 import { computed } from 'vue'
 import type { User } from '@/generated/admin-api'
 import type { UserListItemView, UsersWorkspaceView } from '@/models/users'
+import TablePagination from '@/components/shared/TablePagination.vue'
+import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
 defineEmits<{
   openResetPassword: [user: User]
   saveUser: [user: User]
   deleteUser: [user: User]
+  page: [event: TablePageChange]
 }>()
 
 const props = defineProps<{
@@ -189,5 +192,12 @@ const tableToggleLabelClass =
         </div>
       </template>
     </UTable>
+    <TablePagination
+      :first="workspace.first"
+      :rows="workspace.rows"
+      :total="workspace.total"
+      :page-size-options="STANDARD_PAGE_SIZE_OPTIONS"
+      @change="$emit('page', $event)"
+    />
   </section>
 </template>

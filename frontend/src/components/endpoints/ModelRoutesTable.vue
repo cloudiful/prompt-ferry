@@ -67,7 +67,11 @@ defineEmits<{
                 / {{ target.upstream_model }}
               </span>
             </span>
-            <UBadge :label="row.original.owner_label" color="neutral" />
+            <UBadge
+              :label="row.original.owner_label"
+              color="neutral"
+              variant="subtle"
+            />
           </div>
           <div v-else class="text-xs text-dimmed">-</div>
         </div>
@@ -76,7 +80,11 @@ defineEmits<{
         <div
           class="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overflow-y-hidden whitespace-nowrap pb-px [&>*]:flex-none"
         >
-          <UBadge :label="row.original.scope_label" color="neutral" />
+          <UBadge
+            :label="row.original.scope_label"
+            color="neutral"
+            variant="subtle"
+          />
           <label
             class="inline-flex flex-none items-center gap-2 whitespace-nowrap"
           >
@@ -94,6 +102,7 @@ defineEmits<{
           <UBadge
             :label="row.original.routing_strategy_label"
             color="neutral"
+            variant="subtle"
           />
         </div>
       </template>

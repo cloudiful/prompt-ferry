@@ -1,13 +1,36 @@
 use super::*;
 
-const CLIENT_KEY_LIMIT: i64 = 10;
+pub(super) async fn list_users(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Query(query): Query<TablePageQuery>,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response;
+    }
+    let first = query.first.unwrap_or(0).max(0);
+    let rows = query.rows.unwrap_or(20).clamp(1, 200);
+    match db::list_users_page(&state.pool, first, rows).await {
+        Ok((total, users)) => Json(UserPageResponse {
+            users,
+            total,
+            first,
+            rows,
+        })
+        .into_response(),
+        Err(err) => internal(&state, err),
+    }
+}
 
-pub(super) async fn list_users(State(state): State<AdminState>, headers: HeaderMap) -> Response {
+pub(super) async fn list_user_options(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
     match db::list_users(&state.pool).await {
-        Ok(users) => Json(users).into_response(),
+        Ok(users) => Json(UserOptionsResponse { users }).into_response(),
         Err(err) => internal(&state, err),
     }
 }
@@ -95,12 +118,21 @@ pub(super) async fn list_client_keys(
     State(state): State<AdminState>,
     headers: HeaderMap,
     Path(user_id): Path<i64>,
+    Query(query): Query<TablePageQuery>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    match db::list_client_keys(&state.pool, user_id).await {
-        Ok(keys) => Json(keys).into_response(),
+    let first = query.first.unwrap_or(0).max(0);
+    let rows = query.rows.unwrap_or(20).clamp(1, 200);
+    match db::list_client_keys_page(&state.pool, user_id, first, rows).await {
+        Ok((total, keys)) => Json(ClientKeyPageResponse {
+            keys,
+            total,
+            first,
+            rows,
+        })
+        .into_response(),
         Err(err) => internal(&state, err),
     }
 }
@@ -113,17 +145,6 @@ pub(super) async fn create_client_key(
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
-    }
-    match db::count_client_keys(&state.pool, user_id).await {
-        Ok(count) if count >= CLIENT_KEY_LIMIT => {
-            return error(
-                StatusCode::BAD_REQUEST,
-                "client_key_limit_exceeded",
-                "client key limit exceeded",
-            );
-        }
-        Ok(_) => {}
-        Err(err) => return internal(&state, err),
     }
     let (secret, prefix, hash) = generate_client_key();
     match db::create_client_key(

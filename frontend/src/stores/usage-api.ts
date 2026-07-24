@@ -41,7 +41,12 @@ export async function fetchUsageRecords(input: {
   requestCategory: RequestRecordCategory
   sortField: string
   sortOrder: -1 | 0 | 1
-}): Promise<{ rows: RequestRecordRowView[]; total: number }> {
+}): Promise<{
+  rows: RequestRecordRowView[]
+  total: number
+  first: number
+  rowsPerPage: number
+}> {
   const page = expectData(
     await listRequestRecords<true>(
       withData({
@@ -52,6 +57,8 @@ export async function fetchUsageRecords(input: {
   return {
     rows: page.records.map(createRequestRecordRowView),
     total: page.total,
+    first: page.first,
+    rowsPerPage: page.rows,
   }
 }
 

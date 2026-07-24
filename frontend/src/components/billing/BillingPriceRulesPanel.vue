@@ -6,17 +6,23 @@ import type {
   ProviderEndpoint,
 } from '@/generated/admin-api'
 import { formatBillingRate, formatBillingTime } from '@/models/billing'
+import TablePagination from '@/components/shared/TablePagination.vue'
+import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
 const props = defineProps<{
   endpoints: ProviderEndpoint[]
+  first: number
   loading: boolean
   rules: BillingPriceRuleResponse[]
+  rows: number
+  total: number
   t: TranslateFn
 }>()
 
 const emit = defineEmits<{
   create: []
   toggle: [rule: BillingPriceRuleResponse]
+  page: [event: TablePageChange]
 }>()
 
 const columns = computed<TableColumn<BillingPriceRuleResponse>[]>(() => [
@@ -112,6 +118,13 @@ function scope(rule: BillingPriceRuleResponse): string {
         </template>
       </UTable>
     </div>
+    <TablePagination
+      :first="props.first"
+      :rows="props.rows"
+      :total="props.total"
+      :page-size-options="STANDARD_PAGE_SIZE_OPTIONS"
+      @change="$emit('page', $event)"
+    />
     <p class="text-xs text-dimmed">{{ t('billingRuleScopeHint') }}</p>
   </section>
 </template>

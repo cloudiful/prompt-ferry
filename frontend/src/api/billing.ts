@@ -15,6 +15,7 @@ import type {
   BillingChargeDetailResponse,
   BillingChargePageResponse,
   BillingPriceRuleRequest,
+  BillingPriceRulePageResponse,
   BillingPriceRuleResponse,
   BillingSummaryResponse,
   EndpointPageResponse,
@@ -43,15 +44,15 @@ export async function fetchBillingCharges(
   )
 }
 
-export async function fetchBillingPriceRules(): Promise<
-  BillingPriceRuleResponse[]
-> {
-  const response = expectData(
+export async function fetchBillingPriceRules(
+  first: number,
+  rows: number,
+): Promise<BillingPriceRulePageResponse> {
+  return expectData(
     await listBillingPriceRules<true>(
-      withData({ query: { first: 0, rows: 500 } }),
+      withData({ query: { first, rows } }),
     ),
   )
-  return response.rules
 }
 
 export async function fetchBillingEndpoints(): Promise<EndpointPageResponse> {

@@ -62,6 +62,11 @@ impl ManagedRelay {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ManagedRelayListResponse {
     pub relays: Vec<ManagedRelay>,
+    pub total: i64,
+    pub first: i64,
+    pub rows: i64,
+    pub connected_count: i64,
+    pub enabled_count: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]

@@ -195,4 +195,6 @@ pub struct SnapshotKey {
 pub struct ModelRoutePage {
     pub total: i64,
     pub routes: Vec<ModelEndpointRule>,
+    pub first: i64,
+    pub rows: i64,
 }

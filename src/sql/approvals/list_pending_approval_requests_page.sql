@@ -21,6 +21,6 @@ SELECT
     updated_at
 FROM approval_requests
 WHERE approval_status = 'pending'
-ORDER BY wait_deadline_unix_ms ASC NULLS LAST, created_at DESC
+ORDER BY wait_deadline_unix_ms ASC NULLS LAST, created_at DESC, approval_id ASC
 OFFSET $1
 LIMIT $2

@@ -1,7 +1,7 @@
 SELECT
     ue.event_id AS "record_id!",
     ue.request_id AS "request_id!",
-    ue.request_category AS "request_category: _",
+    ue.request_category AS "request_category!: _",
     ue.user_id,
     u.login_name AS user_login_name,
     ue.client_key_label,
@@ -21,7 +21,7 @@ SELECT
     ue.mcp_operation_name,
     ue.path AS "path!",
     ue.model,
-    ue.request_state AS "request_state: _",
+    ue.request_state AS "request_state!: _",
     ue.status,
     ue.ok,
     ue.duration_ms,
@@ -73,7 +73,7 @@ SELECT
     ue.error_message,
     ue.failure_family AS "failure_family: _",
     ue.mcp_bearer_token_slot,
-    ue.route_selection_reason AS "route_selection_reason: _",
+    ue.route_selection_reason AS "route_selection_reason!: _",
     ue.created_at AS "created_at!",
     ue.response_capture_truncated AS "response_capture_truncated!"
 FROM request_records ue

@@ -130,8 +130,12 @@ async function deleteMcpServer(server: McpServer): Promise<void> {
   }
 }
 
-function onMcpPage(event: TablePageChange): void {
-  mcpStore.setServerPage(event.first, event.rows)
+async function onMcpPage(event: TablePageChange): Promise<void> {
+  try {
+    await mcpStore.setServerPage(event.first, event.rows)
+  } catch (cause) {
+    notifyApiError(cause)
+  }
 }
 
 onMounted(async () => {

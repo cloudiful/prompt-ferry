@@ -115,4 +115,6 @@ pub struct EndpointApiKeyCreate {
 pub struct EndpointPage {
     pub total: i64,
     pub endpoints: Vec<ProviderEndpoint>,
+    pub first: i64,
+    pub rows: i64,
 }

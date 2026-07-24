@@ -25,13 +25,13 @@ pub use endpoints::{
     list_visible_endpoints, set_user_endpoint_setting, update_endpoint,
 };
 pub use mcp::{
-    create_mcp_server, delete_mcp_server, get_mcp_server_by_name, get_user_mcp_server,
-    get_visible_mcp_server, list_mcp_servers, list_user_mcp_servers, list_visible_mcp_servers,
-    update_mcp_server,
+    create_mcp_server, delete_mcp_server, get_mcp_server, get_mcp_server_by_name,
+    get_user_mcp_server, get_visible_mcp_server, list_mcp_servers, list_mcp_servers_page,
+    list_user_mcp_servers, list_user_mcp_servers_page, list_visible_mcp_servers, update_mcp_server,
 };
 pub use relays::{
     create_managed_relay, delete_managed_relay, get_managed_relay, list_enabled_managed_relays,
-    list_managed_relays, update_managed_relay,
+    list_managed_relays, list_managed_relays_page, update_managed_relay,
 };
 pub use routes::{
     cleanup_orphan_model_routes, create_model_endpoint_rule, delete_model_endpoint_rule,
@@ -80,6 +80,6 @@ pub use usage::{
 pub use users::{
     bootstrap_admin, count_client_keys, create_client_key, create_user, delete_client_key,
     delete_user, get_active_user, get_client_key_identity_by_hash, get_client_key_label_by_hash,
-    get_user_endpoint_setting, get_user_password_by_login, list_client_keys, list_users,
-    reset_password, update_client_key, update_user,
+    get_user_endpoint_setting, get_user_password_by_login, list_client_keys, list_client_keys_page,
+    list_users, list_users_page, reset_password, update_client_key, update_user,
 };

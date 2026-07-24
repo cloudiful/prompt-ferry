@@ -20,6 +20,7 @@ const {
   submitResetPassword,
   t,
   usersWorkspace,
+  onPage,
 } = useUsersPage()
 </script>
 
@@ -60,6 +61,7 @@ const {
       @open-reset-password="openResetPassword"
       @save-user="saveUser"
       @delete-user="deleteUser"
+      @page="onPage"
     />
 
     <CreateUserDialog

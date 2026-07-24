@@ -256,11 +256,15 @@ onMounted(async () => {
     <BillingPriceRulesPanel
       v-if="session.isAdmin"
       :endpoints="billing.endpoints"
+      :first="billing.priceRuleFirst"
       :loading="billing.priceRulesLoading"
       :rules="billing.priceRules"
+      :rows="billing.priceRuleRows"
+      :total="billing.priceRuleTotal"
       :t="t"
       @create="openPriceRule"
       @toggle="togglePriceRule"
+      @page="billing.refreshPriceRules($event.first, $event.rows)"
     />
     <BillingPriceRuleDialog
       v-model:visible="priceRuleVisible"

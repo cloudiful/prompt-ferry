@@ -56,6 +56,19 @@ pub async fn list_users(pool: &PgPool) -> Result<Vec<User>> {
         .await?)
 }
 
+pub async fn list_users_page(pool: &PgPool, first: i64, rows: i64) -> Result<(i64, Vec<User>)> {
+    let total = sqlx::query_file!("src/sql/users/count_users.sql")
+        .fetch_one(pool)
+        .await?
+        .total;
+    let first = first.max(0);
+    let rows = rows.clamp(1, 200);
+    let users = sqlx::query_file_as!(User, "src/sql/users/list_users_page.sql", first, rows,)
+        .fetch_all(pool)
+        .await?;
+    Ok((total, users))
+}
+
 pub async fn create_user(pool: &PgPool, input: UserCreate) -> Result<User> {
     Ok(sqlx::query_file_as!(
         User,
@@ -127,10 +140,31 @@ pub async fn count_client_keys(pool: &PgPool, user_id: i64) -> Result<i64> {
 
 pub async fn list_client_keys(pool: &PgPool, user_id: i64) -> Result<Vec<ClientKey>> {
     Ok(
-        sqlx::query_file_as!(ClientKey, "src/sql/users/list_client_keys.sql", user_id,)
+        sqlx::query_file_as!(ClientKey, "src/sql/users/list_client_keys_all.sql", user_id,)
             .fetch_all(pool)
             .await?,
     )
+}
+
+pub async fn list_client_keys_page(
+    pool: &PgPool,
+    user_id: i64,
+    first: i64,
+    rows: i64,
+) -> Result<(i64, Vec<ClientKey>)> {
+    let total = count_client_keys(pool, user_id).await?;
+    let first = first.max(0);
+    let rows = rows.clamp(1, 200);
+    let keys = sqlx::query_file_as!(
+        ClientKey,
+        "src/sql/users/list_client_keys.sql",
+        user_id,
+        first,
+        rows,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok((total, keys))
 }
 
 pub async fn get_client_key_label_by_hash(pool: &PgPool, key_hash: &str) -> Result<Option<String>> {

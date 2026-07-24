@@ -115,6 +115,17 @@ export const useEndpointsStore = defineStore('endpoints', () => {
     )
     endpointState.items.value = page.endpoints
     endpointState.total.value = page.total
+    endpointState.first.value = page.first
+    endpointState.rows.value = page.rows
+    if (
+      page.endpoints.length === 0 &&
+      page.total > 0 &&
+      page.first >= page.total
+    ) {
+      const previousFirst =
+        Math.floor((page.total - 1) / page.rows) * page.rows
+      await loadEndpoints(previousFirst, page.rows)
+    }
   }
 
   async function loadModelRoutes(
@@ -129,6 +140,17 @@ export const useEndpointsStore = defineStore('endpoints', () => {
     )
     modelRouteState.items.value = page.routes
     modelRouteState.total.value = page.total
+    modelRouteState.first.value = page.first
+    modelRouteState.rows.value = page.rows
+    if (
+      page.routes.length === 0 &&
+      page.total > 0 &&
+      page.first >= page.total
+    ) {
+      const previousFirst =
+        Math.floor((page.total - 1) / page.rows) * page.rows
+      await loadModelRoutes(previousFirst, page.rows)
+    }
   }
 
   async function reloadWorkspace(): Promise<void> {

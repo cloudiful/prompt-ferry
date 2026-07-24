@@ -2,8 +2,13 @@
 import type { TableColumn } from '@nuxt/ui'
 import { computed } from 'vue'
 import type { ApiKeyItemView, ApiKeysWorkspaceView } from '@/models'
+import TablePagination from '@/components/shared/TablePagination.vue'
+import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
 const props = defineProps<{
+  first: number
+  rows: number
+  total: number
   t: TranslateFn
   workspace: ApiKeysWorkspaceView
 }>()
@@ -20,6 +25,7 @@ defineEmits<{
   copyKeySecret: [keyId: number]
   toggleKey: [keyId: number]
   deleteKey: [keyId: number]
+  page: [event: TablePageChange]
 }>()
 </script>
 
@@ -194,5 +200,12 @@ defineEmits<{
         </div>
       </template>
     </UTable>
+    <TablePagination
+      :first="props.first"
+      :rows="props.rows"
+      :total="props.total"
+      :page-size-options="STANDARD_PAGE_SIZE_OPTIONS"
+      @change="$emit('page', $event)"
+    />
   </section>
 </template>

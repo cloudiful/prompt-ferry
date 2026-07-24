@@ -30,6 +30,7 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
         )
         .route("/me/models", get(me::list_available_models))
         .route("/admin/users", get(list_users).post(create_user))
+        .route("/admin/users/options", get(list_user_options))
         .route(
             "/admin/users/{user_id}",
             patch(update_user).delete(delete_user),

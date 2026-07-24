@@ -19,6 +19,14 @@ pub async fn list_price_rules(
     .await?)
 }
 
+pub async fn count_price_rules(pool: &PgPool) -> Result<i64> {
+    Ok(
+        sqlx::query_file_scalar!("src/sql/billing/count_price_rules.sql")
+            .fetch_one(pool)
+            .await?,
+    )
+}
+
 pub async fn create_price_rule(
     pool: &PgPool,
     input: BillingPriceRuleCreate,

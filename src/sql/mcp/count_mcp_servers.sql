@@ -1,2 +1,2 @@
 SELECT COUNT(*)::BIGINT AS "total!"
-FROM billing_price_rules
+FROM mcp_servers

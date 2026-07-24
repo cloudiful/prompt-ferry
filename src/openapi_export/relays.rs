@@ -1,11 +1,13 @@
 use super::schemas::ErrorEnvelope;
 use crate::worker_admin_types::{
     ManagedRelay, ManagedRelayListResponse, ManagedRelayPatchRequest, ManagedRelayRequest,
+    TablePageQuery,
 };
 
 #[utoipa::path(
     get,
     path = "/api/v1/admin/relays",
+    params(TablePageQuery),
     responses((status = 200, body = ManagedRelayListResponse, description = "Managed relay list")),
     tag = "relays"
 )]

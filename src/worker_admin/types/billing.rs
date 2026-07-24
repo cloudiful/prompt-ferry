@@ -60,6 +60,9 @@ pub struct BillingPriceRuleResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct BillingPriceRulePageResponse {
     pub rules: Vec<BillingPriceRuleResponse>,
+    pub total: i64,
+    pub first: i64,
+    pub rows: i64,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -159,6 +162,8 @@ pub struct BillingChargeResponse {
 pub struct BillingChargePageResponse {
     pub total: i64,
     pub charges: Vec<BillingChargeResponse>,
+    pub first: i64,
+    pub rows: i64,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

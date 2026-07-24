@@ -2,22 +2,36 @@ use super::schemas::ErrorEnvelope;
 use crate::{
     db,
     worker_admin_types::{
-        CreateClientKeyRequest, CreateClientKeyResponse, CreateUserRequest, ResetPasswordRequest,
-        UpdateClientKeyRequest,
+        ClientKeyPageResponse, CreateClientKeyRequest, CreateClientKeyResponse, CreateUserRequest,
+        ResetPasswordRequest, TablePageQuery, UpdateClientKeyRequest, UserOptionsResponse,
+        UserPageResponse,
     },
 };
 
 #[utoipa::path(
     get,
     path = "/api/v1/admin/users",
+    params(TablePageQuery),
     responses(
-        (status = 200, body = [db::User], description = "Users"),
+        (status = 200, body = UserPageResponse, description = "Users"),
         (status = 401, body = ErrorEnvelope),
         (status = 403, body = ErrorEnvelope)
     ),
     tag = "users"
 )]
 pub(super) fn list_users() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/users/options",
+    responses(
+        (status = 200, body = UserOptionsResponse, description = "User options"),
+        (status = 401, body = ErrorEnvelope),
+        (status = 403, body = ErrorEnvelope)
+    ),
+    tag = "users"
+)]
+pub(super) fn list_user_options() {}
 
 #[utoipa::path(
     post,
@@ -74,9 +88,9 @@ pub(super) fn reset_password() {}
 #[utoipa::path(
     get,
     path = "/api/v1/admin/users/{user_id}/client-keys",
-    params(("user_id" = i64, Path, description = "User ID")),
+    params(("user_id" = i64, Path, description = "User ID"), TablePageQuery),
     responses(
-        (status = 200, body = [db::ClientKey], description = "Client keys"),
+        (status = 200, body = ClientKeyPageResponse, description = "Client keys"),
         (status = 404, body = ErrorEnvelope)
     ),
     tag = "users"

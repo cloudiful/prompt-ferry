@@ -4,7 +4,10 @@ import PageIntro from '../components/PageIntro.vue'
 import { useLocale } from '../composables/useLocale'
 import { useNotifier } from '../composables/useNotifier'
 import ApprovalsPanel from '../components/approvals/ApprovalsPanel.vue'
-import type { ApprovalRequest } from '../generated/admin-api'
+import type {
+  ApprovalRequest,
+  ApprovalStatusFilter,
+} from '../generated/admin-api'
 import { useApprovalsStore } from '../stores/approvals'
 
 const { t } = useLocale()
@@ -52,11 +55,23 @@ async function reject(approval: ApprovalRequest): Promise<void> {
 }
 
 async function onPage(event: TablePageChange): Promise<void> {
-  await approvalsStore.refresh(
-    approvalsStore.currentFilter,
-    event.first,
-    event.rows,
-  )
+  try {
+    await approvalsStore.refresh(
+      approvalsStore.currentFilter,
+      event.first,
+      event.rows,
+    )
+  } catch (cause) {
+    notifyApiError(cause)
+  }
+}
+
+async function onFilter(nextFilter: ApprovalStatusFilter): Promise<void> {
+  try {
+    await approvalsStore.refresh(nextFilter, 0, approvalsStore.rows)
+  } catch (cause) {
+    notifyApiError(cause)
+  }
 }
 
 onMounted(async () => {
@@ -91,6 +106,7 @@ onMounted(async () => {
       :format-time="formatTime"
       :t="t"
       @approval-page="onPage"
+      @update:approval-filter="onFilter"
       @open-detail="openDetail"
       @approve-approval="approve"
       @reject-approval="reject"

@@ -49,6 +49,17 @@ export const useApprovalsStore = defineStore('approvals', () => {
       )
       approvals.value = page.approvals
       total.value = page.total
+      first.value = page.first
+      rows.value = page.rows
+      if (
+        page.approvals.length === 0 &&
+        page.total > 0 &&
+        page.first >= page.total
+      ) {
+        const previousFirst =
+          Math.floor((page.total - 1) / page.rows) * page.rows
+        await refresh(currentFilter.value, previousFirst, page.rows)
+      }
     } finally {
       loading.value = false
     }

@@ -24,9 +24,6 @@ defineEmits<{
   toggleMcpServer: [server: McpServer]
 }>()
 
-const visibleItems = computed(() =>
-  props.listItems.slice(props.mcpFirst, props.mcpFirst + props.mcpRows),
-)
 const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
   { accessorKey: 'name', header: props.t('name') },
   { id: 'status', header: props.t('status') },
@@ -39,7 +36,7 @@ const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
 <template>
   <section class="grid min-w-0 gap-3">
     <UTable
-      :data="visibleItems"
+      :data="listItems"
       :columns="columns"
       :loading="busy"
       class="min-w-0"

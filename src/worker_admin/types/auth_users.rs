@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::db;
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct BridgeStatus {
     pub configured_relays: usize,
@@ -85,4 +87,28 @@ pub struct AvailableModel {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AvailableModelsResponse {
     pub models: Vec<AvailableModel>,
+    pub total: i64,
+    pub first: i64,
+    pub rows: i64,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct UserPageResponse {
+    pub users: Vec<db::User>,
+    pub total: i64,
+    pub first: i64,
+    pub rows: i64,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ClientKeyPageResponse {
+    pub keys: Vec<db::ClientKey>,
+    pub total: i64,
+    pub first: i64,
+    pub rows: i64,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct UserOptionsResponse {
+    pub users: Vec<db::User>,
 }

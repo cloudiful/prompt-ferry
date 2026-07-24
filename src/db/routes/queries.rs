@@ -30,6 +30,8 @@ pub async fn list_model_endpoint_rules_page(
     Ok(ModelRoutePage {
         total,
         routes: hydrate::hydrate_rules(pool, route_rows).await?,
+        first: first.max(0),
+        rows: rows.clamp(1, 200),
     })
 }
 

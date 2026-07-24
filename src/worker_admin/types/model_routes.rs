@@ -275,6 +275,8 @@ pub struct ModelRouteWhitelistRequest {
 pub struct ModelRoutePageResponse {
     pub total: i64,
     pub routes: Vec<db::ModelEndpointRule>,
+    pub first: i64,
+    pub rows: i64,
 }
 
 impl From<db::ModelRoutePage> for ModelRoutePageResponse {
@@ -282,6 +284,8 @@ impl From<db::ModelRoutePage> for ModelRoutePageResponse {
         Self {
             total: value.total,
             routes: value.routes,
+            first: value.first,
+            rows: value.rows,
         }
     }
 }

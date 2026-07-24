@@ -66,6 +66,14 @@ async function onUserChange(): Promise<void> {
   }
 }
 
+async function onPage(event: TablePageChange): Promise<void> {
+  try {
+    await apiKeysStore.loadKeys(undefined, event.first, event.rows)
+  } catch (cause) {
+    notifyApiError(cause)
+  }
+}
+
 async function openCreateKey(): Promise<void> {
   keyLabel.value = ''
   generatedSecret.value = ''
@@ -170,10 +178,14 @@ onMounted(async () => {
     <ApiKeysList
       :t="t"
       :workspace="workspace"
+      :first="apiKeysStore.first"
+      :rows="apiKeysStore.rows"
+      :total="apiKeysStore.total"
       @toggle-key-secret="toggleKeySecret"
       @copy-key-secret="copyKeySecret"
       @toggle-key="toggleKey"
       @delete-key="deleteKey"
+      @page="onPage"
     />
 
     <KeyDialog
