@@ -120,11 +120,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
   async function refreshAll(): Promise<void> {
     loadingState.page.value = true
     try {
-      await Promise.all([
-        refreshOverview(),
-        refreshRecords(),
-        refreshFacets(),
-      ])
+      await Promise.all([refreshOverview(), refreshRecords(), refreshFacets()])
     } finally {
       loadingState.page.value = false
     }

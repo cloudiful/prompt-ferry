@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import type { BillingSummaryResponse } from '@/generated/admin-api'
-import {
-  formatBillingAmount,
-  formatTokenCount,
-} from '@/models/billing'
+import { formatBillingAmount, formatTokenCount } from '@/models/billing'
 
 const props = defineProps<{
   isAdmin: boolean
@@ -21,29 +18,57 @@ function amount(value: string | null | undefined): string {
     <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
       <div class="rounded-lg border border-default bg-default p-3">
         <div class="text-xs text-muted">{{ t('billingAmount') }}</div>
-        <strong class="mt-1 block text-xl text-highlighted">{{ amount(summary?.adjusted_amount) }}</strong>
+        <strong class="mt-1 block text-xl text-highlighted">{{
+          amount(summary?.adjusted_amount)
+        }}</strong>
       </div>
-      <div v-if="isAdmin" class="rounded-lg border border-default bg-default p-3">
+      <div
+        v-if="isAdmin"
+        class="rounded-lg border border-default bg-default p-3"
+      >
         <div class="text-xs text-muted">{{ t('billingCost') }}</div>
-        <strong class="mt-1 block text-xl text-highlighted">{{ amount(summary?.provider_cost) }}</strong>
+        <strong class="mt-1 block text-xl text-highlighted">{{
+          amount(summary?.provider_cost)
+        }}</strong>
       </div>
-      <div v-if="isAdmin" class="rounded-lg border border-default bg-default p-3">
+      <div
+        v-if="isAdmin"
+        class="rounded-lg border border-default bg-default p-3"
+      >
         <div class="text-xs text-muted">{{ t('billingMargin') }}</div>
-        <strong class="mt-1 block text-xl text-highlighted">{{ amount(summary?.gross_margin) }}</strong>
+        <strong class="mt-1 block text-xl text-highlighted">{{
+          amount(summary?.gross_margin)
+        }}</strong>
       </div>
       <div class="rounded-lg border border-default bg-default p-3">
         <div class="text-xs text-muted">{{ t('billingRequests') }}</div>
-        <strong class="mt-1 block text-xl text-highlighted">{{ formatTokenCount(summary?.request_count ?? 0) }}</strong>
+        <strong class="mt-1 block text-xl text-highlighted">{{
+          formatTokenCount(summary?.request_count ?? 0)
+        }}</strong>
       </div>
       <div class="rounded-lg border border-default bg-default p-3">
         <div class="text-xs text-muted">{{ t('billingKnown') }}</div>
-        <strong class="mt-1 block text-xl text-highlighted">{{ formatTokenCount(summary?.known_count ?? 0) }}</strong>
+        <strong class="mt-1 block text-xl text-highlighted">{{
+          formatTokenCount(summary?.known_count ?? 0)
+        }}</strong>
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-2 text-xs text-muted">
-      <UBadge :label="`${t('billingPriced')}: ${summary?.priced_count ?? 0}`" color="success" variant="subtle" />
-      <UBadge :label="`${t('billingUnpriced')}: ${summary?.unpriced_count ?? 0}`" color="warning" variant="subtle" />
-      <UBadge :label="`${t('billingUnknown')}: ${summary?.unknown_count ?? 0}`" color="neutral" variant="subtle" />
+      <UBadge
+        :label="`${t('billingPriced')}: ${summary?.priced_count ?? 0}`"
+        color="success"
+        variant="subtle"
+      />
+      <UBadge
+        :label="`${t('billingUnpriced')}: ${summary?.unpriced_count ?? 0}`"
+        color="warning"
+        variant="subtle"
+      />
+      <UBadge
+        :label="`${t('billingUnknown')}: ${summary?.unknown_count ?? 0}`"
+        color="neutral"
+        variant="subtle"
+      />
     </div>
   </section>
 </template>

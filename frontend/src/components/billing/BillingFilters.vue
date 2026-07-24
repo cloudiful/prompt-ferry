@@ -24,14 +24,19 @@ function apply(): void {
 
 function updateUser(value: unknown): void {
   const userId = Number(value)
-  emit('apply', { ...props.filters, user_id: Number.isFinite(userId) ? userId : undefined })
+  emit('apply', {
+    ...props.filters,
+    user_id: Number.isFinite(userId) ? userId : undefined,
+  })
 }
 </script>
 
 <template>
   <section class="grid gap-3 rounded-lg bg-default p-3">
     <div class="flex flex-wrap items-center gap-2">
-      <span class="text-sm font-semibold text-highlighted">{{ t('billingPeriod') }}</span>
+      <span class="text-sm font-semibold text-highlighted">{{
+        t('billingPeriod')
+      }}</span>
       <UInput
         :model-value="startDate"
         type="date"
@@ -45,7 +50,13 @@ function updateUser(value: unknown): void {
         size="sm"
         @update:model-value="emit('period', startDate, String($event ?? ''))"
       />
-      <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-filter" @click="apply">
+      <UButton
+        size="sm"
+        color="neutral"
+        variant="outline"
+        icon="i-lucide-filter"
+        @click="apply"
+      >
         {{ t('filterBilling') }}
       </UButton>
     </div>
@@ -53,7 +64,13 @@ function updateUser(value: unknown): void {
       <USelect
         v-if="isAdmin"
         :model-value="filters.user_id"
-        :items="[{ label: t('allUsers'), value: undefined }, ...users.map((user) => ({ label: user.login_name, value: user.user_id }))]"
+        :items="[
+          { label: t('allUsers'), value: undefined },
+          ...users.map((user) => ({
+            label: user.login_name,
+            value: user.user_id,
+          })),
+        ]"
         label-key="label"
         value-key="value"
         :placeholder="t('allUsers')"
@@ -63,17 +80,27 @@ function updateUser(value: unknown): void {
         :model-value="filters.client_key_id"
         type="number"
         :placeholder="t('billingClientKeyId')"
-        @update:model-value="filters.client_key_id = Number($event) || undefined"
+        @update:model-value="
+          filters.client_key_id = Number($event) || undefined
+        "
       />
       <UInput
         :model-value="filters.requested_model"
         :placeholder="t('publicModel')"
-        @update:model-value="filters.requested_model = String($event ?? '') || undefined"
+        @update:model-value="
+          filters.requested_model = String($event ?? '') || undefined
+        "
       />
       <USelect
         v-if="isAdmin"
         :model-value="filters.endpoint_id"
-        :items="[{ label: t('allEndpoints'), value: undefined }, ...endpoints.map((endpoint) => ({ label: endpoint.name, value: endpoint.endpoint_id }))]"
+        :items="[
+          { label: t('allEndpoints'), value: undefined },
+          ...endpoints.map((endpoint) => ({
+            label: endpoint.name,
+            value: endpoint.endpoint_id,
+          })),
+        ]"
         label-key="label"
         value-key="value"
         :placeholder="t('allEndpoints')"

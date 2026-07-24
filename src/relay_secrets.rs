@@ -1,9 +1,6 @@
 use anyhow::{Context, anyhow};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use chacha20poly1305::{
-    ChaCha20Poly1305, KeyInit,
-    aead::{Aead, generic_array::GenericArray},
-};
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
 use rand::Rng;
 
 const KEY_BYTES: usize = 32;
@@ -47,7 +44,7 @@ impl RelaySecretManager {
         let mut nonce = [0_u8; NONCE_BYTES];
         rand::rng().fill_bytes(&mut nonce);
         let ciphertext = cipher
-            .encrypt(GenericArray::from_slice(&nonce), plaintext.as_bytes())
+            .encrypt(&Nonce::from(nonce), plaintext.as_bytes())
             .map_err(|_| anyhow!("failed to encrypt relay secret"))?;
         Ok(EncryptedSecretEnvelope {
             ciphertext,
@@ -68,12 +65,10 @@ impl RelaySecretManager {
             .as_slice()
             .try_into()
             .map_err(|_| anyhow!("relay secret nonce must be {NONCE_BYTES} bytes"))?;
+        let nonce = Nonce::from(*nonce);
         let cipher = ChaCha20Poly1305::new((&self.key).into());
         let plaintext = cipher
-            .decrypt(
-                GenericArray::from_slice(nonce),
-                envelope.ciphertext.as_ref(),
-            )
+            .decrypt(&nonce, envelope.ciphertext.as_ref())
             .map_err(|_| anyhow!("failed to decrypt relay secret"))?;
         String::from_utf8(plaintext).context("relay secret plaintext is not valid utf-8")
     }

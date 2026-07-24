@@ -140,7 +140,8 @@ export const billingMessages = {
     requestLinkBilling: 'View billing snapshot',
     billingForRequest: 'Billing snapshot for this request',
     billingCsvDownloaded: 'CSV exported',
-    billingRuleScopeHint: 'Sale matches the public model; cost matches the endpoint and upstream model.',
+    billingRuleScopeHint:
+      'Sale matches the public model; cost matches the endpoint and upstream model.',
     billingRateHint: 'Amounts use CNY per million tokens.',
   },
 } as const

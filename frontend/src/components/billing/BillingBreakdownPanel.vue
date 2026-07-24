@@ -30,13 +30,27 @@ const columns = computed<TableColumn<BillingBreakdownResponse>[]>(() => [
     <h2 class="text-sm font-semibold text-highlighted">{{ title }}</h2>
     <UTable :data="rows" :columns="columns" class="min-w-[52rem]">
       <template #empty>-</template>
-      <template #request_count-cell="{ row }">{{ formatTokenCount(row.original.request_count) }}</template>
-      <template #input_tokens-cell="{ row }">{{ formatTokenCount(row.original.input_tokens) }}</template>
-      <template #cache_read_tokens-cell="{ row }">{{ formatTokenCount(row.original.cache_read_tokens) }}</template>
-      <template #cache_write_tokens-cell="{ row }">{{ formatTokenCount(row.original.cache_write_tokens) }}</template>
-      <template #output_tokens-cell="{ row }">{{ formatTokenCount(row.original.output_tokens) }}</template>
-      <template #adjusted_amount-cell="{ row }">{{ formatBillingAmount(row.original.adjusted_amount) }}</template>
-      <template #provider_cost-cell="{ row }">{{ formatBillingAmount(row.original.provider_cost) }}</template>
+      <template #request_count-cell="{ row }">{{
+        formatTokenCount(row.original.request_count)
+      }}</template>
+      <template #input_tokens-cell="{ row }">{{
+        formatTokenCount(row.original.input_tokens)
+      }}</template>
+      <template #cache_read_tokens-cell="{ row }">{{
+        formatTokenCount(row.original.cache_read_tokens)
+      }}</template>
+      <template #cache_write_tokens-cell="{ row }">{{
+        formatTokenCount(row.original.cache_write_tokens)
+      }}</template>
+      <template #output_tokens-cell="{ row }">{{
+        formatTokenCount(row.original.output_tokens)
+      }}</template>
+      <template #adjusted_amount-cell="{ row }">{{
+        formatBillingAmount(row.original.adjusted_amount)
+      }}</template>
+      <template #provider_cost-cell="{ row }">{{
+        formatBillingAmount(row.original.provider_cost)
+      }}</template>
     </UTable>
   </section>
 </template>

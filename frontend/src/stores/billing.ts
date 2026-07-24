@@ -32,7 +32,9 @@ export const useBillingStore = defineStore('billing', () => {
   const charges = ref<BillingChargeResponse[]>([])
   const total = ref(0)
   const priceRules = ref<BillingPriceRuleResponse[]>([])
-  const endpoints = ref<Awaited<ReturnType<typeof fetchBillingEndpoints>>['endpoints']>([])
+  const endpoints = ref<
+    Awaited<ReturnType<typeof fetchBillingEndpoints>>['endpoints']
+  >([])
   const filters = ref<BillingChargeFilters>({})
   const first = ref(0)
   const rows = useStoredPageSize('billing', 25, BILLING_PAGE_SIZE_OPTIONS)
@@ -67,7 +69,11 @@ export const useBillingStore = defineStore('billing', () => {
     rows.value = nextRows
     chargesLoading.value = true
     try {
-      const page = await fetchBillingCharges(filters.value, first.value, rows.value)
+      const page = await fetchBillingCharges(
+        filters.value,
+        first.value,
+        rows.value,
+      )
       charges.value = page.charges
       total.value = page.total
     } finally {
@@ -155,7 +161,9 @@ export const useBillingStore = defineStore('billing', () => {
     filename: string,
   ): Promise<void> {
     const csv = await fetchBillingCsv(kind, filters.value)
-    const url = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }))
+    const url = URL.createObjectURL(
+      new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }),
+    )
     const link = document.createElement('a')
     link.href = url
     link.download = filename

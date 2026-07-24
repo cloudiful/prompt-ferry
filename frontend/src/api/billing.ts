@@ -35,9 +35,11 @@ export async function fetchBillingCharges(
   rows: number,
 ): Promise<BillingChargePageResponse> {
   return expectData(
-    await listBillingCharges<true>(withData({
-      query: { ...filters, first, rows },
-    })),
+    await listBillingCharges<true>(
+      withData({
+        query: { ...filters, first, rows },
+      }),
+    ),
   )
 }
 
@@ -45,7 +47,9 @@ export async function fetchBillingPriceRules(): Promise<
   BillingPriceRuleResponse[]
 > {
   const response = expectData(
-    await listBillingPriceRules<true>(withData({ query: { first: 0, rows: 500 } })),
+    await listBillingPriceRules<true>(
+      withData({ query: { first: 0, rows: 500 } }),
+    ),
   )
   return response.rules
 }
@@ -77,7 +81,9 @@ export async function fetchBillingChargeDetail(
   chargeId: number,
 ): Promise<BillingChargeDetailResponse> {
   return expectData(
-    await billingChargeDetail<true>(withData({ path: { charge_id: chargeId } })),
+    await billingChargeDetail<true>(
+      withData({ path: { charge_id: chargeId } }),
+    ),
   )
 }
 

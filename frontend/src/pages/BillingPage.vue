@@ -95,9 +95,11 @@ async function savePriceRule(): Promise<void> {
   try {
     await billing.savePriceRule({
       price_side: form.price_side,
-      public_model: form.price_side === 'sale' ? form.public_model.trim() : null,
+      public_model:
+        form.price_side === 'sale' ? form.public_model.trim() : null,
       endpoint_id: form.price_side === 'cost' ? form.endpoint_id : null,
-      upstream_model: form.price_side === 'cost' ? form.upstream_model.trim() : null,
+      upstream_model:
+        form.price_side === 'cost' ? form.upstream_model.trim() : null,
       input_rate: form.input_rate.trim(),
       cache_read_rate: form.cache_read_rate.trim(),
       cache_write_rate: form.cache_write_rate.trim(),
@@ -111,7 +113,9 @@ async function savePriceRule(): Promise<void> {
   }
 }
 
-async function togglePriceRule(rule: (typeof billing.priceRules)[number]): Promise<void> {
+async function togglePriceRule(
+  rule: (typeof billing.priceRules)[number],
+): Promise<void> {
   try {
     await billing.togglePriceRule(rule)
     notifySuccess(rule.enabled ? t('priceRuleDisabled') : t('priceRuleEnabled'))
@@ -144,7 +148,10 @@ function openPriceRule(): void {
 }
 
 onMounted(async () => {
-  const requestId = typeof route.query.request_id === 'string' ? route.query.request_id : undefined
+  const requestId =
+    typeof route.query.request_id === 'string'
+      ? route.query.request_id
+      : undefined
   billing.configureFilters({
     ...billing.filters,
     request_id: requestId,
@@ -161,24 +168,117 @@ onMounted(async () => {
 
 <template>
   <div class="grid min-w-0 max-w-full gap-3">
-    <PageIntro :eyebrow="t('observability')" :title="t('billing')" :subtitle="t('billingSubtitle')">
+    <PageIntro
+      :eyebrow="t('observability')"
+      :title="t('billing')"
+      :subtitle="t('billingSubtitle')"
+    >
       <template #actions>
-        <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-refresh-cw" :loading="billing.loading" :aria-label="t('billingRefresh')" @click="refresh">{{ t('billingRefresh') }}</UButton>
-        <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-download" @click="download('details')">{{ t('billingExportDetails') }}</UButton>
-        <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-calendar-arrow-down" @click="download('monthly')">{{ t('billingExportMonthly') }}</UButton>
-        <UButton v-if="session.isAdmin" size="sm" color="warning" variant="outline" icon="i-lucide-calculator" @click="reprice">{{ t('reprice') }}</UButton>
+        <UButton
+          size="sm"
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-refresh-cw"
+          :loading="billing.loading"
+          :aria-label="t('billingRefresh')"
+          @click="refresh"
+          >{{ t('billingRefresh') }}</UButton
+        >
+        <UButton
+          size="sm"
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-download"
+          @click="download('details')"
+          >{{ t('billingExportDetails') }}</UButton
+        >
+        <UButton
+          size="sm"
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-calendar-arrow-down"
+          @click="download('monthly')"
+          >{{ t('billingExportMonthly') }}</UButton
+        >
+        <UButton
+          v-if="session.isAdmin"
+          size="sm"
+          color="warning"
+          variant="outline"
+          icon="i-lucide-calculator"
+          @click="reprice"
+          >{{ t('reprice') }}</UButton
+        >
       </template>
     </PageIntro>
 
-    <BillingFilters :filters="billing.filters" :endpoints="billing.endpoints" :is-admin="session.isAdmin" :start-date="dateInputValue(periodStart)" :end-date="periodEnd" :users="users.users" :t="t" @apply="applyFilters" @period="applyPeriod" />
-    <BillingSummaryPanel :summary="billing.summary" :is-admin="session.isAdmin" :t="t" />
+    <BillingFilters
+      :filters="billing.filters"
+      :endpoints="billing.endpoints"
+      :is-admin="session.isAdmin"
+      :start-date="dateInputValue(periodStart)"
+      :end-date="periodEnd"
+      :users="users.users"
+      :t="t"
+      @apply="applyFilters"
+      @period="applyPeriod"
+    />
+    <BillingSummaryPanel
+      :summary="billing.summary"
+      :is-admin="session.isAdmin"
+      :t="t"
+    />
     <div class="grid gap-3 xl:grid-cols-2">
-      <BillingBreakdownPanel :rows="billing.summary?.by_client_key ?? []" :is-admin="session.isAdmin" :title="t('billingClientKeys')" :t="t" />
-      <BillingBreakdownPanel :rows="billing.summary?.by_model ?? []" :is-admin="session.isAdmin" :title="t('billingModels')" :t="t" />
+      <BillingBreakdownPanel
+        :rows="billing.summary?.by_client_key ?? []"
+        :is-admin="session.isAdmin"
+        :title="t('billingClientKeys')"
+        :t="t"
+      />
+      <BillingBreakdownPanel
+        :rows="billing.summary?.by_model ?? []"
+        :is-admin="session.isAdmin"
+        :title="t('billingModels')"
+        :t="t"
+      />
     </div>
-    <BillingChargesPanel :charges="billing.charges" :first="billing.first" :is-admin="session.isAdmin" :loading="billing.chargesLoading" :rows="billing.rows" :total="billing.total" :t="t" @open-detail="openDetail($event.charge_id)" @page="billing.refreshCharges($event.first, $event.rows)" />
-    <BillingPriceRulesPanel v-if="session.isAdmin" :endpoints="billing.endpoints" :loading="billing.priceRulesLoading" :rules="billing.priceRules" :t="t" @create="openPriceRule" @toggle="togglePriceRule" />
-    <BillingPriceRuleDialog v-model:visible="priceRuleVisible" v-model:form="priceRuleForm" :busy="billing.loading" :endpoints="billing.endpoints" :t="t" @save="savePriceRule" />
-    <BillingChargeDetailDialog v-model:visible="detailVisible" v-model:adjustment-amount="adjustmentAmount" v-model:adjustment-reason="adjustmentReason" :detail="billing.detail" :is-admin="session.isAdmin" :loading="billing.detailLoading" :t="t" @add-adjustment="addAdjustment" />
+    <BillingChargesPanel
+      :charges="billing.charges"
+      :first="billing.first"
+      :is-admin="session.isAdmin"
+      :loading="billing.chargesLoading"
+      :rows="billing.rows"
+      :total="billing.total"
+      :t="t"
+      @open-detail="openDetail($event.charge_id)"
+      @page="billing.refreshCharges($event.first, $event.rows)"
+    />
+    <BillingPriceRulesPanel
+      v-if="session.isAdmin"
+      :endpoints="billing.endpoints"
+      :loading="billing.priceRulesLoading"
+      :rules="billing.priceRules"
+      :t="t"
+      @create="openPriceRule"
+      @toggle="togglePriceRule"
+    />
+    <BillingPriceRuleDialog
+      v-model:visible="priceRuleVisible"
+      v-model:form="priceRuleForm"
+      :busy="billing.loading"
+      :endpoints="billing.endpoints"
+      :t="t"
+      @save="savePriceRule"
+    />
+    <BillingChargeDetailDialog
+      v-model:visible="detailVisible"
+      v-model:adjustment-amount="adjustmentAmount"
+      v-model:adjustment-reason="adjustmentReason"
+      :detail="billing.detail"
+      :is-admin="session.isAdmin"
+      :loading="billing.detailLoading"
+      :t="t"
+      @add-adjustment="addAdjustment"
+    />
   </div>
 </template>
