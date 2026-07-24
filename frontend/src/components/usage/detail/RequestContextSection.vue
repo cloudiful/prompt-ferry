@@ -34,7 +34,10 @@ defineProps<{
               color="neutral"
               variant="link"
               icon="i-lucide-receipt-text"
-              :to="{ path: '/billing', query: { request_id: event.request_id } }"
+              :to="{
+                path: '/billing',
+                query: { request_id: event.request_id },
+              }"
               :aria-label="t('requestLinkBilling')"
               :label="t('requestLinkBilling')"
             />
@@ -50,6 +53,18 @@ defineProps<{
         </DetailKeyValue>
         <DetailKeyValue :label="t('cacheRate')">
           {{ formatting.formatPercent(event.cache_rate) }}
+        </DetailKeyValue>
+        <DetailKeyValue
+          v-if="event.request_category === 'ai'"
+          :label="t('ttft')"
+        >
+          {{ formatting.formatMs(event.ttft_ms) }}
+        </DetailKeyValue>
+        <DetailKeyValue
+          v-if="event.request_category === 'ai'"
+          :label="t('streamLatency')"
+        >
+          {{ formatting.formatMs(formatting.streamMs(event)) }}
         </DetailKeyValue>
         <DetailKeyValue :label="t('upstream')">
           {{ event.target }}

@@ -34,7 +34,7 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
         input.status,
         input.ok,
         input.duration_ms,
-        input.first_chunk_ms,
+        input.ttft_ms,
         input.input_tokens,
         input.output_tokens,
         input.total_tokens,

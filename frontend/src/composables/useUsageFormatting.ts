@@ -1,5 +1,7 @@
-import type { RequestRecordRowView } from '../models'
-import type { RequestRecordFormatting } from '../models/request-record-formatting'
+import type {
+  RequestRecordFormatting,
+  RequestRecordTiming,
+} from '../models/request-record-formatting'
 import {
   requestRecordStateTagSeverity,
   requestRecordStateLabelKey,
@@ -49,10 +51,10 @@ export function formatRequestRecordMs(value?: number | null): string {
 }
 
 export function requestRecordStreamMs(
-  record: RequestRecordRowView,
+  record: RequestRecordTiming,
 ): number | null {
-  if (record.duration_ms == null || record.first_chunk_ms == null) return null
-  return Math.max(0, record.duration_ms - record.first_chunk_ms)
+  if (record.duration_ms == null || record.ttft_ms == null) return null
+  return Math.max(0, record.duration_ms - record.ttft_ms)
 }
 
 function formatRate(
@@ -66,15 +68,40 @@ function formatRate(
 }
 
 export function formatRequestRecordOutputTokensPerSecond(
-  record: RequestRecordRowView,
+  record: RequestRecordTiming,
 ): string {
-  return formatRate(record.output_tokens, requestRecordStreamMs(record))
+  if (
+    record.request_category !== 'ai' ||
+    record.request_state !== 'completed'
+  ) {
+    return '-'
+  }
+  return formatRate(
+    record.output_tokens,
+    requestRecordStreamMs(record) ?? record.duration_ms,
+  )
+}
+
+export function formatRequestRecordOutputRateMode(
+  record: RequestRecordTiming,
+): 'generation' | 'e2e' | null {
+  if (
+    record.request_category !== 'ai' ||
+    record.request_state !== 'completed' ||
+    record.output_tokens == null ||
+    record.output_tokens <= 0
+  ) {
+    return null
+  }
+  if (record.ttft_ms != null) return 'generation'
+  if (record.duration_ms != null && record.duration_ms > 0) return 'e2e'
+  return null
 }
 
 export function formatRequestRecordInputTokensPerSecond(
-  record: RequestRecordRowView,
+  record: RequestRecordTiming,
 ): string {
-  return formatRate(record.input_tokens, record.first_chunk_ms)
+  return formatRate(record.input_tokens, record.ttft_ms)
 }
 
 export function createRequestRecordFormatting(
@@ -85,6 +112,7 @@ export function createRequestRecordFormatting(
     formatMs: formatRequestRecordMs,
     formatPercent: formatRequestRecordPercent,
     formatOutputTokensPerSecond: formatRequestRecordOutputTokensPerSecond,
+    formatOutputRateMode: formatRequestRecordOutputRateMode,
     formatInputTokensPerSecond: formatRequestRecordInputTokensPerSecond,
     formatRequestStateLabel: (state) =>
       labels(requestRecordStateLabelKey(state)),

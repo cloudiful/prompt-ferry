@@ -1,7 +1,7 @@
 INSERT INTO request_records(
     event_kind, request_category, request_state, request_id, user_id, client_key_label, request_user_agent, endpoint_id, endpoint_key_id, endpoint_key_label, model_route_rule_id, mcp_server_id, mcp_server_name, mcp_protocol_method, mcp_operation_name, path,
     http_request_content_encoding, http_request_compressed, http_request_compressed_bytes, http_request_decompressed_bytes, http_request_compression_ratio,
-    model, status, ok, duration_ms, first_chunk_ms,
+    model, status, ok, duration_ms, ttft_ms,
     input_tokens, output_tokens, total_tokens, cached_tokens, cache_read_tokens,
     cache_write_tokens, conversation_id, parent_event_id, conversation_seq, conversation_source,
     storage_sanitized, storage_sanitized_nul_count,
@@ -51,7 +51,7 @@ DO UPDATE SET
     status = COALESCE(EXCLUDED.status, request_records.status),
     ok = COALESCE(EXCLUDED.ok, request_records.ok),
     duration_ms = COALESCE(EXCLUDED.duration_ms, request_records.duration_ms),
-    first_chunk_ms = COALESCE(EXCLUDED.first_chunk_ms, request_records.first_chunk_ms),
+    ttft_ms = COALESCE(EXCLUDED.ttft_ms, request_records.ttft_ms),
     input_tokens = COALESCE(EXCLUDED.input_tokens, request_records.input_tokens),
     output_tokens = COALESCE(EXCLUDED.output_tokens, request_records.output_tokens),
     total_tokens = COALESCE(EXCLUDED.total_tokens, request_records.total_tokens),

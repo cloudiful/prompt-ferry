@@ -41,7 +41,7 @@ pub(super) async fn finish_failure(
     status: u16,
     capture: &mut UsageCapture,
     raw_response_body: &[u8],
-    first_chunk_ms: Option<i64>,
+    ttft_ms: Option<i64>,
 ) -> anyhow::Result<()> {
     let services = context.services;
     let request = context.request;
@@ -71,7 +71,7 @@ pub(super) async fn finish_failure(
                 Some(status as i32),
                 Some(false),
                 Some(request_ctx.elapsed_ms()),
-                first_chunk_ms,
+                ttft_ms,
             )
             .with_usage(capture.usage.clone())
             .with_response(

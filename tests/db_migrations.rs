@@ -278,6 +278,13 @@ async fn migrate_upgrades_legacy_usage_events_table() -> anyhow::Result<()> {
     assert!(row.has_default);
     assert!(row.has_storage_constraint);
 
+    let timing_columns =
+        sqlx::query_file!("tests/sql/db_migrations/request_record_ttft_columns.sql")
+            .fetch_one(&schema.pool)
+            .await?;
+    assert!(timing_columns.ttft_exists);
+    assert!(timing_columns.first_chunk_absent);
+
     let client_key_label_exists =
         sqlx::query_file!("tests/sql/db_migrations/usage_events_client_key_label_exists.sql")
             .fetch_one(&schema.pool)

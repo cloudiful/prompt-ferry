@@ -74,7 +74,7 @@ const columns = computed<TableColumn<RequestRecordRowView>[]>(() => [
     header: props.t('tokenCacheSummary'),
     enableSorting: true,
   },
-  { id: 'throughput', header: `${props.t('throughput')} token/s` },
+  { id: 'throughput', header: `${props.t('outputRate')} token/s` },
   { accessorKey: 'error_message', header: props.t('error') },
 ])
 
@@ -256,9 +256,21 @@ function applyFilter(): void {
           {{ formatting.formatCount(row.original.cached_tokens) }} /
           {{ formatting.formatPercent(row.original.cache_rate) }}
         </template>
-        <template #throughput-cell="{ row }">{{
-          formatting.formatOutputTokensPerSecond(row.original)
-        }}</template>
+        <template #throughput-cell="{ row }">
+          <UTooltip
+            v-if="formatting.formatOutputRateMode(row.original)"
+            :text="
+              formatting.formatOutputRateMode(row.original) === 'generation'
+                ? t('generationTps')
+                : t('e2eOutputRate')
+            "
+          >
+            <span>{{
+              formatting.formatOutputTokensPerSecond(row.original)
+            }}</span>
+          </UTooltip>
+          <span v-else>-</span>
+        </template>
         <template #error_message-cell="{ row }">
           <UButton
             v-if="row.original.error_message"

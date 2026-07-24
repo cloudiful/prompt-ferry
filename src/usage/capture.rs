@@ -23,7 +23,7 @@ pub struct UsageCapture {
     sse_decode_failed: bool,
     json_body: Vec<u8>,
     json_body_truncated: bool,
-    saw_content: bool,
+    saw_output: bool,
 }
 
 impl UsageCapture {
@@ -41,7 +41,7 @@ impl UsageCapture {
             sse_decode_failed: false,
             json_body: Vec::new(),
             json_body_truncated: false,
-            saw_content: false,
+            saw_output: false,
         }
     }
 
@@ -51,7 +51,7 @@ impl UsageCapture {
     }
 
     pub fn observe_chunk(&mut self, chunk: &[u8]) -> bool {
-        let had_content = self.saw_content;
+        let had_output = self.saw_output;
         if self.is_sse {
             self.observe_sse_chunk(chunk);
         } else if !self.json_body_truncated {
@@ -63,13 +63,14 @@ impl UsageCapture {
                 self.json_body_truncated = true;
             }
         }
-        !had_content && self.saw_content
+        !had_output && self.saw_output
     }
 
-    pub fn finish(&mut self) {
+    pub fn finish(&mut self) -> bool {
+        let had_output = self.saw_output;
         if self.is_sse {
             if self.sse_decode_failed {
-                return;
+                return false;
             }
             if let Ok(Some(line)) = self.sse_decoder.finish() {
                 self.observe_sse_line(&line);
@@ -79,6 +80,7 @@ impl UsageCapture {
         {
             self.observe_json_value(&value);
         }
+        !had_output && self.saw_output
     }
 
     fn observe_sse_chunk(&mut self, chunk: &[u8]) {
@@ -141,8 +143,10 @@ impl UsageCapture {
         } else {
             text::append_text(&mut self.response_text, &text::extract_output_text(value));
         }
-        if text::has_content(payload) || text::has_content(value) {
-            self.saw_content = true;
+        let saw_output = output_events::has_output_event(value)
+            || (value.get("type").is_none() && output_events::has_output_event(payload));
+        if saw_output {
+            self.saw_output = true;
         }
         self.truncate_response_text();
     }
@@ -157,5 +161,33 @@ impl UsageCapture {
         }
         self.response_text.truncate(end);
         self.response_text_truncated = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UsageCapture;
+
+    #[test]
+    fn ttft_starts_on_reasoning_or_tool_output_not_lifecycle_events() {
+        let mut capture = UsageCapture::new(true, None);
+
+        assert!(!capture.observe_chunk(b"data: {\"type\":\"response.created\"}\n\n"));
+        assert!(capture.observe_chunk(
+            b"data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"think\"}\n\n"
+        ));
+        assert!(!capture.observe_chunk(
+            b"data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n"
+        ));
+    }
+
+    #[test]
+    fn ttft_handles_an_output_event_split_across_sse_chunks() {
+        let mut capture = UsageCapture::new(true, None);
+
+        assert!(!capture.observe_chunk(
+            b"data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{"
+        ));
+        assert!(capture.observe_chunk(b"\"}\n\n"));
     }
 }

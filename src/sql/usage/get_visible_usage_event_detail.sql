@@ -25,7 +25,7 @@ SELECT
     ue.status,
     ue.ok,
     ue.duration_ms,
-    ue.first_chunk_ms,
+    ue.ttft_ms,
     ue.input_tokens,
     ue.output_tokens,
     ue.total_tokens,

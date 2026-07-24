@@ -35,7 +35,7 @@ pub struct RequestRecordListRow {
     pub status: Option<i32>,
     pub ok: Option<bool>,
     pub duration_ms: Option<i64>,
-    pub first_chunk_ms: Option<i64>,
+    pub ttft_ms: Option<i64>,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
@@ -88,7 +88,7 @@ pub struct RequestRecordDetail {
     pub status: Option<i32>,
     pub ok: Option<bool>,
     pub duration_ms: Option<i64>,
-    pub first_chunk_ms: Option<i64>,
+    pub ttft_ms: Option<i64>,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
@@ -157,7 +157,7 @@ pub struct RequestRecordBucket {
     pub cache_rate: Option<f64>,
     pub error_rate: Option<f64>,
     pub avg_duration_ms: Option<f64>,
-    pub avg_first_chunk_ms: Option<f64>,
+    pub avg_ttft_ms: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

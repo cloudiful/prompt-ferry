@@ -15,8 +15,8 @@ SELECT
     COUNT(DISTINCT rr.mcp_protocol_method)::BIGINT AS "method_coverage_count!",
     percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.duration_ms)
         FILTER (WHERE rr.duration_ms IS NOT NULL) AS p95_total_ms,
-    percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.first_chunk_ms)
-        FILTER (WHERE rr.first_chunk_ms IS NOT NULL) AS p95_first_token_ms
+    percentile_cont(0.95) WITHIN GROUP (ORDER BY rr.ttft_ms)
+        FILTER (WHERE rr.ttft_ms IS NOT NULL) AS p95_first_token_ms
 FROM request_records rr
 LEFT JOIN users u ON u.user_id = rr.user_id
 LEFT JOIN provider_endpoints pe ON pe.endpoint_id = rr.endpoint_id

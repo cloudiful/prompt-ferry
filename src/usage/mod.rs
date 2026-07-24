@@ -4,6 +4,7 @@ use crate::stream_text::Utf8LineDecoder;
 
 mod capture;
 pub mod logging;
+mod output_events;
 pub mod prompt;
 mod request;
 mod text;

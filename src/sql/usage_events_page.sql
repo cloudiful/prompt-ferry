@@ -17,7 +17,7 @@ SELECT
     rr.status,
     rr.ok,
     rr.duration_ms,
-    rr.first_chunk_ms,
+    rr.ttft_ms,
     rr.input_tokens,
     rr.output_tokens,
     rr.total_tokens,

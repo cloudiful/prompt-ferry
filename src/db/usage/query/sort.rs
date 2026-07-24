@@ -25,9 +25,7 @@ pub(super) fn request_records_order_by_clause(sort_field: &str, sort_order: i64)
         ("duration_ms", true) => {
             "rr.duration_ms ASC NULLS LAST, rr.created_at DESC, rr.event_id DESC"
         }
-        ("first_chunk_ms", true) => {
-            "rr.first_chunk_ms ASC NULLS LAST, rr.created_at DESC, rr.event_id DESC"
-        }
+        ("ttft_ms", true) => "rr.ttft_ms ASC NULLS LAST, rr.created_at DESC, rr.event_id DESC",
         ("total_tokens", true) => {
             "rr.total_tokens ASC NULLS LAST, rr.created_at DESC, rr.event_id DESC"
         }
@@ -58,9 +56,7 @@ pub(super) fn request_records_order_by_clause(sort_field: &str, sort_order: i64)
         ("duration_ms", false) => {
             "rr.duration_ms DESC NULLS LAST, rr.created_at DESC, rr.event_id DESC"
         }
-        ("first_chunk_ms", false) => {
-            "rr.first_chunk_ms DESC NULLS LAST, rr.created_at DESC, rr.event_id DESC"
-        }
+        ("ttft_ms", false) => "rr.ttft_ms DESC NULLS LAST, rr.created_at DESC, rr.event_id DESC",
         ("total_tokens", false) => {
             "rr.total_tokens DESC NULLS LAST, rr.created_at DESC, rr.event_id DESC"
         }

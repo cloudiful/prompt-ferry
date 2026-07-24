@@ -14,7 +14,7 @@ agg AS (
            COALESCE(SUM(total_tokens), 0)::BIGINT AS total_tokens,
            COALESCE(SUM(cached_tokens), 0)::BIGINT AS cached_tokens,
            AVG(duration_ms)::DOUBLE PRECISION AS avg_duration_ms,
-           AVG(first_chunk_ms)::DOUBLE PRECISION AS avg_first_chunk_ms
+           AVG(ttft_ms)::DOUBLE PRECISION AS avg_ttft_ms
     FROM request_records, bounds
     WHERE event_kind = 'request'
       AND created_at >= bounds.start_at AND created_at < bounds.end_at + INTERVAL '1 day'
@@ -38,7 +38,7 @@ SELECT buckets.bucket_at AS "bucket_at!",
             ELSE NULL
        END AS error_rate,
        agg.avg_duration_ms AS avg_duration_ms,
-       agg.avg_first_chunk_ms AS avg_first_chunk_ms
+       agg.avg_ttft_ms AS avg_ttft_ms
 FROM buckets
 LEFT JOIN agg USING (bucket_at)
 ORDER BY buckets.bucket_at ASC

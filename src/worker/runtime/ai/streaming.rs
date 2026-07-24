@@ -256,7 +256,7 @@ pub(super) async fn forward_streaming_response(
     let mut raw_response_body = Vec::new();
     let mut upstream_response_bytes = 0usize;
     let mut raw_response_capture_truncated = false;
-    let mut first_chunk_ms = None;
+    let mut ttft_ms = None;
     let mut chat_stream_adapter =
         (response_adapter == ResponseAdapter::ChatToResponses).then(ChatResponseStreamAdapter::new);
     let mut anthropic_stream_adapter = (response_adapter
@@ -300,15 +300,10 @@ pub(super) async fn forward_streaming_response(
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
     }
     let emit_output_chunks = |output_chunks: Vec<Vec<u8>>,
-                              capture: &mut UsageCapture,
                               out_tx: &BridgeSender,
-                              first_chunk_ms: &mut Option<i64>,
                               stream_diag: &mut UpstreamStreamDiag|
      -> anyhow::Result<()> {
         for output_chunk in output_chunks {
-            if capture.observe_chunk(&output_chunk) {
-                *first_chunk_ms = Some(request_ctx.elapsed_ms());
-            }
             stream_diag.record_emitted_chunk(output_chunk.len());
             out_tx
                 .send(BridgeMessage::ResponseChunk(ResponseChunk {
@@ -333,9 +328,7 @@ pub(super) async fn forward_streaming_response(
             }, if flush_interval.is_some() => {
                 emit_output_chunks(
                     stream_delta_batcher.flush_due()?,
-                    &mut capture,
                     &services.out_tx,
-                    &mut first_chunk_ms,
                     &mut stream_diag,
                 )?;
             }
@@ -371,7 +364,7 @@ pub(super) async fn forward_streaming_response(
                                     Some(status.as_u16() as i32),
                                     Some(false),
                                     Some(request_ctx.elapsed_ms()),
-                                    first_chunk_ms,
+                                    ttft_ms,
                                 )
                                 .with_usage(capture.usage.clone())
                                 .with_response(
@@ -410,6 +403,9 @@ pub(super) async fn forward_streaming_response(
                     return Err(anyhow!("upstream_response_too_large"));
                 }
                 stream_diag.record_upstream_chunk(chunk.len());
+                if ttft_ms.is_none() && capture.observe_chunk(&chunk) {
+                    ttft_ms = Some(request_ctx.elapsed_ms());
+                }
                 if raw_content_logging_enabled {
                     append_limited_capture(
                         &mut raw_response_body,
@@ -483,9 +479,7 @@ pub(super) async fn forward_streaming_response(
                 for output_chunk in output_chunks {
                     emit_output_chunks(
                         stream_delta_batcher.push_chunk(output_chunk)?,
-                        &mut capture,
                         &services.out_tx,
-                        &mut first_chunk_ms,
                         &mut stream_diag,
                     )?;
                 }
@@ -522,9 +516,7 @@ pub(super) async fn forward_streaming_response(
         for output_chunk in output_chunks {
             emit_output_chunks(
                 stream_delta_batcher.push_chunk(output_chunk)?,
-                &mut capture,
                 &services.out_tx,
-                &mut first_chunk_ms,
                 &mut stream_diag,
             )?;
         }
@@ -550,9 +542,7 @@ pub(super) async fn forward_streaming_response(
         for output_chunk in output_chunks {
             emit_output_chunks(
                 stream_delta_batcher.push_chunk(output_chunk)?,
-                &mut capture,
                 &services.out_tx,
-                &mut first_chunk_ms,
                 &mut stream_diag,
             )?;
         }
@@ -568,9 +558,7 @@ pub(super) async fn forward_streaming_response(
         for output_chunk in output_chunks {
             emit_output_chunks(
                 stream_delta_batcher.push_chunk(output_chunk)?,
-                &mut capture,
                 &services.out_tx,
-                &mut first_chunk_ms,
                 &mut stream_diag,
             )?;
         }
@@ -579,9 +567,7 @@ pub(super) async fn forward_streaming_response(
         for output_chunk in filter.finish()? {
             emit_output_chunks(
                 stream_delta_batcher.push_chunk(output_chunk)?,
-                &mut capture,
                 &services.out_tx,
-                &mut first_chunk_ms,
                 &mut stream_diag,
             )?;
         }
@@ -598,13 +584,10 @@ pub(super) async fn forward_streaming_response(
             Some(ResponsesSseTerminal::Completed)
         )
     {
-        emit_output_chunks(
-            buffered_output,
-            &mut capture,
-            &services.out_tx,
-            &mut first_chunk_ms,
-            &mut stream_diag,
-        )?;
+        emit_output_chunks(buffered_output, &services.out_tx, &mut stream_diag)?;
+        if capture.finish() && ttft_ms.is_none() {
+            ttft_ms = Some(request_ctx.elapsed_ms());
+        }
         let (code, message) = failure_details(responses_stream_terminal);
         finish_failure(
             responses_stream_terminal,
@@ -612,21 +595,17 @@ pub(super) async fn forward_streaming_response(
             status.as_u16(),
             &mut capture,
             &raw_response_body,
-            first_chunk_ms,
+            ttft_ms,
         )
         .await?;
         stream_diag.mark_terminal(code, Some(message.to_string()));
         stream_diag.finish();
         return Ok(());
     }
-    emit_output_chunks(
-        buffered_output,
-        &mut capture,
-        &services.out_tx,
-        &mut first_chunk_ms,
-        &mut stream_diag,
-    )?;
-    capture.finish();
+    emit_output_chunks(buffered_output, &services.out_tx, &mut stream_diag)?;
+    if capture.finish() && ttft_ms.is_none() {
+        ttft_ms = Some(request_ctx.elapsed_ms());
+    }
     if let Some(assistant_capture) = assistant_capture.as_mut() {
         assistant_capture.finish();
     }
@@ -679,7 +658,7 @@ pub(super) async fn forward_streaming_response(
                 Some(status.as_u16() as i32),
                 Some(true),
                 Some(request_ctx.elapsed_ms()),
-                first_chunk_ms,
+                ttft_ms,
             )
             .with_usage(capture.usage.clone())
             .with_response(
@@ -866,7 +845,6 @@ async fn forward_buffered_non_sse_response(
     stream_diag.mark_terminal("completed", None);
     stream_diag.finish();
 
-    let first_chunk_ms = Some(request_ctx.elapsed_ms());
     let captured_artifact = assistant_capture
         .as_ref()
         .and_then(|capture| capture.artifact())
@@ -900,7 +878,7 @@ async fn forward_buffered_non_sse_response(
                 Some(status.as_u16() as i32),
                 Some(true),
                 Some(request_ctx.elapsed_ms()),
-                first_chunk_ms,
+                None,
             )
             .with_usage(capture.usage.clone())
             .with_response(

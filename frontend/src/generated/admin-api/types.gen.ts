@@ -808,7 +808,7 @@ export type RequestFailureFamily = 'auth' | 'rate_limit' | 'quota' | 'timeout' |
 
 export type RequestRecordBucket = {
     avg_duration_ms?: number | null;
-    avg_first_chunk_ms?: number | null;
+    avg_ttft_ms?: number | null;
     bucket_at: string;
     cache_rate?: number | null;
     cached_tokens: number;
@@ -843,7 +843,6 @@ export type RequestRecordDetail = {
     error_code?: string | null;
     error_message?: string | null;
     failure_family?: null | RequestFailureFamily;
-    first_chunk_ms?: number | null;
     has_full_request: boolean;
     has_parent: boolean;
     has_reasoning_content?: boolean | null;
@@ -887,6 +886,7 @@ export type RequestRecordDetail = {
     storage_sanitized_nul_count: number;
     tool_call_events?: Array<RequestRecordToolCall>;
     total_tokens?: number | null;
+    ttft_ms?: number | null;
     upstream_error_body?: string | null;
     user_id?: number | null;
     user_login_name?: string | null;
@@ -937,7 +937,6 @@ export type RequestRecordListRow = {
     error_code?: string | null;
     error_message?: string | null;
     failure_family?: null | RequestFailureFamily;
-    first_chunk_ms?: number | null;
     has_full_request: boolean;
     has_parent: boolean;
     input_tokens?: number | null;
@@ -961,6 +960,7 @@ export type RequestRecordListRow = {
     storage_sanitized: boolean;
     storage_sanitized_nul_count: number;
     total_tokens?: number | null;
+    ttft_ms?: number | null;
     user_id?: number | null;
     user_login_name?: string | null;
 };

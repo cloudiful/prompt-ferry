@@ -87,7 +87,7 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
     )
     .with_model(log.model)
     .with_billing_models(log.requested_model, log.upstream_model)
-    .with_timing(log.status, log.ok, log.duration_ms, log.first_chunk_ms)
+    .with_timing(log.status, log.ok, log.duration_ms, log.ttft_ms)
     .with_usage(
         log.usage.input_tokens,
         log.usage.output_tokens,

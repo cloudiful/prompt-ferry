@@ -47,7 +47,7 @@ pub struct RequestRecordCreate {
     pub status: Option<i32>,
     pub ok: Option<bool>,
     pub duration_ms: Option<i64>,
-    pub first_chunk_ms: Option<i64>,
+    pub ttft_ms: Option<i64>,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
@@ -197,7 +197,7 @@ impl RequestRecordCreate {
             status: None,
             ok: None,
             duration_ms: None,
-            first_chunk_ms: None,
+            ttft_ms: None,
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
@@ -347,12 +347,12 @@ impl RequestRecordCreate {
         status: Option<i32>,
         ok: Option<bool>,
         duration_ms: Option<i64>,
-        first_chunk_ms: Option<i64>,
+        ttft_ms: Option<i64>,
     ) -> Self {
         self.status = status;
         self.ok = ok;
         self.duration_ms = duration_ms;
-        self.first_chunk_ms = first_chunk_ms;
+        self.ttft_ms = ttft_ms;
         self
     }
 

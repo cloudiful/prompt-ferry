@@ -1,0 +1,97 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH bounds AS (\n    SELECT date_trunc('day', COALESCE($2::TIMESTAMPTZ, NOW() - ($1::BIGINT * INTERVAL '1 day'))) AS start_at,\n           date_trunc('day', COALESCE($3::TIMESTAMPTZ, NOW())) AS end_at\n),\nbuckets AS (\n    SELECT generate_series(start_at, end_at, INTERVAL '1 day') AS bucket_at FROM bounds\n),\nagg AS (\n    SELECT date_trunc('day', created_at) AS bucket_at,\n           COUNT(*)::BIGINT AS request_count,\n           COUNT(*) FILTER (WHERE request_state IN ('failed', 'aborted'))::BIGINT AS error_count,\n           COALESCE(SUM(input_tokens), 0)::BIGINT AS input_tokens,\n           COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,\n           COALESCE(SUM(total_tokens), 0)::BIGINT AS total_tokens,\n           COALESCE(SUM(cached_tokens), 0)::BIGINT AS cached_tokens,\n           AVG(duration_ms)::DOUBLE PRECISION AS avg_duration_ms,\n           AVG(ttft_ms)::DOUBLE PRECISION AS avg_ttft_ms\n    FROM request_records, bounds\n    WHERE event_kind = 'request'\n      AND created_at >= bounds.start_at AND created_at < bounds.end_at + INTERVAL '1 day'\n      AND ($4::BIGINT IS NULL OR user_id = $4)\n      AND ($5::TEXT IS NULL OR request_category = $5::TEXT)\n    GROUP BY 1\n)\nSELECT buckets.bucket_at AS \"bucket_at!\",\n       COALESCE(agg.request_count, 0)::BIGINT AS \"request_count!\",\n       COALESCE(agg.error_count, 0)::BIGINT AS \"error_count!\",\n       COALESCE(agg.input_tokens, 0)::BIGINT AS \"input_tokens!\",\n       COALESCE(agg.output_tokens, 0)::BIGINT AS \"output_tokens!\",\n       COALESCE(agg.total_tokens, 0)::BIGINT AS \"total_tokens!\",\n       COALESCE(agg.cached_tokens, 0)::BIGINT AS \"cached_tokens!\",\n       CASE WHEN COALESCE(agg.input_tokens, 0) > 0\n            THEN COALESCE(agg.cached_tokens, 0)::DOUBLE PRECISION / agg.input_tokens::DOUBLE PRECISION\n            ELSE NULL\n       END AS cache_rate,\n       CASE WHEN COALESCE(agg.request_count, 0) > 0\n            THEN COALESCE(agg.error_count, 0)::DOUBLE PRECISION / agg.request_count::DOUBLE PRECISION\n            ELSE NULL\n       END AS error_rate,\n       agg.avg_duration_ms AS avg_duration_ms,\n       agg.avg_ttft_ms AS avg_ttft_ms\nFROM buckets\nLEFT JOIN agg USING (bucket_at)\nORDER BY buckets.bucket_at ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bucket_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "error_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "total_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "cached_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_rate",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "error_rate",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "avg_duration_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "avg_ttft_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "bda41e3efa44431bd6746490d696b4f95cc9868a0c2a23cd84964e473c8f9dd2"
+}

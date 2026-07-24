@@ -186,60 +186,9 @@ pub fn truncate_chars(text: &str, limit: usize) -> String {
     value
 }
 
-pub(super) fn has_content(value: &Value) -> bool {
-    if value
-        .get("type")
-        .and_then(Value::as_str)
-        .is_some_and(|event_type| {
-            event_type == "response.output_text.delta" || event_type == "response.output_text.done"
-        })
-    {
-        return true;
-    }
-    if value
-        .get("delta")
-        .filter(|_| is_visible_delta_event(value))
-        .and_then(Value::as_str)
-        .is_some_and(|delta| !delta.is_empty())
-    {
-        return true;
-    }
-    if value
-        .get("choices")
-        .and_then(Value::as_array)
-        .is_some_and(|choices| choices.iter().any(choice_has_content))
-    {
-        return true;
-    }
-    value
-        .get("output")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items.iter().any(output_item_has_content))
-}
-
-fn choice_has_content(choice: &Value) -> bool {
-    choice
-        .get("delta")
-        .and_then(|delta| delta.get("content"))
-        .is_some()
-}
-
 fn is_visible_delta_event(value: &Value) -> bool {
     value
         .get("type")
         .and_then(Value::as_str)
         .is_none_or(|event_type| event_type == "response.output_text.delta")
-}
-
-fn output_item_has_content(item: &Value) -> bool {
-    item.get("content")
-        .and_then(Value::as_array)
-        .is_some_and(|content| {
-            content.iter().any(|part| {
-                part.get("text")
-                    .or_else(|| part.get("output_text"))
-                    .and_then(Value::as_str)
-                    .is_some_and(|text| !text.is_empty())
-            })
-        })
 }
