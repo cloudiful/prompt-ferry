@@ -23,6 +23,15 @@
 - 支持 HTTP/stdio MCP 聚合、请求用量与重放、保留策略、审批和计费。
 - 支持 relay-worker 之间的 TLS、双向 TLS 和应用层加密。
 
+## 兼容边界
+
+- Responses 的 `input_image` 转发到 Chat 上游时会转换为标准的
+  `image_url` 内容块。调用方选择的 provider 和模型必须支持 Chat 多模态输入。
+- 远程 URL 和 data URL 会直接透传，不会由中继下载图片。远程 URL 必须能被上游
+  provider 访问，data URL 也会计入请求体大小限制。
+- Chat 转换不支持 Responses file ID、工具返回图片或上游模型输出图片。使用原生
+  Responses 上游时，输入图片内容不会经过 Chat 转换。
+
 ## 部署
 
 ### Docker Compose

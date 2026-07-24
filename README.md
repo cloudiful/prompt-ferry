@@ -24,6 +24,18 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 - MCP aggregation for HTTP and stdio servers, request usage and replay, retention, approval, and billing.
 - TLS, mutual TLS, and application-layer encryption for relay-worker traffic.
 
+## Compatibility
+
+- Responses `input_image` parts are converted to standard Chat `image_url` parts
+  when routed to a Chat upstream. The selected provider and model must support
+  multimodal Chat input.
+- Remote URLs and data URLs are passed through without downloading the image.
+  The upstream provider must be able to fetch remote URLs, and data URLs count
+  toward the request size limit.
+- Chat conversion does not support Responses file IDs, images returned by tools,
+  or image output from the upstream model. Responses-native upstreams receive
+  input image parts without Chat conversion.
+
 ## Deploy
 
 ### Docker Compose

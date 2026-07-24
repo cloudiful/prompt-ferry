@@ -43,6 +43,43 @@ mod tests {
     }
 
     #[test]
+    fn translates_mixed_text_and_image_parts_to_chat_image_url_parts() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_request_to_chat(
+                br#"{
+                    "model":"vision-test",
+                    "input":[{
+                        "role":"user",
+                        "content":[
+                            {"type":"input_text","text":"describe these images"},
+                            {"type":"input_image","image_url":"https://example.com/chart.png"},
+                            {"type":"input_image","image_url":{"url":"data:image/png;base64,AA==","detail":"high"}}
+                        ]
+                    }]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let content = value["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 3);
+        assert_eq!(content[0]["type"].as_str(), Some("text"));
+        assert_eq!(content[0]["text"].as_str(), Some("describe these images"));
+        assert_eq!(content[1]["type"].as_str(), Some("image_url"));
+        assert_eq!(
+            content[1]["image_url"]["url"].as_str(),
+            Some("https://example.com/chart.png")
+        );
+        assert_eq!(content[2]["type"].as_str(), Some("image_url"));
+        assert_eq!(
+            content[2]["image_url"]["url"].as_str(),
+            Some("data:image/png;base64,AA==")
+        );
+        assert_eq!(content[2]["image_url"]["detail"].as_str(), Some("high"));
+    }
+
+    #[test]
     fn translates_function_call_history_to_chat_messages() {
         let request = br#"{
             "model":"gpt-test",

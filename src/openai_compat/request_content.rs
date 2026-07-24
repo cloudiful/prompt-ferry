@@ -160,6 +160,8 @@ fn translate_part(value: &Value) -> Result<Option<Value>, CompatError> {
                 "text": text,
             })))
         }
+        // Chat-compatible multimodal providers use the standard image_url part;
+        // pass URLs through without fetching or rewriting them.
         "input_image" => {
             let image_url = match object.get("image_url") {
                 Some(Value::String(url)) => json!({ "url": url }),
