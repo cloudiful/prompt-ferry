@@ -94,8 +94,8 @@ docker pull ghcr.io/OWNER/prompt-ferry:v0.5.0
 
 ### Single-host binary
 
-Download the matching archive from the [GitHub Releases](https://github.com/OWNER/prompt-ferry/releases)
-page, extract `prompt-ferry`, and start a relay plus worker in one process:
+Download the matching binary from the [GitHub Releases](https://github.com/OWNER/prompt-ferry/releases)
+page and start a relay plus worker in one process:
 
 ```bash
 ./prompt-ferry serve

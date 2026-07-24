@@ -22,28 +22,28 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
-            archive_ext: tar.gz
             executable: prompt-ferry
+            release_suffix: ""
             msvc_arch: ""
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
-            archive_ext: tar.gz
             executable: prompt-ferry
+            release_suffix: ""
             msvc_arch: ""
           - target: aarch64-apple-darwin
             runner: macos-14
-            archive_ext: tar.gz
             executable: prompt-ferry
+            release_suffix: ""
             msvc_arch: ""
           - target: x86_64-pc-windows-msvc
             runner: windows-2022
-            archive_ext: zip
             executable: prompt-ferry.exe
+            release_suffix: .exe
             msvc_arch: x64
           - target: aarch64-pc-windows-msvc
             runner: windows-2022
-            archive_ext: zip
             executable: prompt-ferry.exe
+            release_suffix: .exe
             msvc_arch: amd64_arm64
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -52,7 +52,7 @@ jobs:
       CARGO_TERM_COLOR: always
       SQLX_OFFLINE: "true"
       TARGET: ${{ matrix.target }}
-      RELEASE_ARCHIVE: prompt-ferry-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive_ext }}
+      RELEASE_BINARY: prompt-ferry-${{ github.ref_name }}-${{ matrix.target }}${{ matrix.release_suffix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -76,25 +76,17 @@ jobs:
       - name: Build binary
         run: cargo build --release --bin prompt-ferry --target "${{ matrix.target }}"
 
-      - name: Package binary
+      - name: Prepare binary
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf package
-          mkdir -p package
-          cp "target/${TARGET}/release/${{ matrix.executable }}" package/
-          cp LICENSE README.md package/
-          if [[ "${{ matrix.archive_ext }}" == "zip" ]]; then
-            pwsh -NoProfile -Command 'Compress-Archive -Path package/* -DestinationPath $env:RELEASE_ARCHIVE'
-          else
-            tar -czf "$RELEASE_ARCHIVE" -C package .
-          fi
+          cp "target/${TARGET}/release/${{ matrix.executable }}" "$RELEASE_BINARY"
 
-      - name: Upload binary archive
+      - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.target }}
-          path: ${{ env.RELEASE_ARCHIVE }}
+          path: ${{ env.RELEASE_BINARY }}
           if-no-files-found: error
           retention-days: 7
 
@@ -116,7 +108,7 @@ jobs:
     permissions:
       contents: read
     env:
-      BINARY_ARCHIVE: prompt-ferry-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+      BINARY_NAME: prompt-ferry-${{ github.ref_name }}-${{ matrix.target }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -150,8 +142,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ci-image-input/frontend-dist
-          tar -xzf "binary-artifact/${BINARY_ARCHIVE}" -C binary-artifact
-          install -Dm755 binary-artifact/prompt-ferry ci-image-input/prompt-ferry
+          install -Dm755 "binary-artifact/${BINARY_NAME}" ci-image-input/prompt-ferry
 
       - name: Export OpenAPI
         run: ci-image-input/prompt-ferry openapi export
@@ -274,7 +265,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download binary archives
+      - name: Download binaries
         uses: actions/download-artifact@v4
         with:
           pattern: binary-*
