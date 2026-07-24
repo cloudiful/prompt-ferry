@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import UsageCategoryPanel from '@/components/usage/UsageCategoryPanel.vue'
+import PageIntro from '../components/PageIntro.vue'
 import RequestOverviewModeSwitch from '../components/RequestOverviewModeSwitch.vue'
 import { useUsagePage } from '../composables/useUsagePage'
 import { useRequestRecordsStore } from '../stores/usage'
@@ -52,23 +53,24 @@ watch(activeSection, (next) => {
 
 <template>
   <div class="grid min-w-0 max-w-full gap-3">
-    <section class="flex flex-wrap items-center justify-between gap-2">
-      <RequestOverviewModeSwitch
-        :active-mode="activeMode"
-        @change="setActiveMode"
-      />
-      <UButton
-        class="w-full justify-center md:w-auto"
-        size="sm"
-        color="neutral"
-        variant="outline"
-        :aria-label="t('refresh')"
-        @click="refresh"
-      >
-        <UIcon name="i-lucide-refresh-cw" class="h-4 w-4" />
-        <span>{{ t('refresh') }}</span>
-      </UButton>
-    </section>
+    <PageIntro>
+      <template #actions>
+        <RequestOverviewModeSwitch
+          :active-mode="activeMode"
+          @change="setActiveMode"
+        />
+        <UButton
+          size="sm"
+          color="neutral"
+          variant="outline"
+          :aria-label="t('refresh')"
+          @click="refresh"
+        >
+          <UIcon name="i-lucide-refresh-cw" class="h-4 w-4" />
+          <span>{{ t('refresh') }}</span>
+        </UButton>
+      </template>
+    </PageIntro>
 
     <UsageCategoryPanel
       v-model:filters="requestRecordsStore.filters"
