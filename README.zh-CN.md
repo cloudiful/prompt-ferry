@@ -1,0 +1,81 @@
+# 模型摆渡人
+
+[![Release](https://github.com/cloudiful/prompt-ferry/actions/workflows/release.yml/badge.svg)](https://github.com/cloudiful/prompt-ferry/actions/workflows/release.yml)
+[![Latest Release](https://img.shields.io/github/v/release/cloudiful/prompt-ferry?display_name=tag)](https://github.com/cloudiful/prompt-ferry/releases)
+[![License](https://img.shields.io/github/license/cloudiful/prompt-ferry)](LICENSE)
+[![GHCR](https://img.shields.io/badge/container-GHCR-2496ED?logo=docker&logoColor=white)](https://github.com/cloudiful/prompt-ferry/pkgs/container/prompt-ferry)
+
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+`prompt-ferry`（模型摆渡人）是一个支持脱敏的 OpenAI 兼容 AI API 中继，
+面向 Codex 和其他 API 客户端。请求会经过 relay-worker 通道转发到一个或多个
+兼容 OpenAI 或 Anthropic 的上游服务。
+
+```text
+客户端 -> relay /v1/* <-> worker WebSocket -> 上游 API
+```
+
+## 核心功能
+
+- 兼容 OpenAI Chat Completions 和 Responses，并支持通过 Responses 转发到 Anthropic Messages 上游。
+- 支持对转发内容、日志和用量详情进行配置化脱敏。
+- 支持用户、客户端 API Key、上游端点、模型路由和多 relay 管理。
+- 支持 HTTP/stdio MCP 聚合、请求用量与重放、保留策略、审批和计费。
+- 支持 relay-worker 之间的 TLS、双向 TLS 和应用层加密。
+
+## 部署
+
+### Docker Compose
+
+Compose 示例会启动 PostgreSQL、relay、worker 和管理控制台，并使用 GHCR
+中的预构建镜像。
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env`，将 `PROMPT_FERRY_IMAGE` 设置为
+`ghcr.io/cloudiful/prompt-ferry:latest`，并替换所有密钥占位符。然后启动：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+打开管理控制台：<http://127.0.0.1:8789>。登录后配置上游端点、模型路由、
+用户和客户端 API Key，再将 OpenAI 兼容客户端指向 relay：
+
+```dotenv
+OPENAI_BASE_URL=http://127.0.0.1:8787/v1
+OPENAI_API_KEY=<生成的客户端密钥>
+```
+
+请保持 `8789` 端口只对本机或受保护的内网开放。Compose 配置项见
+[.env.example](.env.example)。
+
+### 单机二进制
+
+从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的
+二进制文件，然后让 relay 和 worker 在同一个进程中运行：
+
+```bash
+./prompt-ferry serve
+```
+
+非托管模式启动前需要配置 relay 客户端令牌和上游 worker：
+
+```dotenv
+PROMPT_FERRY_RELAY__CLIENT_TOKEN=<客户端令牌>
+PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://api.example.com
+PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<上游 API 密钥>
+```
+
+## 文档
+
+- [安全策略](SECURITY.md)
+- [贡献指南](CONTRIBUTING.md)
+- [Apache License 2.0](LICENSE)
+
+## 许可证
+
+本项目采用 Apache License 2.0 许可证。
