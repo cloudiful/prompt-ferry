@@ -62,18 +62,30 @@ pub(in crate::chat_replay) fn should_replay_reasoning(
     route_base_url: &str,
     artifacts: &HashMap<i64, AssistantArtifact>,
 ) -> bool {
-    let history_has_reasoning = artifacts
-        .values()
-        .any(|artifact| artifact.has_reasoning_content);
-    if !history_has_reasoning {
+    if !targets_reasoning_provider(current_request_model, parent_model, route_base_url) {
         return false;
     }
-    current_request_model.is_some_and(is_deepseek_model)
-        || current_request_model.is_some_and(is_minimax_model)
-        || parent_model.is_some_and(is_deepseek_model)
-        || parent_model.is_some_and(is_minimax_model)
-        || route_base_url.to_ascii_lowercase().contains("deepseek")
-        || route_base_url.to_ascii_lowercase().contains("minimax")
+    let history_has_reasoning = artifacts.values().any(artifact_has_reasoning_content);
+    history_has_reasoning
+}
+
+pub(in crate::chat_replay) fn validate_reasoning_replay(
+    current_request_model: Option<&str>,
+    parent_model: Option<&str>,
+    route_base_url: &str,
+    artifacts: &HashMap<i64, AssistantArtifact>,
+) -> Result<(), crate::openai_compat::CompatError> {
+    if !targets_reasoning_provider(current_request_model, parent_model, route_base_url) {
+        return Ok(());
+    }
+    if artifacts.values().any(|artifact| {
+        artifact_has_tool_calls(artifact) && !artifact_has_reasoning_content(artifact)
+    }) {
+        return Err(replay_error(
+            "stored assistant tool-call turn is missing complete reasoning for the target reasoning provider",
+        ));
+    }
+    Ok(())
 }
 
 pub(in crate::chat_replay) fn replay_assistant_message(
@@ -180,8 +192,38 @@ fn has_meaningful_value(value: &Value) -> bool {
     }
 }
 
+fn artifact_has_reasoning_content(artifact: &AssistantArtifact) -> bool {
+    persisted_assistant_message(&artifact.message_json)
+        .ok()
+        .and_then(|message| message.get("reasoning_content").cloned())
+        .is_some_and(|value| has_meaningful_value(&value))
+}
+
+fn artifact_has_tool_calls(artifact: &AssistantArtifact) -> bool {
+    if artifact.has_tool_calls {
+        return true;
+    }
+    persisted_assistant_message(&artifact.message_json)
+        .ok()
+        .and_then(|message| message.get("tool_calls").cloned())
+        .is_some_and(|value| has_meaningful_value(&value))
+}
+
 fn is_deepseek_model(model: &str) -> bool {
     model.trim().to_ascii_lowercase().starts_with("deepseek-")
+}
+
+fn targets_reasoning_provider(
+    current_request_model: Option<&str>,
+    parent_model: Option<&str>,
+    route_base_url: &str,
+) -> bool {
+    let route = route_base_url.to_ascii_lowercase();
+    if route.contains("deepseek") || route.contains("minimax") {
+        return true;
+    }
+    let model = current_request_model.or(parent_model);
+    model.is_some_and(|model| is_deepseek_model(model) || is_minimax_model(model))
 }
 
 fn is_minimax_model(model: &str) -> bool {

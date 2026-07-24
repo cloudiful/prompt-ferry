@@ -1,4 +1,4 @@
-use super::capture::{AssistantArtifactCapture, fallback_text_artifact};
+use super::capture::{AssistantArtifactCapture, ResponsesArtifactCapture, fallback_text_artifact};
 
 #[test]
 fn captures_non_stream_reasoning_content() {
@@ -163,6 +163,78 @@ fn captures_repaired_streaming_tool_call_arguments_in_artifact() {
     assert_eq!(
         function_call["arguments"].as_str(),
         Some("{\"limit\":5,\"query\":\"正泰电源\"}")
+    );
+}
+
+#[test]
+fn captures_responses_reasoning_with_tool_calls_in_one_assistant_message() {
+    let mut capture = ResponsesArtifactCapture::new(false);
+    capture.observe_chunk(
+        br#"{"output":[
+            {"type":"reasoning","summary":[{"type":"summary_text","text":"short summary"}],"content":[{"type":"reasoning_text","text":"complete reasoning"}]},
+            {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}
+        ]}"#,
+    );
+    capture.finish();
+
+    let artifact = capture.artifact().unwrap();
+    assert_eq!(
+        artifact.message_json["assistant_message"]["role"].as_str(),
+        Some("assistant")
+    );
+    assert_eq!(
+        artifact.message_json["assistant_message"]["reasoning_content"].as_str(),
+        Some("complete reasoning")
+    );
+    assert_eq!(
+        artifact.message_json["assistant_message"]["tool_calls"][0]["id"].as_str(),
+        Some("call_1")
+    );
+    assert!(artifact.has_reasoning_content);
+    assert!(artifact.has_tool_calls);
+}
+
+#[test]
+fn does_not_turn_responses_summary_into_reasoning_content() {
+    let mut capture = ResponsesArtifactCapture::new(false);
+    capture.observe_chunk(
+        br#"{"output":[
+            {"type":"reasoning","summary":[{"type":"summary_text","text":"summary only"}]},
+            {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}
+        ]}"#,
+    );
+    capture.finish();
+
+    let artifact = capture.artifact().unwrap();
+    assert!(
+        artifact.message_json["assistant_message"]
+            .get("reasoning_content")
+            .is_none()
+    );
+    assert!(!artifact.has_reasoning_content);
+    assert!(artifact.has_tool_calls);
+}
+
+#[test]
+fn captures_streaming_responses_reasoning_delta_with_tool_call() {
+    let mut capture = ResponsesArtifactCapture::new(true);
+    capture.observe_chunk(
+        br#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","content":[{"type":"reasoning_text","text":""}]}}
+data: {"type":"response.reasoning_text.delta","output_index":0,"delta":"complete reasoning"}
+data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}
+data: {"type":"response.function_call_arguments.delta","output_index":1,"call_id":"call_1","delta":"{}"}
+"#,
+    );
+    capture.finish();
+
+    let artifact = capture.artifact().unwrap();
+    assert_eq!(
+        artifact.message_json["assistant_message"]["reasoning_content"].as_str(),
+        Some("complete reasoning")
+    );
+    assert_eq!(
+        artifact.message_json["assistant_message"]["tool_calls"][0]["id"].as_str(),
+        Some("call_1")
     );
 }
 

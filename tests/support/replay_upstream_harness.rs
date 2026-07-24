@@ -16,6 +16,7 @@ pub struct ChatRequestLog {
     pub bodies: Mutex<Vec<Value>>,
     pub fail_next_chat_turns: Mutex<Vec<usize>>,
     pub fail_next_response_turns: Mutex<Vec<usize>>,
+    pub omit_reasoning: bool,
 }
 
 pub async fn spawn_replay_upstream(log: Arc<ChatRequestLog>) -> std::net::SocketAddr {
@@ -64,6 +65,7 @@ pub async fn spawn_replay_responses_upstream_without_conversation(
 
 async fn fake_chat_completion(State(log): State<Arc<ChatRequestLog>>, body: Bytes) -> Response {
     let value = serde_json::from_slice::<Value>(&body).unwrap();
+    let omit_reasoning = log.omit_reasoning;
     let mut requests = log.bodies.lock().await;
     requests.push(value.clone());
     let turn = requests.len();
@@ -106,7 +108,11 @@ async fn fake_chat_completion(State(log): State<Arc<ChatRequestLog>>, body: Byte
                             "arguments": "{\"city\":\"Boston\"}"
                         }
                     }],
-                    "reasoning_content": "internal steps"
+                    "reasoning_content": if omit_reasoning {
+                        Value::Null
+                    } else {
+                        Value::String("internal steps".to_string())
+                    }
                 },
                 "finish_reason": "tool_calls"
             }],

@@ -24,8 +24,8 @@ pub(crate) use responses_error::normalize_response_error;
 pub(crate) use responses_input_normalize::output_items_to_input_items;
 pub(crate) use responses_output::{
     assistant_message_to_output_items, extract_output_items_from_responses_value,
-    persisted_artifact, persisted_assistant_message, persisted_output_items,
-    responses_stream_output_items,
+    output_items_to_assistant_message, persisted_artifact, persisted_assistant_message,
+    persisted_output_items, responses_stream_output_items,
 };
 pub(crate) use responses_request_state::{
     NormalizedResponsesRequest, validate_raw_responses_request_body,

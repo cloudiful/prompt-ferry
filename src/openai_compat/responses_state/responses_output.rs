@@ -5,6 +5,7 @@ pub(crate) fn output_items_to_assistant_message(
     fallback: Option<&Value>,
 ) -> Result<Value, CompatError> {
     let mut content_parts = Vec::new();
+    let mut reasoning_parts = Vec::new();
     let mut tool_calls = Vec::new();
     for item in output_items {
         let object = item.as_object().ok_or_else(|| {
@@ -35,6 +36,12 @@ pub(crate) fn output_items_to_assistant_message(
                     }
                 }));
             }
+            "reasoning" => {
+                let reasoning = object.get("content").map(extract_text).unwrap_or_default();
+                if !reasoning.trim().is_empty() {
+                    reasoning_parts.push(reasoning);
+                }
+            }
             _ => {}
         }
     }
@@ -50,7 +57,14 @@ pub(crate) fn output_items_to_assistant_message(
     if !tool_calls.is_empty() {
         message.insert("tool_calls".to_string(), Value::Array(tool_calls));
     }
-    if let Some(fallback) = fallback.and_then(Value::as_object)
+    if !reasoning_parts.is_empty() {
+        message.insert(
+            "reasoning_content".to_string(),
+            Value::String(reasoning_parts.join("\n")),
+        );
+    }
+    if !message.contains_key("reasoning_content")
+        && let Some(fallback) = fallback.and_then(Value::as_object)
         && let Some(reasoning) = fallback.get("reasoning_content").cloned()
         && has_meaningful_value(&reasoning)
     {
@@ -210,6 +224,22 @@ pub(crate) fn responses_stream_output_items(chunks: &[Value]) -> Result<Vec<Valu
                     );
                 }
             }
+            "response.reasoning_text.delta" => {
+                if let Some(index) = value.get("output_index").and_then(Value::as_u64)
+                    && let Some(delta) = value.get("delta").and_then(Value::as_str)
+                {
+                    let item = output_by_index.entry(index as usize).or_insert_with(|| {
+                        json!({
+                            "type":"reasoning",
+                            "content":[{
+                                "type":"reasoning_text",
+                                "text":""
+                            }]
+                        })
+                    });
+                    append_output_text(item, delta);
+                }
+            }
             "response.function_call_arguments.delta" => {
                 if let Some(index) = value.get("output_index").and_then(Value::as_u64)
                     && let Some(delta) = value.get("delta").and_then(Value::as_str)
@@ -336,6 +366,18 @@ mod tests {
         let message = super::output_items_to_assistant_message(&items, None).unwrap();
         assert_eq!(message["content"].as_str(), Some("done"));
         assert_eq!(message["tool_calls"][0]["id"].as_str(), Some("call_1"));
+    }
+
+    #[test]
+    fn prefers_complete_output_reasoning_over_fallback_reasoning() {
+        let items = vec![json!({
+            "type":"reasoning",
+            "summary":[{"type":"summary_text","text":"summary"}],
+            "content":[{"type":"reasoning_text","text":"complete"}]
+        })];
+        let fallback = json!({"reasoning_content":"fallback"});
+        let message = super::output_items_to_assistant_message(&items, Some(&fallback)).unwrap();
+        assert_eq!(message["reasoning_content"].as_str(), Some("complete"));
     }
 
     #[test]

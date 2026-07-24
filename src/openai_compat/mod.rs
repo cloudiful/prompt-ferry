@@ -24,8 +24,9 @@ pub(crate) use response_stream_state::sse_event;
 pub(crate) use responses_state::{
     NormalizedResponsesRequest, assistant_message_to_output_items,
     extract_output_items_from_responses_value, normalize_response_error,
-    output_items_to_input_items, persisted_artifact, persisted_assistant_message,
-    persisted_output_items, responses_stream_output_items, validate_raw_responses_request_body,
+    output_items_to_assistant_message, output_items_to_input_items, persisted_artifact,
+    persisted_assistant_message, persisted_output_items, responses_stream_output_items,
+    validate_raw_responses_request_body,
 };
 
 #[derive(Debug, Clone)]

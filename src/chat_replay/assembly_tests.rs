@@ -72,6 +72,115 @@ fn deepseek_gate_requires_history_and_signal() {
         "https://example.com",
         &artifacts
     ));
+    assert!(!should_replay_reasoning(
+        Some("gpt-5"),
+        Some("deepseek-reasoner"),
+        "https://example.com",
+        &artifacts
+    ));
+}
+
+#[test]
+fn rejects_reasoning_provider_replay_when_tool_call_reasoning_is_missing() {
+    let mut artifacts = HashMap::new();
+    artifacts.insert(
+        1,
+        AssistantArtifact {
+            message_json: json!({
+                "version": 1,
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "lookup", "arguments": "{}"}
+                    }]
+                },
+                "output_items": [{
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "lookup",
+                    "arguments": "{}"
+                }]
+            }),
+            has_reasoning_content: false,
+            has_tool_calls: true,
+        },
+    );
+
+    let error = validate_reasoning_replay(
+        Some("deepseek-v4-pro"),
+        None,
+        "https://example.com",
+        &artifacts,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "replay_unavailable");
+    assert!(error.message.contains("missing complete reasoning"));
+}
+
+#[test]
+fn recovers_reasoning_from_legacy_responses_output_items() {
+    let mut artifacts = HashMap::new();
+    artifacts.insert(
+        1,
+        AssistantArtifact {
+            message_json: json!({
+                "version": 1,
+                "assistant_message": null,
+                "output_items": [
+                    {
+                        "type": "reasoning",
+                        "content": [{"type":"reasoning_text","text":"complete reasoning"}]
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "lookup",
+                        "arguments": "{}"
+                    }
+                ]
+            }),
+            has_reasoning_content: false,
+            has_tool_calls: false,
+        },
+    );
+
+    assert!(should_replay_reasoning(
+        Some("deepseek-v4-pro"),
+        None,
+        "https://example.com",
+        &artifacts,
+    ));
+    validate_reasoning_replay(
+        Some("deepseek-v4-pro"),
+        None,
+        "https://example.com",
+        &artifacts,
+    )
+    .unwrap();
+}
+
+#[test]
+fn allows_missing_reasoning_for_non_reasoning_providers() {
+    let mut artifacts = HashMap::new();
+    artifacts.insert(
+        1,
+        AssistantArtifact {
+            message_json: json!({"role":"assistant","content":null}),
+            has_reasoning_content: false,
+            has_tool_calls: true,
+        },
+    );
+
+    validate_reasoning_replay(
+        Some("gpt-5"),
+        Some("deepseek-v4-pro"),
+        "https://api.openai.com",
+        &artifacts,
+    )
+    .unwrap();
 }
 
 #[test]

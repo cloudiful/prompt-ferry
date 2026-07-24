@@ -24,6 +24,7 @@ pub(super) use history::fallback_artifact_for_entry;
 #[cfg(test)]
 pub(super) use reconstruct::{
     replay_assistant_message, replayable_output_items, should_replay_reasoning,
+    validate_reasoning_replay,
 };
 
 pub struct ResponsesReplayRequest<'a> {
@@ -96,6 +97,14 @@ pub async fn prepare_responses_replay_request(
         route_base_url,
         &assistant_artifacts,
     );
+    if native_api == NativeApi::Chat {
+        reconstruct::validate_reasoning_replay(
+            current_request_model,
+            parent.model.as_deref(),
+            route_base_url,
+            &assistant_artifacts,
+        )?;
+    }
     let prior_call_ids = assistant_artifacts
         .values()
         .flat_map(|artifact| {

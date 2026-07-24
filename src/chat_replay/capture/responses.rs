@@ -1,7 +1,8 @@
 use serde_json::Value;
 
 use crate::openai_compat::{
-    extract_output_items_from_responses_value, persisted_artifact, responses_stream_output_items,
+    extract_output_items_from_responses_value, output_items_to_assistant_message,
+    persisted_artifact, responses_stream_output_items,
 };
 
 use super::{
@@ -46,8 +47,9 @@ impl ResponsesArtifactCapture {
 
     pub fn artifact(&self) -> Option<AssistantArtifact> {
         let output_items = self.finalized_output.clone()?;
+        let assistant_message = output_items_to_assistant_message(&output_items, None).ok()?;
         let (message_json, has_reasoning_content, has_tool_calls) =
-            persisted_artifact(None, output_items)?;
+            persisted_artifact(Some(assistant_message), output_items)?;
         Some(AssistantArtifact {
             message_json,
             has_reasoning_content,

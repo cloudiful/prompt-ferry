@@ -197,7 +197,7 @@ async fn replays_deepseek_reasoning_content_for_chat_native_continuations() -> a
         .post(format!("http://{relay_addr}/v1/responses"))
         .bearer_auth("client-token")
         .json(&serde_json::json!({
-            "model": "deepseek-chat",
+            "model": "deepseek-v4-pro",
             "input": "need weather",
             "stream": false
         }))
@@ -216,7 +216,7 @@ async fn replays_deepseek_reasoning_content_for_chat_native_continuations() -> a
         .post(format!("http://{relay_addr}/v1/responses"))
         .bearer_auth("client-token")
         .json(&serde_json::json!({
-            "model": "deepseek-chat",
+            "model": "deepseek-v4-pro",
             "previous_response_id": "chatcmpl_turn1",
             "input": "use it",
             "stream": false
@@ -270,7 +270,7 @@ async fn replays_deepseek_reasoning_content_for_direct_tool_outputs() -> anyhow:
         .post(format!("http://{relay_addr}/v1/responses"))
         .bearer_auth("client-token")
         .json(&serde_json::json!({
-            "model": "deepseek-chat",
+            "model": "deepseek-v4-pro",
             "input": "need weather",
             "stream": false
         }))
@@ -283,7 +283,7 @@ async fn replays_deepseek_reasoning_content_for_direct_tool_outputs() -> anyhow:
         .post(format!("http://{relay_addr}/v1/responses"))
         .bearer_auth("client-token")
         .json(&serde_json::json!({
-            "model": "deepseek-chat",
+            "model": "deepseek-v4-pro",
             "input": [
                 {"role":"user","content":"need weather"},
                 {"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Boston\"}"},
@@ -303,6 +303,13 @@ async fn replays_deepseek_reasoning_content_for_direct_tool_outputs() -> anyhow:
 
     let requests = upstream_log.bodies.lock().await;
     assert_eq!(requests.len(), 2);
+    let roles = requests[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|message| message["role"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(roles, vec!["user", "assistant", "tool"]);
     assert_eq!(
         requests[1]["messages"][1]["role"].as_str(),
         Some("assistant")
@@ -321,6 +328,61 @@ async fn replays_deepseek_reasoning_content_for_direct_tool_outputs() -> anyhow:
         Some("call_1")
     );
     assert_eq!(requests[1]["messages"][2]["content"].as_str(), Some("72F"));
+
+    worker_handle.abort();
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rejects_deepseek_tool_continuation_when_reasoning_is_missing() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    enable_prompt_logging(&schema).await?;
+
+    let upstream_log = Arc::new(ChatRequestLog {
+        omit_reasoning: true,
+        ..Default::default()
+    });
+    let upstream_addr = spawn_replay_upstream(upstream_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let mut worker_handle =
+        spawn_worker(worker_addr, upstream_addr, &worker_database_url(&schema)?).await;
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let client = reqwest::Client::new();
+    let turn1 = client
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "need weather",
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(turn1.status(), StatusCode::OK);
+    assert_eq!(wait_for_assistant_artifact(&schema).await?, (false, true));
+
+    let turn2 = client
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "previous_response_id": "chatcmpl_turn1",
+            "input": "use it",
+            "stream": false
+        }))
+        .send()
+        .await?;
+    let turn2_status = turn2.status();
+    let turn2_body = turn2.text().await?;
+    assert_eq!(turn2_status, StatusCode::BAD_REQUEST);
+    assert!(turn2_body.contains("missing complete reasoning"));
+    assert_eq!(upstream_log.bodies.lock().await.len(), 1);
 
     worker_handle.abort();
     schema.cleanup().await?;
