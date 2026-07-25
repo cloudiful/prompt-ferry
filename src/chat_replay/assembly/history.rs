@@ -5,7 +5,9 @@ use tracing::warn;
 
 use crate::{chat_replay::fallback_text_artifact, db, replay_cache::ReplayCache};
 
-use super::{AssistantArtifact, REPLAY_CHAIN_DEPTH_LIMIT, replay_db_error, replay_error};
+use crate::chat_replay::AssistantArtifact;
+
+use super::{REPLAY_CHAIN_DEPTH_LIMIT, replay_db_error, replay_error};
 
 pub(super) async fn load_history_entries(
     pool: &PgPool,

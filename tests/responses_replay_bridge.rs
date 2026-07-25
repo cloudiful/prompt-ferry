@@ -75,6 +75,26 @@ async fn wait_for_assistant_artifact(schema: &TestSchema) -> anyhow::Result<(boo
     )
 }
 
+async fn wait_for_assistant_artifact_count(
+    schema: &TestSchema,
+    expected: i64,
+) -> anyhow::Result<()> {
+    for _ in 0..100 {
+        let count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM request_record_assistant_artifacts")
+                .fetch_one(&schema.pool)
+                .await?;
+        if count >= expected {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    anyhow::bail!(
+        "expected at least {expected} assistant artifacts in test schema {}",
+        schema.schema_name
+    );
+}
+
 #[tokio::test]
 async fn creates_responses_conversation_via_public_api() -> anyhow::Result<()> {
     let (relay_addr, _, _) = spawn_relay().await;
@@ -328,6 +348,93 @@ async fn replays_deepseek_reasoning_content_for_direct_tool_outputs() -> anyhow:
         Some("call_1")
     );
     assert_eq!(requests[1]["messages"][2]["content"].as_str(), Some("72F"));
+
+    worker_handle.abort();
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn replays_reasoning_for_each_deepseek_tool_turn() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    enable_prompt_logging(&schema).await?;
+
+    let upstream_log = Arc::new(ChatRequestLog {
+        multi_tool_turns: true,
+        ..Default::default()
+    });
+    let upstream_addr = spawn_replay_upstream(upstream_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let mut worker_handle =
+        spawn_worker(worker_addr, upstream_addr, &worker_database_url(&schema)?).await;
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let client = reqwest::Client::new();
+    let turn1 = client
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "first tool turn",
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(turn1.status(), StatusCode::OK);
+    wait_for_assistant_artifact_count(&schema, 1).await?;
+
+    let turn2 = client
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "first result"
+            }],
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(turn2.status(), StatusCode::OK);
+    wait_for_assistant_artifact_count(&schema, 2).await?;
+
+    let turn3 = client
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_2",
+                "output": "second result"
+            }],
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(turn3.status(), StatusCode::OK);
+
+    let requests = upstream_log.bodies.lock().await;
+    assert_eq!(requests.len(), 3);
+    let messages = requests[2]["messages"].as_array().unwrap();
+    let roles = messages
+        .iter()
+        .map(|message| message["role"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        roles,
+        vec!["user", "assistant", "tool", "assistant", "tool"]
+    );
+    assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
+    assert_eq!(messages[1]["reasoning_content"], "internal steps 1");
+    assert_eq!(messages[3]["tool_calls"][0]["id"], "call_2");
+    assert_eq!(messages[3]["reasoning_content"], "internal steps 2");
 
     worker_handle.abort();
     schema.cleanup().await?;

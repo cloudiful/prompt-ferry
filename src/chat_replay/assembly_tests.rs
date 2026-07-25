@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-
 use serde_json::json;
 
-use super::{AssistantArtifact, assembly::*};
+use super::assembly::*;
 
 #[test]
-fn deepseek_gate_strips_reasoning_for_non_deepseek_routes() {
+fn strips_reasoning_when_chat_replay_prefix_is_built() {
     let message = json!({
         "role": "assistant",
         "content": "hello",
@@ -22,165 +20,6 @@ fn deepseek_gate_strips_reasoning_for_non_deepseek_routes() {
     assert!(stripped.get("reasoning_details").is_none());
     assert_eq!(stripped["content"].as_str(), Some("hello"));
     assert_eq!(stripped["tool_calls"][0]["id"].as_str(), Some("call_1"));
-}
-
-#[test]
-fn deepseek_gate_requires_history_and_signal() {
-    let mut artifacts = HashMap::new();
-    artifacts.insert(
-        1,
-        AssistantArtifact {
-            message_json: json!({"role":"assistant","content":"hello","reasoning_content":"hidden"}),
-            has_reasoning_content: true,
-            has_tool_calls: false,
-        },
-    );
-
-    assert!(should_replay_reasoning(
-        Some("deepseek-chat"),
-        None,
-        "https://example.com",
-        &artifacts
-    ));
-    assert!(should_replay_reasoning(
-        None,
-        Some("deepseek-reasoner"),
-        "https://example.com",
-        &artifacts
-    ));
-    assert!(should_replay_reasoning(
-        None,
-        None,
-        "https://api.deepseek.com",
-        &artifacts
-    ));
-    assert!(should_replay_reasoning(
-        Some("MiniMax-M3"),
-        None,
-        "https://example.com",
-        &artifacts
-    ));
-    assert!(should_replay_reasoning(
-        None,
-        None,
-        "https://api.minimax.chat",
-        &artifacts
-    ));
-    assert!(!should_replay_reasoning(
-        Some("gpt-5"),
-        Some("gpt-4"),
-        "https://example.com",
-        &artifacts
-    ));
-    assert!(!should_replay_reasoning(
-        Some("gpt-5"),
-        Some("deepseek-reasoner"),
-        "https://example.com",
-        &artifacts
-    ));
-}
-
-#[test]
-fn rejects_reasoning_provider_replay_when_tool_call_reasoning_is_missing() {
-    let mut artifacts = HashMap::new();
-    artifacts.insert(
-        1,
-        AssistantArtifact {
-            message_json: json!({
-                "version": 1,
-                "assistant_message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {"name": "lookup", "arguments": "{}"}
-                    }]
-                },
-                "output_items": [{
-                    "type": "function_call",
-                    "call_id": "call_1",
-                    "name": "lookup",
-                    "arguments": "{}"
-                }]
-            }),
-            has_reasoning_content: false,
-            has_tool_calls: true,
-        },
-    );
-
-    let error = validate_reasoning_replay(
-        Some("deepseek-v4-pro"),
-        None,
-        "https://example.com",
-        &artifacts,
-    )
-    .unwrap_err();
-    assert_eq!(error.code, "replay_unavailable");
-    assert!(error.message.contains("missing complete reasoning"));
-}
-
-#[test]
-fn recovers_reasoning_from_legacy_responses_output_items() {
-    let mut artifacts = HashMap::new();
-    artifacts.insert(
-        1,
-        AssistantArtifact {
-            message_json: json!({
-                "version": 1,
-                "assistant_message": null,
-                "output_items": [
-                    {
-                        "type": "reasoning",
-                        "content": [{"type":"reasoning_text","text":"complete reasoning"}]
-                    },
-                    {
-                        "type": "function_call",
-                        "call_id": "call_1",
-                        "name": "lookup",
-                        "arguments": "{}"
-                    }
-                ]
-            }),
-            has_reasoning_content: false,
-            has_tool_calls: false,
-        },
-    );
-
-    assert!(should_replay_reasoning(
-        Some("deepseek-v4-pro"),
-        None,
-        "https://example.com",
-        &artifacts,
-    ));
-    validate_reasoning_replay(
-        Some("deepseek-v4-pro"),
-        None,
-        "https://example.com",
-        &artifacts,
-    )
-    .unwrap();
-}
-
-#[test]
-fn allows_missing_reasoning_for_non_reasoning_providers() {
-    let mut artifacts = HashMap::new();
-    artifacts.insert(
-        1,
-        AssistantArtifact {
-            message_json: json!({"role":"assistant","content":null}),
-            has_reasoning_content: false,
-            has_tool_calls: true,
-        },
-    );
-
-    validate_reasoning_replay(
-        Some("gpt-5"),
-        Some("deepseek-v4-pro"),
-        "https://api.openai.com",
-        &artifacts,
-    )
-    .unwrap();
 }
 
 #[test]
@@ -203,7 +42,7 @@ fn rejects_phase_or_refusal_replay_semantics() {
 }
 
 #[test]
-fn filters_reasoning_items_from_responses_native_replay_prefix() {
+fn preserves_reasoning_items_for_responses_native_tool_replay() {
     let items = vec![
         json!({
             "id": "rs_1",
@@ -226,14 +65,23 @@ fn filters_reasoning_items_from_responses_native_replay_prefix() {
     ];
 
     let filtered = replayable_output_items(&items);
-    assert_eq!(filtered.len(), 2);
-    assert!(
-        filtered
-            .iter()
-            .all(|item| item["type"].as_str() != Some("reasoning"))
-    );
-    assert_eq!(filtered[0]["type"].as_str(), Some("function_call"));
-    assert_eq!(filtered[1]["type"].as_str(), Some("message"));
+    assert_eq!(filtered, items);
+}
+
+#[test]
+fn omits_reasoning_items_from_responses_native_text_only_replay() {
+    let items = vec![
+        json!({"type":"reasoning","summary":[]}),
+        json!({
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type":"output_text","text":"done"}]
+        }),
+    ];
+
+    let filtered = replayable_output_items(&items);
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0]["type"].as_str(), Some("message"));
 }
 
 #[test]

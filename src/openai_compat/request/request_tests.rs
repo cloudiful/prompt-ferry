@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn groups_interleaved_tool_calls_before_emitting_outputs() {
+    fn splits_tool_call_rounds_after_outputs() {
         let value = serde_json::from_slice::<Value>(
             &responses_request_to_chat(
                 br#"{
@@ -176,22 +176,35 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(value["messages"].as_array().map(Vec::len), Some(5));
+        assert_eq!(value["messages"].as_array().map(Vec::len), Some(6));
         assert_eq!(value["messages"][1]["role"].as_str(), Some("assistant"));
         assert_eq!(
             value["messages"][1]["tool_calls"].as_array().map(Vec::len),
-            Some(2)
+            Some(1)
+        );
+        assert_eq!(
+            value["messages"][1]["tool_calls"][0]["id"].as_str(),
+            Some("call_1")
         );
         assert_eq!(
             value["messages"][2]["tool_call_id"].as_str(),
             Some("call_1")
         );
+        assert_eq!(value["messages"][3]["role"].as_str(), Some("assistant"));
         assert_eq!(
-            value["messages"][3]["tool_call_id"].as_str(),
+            value["messages"][3]["tool_calls"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            value["messages"][3]["tool_calls"][0]["id"].as_str(),
             Some("call_2")
         );
-        assert_eq!(value["messages"][4]["role"].as_str(), Some("user"));
-        assert_eq!(value["messages"][4]["content"].as_str(), Some("continue"));
+        assert_eq!(
+            value["messages"][4]["tool_call_id"].as_str(),
+            Some("call_2")
+        );
+        assert_eq!(value["messages"][5]["role"].as_str(), Some("user"));
+        assert_eq!(value["messages"][5]["content"].as_str(), Some("continue"));
     }
 
     #[test]

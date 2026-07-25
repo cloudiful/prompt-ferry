@@ -22,66 +22,9 @@ use crate::{
 use reqwest::StatusCode;
 use serde_json::Value;
 use std::collections::HashMap;
-use tracing::{info, warn};
+use tracing::warn;
 
 use super::upstream_redaction::redact_ai_request_json_blocking;
-
-pub(super) fn log_prepared_upstream_request(
-    route: &db::RouteConfig,
-    request_path: &str,
-    body: &PreparedRequestBody,
-) {
-    if request_path != "/v1/responses"
-        || !matches!(
-            route.native_api,
-            crate::config::NativeApi::Responses | crate::config::NativeApi::AnthropicMessages
-        )
-    {
-        return;
-    }
-    let body = match body {
-        PreparedRequestBody::PassthroughStream(bytes)
-        | PreparedRequestBody::BufferedBytes(bytes) => bytes.as_slice(),
-    };
-    let Ok(value) = serde_json::from_slice::<Value>(body) else {
-        return;
-    };
-    let input = value
-        .get("input")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let item_references = input
-        .iter()
-        .filter_map(|item| {
-            item.as_object()
-                .filter(|object| {
-                    object.get("type").and_then(Value::as_str) == Some("item_reference")
-                })
-                .and_then(|object| object.get("id").and_then(Value::as_str))
-                .map(str::to_string)
-        })
-        .collect::<Vec<_>>();
-    let function_call_outputs = extract_function_call_output_ids(&input);
-    let item_reference_count = item_references.len();
-    let function_call_output_count = function_call_outputs.len();
-    let item_reference_sample = item_references.into_iter().take(3).collect::<Vec<_>>();
-    let function_call_output_sample = function_call_outputs
-        .into_iter()
-        .take(3)
-        .collect::<Vec<_>>();
-    info!(
-        endpoint_id = %route.route_id,
-        native_api = %route.native_api.as_str(),
-        upstream_store = value.get("store").and_then(|raw| raw.as_bool()),
-        input_len = input.len(),
-        item_reference_count,
-        function_call_output_count,
-        item_reference_sample = ?item_reference_sample,
-        function_call_output_sample = ?function_call_output_sample,
-        "prepared responses-native upstream request"
-    );
-}
 
 pub(super) fn ai_route_usage_log(
     request_ctx: &RequestExecutionContext,
@@ -177,10 +120,8 @@ pub(super) async fn prepare_upstream_request_with_replay(
     request: &BufferedBridgeRequest,
     conversation_id: Option<uuid::Uuid>,
     parent_event_id: Option<i64>,
-    request_model: Option<&str>,
 ) -> Result<PreparedUpstreamRequest, CompatError> {
     let effective_request_body = effective_request_body(route, request.body.as_slice());
-    let effective_request_model = route.upstream_model.as_deref().or(request_model);
     let prior_session = load_prior_session(admin_state, conversation_id).await;
     let redaction_enabled =
         redact::effective_config_for_user(request.user_id.filter(|id| *id > 0)).enabled;
@@ -203,7 +144,7 @@ pub(super) async fn prepare_upstream_request_with_replay(
         .or(plain_request_body.as_deref())
         .expect("plain or redacted request body");
     let needs_replay = should_replay_request(route, request, parent_event_id);
-    if !needs_replay {
+    let mut prepared = if !needs_replay {
         if requires_local_conversation_state(route, request) && admin_state.is_none() {
             return Err(CompatError::new(
                 StatusCode::BAD_REQUEST,
@@ -215,128 +156,99 @@ pub(super) async fn prepare_upstream_request_with_replay(
             let normalized = NormalizedResponsesRequest::from_body(prepared_body)?;
             normalized.validate_for_raw_responses_passthrough()?;
             let translated = normalized.to_responses_request_with_prefix(&[], false, true)?;
-            let mut prepared = PreparedUpstreamRequest {
+            PreparedUpstreamRequest {
                 path: crate::config::NativeApi::Responses.path().to_string(),
                 body: PreparedRequestBody::BufferedBytes(upstream_body(
                     crate::config::NativeApi::Responses.path(),
                     &translated,
                 )),
                 response_adapter: ResponseAdapter::Passthrough,
-                upstream_redacted_request_json: redacted_request
-                    .as_ref()
-                    .and_then(|value| value.redacted_request_json.clone()),
-                upstream_restore_session: redacted_request
-                    .as_ref()
-                    .and_then(|value| value.restore_session.clone()),
-            };
-            apply_provider_request_defaults(
-                admin_state,
-                request.user_id.filter(|id| *id > 0),
-                route,
-                &mut prepared,
-            )
-            .await;
-            return Ok(prepared);
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+            }
+        } else {
+            prepare_upstream_request(
+                &request.path,
+                prepared_body,
+                route.native_api,
+                should_passthrough_responses(route),
+            )?
         }
-        let mut prepared = prepare_upstream_request(
-            &request.path,
-            prepared_body,
-            route.native_api,
-            should_passthrough_responses(route),
-        )?;
-        prepared.upstream_redacted_request_json = redacted_request
-            .as_ref()
-            .and_then(|value| value.redacted_request_json.clone());
-        prepared.upstream_restore_session = redacted_request
-            .as_ref()
-            .and_then(|value| value.restore_session.clone());
-        apply_provider_request_defaults(
-            admin_state,
-            request.user_id.filter(|id| *id > 0),
-            route,
-            &mut prepared,
-        )
-        .await;
-        return Ok(prepared);
-    }
-    let Some(state) = admin_state else {
-        return Err(CompatError::new(
-            StatusCode::BAD_REQUEST,
-            "replay_unavailable",
-            "previous_response_id for chat-native continuations requires stored replay state",
-        ));
-    };
-    let translated = prepare_responses_replay_request(crate::chat_replay::ResponsesReplayRequest {
-        pool: &state.pool,
-        replay_cache: &state.replay_cache,
-        user_id: request.user_id.filter(|id| *id > 0),
-        resolved_parent_event_id: parent_event_id,
-        request_body: prepared_body,
-        native_api: route.native_api,
-        route_base_url: &route.base_url,
-        current_request_model: effective_request_model,
-    })
-    .await?;
-    let mut prepared = match route.native_api {
-        crate::config::NativeApi::Chat => PreparedUpstreamRequest {
-            path: crate::config::NativeApi::Chat.path().to_string(),
-            body: PreparedRequestBody::BufferedBytes(upstream_body(
-                crate::config::NativeApi::Chat.path(),
-                &translated,
-            )),
-            response_adapter: ResponseAdapter::ChatToResponses,
-            upstream_redacted_request_json: redacted_request
-                .as_ref()
-                .and_then(|value| value.redacted_request_json.clone()),
-            upstream_restore_session: redacted_request
-                .as_ref()
-                .and_then(|value| value.restore_session.clone()),
-        },
-        crate::config::NativeApi::Responses => PreparedUpstreamRequest {
-            path: crate::config::NativeApi::Responses.path().to_string(),
-            body: PreparedRequestBody::BufferedBytes(upstream_body(
-                crate::config::NativeApi::Responses.path(),
-                &translated,
-            )),
-            response_adapter: ResponseAdapter::Passthrough,
-            upstream_redacted_request_json: redacted_request
-                .as_ref()
-                .and_then(|value| value.redacted_request_json.clone()),
-            upstream_restore_session: redacted_request
-                .as_ref()
-                .and_then(|value| value.restore_session.clone()),
-        },
-        crate::config::NativeApi::AnthropicMessages => PreparedUpstreamRequest {
-            path: crate::config::NativeApi::AnthropicMessages
-                .path()
-                .to_string(),
-            body: PreparedRequestBody::BufferedBytes(upstream_body(
-                crate::config::NativeApi::AnthropicMessages.path(),
-                &responses_request_to_anthropic_messages(&translated)?,
-            )),
-            response_adapter: ResponseAdapter::AnthropicMessagesToResponses,
-            upstream_redacted_request_json: redacted_request
-                .as_ref()
-                .and_then(|value| value.redacted_request_json.clone()),
-            upstream_restore_session: redacted_request
-                .as_ref()
-                .and_then(|value| value.restore_session.clone()),
-        },
-        crate::config::NativeApi::Realtime => {
+    } else {
+        let Some(state) = admin_state else {
             return Err(CompatError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_native_api",
-                "Realtime endpoints are not compatible with HTTP request translation",
+                "replay_unavailable",
+                "previous_response_id for chat-native continuations requires stored replay state",
             ));
+        };
+        let translated =
+            prepare_responses_replay_request(crate::chat_replay::ResponsesReplayRequest {
+                pool: &state.pool,
+                replay_cache: &state.replay_cache,
+                user_id: request.user_id.filter(|id| *id > 0),
+                resolved_parent_event_id: parent_event_id,
+                request_body: prepared_body,
+                native_api: route.native_api,
+                route_base_url: &route.base_url,
+                current_request_model: route.upstream_model.as_deref(),
+            })
+            .await?;
+        match route.native_api {
+            crate::config::NativeApi::Chat => PreparedUpstreamRequest {
+                path: crate::config::NativeApi::Chat.path().to_string(),
+                body: PreparedRequestBody::BufferedBytes(upstream_body(
+                    crate::config::NativeApi::Chat.path(),
+                    &translated,
+                )),
+                response_adapter: ResponseAdapter::ChatToResponses,
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+            },
+            crate::config::NativeApi::Responses => PreparedUpstreamRequest {
+                path: crate::config::NativeApi::Responses.path().to_string(),
+                body: PreparedRequestBody::BufferedBytes(upstream_body(
+                    crate::config::NativeApi::Responses.path(),
+                    &translated,
+                )),
+                response_adapter: ResponseAdapter::Passthrough,
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+            },
+            crate::config::NativeApi::AnthropicMessages => PreparedUpstreamRequest {
+                path: crate::config::NativeApi::AnthropicMessages
+                    .path()
+                    .to_string(),
+                body: PreparedRequestBody::BufferedBytes(upstream_body(
+                    crate::config::NativeApi::AnthropicMessages.path(),
+                    &responses_request_to_anthropic_messages(&translated)?,
+                )),
+                response_adapter: ResponseAdapter::AnthropicMessagesToResponses,
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+            },
+            crate::config::NativeApi::Realtime => {
+                return Err(CompatError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_native_api",
+                    "Realtime endpoints are not compatible with HTTP request translation",
+                ));
+            }
         }
     };
+    prepared.upstream_redacted_request_json = redacted_request
+        .as_ref()
+        .and_then(|value| value.redacted_request_json.clone());
+    prepared.upstream_restore_session = redacted_request
+        .as_ref()
+        .and_then(|value| value.restore_session.clone());
     apply_provider_request_defaults(
         admin_state,
         request.user_id.filter(|id| *id > 0),
         route,
         &mut prepared,
     )
-    .await;
+    .await?;
     Ok(prepared)
 }
 
@@ -375,9 +287,9 @@ async fn apply_provider_request_defaults(
     user_id: Option<i64>,
     route: &db::RouteConfig,
     prepared: &mut PreparedUpstreamRequest,
-) {
+) -> Result<(), CompatError> {
     if prepared.path != crate::config::NativeApi::Chat.path() {
-        return;
+        return Ok(());
     }
     let original_body = match &prepared.body {
         PreparedRequestBody::PassthroughStream(bytes)
@@ -389,7 +301,7 @@ async fn apply_provider_request_defaults(
         route,
         &original_body,
     )
-    .await
+    .await?
     .unwrap_or(original_body);
     if let Some(updated) = with_minimax_chat_request_defaults(route, &body) {
         body = updated;
@@ -400,6 +312,7 @@ async fn apply_provider_request_defaults(
             *bytes = body;
         }
     }
+    Ok(())
 }
 
 fn with_minimax_chat_request_defaults(

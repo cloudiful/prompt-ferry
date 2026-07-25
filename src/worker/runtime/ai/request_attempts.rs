@@ -12,7 +12,8 @@ use super::super::{
 use super::{
     forward::forward_upstream_response,
     forward::{ResponseForwardContext, ResponseLoggingContext},
-    request_support::{log_prepared_upstream_request, prepare_upstream_request_with_replay},
+    request_logging::log_prepared_upstream_summary,
+    request_support::prepare_upstream_request_with_replay,
     upstream::send_upstream_request,
 };
 
@@ -79,7 +80,6 @@ pub(super) async fn forward_route_request(
         request,
         request_ctx.request_prompt_log.conversation_id,
         request_ctx.request_prompt_log.parent_event_id,
-        request_ctx.request_model.as_deref(),
     )
     .await
     {
@@ -110,7 +110,7 @@ pub(super) async fn forward_route_request(
         &prepared.body,
     )
     .await;
-    log_prepared_upstream_request(route, &request.path, &prepared.body);
+    log_prepared_upstream_summary(route, &prepared);
     match response {
         Ok(response) => {
             handle_attempt_response(

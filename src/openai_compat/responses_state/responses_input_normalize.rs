@@ -173,6 +173,7 @@ pub(crate) fn output_items_to_input_items(
                     "arguments": arguments,
                 }));
             }
+            "reasoning" => items.push(item.clone()),
             other => {
                 return Err(CompatError::new(
                     StatusCode::BAD_GATEWAY,

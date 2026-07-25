@@ -7,6 +7,7 @@ pub(super) mod realtime;
 pub(super) mod request;
 pub(super) mod request_attempts;
 pub(super) mod request_init;
+pub(super) mod request_logging;
 pub(super) mod request_routes;
 pub(super) mod request_support;
 pub(super) mod review;

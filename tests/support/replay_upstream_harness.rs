@@ -17,6 +17,7 @@ pub struct ChatRequestLog {
     pub fail_next_chat_turns: Mutex<Vec<usize>>,
     pub fail_next_response_turns: Mutex<Vec<usize>>,
     pub omit_reasoning: bool,
+    pub multi_tool_turns: bool,
 }
 
 pub async fn spawn_replay_upstream(log: Arc<ChatRequestLog>) -> std::net::SocketAddr {
@@ -66,6 +67,7 @@ pub async fn spawn_replay_responses_upstream_without_conversation(
 async fn fake_chat_completion(State(log): State<Arc<ChatRequestLog>>, body: Bytes) -> Response {
     let value = serde_json::from_slice::<Value>(&body).unwrap();
     let omit_reasoning = log.omit_reasoning;
+    let multi_tool_turns = log.multi_tool_turns;
     let mut requests = log.bodies.lock().await;
     requests.push(value.clone());
     let turn = requests.len();
@@ -92,16 +94,27 @@ async fn fake_chat_completion(State(log): State<Arc<ChatRequestLog>>, body: Byte
         .get("model")
         .and_then(Value::as_str)
         .unwrap_or("gpt-test");
-    let body = if turn == 1 {
+    let tool_turn = if multi_tool_turns {
+        turn <= 2
+    } else {
+        turn == 1
+    };
+    let body = if tool_turn {
+        let call_id = if turn == 1 { "call_1" } else { "call_2" };
+        let reasoning = if multi_tool_turns {
+            format!("internal steps {turn}")
+        } else {
+            "internal steps".to_string()
+        };
         serde_json::json!({
-            "id": "chatcmpl_turn1",
+            "id": format!("chatcmpl_turn{turn}"),
             "created": 123,
             "model": model,
             "choices": [{
                 "message": {
                     "content": Value::Null,
                     "tool_calls": [{
-                        "id": "call_1",
+                        "id": call_id,
                         "type": "function",
                         "function": {
                             "name": "get_weather",
@@ -111,7 +124,7 @@ async fn fake_chat_completion(State(log): State<Arc<ChatRequestLog>>, body: Byte
                     "reasoning_content": if omit_reasoning {
                         Value::Null
                     } else {
-                        Value::String("internal steps".to_string())
+                        Value::String(reasoning)
                     }
                 },
                 "finish_reason": "tool_calls"

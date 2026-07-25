@@ -15,17 +15,12 @@ use crate::{
     replay_cache::ReplayCache,
 };
 
-use super::AssistantArtifact;
-
 mod history;
 mod reconstruct;
 
 pub(super) use history::fallback_artifact_for_entry;
 #[cfg(test)]
-pub(super) use reconstruct::{
-    replay_assistant_message, replayable_output_items, should_replay_reasoning,
-    validate_reasoning_replay,
-};
+pub(super) use reconstruct::{replay_assistant_message, replayable_output_items};
 
 pub struct ResponsesReplayRequest<'a> {
     pub pool: &'a PgPool,
@@ -48,8 +43,8 @@ pub async fn prepare_responses_replay_request(
         resolved_parent_event_id,
         request_body,
         native_api,
-        route_base_url,
-        current_request_model,
+        route_base_url: _route_base_url,
+        current_request_model: _current_request_model,
     } = input;
     let request = NormalizedResponsesRequest::from_body(request_body)?;
     let parent = if let Some(parent_event_id) = resolved_parent_event_id {
@@ -91,20 +86,6 @@ pub async fn prepare_responses_replay_request(
 
     let history_entries = history::load_history_entries(pool, replay_cache, &parent).await?;
     let assistant_artifacts = history::load_assistant_artifacts(pool, &history_entries).await?;
-    let replay_reasoning = reconstruct::should_replay_reasoning(
-        current_request_model,
-        parent.model.as_deref(),
-        route_base_url,
-        &assistant_artifacts,
-    );
-    if native_api == NativeApi::Chat {
-        reconstruct::validate_reasoning_replay(
-            current_request_model,
-            parent.model.as_deref(),
-            route_base_url,
-            &assistant_artifacts,
-        )?;
-    }
     let prior_call_ids = assistant_artifacts
         .values()
         .flat_map(|artifact| {
@@ -132,7 +113,7 @@ pub async fn prepare_responses_replay_request(
                 })?;
                 prefix_messages.push(reconstruct::replay_assistant_message(
                     &artifact.message_json,
-                    replay_reasoning,
+                    false,
                 )?);
             }
             request.to_chat_request_with_prefix(&prefix_messages)

@@ -9,7 +9,7 @@ use crate::{
     usage_prompt::PromptMessageRef,
 };
 
-use super::{AssistantArtifact, replay_db_error, replay_error};
+use super::{replay_db_error, replay_error};
 
 pub(super) async fn reconstruct_turn_messages(
     pool: &PgPool,
@@ -49,43 +49,16 @@ pub(super) async fn reconstruct_turn_items(
 }
 
 pub(in crate::chat_replay) fn replayable_output_items(output_items: &[Value]) -> Vec<Value> {
+    let has_tool_call = output_items
+        .iter()
+        .any(|item| item.get("type").and_then(Value::as_str) == Some("function_call"));
     output_items
         .iter()
-        .filter(|item| item.get("type").and_then(Value::as_str) != Some("reasoning"))
+        .filter(|item| {
+            has_tool_call || item.get("type").and_then(Value::as_str) != Some("reasoning")
+        })
         .cloned()
         .collect()
-}
-
-pub(in crate::chat_replay) fn should_replay_reasoning(
-    current_request_model: Option<&str>,
-    parent_model: Option<&str>,
-    route_base_url: &str,
-    artifacts: &HashMap<i64, AssistantArtifact>,
-) -> bool {
-    if !targets_reasoning_provider(current_request_model, parent_model, route_base_url) {
-        return false;
-    }
-    let history_has_reasoning = artifacts.values().any(artifact_has_reasoning_content);
-    history_has_reasoning
-}
-
-pub(in crate::chat_replay) fn validate_reasoning_replay(
-    current_request_model: Option<&str>,
-    parent_model: Option<&str>,
-    route_base_url: &str,
-    artifacts: &HashMap<i64, AssistantArtifact>,
-) -> Result<(), crate::openai_compat::CompatError> {
-    if !targets_reasoning_provider(current_request_model, parent_model, route_base_url) {
-        return Ok(());
-    }
-    if artifacts.values().any(|artifact| {
-        artifact_has_tool_calls(artifact) && !artifact_has_reasoning_content(artifact)
-    }) {
-        return Err(replay_error(
-            "stored assistant tool-call turn is missing complete reasoning for the target reasoning provider",
-        ));
-    }
-    Ok(())
 }
 
 pub(in crate::chat_replay) fn replay_assistant_message(
@@ -190,42 +163,4 @@ fn has_meaningful_value(value: &Value) -> bool {
         Value::Object(object) => !object.is_empty(),
         Value::Number(_) => true,
     }
-}
-
-fn artifact_has_reasoning_content(artifact: &AssistantArtifact) -> bool {
-    persisted_assistant_message(&artifact.message_json)
-        .ok()
-        .and_then(|message| message.get("reasoning_content").cloned())
-        .is_some_and(|value| has_meaningful_value(&value))
-}
-
-fn artifact_has_tool_calls(artifact: &AssistantArtifact) -> bool {
-    if artifact.has_tool_calls {
-        return true;
-    }
-    persisted_assistant_message(&artifact.message_json)
-        .ok()
-        .and_then(|message| message.get("tool_calls").cloned())
-        .is_some_and(|value| has_meaningful_value(&value))
-}
-
-fn is_deepseek_model(model: &str) -> bool {
-    model.trim().to_ascii_lowercase().starts_with("deepseek-")
-}
-
-fn targets_reasoning_provider(
-    current_request_model: Option<&str>,
-    parent_model: Option<&str>,
-    route_base_url: &str,
-) -> bool {
-    let route = route_base_url.to_ascii_lowercase();
-    if route.contains("deepseek") || route.contains("minimax") {
-        return true;
-    }
-    let model = current_request_model.or(parent_model);
-    model.is_some_and(|model| is_deepseek_model(model) || is_minimax_model(model))
-}
-
-fn is_minimax_model(model: &str) -> bool {
-    model.trim().to_ascii_lowercase().starts_with("minimax-")
 }

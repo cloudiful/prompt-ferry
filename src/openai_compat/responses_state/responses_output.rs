@@ -413,6 +413,20 @@ mod tests {
     }
 
     #[test]
+    fn replays_reasoning_items_without_converting_them_to_chat_fields() {
+        let reasoning = json!({
+            "id":"rs_123",
+            "type":"reasoning",
+            "summary":[{"type":"summary_text","text":"summary"}],
+            "content":[{"type":"reasoning_text","text":"private"}]
+        });
+        let input_items = output_items_to_input_items(&[reasoning.clone()]).unwrap();
+
+        assert_eq!(input_items, vec![reasoning]);
+        assert!(input_items[0].get("reasoning_content").is_none());
+    }
+
+    #[test]
     fn persisted_artifact_aligns_assistant_tool_calls_with_repaired_output_items() {
         let assistant_message = json!({
             "role":"assistant",

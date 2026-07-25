@@ -36,6 +36,10 @@ impl ToolCallTurn {
         Ok(())
     }
 
+    fn has_outputs(&self) -> bool {
+        !self.outputs.is_empty()
+    }
+
     fn finish(self) -> Vec<Value> {
         let mut messages =
             Vec::with_capacity(usize::from(!self.function_calls.is_empty()) + self.outputs.len());
@@ -62,6 +66,14 @@ where
     let mut turn = ToolCallTurn::new();
     for item in items {
         if is_tool_call_item(item) {
+            if matches!(
+                tool_call_item_kind(item),
+                Some(ToolCallItemKind::FunctionCall)
+            ) && turn.has_outputs()
+            {
+                messages.extend(turn.finish());
+                turn = ToolCallTurn::new();
+            }
             turn.push(item)?;
             continue;
         }
