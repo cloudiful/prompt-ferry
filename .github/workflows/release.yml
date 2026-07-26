@@ -82,7 +82,6 @@ jobs:
           SCCACHE_BUCKET: sccache
           SCCACHE_ENDPOINT: https://12412d5b061683494ea3e5c217d6a961.r2.cloudflarestorage.com
           SCCACHE_REGION: auto
-          SCCACHE_S3_KEY_PREFIX: rust/
         run: cargo build --release --bin prompt-ferry --target "${{ matrix.target }}"
 
       - name: Show sccache stats
@@ -95,7 +94,6 @@ jobs:
           SCCACHE_BUCKET: sccache
           SCCACHE_ENDPOINT: https://12412d5b061683494ea3e5c217d6a961.r2.cloudflarestorage.com
           SCCACHE_REGION: auto
-          SCCACHE_S3_KEY_PREFIX: rust/
         run: sccache --show-stats
 
       - name: Prepare binary

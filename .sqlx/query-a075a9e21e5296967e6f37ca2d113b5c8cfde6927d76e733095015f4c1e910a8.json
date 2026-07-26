@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n    approval_id,\n    request_id,\n    user_id,\n    (SELECT login_name FROM users WHERE user_id = approval_requests.user_id) AS \"user_login_name?\",\n    client_key_label,\n    path,\n    model,\n    review_decision,\n    approval_status,\n    review_reason,\n    review_categories,\n    request_preview,\n    request_payload_json,\n    request_deadline_unix_ms,\n    wait_deadline_unix_ms,\n    decided_by_user_id,\n    (SELECT login_name FROM users WHERE user_id = approval_requests.decided_by_user_id) AS \"decided_by_login_name?\",\n    decided_at,\n    created_at,\n    updated_at\nFROM approval_requests\nWHERE approval_status <> 'pending'\nORDER BY created_at DESC\nOFFSET $1\nLIMIT $2\n",
+  "query": "SELECT\n    approval_id,\n    request_id,\n    user_id,\n    (SELECT login_name FROM users WHERE user_id = approval_requests.user_id) AS \"user_login_name?\",\n    client_key_label,\n    path,\n    model,\n    review_decision,\n    approval_status,\n    review_reason,\n    review_categories,\n    request_preview,\n    request_payload_json,\n    request_deadline_unix_ms,\n    wait_deadline_unix_ms,\n    decided_by_user_id,\n    (SELECT login_name FROM users WHERE user_id = approval_requests.decided_by_user_id) AS \"decided_by_login_name?\",\n    decided_at,\n    created_at,\n    updated_at\nFROM approval_requests\nWHERE approval_status <> 'pending'\nORDER BY created_at DESC, approval_id DESC\nOFFSET $1\nLIMIT $2\n",
   "describe": {
     "columns": [
       {
@@ -243,5 +243,5 @@
       false
     ]
   },
-  "hash": "1b93fd33e9febf839371e5b88b4b32caa7bc305f92ec717c8c18ec0939d14478"
+  "hash": "a075a9e21e5296967e6f37ca2d113b5c8cfde6927d76e733095015f4c1e910a8"
 }

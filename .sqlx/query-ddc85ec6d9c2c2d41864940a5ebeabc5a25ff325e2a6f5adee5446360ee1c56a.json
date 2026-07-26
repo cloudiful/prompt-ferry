@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT rr.event_id, rr.request_id, rr.user_id, rr.endpoint_id, rr.path, rr.model, rr.conversation_id, rr.parent_event_id,\n       rr.conversation_seq, rr.conversation_source, rr.client_installation_id, rr.normalized_item_count,\n       rr.normalized_chain_hash, rr.normalized_first_ref_hash, rr.normalized_last_ref_hash,\n       rr.request_storage_mode, rr.request_full_json, rr.request_delta_json,\n       raw.request_raw_json, rr.request_has_previous_response_id,\n       rr.request_previous_response_id, rr.request_previous_response_parent_found,\n       rr.request_conversation_key, rr.request_conversation_parent_found,\n       rr.provider_response_id, rr.base_checkpoint_event_id, rr.response_prompt, raw.response_raw_body\nFROM request_records rr\nLEFT JOIN request_record_raw_payloads raw\n  ON raw.event_id = rr.event_id\n AND raw.created_at = rr.created_at\nWHERE rr.event_id = $1\n",
+  "query": "SELECT rr.event_id AS \"event_id!\", rr.request_id AS \"request_id!\", rr.user_id, rr.endpoint_id, rr.path AS \"path!\", rr.model, rr.conversation_id, rr.parent_event_id,\n       rr.conversation_seq, rr.conversation_source AS \"conversation_source!\", rr.client_installation_id, rr.normalized_item_count,\n       rr.normalized_chain_hash, rr.normalized_first_ref_hash, rr.normalized_last_ref_hash,\n       rr.request_storage_mode AS \"request_storage_mode!\", rr.request_full_json, rr.request_delta_json,\n       raw.request_raw_json, rr.request_has_previous_response_id AS \"request_has_previous_response_id!\",\n       rr.request_previous_response_id, rr.request_previous_response_parent_found,\n       rr.request_conversation_key, rr.request_conversation_parent_found,\n       rr.provider_response_id, rr.base_checkpoint_event_id, rr.response_prompt, raw.response_raw_body\nFROM request_records rr\nLEFT JOIN request_record_raw_payloads raw\n  ON raw.event_id = rr.event_id\n AND raw.created_at = rr.created_at\nWHERE rr.event_id = $1\n  AND ($2::BIGINT IS NULL OR rr.user_id = $2)\n",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "event_id",
+        "name": "event_id!",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "request_id",
+        "name": "request_id!",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -49,7 +49,7 @@
       },
       {
         "ordinal": 4,
-        "name": "path",
+        "name": "path!",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -104,7 +104,7 @@
       },
       {
         "ordinal": 9,
-        "name": "conversation_source",
+        "name": "conversation_source!",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -170,7 +170,7 @@
       },
       {
         "ordinal": 15,
-        "name": "request_storage_mode",
+        "name": "request_storage_mode!",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -214,7 +214,7 @@
       },
       {
         "ordinal": 19,
-        "name": "request_has_previous_response_id",
+        "name": "request_has_previous_response_id!",
         "type_info": "Bool",
         "origin": {
           "Table": {
@@ -314,6 +314,7 @@
     ],
     "parameters": {
       "Left": [
+        "Int8",
         "Int8"
       ]
     },
@@ -348,5 +349,5 @@
       true
     ]
   },
-  "hash": "b9f646eb72233ea4ef7d4d23970fcc02d4f586431ab76d1100dbc6722e83d68e"
+  "hash": "ddc85ec6d9c2c2d41864940a5ebeabc5a25ff325e2a6f5adee5446360ee1c56a"
 }

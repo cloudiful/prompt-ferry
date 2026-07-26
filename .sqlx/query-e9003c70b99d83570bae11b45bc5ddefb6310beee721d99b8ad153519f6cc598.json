@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT key_id, user_id, key_prefix, label, enabled, last_used_at, created_at, secret\nFROM client_keys\nWHERE user_id = $1\nORDER BY created_at DESC\n",
+  "query": "SELECT key_id, user_id, key_prefix, label, enabled, last_used_at, created_at, secret\nFROM client_keys\nWHERE user_id = $1\nORDER BY created_at DESC, key_id DESC\n",
   "describe": {
     "columns": [
       {
@@ -108,5 +108,5 @@
       true
     ]
   },
-  "hash": "f9dc0bf1612540a9c30a5b9c0a389329d6e55911f95775aa47322e5150daaf43"
+  "hash": "e9003c70b99d83570bae11b45bc5ddefb6310beee721d99b8ad153519f6cc598"
 }

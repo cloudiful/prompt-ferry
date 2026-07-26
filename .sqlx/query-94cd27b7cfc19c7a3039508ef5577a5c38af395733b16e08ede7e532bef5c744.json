@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT rule_id, scope, owner_user_id, model_pattern, routing_strategy, session_affinity_lock_after_turns, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\nFROM model_endpoint_rules\nORDER BY\n  CASE WHEN scope = 'user' THEN 0 ELSE 1 END,\n  owner_user_id NULLS FIRST,\n  model_pattern ASC,\n  updated_at DESC\nOFFSET $1\nLIMIT $2\n",
+  "query": "SELECT rule_id, scope, owner_user_id, model_pattern, routing_strategy, session_affinity_lock_after_turns, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\nFROM model_endpoint_rules\nORDER BY\n  CASE WHEN scope = 'user' THEN 0 ELSE 1 END,\n  owner_user_id NULLS FIRST,\n  model_pattern ASC,\n  updated_at DESC,\n  rule_id ASC\nOFFSET $1\nLIMIT $2\n",
   "describe": {
     "columns": [
       {
@@ -145,5 +145,5 @@
       false
     ]
   },
-  "hash": "3c939c9e6078a648c81f8d1cc37ba3058ca09b01ab66d63a6d1ac4c8c39dcb53"
+  "hash": "94cd27b7cfc19c7a3039508ef5577a5c38af395733b16e08ede7e532bef5c744"
 }

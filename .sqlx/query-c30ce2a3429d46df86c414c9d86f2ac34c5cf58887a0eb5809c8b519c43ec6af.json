@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT price_rule_id, price_side, public_model, endpoint_id, upstream_model,\n       input_rate, cache_read_rate, cache_write_rate, output_rate, currency,\n       effective_from, effective_to, enabled, created_by_user_id, created_at, updated_at\nFROM billing_price_rules\nORDER BY price_side, COALESCE(public_model, upstream_model), effective_from DESC, created_at DESC\nLIMIT $1 OFFSET $2\n",
+  "query": "SELECT price_rule_id, price_side, public_model, endpoint_id, upstream_model,\n       input_rate, cache_read_rate, cache_write_rate, output_rate, currency,\n       effective_from, effective_to, enabled, created_by_user_id, created_at, updated_at\nFROM billing_price_rules\nORDER BY price_side, COALESCE(public_model, upstream_model), effective_from DESC, created_at DESC, price_rule_id ASC\nLIMIT $1 OFFSET $2\n",
   "describe": {
     "columns": [
       {
@@ -205,5 +205,5 @@
       false
     ]
   },
-  "hash": "9e085162c1a717ec9ec34d90b0a98281b7b0c967a11aea247d1486cd4e6de4e0"
+  "hash": "c30ce2a3429d46df86c414c9d86f2ac34c5cf58887a0eb5809c8b519c43ec6af"
 }
