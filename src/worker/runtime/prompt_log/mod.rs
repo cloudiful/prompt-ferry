@@ -206,10 +206,7 @@ pub(super) async fn prepare_request_prompt_log(
         normalized.previous_response_id.as_deref(),
         normalized.conversation.as_deref(),
         log.session_header_id.as_deref(),
-        codex_metadata
-            .prompt_cache_key
-            .as_deref()
-            .or(codex_metadata.window_thread_id.as_deref()),
+        codex_thread_key(&codex_metadata),
     )
     .await?
     else {
@@ -378,6 +375,13 @@ fn codex_request_metadata(body: &[u8]) -> CodexRequestMetadata {
     }
 }
 
+fn codex_thread_key(metadata: &CodexRequestMetadata) -> Option<&str> {
+    metadata
+        .window_thread_id
+        .as_deref()
+        .or(metadata.prompt_cache_key.as_deref())
+}
+
 fn session_header_id(headers: &[(String, String)]) -> Option<String> {
     headers
         .iter()
@@ -389,4 +393,35 @@ fn session_header_id(headers: &[(String, String)]) -> Option<String> {
 
 pub(super) fn resolve_mcp_conversation_log() -> RequestPromptLog {
     RequestPromptLog::default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{codex_request_metadata, codex_thread_key};
+
+    #[test]
+    fn codex_thread_identity_precedes_prompt_cache_key() {
+        let metadata = codex_request_metadata(
+            br#"{
+                "prompt_cache_key": "guardian:parent-session",
+                "client_metadata": {
+                    "x-codex-window-id": "guardian-child:0"
+                }
+            }"#,
+        );
+
+        assert_eq!(codex_thread_key(&metadata), Some("guardian-child"));
+    }
+
+    #[test]
+    fn prompt_cache_key_is_used_without_codex_thread_identity() {
+        let metadata = codex_request_metadata(
+            br#"{
+                "prompt_cache_key": "guardian:parent-session",
+                "input": "hello"
+            }"#,
+        );
+
+        assert_eq!(codex_thread_key(&metadata), Some("guardian:parent-session"));
+    }
 }

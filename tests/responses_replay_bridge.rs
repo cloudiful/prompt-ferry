@@ -1627,7 +1627,7 @@ async fn codex_thread_identity_keeps_tool_output_replay_on_one_conversation() ->
 
     let client = reqwest::Client::new();
     let codex_identity = serde_json::json!({
-        "prompt_cache_key": "thread-codex-1",
+        "prompt_cache_key": "guardian-parent-session",
         "client_metadata": {
             "x-codex-window-id": "thread-codex-1:0",
             "x-codex-installation-id": "install-1"
@@ -1699,7 +1699,7 @@ async fn codex_thread_identity_keeps_tool_output_replay_on_one_conversation() ->
          AND raw.created_at = rr.created_at
         WHERE rr.event_kind = 'request'
           AND rr.request_category = 'ai'
-          AND raw.request_raw_json ->> 'prompt_cache_key' = 'thread-codex-1'
+          AND raw.request_raw_json ->> 'prompt_cache_key' = 'guardian-parent-session'
         ORDER BY rr.created_at ASC
         "#,
     )

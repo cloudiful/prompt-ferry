@@ -79,3 +79,38 @@ fn infers_failure_family_for_auth_rate_limit_and_empty_success() {
         Some(RequestFailureFamily::EmptySuccess)
     );
 }
+
+#[test]
+fn infers_quota_before_generic_rate_limit_for_explicit_quota_errors() {
+    let quota = UsageLog::ai_request(
+        uuid::Uuid::new_v4(),
+        UsageRequestMetadata::default(),
+        Some("gpt-5".to_string()),
+    )
+    .with_status(Some(429), Some(false), None, None)
+    .with_error(
+        Some("http_error".to_string()),
+        Some("upstream returned HTTP 500".to_string()),
+        Some(r#"{"error":{"code":2056,"message":"Token Plan usage limit exhausted"}}"#.to_string()),
+    );
+    let ordinary_server_error = UsageLog::ai_request(
+        uuid::Uuid::new_v4(),
+        UsageRequestMetadata::default(),
+        Some("gpt-5".to_string()),
+    )
+    .with_status(Some(500), Some(false), None, None)
+    .with_error(
+        Some("http_error".to_string()),
+        Some("upstream returned HTTP 500".to_string()),
+        Some("temporary provider failure".to_string()),
+    );
+
+    assert_eq!(
+        infer_failure_family(&quota),
+        Some(RequestFailureFamily::Quota)
+    );
+    assert_eq!(
+        infer_failure_family(&ordinary_server_error),
+        Some(RequestFailureFamily::Upstream5xx)
+    );
+}

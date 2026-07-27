@@ -15,6 +15,7 @@ use crate::{
     db,
     openai_compat::normalize_response_error,
     upstream_adapter::ResponseAdapter,
+    upstream_error::is_quota_exhaustion,
     worker_usage::record_usage_event,
 };
 use http::header;
@@ -99,6 +100,7 @@ pub(super) async fn forward_upstream_response(
     if !status.is_success() {
         let body = read_response_sample(response, ERROR_BODY_SAMPLE_BYTES).await;
         let body_text = String::from_utf8_lossy(&body).to_string();
+        let client_status = client_status_for_upstream_error(status, &body_text);
         let error_body = (!body_text.trim().is_empty())
             .then(|| maybe_redact_text(&body_text, redact_content, request_ctx.user_id));
         let normalized_error = normalize_response_error(&body_text);
@@ -107,7 +109,7 @@ pub(super) async fn forward_upstream_response(
         send_json_response(
             services,
             &request.request_id,
-            status.as_u16(),
+            client_status.as_u16(),
             normalized_bytes,
         )
         .await?;
@@ -121,7 +123,7 @@ pub(super) async fn forward_upstream_response(
                 )
                 .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
                 .with_status(
-                    Some(status.as_u16() as i32),
+                    Some(client_status.as_u16() as i32),
                     Some(false),
                     Some(request_ctx.elapsed_ms()),
                     None,
@@ -177,6 +179,17 @@ pub(super) async fn forward_upstream_response(
     .await
 }
 
+fn client_status_for_upstream_error(
+    upstream_status: http::StatusCode,
+    body: &str,
+) -> http::StatusCode {
+    if !upstream_status.is_success() && is_quota_exhaustion(body) {
+        http::StatusCode::TOO_MANY_REQUESTS
+    } else {
+        upstream_status
+    }
+}
+
 pub(super) fn response_logging_payload(
     response_text: &str,
     body: &[u8],
@@ -220,6 +233,32 @@ pub(super) fn logged_response_raw_body(
         .then(|| format_response_raw_body(body))
         .flatten()
         .filter(|text| !text.trim().is_empty())
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::client_status_for_upstream_error;
+    use http::StatusCode;
+
+    #[test]
+    fn maps_explicit_quota_exhaustion_to_too_many_requests() {
+        let status = client_status_for_upstream_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            r#"{"error":{"message":"Token Plan usage limit exhausted"}}"#,
+        );
+
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn preserves_ordinary_upstream_server_errors() {
+        let status = client_status_for_upstream_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            r#"{"error":{"message":"temporary provider failure"}}"#,
+        );
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
 }
 
 #[cfg(test)]

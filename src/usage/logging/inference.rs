@@ -1,4 +1,5 @@
 use crate::db::{self, RequestFailureFamily};
+use crate::upstream_error::is_quota_exhaustion;
 
 use super::UsageLog;
 
@@ -27,6 +28,9 @@ pub(super) fn infer_failure_family(log: &UsageLog) -> Option<RequestFailureFamil
         .to_ascii_lowercase();
     let haystack = format!("{error_code} {error_message} {upstream_error_body}");
 
+    if is_quota_exhaustion(&haystack) {
+        return Some(RequestFailureFamily::Quota);
+    }
     if matches!(status, Some(401 | 403))
         || haystack.contains("auth")
         || haystack.contains("unauthor")
@@ -40,13 +44,6 @@ pub(super) fn infer_failure_family(log: &UsageLog) -> Option<RequestFailureFamil
         || haystack.contains("too many requests")
     {
         return Some(RequestFailureFamily::RateLimit);
-    }
-    if haystack.contains("quota")
-        || haystack.contains("credit")
-        || haystack.contains("billing")
-        || haystack.contains("insufficient_quota")
-    {
-        return Some(RequestFailureFamily::Quota);
     }
     if haystack.contains("timeout") || haystack.contains("deadline") {
         return Some(RequestFailureFamily::Timeout);
