@@ -10,7 +10,10 @@ use super::{
 use crate::{
     chat_replay::{AssistantArtifactCapture, ResponsesArtifactCapture},
     db,
-    openai_compat::{AnthropicResponseStreamAdapter, ChatResponseStreamAdapter, CompatError},
+    openai_compat::{
+        AnthropicResponseStreamAdapter, ChatResponseStreamAdapter, CompatError,
+        ResponsesChatResponseStreamAdapter,
+    },
     protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseStart},
     upstream_adapter::ResponseAdapter,
     usage::UsageCapture,
@@ -160,6 +163,7 @@ fn response_adapter_name(adapter: ResponseAdapter) -> &'static str {
     match adapter {
         ResponseAdapter::Passthrough => "passthrough",
         ResponseAdapter::ChatToResponses => "chat_to_responses",
+        ResponseAdapter::ResponsesToChat => "responses_to_chat",
         ResponseAdapter::AnthropicMessagesToResponses => "anthropic_messages_to_responses",
     }
 }
@@ -203,14 +207,18 @@ pub(super) async fn forward_streaming_response(
     let status = response.status();
     let capture_is_sse = matches!(
         response_adapter,
-        ResponseAdapter::ChatToResponses | ResponseAdapter::AnthropicMessagesToResponses
+        ResponseAdapter::ChatToResponses
+            | ResponseAdapter::ResponsesToChat
+            | ResponseAdapter::AnthropicMessagesToResponses
     ) || is_sse;
     let mut capture = UsageCapture::new(capture_is_sse, request_ctx.request_model.clone());
     capture
         .set_response_text_capture_limit(services.response_limits.max_response_text_capture_bytes);
     let response_content_type = if matches!(
         response_adapter,
-        ResponseAdapter::ChatToResponses | ResponseAdapter::AnthropicMessagesToResponses
+        ResponseAdapter::ChatToResponses
+            | ResponseAdapter::ResponsesToChat
+            | ResponseAdapter::AnthropicMessagesToResponses
     ) {
         Some("text/event-stream".to_string())
     } else {
@@ -259,6 +267,9 @@ pub(super) async fn forward_streaming_response(
     let mut ttft_ms = None;
     let mut chat_stream_adapter =
         (response_adapter == ResponseAdapter::ChatToResponses).then(ChatResponseStreamAdapter::new);
+    let mut responses_to_chat_stream_adapter = (response_adapter
+        == ResponseAdapter::ResponsesToChat)
+        .then(ResponsesChatResponseStreamAdapter::new);
     let mut anthropic_stream_adapter = (response_adapter
         == ResponseAdapter::AnthropicMessagesToResponses)
         .then(AnthropicResponseStreamAdapter::new);
@@ -420,7 +431,29 @@ pub(super) async fn forward_streaming_response(
                 if let Some(capture) = responses_capture.as_mut() {
                     capture.observe_chunk(&chunk);
                 }
-                let output_chunks: Vec<Vec<u8>> = if let Some(adapter) = chat_stream_adapter.as_mut() {
+                let output_chunks: Vec<Vec<u8>> = if let Some(adapter) = responses_to_chat_stream_adapter.as_mut() {
+                    match adapter.push_chunk(&chunk) {
+                        Ok(output_chunks) => output_chunks,
+                        Err(err) => {
+                            log_stream_adapter_error(
+                                adapter.provider_response_id(),
+                                adapter.model_name(),
+                                &err,
+                            );
+                            stream_diag
+                                .mark_terminal("stream_adapter_error", Some(err.message.clone()));
+                            stream_diag.finish();
+                            return respond_with_client_error(
+                                services,
+                                request,
+                                request_ctx,
+                                route_ctx,
+                                err,
+                            )
+                            .await;
+                        }
+                    }
+                } else if let Some(adapter) = chat_stream_adapter.as_mut() {
                     match adapter.push_chunk(&chunk) {
                         Ok(output_chunks) => output_chunks,
                         Err(err) => {
@@ -493,6 +526,32 @@ pub(super) async fn forward_streaming_response(
                     break;
                 }
             }
+        }
+    }
+
+    if let Some(adapter) = responses_to_chat_stream_adapter.as_mut() {
+        let output_chunks = match adapter.finish() {
+            Ok(output_chunks) => output_chunks,
+            Err(err) => {
+                log_stream_adapter_error(
+                    adapter.provider_response_id(),
+                    adapter.model_name(),
+                    &err,
+                );
+                return respond_with_client_error(services, request, request_ctx, route_ctx, err)
+                    .await;
+            }
+        };
+        let output_chunks = match sse_restore_filter.as_mut() {
+            Some(filter) => filter.push_chunks(output_chunks)?,
+            None => output_chunks,
+        };
+        for output_chunk in output_chunks {
+            emit_output_chunks(
+                stream_delta_batcher.push_chunk(output_chunk)?,
+                &services.out_tx,
+                &mut stream_diag,
+            )?;
         }
     }
 

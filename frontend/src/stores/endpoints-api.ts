@@ -75,7 +75,7 @@ export async function deleteEndpointById(endpointId: string): Promise<void> {
   await deleteEndpoint<true>(withData({ path: { endpoint_id: endpointId } }))
 }
 
-export async function runEndpointProbe(
+export async function runEndpointTest(
   endpointId: string,
 ): Promise<EndpointTestResponse> {
   return expectData(

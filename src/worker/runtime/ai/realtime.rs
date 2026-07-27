@@ -29,13 +29,18 @@ pub(in crate::worker::runtime) async fn start_realtime_session(
     services: &RuntimeServices,
 ) {
     if let Err(err) = run_realtime_session(&request, &mut inbound_rx, config, services).await {
+        let message = err.to_string();
+        let (code, message) = message
+            .strip_prefix("unsupported_auto_protocol: ")
+            .map(|message| ("unsupported_auto_protocol", message.to_string()))
+            .unwrap_or(("realtime_error", message));
         let _ = services
             .out_tx
             .send(BridgeMessage::ResponseError(ResponseError {
                 request_id: request.request_id.clone(),
                 status: StatusCode::BAD_GATEWAY.as_u16(),
-                code: "realtime_error".to_string(),
-                message: err.to_string(),
+                code: code.to_string(),
+                message,
             }));
     }
     services
@@ -179,7 +184,7 @@ async fn resolve_realtime_route(
     };
     let InitializedRequest { request_ctx, .. } =
         super::request_init::initialize_request(&fake_request, services).await?;
-    let (route, load_guard) = match resolve_route(&fake_request, config, services, &request_ctx)
+    let (mut route, load_guard) = match resolve_route(&fake_request, config, services, &request_ctx)
         .await?
     {
         super::request_routes::RouteResolution::Ready { route, load_guard } => (*route, load_guard),
@@ -187,6 +192,8 @@ async fn resolve_realtime_route(
             return Err(anyhow!("realtime route was rejected by budget gate"));
         }
     };
+    super::request::resolve_auto_protocol(&mut route, &request.path)
+        .map_err(|err| anyhow!("{}: {}", err.code, err.message))?;
     (route.native_api == NativeApi::Realtime)
         .then_some((route, load_guard))
         .ok_or_else(|| {

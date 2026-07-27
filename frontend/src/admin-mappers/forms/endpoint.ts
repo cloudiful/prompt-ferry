@@ -25,6 +25,13 @@ export function createEmptyEndpointForm(): EndpointForm {
 
 export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
   const endpointApiKeys = endpoint.api_keys ?? []
+  const nativeApiOverride =
+    endpoint.native_api === 'anthropic_messages' ||
+    endpoint.native_api === 'responses' ||
+    endpoint.native_api === 'chat' ||
+    endpoint.native_api === 'realtime'
+      ? endpoint.native_api
+      : null
   return {
     endpoint_id: endpoint.endpoint_id,
     scope: endpoint.scope === 'user' ? 'user' : 'admin',
@@ -40,14 +47,11 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
       enabled: key.enabled,
     })),
     key_lb_enabled: endpoint.key_lb_enabled ?? false,
-    protocol_mode: endpoint.native_api_source === 'manual' ? 'manual' : 'auto',
-    native_api_override:
-      endpoint.native_api === 'anthropic_messages' ||
-      endpoint.native_api === 'responses' ||
-      endpoint.native_api === 'chat' ||
-      endpoint.native_api === 'realtime'
-        ? endpoint.native_api
-        : null,
+    protocol_mode:
+      endpoint.native_api_source === 'auto' && endpoint.native_api === 'auto'
+        ? 'auto'
+        : 'manual',
+    native_api_override: nativeApiOverride,
     daily_max_requests: endpoint.daily_max_requests ?? null,
     monthly_max_requests: endpoint.monthly_max_requests ?? null,
     enabled: endpoint.enabled,

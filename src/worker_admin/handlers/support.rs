@@ -128,39 +128,33 @@ pub(super) async fn resolve_endpoint_input(
             ));
         }
     }
-    let protocol = match body.protocol_mode {
-        EndpointProtocolMode::Manual => EndpointProtocolResolution {
-            native_api: body.native_api_override.ok_or_else(|| {
+    let (native_api, native_api_source) = match body.protocol_mode {
+        EndpointProtocolMode::Manual => {
+            let native_api = body.native_api_override.ok_or_else(|| {
                 error(
                     StatusCode::BAD_REQUEST,
                     "invalid_native_api",
                     "native_api_override is required in manual protocol mode",
                 )
-            })?,
-            native_api_source: NativeApiSource::Manual,
-        },
-        EndpointProtocolMode::Auto => {
-            if body.native_api_override == Some(NativeApi::Realtime) {
+            })?;
+            if native_api == NativeApi::Auto {
                 return Err(error(
                     StatusCode::BAD_REQUEST,
                     "invalid_native_api",
-                    "realtime requires manual protocol mode",
+                    "auto must use automatic protocol mode",
                 ));
             }
-            let client = endpoint_protocol_client();
-            let native_api = detect_endpoint_protocol(&client, &body.base_url, &api_key)
-                .await
-                .map_err(|message| {
-                    error(
-                        StatusCode::BAD_REQUEST,
-                        "protocol_detection_failed",
-                        &format!("failed to detect endpoint protocol: {message}"),
-                    )
-                })?;
-            EndpointProtocolResolution {
-                native_api,
-                native_api_source: NativeApiSource::Detected,
+            (native_api, NativeApiSource::Manual)
+        }
+        EndpointProtocolMode::Auto => {
+            if body.native_api_override.is_some() {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_native_api",
+                    "native_api_override is only valid in manual protocol mode",
+                ));
             }
+            (NativeApi::Auto, NativeApiSource::Auto)
         }
     };
     let primary_key_label = if body.name.trim().is_empty() {
@@ -229,8 +223,8 @@ pub(super) async fn resolve_endpoint_input(
         owner_user_id: body.owner_user_id,
         name: body.name,
         base_url: body.base_url,
-        native_api: protocol.native_api,
-        native_api_source: protocol.native_api_source,
+        native_api,
+        native_api_source,
         daily_max_requests: body.daily_max_requests,
         monthly_max_requests: body.monthly_max_requests,
         api_key,

@@ -156,6 +156,107 @@ async fn preserves_input_image_parts_for_native_responses_upstream() {
     worker_handle.abort();
 }
 
+#[tokio::test]
+async fn auto_endpoint_routes_chat_images_to_chat_upstream() {
+    let state = UpstreamState::default();
+    let upstream_addr = spawn_upstream(state.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Auto);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+    let response = reqwest::Client::new()
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "vision-test",
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "describe"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}}
+            ]}]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        state.bodies.lock().await[0]["messages"][0]["content"][1]["type"],
+        "image_url"
+    );
+    worker_handle.abort();
+}
+
+#[tokio::test]
+async fn auto_endpoint_routes_responses_images_to_responses_upstream() {
+    let state = UpstreamState::default();
+    let upstream_addr = spawn_upstream(state.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Auto);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+    let response = reqwest::Client::new()
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "vision-test",
+            "input": [{"role": "user", "content": [
+                {"type": "input_image", "image_url": "https://example.com/chart.png"}
+            ]}]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        state.bodies.lock().await[0]["input"][0]["content"][0]["type"],
+        "input_image"
+    );
+    worker_handle.abort();
+}
+
+#[tokio::test]
+async fn responses_endpoint_returns_chat_shape_for_chat_image_requests() {
+    let state = UpstreamState::default();
+    let upstream_addr = spawn_upstream(state.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Responses);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+    let response = reqwest::Client::new()
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "vision-test",
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "describe"},
+                {"type": "image_url", "image_url": "https://example.com/chart.png"}
+            ]}]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body["object"], "chat.completion");
+    assert_eq!(body["choices"][0]["message"]["content"], "image accepted");
+    assert_eq!(
+        state.bodies.lock().await[0]["input"][0]["content"][1]["type"],
+        "input_image"
+    );
+    worker_handle.abort();
+}
+
 async fn spawn_upstream(state: UpstreamState) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

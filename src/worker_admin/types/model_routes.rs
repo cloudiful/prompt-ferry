@@ -69,7 +69,7 @@ impl ModelRouteRequest {
                         )
                     })?;
                 let responses_continuation_policy = target.responses_continuation_policy.unwrap_or(
-                    if endpoint.native_api == "responses" {
+                    if endpoint.native_api == "responses" || endpoint.native_api == "auto" {
                         db::ResponsesContinuationPolicy::ForcePassthrough
                     } else {
                         db::ResponsesContinuationPolicy::ForceReplay
@@ -79,6 +79,7 @@ impl ModelRouteRequest {
                     responses_continuation_policy,
                     db::ResponsesContinuationPolicy::ForcePassthrough
                 ) && endpoint.native_api != "responses"
+                    && endpoint.native_api != "auto"
                 {
                     return Err(error(
                         StatusCode::BAD_REQUEST,

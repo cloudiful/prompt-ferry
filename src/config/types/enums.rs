@@ -78,6 +78,7 @@ impl WorkerTlsMode {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum NativeApi {
+    Auto,
     AnthropicMessages,
     Chat,
     #[default]
@@ -88,6 +89,7 @@ pub enum NativeApi {
 impl NativeApi {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Auto => "auto",
             Self::AnthropicMessages => "anthropic_messages",
             Self::Chat => "chat",
             Self::Responses => "responses",
@@ -97,6 +99,7 @@ impl NativeApi {
 
     pub fn path(self) -> &'static str {
         match self {
+            Self::Auto => unreachable!("auto protocol must be resolved before path lookup"),
             Self::AnthropicMessages => "/v1/messages",
             Self::Chat => "/v1/chat/completions",
             Self::Responses => "/v1/responses",
@@ -108,6 +111,7 @@ impl NativeApi {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum NativeApiSource {
+    Auto,
     Detected,
     #[default]
     Manual,
@@ -116,6 +120,7 @@ pub enum NativeApiSource {
 impl NativeApiSource {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Auto => "auto",
             Self::Detected => "detected",
             Self::Manual => "manual",
         }

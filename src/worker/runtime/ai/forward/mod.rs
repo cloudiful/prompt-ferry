@@ -1,4 +1,5 @@
 mod non_stream;
+mod responses_to_chat;
 
 use super::super::{
     ERROR_BODY_SAMPLE_BYTES, RequestExecutionContext,
@@ -23,6 +24,7 @@ use non_stream::{
     forward_non_stream_anthropic_response, forward_non_stream_chat_response,
     forward_non_stream_responses_response, send_json_response,
 };
+use responses_to_chat::forward_non_stream_responses_to_chat_response;
 use tracing::warn;
 
 #[derive(Clone, Copy)]
@@ -82,15 +84,15 @@ pub(super) async fn forward_upstream_response(
         .is_some_and(|value| value.contains("text/event-stream"));
     let mut assistant_capture = (route.native_api == crate::config::NativeApi::Chat)
         .then(|| AssistantArtifactCapture::new(is_sse));
-    let mut responses_capture = (request.path == "/v1/responses"
-        && matches!(
-            response_adapter,
-            ResponseAdapter::Passthrough | ResponseAdapter::AnthropicMessagesToResponses
-        )
-        && matches!(
-            route.native_api,
-            crate::config::NativeApi::Responses | crate::config::NativeApi::AnthropicMessages
-        ))
+    let mut responses_capture = (matches!(
+        response_adapter,
+        ResponseAdapter::Passthrough
+            | ResponseAdapter::ResponsesToChat
+            | ResponseAdapter::AnthropicMessagesToResponses
+    ) && matches!(
+        route.native_api,
+        crate::config::NativeApi::Responses | crate::config::NativeApi::AnthropicMessages
+    ))
     .then(|| {
         ResponsesArtifactCapture::new(
             is_sse || response_adapter == ResponseAdapter::AnthropicMessagesToResponses,
@@ -160,6 +162,14 @@ pub(super) async fn forward_upstream_response(
         && !is_sse
     {
         return forward_non_stream_anthropic_response(response, context.cloned(), capture).await;
+    }
+
+    if let Some(capture) = responses_capture.as_mut()
+        && response_adapter == ResponseAdapter::ResponsesToChat
+        && !is_sse
+    {
+        return forward_non_stream_responses_to_chat_response(response, context.cloned(), capture)
+            .await;
     }
 
     if let Some(capture) = responses_capture.as_mut()

@@ -4,8 +4,8 @@ use crate::{
     anthropic_compat::responses_request_to_anthropic_messages,
     config::NativeApi,
     openai_compat::{
-        CompatError, NormalizedResponsesRequest, responses_request_to_chat,
-        validate_raw_responses_request_body,
+        CompatError, NormalizedResponsesRequest, chat_request_to_responses,
+        responses_request_to_chat, validate_raw_responses_request_body,
     },
     redact_upstream::UpstreamRedactionSession,
     usage::upstream_body,
@@ -15,6 +15,7 @@ use crate::{
 pub enum ResponseAdapter {
     Passthrough,
     ChatToResponses,
+    ResponsesToChat,
     AnthropicMessagesToResponses,
 }
 
@@ -95,15 +96,23 @@ pub fn prepare_upstream_request(
             upstream_redacted_request_json: None,
             upstream_restore_session: None,
         }),
+        ("/v1/chat/completions", NativeApi::Responses) => {
+            let translated = chat_request_to_responses(request_body)?;
+            Ok(PreparedUpstreamRequest {
+                path: NativeApi::Responses.path().to_string(),
+                body: PreparedRequestBody::BufferedBytes(upstream_body(
+                    NativeApi::Responses.path(),
+                    &translated,
+                )),
+                response_adapter: ResponseAdapter::ResponsesToChat,
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+            })
+        }
         ("/v1/chat/completions", NativeApi::AnthropicMessages) => Err(CompatError::new(
             StatusCode::BAD_REQUEST,
             "unsupported_upstream",
             "legacy /v1/chat/completions cannot be routed to an anthropic-native endpoint; use /v1/responses",
-        )),
-        ("/v1/chat/completions", NativeApi::Responses) => Err(CompatError::new(
-            StatusCode::BAD_REQUEST,
-            "unsupported_upstream",
-            "legacy /v1/chat/completions cannot be routed to a responses-native endpoint; use /v1/responses",
         )),
         _ => Ok(PreparedUpstreamRequest {
             path: request_path.to_string(),
@@ -112,5 +121,44 @@ pub fn prepare_upstream_request(
             upstream_redacted_request_json: None,
             upstream_restore_session: None,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PreparedRequestBody, ResponseAdapter, prepare_upstream_request};
+    use crate::config::NativeApi;
+    use serde_json::Value;
+
+    #[test]
+    fn translates_chat_requests_for_responses_native_upstreams() {
+        let prepared = prepare_upstream_request(
+            "/v1/chat/completions",
+            br#"{
+                "model":"vision-test",
+                "messages":[{"role":"user","content":[
+                    {"type":"text","text":"describe"},
+                    {"type":"image_url","image_url":{"url":"data:image/png;base64,AA==","detail":"high"}}
+                ]}],
+                "stream":false
+            }"#,
+            NativeApi::Responses,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(prepared.path, "/v1/responses");
+        assert_eq!(prepared.response_adapter, ResponseAdapter::ResponsesToChat);
+        let PreparedRequestBody::BufferedBytes(body) = prepared.body else {
+            panic!("chat to Responses compatibility must buffer the translated body");
+        };
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(body["input"][0]["content"][1]["type"], "input_image");
+        assert_eq!(
+            body["input"][0]["content"][1]["image_url"],
+            "data:image/png;base64,AA=="
+        );
+        assert_eq!(body["input"][0]["content"][1]["detail"], "high");
     }
 }

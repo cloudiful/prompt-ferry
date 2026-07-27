@@ -38,9 +38,7 @@ pub(super) use uuid::Uuid;
 pub(super) use crate::{
     config::{NativeApi, NativeApiSource},
     db::{self, EndpointCreate, UserCreate, UserUpdate},
-    endpoint_protocol::{
-        EndpointProtocolResolution, detect_endpoint_protocol, endpoint_protocol_client,
-    },
+    endpoint_protocol::endpoint_protocol_client,
     ip_acl,
     keys::{generate_client_key, hash_password, verify_password},
     llm_review::{

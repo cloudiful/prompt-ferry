@@ -151,6 +151,9 @@ pub async fn prepare_responses_replay_request(
         NativeApi::Realtime => Err(replay_error(
             "Realtime endpoints do not support responses replay assembly",
         )),
+        NativeApi::Auto => Err(replay_error(
+            "automatic endpoints must resolve their protocol before responses replay assembly",
+        )),
     }
 }
 

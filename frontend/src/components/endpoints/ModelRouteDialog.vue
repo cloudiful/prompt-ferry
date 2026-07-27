@@ -47,7 +47,9 @@ function endpointForTarget(endpointId: string): ProviderEndpoint | undefined {
 function defaultContinuationPolicy(
   endpointId: string,
 ): 'force_passthrough' | 'force_replay' {
-  return endpointForTarget(endpointId)?.native_api === 'responses'
+  return ['responses', 'auto'].includes(
+    endpointForTarget(endpointId)?.native_api ?? '',
+  )
     ? 'force_passthrough'
     : 'force_replay'
 }
@@ -61,7 +63,9 @@ function onTargetEndpointChange(
 }
 
 function canUseForcePassthrough(endpointId: string): boolean {
-  return endpointForTarget(endpointId)?.native_api === 'responses'
+  return ['responses', 'auto'].includes(
+    endpointForTarget(endpointId)?.native_api ?? '',
+  )
 }
 
 function continuationPolicyOptionsFor(endpointId: string): Array<{

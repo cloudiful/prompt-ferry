@@ -251,6 +251,13 @@ pub(super) async fn prepare_upstream_request_with_replay(
                     "Realtime endpoints are not compatible with HTTP request translation",
                 ));
             }
+            crate::config::NativeApi::Auto => {
+                return Err(CompatError::new(
+                    StatusCode::BAD_REQUEST,
+                    "unsupported_auto_protocol",
+                    "automatic endpoints must resolve to Chat or Responses before replay",
+                ));
+            }
         }
     };
     prepared.upstream_redacted_request_json = redacted_request

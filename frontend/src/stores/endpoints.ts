@@ -21,7 +21,7 @@ import {
   fetchModelRoutesPage,
   persistEndpoint,
   persistModelRoute,
-  runEndpointProbe,
+  runEndpointTest,
   runModelRouteProbe,
   updateEndpointEnabled,
   updateModelRouteEnabled,
@@ -74,8 +74,9 @@ export const useEndpointsStore = defineStore('endpoints', () => {
       labels: {
         active: t('active'),
         disabled: t('disabled'),
-        endpointProbeIdle: t('endpointProbeIdle'),
+        endpointTestIdle: t('endpointTestIdle'),
         endpointSourceAuto: t('endpointSourceAuto'),
+        endpointSourceDetected: t('endpointSourceDetected'),
         endpointSourceManual: t('endpointSourceManual'),
         nativeApiAnthropicMessages: t('nativeApiAnthropicMessages'),
         nativeApiChat: t('nativeApiChat'),
@@ -189,7 +190,7 @@ export const useEndpointsStore = defineStore('endpoints', () => {
   ): Promise<EndpointTestResponse> {
     endpointState.testingId.value = endpointId
     try {
-      const result = await runEndpointProbe(endpointId)
+      const result = await runEndpointTest(endpointId)
       endpointState.testResults.value[endpointId] = result
       return result
     } finally {

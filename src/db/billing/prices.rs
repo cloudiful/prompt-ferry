@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -76,7 +76,13 @@ pub(super) async fn match_sale_price_rule(
         at,
     )
     .fetch_optional(executor)
-    .await?)
+    .await
+    .with_context(|| {
+        format!(
+            "billing price rule lookup failed: price_side=sale public_model={public_model} \
+             endpoint_id=<none> upstream_model=<none> billing_at={at}"
+        )
+    })?)
 }
 
 pub(super) async fn match_cost_price_rule(
@@ -93,5 +99,11 @@ pub(super) async fn match_cost_price_rule(
         at,
     )
     .fetch_optional(executor)
-    .await?)
+    .await
+    .with_context(|| {
+        format!(
+            "billing price rule lookup failed: price_side=cost public_model=<none> \
+             endpoint_id={endpoint_id} upstream_model={upstream_model} billing_at={at}"
+        )
+    })?)
 }

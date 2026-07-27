@@ -3,9 +3,43 @@ mod tests {
     use serde_json::Value;
 
     use super::super::{
-        conversation_key, previous_response_id,
+        chat_request_to_responses, conversation_key, previous_response_id,
         request_translate::responses_request_to_chat_with_prefix, responses_request_to_chat,
     };
+
+    #[test]
+    fn translates_chat_request_with_mixed_images_and_detail_to_responses() {
+        let value = serde_json::from_slice::<Value>(
+            &chat_request_to_responses(
+                br#"{
+                    "model":"vision-test",
+                    "messages":[{
+                        "role":"user",
+                        "content":[
+                            {"type":"text","text":"describe"},
+                            {"type":"image_url","image_url":{"url":"https://example.com/a.png","detail":"high"}},
+                            {"type":"image_url","image_url":"data:image/png;base64,AA=="}
+                        ]
+                    }]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let content = value["input"][0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"].as_str(), Some("input_text"));
+        assert_eq!(content[1]["type"].as_str(), Some("input_image"));
+        assert_eq!(
+            content[1]["image_url"].as_str(),
+            Some("https://example.com/a.png")
+        );
+        assert_eq!(content[1]["detail"].as_str(), Some("high"));
+        assert_eq!(
+            content[2]["image_url"].as_str(),
+            Some("data:image/png;base64,AA==")
+        );
+    }
 
     #[test]
     fn translates_basic_responses_request_to_chat() {

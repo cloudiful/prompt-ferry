@@ -198,6 +198,17 @@ async fn run_model_route_test(
             "no upstream model matched rule".to_string(),
         ));
     };
+    if target.native_api == NativeApi::Auto {
+        return Ok((
+            db::RouteTestEndpoint {
+                endpoint_id: target.endpoint_id,
+                name: target.endpoint_name.clone(),
+            },
+            model,
+            StatusCode::OK,
+            "OK (auto; caller protocol is selected at request time)".to_string(),
+        ));
+    }
     if target.native_api == NativeApi::Realtime {
         let url = format!(
             "{}?model={}",
@@ -284,6 +295,7 @@ async fn run_model_route_test(
                 "max_tokens": 1,
             }),
         ),
+        NativeApi::Auto => unreachable!("auto model routes return before protocol test"),
         NativeApi::Realtime => unreachable!(),
     };
     let request = client.post(format!("{base}{path}")).json(&payload);

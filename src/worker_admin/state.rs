@@ -287,7 +287,8 @@ pub fn error(status: StatusCode, code: &str, message: &str) -> Response {
 }
 
 pub fn internal(state: &AdminState, err: impl std::fmt::Display) -> Response {
-    tracing::warn!(error = %maybe_redact(state, &err.to_string()), "admin api error");
+    let message = format!("{err:#}");
+    tracing::warn!(error = %maybe_redact(state, &message), "admin api error");
     error(
         StatusCode::INTERNAL_SERVER_ERROR,
         "internal_error",

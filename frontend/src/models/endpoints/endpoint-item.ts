@@ -8,8 +8,9 @@ import type { EndpointListItemView } from '../endpoints'
 export type EndpointViewItemLabels = {
   activeLabel: string
   disabledLabel: string
-  endpointProbeIdle: string
+  endpointTestIdle: string
   endpointSourceAuto: string
+  endpointSourceDetected: string
   endpointSourceManual: string
   nativeApiChat: string
   nativeApiAnthropicMessages: string
@@ -37,7 +38,9 @@ export function createEndpointListItemView(
       endpoint.scope === 'user' ? options.scopeUser : options.scopeAdmin,
     native_api: endpoint.native_api,
     native_api_label:
-      endpoint.native_api === 'chat'
+      endpoint.native_api === 'auto'
+        ? options.endpointSourceAuto
+        : endpoint.native_api === 'chat'
         ? options.nativeApiChat
         : endpoint.native_api === 'anthropic_messages'
           ? options.nativeApiAnthropicMessages
@@ -46,9 +49,11 @@ export function createEndpointListItemView(
             : options.nativeApiResponses,
     native_api_source: endpoint.native_api_source,
     native_api_source_label:
-      endpoint.native_api_source === 'manual'
-        ? options.endpointSourceManual
-        : options.endpointSourceAuto,
+      endpoint.native_api_source === 'auto'
+        ? options.endpointSourceAuto
+        : endpoint.native_api_source === 'detected'
+          ? options.endpointSourceDetected
+          : options.endpointSourceManual,
     enabled: endpoint.enabled,
     enabled_label: endpoint.enabled
       ? options.activeLabel
@@ -60,7 +65,7 @@ export function createEndpointListItemView(
     toggling: options.togglingEndpointId === endpoint.endpoint_id,
     test_message: createEndpointTestMessage(
       options.testResult,
-      options.endpointProbeIdle,
+      options.endpointTestIdle,
     ),
     test_severity: options.testResult
       ? options.testResult.ok

@@ -15,12 +15,14 @@ use crate::openai_compat::{
 };
 use crate::stream_text::Utf8LineDecoder;
 
+mod responses_to_chat;
 mod stream_adapter;
 mod stream_tool_calls;
 
 pub mod anthropic_stream_adapter;
 
 pub use anthropic_stream_adapter::AnthropicResponseStreamAdapter;
+pub use responses_to_chat::ResponsesChatResponseStreamAdapter;
 pub use stream_adapter::ChatResponseStreamAdapter;
 
 pub(super) fn decode_sse_chunk(

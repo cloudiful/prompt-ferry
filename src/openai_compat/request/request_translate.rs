@@ -1,4 +1,7 @@
-use super::*;
+use super::{conversation_key, previous_response_id, request_parse, request_validate};
+use crate::openai_compat::{CompatError, NormalizedResponsesRequest};
+#[cfg(test)]
+use serde_json::Value;
 
 pub fn responses_request_to_chat(body: &[u8]) -> Result<Vec<u8>, CompatError> {
     let object = request_parse::parse_request_object(body)?;

@@ -13,7 +13,13 @@ use super::{
     request_support::mark_function_call_outputs_received,
     review::handle_llm_review_gate,
 };
-use crate::{config::WorkerConfig, db, worker_usage::record_usage_event};
+use crate::{
+    config::{NativeApi, WorkerConfig},
+    db,
+    openai_compat::CompatError,
+    worker_usage::record_usage_event,
+};
+use http::StatusCode;
 
 pub(in crate::worker::runtime) async fn process_request(
     request: BufferedBridgeRequest,
@@ -68,11 +74,16 @@ pub(in crate::worker::runtime) async fn process_request(
         return Ok(());
     }
 
-    let (route, _endpoint_load_guard) =
+    let (mut route, _endpoint_load_guard) =
         match resolve_route(&request, config, services, &request_ctx).await? {
             RouteResolution::Ready { route, load_guard } => (*route, load_guard),
             RouteResolution::Responded => return Ok(()),
         };
+
+    if let Err(err) = resolve_auto_protocol(&mut route, &request.path) {
+        let route_ctx = RouteExecutionContext::new(&route);
+        return respond_with_client_error(services, &request, &request_ctx, &route_ctx, err).await;
+    }
 
     let outcome = forward_route_request(RouteForwardRequest {
         services,
@@ -161,4 +172,83 @@ pub(in crate::worker::runtime) async fn process_request(
     )
     .await;
     Err(err)
+}
+
+pub(super) fn resolve_auto_protocol(
+    route: &mut db::RouteConfig,
+    request_path: &str,
+) -> Result<(), CompatError> {
+    if route.native_api != NativeApi::Auto {
+        return Ok(());
+    }
+    route.native_api = match request_path {
+        "/v1/chat/completions" => NativeApi::Chat,
+        "/v1/responses" => NativeApi::Responses,
+        _ => {
+            return Err(CompatError::new(
+                StatusCode::BAD_REQUEST,
+                "unsupported_auto_protocol",
+                "automatic endpoints support only /v1/chat/completions and /v1/responses",
+            ));
+        }
+    };
+    Ok(())
+}
+
+#[cfg(test)]
+mod auto_protocol_tests {
+    use super::resolve_auto_protocol;
+    use crate::{config::NativeApi, db};
+
+    fn route(native_api: NativeApi) -> db::RouteConfig {
+        db::RouteConfig {
+            route_id: uuid::Uuid::nil(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://example.test".to_string(),
+            api_key: "key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api,
+            upstream_model: None,
+            responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+            route_selection_reason: db::RouteSelectionReason::Default,
+        }
+    }
+
+    #[test]
+    fn resolves_auto_from_request_path() {
+        let mut chat_route = route(NativeApi::Auto);
+        resolve_auto_protocol(&mut chat_route, "/v1/chat/completions").unwrap();
+        assert_eq!(chat_route.native_api, NativeApi::Chat);
+
+        let mut responses_route = route(NativeApi::Auto);
+        resolve_auto_protocol(&mut responses_route, "/v1/responses").unwrap();
+        assert_eq!(responses_route.native_api, NativeApi::Responses);
+    }
+
+    #[test]
+    fn rejects_unsupported_auto_path() {
+        let mut route = route(NativeApi::Auto);
+        let error = resolve_auto_protocol(&mut route, "/v1/embeddings").unwrap_err();
+        assert_eq!(error.code, "unsupported_auto_protocol");
+        assert_eq!(route.native_api, NativeApi::Auto);
+    }
+
+    #[test]
+    fn rejects_auto_for_realtime() {
+        let mut route = route(NativeApi::Auto);
+        let error = resolve_auto_protocol(&mut route, "/v1/realtime").unwrap_err();
+        assert_eq!(error.code, "unsupported_auto_protocol");
+        assert_eq!(route.native_api, NativeApi::Auto);
+    }
+
+    #[test]
+    fn leaves_fixed_protocols_unchanged() {
+        let mut route = route(NativeApi::Responses);
+        resolve_auto_protocol(&mut route, "/v1/chat/completions").unwrap();
+        assert_eq!(route.native_api, NativeApi::Responses);
+    }
 }

@@ -8,7 +8,7 @@ import type { ModelRouteListItemView } from '../endpoints'
 export type ModelRouteViewItemLabels = {
   activeLabel: string
   disabledLabel: string
-  endpointProbeIdle: string
+  endpointTestIdle: string
   ownerLabel: string
   routingStrategyClientKey: string
   routingStrategySessionAffinity: string
@@ -49,7 +49,7 @@ export function createModelRouteListItemView(
     toggling: options.togglingModelRouteId === route.rule_id,
     test_message: createModelRouteTestMessage(
       options.testResult,
-      options.endpointProbeIdle,
+      options.endpointTestIdle,
     ),
     test_severity: options.testResult
       ? options.testResult.ok

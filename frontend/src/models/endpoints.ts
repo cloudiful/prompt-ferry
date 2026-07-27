@@ -72,8 +72,9 @@ export type EndpointsWorkspaceView = {
 type EndpointViewLabels = {
   active: string
   disabled: string
-  endpointProbeIdle: string
+  endpointTestIdle: string
   endpointSourceAuto: string
+  endpointSourceDetected: string
   endpointSourceManual: string
   nativeApiAnthropicMessages: string
   nativeApiChat: string
@@ -123,8 +124,9 @@ export function createEndpointsWorkspaceView(options: {
   const endpointLabels: EndpointViewItemLabels = {
     activeLabel: options.labels.active,
     disabledLabel: options.labels.disabled,
-    endpointProbeIdle: options.labels.endpointProbeIdle,
+    endpointTestIdle: options.labels.endpointTestIdle,
     endpointSourceAuto: options.labels.endpointSourceAuto,
+    endpointSourceDetected: options.labels.endpointSourceDetected,
     endpointSourceManual: options.labels.endpointSourceManual,
     nativeApiAnthropicMessages: options.labels.nativeApiAnthropicMessages,
     nativeApiChat: options.labels.nativeApiChat,
@@ -137,7 +139,7 @@ export function createEndpointsWorkspaceView(options: {
   const modelRouteLabels: ModelRouteViewItemLabels = {
     activeLabel: options.labels.active,
     disabledLabel: options.labels.disabled,
-    endpointProbeIdle: options.labels.endpointProbeIdle,
+    endpointTestIdle: options.labels.endpointTestIdle,
     ownerLabel: options.labels.owner,
     routingStrategyClientKey: options.labels.routingStrategyClientKey,
     routingStrategySessionAffinity:

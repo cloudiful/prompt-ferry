@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
@@ -59,13 +59,31 @@ pub async fn record_usage_charge(
         .fetch_one(&mut *tx)
         .await?;
     let sale_rule = match requested_model {
-        Some(model) => match_sale_price_rule(&mut *tx, model, at).await?,
+        Some(model) => match_sale_price_rule(&mut *tx, model, at)
+            .await
+            .with_context(|| {
+                format!(
+                    "billing price lookup failed: event_id={event_id} charge_id=<pending> \
+                     price_side=sale public_model={model} endpoint_id={} upstream_model={} billing_at={at}",
+                    input
+                        .endpoint_id
+                        .map_or_else(|| "<none>".to_string(), |id| id.to_string()),
+                    upstream_model.unwrap_or("<none>"),
+                )
+            })?,
         None => None,
     };
     let cost_rule = match (input.endpoint_id, upstream_model) {
-        (Some(endpoint_id), Some(model)) => {
-            match_cost_price_rule(&mut *tx, endpoint_id, model, at).await?
-        }
+        (Some(endpoint_id), Some(model)) => match_cost_price_rule(&mut *tx, endpoint_id, model, at)
+            .await
+            .with_context(|| {
+                format!(
+                    "billing price lookup failed: event_id={event_id} charge_id=<pending> \
+                         price_side=cost public_model={} endpoint_id={endpoint_id} \
+                         upstream_model={model} billing_at={at}",
+                    requested_model.unwrap_or("<none>"),
+                )
+            })?,
         _ => None,
     };
     let priced = usage.is_some() && sale_rule.is_some() && cost_rule.is_some();
@@ -339,12 +357,35 @@ pub async fn reprice_unpriced_charges(pool: &PgPool, limit: i64) -> Result<u64> 
         };
         let mut tx = pool.begin().await?;
         let sale_rule = match row.requested_model.as_deref() {
-            Some(model) => match_sale_price_rule(&mut *tx, model, row.created_at).await?,
+            Some(model) => match_sale_price_rule(&mut *tx, model, row.created_at)
+                .await
+                .with_context(|| {
+                    format!(
+                        "billing price lookup failed: charge_id={} price_side=sale \
+                         public_model={model} endpoint_id={} upstream_model={} billing_at={}",
+                        row.charge_id,
+                        row.endpoint_id
+                            .map_or_else(|| "<none>".to_string(), |id| id.to_string()),
+                        row.upstream_model.as_deref().unwrap_or("<none>"),
+                        row.created_at,
+                    )
+                })?,
             None => None,
         };
         let cost_rule = match (row.endpoint_id, row.upstream_model.as_deref()) {
             (Some(endpoint_id), Some(model)) => {
-                match_cost_price_rule(&mut *tx, endpoint_id, model, row.created_at).await?
+                match_cost_price_rule(&mut *tx, endpoint_id, model, row.created_at)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "billing price lookup failed: charge_id={} price_side=cost \
+                             public_model={} endpoint_id={endpoint_id} upstream_model={model} \
+                             billing_at={}",
+                            row.charge_id,
+                            row.requested_model.as_deref().unwrap_or("<none>"),
+                            row.created_at,
+                        )
+                    })?
             }
             _ => None,
         };

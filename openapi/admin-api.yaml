@@ -2143,6 +2143,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StreamDeltaBatchingSettings'
+  /api/v1/settings/usage-retention:
+    get:
+      tags:
+      - settings
+      operationId: get_usage_retention
+      responses:
+        '200':
+          description: Usage content retention
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageRetentionSettings'
+    patch:
+      tags:
+      - settings
+      operationId: set_usage_retention
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsageRetentionSettings'
+        required: true
+      responses:
+        '200':
+          description: Updated usage content retention
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageRetentionSettings'
 components:
   schemas:
     AppliedReplacementSchema:
@@ -4026,6 +4055,7 @@ components:
     NativeApi:
       type: string
       enum:
+      - auto
       - anthropic_messages
       - chat
       - responses
@@ -5646,6 +5676,27 @@ components:
       - current_user
       - all_users
       - target_user
+    UsageRetentionSettings:
+      type: object
+      properties:
+        content_retention_days:
+          type: integer
+          format: int32
+          default: 3
+        metadata_retention_days:
+          type: integer
+          format: int32
+          default: 90
+        raw_backend:
+          type: string
+          default: object_store
+        raw_retention_days:
+          type: integer
+          format: int32
+          default: 3
+        replay_enabled:
+          type: boolean
+          default: true
     User:
       type: object
       required:

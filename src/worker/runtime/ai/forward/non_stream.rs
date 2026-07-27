@@ -427,7 +427,7 @@ pub(super) async fn forward_non_stream_anthropic_response(
     Ok(())
 }
 
-async fn read_response_limited(
+pub(super) async fn read_response_limited(
     response: reqwest::Response,
     max_bytes: usize,
 ) -> anyhow::Result<Vec<u8>> {

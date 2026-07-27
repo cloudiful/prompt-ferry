@@ -160,127 +160,27 @@ pub(super) async fn test_endpoint(
                 })
                 .into_response();
             }
-            let protocol = if endpoint.native_api_source == NativeApiSource::Detected.as_str() {
-                match detect_endpoint_protocol(&client, &endpoint.base_url, &endpoint.api_key).await
-                {
-                    Ok(native_api) => EndpointProtocolResolution {
-                        native_api,
-                        native_api_source: NativeApiSource::Detected,
-                    },
-                    Err(message) => {
-                        return Json(EndpointTestResponse {
-                            ok: false,
-                            status: Some(StatusCode::BAD_GATEWAY.as_u16()),
-                            duration_ms: elapsed,
-                            model_count,
-                            native_api: None,
-                            native_api_source: Some(NativeApiSource::Detected.as_str().to_string()),
-                            message: truncate_message(&maybe_redact(&state, &message)),
-                        })
-                        .into_response();
-                    }
-                }
-            } else {
-                EndpointProtocolResolution {
-                    native_api: parse_native_api(&endpoint.native_api),
-                    native_api_source: NativeApiSource::Manual,
-                }
-            };
+            let native_api = parse_native_api(&endpoint.native_api);
+            let native_api_source = endpoint.native_api_source.clone();
             let message = match model_count {
                 Some(count) => format!(
                     "OK, models: {count}, protocol: {} ({})",
-                    protocol.native_api.as_str(),
-                    protocol.native_api_source.as_str()
+                    native_api.as_str(),
+                    native_api_source
                 ),
                 None => format!(
                     "OK, protocol: {} ({})",
-                    protocol.native_api.as_str(),
-                    protocol.native_api_source.as_str()
+                    native_api.as_str(),
+                    native_api_source
                 ),
             };
-            if protocol.native_api == NativeApi::Realtime {
-                let model = serde_json::from_str::<serde_json::Value>(&body)
-                    .ok()
-                    .and_then(|value| value.get("data").and_then(|data| data.as_array()).cloned())
-                    .and_then(|items| {
-                        items.into_iter().find_map(|item| {
-                            item.get("id")
-                                .and_then(serde_json::Value::as_str)
-                                .map(str::to_string)
-                        })
-                    });
-                let Some(model) = model else {
-                    return Json(EndpointTestResponse {
-                        ok: false,
-                        status: Some(StatusCode::NOT_FOUND.as_u16()),
-                        duration_ms: elapsed,
-                        model_count,
-                        native_api: Some(protocol.native_api.as_str().to_string()),
-                        native_api_source: Some(protocol.native_api_source.as_str().to_string()),
-                        message: "realtime handshake requires at least one listed model"
-                            .to_string(),
-                    })
-                    .into_response();
-                };
-                let ws_url = format!(
-                    "{}?model={}",
-                    format!("{}/v1/realtime", endpoint.base_url.trim_end_matches('/'))
-                        .replace("https://", "wss://")
-                        .replace("http://", "ws://"),
-                    urlencoding::encode(&model)
-                );
-                let mut ws_request = match tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(ws_url) {
-                    Ok(request) => request,
-                    Err(err) => {
-                        return Json(EndpointTestResponse {
-                            ok: false,
-                            status: Some(StatusCode::BAD_REQUEST.as_u16()),
-                            duration_ms: elapsed,
-                            model_count,
-                            native_api: Some(protocol.native_api.as_str().to_string()),
-                            native_api_source: Some(protocol.native_api_source.as_str().to_string()),
-                            message: truncate_message(&maybe_redact(&state, &err.to_string())),
-                        }).into_response();
-                    }
-                };
-                if let Ok(value) =
-                    header::HeaderValue::from_str(&format!("Bearer {}", endpoint.api_key))
-                {
-                    ws_request
-                        .headers_mut()
-                        .insert(header::AUTHORIZATION, value);
-                }
-                match tokio_tungstenite::connect_async_with_config(ws_request, None, false).await {
-                    Ok((mut socket, _)) => {
-                        let _ = futures::SinkExt::send(
-                            &mut socket,
-                            tokio_tungstenite::tungstenite::Message::Close(None),
-                        )
-                        .await;
-                    }
-                    Err(err) => {
-                        return Json(EndpointTestResponse {
-                            ok: false,
-                            status: Some(StatusCode::BAD_GATEWAY.as_u16()),
-                            duration_ms: elapsed,
-                            model_count,
-                            native_api: Some(protocol.native_api.as_str().to_string()),
-                            native_api_source: Some(
-                                protocol.native_api_source.as_str().to_string(),
-                            ),
-                            message: truncate_message(&maybe_redact(&state, &err.to_string())),
-                        })
-                        .into_response();
-                    }
-                }
-            }
             Json(EndpointTestResponse {
                 ok: true,
                 status: Some(status.as_u16()),
                 duration_ms: elapsed,
                 model_count,
-                native_api: Some(protocol.native_api.as_str().to_string()),
-                native_api_source: Some(protocol.native_api_source.as_str().to_string()),
+                native_api: Some(native_api.as_str().to_string()),
+                native_api_source: Some(native_api_source),
                 message,
             })
             .into_response()

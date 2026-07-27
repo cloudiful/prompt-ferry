@@ -1,5 +1,5 @@
 use http::StatusCode;
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 
 use super::{
     CompatError,
@@ -31,6 +31,198 @@ pub fn chat_response_to_responses(body: &[u8]) -> Result<Vec<u8>, CompatError> {
             "failed to encode translated responses payload",
         )
     })
+}
+
+pub fn responses_response_to_chat(body: &[u8]) -> Result<Vec<u8>, CompatError> {
+    let value = serde_json::from_slice::<Value>(body).map_err(|_| {
+        CompatError::new(
+            StatusCode::BAD_GATEWAY,
+            "invalid_upstream_response",
+            "responses-native endpoint returned invalid JSON",
+        )
+    })?;
+    let output = value
+        .get("output")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut content = String::new();
+    let mut reasoning = String::new();
+    let mut tool_calls = Vec::new();
+    for item in &output {
+        let Some(object) = item.as_object() else {
+            return Err(CompatError::new(
+                StatusCode::BAD_GATEWAY,
+                "invalid_upstream_response",
+                "responses-native endpoint returned an invalid output item",
+            ));
+        };
+        match object
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("message")
+        {
+            "message" => content.push_str(
+                &object
+                    .get("content")
+                    .map(super::response_items::extract_text)
+                    .unwrap_or_default(),
+            ),
+            "reasoning" => reasoning.push_str(
+                &object
+                    .get("content")
+                    .or_else(|| object.get("summary"))
+                    .map(super::response_items::extract_text)
+                    .unwrap_or_default(),
+            ),
+            "function_call" => {
+                let call_id = object
+                    .get("call_id")
+                    .or_else(|| object.get("id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                tool_calls.push(json!({
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": object.get("name").and_then(Value::as_str).unwrap_or_default(),
+                        "arguments": object.get("arguments").and_then(Value::as_str).unwrap_or_default(),
+                    }
+                }));
+            }
+            _ => {}
+        }
+    }
+    if content.is_empty() {
+        content = value
+            .get("output_text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+    }
+
+    let mut message = Map::new();
+    message.insert("role".to_string(), Value::String("assistant".to_string()));
+    message.insert(
+        "content".to_string(),
+        if content.is_empty() {
+            Value::Null
+        } else {
+            Value::String(content)
+        },
+    );
+    if !reasoning.trim().is_empty() {
+        message.insert("reasoning_content".to_string(), Value::String(reasoning));
+    }
+    if !tool_calls.is_empty() {
+        message.insert("tool_calls".to_string(), Value::Array(tool_calls.clone()));
+    }
+
+    let status = value
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("completed");
+    let finish_reason = if !tool_calls.is_empty() {
+        "tool_calls"
+    } else if status == "incomplete" {
+        "length"
+    } else {
+        "stop"
+    };
+    let mut response = Map::new();
+    response.insert(
+        "id".to_string(),
+        value
+            .get("id")
+            .cloned()
+            .unwrap_or_else(|| Value::String("".to_string())),
+    );
+    response.insert(
+        "object".to_string(),
+        Value::String("chat.completion".to_string()),
+    );
+    response.insert(
+        "created".to_string(),
+        value
+            .get("created_at")
+            .or_else(|| value.get("created"))
+            .cloned()
+            .unwrap_or_else(|| Value::from(chrono::Utc::now().timestamp())),
+    );
+    response.insert(
+        "model".to_string(),
+        value
+            .get("model")
+            .cloned()
+            .unwrap_or_else(|| Value::String("unknown".to_string())),
+    );
+    response.insert(
+        "choices".to_string(),
+        Value::Array(vec![json!({
+            "index": 0,
+            "message": Value::Object(message),
+            "finish_reason": finish_reason,
+            "logprobs": Value::Null,
+        })]),
+    );
+    response.insert(
+        "usage".to_string(),
+        responses_usage_to_chat(value.get("usage")),
+    );
+    if let Some(fingerprint) = value.get("system_fingerprint") {
+        response.insert("system_fingerprint".to_string(), fingerprint.clone());
+    }
+
+    serde_json::to_vec(&Value::Object(response)).map_err(|_| {
+        CompatError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "adapter_error",
+            "failed to encode translated chat response",
+        )
+    })
+}
+
+fn responses_usage_to_chat(value: Option<&Value>) -> Value {
+    let Some(usage) = value.and_then(Value::as_object) else {
+        return Value::Null;
+    };
+    let input_tokens = usage.get("input_tokens").and_then(Value::as_i64);
+    let output_tokens = usage.get("output_tokens").and_then(Value::as_i64);
+    let total_tokens = usage.get("total_tokens").and_then(Value::as_i64);
+    if input_tokens.is_none() && output_tokens.is_none() && total_tokens.is_none() {
+        return Value::Null;
+    }
+    let mut translated = Map::new();
+    if let Some(value) = input_tokens {
+        translated.insert("prompt_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = output_tokens {
+        translated.insert("completion_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = total_tokens {
+        translated.insert("total_tokens".to_string(), Value::from(value));
+    }
+    if let Some(cached_tokens) = usage
+        .get("input_tokens_details")
+        .and_then(|details| details.get("cached_tokens"))
+        .and_then(Value::as_i64)
+    {
+        translated.insert(
+            "prompt_tokens_details".to_string(),
+            json!({ "cached_tokens": cached_tokens }),
+        );
+    }
+    if let Some(reasoning_tokens) = usage
+        .get("output_tokens_details")
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(Value::as_i64)
+    {
+        translated.insert(
+            "completion_tokens_details".to_string(),
+            json!({ "reasoning_tokens": reasoning_tokens }),
+        );
+    }
+    Value::Object(translated)
 }
 
 #[cfg(test)]

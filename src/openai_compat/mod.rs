@@ -10,16 +10,20 @@ mod response_stream_state;
 mod response_stream_tests;
 #[cfg(test)]
 mod response_stream_utf8_tests;
+#[cfg(test)]
+mod response_tests;
 mod responses_state;
 
 use http::StatusCode;
 
+pub use request::{chat_request_to_responses, is_streaming_request, responses_request_to_chat};
 pub(crate) use request::{conversation_key, previous_response_id};
-pub use request::{is_streaming_request, responses_request_to_chat};
 pub(crate) use request_input::translate_input;
-pub use response::chat_response_to_responses;
+pub use response::{chat_response_to_responses, responses_response_to_chat};
 pub(crate) use response_items::{extract_text, reasoning_details_from_text};
-pub use response_stream::{AnthropicResponseStreamAdapter, ChatResponseStreamAdapter};
+pub use response_stream::{
+    AnthropicResponseStreamAdapter, ChatResponseStreamAdapter, ResponsesChatResponseStreamAdapter,
+};
 pub(crate) use response_stream_state::sse_event;
 pub(crate) use responses_state::{
     NormalizedResponsesRequest, assistant_message_to_output_items,

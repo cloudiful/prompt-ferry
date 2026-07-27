@@ -628,7 +628,7 @@ export type ModelRouteWhitelistResponse = {
     enabled: boolean;
 };
 
-export type NativeApi = 'anthropic_messages' | 'chat' | 'responses' | 'realtime';
+export type NativeApi = 'auto' | 'anthropic_messages' | 'chat' | 'responses' | 'realtime';
 
 export type OverviewErrorBreakdownRow = {
     count: number;
@@ -1129,6 +1129,14 @@ export type UpdateClientKeyRequest = {
 };
 
 export type UsageClearScope = 'current_user' | 'all_users' | 'target_user';
+
+export type UsageRetentionSettings = {
+    content_retention_days?: number;
+    metadata_retention_days?: number;
+    raw_backend?: string;
+    raw_retention_days?: number;
+    replay_enabled?: boolean;
+};
 
 export type User = {
     created_at: string;
@@ -3008,3 +3016,35 @@ export type SetStreamDeltaBatchingResponses = {
 };
 
 export type SetStreamDeltaBatchingResponse = SetStreamDeltaBatchingResponses[keyof SetStreamDeltaBatchingResponses];
+
+export type GetUsageRetentionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/settings/usage-retention';
+};
+
+export type GetUsageRetentionResponses = {
+    /**
+     * Usage content retention
+     */
+    200: UsageRetentionSettings;
+};
+
+export type GetUsageRetentionResponse = GetUsageRetentionResponses[keyof GetUsageRetentionResponses];
+
+export type SetUsageRetentionData = {
+    body: UsageRetentionSettings;
+    path?: never;
+    query?: never;
+    url: '/api/v1/settings/usage-retention';
+};
+
+export type SetUsageRetentionResponses = {
+    /**
+     * Updated usage content retention
+     */
+    200: UsageRetentionSettings;
+};
+
+export type SetUsageRetentionResponse = SetUsageRetentionResponses[keyof SetUsageRetentionResponses];
