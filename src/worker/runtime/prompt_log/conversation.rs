@@ -42,6 +42,7 @@ pub(super) async fn resolve_prompt_conversation(
             return Ok(Some(PromptConversationResolution {
                 conversation_id,
                 parent_event_id: replay_parent.as_ref().map(|entry| entry.event_id),
+                replay_unavailable: latest.is_some() && replay_parent.is_none(),
                 endpoint_id: replay_parent.as_ref().and_then(|entry| entry.endpoint_id),
                 conversation_seq,
                 source: "codex_thread_key",
@@ -80,6 +81,7 @@ pub(super) async fn resolve_prompt_conversation(
             return Ok(Some(PromptConversationResolution {
                 conversation_id,
                 parent_event_id: Some(parent.event_id),
+                replay_unavailable: false,
                 endpoint_id: parent.endpoint_id,
                 conversation_seq,
                 source: "explicit_previous_response_id",
@@ -125,6 +127,7 @@ pub(super) async fn resolve_prompt_conversation(
             return Ok(Some(PromptConversationResolution {
                 conversation_id,
                 parent_event_id: replay_parent.as_ref().map(|entry| entry.event_id),
+                replay_unavailable: latest.is_some() && replay_parent.is_none(),
                 endpoint_id: replay_parent.as_ref().and_then(|entry| entry.endpoint_id),
                 conversation_seq,
                 source: "explicit_conversation",
@@ -159,6 +162,7 @@ pub(super) async fn resolve_prompt_conversation(
             return Ok(Some(PromptConversationResolution {
                 conversation_id,
                 parent_event_id: replay_parent.as_ref().map(|entry| entry.event_id),
+                replay_unavailable: latest.is_some() && replay_parent.is_none(),
                 endpoint_id: replay_parent.as_ref().and_then(|entry| entry.endpoint_id),
                 conversation_seq,
                 source: "session_header",

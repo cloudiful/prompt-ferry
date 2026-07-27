@@ -1,4 +1,6 @@
 use super::lifecycle::RuntimeControl;
+use crate::raw_payload_store::RawPayloadStore;
+use crate::worker_admin_types::UsageRetentionSettings;
 use crate::{config::WorkerConfig, db};
 use redis::{AsyncCommands, aio::ConnectionManager};
 use scheduler::{
@@ -7,7 +9,7 @@ use scheduler::{
 };
 use sqlx::PgPool;
 use std::{sync::Arc, time::Duration};
-use tokio::{task::JoinHandle, time::timeout};
+use tokio::{sync::RwLock, task::JoinHandle, time::timeout};
 use tracing::{info, warn};
 
 const RAW_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -20,20 +22,23 @@ const VALKEY_HEALTH_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 #[derive(Clone)]
 struct RawMaintenanceDependencies {
     pool: PgPool,
-    retention_days: i64,
+    retention: Arc<RwLock<UsageRetentionSettings>>,
+    raw_store: Option<Arc<RawPayloadStore>>,
 }
 
 pub(super) fn spawn(
     config: &WorkerConfig,
     pool: PgPool,
-    retention_days: i64,
+    retention: Arc<RwLock<UsageRetentionSettings>>,
+    raw_store: Option<Arc<RawPayloadStore>>,
     control: RuntimeControl,
 ) -> JoinHandle<()> {
     let valkey_url = config.valkey_url.trim().to_string();
     tokio::spawn(async move {
         let dependencies = Arc::new(RawMaintenanceDependencies {
             pool,
-            retention_days,
+            retention,
+            raw_store,
         });
 
         if let Err(error) = run_once(&dependencies).await {
@@ -220,12 +225,57 @@ async fn monitor_valkey_health(url: String) -> anyhow::Result<()> {
 }
 
 async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<()> {
-    match db::run_raw_payload_maintenance(&dependencies.pool, dependencies.retention_days).await {
+    let retention = dependencies.retention.read().await.clone().normalized();
+    match db::run_usage_content_maintenance(
+        &dependencies.pool,
+        i64::from(retention.content_retention_days),
+    )
+    .await
+    {
+        Ok(Some(report)) => info!(
+            expired_events = report.expired_events,
+            deleted_block_refs = report.deleted_block_refs,
+            deleted_artifacts = report.deleted_artifacts,
+            deleted_snapshots = report.deleted_snapshots,
+            cleared_tool_arguments = report.cleared_tool_arguments,
+            deleted_redaction_sessions = report.deleted_redaction_sessions,
+            orphan_prompt_blocks_deleted = report.orphan_prompt_blocks_deleted,
+            content_retention_days = retention.content_retention_days,
+            "usage content maintenance completed"
+        ),
+        Ok(None) => {}
+        Err(error) => warn!(error = %error, "usage content maintenance failed"),
+    }
+    match db::prune_usage_events(
+        &dependencies.pool,
+        i64::from(retention.metadata_retention_days),
+    )
+    .await
+    {
+        Ok(deleted) => info!(
+            metadata_rows_deleted = deleted,
+            metadata_retention_days = retention.metadata_retention_days,
+            "usage metadata maintenance completed"
+        ),
+        Err(error) => warn!(error = %error, "usage metadata maintenance failed"),
+    }
+    let raw_store = if retention.raw_backend == "object_store" {
+        dependencies.raw_store.as_deref()
+    } else {
+        None
+    };
+    match db::run_raw_payload_maintenance_with_store(
+        &dependencies.pool,
+        i64::from(retention.raw_retention_days),
+        raw_store,
+    )
+    .await
+    {
         Ok(Some(report)) => info!(
             partitions_created = report.partitions_created,
             raw_rows_deleted = report.raw_rows_deleted,
             partitions_dropped = report.partitions_dropped,
-            retention_days = dependencies.retention_days,
+            retention_days = retention.raw_retention_days,
             "raw payload maintenance completed"
         ),
         Ok(None) => {}

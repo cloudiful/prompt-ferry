@@ -94,6 +94,42 @@ pub struct RequestContentLoggingRequest {
     pub raw_retention_days: i32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(default)]
+pub struct UsageRetentionSettings {
+    pub metadata_retention_days: i32,
+    pub content_retention_days: i32,
+    pub raw_retention_days: i32,
+    pub replay_enabled: bool,
+    pub raw_backend: String,
+}
+
+impl Default for UsageRetentionSettings {
+    fn default() -> Self {
+        Self {
+            metadata_retention_days: 90,
+            content_retention_days: 3,
+            raw_retention_days: 3,
+            replay_enabled: true,
+            raw_backend: "object_store".to_string(),
+        }
+    }
+}
+
+impl UsageRetentionSettings {
+    pub fn normalized(mut self) -> Self {
+        self.metadata_retention_days = self.metadata_retention_days.max(1);
+        self.content_retention_days = self.content_retention_days.max(1);
+        self.raw_retention_days = self.raw_retention_days.max(1);
+        if !matches!(self.raw_backend.trim(), "postgres" | "object_store") {
+            self.raw_backend = "postgres".to_string();
+        } else {
+            self.raw_backend = self.raw_backend.trim().to_string();
+        }
+        self
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RelayIpPolicyResponse {
     pub allowed_cidrs: Vec<String>,
@@ -108,5 +144,38 @@ impl From<RelayIpPolicy> for RelayIpPolicyResponse {
             allowed_cidrs: value.allowed_cidrs,
             trusted_proxy_cidrs: value.trusted_proxy_cidrs,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UsageRetentionSettings;
+
+    #[test]
+    fn usage_retention_normalizes_bounds_and_backend() {
+        let normalized = UsageRetentionSettings {
+            metadata_retention_days: 0,
+            content_retention_days: -1,
+            raw_retention_days: 0,
+            replay_enabled: true,
+            raw_backend: " unsupported ".to_string(),
+        }
+        .normalized();
+
+        assert_eq!(normalized.metadata_retention_days, 1);
+        assert_eq!(normalized.content_retention_days, 1);
+        assert_eq!(normalized.raw_retention_days, 1);
+        assert_eq!(normalized.raw_backend, "postgres");
+    }
+
+    #[test]
+    fn usage_retention_trims_supported_backend() {
+        let normalized = UsageRetentionSettings {
+            raw_backend: " object_store ".to_string(),
+            ..UsageRetentionSettings::default()
+        }
+        .normalized();
+
+        assert_eq!(normalized.raw_backend, "object_store");
     }
 }

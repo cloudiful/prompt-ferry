@@ -1,6 +1,6 @@
 use crate::{
     db::{self, UsageEventKind},
-    redact_upstream::{encrypt_upstream_session, envelope_from_session},
+    redact_upstream::encrypt_upstream_session,
     replay_cache::{ReplaySnapshotUpdate, update_replay_state},
     storage_sanitization::{
         SanitizationStats, sanitize_optional_json_for_storage, sanitize_optional_text_for_storage,
@@ -42,19 +42,6 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
     let storage_sanitized = log.storage_sanitized || request_storage_stats.sanitized();
     let storage_sanitized_nul_count = log.storage_sanitized_nul_count
         + i32::try_from(request_storage_stats.nul_count).unwrap_or(i32::MAX);
-    let restore_session = match (
-        state.relay_secret_manager(),
-        log.upstream_restore_session.as_ref(),
-    ) {
-        (Ok(manager), session) => match envelope_from_session(manager, session) {
-            Ok(value) => value,
-            Err(err) => {
-                warn!(error = %err, request_id = %log.request_id, "failed to encrypt upstream restore session");
-                db::EncryptedPayloadInput::default()
-            }
-        },
-        _ => db::EncryptedPayloadInput::default(),
-    };
     let create = match log.request_category {
         db::RequestRecordCategory::Ai => {
             db::RequestRecordCreate::ai_request(log.request_id, log.path.clone())
@@ -129,17 +116,15 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         request_storage_mode: log.request_storage_mode,
         request_full_json,
         request_delta_json,
-        request_raw_json,
+        request_raw_json: request_raw_json.clone(),
         request_has_previous_response_id: log.request_has_previous_response_id,
         request_previous_response_id: log.request_previous_response_id,
         request_previous_response_parent_found: log.request_previous_response_parent_found,
         request_conversation_key: log.request_conversation_key,
         request_conversation_parent_found: log.request_conversation_parent_found,
         upstream_redaction_enabled: log.upstream_redaction_enabled,
-        upstream_redacted_request_json: log.upstream_redacted_request_json,
-        restore_session,
         response_prompt,
-        response_raw_body,
+        response_raw_body: response_raw_body.clone(),
         response_capture_truncated: log.response_capture_truncated,
     })
     .with_provider_response(log.provider_response_id, log.provider_conversation_key)
@@ -152,7 +137,25 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         log.lease_expires_at,
         log.last_heartbeat_at,
     );
-    match db::record_request_record(&state.pool, create).await {
+    let raw_payload = db::RawPayloadInput {
+        request_raw_json: request_raw_json.clone(),
+        response_raw_body: response_raw_body.clone(),
+    };
+    let retention = state.usage_retention.read().await.clone().normalized();
+    let raw_store = if retention.raw_backend == "object_store" {
+        state.raw_payload_store.clone()
+    } else {
+        None
+    };
+    match db::record_request_record_with_raw_store(
+        &state.pool,
+        create,
+        raw_payload,
+        raw_store.as_deref(),
+        i64::from(retention.raw_retention_days),
+    )
+    .await
+    {
         Ok(event_id) => {
             if let (Some(conversation_id), Some(session), Ok(manager)) = (
                 conversation_id,

@@ -11,8 +11,7 @@ INSERT INTO request_records(
     request_delta_json, request_has_previous_response_id,
     request_previous_response_id, request_previous_response_parent_found,
     request_conversation_key, request_conversation_parent_found,
-    upstream_redaction_enabled, upstream_redacted_request_json,
-    restore_session_ciphertext, restore_session_nonce, restore_session_key_version,
+    upstream_redaction_enabled,
     provider_response_id, provider_conversation_key, base_checkpoint_event_id,
     response_prompt, upstream_error_body, error_code, error_message,
     failure_family, mcp_bearer_token_slot, route_selection_reason, owner_worker_id,
@@ -25,7 +24,7 @@ VALUES (
     $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44,
     $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58,
     $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72,
-    $73, $74, $75, $76, $77, $78
+    $73, $74
 )
 ON CONFLICT (request_id) WHERE event_kind = 'request'
 DO UPDATE SET
@@ -97,10 +96,6 @@ DO UPDATE SET
     request_conversation_key = COALESCE(EXCLUDED.request_conversation_key, request_records.request_conversation_key),
     request_conversation_parent_found = COALESCE(EXCLUDED.request_conversation_parent_found, request_records.request_conversation_parent_found),
     upstream_redaction_enabled = request_records.upstream_redaction_enabled OR EXCLUDED.upstream_redaction_enabled,
-    upstream_redacted_request_json = COALESCE(EXCLUDED.upstream_redacted_request_json, request_records.upstream_redacted_request_json),
-    restore_session_ciphertext = COALESCE(EXCLUDED.restore_session_ciphertext, request_records.restore_session_ciphertext),
-    restore_session_nonce = COALESCE(EXCLUDED.restore_session_nonce, request_records.restore_session_nonce),
-    restore_session_key_version = COALESCE(EXCLUDED.restore_session_key_version, request_records.restore_session_key_version),
     provider_response_id = COALESCE(EXCLUDED.provider_response_id, request_records.provider_response_id),
     provider_conversation_key = COALESCE(EXCLUDED.provider_conversation_key, request_records.provider_conversation_key),
     base_checkpoint_event_id = COALESCE(EXCLUDED.base_checkpoint_event_id, request_records.base_checkpoint_event_id),

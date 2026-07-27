@@ -32,6 +32,13 @@ pub struct WorkerConfig {
     pub max_raw_response_capture_bytes: usize,
     pub max_response_text_capture_bytes: usize,
     pub endpoint_model_cache_ttl_seconds: u64,
+    pub raw_object_store_endpoint: String,
+    pub raw_object_store_bucket: String,
+    pub raw_object_store_region: String,
+    pub raw_object_store_access_key: String,
+    pub raw_object_store_secret_key: String,
+    pub raw_object_store_prefix: String,
+    pub raw_object_store_allow_http: bool,
 }
 
 impl Default for WorkerConfig {
@@ -62,6 +69,13 @@ impl Default for WorkerConfig {
             max_raw_response_capture_bytes: 4 * 1024 * 1024,
             max_response_text_capture_bytes: 1024 * 1024,
             endpoint_model_cache_ttl_seconds: 300,
+            raw_object_store_endpoint: String::new(),
+            raw_object_store_bucket: String::new(),
+            raw_object_store_region: "auto".to_string(),
+            raw_object_store_access_key: String::new(),
+            raw_object_store_secret_key: String::new(),
+            raw_object_store_prefix: "prompt-ferry/raw".to_string(),
+            raw_object_store_allow_http: false,
         }
     }
 }

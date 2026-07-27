@@ -51,6 +51,7 @@ rcgen = "0.14.8"
 redactor = { package = "cloudiful-redactor", version = "0.5.0" }
 redis = { version = "1.4.1", features = ["tokio-comp", "connection-manager"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["charset", "gzip", "http2", "json", "rustls", "stream", "system-proxy"] }
+object_store = { version = "0.14.1", default-features = false, features = ["aws"] }
 rmcp = { version = "2.2.0", features = ["client", "transport-streamable-http-client-reqwest", "transport-child-process", "transport-streamable-http-server"] }
 scheduler = { package = "cloudiful-scheduler", version = "0.4.12", features = ["valkey-store"] }
 rustls = { version = "0.23.42", features = ["aws-lc-rs"] }

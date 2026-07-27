@@ -220,6 +220,41 @@ pub(super) async fn set_request_content_logging(
     {
         Ok(config) => {
             *state.request_content_logging.write().await = config.clone();
+            if let Ok(retention) = db::get_usage_retention(&state.pool).await {
+                *state.usage_retention.write().await = retention;
+            }
+            Json(config).into_response()
+        }
+        Err(err) => internal(&state, err),
+    }
+}
+
+pub(super) async fn get_usage_retention(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response;
+    }
+    Json(state.usage_retention.read().await.clone()).into_response()
+}
+
+pub(super) async fn set_usage_retention(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Json(body): Json<UsageRetentionSettings>,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response;
+    }
+    match db::set_usage_retention(&state.pool, &body).await {
+        Ok(config) => {
+            *state.usage_retention.write().await = config.clone();
+            state
+                .request_content_logging
+                .write()
+                .await
+                .raw_retention_days = config.raw_retention_days;
             Json(config).into_response()
         }
         Err(err) => internal(&state, err),

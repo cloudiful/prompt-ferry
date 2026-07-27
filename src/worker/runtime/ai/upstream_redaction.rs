@@ -56,6 +56,7 @@ pub(super) fn redact_ai_request_json(
         )
     })?;
     let redacted_text = std::str::from_utf8(&redacted_body).expect("serialized JSON is UTF-8");
+    let applied_replacements = processor.has_applied_replacements();
     let request_session = processor
         .finish_state(original_text, redacted_text)
         .map_err(|err| {
@@ -65,9 +66,10 @@ pub(super) fn redact_ai_request_json(
                 format!("failed to finalize upstream redaction: {err}"),
             )
         })?;
+    let redacted_request_json = applied_replacements.then_some(value);
     Ok(PreparedRedactedRequest {
         body: redacted_body,
-        redacted_request_json: Some(value),
+        redacted_request_json,
         restore_session: request_session,
     })
 }
@@ -324,6 +326,42 @@ mod tests {
                 .expect("arguments")
                 .contains("[[RDX:v2:")
         );
+    }
+
+    #[test]
+    fn does_not_keep_full_json_when_prior_session_has_no_new_replacements() {
+        let _guard = crate::redact::TEST_REDACTION_LOCK.lock().expect("lock");
+        apply_config(&RedactionConfig {
+            enabled: true,
+            rules: RedactionRules {
+                domain: true,
+                ..RedactionRules::default()
+            },
+            custom_strings: Vec::new(),
+        })
+        .expect("config");
+
+        let first = redact_ai_request_json(
+            "/v1/responses",
+            br#"{"instructions":"contact a.example.com"}"#,
+            None,
+            None,
+            None,
+        )
+        .expect("first redaction");
+        assert!(first.redacted_request_json.is_some());
+        let prior_session = first.restore_session.expect("first session");
+
+        let second = redact_ai_request_json(
+            "/v1/responses",
+            br#"{"instructions":"continue"}"#,
+            None,
+            None,
+            Some(&prior_session),
+        )
+        .expect("second redaction");
+        assert!(second.restore_session.is_some());
+        assert!(second.redacted_request_json.is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]

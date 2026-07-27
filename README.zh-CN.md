@@ -59,6 +59,11 @@ OPENAI_BASE_URL=http://127.0.0.1:8787/v1
 OPENAI_API_KEY=<生成的客户端密钥>
 ```
 
+如需将原始报文放在 PostgreSQL 之外，请在 `.env` 中配置
+`PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_*` 变量，并在 usage-retention 设置中选择
+`object_store`。对象桶应配置 3 天生命周期、服务端加密和私有访问；对象存储凭据
+只属于部署配置，不会通过管理 API 暴露。
+
 请保持 `8789` 端口只对本机或受保护的内网开放。Compose 配置项见
 [.env.example](.env.example)。
 

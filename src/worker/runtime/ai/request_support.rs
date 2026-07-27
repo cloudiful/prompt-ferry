@@ -120,7 +120,17 @@ pub(super) async fn prepare_upstream_request_with_replay(
     request: &BufferedBridgeRequest,
     conversation_id: Option<uuid::Uuid>,
     parent_event_id: Option<i64>,
+    replay_unavailable: bool,
 ) -> Result<PreparedUpstreamRequest, CompatError> {
+    if replay_unavailable
+        && route.responses_continuation_policy == db::ResponsesContinuationPolicy::ForceReplay
+    {
+        return Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "replay_unavailable",
+            "stored conversation content has expired or is unavailable",
+        ));
+    }
     let effective_request_body = effective_request_body(route, request.body.as_slice());
     let prior_session = load_prior_session(admin_state, conversation_id).await;
     let redaction_enabled =
@@ -182,6 +192,13 @@ pub(super) async fn prepare_upstream_request_with_replay(
                 "previous_response_id for chat-native continuations requires stored replay state",
             ));
         };
+        if !state.usage_retention.read().await.replay_enabled {
+            return Err(CompatError::new(
+                StatusCode::BAD_REQUEST,
+                "replay_unavailable",
+                "stored replay state is disabled",
+            ));
+        }
         let translated =
             prepare_responses_replay_request(crate::chat_replay::ResponsesReplayRequest {
                 pool: &state.pool,

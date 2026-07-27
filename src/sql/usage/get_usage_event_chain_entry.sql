@@ -11,3 +11,4 @@ LEFT JOIN request_record_raw_payloads raw
   ON raw.event_id = rr.event_id
  AND raw.created_at = rr.created_at
 WHERE rr.event_id = $1
+  AND rr.content_expired_at IS NULL

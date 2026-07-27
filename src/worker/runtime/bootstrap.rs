@@ -10,7 +10,7 @@ use crate::{
     worker_admin::{self, AdminState},
 };
 use anyhow::anyhow;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tracing::{error, warn};
 
 pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
@@ -79,9 +79,22 @@ pub(super) async fn build_admin_state(
         &config.bootstrap_admin_password,
     )
     .await?;
-    if let Err(err) = db::prune_usage_events(&pool, 90).await {
+    let usage_retention = db::get_usage_retention(&pool).await?;
+    if let Err(err) =
+        db::prune_usage_events(&pool, i64::from(usage_retention.metadata_retention_days)).await
+    {
         warn!(error = %err, "failed to prune usage events");
     }
+    let raw_payload_store = match crate::raw_payload_store::RawPayloadStore::from_config(config)? {
+        Some(store) => Some(Arc::new(store)),
+        None if usage_retention.raw_backend == "object_store" => {
+            warn!(
+                "raw backend is configured as object_store but no bucket is configured; retaining raw payloads in postgres"
+            );
+            None
+        }
+        None => None,
+    };
     let redaction_config = db::get_redaction_config(&pool).await?;
     let user_redaction_configs = db::list_user_redaction_configs(&pool).await?;
     redact::apply_configs(&redaction_config, user_redaction_configs)?;
@@ -91,7 +104,8 @@ pub(super) async fn build_admin_state(
         .unwrap_or_default();
     let model_route_whitelist_enabled =
         db::get_bool_setting(&pool, "model_route_whitelist_enabled", true).await?;
-    let request_content_logging = db::get_request_content_logging(&pool).await?;
+    let mut request_content_logging = db::get_request_content_logging(&pool).await?;
+    request_content_logging.raw_retention_days = usage_retention.raw_retention_days;
     let stream_delta_batching = db::get_stream_delta_batching(&pool).await?;
     let aborted_count = db::abort_pending_approval_requests(&pool).await?;
     if aborted_count > 0 {
@@ -120,6 +134,8 @@ pub(super) async fn build_admin_state(
         redaction_enabled,
         model_route_whitelist_enabled,
         request_content_logging,
+        usage_retention,
+        raw_payload_store,
         stream_delta_batching,
         llm_review_settings,
         mcp_catalog_cache,

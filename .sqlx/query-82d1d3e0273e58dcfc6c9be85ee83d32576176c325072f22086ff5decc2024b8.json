@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT event_id, endpoint_id, conversation_id, conversation_seq\nFROM request_records\nWHERE provider_conversation_key = $1\n  AND user_id IS NOT DISTINCT FROM $2\n  AND request_state = 'completed'\nORDER BY event_id DESC\nLIMIT 1\n",
+  "query": "SELECT event_id, endpoint_id, conversation_id, conversation_seq\nFROM request_records\nWHERE conversation_id = $1\n  AND user_id IS NOT DISTINCT FROM $2\n  AND request_state = 'completed'\n  AND content_expired_at IS NULL\nORDER BY conversation_seq DESC NULLS LAST, event_id DESC\nLIMIT 1\n",
   "describe": {
     "columns": [
       {
@@ -50,7 +50,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
+        "Uuid",
         "Int8"
       ]
     },
@@ -61,5 +61,5 @@
       true
     ]
   },
-  "hash": "80d49af120115eb129c1e8038b5ef027652d3c53e783b82b603e82e0f87556e6"
+  "hash": "82d1d3e0273e58dcfc6c9be85ee83d32576176c325072f22086ff5decc2024b8"
 }

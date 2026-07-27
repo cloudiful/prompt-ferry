@@ -47,19 +47,22 @@ pub use routing_state::{
 };
 pub use settings::{
     REQUEST_CONTENT_LOGGING_SETTINGS_KEY, RedactionCustomStringRuleListItem,
-    STREAM_DELTA_BATCHING_SETTINGS_KEY, get_bool_setting, get_json_setting, get_redaction_config,
-    get_redaction_enabled, get_request_content_logging, get_stream_delta_batching,
-    get_user_redaction_config, list_redaction_custom_string_rules, list_user_redaction_configs,
-    set_bool_setting, set_json_setting, set_redaction_config, set_redaction_enabled,
-    set_request_content_logging, set_stream_delta_batching, set_user_redaction_config,
+    STREAM_DELTA_BATCHING_SETTINGS_KEY, USAGE_RETENTION_SETTINGS_KEY, get_bool_setting,
+    get_json_setting, get_redaction_config, get_redaction_enabled, get_request_content_logging,
+    get_stream_delta_batching, get_usage_retention, get_user_redaction_config,
+    list_redaction_custom_string_rules, list_user_redaction_configs, set_bool_setting,
+    set_json_setting, set_redaction_config, set_redaction_enabled, set_request_content_logging,
+    set_stream_delta_batching, set_usage_retention, set_user_redaction_config,
 };
 pub use types::*;
+pub(crate) use usage::get_visible_usage_event_detail_with_raw_store;
+pub(crate) use usage::run_raw_payload_maintenance_with_store;
 pub use usage::{
     OverviewBucket, OverviewWindow, RawPayloadMaintenanceReport, RequestRecordStateInput,
-    abort_request_records_by_ids, abort_stale_request_records, allocate_conversation_seq,
-    clear_usage_events, decode_prompt_message_refs, delete_request_record_lease,
-    find_request_record_tool_calls_by_call_ids, get_conversation_redaction_session,
-    get_replayable_usage_event_by_provider_conversation_key,
+    UsageContentMaintenanceReport, abort_request_records_by_ids, abort_stale_request_records,
+    allocate_conversation_seq, clear_usage_events, decode_prompt_message_refs,
+    delete_request_record_lease, find_request_record_tool_calls_by_call_ids,
+    get_conversation_redaction_session, get_replayable_usage_event_by_provider_conversation_key,
     get_replayable_usage_event_locator_by_provider_conversation_key, get_usage_assistant_artifacts,
     get_usage_event_by_provider_conversation_key, get_usage_event_by_provider_response_id,
     get_usage_event_by_request_id, get_usage_event_chain_entry,
@@ -72,8 +75,9 @@ pub use usage::{
     latest_usage_event_locator_by_provider_conversation_key, list_active_request_record_ids,
     list_request_record_facets, list_request_record_tool_calls, list_request_records,
     list_usage_events_missing_assistant_artifacts, prune_usage_events, record_request_record,
-    record_request_state, replay_snapshot_before_or_at_seq, request_record_summary,
-    request_records_overview, run_raw_payload_maintenance, upsert_conversation_redaction_session,
+    record_request_record_with_raw_store, record_request_state, replay_snapshot_before_or_at_seq,
+    request_record_summary, request_records_overview, run_raw_payload_maintenance,
+    run_usage_content_maintenance, upsert_conversation_redaction_session,
     upsert_request_record_tool_call, upsert_usage_assistant_artifact, upsert_usage_prompt_block,
     usage_buckets,
 };

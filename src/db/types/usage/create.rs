@@ -5,19 +5,24 @@ use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Default)]
-pub struct EncryptedPayloadInput {
-    pub ciphertext: Option<Vec<u8>>,
-    pub nonce: Option<Vec<u8>>,
-    pub key_version: Option<i16>,
-}
-
-#[derive(Debug, Clone, Default)]
 pub struct RequestRecordRedactionSummaryInput {
     pub applied: bool,
     pub findings_count: i32,
     pub replacements_count: i32,
     pub types_json: Option<Value>,
     pub fields_json: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RawPayloadInput {
+    pub request_raw_json: Option<Value>,
+    pub response_raw_body: Option<String>,
+}
+
+impl RawPayloadInput {
+    pub fn is_empty(&self) -> bool {
+        self.request_raw_json.is_none() && self.response_raw_body.is_none()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -80,8 +85,6 @@ pub struct RequestRecordCreate {
     pub request_conversation_key: Option<String>,
     pub request_conversation_parent_found: Option<bool>,
     pub upstream_redaction_enabled: bool,
-    pub upstream_redacted_request_json: Option<Value>,
-    pub restore_session: EncryptedPayloadInput,
     pub provider_response_id: Option<String>,
     pub provider_conversation_key: Option<String>,
     pub base_checkpoint_event_id: Option<i64>,
@@ -131,8 +134,6 @@ pub struct RequestRecordStorageInput {
     pub request_conversation_key: Option<String>,
     pub request_conversation_parent_found: Option<bool>,
     pub upstream_redaction_enabled: bool,
-    pub upstream_redacted_request_json: Option<Value>,
-    pub restore_session: EncryptedPayloadInput,
     pub response_prompt: Option<String>,
     pub response_raw_body: Option<String>,
     pub response_capture_truncated: bool,
@@ -230,8 +231,6 @@ impl RequestRecordCreate {
             request_conversation_key: None,
             request_conversation_parent_found: None,
             upstream_redaction_enabled: false,
-            upstream_redacted_request_json: None,
-            restore_session: EncryptedPayloadInput::default(),
             provider_response_id: None,
             provider_conversation_key: None,
             base_checkpoint_event_id: None,
@@ -407,8 +406,6 @@ impl RequestRecordCreate {
         self.request_conversation_key = storage.request_conversation_key;
         self.request_conversation_parent_found = storage.request_conversation_parent_found;
         self.upstream_redaction_enabled = storage.upstream_redaction_enabled;
-        self.upstream_redacted_request_json = storage.upstream_redacted_request_json;
-        self.restore_session = storage.restore_session;
         self.response_prompt = storage.response_prompt;
         self.response_raw_body = storage.response_raw_body;
         self.response_capture_truncated = storage.response_capture_truncated;

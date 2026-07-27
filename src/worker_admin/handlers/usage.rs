@@ -369,7 +369,8 @@ pub(super) async fn prune_usage_events(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    match db::prune_usage_events(&state.pool, 90).await {
+    let retention_days = state.usage_retention.read().await.metadata_retention_days;
+    match db::prune_usage_events(&state.pool, i64::from(retention_days)).await {
         Ok(deleted) => Json(UsagePruneResponse { deleted }).into_response(),
         Err(err) => internal(&state, err),
     }

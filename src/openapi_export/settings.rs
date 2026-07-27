@@ -5,6 +5,7 @@ use crate::{
     worker_admin_types::{
         EndpointSettingRequest, ModelRouteWhitelistRequest, ModelRouteWhitelistResponse,
         RelayIpPolicyResponse, RequestContentLoggingRequest, RequestContentLoggingResponse,
+        UsageRetentionSettings,
     },
 };
 
@@ -104,6 +105,23 @@ pub(super) fn get_request_content_logging() {}
     tag = "settings"
 )]
 pub(super) fn set_request_content_logging() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/usage-retention",
+    responses((status = 200, body = UsageRetentionSettings, description = "Usage content retention")),
+    tag = "settings"
+)]
+pub(super) fn get_usage_retention() {}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings/usage-retention",
+    request_body = UsageRetentionSettings,
+    responses((status = 200, body = UsageRetentionSettings, description = "Updated usage content retention")),
+    tag = "settings"
+)]
+pub(super) fn set_usage_retention() {}
 
 #[utoipa::path(
     get,

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_record_raw_payloads_overflow (\n    event_id,\n    created_at,\n    request_raw_json,\n    response_raw_body,\n    raw_object_key,\n    raw_object_size_bytes,\n    raw_object_sha256,\n    raw_object_expires_at\n)\nSELECT\n    event_id,\n    created_at,\n    request_raw_json,\n    response_raw_body,\n    raw_object_key,\n    raw_object_size_bytes,\n    raw_object_sha256,\n    raw_object_expires_at\nFROM request_record_raw_payloads_default\nWHERE created_at >= $1\n  AND created_at < $2;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "00dd4d9bc0870132863c531d17e25ca865c4dee7367499380f207f2672a3070b"
+}

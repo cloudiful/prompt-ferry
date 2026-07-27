@@ -13,6 +13,7 @@ LEFT JOIN request_record_raw_payloads raw
   ON raw.event_id = ue.event_id
  AND raw.created_at = ue.created_at
 WHERE ua.event_id IS NULL
+  AND ue.content_expired_at IS NULL
   AND ue.request_state = 'completed'
   AND ue.path IN ('/v1/responses', '/v1/chat/completions')
 ORDER BY ue.event_id ASC

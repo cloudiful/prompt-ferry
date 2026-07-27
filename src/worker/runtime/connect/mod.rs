@@ -38,16 +38,11 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
     let _stale_reconciler =
         super::spawn_stale_request_reconciler(admin_state.as_ref(), runtime_state.control.clone());
     let raw_maintenance_task = if let Some(state) = admin_state.as_ref() {
-        let retention_days = state
-            .request_content_logging
-            .read()
-            .await
-            .raw_retention_days
-            .into();
         Some(super::raw_maintenance::spawn(
             &config,
             state.pool.clone(),
-            retention_days,
+            state.usage_retention.clone(),
+            state.raw_payload_store.clone(),
             runtime_state.control.clone(),
         ))
     } else {

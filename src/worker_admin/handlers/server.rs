@@ -147,6 +147,10 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             get(get_request_content_logging).patch(set_request_content_logging),
         )
         .route(
+            "/settings/usage-retention",
+            get(get_usage_retention).patch(set_usage_retention),
+        )
+        .route(
             "/settings/stream-delta-batching",
             get(get_stream_delta_batching).patch(set_stream_delta_batching),
         )
@@ -237,6 +241,8 @@ mod tests {
                 mode: RequestContentLoggingMode::Off,
                 raw_retention_days: 3,
             },
+            usage_retention: UsageRetentionSettings::default(),
+            raw_payload_store: None,
             stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
             llm_review_settings: LlmReviewSettings::default(),
             mcp_catalog_cache: McpCatalogCache::new(),

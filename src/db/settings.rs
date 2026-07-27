@@ -8,6 +8,7 @@ use sqlx::PgPool;
 use crate::{
     db::StreamDeltaBatchingSettings,
     redact::RedactionConfig,
+    worker_admin_types::UsageRetentionSettings,
     worker_admin_types::{RequestContentLoggingMode, RequestContentLoggingResponse},
 };
 
@@ -20,6 +21,7 @@ pub struct RedactionCustomStringRuleListItem {
 }
 
 pub const REQUEST_CONTENT_LOGGING_SETTINGS_KEY: &str = "request_content_logging";
+pub const USAGE_RETENTION_SETTINGS_KEY: &str = "usage_retention";
 pub const STREAM_DELTA_BATCHING_SETTINGS_KEY: &str = "stream_delta_batching";
 const REQUEST_CONTENT_LOGGING_ENABLED_KEY: &str = "request_content_logging_enabled";
 const LEGACY_USAGE_CONTENT_LOGGING_SETTINGS_KEY: &str = "usage_content_logging";
@@ -202,7 +204,10 @@ pub async fn get_request_content_logging(pool: &PgPool) -> Result<RequestContent
     )
     .await?
     {
-        return Ok(normalize_request_content_logging(setting));
+        let normalized = normalize_request_content_logging(setting);
+        delete_setting(pool, LEGACY_USAGE_CONTENT_LOGGING_SETTINGS_KEY).await?;
+        delete_setting(pool, LEGACY_USAGE_CONTENT_LOGGING_ENABLED_KEY).await?;
+        return Ok(normalized);
     }
     if let Some(setting) = get_json_setting::<RequestContentLoggingResponse>(
         pool,
@@ -210,19 +215,31 @@ pub async fn get_request_content_logging(pool: &PgPool) -> Result<RequestContent
     )
     .await?
     {
-        return Ok(normalize_request_content_logging(setting));
+        let normalized = normalize_request_content_logging(setting);
+        set_json_setting(pool, REQUEST_CONTENT_LOGGING_SETTINGS_KEY, &normalized).await?;
+        delete_setting(pool, LEGACY_USAGE_CONTENT_LOGGING_SETTINGS_KEY).await?;
+        delete_setting(pool, LEGACY_USAGE_CONTENT_LOGGING_ENABLED_KEY).await?;
+        return Ok(normalized);
     }
 
-    let enabled = get_bool_setting(pool, REQUEST_CONTENT_LOGGING_ENABLED_KEY, false).await?
-        || get_bool_setting(pool, LEGACY_USAGE_CONTENT_LOGGING_ENABLED_KEY, false).await?;
-    Ok(RequestContentLoggingResponse {
+    let legacy_enabled =
+        get_bool_setting(pool, LEGACY_USAGE_CONTENT_LOGGING_ENABLED_KEY, false).await?;
+    let enabled =
+        get_bool_setting(pool, REQUEST_CONTENT_LOGGING_ENABLED_KEY, false).await? || legacy_enabled;
+    let response = RequestContentLoggingResponse {
         mode: if enabled {
             RequestContentLoggingMode::NormalizedOnly
         } else {
             RequestContentLoggingMode::Off
         },
         raw_retention_days: DEFAULT_RAW_RETENTION_DAYS,
-    })
+    };
+    if enabled {
+        set_json_setting(pool, REQUEST_CONTENT_LOGGING_SETTINGS_KEY, &response).await?;
+    }
+    delete_setting(pool, LEGACY_USAGE_CONTENT_LOGGING_SETTINGS_KEY).await?;
+    delete_setting(pool, LEGACY_USAGE_CONTENT_LOGGING_ENABLED_KEY).await?;
+    Ok(response)
 }
 
 pub async fn set_request_content_logging(
@@ -237,6 +254,36 @@ pub async fn set_request_content_logging(
         normalized.mode.captures_normalized(),
     )
     .await?;
+    delete_setting(pool, LEGACY_USAGE_CONTENT_LOGGING_SETTINGS_KEY).await?;
+    delete_setting(pool, LEGACY_USAGE_CONTENT_LOGGING_ENABLED_KEY).await?;
+    let mut retention = get_usage_retention(pool).await?;
+    retention.raw_retention_days = normalized.raw_retention_days;
+    set_usage_retention(pool, &retention).await?;
+    Ok(normalized)
+}
+
+async fn delete_setting(pool: &PgPool, key: &str) -> Result<()> {
+    sqlx::query_file!("src/sql/settings/delete_setting.sql", key)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn get_usage_retention(pool: &PgPool) -> Result<UsageRetentionSettings> {
+    Ok(
+        get_json_setting::<UsageRetentionSettings>(pool, USAGE_RETENTION_SETTINGS_KEY)
+            .await?
+            .unwrap_or_default()
+            .normalized(),
+    )
+}
+
+pub async fn set_usage_retention(
+    pool: &PgPool,
+    value: &UsageRetentionSettings,
+) -> Result<UsageRetentionSettings> {
+    let normalized = value.clone().normalized();
+    set_json_setting(pool, USAGE_RETENTION_SETTINGS_KEY, &normalized).await?;
     Ok(normalized)
 }
 

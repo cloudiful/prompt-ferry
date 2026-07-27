@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use redactor::{
     InputKind, RedactionSession, RedactorError, RestoreContext, RestoreResult, RestoreState,
     SessionRedactor,
@@ -172,44 +172,6 @@ pub fn redact_text_with_stateful_session(
 
 pub fn restore_text(text: &str, session: &UpstreamRedactionSession) -> Result<RestoreResult> {
     Ok(UpstreamRestoreContext::new(session)?.restore_text(text))
-}
-
-pub fn envelope_from_session(
-    manager: &RelaySecretManager,
-    session: Option<&UpstreamRedactionSession>,
-) -> Result<crate::db::EncryptedPayloadInput> {
-    let Some(session) = session else {
-        return Ok(crate::db::EncryptedPayloadInput::default());
-    };
-    let encrypted = encrypt_upstream_session(manager, session)?;
-    Ok(crate::db::EncryptedPayloadInput {
-        ciphertext: Some(encrypted.ciphertext),
-        nonce: Some(encrypted.nonce),
-        key_version: Some(encrypted.key_version),
-    })
-}
-
-pub fn envelope_to_session(
-    manager: &RelaySecretManager,
-    envelope: &crate::db::EncryptedPayloadInput,
-) -> Result<Option<UpstreamRedactionSession>> {
-    match (
-        envelope.ciphertext.as_ref(),
-        envelope.nonce.as_ref(),
-        envelope.key_version,
-    ) {
-        (Some(ciphertext), Some(nonce), Some(key_version)) => decrypt_upstream_session(
-            manager,
-            &EncryptedSecretEnvelope {
-                ciphertext: ciphertext.clone(),
-                nonce: nonce.clone(),
-                key_version,
-            },
-        )
-        .map(Some),
-        (None, None, None) => Ok(None),
-        _ => Err(anyhow!("incomplete upstream restore session envelope")),
-    }
 }
 
 #[cfg(test)]

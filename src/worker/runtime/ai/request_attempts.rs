@@ -80,6 +80,7 @@ pub(super) async fn forward_route_request(
         request,
         request_ctx.request_prompt_log.conversation_id,
         request_ctx.request_prompt_log.parent_event_id,
+        request_ctx.request_prompt_log.replay_unavailable,
     )
     .await
     {

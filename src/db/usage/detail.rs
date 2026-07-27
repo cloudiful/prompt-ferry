@@ -3,6 +3,8 @@ use crate::db::{
     RequestFailureFamily, RequestRecordCategory, RequestRecordRedactionSummary,
     RouteSelectionReason,
 };
+use crate::raw_payload_store::RawPayloadStore;
+use tracing::warn;
 
 #[derive(sqlx::FromRow)]
 struct RequestRecordDetailRow {
@@ -55,6 +57,9 @@ struct RequestRecordDetailRow {
     normalized_item_count: Option<i32>,
     request_storage_mode: String,
     request_raw_json: Option<serde_json::Value>,
+    raw_object_key: Option<String>,
+    raw_object_sha256: Option<String>,
+    raw_object_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     request_has_previous_response_id: bool,
     request_previous_response_id: Option<String>,
     request_previous_response_parent_found: Option<bool>,
@@ -172,6 +177,57 @@ pub async fn get_visible_usage_event_detail(
     .fetch_optional(pool)
     .await?
     .map(Into::into))
+}
+
+pub(crate) async fn get_visible_usage_event_detail_with_raw_store(
+    pool: &PgPool,
+    event_id: i64,
+    visible_user_id: Option<i64>,
+    raw_store: Option<&RawPayloadStore>,
+) -> Result<Option<RequestRecordDetail>> {
+    let Some(row) = sqlx::query_file_as!(
+        RequestRecordDetailRow,
+        "src/sql/usage/get_visible_usage_event_detail.sql",
+        event_id,
+        visible_user_id,
+    )
+    .fetch_optional(pool)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let object_key = row.raw_object_key.clone();
+    let object_sha256 = row.raw_object_sha256.clone();
+    let object_expires_at = row.raw_object_expires_at;
+    let mut detail = RequestRecordDetail::from(row);
+    let Some(raw_store) = raw_store else {
+        return Ok(Some(detail));
+    };
+    if object_key.is_none() || object_expires_at.is_some_and(|expires_at| expires_at <= Utc::now())
+    {
+        return Ok(Some(detail));
+    }
+    match raw_store
+        .get(
+            object_key.as_deref().unwrap_or_default(),
+            object_sha256.as_deref(),
+        )
+        .await
+    {
+        Ok(Some(payload)) => {
+            if payload.request_raw_json.is_some() {
+                detail.request_raw_json = payload.request_raw_json;
+            }
+            if payload.response_raw_body.is_some() {
+                detail.response_raw_body = payload.response_raw_body;
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            warn!(error = %error, event_id, "failed to load raw payload object for usage detail")
+        }
+    }
+    Ok(Some(detail))
 }
 
 pub async fn get_usage_event_chain_entry(

@@ -24,6 +24,7 @@ use reconstruct::{reconstruct_prompt_chain, redact_prompt_item};
 pub(super) struct RequestPromptLog {
     pub(super) conversation_id: Option<uuid::Uuid>,
     pub(super) parent_event_id: Option<i64>,
+    pub(super) replay_unavailable: bool,
     pub(super) conversation_seq: Option<i32>,
     pub(super) conversation_source: String,
     pub(super) storage_sanitized: bool,
@@ -59,6 +60,7 @@ impl Default for RequestPromptLog {
         Self {
             conversation_id: None,
             parent_event_id: None,
+            replay_unavailable: false,
             conversation_seq: None,
             conversation_source: "none".to_string(),
             storage_sanitized: false,
@@ -95,6 +97,7 @@ impl Default for RequestPromptLog {
 pub(super) struct PromptConversationResolution {
     pub(super) conversation_id: uuid::Uuid,
     pub(super) parent_event_id: Option<i64>,
+    pub(super) replay_unavailable: bool,
     pub(super) endpoint_id: Option<uuid::Uuid>,
     pub(super) conversation_seq: i32,
     pub(super) source: &'static str,
@@ -170,25 +173,11 @@ pub(super) async fn prepare_request_prompt_log(
             .collect();
     }
 
-    let mut prompt_block_nul_count = 0_i32;
-    for item in &normalized.items {
-        let stats = db::upsert_usage_prompt_block(
-            &state.pool,
-            &prompt_block_hash(&item.role, &item.content_json),
-            &item.role,
-            &item.content_json,
-            &item.preview_text,
-        )
-        .await?;
-        prompt_block_nul_count = prompt_block_nul_count
-            .saturating_add(i32::try_from(stats.nul_count).unwrap_or(i32::MAX));
-    }
-
     let current_refs = prompt_message_refs(&normalized.items);
     let fingerprint = normalized.fingerprint.clone();
     let mut log = RequestPromptLog {
-        storage_sanitized: prompt_block_nul_count > 0,
-        storage_sanitized_nul_count: prompt_block_nul_count,
+        storage_sanitized: false,
+        storage_sanitized_nul_count: 0,
         redaction: prompt_redaction,
         client_installation_id: codex_metadata.client_installation_id.clone(),
         session_header_id: session_header_id(request.headers.as_slice()),
@@ -196,8 +185,8 @@ pub(super) async fn prepare_request_prompt_log(
         normalized_chain_hash: Some(fingerprint.normalized_chain_hash.clone()),
         normalized_first_ref_hash: fingerprint.normalized_first_ref_hash.clone(),
         normalized_last_ref_hash: fingerprint.normalized_last_ref_hash.clone(),
-        request_full_json: Some(serde_json::to_value(&current_refs)?),
-        snapshot_prompt_refs_json: Some(serde_json::to_value(&current_refs)?),
+        request_full_json: None,
+        snapshot_prompt_refs_json: None,
         request_raw_json: raw_observability.request_raw_json,
         request_has_previous_response_id: raw_observability.request_has_previous_response_id,
         request_previous_response_id: raw_observability.request_previous_response_id,
@@ -205,6 +194,8 @@ pub(super) async fn prepare_request_prompt_log(
             .request_previous_response_parent_found,
         request_conversation_key: raw_observability.request_conversation_key,
         request_conversation_parent_found: raw_observability.request_conversation_parent_found,
+        replay_unavailable: raw_observability.request_has_previous_response_id
+            && raw_observability.request_previous_response_parent_found == Some(false),
         ..RequestPromptLog::default()
     };
 
@@ -224,6 +215,29 @@ pub(super) async fn prepare_request_prompt_log(
     else {
         return Ok(log);
     };
+
+    log.replay_unavailable |= resolution.replay_unavailable;
+    if !state.usage_retention.read().await.replay_enabled {
+        return Ok(log);
+    }
+
+    let mut prompt_block_nul_count = 0_i32;
+    for item in &normalized.items {
+        let stats = db::upsert_usage_prompt_block(
+            &state.pool,
+            &prompt_block_hash(&item.role, &item.content_json),
+            &item.role,
+            &item.content_json,
+            &item.preview_text,
+        )
+        .await?;
+        prompt_block_nul_count = prompt_block_nul_count
+            .saturating_add(i32::try_from(stats.nul_count).unwrap_or(i32::MAX));
+    }
+    log.storage_sanitized = prompt_block_nul_count > 0;
+    log.storage_sanitized_nul_count = prompt_block_nul_count;
+    log.request_full_json = Some(serde_json::to_value(&current_refs)?);
+    log.snapshot_prompt_refs_json = Some(serde_json::to_value(&current_refs)?);
 
     log.conversation_id = Some(resolution.conversation_id);
     log.parent_event_id = resolution.parent_event_id;

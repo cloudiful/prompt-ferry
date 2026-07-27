@@ -1,4 +1,6 @@
 use super::*;
+use crate::raw_payload_store::{RawPayloadEnvelope, RawPayloadStore};
+use chrono::Duration as ChronoDuration;
 use tracing::warn;
 
 pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) -> Result<i64> {
@@ -66,10 +68,6 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
         input.request_conversation_key,
         input.request_conversation_parent_found,
         input.upstream_redaction_enabled,
-        input.upstream_redacted_request_json,
-        input.restore_session.ciphertext,
-        input.restore_session.nonce,
-        input.restore_session.key_version,
         input.provider_response_id,
         input.provider_conversation_key,
         input.base_checkpoint_event_id,
@@ -125,6 +123,67 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
 
     insert_request_record_block_refs(pool, event_id, &ref_full, &ref_delta).await?;
 
+    Ok(event_id)
+}
+
+pub async fn record_request_record_with_raw_store(
+    pool: &PgPool,
+    input: RequestRecordCreate,
+    raw_payload: RawPayloadInput,
+    raw_store: Option<&RawPayloadStore>,
+    raw_retention_days: i64,
+) -> Result<i64> {
+    let event_id = record_request_record(pool, input).await?;
+    let Some(raw_store) = raw_store else {
+        return Ok(event_id);
+    };
+
+    let Some(existing) =
+        sqlx::query_file!("src/sql/usage/get_request_record_raw_payload.sql", event_id,)
+            .fetch_optional(pool)
+            .await?
+    else {
+        return Ok(event_id);
+    };
+    let payload = RawPayloadEnvelope {
+        request_raw_json: raw_payload.request_raw_json.or(existing.request_raw_json),
+        response_raw_body: raw_payload.response_raw_body.or(existing.response_raw_body),
+    };
+    if payload.request_raw_json.is_none() && payload.response_raw_body.is_none() {
+        return Ok(event_id);
+    }
+
+    let created_at =
+        sqlx::query_file_scalar!("src/sql/usage/get_request_record_created_at.sql", event_id,)
+            .fetch_optional(pool)
+            .await?;
+    let Some(created_at) = created_at else {
+        return Ok(event_id);
+    };
+    let expires_at = created_at + ChronoDuration::days(raw_retention_days.max(1));
+    let object = match raw_store
+        .put(event_id, created_at, payload, expires_at)
+        .await
+    {
+        Ok(object) => object,
+        Err(err) => {
+            warn!(error = %err, event_id, "failed to upload raw payload; retaining postgres copy");
+            return Ok(event_id);
+        }
+    };
+    if let Err(err) = sqlx::query_file!(
+        "src/sql/usage/upsert_request_record_raw_object.sql",
+        event_id,
+        object.object_key,
+        object.size_bytes,
+        object.sha256,
+        object.expires_at,
+    )
+    .execute(pool)
+    .await
+    {
+        warn!(error = %err, event_id, "failed to persist raw payload object metadata; retaining postgres copy");
+    }
     Ok(event_id)
 }
 
@@ -218,7 +277,7 @@ mod tests {
     fn request_record_sql_placeholders_match_bind_count() {
         let upsert_sql = include_str!("../../sql/usage/upsert_request_record.sql");
 
-        assert_eq!(insert_column_count(upsert_sql), 78);
-        assert_eq!(max_placeholder(upsert_sql), 78);
+        assert_eq!(insert_column_count(upsert_sql), 74);
+        assert_eq!(max_placeholder(upsert_sql), 74);
     }
 }

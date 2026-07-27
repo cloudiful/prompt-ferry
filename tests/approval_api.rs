@@ -14,7 +14,10 @@ use prompt_ferry::{
     replay_cache::ReplayCache,
     worker_admin,
     worker_admin_state::{AdminState, AdminStateInit},
-    worker_admin_types::{RequestContentLoggingMode, RequestContentLoggingResponse, SessionUser},
+    worker_admin_types::{
+        RequestContentLoggingMode, RequestContentLoggingResponse, SessionUser,
+        UsageRetentionSettings,
+    },
 };
 use serde_json::Value;
 use sqlx::{
@@ -109,6 +112,8 @@ async fn admin_state(pool: PgPool, admin: &db::User) -> AdminState {
             mode: RequestContentLoggingMode::Off,
             raw_retention_days: 3,
         },
+        usage_retention: UsageRetentionSettings::default(),
+        raw_payload_store: None,
         stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
         llm_review_settings: LlmReviewSettings::default(),
         mcp_catalog_cache: McpCatalogCache::new(),
@@ -271,6 +276,8 @@ async fn login_succeeds_with_local_session_fallback_when_session_backend_is_disa
             mode: RequestContentLoggingMode::Off,
             raw_retention_days: 3,
         },
+        usage_retention: UsageRetentionSettings::default(),
+        raw_payload_store: None,
         stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
         llm_review_settings: LlmReviewSettings::default(),
         mcp_catalog_cache: McpCatalogCache::new(),
@@ -750,6 +757,8 @@ async fn bridge_status_reports_multi_relay_connectivity() -> anyhow::Result<()> 
             mode: RequestContentLoggingMode::Off,
             raw_retention_days: 3,
         },
+        usage_retention: UsageRetentionSettings::default(),
+        raw_payload_store: None,
         stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
         llm_review_settings: LlmReviewSettings::default(),
         mcp_catalog_cache: McpCatalogCache::new(),

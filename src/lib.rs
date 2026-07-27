@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod naming;
 pub mod openai_compat;
 pub mod openapi_export;
+pub mod raw_payload_store;
 pub mod realtime;
 pub mod redact;
 pub mod redact_upstream;

@@ -1,14 +1,25 @@
+use super::content_maintenance::cleanup_orphan_usage_prompt_blocks;
 use super::*;
+use crate::raw_payload_store::{RawPayloadEnvelope, RawPayloadStore};
 use chrono::Duration as ChronoDuration;
 use std::time::Duration;
 
 const RAW_REQUEST_PRUNE_BATCH_SIZE: i64 = 500;
 const RAW_REQUEST_PRUNE_LOCK_KEY: i64 = 0x7072_756e_6552_6177;
+const RAW_OBJECT_MIGRATION_BATCH_SIZE: i64 = 100;
 
 #[derive(Debug)]
 struct RawPayloadPruneBatch {
     deleted_count: Option<i64>,
     cleared_count: Option<i64>,
+}
+
+#[derive(Debug)]
+struct RawPayloadObjectMigrationRow {
+    event_id: i64,
+    created_at: DateTime<Utc>,
+    request_raw_json: Option<Value>,
+    response_raw_body: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -32,11 +43,19 @@ pub async fn run_raw_payload_maintenance(
     pool: &PgPool,
     retention_days: i64,
 ) -> Result<Option<RawPayloadMaintenanceReport>> {
+    run_raw_payload_maintenance_with_store(pool, retention_days, None).await
+}
+
+pub(crate) async fn run_raw_payload_maintenance_with_store(
+    pool: &PgPool,
+    retention_days: i64,
+    raw_store: Option<&RawPayloadStore>,
+) -> Result<Option<RawPayloadMaintenanceReport>> {
     let Some(mut conn) = try_acquire_raw_request_prune_lock(pool).await? else {
         return Ok(None);
     };
 
-    let result = run_raw_payload_maintenance_locked(&mut conn, retention_days).await;
+    let result = run_raw_payload_maintenance_locked(&mut conn, retention_days, raw_store).await;
     let released = sqlx::query_file_scalar!(
         "src/sql/usage/release_raw_request_prune_lock.sql",
         RAW_REQUEST_PRUNE_LOCK_KEY
@@ -61,6 +80,7 @@ pub async fn run_raw_payload_maintenance(
 async fn run_raw_payload_maintenance_locked(
     conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
     retention_days: i64,
+    raw_store: Option<&RawPayloadStore>,
 ) -> Result<RawPayloadMaintenanceReport> {
     let now = Utc::now();
     let prune_cutoff = now - ChronoDuration::days(retention_days);
@@ -69,6 +89,9 @@ async fn run_raw_payload_maintenance_locked(
         .and_hms_opt(0, 0, 0)
         .map(|value| value.and_utc())
         .ok_or_else(|| anyhow::anyhow!("invalid raw payload retention cutoff"))?;
+    if let Some(raw_store) = raw_store {
+        migrate_recent_raw_payloads(conn, raw_store, prune_cutoff, now, retention_days).await?;
+    }
     let partitions_created =
         crate::db::usage::raw_partitions::ensure_raw_payload_partitions(conn, now).await?;
     sqlx::query_file!(
@@ -96,6 +119,70 @@ async fn run_raw_payload_maintenance_locked(
         raw_rows_deleted,
         partitions_dropped,
     })
+}
+
+async fn migrate_recent_raw_payloads(
+    conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
+    raw_store: &RawPayloadStore,
+    cutoff: DateTime<Utc>,
+    now: DateTime<Utc>,
+    retention_days: i64,
+) -> Result<()> {
+    loop {
+        let rows = sqlx::query_file_as!(
+            RawPayloadObjectMigrationRow,
+            "src/sql/usage/list_raw_payloads_for_object_migration.sql",
+            cutoff,
+            now,
+            RAW_OBJECT_MIGRATION_BATCH_SIZE,
+        )
+        .fetch_all(&mut **conn)
+        .await?;
+        if rows.is_empty() {
+            break;
+        }
+        let mut failed = false;
+        for row in rows {
+            let expires_at = row.created_at + ChronoDuration::days(retention_days.max(1));
+            let object = match raw_store
+                .put(
+                    row.event_id,
+                    row.created_at,
+                    RawPayloadEnvelope {
+                        request_raw_json: row.request_raw_json,
+                        response_raw_body: row.response_raw_body,
+                    },
+                    expires_at,
+                )
+                .await
+            {
+                Ok(object) => object,
+                Err(error) => {
+                    failed = true;
+                    tracing::warn!(
+                        error = %error,
+                        event_id = row.event_id,
+                        "failed to migrate raw payload to object storage"
+                    );
+                    continue;
+                }
+            };
+            sqlx::query_file!(
+                "src/sql/usage/upsert_request_record_raw_object.sql",
+                row.event_id,
+                object.object_key,
+                object.size_bytes,
+                object.sha256,
+                object.expires_at,
+            )
+            .execute(&mut **conn)
+            .await?;
+        }
+        if failed {
+            break;
+        }
+    }
+    Ok(())
 }
 
 async fn prune_raw_payload_batches(
@@ -171,15 +258,6 @@ pub async fn clear_usage_events(
     let deleted_prompt_blocks = cleanup_orphan_usage_prompt_blocks(&mut tx).await?;
     tx.commit().await?;
     Ok((result.rows_affected(), deleted_prompt_blocks))
-}
-
-async fn cleanup_orphan_usage_prompt_blocks(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-) -> Result<u64> {
-    let deleted = sqlx::query_file!("src/sql/usage/cleanup_orphan_usage_prompt_blocks.sql")
-        .execute(&mut **tx)
-        .await?;
-    Ok(deleted.rows_affected())
 }
 
 async fn try_acquire_raw_request_prune_lock(

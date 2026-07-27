@@ -65,6 +65,13 @@ OPENAI_BASE_URL=http://127.0.0.1:8787/v1
 OPENAI_API_KEY=<generated-client-key>
 ```
 
+For deployments that keep raw payloads outside PostgreSQL, set the
+`PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_*` variables in `.env` and select
+`object_store` in the usage-retention settings. Configure the bucket with a
+3-day lifecycle, server-side encryption, and private access. Object storage
+credentials remain deployment configuration and are not exposed through the
+admin API.
+
 Keep port `8789` private. See [.env.example](.env.example) for the available
 Compose settings.
 

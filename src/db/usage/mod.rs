@@ -4,16 +4,18 @@ use serde_json::Value;
 use sqlx::PgPool;
 
 use crate::db::types::{
-    PromptMessageRef, ReplaySnapshotCreate, ReplaySnapshotRow, RequestRecordAssistantArtifact,
-    RequestRecordAssistantArtifactCreate, RequestRecordChainEntry, RequestRecordClearQuery,
-    RequestRecordConversationLocator, RequestRecordCreate, RequestRecordDetail,
-    RequestRecordFacets, RequestRecordListRow, RequestRecordPage, RequestRecordPromptBlock,
-    RequestRecordQuery, RequestRecordState, RequestRecordSummary, UsageClearScope,
+    PromptMessageRef, RawPayloadInput, ReplaySnapshotCreate, ReplaySnapshotRow,
+    RequestRecordAssistantArtifact, RequestRecordAssistantArtifactCreate, RequestRecordChainEntry,
+    RequestRecordClearQuery, RequestRecordConversationLocator, RequestRecordCreate,
+    RequestRecordDetail, RequestRecordFacets, RequestRecordListRow, RequestRecordPage,
+    RequestRecordPromptBlock, RequestRecordQuery, RequestRecordState, RequestRecordSummary,
+    UsageClearScope,
 };
 
 mod artifacts;
 mod buckets;
 mod cleanup;
+mod content_maintenance;
 mod detail;
 mod insert;
 mod overview;
@@ -28,10 +30,13 @@ mod runtime;
 pub use artifacts::list_usage_events_missing_assistant_artifacts;
 pub use artifacts::{get_usage_assistant_artifacts, upsert_usage_assistant_artifact};
 pub use buckets::usage_buckets;
+pub(crate) use cleanup::run_raw_payload_maintenance_with_store;
 pub use cleanup::{
     RawPayloadMaintenanceReport, clear_usage_events, prune_usage_events,
     run_raw_payload_maintenance,
 };
+pub use content_maintenance::{UsageContentMaintenanceReport, run_usage_content_maintenance};
+pub(crate) use detail::get_visible_usage_event_detail_with_raw_store;
 pub use detail::{
     get_replayable_usage_event_by_provider_conversation_key,
     get_replayable_usage_event_locator_by_provider_conversation_key,
@@ -44,7 +49,10 @@ pub use detail::{
     latest_usage_event_locator_by_conversation,
     latest_usage_event_locator_by_provider_conversation_key,
 };
-pub use insert::{RequestRecordStateInput, record_request_record, record_request_state};
+pub use insert::{
+    RequestRecordStateInput, record_request_record, record_request_record_with_raw_store,
+    record_request_state,
+};
 pub use overview::{OverviewBucket, OverviewWindow, request_records_overview};
 pub use prompt_blocks::{
     decode_prompt_message_refs, get_usage_prompt_blocks, upsert_usage_prompt_block,
