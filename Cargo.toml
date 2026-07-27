@@ -34,7 +34,6 @@ async-trait = "0.1.91"
 async-stream = "0.3.6"
 axum = { version = "0.8.9", features = ["json", "macros", "ws"] }
 base64 = "0.23.0"
-# bincode 3.0.0 currently fails to compile; keep 1.x for bridge wire compatibility.
 bincode = "1.3.3"
 bytes = "1.12.1"
 chacha20poly1305 = "0.11.0"
@@ -53,6 +52,7 @@ redis = { version = "1.4.1", features = ["tokio-comp", "connection-manager"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["charset", "gzip", "http2", "json", "rustls", "stream", "system-proxy"] }
 object_store = { version = "0.14.1", default-features = false, features = ["aws"] }
 rmcp = { version = "2.2.0", features = ["client", "transport-streamable-http-client-reqwest", "transport-child-process", "transport-streamable-http-server"] }
+sse-stream = "0.2.4"
 scheduler = { package = "cloudiful-scheduler", version = "0.4.12", features = ["valkey-store"] }
 rustls = { version = "0.23.42", features = ["aws-lc-rs"] }
 rustls-native-certs = "0.8.4"
