@@ -28,6 +28,7 @@ use tracing::{debug, error, info, warn};
 use super::forward::ResponseForwardContext;
 use super::stream_restore::SseRestoreFilter;
 use super::streaming_terminal::{failure_details, finish_failure};
+use super::streaming_usage::observe_usage_chunk;
 use super::upstream_restore::restore_ai_response_json_blocking;
 
 struct UpstreamStreamDiag {
@@ -414,9 +415,12 @@ pub(super) async fn forward_streaming_response(
                     return Err(anyhow!("upstream_response_too_large"));
                 }
                 stream_diag.record_upstream_chunk(chunk.len());
-                if ttft_ms.is_none() && capture.observe_chunk(&chunk) {
-                    ttft_ms = Some(request_ctx.elapsed_ms());
-                }
+                observe_usage_chunk(
+                    &mut capture,
+                    &mut ttft_ms,
+                    &chunk,
+                    request_ctx.elapsed_ms(),
+                );
                 if raw_content_logging_enabled {
                     append_limited_capture(
                         &mut raw_response_body,

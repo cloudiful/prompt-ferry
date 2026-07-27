@@ -14,6 +14,7 @@ pub(super) mod review;
 mod stream_restore;
 pub(super) mod streaming;
 mod streaming_terminal;
+mod streaming_usage;
 pub(super) mod upstream;
 pub(super) mod upstream_redaction;
 pub(super) mod upstream_restore;

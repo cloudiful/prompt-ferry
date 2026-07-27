@@ -29,11 +29,13 @@ export function formatRequestRecordTime(value: string): string {
 }
 
 export function formatRequestRecordCount(value?: number | null): string {
-  return new Intl.NumberFormat().format(value ?? 0)
+  if (value == null) return '-'
+  return new Intl.NumberFormat().format(value)
 }
 
 export function formatRequestRecordPercent(value?: number | null): string {
-  return `${Math.round((value ?? 0) * 100)}%`
+  if (value == null) return '-'
+  return `${Math.round(value * 100)}%`
 }
 
 export function formatRequestRecordMs(value?: number | null): string {
