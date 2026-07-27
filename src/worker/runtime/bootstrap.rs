@@ -80,11 +80,6 @@ pub(super) async fn build_admin_state(
     )
     .await?;
     let usage_retention = db::get_usage_retention(&pool).await?;
-    if let Err(err) =
-        db::prune_usage_events(&pool, i64::from(usage_retention.metadata_retention_days)).await
-    {
-        warn!(error = %err, "failed to prune usage events");
-    }
     let raw_payload_store = match crate::raw_payload_store::RawPayloadStore::from_config(config)? {
         Some(store) => Some(Arc::new(store)),
         None if usage_retention.raw_backend == "object_store" => {
