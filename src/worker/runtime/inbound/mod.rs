@@ -1,3 +1,4 @@
+mod cancellation;
 mod mcp;
 
 use super::{
@@ -111,10 +112,12 @@ pub(super) async fn handle_relay_bridge_message(
             .await;
         }
         BridgeMessage::RequestCancel(cancel) => {
-            cancel_request(
+            cancellation::cancel_request(
                 &services.runtime_state.pending_requests,
                 &services.runtime_state.request_cancellations,
+                services.admin_state(),
                 &cancel.request_id,
+                &cancel.reason,
             )
             .await;
         }
@@ -200,10 +203,12 @@ pub(super) async fn handle_relay_bridge_message(
             .await;
         }
         BridgeMessage::McpRequestCancel(cancel) => {
-            cancel_request(
+            cancellation::cancel_request(
                 &services.runtime_state.pending_mcp_requests,
                 &services.runtime_state.mcp_request_cancellations,
+                services.admin_state(),
                 &cancel.request_id,
+                &cancel.reason,
             )
             .await;
         }
@@ -287,23 +292,6 @@ async fn finish_request_transfer(
         && let Some(end_tx) = pending.end_tx.take()
     {
         let _ = end_tx.send(stats);
-    }
-}
-
-async fn cancel_request(
-    pending_requests: &std::sync::Arc<
-        tokio::sync::Mutex<std::collections::HashMap<String, PendingIncomingRequest>>,
-    >,
-    cancellations: &std::sync::Arc<
-        tokio::sync::Mutex<std::collections::HashMap<String, RequestCancellation>>,
-    >,
-    request_id: &str,
-) {
-    if let Some(pending) = pending_requests.lock().await.remove(request_id) {
-        pending.cancellation.cancel();
-    }
-    if let Some(cancellation) = cancellations.lock().await.remove(request_id) {
-        cancellation.cancel();
     }
 }
 

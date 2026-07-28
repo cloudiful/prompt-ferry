@@ -239,6 +239,7 @@ pub(super) async fn abort_stale_requests_once(admin_state: Option<&AdminState>) 
             Ok(count) if count > 0 => {
                 warn!(
                     count,
+                    abort_reason = "valkey_lease_missing",
                     "aborted active request records missing valkey leases"
                 );
             }
@@ -251,7 +252,11 @@ pub(super) async fn abort_stale_requests_once(admin_state: Option<&AdminState>) 
     }
     match db::abort_stale_request_records(&state.lease_pool).await {
         Ok(count) if count > 0 => {
-            warn!(count, "aborted stale leased request records");
+            warn!(
+                count,
+                abort_reason = "worker_lease_expired",
+                "aborted stale leased request records"
+            );
         }
         Ok(_) => {}
         Err(err) => {
@@ -282,7 +287,11 @@ pub(super) fn spawn_stale_request_reconciler(
                     if state.replay_cache.enabled() {
                         match abort_requests_missing_valkey_leases(&state).await {
                             Ok(count) if count > 0 => {
-                                warn!(count, "background-aborted request records missing valkey leases");
+                                warn!(
+                                    count,
+                                    abort_reason = "valkey_lease_missing",
+                                    "background-aborted request records missing valkey leases"
+                                );
                             }
                             Ok(_) => {}
                             Err(err) => {
@@ -293,7 +302,11 @@ pub(super) fn spawn_stale_request_reconciler(
                     }
                     match db::abort_stale_request_records(&state.lease_pool).await {
                         Ok(count) if count > 0 => {
-                            warn!(count, "background-aborted stale leased request records");
+                            warn!(
+                                count,
+                                abort_reason = "worker_lease_expired",
+                                "background-aborted stale leased request records"
+                            );
                         }
                         Ok(_) => {}
                         Err(err) => {

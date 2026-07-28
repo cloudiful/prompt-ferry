@@ -21,7 +21,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use std::{net::IpAddr, time::Duration};
 use tokio::sync::{mpsc, oneshot};
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 pub(super) async fn proxy_mcp_root(
@@ -169,10 +169,24 @@ async fn proxy_mcp_request(
     let start = match tokio::time::timeout(timeout, start_rx).await {
         Ok(Ok(Ok(start))) => start,
         Ok(Ok(Err(err))) => {
+            warn!(
+                category = "mcp_bridge_diag",
+                request_id = %request_id,
+                worker_id = selection.worker_id,
+                status = err.status,
+                error_code = %err.code,
+                "relay received an MCP response error before streaming"
+            );
             remove_mcp_pending(&state, &request_id).await;
             return bridge_error_response(err);
         }
         Ok(Err(_)) => {
+            warn!(
+                category = "mcp_bridge_diag",
+                request_id = %request_id,
+                worker_id = selection.worker_id,
+                "MCP response start channel closed before a response was received"
+            );
             remove_mcp_pending(&state, &request_id).await;
             return crate::auth::error_response(
                 StatusCode::BAD_GATEWAY,
@@ -181,6 +195,13 @@ async fn proxy_mcp_request(
             );
         }
         Err(_) => {
+            warn!(
+                category = "mcp_bridge_diag",
+                request_id = %request_id,
+                worker_id = selection.worker_id,
+                timeout_seconds = timeout.as_secs(),
+                "timed out waiting for MCP response start"
+            );
             remove_mcp_pending(&state, &request_id).await;
             return crate::auth::error_response(
                 StatusCode::GATEWAY_TIMEOUT,
@@ -194,6 +215,7 @@ async fn proxy_mcp_request(
     info!(
         category = "mcp_diag",
         peer_ip = %peer_ip,
+        worker_id = selection.worker_id,
         method = %method,
         path = %request_path,
         server_name = server_name.as_deref().unwrap_or("-"),

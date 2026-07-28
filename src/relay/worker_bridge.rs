@@ -109,6 +109,10 @@ async fn handle_worker_socket(state: AppState, socket: WebSocket) {
     write_task.abort();
     state.inner.workers.lock().await.remove(&worker_id);
     state.inner.worker_loads.lock().await.remove(&worker_id);
+    warn!(
+        category = "mcp_bridge_diag",
+        worker_id, "worker bridge connection ended; pending requests will be failed"
+    );
     fail_pending_for_worker(
         &state,
         worker_id,
@@ -241,6 +245,41 @@ mod tests {
         let err = start_rx.await.unwrap().unwrap_err();
         assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE.as_u16());
         assert_eq!(err.code, "approval_interrupted");
+    }
+
+    #[tokio::test]
+    async fn fail_pending_for_worker_reports_mcp_disconnect_to_waiting_requests() {
+        let state = test_state();
+        let (start_tx, start_rx) = oneshot::channel();
+        let (chunk_tx, _chunk_rx) = mpsc::channel(1);
+        let (worker, _worker_rx) = mpsc::channel(1);
+        state.inner.pending_mcp.lock().await.insert(
+            "mcp-req-1".to_string(),
+            super::super::state::PendingMcpRequest {
+                start_tx: Some(start_tx),
+                chunk_tx,
+                worker_id: 3,
+                worker,
+                queued_bytes: 0,
+            },
+        );
+
+        fail_pending_for_worker(
+            &state,
+            3,
+            ResponseError {
+                request_id: String::new(),
+                status: StatusCode::BAD_GATEWAY.as_u16(),
+                code: "worker_disconnected".to_string(),
+                message: "worker disconnected".to_string(),
+            },
+        )
+        .await;
+
+        let err = start_rx.await.unwrap().unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_GATEWAY.as_u16());
+        assert_eq!(err.code, "worker_disconnected");
+        assert_eq!(err.request_id, "mcp-req-1");
     }
 
     #[tokio::test]

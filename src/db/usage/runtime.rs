@@ -55,6 +55,13 @@ pub async fn delete_request_record_lease(pool: &PgPool, request_id: Uuid) -> Res
     Ok(result.rows_affected())
 }
 
+pub async fn abort_request_record(pool: &PgPool, request_id: Uuid, reason: &str) -> Result<u64> {
+    let result = sqlx::query_file!("src/sql/usage/abort_request_record.sql", request_id, reason,)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
+}
+
 pub async fn abort_stale_request_records(pool: &PgPool) -> Result<u64> {
     let result = sqlx::query_file!("src/sql/usage/abort_stale_request_records.sql")
         .execute(pool)

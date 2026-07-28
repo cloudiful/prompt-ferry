@@ -67,8 +67,9 @@ pub use replay_snapshots::{
     insert_replay_snapshot, latest_replay_snapshot, replay_snapshot_before_or_at_seq,
 };
 pub use runtime::{
-    abort_request_records_by_ids, abort_stale_request_records, allocate_conversation_seq,
-    delete_request_record_lease, find_request_record_tool_calls_by_call_ids,
-    heartbeat_request_record_lease, list_active_request_record_ids, list_request_record_tool_calls,
+    abort_request_record, abort_request_records_by_ids, abort_stale_request_records,
+    allocate_conversation_seq, delete_request_record_lease,
+    find_request_record_tool_calls_by_call_ids, heartbeat_request_record_lease,
+    list_active_request_record_ids, list_request_record_tool_calls,
     upsert_request_record_tool_call,
 };

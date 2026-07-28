@@ -14,7 +14,7 @@ SET
     request_state = 'aborted',
     ok = FALSE,
     error_code = COALESCE(rr.error_code, 'request_aborted'),
-    error_message = COALESCE(rr.error_message, 'request processing interrupted before completion'),
+    error_message = COALESCE(rr.error_message, 'request Valkey lease was missing before completion'),
     updated_at = NOW()
 FROM target
 WHERE rr.event_id = target.event_id

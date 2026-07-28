@@ -15,7 +15,10 @@ SET
     request_state = 'aborted',
     ok = FALSE,
     error_code = COALESCE(rr.error_code, 'request_aborted'),
-    error_message = COALESCE(rr.error_message, 'request processing interrupted before completion'),
+    error_message = COALESCE(
+        rr.error_message,
+        'request worker lease expired before completion; worker may have stopped or missed heartbeats'
+    ),
     updated_at = NOW()
 FROM stale
 WHERE rr.event_id = stale.event_id
