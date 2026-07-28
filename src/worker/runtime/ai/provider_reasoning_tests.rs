@@ -87,3 +87,70 @@ fn rejects_missing_reasoning_before_forwarding() {
     assert_eq!(error.code, "replay_unavailable");
     assert!(error.message.contains("missing complete reasoning"));
 }
+
+#[test]
+fn matches_tool_calls_when_json_argument_formatting_differs() {
+    let current = json!({
+        "tool_calls": [{
+            "id": "call_1",
+            "function": {
+                "name": "lookup",
+                "arguments": "{\"city\":\"Boston\",\"options\":{\"limit\":5,\"active\":true}}"
+            }
+        }]
+    });
+    let artifact = json!({
+        "tool_calls": [{
+            "id": "call_1",
+            "function": {
+                "name": "lookup",
+                "arguments": "{ \"options\": { \"active\": true, \"limit\": 5 }, \"city\": \"Boston\" }"
+            }
+        }]
+    });
+
+    assert!(tool_calls_match(&current, &artifact));
+}
+
+#[test]
+fn rejects_tool_calls_when_json_argument_value_differs() {
+    let current = json!({
+        "tool_calls": [{
+            "id": "call_1",
+            "function": {"name": "lookup", "arguments": "{\"limit\":5}"}
+        }]
+    });
+    let artifact = json!({
+        "tool_calls": [{
+            "id": "call_1",
+            "function": {"name": "lookup", "arguments": "{\"limit\":6}"}
+        }]
+    });
+
+    assert!(!tool_calls_match(&current, &artifact));
+}
+
+#[test]
+fn compares_invalid_json_arguments_as_raw_strings() {
+    let current = json!({
+        "tool_calls": [{
+            "id": "call_1",
+            "function": {"name": "lookup", "arguments": "not-json"}
+        }]
+    });
+    let same_artifact = json!({
+        "tool_calls": [{
+            "id": "call_1",
+            "function": {"name": "lookup", "arguments": "not-json"}
+        }]
+    });
+    let different_artifact = json!({
+        "tool_calls": [{
+            "id": "call_1",
+            "function": {"name": "lookup", "arguments": "still-not-json"}
+        }]
+    });
+
+    assert!(tool_calls_match(&current, &same_artifact));
+    assert!(!tool_calls_match(&current, &different_artifact));
+}

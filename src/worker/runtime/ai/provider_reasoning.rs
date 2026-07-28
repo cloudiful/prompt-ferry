@@ -206,7 +206,13 @@ fn tool_calls_match(current: &Value, artifact: &Value) -> bool {
     tool_call_signatures(current) == tool_call_signatures(artifact)
 }
 
-fn tool_call_signatures(value: &Value) -> Option<HashMap<String, (String, String)>> {
+#[derive(Debug, PartialEq, Eq)]
+enum ToolCallArguments {
+    Json(Value),
+    Raw(String),
+}
+
+fn tool_call_signatures(value: &Value) -> Option<HashMap<String, (String, ToolCallArguments)>> {
     let tool_calls = value.get("tool_calls").and_then(Value::as_array)?;
     let mut signatures = HashMap::with_capacity(tool_calls.len());
     for tool_call in tool_calls {
@@ -219,6 +225,10 @@ fn tool_call_signatures(value: &Value) -> Option<HashMap<String, (String, String
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
+        let arguments = match serde_json::from_str::<Value>(&arguments) {
+            Ok(value) => ToolCallArguments::Json(value),
+            Err(_) => ToolCallArguments::Raw(arguments),
+        };
         if signatures.insert(id, (name, arguments)).is_some() {
             return None;
         }
