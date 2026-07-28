@@ -1,4 +1,3 @@
-use super::content_maintenance::cleanup_orphan_usage_prompt_blocks;
 use super::*;
 use crate::raw_payload_store::{RawPayloadEnvelope, RawPayloadStore};
 use chrono::Duration as ChronoDuration;
@@ -27,16 +26,6 @@ pub struct RawPayloadMaintenanceReport {
     pub partitions_created: u64,
     pub raw_rows_deleted: u64,
     pub partitions_dropped: u64,
-}
-
-pub async fn prune_usage_events(pool: &PgPool, retention_days: i64) -> Result<u64> {
-    let mut tx = pool.begin().await?;
-    let result = sqlx::query_file!("src/sql/usage/prune_usage_events.sql", retention_days)
-        .execute(&mut *tx)
-        .await?;
-    cleanup_orphan_usage_prompt_blocks(&mut tx).await?;
-    tx.commit().await?;
-    Ok(result.rows_affected())
 }
 
 pub async fn run_raw_payload_maintenance(
@@ -217,47 +206,6 @@ async fn prune_raw_payload_batches(
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     Ok(total)
-}
-
-pub async fn clear_usage_events(
-    pool: &PgPool,
-    query: RequestRecordClearQuery,
-) -> Result<(u64, u64)> {
-    let mut tx = pool.begin().await?;
-    let result = match query.scope {
-        UsageClearScope::CurrentUser => {
-            sqlx::query_file!(
-                "src/sql/usage/clear_usage_events_current_user.sql",
-                query.visible_user_id,
-                query.start_at,
-                query.end_at,
-            )
-            .execute(&mut *tx)
-            .await?
-        }
-        UsageClearScope::AllUsers => {
-            sqlx::query_file!(
-                "src/sql/usage/clear_usage_events_all_users.sql",
-                query.start_at,
-                query.end_at,
-            )
-            .execute(&mut *tx)
-            .await?
-        }
-        UsageClearScope::TargetUser => {
-            sqlx::query_file!(
-                "src/sql/usage/clear_usage_events_target_user.sql",
-                query.target_user_id,
-                query.start_at,
-                query.end_at,
-            )
-            .execute(&mut *tx)
-            .await?
-        }
-    };
-    let deleted_prompt_blocks = cleanup_orphan_usage_prompt_blocks(&mut tx).await?;
-    tx.commit().await?;
-    Ok((result.rows_affected(), deleted_prompt_blocks))
 }
 
 async fn try_acquire_raw_request_prune_lock(

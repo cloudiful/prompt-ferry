@@ -12,6 +12,7 @@ mod types;
 mod usage;
 mod users;
 
+pub use approvals::run_approval_retention_maintenance;
 pub use approvals::{
     abort_pending_approval_requests, approval_request_status, create_approval_request,
     create_flagged_approval_request, get_approval_request, list_approval_requests_page,
@@ -57,12 +58,14 @@ pub use settings::{
 pub use types::*;
 pub(crate) use usage::get_visible_usage_event_detail_with_raw_store;
 pub(crate) use usage::run_raw_payload_maintenance_with_store;
+pub use usage::run_usage_metadata_maintenance;
 pub use usage::{
-    OverviewBucket, OverviewWindow, RawPayloadMaintenanceReport, RequestRecordStateInput,
-    UsageContentMaintenanceReport, abort_request_records_by_ids, abort_stale_request_records,
-    allocate_conversation_seq, clear_usage_events, decode_prompt_message_refs,
-    delete_request_record_lease, find_request_record_tool_calls_by_call_ids,
-    get_conversation_redaction_session, get_replayable_usage_event_by_provider_conversation_key,
+    OverviewBucket, OverviewWindow, RawPayloadMaintenanceReport, RequestRecordClearReport,
+    RequestRecordPruneReport, RequestRecordStateInput, UsageContentMaintenanceReport,
+    abort_request_records_by_ids, abort_stale_request_records, allocate_conversation_seq,
+    clear_usage_events, decode_prompt_message_refs, delete_request_record_lease,
+    find_request_record_tool_calls_by_call_ids, get_conversation_redaction_session,
+    get_replayable_usage_event_by_provider_conversation_key,
     get_replayable_usage_event_locator_by_provider_conversation_key, get_usage_assistant_artifacts,
     get_usage_event_by_provider_conversation_key, get_usage_event_by_provider_response_id,
     get_usage_event_by_request_id, get_usage_event_chain_entry,

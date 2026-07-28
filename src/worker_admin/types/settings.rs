@@ -100,8 +100,14 @@ pub struct UsageRetentionSettings {
     pub metadata_retention_days: i32,
     pub content_retention_days: i32,
     pub raw_retention_days: i32,
+    #[serde(default = "default_approval_retention_days")]
+    pub approval_retention_days: i32,
     pub replay_enabled: bool,
     pub raw_backend: String,
+}
+
+fn default_approval_retention_days() -> i32 {
+    90
 }
 
 impl Default for UsageRetentionSettings {
@@ -110,6 +116,7 @@ impl Default for UsageRetentionSettings {
             metadata_retention_days: 90,
             content_retention_days: 3,
             raw_retention_days: 3,
+            approval_retention_days: default_approval_retention_days(),
             replay_enabled: true,
             raw_backend: "object_store".to_string(),
         }
@@ -121,6 +128,7 @@ impl UsageRetentionSettings {
         self.metadata_retention_days = self.metadata_retention_days.max(1);
         self.content_retention_days = self.content_retention_days.max(1);
         self.raw_retention_days = self.raw_retention_days.max(1);
+        self.approval_retention_days = self.approval_retention_days.max(1);
         if !matches!(self.raw_backend.trim(), "postgres" | "object_store") {
             self.raw_backend = "postgres".to_string();
         } else {
@@ -149,6 +157,8 @@ impl From<RelayIpPolicy> for RelayIpPolicyResponse {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::UsageRetentionSettings;
 
     #[test]
@@ -157,6 +167,7 @@ mod tests {
             metadata_retention_days: 0,
             content_retention_days: -1,
             raw_retention_days: 0,
+            approval_retention_days: 0,
             replay_enabled: true,
             raw_backend: " unsupported ".to_string(),
         }
@@ -165,6 +176,7 @@ mod tests {
         assert_eq!(normalized.metadata_retention_days, 1);
         assert_eq!(normalized.content_retention_days, 1);
         assert_eq!(normalized.raw_retention_days, 1);
+        assert_eq!(normalized.approval_retention_days, 1);
         assert_eq!(normalized.raw_backend, "postgres");
     }
 
@@ -177,5 +189,19 @@ mod tests {
         .normalized();
 
         assert_eq!(normalized.raw_backend, "object_store");
+    }
+
+    #[test]
+    fn legacy_usage_retention_defaults_approval_days() {
+        let settings: UsageRetentionSettings = serde_json::from_value(json!({
+            "metadata_retention_days": 90,
+            "content_retention_days": 3,
+            "raw_retention_days": 3,
+            "replay_enabled": true,
+            "raw_backend": "object_store"
+        }))
+        .expect("legacy usage retention should deserialize");
+
+        assert_eq!(settings.approval_retention_days, 90);
     }
 }

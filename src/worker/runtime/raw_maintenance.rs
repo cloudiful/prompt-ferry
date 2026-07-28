@@ -246,17 +246,19 @@ async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<(
         Ok(None) => {}
         Err(error) => warn!(error = %error, "usage content maintenance failed"),
     }
-    match db::prune_usage_events(
+    match db::run_usage_metadata_maintenance(
         &dependencies.pool,
         i64::from(retention.metadata_retention_days),
     )
     .await
     {
-        Ok(deleted) => info!(
-            metadata_rows_deleted = deleted,
+        Ok(Some(report)) => info!(
+            metadata_rows_deleted = report.deleted,
+            protected_by_billing = report.protected_by_billing,
             metadata_retention_days = retention.metadata_retention_days,
             "usage metadata maintenance completed"
         ),
+        Ok(None) => {}
         Err(error) => warn!(error = %error, "usage metadata maintenance failed"),
     }
     let raw_store = if retention.raw_backend == "object_store" {
@@ -279,7 +281,23 @@ async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<(
             "raw payload maintenance completed"
         ),
         Ok(None) => {}
-        Err(error) => return Err(error),
+        Err(error) => {
+            warn!(error = %error, "raw payload maintenance failed");
+        }
+    }
+    match db::run_approval_retention_maintenance(
+        &dependencies.pool,
+        i64::from(retention.approval_retention_days),
+    )
+    .await
+    {
+        Ok(Some(deleted)) => info!(
+            approval_rows_deleted = deleted,
+            approval_retention_days = retention.approval_retention_days,
+            "approval retention maintenance completed"
+        ),
+        Ok(None) => {}
+        Err(error) => warn!(error = %error, "approval retention maintenance failed"),
     }
     Ok(())
 }

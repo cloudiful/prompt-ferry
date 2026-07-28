@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_approval_requests_resolved_created_at;

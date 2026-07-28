@@ -4,6 +4,7 @@ import type { MessageKey } from '@/i18n'
 import type {
   RequestContentLoggingMode,
   RequestContentLoggingResponse,
+  UsageRetentionSettings,
 } from '@/generated/admin-api'
 import StreamDeltaBatchingFields from '@/components/shared/StreamDeltaBatchingFields.vue'
 import type { StreamDeltaBatchingForm } from '@/models'
@@ -17,6 +18,9 @@ const requestContentLogging = defineModel<RequestContentLoggingResponse>(
   'requestContentLogging',
   { required: true },
 )
+const usageRetention = defineModel<UsageRetentionSettings>('usageRetention', {
+  required: true,
+})
 const streamDeltaBatching = defineModel<StreamDeltaBatchingForm>(
   'streamDeltaBatching',
   { required: true },
@@ -78,6 +82,16 @@ const requestContentLoggingModeOptions = computed(() =>
               size="sm"
               :min="1"
               :max="30"
+              :use-grouping="false"
+            />
+          </label>
+
+          <label class="grid gap-1.5">
+            <span class="text-xs text-muted">{{ t('approvalRetentionDays') }}</span>
+            <UInputNumber
+              v-model="usageRetention.approval_retention_days"
+              size="sm"
+              :min="1"
               :use-grouping="false"
             />
           </label>

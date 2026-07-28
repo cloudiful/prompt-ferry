@@ -25,6 +25,7 @@ const activeSection = computed(() =>
 )
 const requestAutosaveReady = { value: false }
 let requestContentLoggingSnapshot = ''
+let usageRetentionSnapshot = ''
 let streamDeltaBatchingSnapshot = ''
 let modelRouteWhitelistSnapshot = ''
 
@@ -34,6 +35,7 @@ function serialize(value: unknown): string {
 
 function syncRequestSnapshots(): void {
   requestContentLoggingSnapshot = serialize(settingsStore.requestContentLogging)
+  usageRetentionSnapshot = serialize(settingsStore.usageRetention)
   streamDeltaBatchingSnapshot = serialize(settingsStore.streamDeltaBatching)
   modelRouteWhitelistSnapshot = serialize(settingsStore.modelRouteWhitelist)
 }
@@ -131,6 +133,16 @@ const streamDeltaBatchingAutosave = createAutosaveController({
   save: () => settingsStore.saveStreamDeltaBatching(),
 })
 
+const usageRetentionAutosave = createAutosaveController({
+  delayMs: 250,
+  getSnapshot: () => serialize(settingsStore.usageRetention),
+  getSavedSnapshot: () => usageRetentionSnapshot,
+  setSavedSnapshot: (value) => {
+    usageRetentionSnapshot = value
+  },
+  save: () => settingsStore.saveUsageRetention(),
+})
+
 const modelRouteWhitelistAutosave = createAutosaveController({
   delayMs: 150,
   getSnapshot: () => serialize(settingsStore.modelRouteWhitelist),
@@ -179,6 +191,14 @@ onMounted(async () => {
 })
 
 watch(
+  () => settingsStore.usageRetention,
+  () => {
+    usageRetentionAutosave.schedule()
+  },
+  { deep: true },
+)
+
+watch(
   () => settingsStore.requestContentLogging,
   () => {
     requestContentLoggingAutosave.schedule()
@@ -204,6 +224,7 @@ watch(
 
 onBeforeUnmount(() => {
   requestContentLoggingAutosave.dispose()
+  usageRetentionAutosave.dispose()
   streamDeltaBatchingAutosave.dispose()
   modelRouteWhitelistAutosave.dispose()
 })
@@ -223,6 +244,7 @@ onBeforeUnmount(() => {
     <SettingsRequestsTab
       v-else-if="session.isAdmin && activeSection === 'requests'"
       v-model:request-content-logging="settingsStore.requestContentLogging"
+      v-model:usage-retention="settingsStore.usageRetention"
       v-model:stream-delta-batching="settingsStore.streamDeltaBatching"
       v-model:model-route-whitelist="settingsStore.modelRouteWhitelist"
       :t="t"

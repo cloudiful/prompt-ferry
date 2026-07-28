@@ -5352,8 +5352,13 @@ components:
       type: object
       required:
       - deleted
+      - protected_by_billing
       properties:
         deleted:
+          type: integer
+          format: int64
+          minimum: 0
+        protected_by_billing:
           type: integer
           format: int64
           minimum: 0
@@ -5513,12 +5518,17 @@ components:
       required:
       - deleted
       - deleted_prompt_blocks
+      - protected_by_billing
       properties:
         deleted:
           type: integer
           format: int64
           minimum: 0
         deleted_prompt_blocks:
+          type: integer
+          format: int64
+          minimum: 0
+        protected_by_billing:
           type: integer
           format: int64
           minimum: 0
@@ -5679,6 +5689,10 @@ components:
     UsageRetentionSettings:
       type: object
       properties:
+        approval_retention_days:
+          type: integer
+          format: int32
+          default: 90
         content_retention_days:
           type: integer
           format: int32

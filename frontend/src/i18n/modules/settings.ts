@@ -1,6 +1,7 @@
 export const settingsMessages = {
   'zh-CN': {
     allowedCidrs: '允许访问 CIDR',
+    approvalRetentionDays: '审批历史保留天数',
     allowedCidrsHelp: '留空表示不限制；每行一条 IP 或 CIDR。',
     allowedCidrsPlaceholder: '10.0.0.0/24\n192.168.1.10',
     bridgeStatus: '桥接状态',
@@ -68,6 +69,7 @@ export const settingsMessages = {
   },
   'en-US': {
     allowedCidrs: 'Allowed CIDRs',
+    approvalRetentionDays: 'Approval history retention days',
     allowedCidrsHelp: 'Leave empty to allow all; one IP or CIDR per line.',
     allowedCidrsPlaceholder: '10.0.0.0/24\n192.168.1.10',
     bridgeStatus: 'Bridge status',

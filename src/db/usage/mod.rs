@@ -18,6 +18,7 @@ mod cleanup;
 mod content_maintenance;
 mod detail;
 mod insert;
+mod metadata_maintenance;
 mod overview;
 mod prompt_blocks;
 mod quality;
@@ -31,10 +32,7 @@ pub use artifacts::list_usage_events_missing_assistant_artifacts;
 pub use artifacts::{get_usage_assistant_artifacts, upsert_usage_assistant_artifact};
 pub use buckets::usage_buckets;
 pub(crate) use cleanup::run_raw_payload_maintenance_with_store;
-pub use cleanup::{
-    RawPayloadMaintenanceReport, clear_usage_events, prune_usage_events,
-    run_raw_payload_maintenance,
-};
+pub use cleanup::{RawPayloadMaintenanceReport, run_raw_payload_maintenance};
 pub use content_maintenance::{UsageContentMaintenanceReport, run_usage_content_maintenance};
 pub(crate) use detail::get_visible_usage_event_detail_with_raw_store;
 pub use detail::{
@@ -52,6 +50,10 @@ pub use detail::{
 pub use insert::{
     RequestRecordStateInput, record_request_record, record_request_record_with_raw_store,
     record_request_state,
+};
+pub use metadata_maintenance::{
+    RequestRecordClearReport, RequestRecordPruneReport, clear_usage_events, prune_usage_events,
+    run_usage_metadata_maintenance,
 };
 pub use overview::{OverviewBucket, OverviewWindow, request_records_overview};
 pub use prompt_blocks::{

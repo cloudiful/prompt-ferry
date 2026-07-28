@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*)::BIGINT AS \"count!\"\nFROM request_records rr\nWHERE rr.created_at < $1::TIMESTAMPTZ\n  AND EXISTS (\n      SELECT 1\n      FROM usage_charges charge\n      WHERE charge.event_id = rr.event_id\n  );\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9e6f4d23ee7ead3a61bdf1c1b43fb2d991ef7901d8465dfccee5e9a02a1f4beb"
+}

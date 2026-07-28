@@ -109,13 +109,6 @@ pub(super) async fn build_admin_state(
             "aborted stale pending approval requests on startup"
         );
     }
-    let stale_request_count = db::abort_stale_request_records(&lease_pool).await?;
-    if stale_request_count > 0 {
-        warn!(
-            count = stale_request_count,
-            "aborted stale leased request records on startup"
-        );
-    }
     let mcp_catalog_cache = crate::mcp::McpCatalogCache::from_config(config).await;
     let mcp_catalog_service =
         crate::mcp::McpCatalogService::new(pool.clone(), mcp_catalog_cache.clone());

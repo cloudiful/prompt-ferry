@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM request_record_leases lease\nWHERE NOT EXISTS (\n    SELECT 1\n    FROM request_records rr\n    WHERE rr.request_id = lease.request_id\n);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "f09e03fe0b86ca3df6b0034dbc027468de3acc18f36436ca14efb7de67c46c36"
+}

@@ -353,9 +353,10 @@ pub(super) async fn clear_usage_events(
         Err(response) => return *response,
     };
     match db::clear_usage_events(&state.pool, clear_query).await {
-        Ok((deleted, deleted_prompt_blocks)) => Json(UsageClearResponse {
-            deleted,
-            deleted_prompt_blocks,
+        Ok(report) => Json(UsageClearResponse {
+            deleted: report.deleted,
+            deleted_prompt_blocks: report.deleted_prompt_blocks,
+            protected_by_billing: report.protected_by_billing,
         })
         .into_response(),
         Err(err) => internal(&state, err),
@@ -371,7 +372,11 @@ pub(super) async fn prune_usage_events(
     }
     let retention_days = state.usage_retention.read().await.metadata_retention_days;
     match db::prune_usage_events(&state.pool, i64::from(retention_days)).await {
-        Ok(deleted) => Json(UsagePruneResponse { deleted }).into_response(),
+        Ok(report) => Json(UsagePruneResponse {
+            deleted: report.deleted,
+            protected_by_billing: report.protected_by_billing,
+        })
+        .into_response(),
         Err(err) => internal(&state, err),
     }
 }

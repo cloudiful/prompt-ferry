@@ -87,12 +87,14 @@ pub struct RequestRecordSeriesQuery {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RequestRecordPruneResponse {
     pub deleted: u64,
+    pub protected_by_billing: u64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RequestRecordsClearResponse {
     pub deleted: u64,
     pub deleted_prompt_blocks: u64,
+    pub protected_by_billing: u64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

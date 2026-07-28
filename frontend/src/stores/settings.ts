@@ -6,11 +6,13 @@ import {
   getRequestContentLogging,
   getStreamDeltaBatching,
   getRelayIpWhitelist,
+  getUsageRetention,
   setLlmReviewSetting,
   setModelRouteWhitelist,
   setRequestContentLogging,
   setStreamDeltaBatching,
   setRelayIpWhitelist,
+  setUsageRetention,
 } from '../generated/admin-api'
 import type {
   LlmReviewSettings,
@@ -19,6 +21,7 @@ import type {
   RequestContentLoggingResponse,
   RelayIpPolicyResponse,
   StreamDeltaBatchingSettings,
+  UsageRetentionSettings,
 } from '../generated/admin-api'
 import {
   ensureLlmReviewDefaults,
@@ -55,6 +58,14 @@ export const useSettingsStore = defineStore('settings', () => {
     mode: 'off',
     raw_retention_days: 3,
   })
+  const usageRetention = ref<UsageRetentionSettings>({
+    metadata_retention_days: 90,
+    content_retention_days: 3,
+    raw_retention_days: 3,
+    approval_retention_days: 90,
+    replay_enabled: true,
+    raw_backend: 'object_store',
+  })
   const streamDeltaBatching = ref<StreamDeltaBatchingForm>({
     enabled: false,
     flush_window_ms: 50,
@@ -85,12 +96,14 @@ export const useSettingsStore = defineStore('settings', () => {
         relayPolicy,
         routeWhitelist,
         reviewSettings,
+        retention,
       ] = await Promise.all([
         getRequestContentLogging<true>(withData()),
         getStreamDeltaBatching<true>(withData()),
         getRelayIpWhitelist<true>(withData()),
         getModelRouteWhitelist<true>(withData()),
         getLlmReviewSetting<true>(withData()),
+        getUsageRetention<true>(withData()),
       ])
       requestContentLogging.value = expectData(contentLogging)
       streamDeltaBatching.value = streamDeltaBatchingToForm(
@@ -99,6 +112,9 @@ export const useSettingsStore = defineStore('settings', () => {
       relayIpWhitelist.value = relayPolicyToForm(expectData(relayPolicy))
       modelRouteWhitelist.value = expectData(routeWhitelist)
       llmReview.value = ensureLlmReviewDefaults(expectData(reviewSettings))
+      usageRetention.value = expectData(retention)
+      requestContentLogging.value.raw_retention_days =
+        usageRetention.value.raw_retention_days ?? requestContentLogging.value.raw_retention_days
       llmReviewWebhookHeadersText.value = webhookHeadersToText(
         llmReview.value.webhook?.extra_headers ?? {},
       )
@@ -108,11 +124,21 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function saveRequestContentLogging(): Promise<void> {
-    requestContentLogging.value = expectData(
+    const response = expectData(
       await setRequestContentLogging<true>(
         withData({ body: requestContentLogging.value }),
       ),
     )
+    requestContentLogging.value = response
+    usageRetention.value.raw_retention_days = response.raw_retention_days
+  }
+
+  async function saveUsageRetention(): Promise<void> {
+    usageRetention.value = expectData(
+      await setUsageRetention<true>(withData({ body: usageRetention.value })),
+    )
+    requestContentLogging.value.raw_retention_days =
+      usageRetention.value.raw_retention_days ?? requestContentLogging.value.raw_retention_days
   }
 
   async function saveStreamDeltaBatching(): Promise<void> {
@@ -180,5 +206,7 @@ export const useSettingsStore = defineStore('settings', () => {
     saveRequestContentLogging,
     saveStreamDeltaBatching,
     streamDeltaBatching,
+    usageRetention,
+    saveUsageRetention,
   }
 })

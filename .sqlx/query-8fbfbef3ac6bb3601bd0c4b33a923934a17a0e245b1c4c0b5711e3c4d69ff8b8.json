@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH candidates AS MATERIALIZED (\n    SELECT approval_id\n    FROM approval_requests\n    WHERE approval_status <> 'pending'\n      AND created_at < $1::TIMESTAMPTZ\n    ORDER BY created_at ASC, approval_id ASC\n    LIMIT $2::BIGINT\n    FOR UPDATE SKIP LOCKED\n), deleted AS (\n    DELETE FROM approval_requests approvals\n    USING candidates\n    WHERE approvals.approval_id = candidates.approval_id\n    RETURNING approvals.approval_id\n)\nSELECT COUNT(*)::BIGINT AS \"deleted_count!\"\nFROM deleted;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "deleted_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8fbfbef3ac6bb3601bd0c4b33a923934a17a0e245b1c4c0b5711e3c4d69ff8b8"
+}

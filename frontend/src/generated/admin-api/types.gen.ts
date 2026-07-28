@@ -1024,6 +1024,7 @@ export type RequestRecordPage = {
 
 export type RequestRecordPruneResponse = {
     deleted: number;
+    protected_by_billing: number;
 };
 
 export type RequestRecordRedactionSummary = {
@@ -1074,6 +1075,7 @@ export type RequestRecordsClearRequest = {
 export type RequestRecordsClearResponse = {
     deleted: number;
     deleted_prompt_blocks: number;
+    protected_by_billing: number;
 };
 
 export type RequestToolCallStatus = 'emitted' | 'output_received' | 'failed' | 'skipped';
@@ -1131,6 +1133,7 @@ export type UpdateClientKeyRequest = {
 export type UsageClearScope = 'current_user' | 'all_users' | 'target_user';
 
 export type UsageRetentionSettings = {
+    approval_retention_days?: number;
     content_retention_days?: number;
     metadata_retention_days?: number;
     raw_backend?: string;

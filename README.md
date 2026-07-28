@@ -24,6 +24,10 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 - MCP aggregation for HTTP and stdio servers, request usage and replay, retention, approval, and billing.
 - TLS, mutual TLS, and application-layer encryption for relay-worker traffic.
 
+Managed mode retains request metadata for 90 days, normalized content for 3 days,
+raw payloads for 3 days, and resolved approval history for 90 days by default.
+Pending approvals are never removed by approval retention.
+
 ## Compatibility
 
 - Responses `input_image` parts are converted to standard Chat `image_url` parts

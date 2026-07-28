@@ -5,6 +5,7 @@ use std::sync::{
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use futures::{StreamExt, TryStreamExt};
 use tokio::{
     sync::Notify,
     task::JoinHandle,
@@ -265,6 +266,10 @@ pub(super) fn spawn_stale_request_reconciler(
 ) -> Option<JoinHandle<()>> {
     let state = admin_state?.clone();
     Some(tokio::spawn(async move {
+        tokio::select! {
+            _ = control.wait_for_shutdown() => return,
+            _ = time::sleep(Duration::from_secs(super::STALE_REQUEST_SWEEP_SECONDS as u64)) => {}
+        }
         let mut interval = time::interval(Duration::from_secs(
             super::STALE_REQUEST_SWEEP_SECONDS as u64,
         ));
@@ -303,16 +308,24 @@ pub(super) fn spawn_stale_request_reconciler(
 
 async fn abort_requests_missing_valkey_leases(state: &AdminState) -> anyhow::Result<u64> {
     let request_ids = db::list_active_request_record_ids(&state.lease_pool).await?;
-    let mut missing = Vec::new();
-    for request_id in request_ids {
-        if !state
-            .replay_cache
-            .request_lease_exists(request_id)
-            .await?
-            .unwrap_or(false)
-        {
-            missing.push(request_id);
+    const VALKEY_LEASE_CHECK_CONCURRENCY: usize = 32;
+    let replay_cache = state.replay_cache.clone();
+    let checked = futures::stream::iter(request_ids.into_iter().map(|request_id| {
+        let replay_cache = replay_cache.clone();
+        async move {
+            let exists = replay_cache
+                .request_lease_exists(request_id)
+                .await?
+                .unwrap_or(false);
+            Ok::<_, anyhow::Error>((request_id, exists))
         }
-    }
+    }))
+    .buffer_unordered(VALKEY_LEASE_CHECK_CONCURRENCY)
+    .try_collect::<Vec<_>>()
+    .await?;
+    let missing = checked
+        .into_iter()
+        .filter_map(|(request_id, exists)| (!exists).then_some(request_id))
+        .collect::<Vec<_>>();
     db::abort_request_records_by_ids(&state.lease_pool, &missing).await
 }
