@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.charge_id AS \"charge_id!\", c.request_id AS \"request_id!\", u.login_name AS user_login_name, c.client_key_label,\n       c.requested_model, c.upstream_model, e.name AS endpoint_name,\n       c.usage_status AS \"usage_status!\", c.pricing_status AS \"pricing_status!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'input'), 0)::BIGINT AS \"input_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_read'), 0)::BIGINT AS \"cache_read_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_write'), 0)::BIGINT AS \"cache_write_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'output'), 0)::BIGINT AS \"output_tokens!\",\n       c.provider_cost, c.customer_amount, c.adjusted_amount, c.created_at AS \"created_at!\"\nFROM usage_charges c\nLEFT JOIN users u ON u.user_id = c.user_id\nLEFT JOIN provider_endpoints e ON e.endpoint_id = c.endpoint_id\nLEFT JOIN usage_charge_lines l ON l.charge_id = c.charge_id\nWHERE ($1::BIGINT IS NULL OR c.user_id = $1)\n  AND ($2::BIGINT IS NULL OR c.client_key_id = $2)\n  AND ($3::TEXT IS NULL OR c.requested_model = $3)\n  AND ($4::UUID IS NULL OR c.endpoint_id = $4)\n  AND ($5::TEXT IS NULL OR c.usage_status = $5)\n  AND ($6::TEXT IS NULL OR c.pricing_status = $6)\n  AND ($7::UUID IS NULL OR c.request_id = $7)\n  AND ($8::TIMESTAMPTZ IS NULL OR c.created_at >= $8)\n  AND ($9::TIMESTAMPTZ IS NULL OR c.created_at < $9)\nGROUP BY c.charge_id, u.login_name, e.name\nORDER BY c.created_at ASC, c.charge_id ASC\n",
+  "query": "SELECT c.charge_id AS \"charge_id!\", c.request_id AS \"request_id!\", u.login_name AS \"user_login_name?\", c.client_key_label,\n       c.requested_model, c.upstream_model, e.name AS \"endpoint_name?\",\n       c.usage_status AS \"usage_status!\", c.pricing_status AS \"pricing_status!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'input'), 0)::BIGINT AS \"input_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_read'), 0)::BIGINT AS \"cache_read_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_write'), 0)::BIGINT AS \"cache_write_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'output'), 0)::BIGINT AS \"output_tokens!\",\n       c.provider_cost, c.customer_amount, c.adjusted_amount, c.created_at AS \"created_at!\"\nFROM usage_charges c\nLEFT JOIN users u ON u.user_id = c.user_id\nLEFT JOIN provider_endpoints e ON e.endpoint_id = c.endpoint_id\nLEFT JOIN usage_charge_lines l ON l.charge_id = c.charge_id\nWHERE ($1::BIGINT IS NULL OR c.user_id = $1)\n  AND ($2::BIGINT IS NULL OR c.client_key_id = $2)\n  AND ($3::TEXT IS NULL OR c.requested_model = $3)\n  AND ($4::UUID IS NULL OR c.endpoint_id = $4)\n  AND ($5::TEXT IS NULL OR c.usage_status = $5)\n  AND ($6::TEXT IS NULL OR c.pricing_status = $6)\n  AND ($7::UUID IS NULL OR c.request_id = $7)\n  AND ($8::TIMESTAMPTZ IS NULL OR c.created_at >= $8)\n  AND ($9::TIMESTAMPTZ IS NULL OR c.created_at < $9)\nGROUP BY c.charge_id, u.login_name, e.name\nORDER BY c.created_at ASC, c.charge_id ASC\n",
   "describe": {
     "columns": [
       {
@@ -27,7 +27,7 @@
       },
       {
         "ordinal": 2,
-        "name": "user_login_name",
+        "name": "user_login_name?",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +71,7 @@
       },
       {
         "ordinal": 6,
-        "name": "endpoint_name",
+        "name": "endpoint_name?",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -204,5 +204,5 @@
       false
     ]
   },
-  "hash": "ed541a6b406638e9cef53a40edc5483275a555c2e50a733aa90800b329bc2386"
+  "hash": "7605e7d55fa844587aab0add0e15a0b59748cb7d5b24c175c013c2f305d0c7e6"
 }

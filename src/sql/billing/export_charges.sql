@@ -1,5 +1,5 @@
-SELECT c.charge_id AS "charge_id!", c.request_id AS "request_id!", u.login_name AS user_login_name, c.client_key_label,
-       c.requested_model, c.upstream_model, e.name AS endpoint_name,
+SELECT c.charge_id AS "charge_id!", c.request_id AS "request_id!", u.login_name AS "user_login_name?", c.client_key_label,
+       c.requested_model, c.upstream_model, e.name AS "endpoint_name?",
        c.usage_status AS "usage_status!", c.pricing_status AS "pricing_status!",
        COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'input'), 0)::BIGINT AS "input_tokens!",
        COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_read'), 0)::BIGINT AS "cache_read_tokens!",

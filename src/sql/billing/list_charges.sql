@@ -1,6 +1,6 @@
-SELECT c.charge_id AS "charge_id!", c.event_id, c.request_id AS "request_id!", c.user_id, u.login_name AS user_login_name,
+SELECT c.charge_id AS "charge_id!", c.event_id, c.request_id AS "request_id!", c.user_id, u.login_name AS "user_login_name?",
        c.client_key_id, c.client_key_label, c.requested_model, c.upstream_model,
-       c.endpoint_id, e.name AS endpoint_name, c.endpoint_key_id,
+       c.endpoint_id, e.name AS "endpoint_name?", c.endpoint_key_id,
        c.usage_status AS "usage_status!", c.pricing_status AS "pricing_status!", c.currency AS "currency!", c.provider_cost,
        c.customer_amount, c.adjusted_amount,
        COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'input'), 0)::BIGINT AS "input_tokens!",

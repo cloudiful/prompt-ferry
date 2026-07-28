@@ -77,6 +77,36 @@ async fn reprice_unpriced_charge_uses_sale_and_cost_rules() -> anyhow::Result<()
             .all(|line| line.price_rule_id == Some(cost_rule_id))
     );
     assert_eq!(db::reprice_unpriced_charges(&schema.pool, 10).await?, 0);
+
+    sqlx::query("UPDATE usage_charges SET user_id = NULL, endpoint_id = NULL WHERE charge_id = $1")
+        .bind(charge_id)
+        .execute(&schema.pool)
+        .await?;
+    let filter = db::BillingChargeFilter {
+        user_id: None,
+        client_key_id: None,
+        requested_model: None,
+        endpoint_id: None,
+        usage_status: None,
+        pricing_status: None,
+        request_id: None,
+        start_at: None,
+        end_at: None,
+    };
+    let (_, charges) = db::list_charges(&schema.pool, &filter, 0, 10).await?;
+    let listed_charge = charges
+        .iter()
+        .find(|charge| charge.charge_id == charge_id)
+        .expect("charge with nullable joined fields should be listed");
+    assert_eq!(listed_charge.user_login_name, None);
+    assert_eq!(listed_charge.endpoint_name, None);
+    let exports = db::list_charge_export(&schema.pool, &filter).await?;
+    let exported_charge = exports
+        .iter()
+        .find(|charge| charge.charge_id == charge_id)
+        .expect("charge with nullable joined fields should be exported");
+    assert_eq!(exported_charge.user_login_name, None);
+    assert_eq!(exported_charge.endpoint_name, None);
     schema.cleanup().await?;
     Ok(())
 }
