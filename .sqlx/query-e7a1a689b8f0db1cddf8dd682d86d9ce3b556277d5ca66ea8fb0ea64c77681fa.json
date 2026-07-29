@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE request_records\nSET\n    request_state = 'aborted',\n    ok = FALSE,\n    error_code = COALESCE(error_code, 'request_aborted'),\n    error_message = COALESCE(error_message, $2),\n    updated_at = NOW()\nWHERE request_id = $1\n  AND event_kind = 'request'\n  AND request_state IN ('received', 'awaiting_approval', 'upstream_processing')\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e7a1a689b8f0db1cddf8dd682d86d9ce3b556277d5ca66ea8fb0ea64c77681fa"
+}
