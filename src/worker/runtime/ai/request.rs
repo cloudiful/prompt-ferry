@@ -1,6 +1,6 @@
 use super::super::{
     admin_proxy::process_admin_request,
-    context::{FailurePayload, RouteExecutionContext, RuntimeServices},
+    context::{FailurePayload, RouteExecutionContext, RuntimeServices, is_bridge_send_error},
     error_handling::safe_error,
     request_assembly::BufferedBridgeRequest,
 };
@@ -142,6 +142,11 @@ pub(in crate::worker::runtime) async fn process_request(
             err
         }
     };
+    let error_code = if is_bridge_send_error(&err) {
+        "relay_bridge_error"
+    } else {
+        "upstream_error"
+    };
     record_usage_event(
         services.admin_state(),
         request_ctx
@@ -165,7 +170,7 @@ pub(in crate::worker::runtime) async fn process_request(
             )
             .with_status(None, Some(false), Some(request_ctx.elapsed_ms()), None)
             .with_error(
-                Some("upstream_error".to_string()),
+                Some(error_code.to_string()),
                 Some(safe_error(&err, redact_content, request_ctx.user_id)),
                 None,
             ),

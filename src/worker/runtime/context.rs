@@ -1,18 +1,10 @@
-use std::{
-    fmt,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::Instant,
-};
+use std::time::Instant;
+
+pub(super) use super::bridge::BridgeSender;
 
 use crate::config::WorkerConfig;
 use chrono::Utc;
 use reqwest::{Client, StatusCode};
-use tokio::sync::mpsc;
-
-const BRIDGE_OUTBOUND_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ResponseLimits {
@@ -41,113 +33,10 @@ impl From<&WorkerConfig> for ResponseLimits {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct BridgeSender {
-    data_tx: mpsc::Sender<BridgeData>,
-    control_tx: mpsc::UnboundedSender<BridgeMessage>,
-    queued_bytes: Arc<AtomicUsize>,
-}
-
-pub(super) struct BridgeData {
-    pub(super) message: BridgeMessage,
-    pub(super) bytes: usize,
-}
-
-#[derive(Debug)]
-pub(super) enum BridgeSendError {
-    Closed,
-    Full,
-    Encoding(String),
-}
-
-impl fmt::Display for BridgeSendError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Closed => formatter.write_str("relay bridge channel closed"),
-            Self::Full => formatter.write_str("relay bridge outbound queue is full"),
-            Self::Encoding(error) => write!(formatter, "failed to encode bridge message: {error}"),
-        }
-    }
-}
-
-impl std::error::Error for BridgeSendError {}
-
-impl BridgeSender {
-    pub(super) fn channel() -> (
-        Self,
-        mpsc::UnboundedReceiver<BridgeMessage>,
-        mpsc::Receiver<BridgeData>,
-    ) {
-        let (control_tx, control_rx) = mpsc::unbounded_channel();
-        let (data_tx, data_rx) = mpsc::channel(256);
-        (
-            Self {
-                data_tx,
-                control_tx,
-                queued_bytes: Arc::new(AtomicUsize::new(0)),
-            },
-            control_rx,
-            data_rx,
-        )
-    }
-
-    #[cfg(test)]
-    pub(super) fn test_sender() -> Self {
-        Self::channel().0
-    }
-
-    pub(super) fn send(&self, message: BridgeMessage) -> Result<(), BridgeSendError> {
-        if is_control_message(&message) {
-            return self
-                .control_tx
-                .send(message)
-                .map_err(|_| BridgeSendError::Closed);
-        }
-        let bytes = crate::bridge_wire::encode_message(&message)
-            .map_err(|error| BridgeSendError::Encoding(error.to_string()))?
-            .len();
-        let mut current = self.queued_bytes.load(Ordering::Acquire);
-        loop {
-            let Some(next) = current.checked_add(bytes) else {
-                return Err(BridgeSendError::Full);
-            };
-            if next > BRIDGE_OUTBOUND_MAX_BYTES {
-                return Err(BridgeSendError::Full);
-            }
-            match self.queued_bytes.compare_exchange_weak(
-                current,
-                next,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => break,
-                Err(actual) => current = actual,
-            }
-        }
-        if self
-            .data_tx
-            .try_send(BridgeData { message, bytes })
-            .is_err()
-        {
-            self.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
-            return Err(BridgeSendError::Full);
-        }
-        Ok(())
-    }
-
-    pub(super) fn release_data(&self, bytes: usize) {
-        self.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
-    }
-}
-
-fn is_control_message(message: &BridgeMessage) -> bool {
-    matches!(message, BridgeMessage::Pong | BridgeMessage::Ping)
-}
 use uuid::Uuid;
 
 use crate::{
     db,
-    protocol::BridgeMessage,
     worker_admin::AdminState,
     worker_admin_types::RequestContentLoggingResponse,
     worker_usage::{UsageLog, UsageRequestMetadata},
@@ -155,6 +44,14 @@ use crate::{
 
 use super::{BufferedBridgeRequest, BufferedMcpRequest, RequestPromptLog, WorkerRuntimeState};
 use crate::mcp::targeting::McpRequestMetadata;
+
+pub(super) fn is_bridge_send_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<super::bridge::BridgeSendError>()
+            .is_some()
+    })
+}
 
 #[derive(Clone)]
 pub(super) struct RuntimeServices {

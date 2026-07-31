@@ -169,6 +169,20 @@ fn response_adapter_name(adapter: ResponseAdapter) -> &'static str {
     }
 }
 
+fn send_stream_message(
+    out_tx: &BridgeSender,
+    message: BridgeMessage,
+    stream_diag: &mut UpstreamStreamDiag,
+) -> anyhow::Result<()> {
+    out_tx.send(message).map_err(|err| {
+        let reason = err.diagnostic_reason();
+        let error_message = err.to_string();
+        stream_diag.mark_terminal(reason, Some(error_message));
+        stream_diag.finish();
+        anyhow::Error::new(err).context("failed sending response to relay")
+    })
+}
+
 pub(super) async fn forward_streaming_response(
     response: reqwest::Response,
     context: ResponseForwardContext<'_>,
@@ -232,19 +246,16 @@ pub(super) async fn forward_streaming_response(
         response_adapter,
         response_content_type.as_deref(),
     );
-    services
-        .out_tx
-        .send(BridgeMessage::ResponseStart(ResponseStart {
+    send_stream_message(
+        &services.out_tx,
+        BridgeMessage::ResponseStart(ResponseStart {
             request_id: request.request_id.clone(),
             status: status.as_u16(),
             content_type: response_content_type,
             headers: Vec::new(),
-        }))
-        .map_err(|_| {
-            stream_diag.mark_terminal("relay_response_channel_closed", None);
-            stream_diag.finish();
-            anyhow!("relay response channel closed")
-        })?;
+        }),
+        &mut stream_diag,
+    )?;
     let log_stream_adapter_error =
         |provider_response_id: Option<&str>, provider_model: Option<&str>, err: &CompatError| {
             error!(
@@ -317,16 +328,14 @@ pub(super) async fn forward_streaming_response(
      -> anyhow::Result<()> {
         for output_chunk in output_chunks {
             stream_diag.record_emitted_chunk(output_chunk.len());
-            out_tx
-                .send(BridgeMessage::ResponseChunk(ResponseChunk {
+            send_stream_message(
+                out_tx,
+                BridgeMessage::ResponseChunk(ResponseChunk {
                     request_id: request.request_id.clone(),
                     data: output_chunk,
-                }))
-                .map_err(|_| {
-                    stream_diag.mark_terminal("relay_response_channel_closed", None);
-                    stream_diag.finish();
-                    anyhow!("relay response channel closed")
-                })?;
+                }),
+                stream_diag,
+            )?;
         }
         Ok(())
     };
@@ -676,16 +685,13 @@ pub(super) async fn forward_streaming_response(
         responses_capture.finish();
     }
 
-    services
-        .out_tx
-        .send(BridgeMessage::ResponseEnd(ResponseEnd {
+    send_stream_message(
+        &services.out_tx,
+        BridgeMessage::ResponseEnd(ResponseEnd {
             request_id: request.request_id.clone(),
-        }))
-        .map_err(|_| {
-            stream_diag.mark_terminal("relay_response_channel_closed", None);
-            stream_diag.finish();
-            anyhow!("relay response channel closed")
-        })?;
+        }),
+        &mut stream_diag,
+    )?;
     stream_diag.mark_terminal("completed", None);
     stream_diag.finish();
     let captured_artifact = assistant_capture
@@ -870,41 +876,32 @@ async fn forward_buffered_non_sse_response(
     let _ = capture.observe_chunk(&restored_output);
     capture.finish();
 
-    services
-        .out_tx
-        .send(BridgeMessage::ResponseStart(ResponseStart {
+    send_stream_message(
+        &services.out_tx,
+        BridgeMessage::ResponseStart(ResponseStart {
             request_id: request.request_id.clone(),
             status: status.as_u16(),
             content_type: response_content_type,
             headers: Vec::new(),
-        }))
-        .map_err(|_| {
-            stream_diag.mark_terminal("relay_response_channel_closed", None);
-            stream_diag.finish();
-            anyhow!("relay response channel closed")
-        })?;
+        }),
+        &mut stream_diag,
+    )?;
     stream_diag.record_emitted_chunk(restored_output.len());
-    services
-        .out_tx
-        .send(BridgeMessage::ResponseChunk(ResponseChunk {
+    send_stream_message(
+        &services.out_tx,
+        BridgeMessage::ResponseChunk(ResponseChunk {
             request_id: request.request_id.clone(),
             data: restored_output,
-        }))
-        .map_err(|_| {
-            stream_diag.mark_terminal("relay_response_channel_closed", None);
-            stream_diag.finish();
-            anyhow!("relay response channel closed")
-        })?;
-    services
-        .out_tx
-        .send(BridgeMessage::ResponseEnd(ResponseEnd {
+        }),
+        &mut stream_diag,
+    )?;
+    send_stream_message(
+        &services.out_tx,
+        BridgeMessage::ResponseEnd(ResponseEnd {
             request_id: request.request_id.clone(),
-        }))
-        .map_err(|_| {
-            stream_diag.mark_terminal("relay_response_channel_closed", None);
-            stream_diag.finish();
-            anyhow!("relay response channel closed")
-        })?;
+        }),
+        &mut stream_diag,
+    )?;
     stream_diag.mark_terminal("completed", None);
     stream_diag.finish();
 

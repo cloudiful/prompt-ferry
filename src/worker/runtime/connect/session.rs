@@ -169,57 +169,66 @@ pub(super) async fn connect_once(
         worker_admin::publish_snapshot(state).await?;
     }
 
-    let write_task = tokio::spawn(async move {
+    let mut write_task = tokio::spawn(async move {
         let mut heartbeat = tokio::time::interval(Duration::from_secs(30));
         loop {
             tokio::select! {
-                Some(message) = control_rx.recv() => {
+                message = control_rx.recv() => {
+                    let Some(message) = message else {
+                        break;
+                    };
                     let payload = if let Some(cipher) = write_cipher.as_mut() {
                         cipher.encrypt_message(&message)
                     } else {
                         bridge_wire::encode_message(&message)
                     };
-                    let payload = match payload {
-                        Ok(payload) => payload,
-                        Err(err) => {
-                            error!(error = %err, "failed to encode bridge message");
-                            break;
-                        }
-                    };
-                    if ws_tx.send(Message::Binary(payload.into())).await.is_err() {
-                        break;
-                    }
+                    let payload = payload.context("failed to encode bridge control message")?;
+                    ws_tx
+                        .send(Message::Binary(payload.into()))
+                        .await
+                        .context("failed to write bridge control message")?;
                 }
-                Some(item) = data_rx.recv() => {
+                item = data_rx.recv() => {
+                    let Some(item) = item else {
+                        break;
+                    };
                     let payload = if let Some(cipher) = write_cipher.as_mut() {
                         cipher.encrypt_message(&item.message)
                     } else {
                         bridge_wire::encode_message(&item.message)
                     };
                     writer_out_tx.release_data(item.bytes);
-                    let payload = match payload {
-                        Ok(payload) => payload,
-                        Err(err) => {
-                            error!(error = %err, "failed to encode bridge message");
-                            break;
-                        }
-                    };
-                    if ws_tx.send(Message::Binary(payload.into())).await.is_err() {
-                        break;
-                    }
+                    let payload = payload.context("failed to encode bridge data message")?;
+                    ws_tx
+                        .send(Message::Binary(payload.into()))
+                        .await
+                        .context("failed to write bridge data message")?;
                 }
                 _ = heartbeat.tick() => {
-                    if ws_tx.send(Message::Ping(Vec::new().into())).await.is_err() {
-                        break;
-                    }
+                    ws_tx
+                        .send(Message::Ping(Vec::new().into()))
+                        .await
+                        .context("failed to write bridge heartbeat")?;
                 }
             }
         }
+        Ok::<(), anyhow::Error>(())
     });
 
+    let mut session_error = None;
     loop {
         let next_message = tokio::select! {
             _ = runtime_state.wait_for_shutdown() => None,
+            result = &mut write_task => {
+                if !runtime_state.is_shutting_down() {
+                    session_error = Some(match result {
+                        Ok(Ok(())) => anyhow!("relay bridge writer stopped"),
+                        Ok(Err(err)) => err,
+                        Err(err) => anyhow!(err).context("relay bridge writer task failed"),
+                    });
+                }
+                break;
+            }
             value = ws_rx.next() => value,
         };
 
@@ -228,7 +237,10 @@ pub(super) async fn connect_once(
         };
 
         match message {
-            Ok(Message::Text(_)) => return Err(anyhow!("unexpected text relay bridge message")),
+            Ok(Message::Text(_)) => {
+                session_error = Some(anyhow!("unexpected text relay bridge message"));
+                break;
+            }
             Ok(Message::Binary(bytes)) => {
                 let decoded = if let Some(cipher) = read_cipher.as_mut() {
                     cipher.decrypt_message(&bytes)
@@ -246,7 +258,10 @@ pub(super) async fn connect_once(
                         );
                         handle_relay_bridge_message(message, &config, &services).await;
                     }
-                    Err(err) => return Err(err).context("failed to decode relay message"),
+                    Err(err) => {
+                        session_error = Some(err.context("failed to decode relay message"));
+                        break;
+                    }
                 }
             }
             Ok(Message::Ping(_)) => {
@@ -254,7 +269,10 @@ pub(super) async fn connect_once(
             }
             Ok(Message::Pong(_)) => {}
             Ok(Message::Close(_)) => break,
-            Err(err) => return Err(err).context("websocket read failed"),
+            Err(err) => {
+                session_error = Some(anyhow!(err).context("websocket read failed"));
+                break;
+            }
             _ => {}
         }
     }
@@ -270,7 +288,10 @@ pub(super) async fn connect_once(
     if let Some(state) = admin_state.as_ref() {
         worker_admin::set_bridge_sender(state, &relay.relay_key, None).await;
     }
-    Ok(())
+    match session_error {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
 }
 
 async fn mark_relay_connected(state: &worker_admin::AdminState, relay: &RelayConnectionConfig) {

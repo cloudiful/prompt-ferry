@@ -226,12 +226,6 @@ function applyFilter(): void {
               color="neutral"
               variant="subtle"
             />
-            <UBadge
-              v-if="row.original.storage_sanitized"
-              label="NUL"
-              color="warning"
-              variant="subtle"
-            />
           </div>
         </template>
         <template #redaction-cell="{ row }">

@@ -10,7 +10,7 @@ use crate::protocol::{ApprovalPending, BridgeMessage, ResponseError};
 use reqwest::StatusCode;
 use tokio::sync::{mpsc, oneshot};
 
-use super::context::RuntimeServices;
+use super::context::{RuntimeServices, is_bridge_send_error};
 use super::request_assembly::{BufferedBridgeRequest, PendingIncomingRequest, RequestCancellation};
 
 pub(super) async fn handle_relay_bridge_message(
@@ -72,12 +72,17 @@ pub(super) async fn handle_relay_bridge_message(
                                     .redaction_enabled
                                     .load(std::sync::atomic::Ordering::SeqCst)
                             });
+                            let error_code = if is_bridge_send_error(&err) {
+                                "relay_bridge_error"
+                            } else {
+                                "upstream_error"
+                            };
                             let _ = services
                                 .out_tx
                                 .send(BridgeMessage::ResponseError(ResponseError {
                                     request_id: request_id.clone(),
                                     status: StatusCode::BAD_GATEWAY.as_u16(),
-                                    code: "upstream_error".to_string(),
+                                    code: error_code.to_string(),
                                     message: safe_error(&err, redact_enabled, request.user_id),
                                 }));
                         }

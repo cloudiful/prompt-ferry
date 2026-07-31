@@ -1,6 +1,7 @@
 mod admin_proxy;
 mod ai;
 mod bootstrap;
+mod bridge;
 mod budget;
 mod connect;
 mod context;
