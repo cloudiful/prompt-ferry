@@ -270,6 +270,8 @@ pub(super) async fn prepare_upstream_request_with_replay(
         admin_state,
         request.user_id.filter(|id| *id > 0),
         route,
+        conversation_id,
+        parent_event_id,
         &mut prepared,
     )
     .await?;
@@ -310,6 +312,8 @@ async fn apply_provider_request_defaults(
     admin_state: Option<&AdminState>,
     user_id: Option<i64>,
     route: &db::RouteConfig,
+    conversation_id: Option<uuid::Uuid>,
+    parent_event_id: Option<i64>,
     prepared: &mut PreparedUpstreamRequest,
 ) -> Result<(), CompatError> {
     if prepared.path != crate::config::NativeApi::Chat.path() {
@@ -323,6 +327,8 @@ async fn apply_provider_request_defaults(
         admin_state,
         user_id,
         route,
+        conversation_id,
+        parent_event_id,
         &original_body,
     )
     .await?

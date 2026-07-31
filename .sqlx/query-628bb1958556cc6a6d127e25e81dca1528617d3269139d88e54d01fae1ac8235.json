@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM request_record_tool_calls calls\nUSING request_records parent\nWHERE parent.event_id = calls.parent_event_id\n  AND parent.content_expired_at IS NOT NULL\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "628bb1958556cc6a6d127e25e81dca1528617d3269139d88e54d01fae1ac8235"
+}

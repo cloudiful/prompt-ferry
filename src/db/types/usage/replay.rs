@@ -92,6 +92,12 @@ pub struct RequestRecordToolCall {
 }
 
 #[derive(Debug, Clone)]
+pub struct RequestRecordToolCallReplayCandidate {
+    pub tool_call: RequestRecordToolCall,
+    pub has_assistant_artifact: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct RequestRecordToolCallCreate {
     pub parent_event_id: i64,
     pub conversation_id: Option<Uuid>,

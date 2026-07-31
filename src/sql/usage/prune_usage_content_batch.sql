@@ -59,21 +59,20 @@ WITH expired_conversations AS (
     USING marked
     WHERE artifacts.event_id = marked.event_id
     RETURNING artifacts.event_id
+), deleted_tool_calls AS (
+    DELETE FROM request_record_tool_calls calls
+    USING marked
+    WHERE calls.parent_event_id = marked.event_id
+    RETURNING
+        calls.tool_call_event_id,
+        (calls.arguments_json IS NOT NULL OR calls.arguments_preview IS NOT NULL)
+            AS had_arguments
 ), deleted_snapshots AS (
     DELETE FROM request_record_replay_snapshots snapshots
     USING marked
     WHERE snapshots.event_id = marked.event_id
        OR snapshots.base_event_id = marked.event_id
     RETURNING snapshots.event_id
-), cleared_tool_arguments AS (
-    UPDATE request_record_tool_calls calls
-    SET arguments_json = NULL,
-        arguments_preview = NULL,
-        updated_at = NOW()
-    FROM marked
-    WHERE calls.parent_event_id = marked.event_id
-      AND (calls.arguments_json IS NOT NULL OR calls.arguments_preview IS NOT NULL)
-    RETURNING calls.tool_call_event_id
 ), deleted_redaction_sessions AS (
     DELETE FROM conversation_redaction_sessions sessions
     USING expired_conversations expired
@@ -84,6 +83,7 @@ SELECT
     (SELECT COUNT(*) FROM marked)::BIGINT AS "expired_events!",
     (SELECT COUNT(*) FROM deleted_block_refs)::BIGINT AS "deleted_block_refs!",
     (SELECT COUNT(*) FROM deleted_artifacts)::BIGINT AS "deleted_artifacts!",
+    (SELECT COUNT(*) FROM deleted_tool_calls)::BIGINT AS "deleted_tool_calls!",
     (SELECT COUNT(*) FROM deleted_snapshots)::BIGINT AS "deleted_snapshots!",
-    (SELECT COUNT(*) FROM cleared_tool_arguments)::BIGINT AS "cleared_tool_arguments!",
+    (SELECT COUNT(*) FROM deleted_tool_calls WHERE had_arguments)::BIGINT AS "cleared_tool_arguments!",
     (SELECT COUNT(*) FROM deleted_redaction_sessions)::BIGINT AS "deleted_redaction_sessions!"

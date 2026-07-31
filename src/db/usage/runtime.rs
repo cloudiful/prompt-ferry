@@ -3,7 +3,10 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::db::types::{RequestRecordToolCall, RequestRecordToolCallCreate, RequestToolCallStatus};
+use crate::db::types::{
+    RequestRecordToolCall, RequestRecordToolCallCreate, RequestRecordToolCallReplayCandidate,
+    RequestToolCallStatus,
+};
 
 fn parse_request_tool_call_status(value: &str) -> Result<RequestToolCallStatus> {
     match value {
@@ -158,7 +161,9 @@ pub async fn find_request_record_tool_calls_by_call_ids(
     call_ids: &[String],
     user_id: Option<i64>,
     endpoint_id: Option<Uuid>,
-) -> Result<Vec<RequestRecordToolCall>> {
+    conversation_id: Option<Uuid>,
+    parent_event_id: Option<i64>,
+) -> Result<Vec<RequestRecordToolCallReplayCandidate>> {
     if call_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -167,24 +172,29 @@ pub async fn find_request_record_tool_calls_by_call_ids(
         call_ids,
         user_id,
         endpoint_id,
+        conversation_id,
+        parent_event_id,
     )
     .fetch_all(pool)
     .await?;
     rows.into_iter()
         .map(|row| {
-            Ok(RequestRecordToolCall {
-                tool_call_event_id: row.tool_call_event_id,
-                parent_event_id: row.parent_event_id,
-                conversation_id: row.conversation_id,
-                call_id: row.call_id,
-                tool_name: row.tool_name,
-                arguments_json: row.arguments_json,
-                arguments_preview: row.arguments_preview,
-                status: parse_request_tool_call_status(&row.status)?,
-                sequence_in_turn: row.sequence_in_turn,
-                mcp_request_event_id: row.mcp_request_event_id,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
+            Ok(RequestRecordToolCallReplayCandidate {
+                tool_call: RequestRecordToolCall {
+                    tool_call_event_id: row.tool_call_event_id,
+                    parent_event_id: row.parent_event_id,
+                    conversation_id: row.conversation_id,
+                    call_id: row.call_id,
+                    tool_name: row.tool_name,
+                    arguments_json: row.arguments_json,
+                    arguments_preview: row.arguments_preview,
+                    status: parse_request_tool_call_status(&row.status)?,
+                    sequence_in_turn: row.sequence_in_turn,
+                    mcp_request_event_id: row.mcp_request_event_id,
+                    created_at: row.created_at,
+                    updated_at: row.updated_at,
+                },
+                has_assistant_artifact: row.has_assistant_artifact,
             })
         })
         .collect()

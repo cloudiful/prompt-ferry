@@ -9,6 +9,7 @@ struct UsageContentPruneBatch {
     expired_events: i64,
     deleted_block_refs: i64,
     deleted_artifacts: i64,
+    deleted_tool_calls: i64,
     deleted_snapshots: i64,
     cleared_tool_arguments: i64,
     deleted_redaction_sessions: i64,
@@ -19,10 +20,12 @@ pub struct UsageContentMaintenanceReport {
     pub expired_events: u64,
     pub deleted_block_refs: u64,
     pub deleted_artifacts: u64,
+    pub deleted_tool_calls: u64,
     pub deleted_snapshots: u64,
     pub cleared_tool_arguments: u64,
     pub deleted_redaction_sessions: u64,
     pub orphan_prompt_blocks_deleted: u64,
+    pub orphan_tool_calls_deleted: u64,
 }
 
 pub async fn run_usage_content_maintenance(
@@ -75,6 +78,7 @@ async fn run_usage_content_maintenance_locked(
         report.expired_events += batch.expired_events.max(0) as u64;
         report.deleted_block_refs += batch.deleted_block_refs.max(0) as u64;
         report.deleted_artifacts += batch.deleted_artifacts.max(0) as u64;
+        report.deleted_tool_calls += batch.deleted_tool_calls.max(0) as u64;
         report.deleted_snapshots += batch.deleted_snapshots.max(0) as u64;
         report.cleared_tool_arguments += batch.cleared_tool_arguments.max(0) as u64;
         report.deleted_redaction_sessions += batch.deleted_redaction_sessions.max(0) as u64;
@@ -88,6 +92,17 @@ async fn run_usage_content_maintenance_locked(
             .execute(&mut **conn)
             .await?;
     report.orphan_prompt_blocks_deleted = orphan_prompt_blocks.rows_affected();
+    let orphan_tool_calls =
+        sqlx::query_file!("src/sql/usage/cleanup_orphan_request_record_tool_calls.sql")
+            .execute(&mut **conn)
+            .await?;
+    report.orphan_tool_calls_deleted = orphan_tool_calls.rows_affected();
+    if report.orphan_tool_calls_deleted > 0 {
+        tracing::warn!(
+            deleted = report.orphan_tool_calls_deleted,
+            "removed orphaned tool-call replay records"
+        );
+    }
     Ok(report)
 }
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n    tool_call.tool_call_event_id,\n    tool_call.parent_event_id,\n    tool_call.conversation_id,\n    tool_call.call_id,\n    tool_call.tool_name,\n    tool_call.arguments_json,\n    tool_call.arguments_preview,\n    tool_call.status,\n    tool_call.sequence_in_turn,\n    tool_call.mcp_request_event_id,\n    tool_call.created_at,\n    tool_call.updated_at\nFROM request_record_tool_calls AS tool_call\nJOIN request_records AS parent\n    ON parent.event_id = tool_call.parent_event_id\nWHERE tool_call.call_id = ANY($1)\n  AND parent.event_kind = 'request'\n  AND parent.request_category = 'ai'\n  AND parent.user_id IS NOT DISTINCT FROM $2::BIGINT\n  AND parent.endpoint_id IS NOT DISTINCT FROM $3::UUID\nORDER BY tool_call.call_id ASC, tool_call.parent_event_id ASC,\n         tool_call.sequence_in_turn ASC NULLS LAST,\n         tool_call.tool_call_event_id ASC\n",
+  "query": "WITH RECURSIVE replay_chain AS (\n    SELECT event_id, parent_event_id\n    FROM request_records\n    WHERE event_id = $5::BIGINT\n\n    UNION ALL\n\n    SELECT parent.event_id, parent.parent_event_id\n    FROM request_records AS parent\n    JOIN replay_chain AS child\n      ON child.parent_event_id = parent.event_id\n)\nSELECT\n    tool_call.tool_call_event_id,\n    tool_call.parent_event_id,\n    tool_call.conversation_id,\n    tool_call.call_id,\n    tool_call.tool_name,\n    tool_call.arguments_json,\n    tool_call.arguments_preview,\n    tool_call.status,\n    tool_call.sequence_in_turn,\n    tool_call.mcp_request_event_id,\n    tool_call.created_at,\n    tool_call.updated_at,\n    (artifact.event_id IS NOT NULL) AS \"has_assistant_artifact!\"\nFROM request_record_tool_calls AS tool_call\nJOIN request_records AS parent\n    ON parent.event_id = tool_call.parent_event_id\nLEFT JOIN request_record_assistant_artifacts AS artifact\n    ON artifact.event_id = tool_call.parent_event_id\n   AND parent.content_expired_at IS NULL\nWHERE tool_call.call_id = ANY($1)\n  AND parent.event_kind = 'request'\n  AND parent.request_category = 'ai'\n  AND parent.user_id IS NOT DISTINCT FROM $2::BIGINT\n  AND parent.endpoint_id IS NOT DISTINCT FROM $3::UUID\n  AND (\n      $4::UUID IS NULL\n      OR parent.conversation_id IS NOT DISTINCT FROM $4::UUID\n  )\n  AND (\n      $5::BIGINT IS NULL\n      OR parent.event_id IN (SELECT event_id FROM replay_chain)\n  )\nORDER BY tool_call.call_id ASC, tool_call.parent_event_id ASC,\n         tool_call.sequence_in_turn ASC NULLS LAST,\n         tool_call.tool_call_event_id ASC\n",
   "describe": {
     "columns": [
       {
@@ -134,13 +134,21 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 12,
+        "name": "has_assistant_artifact!",
+        "type_info": "Bool",
+        "origin": "Expression"
       }
     ],
     "parameters": {
       "Left": [
         "TextArray",
         "Int8",
-        "Uuid"
+        "Uuid",
+        "Uuid",
+        "Int8"
       ]
     },
     "nullable": [
@@ -155,8 +163,9 @@
       true,
       true,
       false,
-      false
+      false,
+      null
     ]
   },
-  "hash": "db079c6b8390fb529f260bf9557d191e6b751ff59a40811bde7c8ffd66d246ac"
+  "hash": "85a730f0ab2d432bbf2b56d07aa0b95af417897d6168419a55fe79c6324e5ade"
 }
