@@ -1,4 +1,4 @@
-use super::super::error_handling::ResponsesSseTerminal;
+use super::super::error_handling::{ResponsesSseTerminal, maybe_redact_text};
 use super::forward::ResponseForwardContext;
 use super::request_support::ai_route_usage_log;
 use crate::{
@@ -41,6 +41,7 @@ pub(super) async fn finish_failure(
     status: u16,
     capture: &mut UsageCapture,
     raw_response_body: &[u8],
+    upstream_error_body: Option<&str>,
     ttft_ms: Option<i64>,
 ) -> anyhow::Result<()> {
     let services = context.services;
@@ -57,6 +58,9 @@ pub(super) async fn finish_failure(
         context.logging.redact_content,
         request_ctx.user_id,
     );
+    let upstream_error_body = upstream_error_body
+        .map(|body| maybe_redact_text(body, context.logging.redact_content, request_ctx.user_id))
+        .filter(|body| !body.trim().is_empty());
     record_usage_event(
         services.admin_state(),
         ai_route_usage_log(request_ctx, request, route_ctx)
@@ -85,7 +89,11 @@ pub(super) async fn finish_failure(
                 response_prompt,
                 response_raw_body,
             )
-            .with_error(Some(code.to_string()), Some(message.to_string()), None),
+            .with_error(
+                Some(code.to_string()),
+                Some(message.to_string()),
+                upstream_error_body,
+            ),
     )
     .await;
 

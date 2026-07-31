@@ -635,20 +635,30 @@ pub(super) async fn forward_streaming_response(
             )?;
         }
     }
-    let responses_stream_terminal = if let Some(filter) = sse_restore_filter.as_mut() {
-        for output_chunk in filter.finish()? {
-            emit_output_chunks(
-                stream_delta_batcher.push_chunk(output_chunk)?,
-                &services.out_tx,
-                &mut stream_diag,
-            )?;
-        }
-        filter.responses_terminal()
-    } else {
-        passthrough_sse_filter
-            .as_ref()
-            .and_then(PassthroughSseFilter::responses_terminal)
-    };
+    let (responses_stream_terminal, responses_error_body) =
+        if let Some(filter) = sse_restore_filter.as_mut() {
+            for output_chunk in filter.finish()? {
+                emit_output_chunks(
+                    stream_delta_batcher.push_chunk(output_chunk)?,
+                    &services.out_tx,
+                    &mut stream_diag,
+                )?;
+            }
+            (
+                filter.responses_terminal(),
+                filter.responses_error_body().map(str::to_owned),
+            )
+        } else {
+            (
+                passthrough_sse_filter
+                    .as_ref()
+                    .and_then(PassthroughSseFilter::responses_terminal),
+                passthrough_sse_filter
+                    .as_ref()
+                    .and_then(PassthroughSseFilter::responses_error_body)
+                    .map(str::to_owned),
+            )
+        };
     let buffered_output = stream_delta_batcher.finish()?;
     if responses_passthrough
         && !matches!(
@@ -667,6 +677,7 @@ pub(super) async fn forward_streaming_response(
             status.as_u16(),
             &mut capture,
             &raw_response_body,
+            responses_error_body.as_deref(),
             ttft_ms,
         )
         .await?;

@@ -1,4 +1,5 @@
 use super::error_handling::{PassthroughSseFilter, ResponsesSseTerminal};
+use serde_json::Value;
 
 #[test]
 fn responses_filter_requires_a_terminal_response_event() {
@@ -67,4 +68,36 @@ fn responses_filter_handles_split_crlf_terminal_and_drops_trailing_data() {
         Some(ResponsesSseTerminal::Completed)
     );
     assert!(filter.finish().unwrap().is_empty());
+}
+
+#[test]
+fn captures_responses_error_payload_for_diagnostics() {
+    let mut filter = PassthroughSseFilter::new_responses();
+    filter
+        .push_chunk(
+            b"event: error\r\ndata: {\"type\":\"error\",\"code\":\"upstream_busy\",\"message\":\"try again\"}\r\n\r\n",
+        )
+        .unwrap();
+
+    assert_eq!(
+        filter.responses_terminal(),
+        Some(ResponsesSseTerminal::Error)
+    );
+    let body: Value = serde_json::from_str(filter.responses_error_body().unwrap()).unwrap();
+    assert_eq!(body["code"], "upstream_busy");
+    assert_eq!(body["message"], "try again");
+}
+
+#[test]
+fn recognizes_error_event_without_a_type_field() {
+    let mut filter = PassthroughSseFilter::new_responses();
+    filter
+        .push_chunk(b"event: error\ndata: provider failed\n\n")
+        .unwrap();
+
+    assert_eq!(
+        filter.responses_terminal(),
+        Some(ResponsesSseTerminal::Error)
+    );
+    assert_eq!(filter.responses_error_body(), Some("provider failed"));
 }

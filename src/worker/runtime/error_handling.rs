@@ -6,6 +6,7 @@ pub(super) struct PassthroughSseFilter {
     pending: Vec<u8>,
     current_event: Vec<u8>,
     terminal: Option<PassthroughSseTerminal>,
+    responses_error_body: Option<String>,
     responses_terminal: bool,
 }
 
@@ -37,6 +38,7 @@ impl PassthroughSseFilter {
             pending: Vec::new(),
             current_event: Vec::new(),
             terminal: None,
+            responses_error_body: None,
             responses_terminal,
         }
     }
@@ -80,6 +82,10 @@ impl PassthroughSseFilter {
         }
     }
 
+    pub(super) fn responses_error_body(&self) -> Option<&str> {
+        self.responses_error_body.as_deref()
+    }
+
     fn drain_events(&mut self, finalize: bool) -> Vec<Vec<u8>> {
         let mut output = Vec::new();
         while let Some(line) = self.take_next_line(finalize) {
@@ -92,8 +98,11 @@ impl PassthroughSseFilter {
             self.current_event.extend_from_slice(&line);
             if is_blank {
                 let event = std::mem::take(&mut self.current_event);
-                if let Some(terminal) = event_contains_terminal(&event, self.responses_terminal) {
+                if let Some((terminal, error_body)) =
+                    event_contains_terminal(&event, self.responses_terminal)
+                {
                     self.terminal = Some(terminal);
+                    self.responses_error_body = error_body;
                 }
                 output.push(event);
                 if self.terminal.is_some() {
@@ -148,29 +157,59 @@ fn line_terminator_trimmed(line: &[u8]) -> &[u8] {
 fn event_contains_terminal(
     event: &[u8],
     responses_terminal: bool,
-) -> Option<PassthroughSseTerminal> {
+) -> Option<(PassthroughSseTerminal, Option<String>)> {
+    let mut event_name_is_error = false;
+    let mut error_value = None;
+    let mut error_data = None;
     for segment in event.split(|byte| *byte == b'\n') {
         let trimmed = segment.strip_suffix(b"\r").unwrap_or(segment);
-        if trimmed == b"data: [DONE]" {
-            return Some(if responses_terminal {
-                PassthroughSseTerminal::Responses(ResponsesSseTerminal::Completed)
-            } else {
-                PassthroughSseTerminal::LegacyDone
-            });
+        if let Some(name) = trimmed.strip_prefix(b"event:") {
+            event_name_is_error = String::from_utf8_lossy(name).trim() == "error";
+            continue;
         }
-        if responses_terminal
-            && let Some(data) = trimmed.strip_prefix(b"data:")
-            && let Ok(value) = serde_json::from_slice::<Value>(data)
-            && let Some(terminal) = match value.get("type").and_then(Value::as_str) {
+        if trimmed == b"data: [DONE]" {
+            return Some((
+                if responses_terminal {
+                    PassthroughSseTerminal::Responses(ResponsesSseTerminal::Completed)
+                } else {
+                    PassthroughSseTerminal::LegacyDone
+                },
+                None,
+            ));
+        }
+        let Some(data) = trimmed.strip_prefix(b"data:") else {
+            continue;
+        };
+        if !responses_terminal {
+            continue;
+        }
+        if let Ok(value) = serde_json::from_slice::<Value>(data) {
+            let terminal = match value.get("type").and_then(Value::as_str) {
                 Some("response.completed") => Some(ResponsesSseTerminal::Completed),
                 Some("response.failed") => Some(ResponsesSseTerminal::Failed),
                 Some("response.incomplete") => Some(ResponsesSseTerminal::Incomplete),
                 Some("error") => Some(ResponsesSseTerminal::Error),
                 _ => None,
+            };
+            if let Some(terminal) = terminal {
+                let error_body =
+                    (terminal == ResponsesSseTerminal::Error).then(|| format_json_value(&value));
+                return Some((PassthroughSseTerminal::Responses(terminal), error_body));
             }
-        {
-            return Some(PassthroughSseTerminal::Responses(terminal));
+            if event_name_is_error {
+                error_value = Some(value);
+            }
+        } else if event_name_is_error {
+            error_data = Some(String::from_utf8_lossy(data).trim().to_string());
         }
+    }
+    if responses_terminal && event_name_is_error {
+        return Some((
+            PassthroughSseTerminal::Responses(ResponsesSseTerminal::Error),
+            error_value
+                .map(|value| format_json_value(&value))
+                .or(error_data),
+        ));
     }
     None
 }

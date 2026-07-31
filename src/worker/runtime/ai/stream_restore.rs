@@ -82,6 +82,10 @@ impl<'a> SseRestoreFilter<'a> {
         self.events.responses_terminal()
     }
 
+    pub(super) fn responses_error_body(&self) -> Option<&str> {
+        self.events.responses_error_body()
+    }
+
     fn restore_events(&mut self, events: Vec<Vec<u8>>) -> Result<Vec<Vec<u8>>> {
         let mut output = Vec::new();
         for event in events {
