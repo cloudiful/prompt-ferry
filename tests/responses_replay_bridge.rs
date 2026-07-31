@@ -197,7 +197,7 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
 }
 
 #[tokio::test]
-async fn replays_deepseek_reasoning_content_for_chat_native_continuations() -> anyhow::Result<()> {
+async fn preserves_deepseek_reasoning_content_for_direct_chat_passthrough() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
         return Ok(());
@@ -214,126 +214,42 @@ async fn replays_deepseek_reasoning_content_for_chat_native_continuations() -> a
 
     let client = reqwest::Client::new();
     let turn1 = client
-        .post(format!("http://{relay_addr}/v1/responses"))
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
         .bearer_auth("client-token")
         .json(&serde_json::json!({
             "model": "deepseek-v4-pro",
-            "input": "need weather",
+            "messages": [{"role":"user","content":"need weather"}],
             "stream": false
         }))
         .send()
         .await?;
     assert_eq!(turn1.status(), StatusCode::OK);
     assert_eq!(
-        turn1.json::<Value>().await?["output"][1]["type"].as_str(),
-        Some("function_call")
+        turn1.json::<Value>().await?["choices"][0]["message"]["tool_calls"][0]["id"].as_str(),
+        Some("call_1")
     );
 
     let artifact_row = wait_for_assistant_artifact(&schema).await?;
     assert_eq!(artifact_row, (true, true));
 
     let turn2 = client
-        .post(format!("http://{relay_addr}/v1/responses"))
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
         .bearer_auth("client-token")
         .json(&serde_json::json!({
             "model": "deepseek-v4-pro",
-            "previous_response_id": "chatcmpl_turn1",
-            "input": "use it",
-            "stream": false
-        }))
-        .send()
-        .await?;
-    assert_eq!(turn2.status(), StatusCode::OK);
-
-    let requests = upstream_log.bodies.lock().await;
-    assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[1]["messages"][0]["content"].as_str(),
-        Some("need weather")
-    );
-    assert_eq!(
-        requests[1]["messages"][1]["reasoning_content"].as_str(),
-        Some("internal steps")
-    );
-    assert_eq!(
-        requests[1]["messages"][1]["tool_calls"][0]["id"].as_str(),
-        Some("call_1")
-    );
-    assert_eq!(
-        requests[1]["messages"][2]["content"].as_str(),
-        Some("use it")
-    );
-
-    worker_handle.abort();
-    schema.cleanup().await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn replays_deepseek_reasoning_content_for_direct_tool_outputs() -> anyhow::Result<()> {
-    if !test_database_configured() {
-        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
-        return Ok(());
-    }
-    let schema = TestSchema::new().await?;
-    enable_prompt_logging(&schema).await?;
-
-    let upstream_log = Arc::new(ChatRequestLog::default());
-    let upstream_addr = spawn_replay_upstream(upstream_log.clone()).await;
-    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
-    let mut worker_handle =
-        spawn_worker(worker_addr, upstream_addr, &worker_database_url(&schema)?).await;
-    wait_for_worker(&relay_handle, &mut worker_handle).await;
-
-    let client = reqwest::Client::new();
-    let turn1 = client
-        .post(format!("http://{relay_addr}/v1/responses"))
-        .bearer_auth("client-token")
-        .json(&serde_json::json!({
-            "model": "deepseek-v4-pro",
-            "input": "need weather",
-            "stream": false
-        }))
-        .send()
-        .await?;
-    assert_eq!(turn1.status(), StatusCode::OK);
-    assert_eq!(wait_for_assistant_artifact(&schema).await?, (true, true));
-
-    let turn2 = client
-        .post(format!("http://{relay_addr}/v1/responses"))
-        .bearer_auth("client-token")
-        .json(&serde_json::json!({
-            "model": "deepseek-v4-pro",
-            "input": [
+            "messages": [
                 {"role":"user","content":"need weather"},
-                {"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Boston\"}"},
-                {"type":"function_call_output","call_id":"call_1","output":"72F"}
+                {"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Boston\"}"}}]},
+                {"role":"tool","tool_call_id":"call_1","content":"72F"}
             ],
             "stream": false
         }))
         .send()
         .await?;
-    let turn2_status = turn2.status();
-    let turn2_body = turn2.text().await?;
-    assert_eq!(
-        turn2_status,
-        StatusCode::OK,
-        "direct tool request failed: {turn2_body}"
-    );
+    assert_eq!(turn2.status(), StatusCode::OK);
 
     let requests = upstream_log.bodies.lock().await;
     assert_eq!(requests.len(), 2);
-    let roles = requests[1]["messages"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|message| message["role"].as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(roles, vec!["user", "assistant", "tool"]);
-    assert_eq!(
-        requests[1]["messages"][1]["role"].as_str(),
-        Some("assistant")
-    );
     assert_eq!(
         requests[1]["messages"][1]["reasoning_content"].as_str(),
         Some("internal steps")
@@ -342,154 +258,7 @@ async fn replays_deepseek_reasoning_content_for_direct_tool_outputs() -> anyhow:
         requests[1]["messages"][1]["tool_calls"][0]["id"].as_str(),
         Some("call_1")
     );
-    assert_eq!(requests[1]["messages"][2]["role"].as_str(), Some("tool"));
-    assert_eq!(
-        requests[1]["messages"][2]["tool_call_id"].as_str(),
-        Some("call_1")
-    );
     assert_eq!(requests[1]["messages"][2]["content"].as_str(), Some("72F"));
-
-    worker_handle.abort();
-    schema.cleanup().await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn replays_reasoning_for_each_deepseek_tool_turn() -> anyhow::Result<()> {
-    if !test_database_configured() {
-        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
-        return Ok(());
-    }
-    let schema = TestSchema::new().await?;
-    enable_prompt_logging(&schema).await?;
-
-    let upstream_log = Arc::new(ChatRequestLog {
-        multi_tool_turns: true,
-        ..Default::default()
-    });
-    let upstream_addr = spawn_replay_upstream(upstream_log.clone()).await;
-    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
-    let mut worker_handle =
-        spawn_worker(worker_addr, upstream_addr, &worker_database_url(&schema)?).await;
-    wait_for_worker(&relay_handle, &mut worker_handle).await;
-
-    let client = reqwest::Client::new();
-    let turn1 = client
-        .post(format!("http://{relay_addr}/v1/responses"))
-        .bearer_auth("client-token")
-        .json(&serde_json::json!({
-            "model": "deepseek-v4-pro",
-            "input": "first tool turn",
-            "stream": false
-        }))
-        .send()
-        .await?;
-    assert_eq!(turn1.status(), StatusCode::OK);
-    wait_for_assistant_artifact_count(&schema, 1).await?;
-
-    let turn2 = client
-        .post(format!("http://{relay_addr}/v1/responses"))
-        .bearer_auth("client-token")
-        .json(&serde_json::json!({
-            "model": "deepseek-v4-pro",
-            "input": [{
-                "type": "function_call_output",
-                "call_id": "call_1",
-                "output": "first result"
-            }],
-            "stream": false
-        }))
-        .send()
-        .await?;
-    assert_eq!(turn2.status(), StatusCode::OK);
-    wait_for_assistant_artifact_count(&schema, 2).await?;
-
-    let turn3 = client
-        .post(format!("http://{relay_addr}/v1/responses"))
-        .bearer_auth("client-token")
-        .json(&serde_json::json!({
-            "model": "deepseek-v4-pro",
-            "input": [{
-                "type": "function_call_output",
-                "call_id": "call_2",
-                "output": "second result"
-            }],
-            "stream": false
-        }))
-        .send()
-        .await?;
-    assert_eq!(turn3.status(), StatusCode::OK);
-
-    let requests = upstream_log.bodies.lock().await;
-    assert_eq!(requests.len(), 3);
-    let messages = requests[2]["messages"].as_array().unwrap();
-    let roles = messages
-        .iter()
-        .map(|message| message["role"].as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        roles,
-        vec!["user", "assistant", "tool", "assistant", "tool"]
-    );
-    assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
-    assert_eq!(messages[1]["reasoning_content"], "internal steps 1");
-    assert_eq!(messages[3]["tool_calls"][0]["id"], "call_2");
-    assert_eq!(messages[3]["reasoning_content"], "internal steps 2");
-
-    worker_handle.abort();
-    schema.cleanup().await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn rejects_deepseek_tool_continuation_when_reasoning_is_missing() -> anyhow::Result<()> {
-    if !test_database_configured() {
-        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
-        return Ok(());
-    }
-    let schema = TestSchema::new().await?;
-    enable_prompt_logging(&schema).await?;
-
-    let upstream_log = Arc::new(ChatRequestLog {
-        omit_reasoning: true,
-        ..Default::default()
-    });
-    let upstream_addr = spawn_replay_upstream(upstream_log.clone()).await;
-    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
-    let mut worker_handle =
-        spawn_worker(worker_addr, upstream_addr, &worker_database_url(&schema)?).await;
-    wait_for_worker(&relay_handle, &mut worker_handle).await;
-
-    let client = reqwest::Client::new();
-    let turn1 = client
-        .post(format!("http://{relay_addr}/v1/responses"))
-        .bearer_auth("client-token")
-        .json(&serde_json::json!({
-            "model": "deepseek-v4-pro",
-            "input": "need weather",
-            "stream": false
-        }))
-        .send()
-        .await?;
-    assert_eq!(turn1.status(), StatusCode::OK);
-    assert_eq!(wait_for_assistant_artifact(&schema).await?, (false, true));
-
-    let turn2 = client
-        .post(format!("http://{relay_addr}/v1/responses"))
-        .bearer_auth("client-token")
-        .json(&serde_json::json!({
-            "model": "deepseek-v4-pro",
-            "previous_response_id": "chatcmpl_turn1",
-            "input": "use it",
-            "stream": false
-        }))
-        .send()
-        .await?;
-    let turn2_status = turn2.status();
-    let turn2_body = turn2.text().await?;
-    assert_eq!(turn2_status, StatusCode::BAD_REQUEST);
-    assert!(turn2_body.contains("missing complete reasoning"));
-    assert_eq!(upstream_log.bodies.lock().await.len(), 1);
 
     worker_handle.abort();
     schema.cleanup().await?;

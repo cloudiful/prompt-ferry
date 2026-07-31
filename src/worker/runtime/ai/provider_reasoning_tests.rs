@@ -217,9 +217,58 @@ async fn bypasses_reasoning_recovery_for_non_reasoning_providers() {
     }))
     .unwrap();
 
-    let restored = restore_provider_reasoning(None, Some(1), &route, None, None, &body)
-        .await
-        .unwrap();
+    let restored = restore_provider_reasoning(
+        None,
+        Some(1),
+        &route,
+        None,
+        None,
+        crate::upstream_adapter::ResponseAdapter::Passthrough,
+        &body,
+    )
+    .await
+    .unwrap();
+
+    assert!(restored.is_none());
+}
+
+#[tokio::test]
+async fn skips_deepseek_reasoning_recovery_for_chat_to_responses() {
+    let route = db::RouteConfig {
+        route_id: uuid::Uuid::nil(),
+        user_id: 1,
+        model_route_rule_id: None,
+        base_url: "https://api.deepseek.com".to_string(),
+        api_key: "key".to_string(),
+        endpoint_key_id: None,
+        endpoint_key_label: None,
+        api_keys: Vec::new(),
+        key_lb_enabled: false,
+        native_api: crate::config::NativeApi::Chat,
+        upstream_model: None,
+        responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+        route_selection_reason: db::RouteSelectionReason::Default,
+    };
+    let body = serde_json::to_vec(&json!({
+        "model":"deepseek-v4-flash",
+        "messages":[{
+            "role":"assistant",
+            "tool_calls":[{"id":"call_1","function":{"name":"one","arguments":"{}"}}]
+        }]
+    }))
+    .unwrap();
+
+    let restored = restore_provider_reasoning(
+        None,
+        Some(1),
+        &route,
+        None,
+        None,
+        crate::upstream_adapter::ResponseAdapter::ChatToResponses,
+        &body,
+    )
+    .await
+    .unwrap();
 
     assert!(restored.is_none());
 }

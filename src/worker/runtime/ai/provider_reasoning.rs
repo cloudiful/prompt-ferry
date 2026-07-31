@@ -1,4 +1,4 @@
-use crate::{db, worker_admin::AdminState};
+use crate::{db, upstream_adapter::ResponseAdapter, worker_admin::AdminState};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
@@ -7,7 +7,7 @@ mod replay;
 
 use replay::{
     ReplayFailureKind, assistant_tool_call_ids, replay_unavailable, resolve_replay_parents,
-    restore_reasoning_from_replay, targets_reasoning_provider,
+    restore_reasoning_from_replay, targets_deepseek, targets_reasoning_provider,
 };
 
 #[cfg(test)]
@@ -19,6 +19,7 @@ pub(super) async fn restore_provider_reasoning(
     route: &db::RouteConfig,
     conversation_id: Option<uuid::Uuid>,
     parent_event_id: Option<i64>,
+    response_adapter: ResponseAdapter,
     request_body: &[u8],
 ) -> Result<Option<Vec<u8>>, crate::openai_compat::CompatError> {
     let Ok(mut value) = serde_json::from_slice::<Value>(request_body) else {
@@ -28,6 +29,9 @@ pub(super) async fn restore_provider_reasoning(
         return Ok(None);
     };
     let model = object.get("model").and_then(Value::as_str);
+    if response_adapter == ResponseAdapter::ChatToResponses && targets_deepseek(route, model) {
+        return Ok(None);
+    }
     if !targets_reasoning_provider(route, model) {
         return Ok(None);
     }

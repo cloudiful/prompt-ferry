@@ -22,6 +22,11 @@ struct ChatRequestLog {
     bodies: Mutex<Vec<Value>>,
 }
 
+#[derive(Default)]
+struct ResponsesRequestLog {
+    bodies: Mutex<Vec<Value>>,
+}
+
 #[tokio::test]
 async fn translates_responses_request_for_chat_native_upstream() {
     let upstream_log = Arc::new(ChatRequestLog::default());
@@ -139,6 +144,46 @@ async fn preserves_native_responses_sse_framing_for_passthrough_upstream() {
 }
 
 #[tokio::test]
+async fn preserves_deepseek_v4_flash_native_responses_reasoning_sse() {
+    let (status, requests, body) = fetch_deepseek_native_responses(NativeApi::Responses).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, deepseek_v4_flash_responses_sse());
+    assert!(body.contains("event: response.reasoning_summary_text.delta\r\n"));
+    assert!(body.contains("\"delta\":\"思考\""));
+    assert!(body.contains("event: response.completed\r\n"));
+
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["model"].as_str(), Some("deepseek-v4-flash"));
+    assert_eq!(
+        requests[0]["instructions"].as_str(),
+        Some("return a concise answer")
+    );
+    assert_eq!(requests[0]["input"][0]["role"].as_str(), Some("user"));
+    assert_eq!(
+        requests[0]["input"][0]["content"].as_str(),
+        Some("What is the capital of France?")
+    );
+    assert_eq!(requests[0]["stream"].as_bool(), Some(true));
+    assert_eq!(requests[0]["max_output_tokens"].as_i64(), Some(32));
+    assert_eq!(
+        requests[0]["metadata"]["request_tag"].as_str(),
+        Some("native-responses")
+    );
+    assert!(requests[0].get("messages").is_none());
+}
+
+#[tokio::test]
+async fn auto_selects_native_responses_for_deepseek_v4_flash() {
+    let (status, requests, body) = fetch_deepseek_native_responses(NativeApi::Auto).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, deepseek_v4_flash_responses_sse());
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["model"].as_str(), Some("deepseek-v4-flash"));
+}
+
+#[tokio::test]
 async fn preserves_native_responses_completed_event_without_synthetic_error() {
     let (status, body) = fetch_native_responses(ResponsesUpstreamMode::OfficialCompleted).await;
 
@@ -232,7 +277,7 @@ async fn wraps_native_responses_midstream_failure_as_sse_error_event() {
 }
 
 #[tokio::test]
-async fn translates_deepseek_reasoning_stream_for_chat_native_upstream() {
+async fn translates_reasoning_stream_for_chat_native_upstream() {
     let upstream_addr = spawn_chat_only_upstream(Arc::new(ChatRequestLog::default())).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
@@ -247,7 +292,7 @@ async fn translates_deepseek_reasoning_stream_for_chat_native_upstream() {
         .post(format!("http://{relay_addr}/v1/responses"))
         .bearer_auth("client-token")
         .json(&serde_json::json!({
-            "model": "deepseek-reasoning",
+            "model": "chat-reasoning",
             "input": "hello",
             "stream": true
         }))
@@ -295,6 +340,53 @@ async fn translates_deepseek_reasoning_stream_for_chat_native_upstream() {
         Some("need tools then answer")
     );
     assert_eq!(completed["response"]["output_text"].as_str(), Some("done"));
+
+    worker_handle.abort();
+}
+
+#[tokio::test]
+async fn does_not_restore_deepseek_reasoning_for_chat_to_responses() {
+    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "input": [
+                {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},
+                {"type":"function_call_output","call_id":"call_1","output":"ok"}
+            ],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let requests = upstream_log.bodies.lock().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0]["messages"][0]["role"].as_str(),
+        Some("assistant")
+    );
+    assert!(
+        requests[0]["messages"][0]
+            .get("reasoning_content")
+            .is_none()
+    );
+    assert_eq!(
+        requests[0]["messages"][0]["tool_calls"][0]["id"].as_str(),
+        Some("call_1")
+    );
 
     worker_handle.abort();
 }
@@ -1016,6 +1108,41 @@ async fn fetch_native_responses(mode: ResponsesUpstreamMode) -> (StatusCode, Str
     (status, body)
 }
 
+async fn fetch_deepseek_native_responses(
+    native_api: NativeApi,
+) -> (StatusCode, Vec<Value>, String) {
+    let request_log = Arc::new(ResponsesRequestLog::default());
+    let upstream_addr = spawn_deepseek_responses_upstream(request_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, native_api);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "instructions": "return a concise answer",
+            "input": [{"role":"user","content":"What is the capital of France?"}],
+            "stream": true,
+            "max_output_tokens": 32,
+            "metadata": {"request_tag":"native-responses"}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    let requests = request_log.bodies.lock().await.clone();
+
+    worker_handle.abort();
+    (status, requests, body)
+}
+
 async fn spawn_native_responses_upstream(mode: ResponsesUpstreamMode) -> SocketAddr {
     if matches!(mode, ResponsesUpstreamMode::MidstreamError) {
         return spawn_broken_native_responses_upstream().await;
@@ -1026,6 +1153,19 @@ async fn spawn_native_responses_upstream(mode: ResponsesUpstreamMode) -> SocketA
         .route("/v1/responses", post(fake_native_responses_stream))
         .route("/v1/models", get(fake_models))
         .with_state(mode);
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    addr
+}
+
+async fn spawn_deepseek_responses_upstream(log: Arc<ResponsesRequestLog>) -> SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = Router::new()
+        .route("/v1/responses", post(fake_deepseek_responses_stream))
+        .route("/v1/models", get(fake_models))
+        .with_state(log);
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
@@ -1084,6 +1224,33 @@ async fn fake_native_responses_stream(
     };
     let stream = futures::stream::iter(chunks);
     let mut response = Response::new(Body::from_stream(stream));
+    *response.status_mut() = StatusCode::OK;
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, "text/event-stream".parse().unwrap());
+    response
+}
+
+async fn fake_deepseek_responses_stream(
+    State(log): State<Arc<ResponsesRequestLog>>,
+    body: Bytes,
+) -> Response {
+    let value = serde_json::from_slice::<Value>(&body).unwrap();
+    log.bodies.lock().await.push(value);
+
+    let body = deepseek_v4_flash_responses_sse().into_bytes();
+    let marker = "\"delta\":\"思考\"".as_bytes();
+    let split = body
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .unwrap()
+        + marker.len()
+        - 1;
+    let chunks = vec![
+        Ok::<Bytes, std::io::Error>(Bytes::copy_from_slice(&body[..split])),
+        Ok(Bytes::copy_from_slice(&body[split..])),
+    ];
+    let mut response = Response::new(Body::from_stream(futures::stream::iter(chunks)));
     *response.status_mut() = StatusCode::OK;
     response
         .headers_mut()
@@ -1193,16 +1360,40 @@ fn native_responses_terminal_sse(event_type: &str) -> String {
     )
 }
 
+fn deepseek_v4_flash_responses_sse() -> String {
+    concat!(
+        "event: response.created\r\n",
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_ds_1\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"deepseek-v4-flash\"}}\r\n",
+        "\r\n",
+        "event: response.output_item.added\r\n",
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"reasoning_1\",\"type\":\"reasoning\",\"summary\":[]}}\r\n",
+        "\r\n",
+        "event: response.reasoning_summary_text.delta\r\n",
+        "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"reasoning_1\",\"output_index\":0,\"summary_index\":0,\"delta\":\"思考\"}\r\n",
+        "\r\n",
+        "event: response.reasoning_summary_text.done\r\n",
+        "data: {\"type\":\"response.reasoning_summary_text.done\",\"item_id\":\"reasoning_1\",\"output_index\":0,\"summary_index\":0,\"text\":\"思考\"}\r\n",
+        "\r\n",
+        "event: response.output_item.done\r\n",
+        "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"reasoning_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"思考\"}]}}\r\n",
+        "\r\n",
+        "event: response.completed\r\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ds_1\",\"status\":\"completed\",\"model\":\"deepseek-v4-flash\"}}\r\n",
+        "\r\n"
+    )
+    .to_string()
+}
+
 async fn fake_chat_completion(State(log): State<Arc<ChatRequestLog>>, body: Bytes) -> Response {
     let value = serde_json::from_slice::<Value>(&body).unwrap();
     log.bodies.lock().await.push(value.clone());
 
-    if value.get("model").and_then(Value::as_str) == Some("deepseek-reasoning")
+    if value.get("model").and_then(Value::as_str) == Some("chat-reasoning")
         && value.get("stream").and_then(Value::as_bool) == Some(true)
     {
         let chunks = vec![
             Ok::<Bytes, std::io::Error>(Bytes::from_static(
-                br#"data: {"id":"chatcmpl_123","created":123,"model":"deepseek-reasoning","choices":[{"delta":{"reasoning_content":"need tools "}}]}
+                br#"data: {"id":"chatcmpl_123","created":123,"model":"chat-reasoning","choices":[{"delta":{"reasoning_content":"need tools "}}]}
 
 "#,
             )),

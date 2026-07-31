@@ -22,18 +22,8 @@
 - 支持用户、客户端 API Key、上游端点、模型路由和多 relay 管理。
 - 支持 HTTP/stdio MCP 聚合、请求用量与重放、保留策略、审批和计费。
 - 支持 relay-worker 之间的 TLS、双向 TLS 和应用层加密。
-
-托管模式默认保留请求元数据 90 天、标准化内容 3 天、原始报文 3 天、已处理审批历史
-90 天。审批保留策略不会删除 pending 状态的审批。
-
-## 兼容边界
-
-- Responses 的 `input_image` 转发到 Chat 上游时会转换为标准的
-  `image_url` 内容块。调用方选择的 provider 和模型必须支持 Chat 多模态输入。
-- 远程 URL 和 data URL 会直接透传，不会由中继下载图片。远程 URL 必须能被上游
-  provider 访问，data URL 也会计入请求体大小限制。
-- Chat 转换不支持 Responses file ID、工具返回图片或上游模型输出图片。使用原生
-  Responses 上游时，输入图片内容不会经过 Chat 转换。
+- 支持原生 Responses 透传，包括 DeepSeek v4 flash；endpoint 使用 `Responses` 或
+  `Auto`，模型路由使用 `force_passthrough`。
 
 ## 部署
 
@@ -86,13 +76,3 @@ PROMPT_FERRY_RELAY__CLIENT_TOKEN=<客户端令牌>
 PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://api.example.com
 PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<上游 API 密钥>
 ```
-
-## 文档
-
-- [安全策略](SECURITY.md)
-- [贡献指南](CONTRIBUTING.md)
-- [Apache License 2.0](LICENSE)
-
-## 许可证
-
-本项目采用 Apache License 2.0 许可证。

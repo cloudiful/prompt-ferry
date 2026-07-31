@@ -23,22 +23,8 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 - Managed users, client API keys, upstream endpoints, model routes, and multiple relays.
 - MCP aggregation for HTTP and stdio servers, request usage and replay, retention, approval, and billing.
 - TLS, mutual TLS, and application-layer encryption for relay-worker traffic.
-
-Managed mode retains request metadata for 90 days, normalized content for 3 days,
-raw payloads for 3 days, and resolved approval history for 90 days by default.
-Pending approvals are never removed by approval retention.
-
-## Compatibility
-
-- Responses `input_image` parts are converted to standard Chat `image_url` parts
-  when routed to a Chat upstream. The selected provider and model must support
-  multimodal Chat input.
-- Remote URLs and data URLs are passed through without downloading the image.
-  The upstream provider must be able to fetch remote URLs, and data URLs count
-  toward the request size limit.
-- Chat conversion does not support Responses file IDs, images returned by tools,
-  or image output from the upstream model. Responses-native upstreams receive
-  input image parts without Chat conversion.
+- Native Responses passthrough, including DeepSeek v4 Flash; use `Responses` or
+  `Auto` endpoints with `force_passthrough` model routes.
 
 ## Deploy
 
@@ -96,13 +82,3 @@ PROMPT_FERRY_RELAY__CLIENT_TOKEN=<client-token>
 PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://api.example.com
 PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<upstream-api-key>
 ```
-
-## Documentation
-
-- [Security policy](SECURITY.md)
-- [Contributing](CONTRIBUTING.md)
-- [Apache License 2.0](LICENSE)
-
-## License
-
-Licensed under the Apache License, Version 2.0.

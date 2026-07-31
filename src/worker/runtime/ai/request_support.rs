@@ -329,6 +329,7 @@ async fn apply_provider_request_defaults(
         route,
         conversation_id,
         parent_event_id,
+        prepared.response_adapter,
         &original_body,
     )
     .await?
