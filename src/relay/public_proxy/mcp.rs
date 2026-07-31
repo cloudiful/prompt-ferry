@@ -3,8 +3,10 @@ use crate::protocol::{BridgeMessage, McpRequestChunk, McpRequestEnd, McpRequestS
 use super::super::{
     request_compression::{HttpRequestCompressionContext, HttpRequestTransferStats},
     response_forward::{
-        bridge_error_response, choose_worker, release_mcp_response_bytes, remove_mcp_pending,
+        PendingCleanup, bridge_error_response, choose_worker, release_mcp_response_bytes,
+        remove_mcp_pending,
     },
+    response_pump::spawn_mcp_response_pump,
     router::drain_body_then,
     state::{AppState, PendingMcpRequest, RemoteAddr, WorkerSender},
 };
@@ -130,15 +132,28 @@ async fn proxy_mcp_request(
     let request_id = Uuid::new_v4().to_string();
     let (start_tx, start_rx) = oneshot::channel();
     let (chunk_tx, chunk_rx) = mpsc::channel(state.config.response_stream_buffer);
+    let (forward_tx, forward_rx) = mpsc::unbounded_channel();
+    let chunk_tx_for_pump = chunk_tx.clone();
     state.inner.pending_mcp.lock().await.insert(
         request_id.clone(),
         PendingMcpRequest {
             start_tx: Some(start_tx),
             chunk_tx,
+            forward_tx,
             worker_id: selection.worker_id,
             worker: selection.sender.clone(),
             queued_bytes: 0,
+            response_started: false,
         },
+    );
+    spawn_mcp_response_pump(
+        state.clone(),
+        request_id.clone(),
+        selection.worker_id,
+        selection.sender.clone(),
+        forward_rx,
+        chunk_tx_for_pump,
+        Duration::from_millis(state.config.response_stream_backpressure_timeout_ms),
     );
     let worker = selection.sender;
     let request_headers = headers
@@ -166,6 +181,7 @@ async fn proxy_mcp_request(
         return response;
     }
     let timeout = Duration::from_secs(state.config.request_timeout_seconds);
+    let mut cleanup = PendingCleanup::mcp(state.clone(), request_id.clone());
     let start = match tokio::time::timeout(timeout, start_rx).await {
         Ok(Ok(Ok(start))) => start,
         Ok(Ok(Err(err))) => {
@@ -178,6 +194,7 @@ async fn proxy_mcp_request(
                 "relay received an MCP response error before streaming"
             );
             remove_mcp_pending(&state, &request_id).await;
+            cleanup.disarm();
             return bridge_error_response(err);
         }
         Ok(Err(_)) => {
@@ -188,6 +205,7 @@ async fn proxy_mcp_request(
                 "MCP response start channel closed before a response was received"
             );
             remove_mcp_pending(&state, &request_id).await;
+            cleanup.disarm();
             return crate::auth::error_response(
                 StatusCode::BAD_GATEWAY,
                 "mcp_response_closed",
@@ -203,6 +221,7 @@ async fn proxy_mcp_request(
                 "timed out waiting for MCP response start"
             );
             remove_mcp_pending(&state, &request_id).await;
+            cleanup.disarm();
             return crate::auth::error_response(
                 StatusCode::GATEWAY_TIMEOUT,
                 "mcp_timeout",
@@ -236,6 +255,7 @@ async fn proxy_mcp_request(
     let stream_path = request_path.clone();
     let stream_content_type = content_type.clone();
     let stream = async_stream::stream! {
+        let mut cleanup = cleanup;
         let mut chunk_rx = chunk_rx;
         let mut diag = DownstreamStreamDiag::new(
             "mcp",
@@ -279,6 +299,7 @@ async fn proxy_mcp_request(
             }
         }
         remove_mcp_pending(&stream_state, &stream_request_id).await;
+        cleanup.disarm();
         diag.mark_completed();
         diag.finish();
     };

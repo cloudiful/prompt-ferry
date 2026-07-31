@@ -118,6 +118,7 @@ pub(super) async fn handle_relay_bridge_message(
                 services.admin_state(),
                 &cancel.request_id,
                 &cancel.reason,
+                cancel.response_started,
             )
             .await;
         }
@@ -209,6 +210,7 @@ pub(super) async fn handle_relay_bridge_message(
                 services.admin_state(),
                 &cancel.request_id,
                 &cancel.reason,
+                cancel.response_started,
             )
             .await;
         }

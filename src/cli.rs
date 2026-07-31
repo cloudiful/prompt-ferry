@@ -53,6 +53,8 @@ pub struct RelayArgs {
     #[arg(long)]
     pub response_stream_max_bytes: Option<usize>,
     #[arg(long)]
+    pub response_stream_backpressure_timeout_ms: Option<u64>,
+    #[arg(long)]
     pub tls_mode: Option<TlsMode>,
     #[arg(long)]
     pub tls_cert: Option<String>,

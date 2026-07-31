@@ -34,6 +34,8 @@ async fn assert_aborted_record(
     event_id: i64,
     request_id: Uuid,
     expected_message: &str,
+    expected_reason: db::RequestAbortReason,
+    expected_response_started: Option<bool>,
 ) -> anyhow::Result<()> {
     let row = db::get_visible_usage_event_detail(pool, event_id, None)
         .await?
@@ -43,6 +45,12 @@ async fn assert_aborted_record(
     assert_eq!(row.ok, Some(false));
     assert_eq!(row.error_code.as_deref(), Some("request_aborted"));
     assert_eq!(row.error_message.as_deref(), Some(expected_message));
+    assert_eq!(row.abort_reason, Some(expected_reason));
+    assert_eq!(
+        row.abort_from_state,
+        Some(db::RequestRecordState::UpstreamProcessing)
+    );
+    assert_eq!(row.abort_response_started, expected_response_started);
     let lease = sqlx::query_as::<_, (i64,)>(include_str!(
         "sql/usage_maintenance/count_request_record_leases.sql"
     ))
@@ -69,7 +77,9 @@ async fn client_cancellation_records_an_aborted_reason() -> anyhow::Result<()> {
         db::abort_request_record(
             &schema.pool,
             request_id,
-            "request cancelled by downstream client before completion (relay reason: request_cancelled)",
+            db::RequestAbortReason::DownstreamClosed,
+            false,
+            "request aborted before completion (relay reason: downstream_closed; abort reason: downstream_closed)",
         )
         .await?,
         1
@@ -78,7 +88,9 @@ async fn client_cancellation_records_an_aborted_reason() -> anyhow::Result<()> {
         &schema.pool,
         event_id,
         request_id,
-        "request cancelled by downstream client before completion (relay reason: request_cancelled)",
+        "request aborted before completion (relay reason: downstream_closed; abort reason: downstream_closed)",
+        db::RequestAbortReason::DownstreamClosed,
+        Some(false),
     )
     .await?;
     schema.cleanup().await?;
@@ -103,6 +115,44 @@ async fn worker_disconnect_is_recorded_as_lease_expiration() -> anyhow::Result<(
         event_id,
         request_id,
         "request worker lease expired before completion; worker may have stopped or missed heartbeats",
+        db::RequestAbortReason::WorkerLeaseExpired,
+        None,
+    )
+    .await?;
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn response_started_is_persisted_for_downstream_disconnect() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping request lease diagnostic test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    db::migrate(&schema.pool).await?;
+    let request_id = Uuid::new_v4();
+    let event_id =
+        create_active_request(&schema.pool, request_id, Utc::now() + Duration::minutes(5)).await?;
+
+    assert_eq!(
+        db::abort_request_record(
+            &schema.pool,
+            request_id,
+            db::RequestAbortReason::DownstreamClosed,
+            true,
+            "request aborted after response started (relay reason: downstream_closed; abort reason: downstream_closed)",
+        )
+        .await?,
+        1
+    );
+    assert_aborted_record(
+        &schema.pool,
+        event_id,
+        request_id,
+        "request aborted after response started (relay reason: downstream_closed; abort reason: downstream_closed)",
+        db::RequestAbortReason::DownstreamClosed,
+        Some(true),
     )
     .await?;
     schema.cleanup().await?;
@@ -130,6 +180,8 @@ async fn missing_valkey_lease_is_recorded_separately() -> anyhow::Result<()> {
         event_id,
         request_id,
         "request Valkey lease was missing before completion",
+        db::RequestAbortReason::ValkeyLeaseMissing,
+        None,
     )
     .await?;
     schema.cleanup().await?;

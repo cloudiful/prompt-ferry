@@ -1,7 +1,7 @@
 use super::*;
 use crate::db::{
-    RequestFailureFamily, RequestRecordCategory, RequestRecordRedactionSummary,
-    RouteSelectionReason,
+    RequestAbortReason, RequestFailureFamily, RequestRecordCategory, RequestRecordRedactionSummary,
+    RequestRecordState, RouteSelectionReason,
 };
 use crate::raw_payload_store::RawPayloadStore;
 use tracing::warn;
@@ -76,6 +76,9 @@ struct RequestRecordDetailRow {
     upstream_error_body: Option<String>,
     error_code: Option<String>,
     error_message: Option<String>,
+    abort_reason: Option<RequestAbortReason>,
+    abort_from_state: Option<RequestRecordState>,
+    abort_response_started: Option<bool>,
     failure_family: Option<RequestFailureFamily>,
     mcp_bearer_token_slot: Option<i16>,
     route_selection_reason: RouteSelectionReason,
@@ -153,6 +156,9 @@ impl From<RequestRecordDetailRow> for RequestRecordDetail {
             upstream_error_body: row.upstream_error_body,
             error_code: row.error_code,
             error_message: row.error_message,
+            abort_reason: row.abort_reason,
+            abort_from_state: row.abort_from_state,
+            abort_response_started: row.abort_response_started,
             failure_family: row.failure_family,
             mcp_bearer_token_slot: row.mcp_bearer_token_slot,
             route_selection_reason: row.route_selection_reason,

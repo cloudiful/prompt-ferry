@@ -1,5 +1,5 @@
 WITH stale AS (
-    SELECT rr.event_id, rr.request_id
+    SELECT rr.event_id, rr.request_id, rr.request_state
     FROM request_records rr
     JOIN request_record_leases lease ON lease.request_id = rr.request_id
     WHERE rr.event_kind = 'request'
@@ -19,6 +19,9 @@ SET
         rr.error_message,
         'request worker lease expired before completion; worker may have stopped or missed heartbeats'
     ),
+    abort_reason = 'worker_lease_expired',
+    abort_from_state = stale.request_state,
+    abort_response_started = NULL,
     updated_at = NOW()
 FROM stale
 WHERE rr.event_id = stale.event_id

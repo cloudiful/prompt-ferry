@@ -831,6 +831,8 @@ export type RelayIpPolicyResponse = {
     trusted_proxy_cidrs: Array<string>;
 };
 
+export type RequestAbortReason = 'downstream_closed' | 'bridge_backpressure_full' | 'bridge_backpressure_bytes_limit' | 'worker_lease_expired' | 'valkey_lease_missing' | 'relay_unknown';
+
 export type RequestContentLoggingMode = 'off' | 'normalized_only' | 'normalized_and_raw';
 
 export type RequestContentLoggingRequest = {
@@ -862,6 +864,9 @@ export type RequestRecordBucket = {
 export type RequestRecordCategory = 'ai' | 'mcp';
 
 export type RequestRecordDetail = {
+    abort_from_state?: null | RequestRecordState;
+    abort_reason?: null | RequestAbortReason;
+    abort_response_started?: boolean | null;
     assistant_message_json?: unknown;
     assistant_output_items_json?: unknown;
     cache_rate?: number | null;
@@ -961,6 +966,9 @@ export type RequestRecordFullResponse = {
 };
 
 export type RequestRecordListRow = {
+    abort_from_state?: null | RequestRecordState;
+    abort_reason?: null | RequestAbortReason;
+    abort_response_started?: boolean | null;
     cache_rate?: number | null;
     cache_read_tokens?: number | null;
     cache_write_tokens?: number | null;

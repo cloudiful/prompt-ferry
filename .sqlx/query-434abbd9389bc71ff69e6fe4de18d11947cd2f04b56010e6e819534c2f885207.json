@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH target AS (\n    SELECT event_id, request_id, request_state\n    FROM request_records\n    WHERE event_kind = 'request'\n      AND request_state IN ('received', 'awaiting_approval', 'upstream_processing')\n      AND request_id = ANY($1::UUID[])\n), cleaned AS (\n    DELETE FROM request_record_leases lease\n    USING target\n    WHERE lease.request_id = target.request_id\n)\nUPDATE request_records rr\nSET\n    request_state = 'aborted',\n    ok = FALSE,\n    error_code = COALESCE(rr.error_code, 'request_aborted'),\n    error_message = COALESCE(rr.error_message, 'request Valkey lease was missing before completion'),\n    abort_reason = 'valkey_lease_missing',\n    abort_from_state = target.request_state,\n    abort_response_started = NULL,\n    updated_at = NOW()\nFROM target\nWHERE rr.event_id = target.event_id\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "434abbd9389bc71ff69e6fe4de18d11947cd2f04b56010e6e819534c2f885207"
+}

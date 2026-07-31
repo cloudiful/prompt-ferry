@@ -1,6 +1,7 @@
 mod public_proxy;
 mod request_compression;
 mod response_forward;
+mod response_pump;
 mod response_queue;
 mod router;
 mod state;

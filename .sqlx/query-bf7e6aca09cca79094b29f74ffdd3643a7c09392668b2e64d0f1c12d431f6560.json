@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH active AS (\n    SELECT event_id, request_state\n    FROM request_records\n    WHERE request_id = $1\n      AND event_kind = 'request'\n      AND request_state IN ('received', 'awaiting_approval', 'upstream_processing')\n    FOR UPDATE\n)\nUPDATE request_records rr\nSET\n    request_state = 'aborted',\n    ok = FALSE,\n    error_code = COALESCE(error_code, 'request_aborted'),\n    error_message = COALESCE(error_message, $2),\n    abort_reason = $3,\n    abort_from_state = active.request_state,\n    abort_response_started = $4,\n    updated_at = NOW()\nFROM active\nWHERE rr.event_id = active.event_id\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bf7e6aca09cca79094b29f74ffdd3643a7c09392668b2e64d0f1c12d431f6560"
+}

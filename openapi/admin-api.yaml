@@ -4657,6 +4657,15 @@ components:
           type: array
           items:
             type: string
+    RequestAbortReason:
+      type: string
+      enum:
+      - downstream_closed
+      - bridge_backpressure_full
+      - bridge_backpressure_bytes_limit
+      - worker_lease_expired
+      - valkey_lease_missing
+      - relay_unknown
     RequestContentLoggingMode:
       type: string
       enum:
@@ -4776,6 +4785,18 @@ components:
       - response_capture_truncated
       - created_at
       properties:
+        abort_from_state:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RequestRecordState'
+        abort_reason:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RequestAbortReason'
+        abort_response_started:
+          type:
+          - boolean
+          - 'null'
         assistant_message_json: {}
         assistant_output_items_json: {}
         cache_rate:
@@ -5131,6 +5152,18 @@ components:
       - route_selection_reason
       - created_at
       properties:
+        abort_from_state:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RequestRecordState'
+        abort_reason:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RequestAbortReason'
+        abort_response_started:
+          type:
+          - boolean
+          - 'null'
         cache_rate:
           type:
           - number

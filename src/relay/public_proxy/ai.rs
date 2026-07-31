@@ -14,9 +14,10 @@ use crate::{
 use super::super::{
     request_compression::{HttpRequestCompressionContext, HttpRequestTransferStats},
     response_forward::{
-        bridge_error_response, choose_worker, release_response_bytes, remove_pending,
-        remove_realtime_pending, request_deadline_unix_ms,
+        PendingCleanup, bridge_error_response, choose_worker, release_response_bytes,
+        remove_pending, remove_realtime_pending, request_deadline_unix_ms,
     },
+    response_pump::{spawn_realtime_response_pump, spawn_response_pump},
     router::drain_body_then,
     state::{AppState, PendingRequest, RemoteAddr, WorkerSender},
 };
@@ -229,14 +230,27 @@ pub(super) async fn proxy_realtime(
         .map(str::to_string);
 
     let (event_tx, event_rx) = mpsc::channel(state.config.response_stream_buffer);
+    let (forward_tx, forward_rx) = mpsc::unbounded_channel();
+    let event_tx_for_pump = event_tx.clone();
     state.inner.pending_realtime_sessions.lock().await.insert(
         request_id.clone(),
         PendingRealtimeSession {
             event_tx,
+            forward_tx,
             worker_id: selection.worker_id,
             worker: selection.sender.clone(),
             queued_bytes: 0,
+            response_started: false,
         },
+    );
+    spawn_realtime_response_pump(
+        state.clone(),
+        request_id.clone(),
+        selection.worker_id,
+        selection.sender.clone(),
+        forward_rx,
+        event_tx_for_pump,
+        Duration::from_millis(state.config.response_stream_backpressure_timeout_ms),
     );
     let start = RealtimeSessionStart {
         request_id: request_id.clone(),
@@ -289,17 +303,30 @@ async fn proxy_request(
 
     let (start_tx, start_rx) = oneshot::channel();
     let (chunk_tx, chunk_rx) = mpsc::channel(state.config.response_stream_buffer);
+    let (forward_tx, forward_rx) = mpsc::unbounded_channel();
+    let chunk_tx_for_pump = chunk_tx.clone();
 
     state.inner.pending.lock().await.insert(
         request_id.clone(),
         PendingRequest {
             start_tx: Some(start_tx),
             chunk_tx,
+            forward_tx,
             worker_id: selection.worker_id,
             worker: selection.sender.clone(),
             queued_bytes: 0,
+            response_started: false,
             awaiting_approval: false,
         },
+    );
+    spawn_response_pump(
+        state.clone(),
+        request_id.clone(),
+        selection.worker_id,
+        selection.sender.clone(),
+        forward_rx,
+        chunk_tx_for_pump,
+        Duration::from_millis(state.config.response_stream_backpressure_timeout_ms),
     );
     let worker = selection.sender;
 
@@ -333,14 +360,17 @@ async fn proxy_request(
     }
 
     let timeout = Duration::from_secs(state.config.request_timeout_seconds);
+    let mut cleanup = PendingCleanup::ai(state.clone(), request_id.clone());
     let start = match tokio::time::timeout(timeout, start_rx).await {
         Ok(Ok(Ok(start))) => start,
         Ok(Ok(Err(err))) => {
             remove_pending(&state, &request_id).await;
+            cleanup.disarm();
             return bridge_error_response(err);
         }
         Ok(Err(_)) => {
             remove_pending(&state, &request_id).await;
+            cleanup.disarm();
             return crate::auth::error_response(
                 StatusCode::BAD_GATEWAY,
                 "worker_response_closed",
@@ -349,6 +379,7 @@ async fn proxy_request(
         }
         Err(_) => {
             remove_pending(&state, &request_id).await;
+            cleanup.disarm();
             return crate::auth::error_response(
                 StatusCode::GATEWAY_TIMEOUT,
                 "request_timeout",
@@ -373,6 +404,7 @@ async fn proxy_request(
     let stream_path = path.to_string();
     let stream_content_type = content_type.clone();
     let stream = async_stream::stream! {
+        let mut cleanup = cleanup;
         let mut chunk_rx = chunk_rx;
         let mut diag = DownstreamStreamDiag::new(
             "ai",
@@ -414,6 +446,7 @@ async fn proxy_request(
             }
         }
         remove_pending(&stream_state, &stream_request_id).await;
+        cleanup.disarm();
         diag.mark_completed();
         diag.finish();
     };
@@ -796,12 +829,14 @@ async fn handle_realtime_socket(
         Result<crate::relay::state::QueuedRealtimeEvent, crate::protocol::ResponseError>,
     >,
 ) {
+    let mut cleanup = PendingCleanup::realtime(state.clone(), request_id.clone());
     if worker
         .send(BridgeMessage::RealtimeSessionStart(start))
         .await
         .is_err()
     {
         remove_realtime_pending(&state, &request_id).await;
+        cleanup.disarm();
         return;
     }
     let (mut ws_tx, mut ws_rx) = socket.split();
@@ -827,6 +862,7 @@ async fn handle_realtime_socket(
                             request_id: request_id.clone(),
                             code: frame.as_ref().map(|frame| frame.code),
                             reason: frame.as_ref().map(|frame| frame.reason.to_string()),
+                            response_started: true,
                         })).await;
                         break;
                     }
@@ -860,4 +896,5 @@ async fn handle_realtime_socket(
         }
     }
     remove_realtime_pending(&state, &request_id).await;
+    cleanup.disarm();
 }

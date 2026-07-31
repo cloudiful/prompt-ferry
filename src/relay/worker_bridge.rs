@@ -217,15 +217,18 @@ mod tests {
         let state = test_state();
         let (start_tx, start_rx) = oneshot::channel();
         let (chunk_tx, _chunk_rx) = mpsc::channel(1);
+        let (forward_tx, _forward_rx) = mpsc::unbounded_channel();
         let (worker, _worker_rx) = mpsc::channel(1);
         state.inner.pending.lock().await.insert(
             "req-1".to_string(),
             super::super::state::PendingRequest {
                 start_tx: Some(start_tx),
                 chunk_tx,
+                forward_tx,
                 worker_id: 1,
                 worker,
                 queued_bytes: 0,
+                response_started: false,
                 awaiting_approval: true,
             },
         );
@@ -252,15 +255,18 @@ mod tests {
         let state = test_state();
         let (start_tx, start_rx) = oneshot::channel();
         let (chunk_tx, _chunk_rx) = mpsc::channel(1);
+        let (forward_tx, _forward_rx) = mpsc::unbounded_channel();
         let (worker, _worker_rx) = mpsc::channel(1);
         state.inner.pending_mcp.lock().await.insert(
             "mcp-req-1".to_string(),
             super::super::state::PendingMcpRequest {
                 start_tx: Some(start_tx),
                 chunk_tx,
+                forward_tx,
                 worker_id: 3,
                 worker,
                 queued_bytes: 0,
+                response_started: false,
             },
         );
 

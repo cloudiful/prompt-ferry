@@ -38,6 +38,7 @@ pub struct RelayConfig {
     pub worker_heartbeat_timeout_seconds: u64,
     pub response_stream_buffer: usize,
     pub response_stream_max_bytes: usize,
+    pub response_stream_backpressure_timeout_ms: u64,
     pub tls_mode: TlsMode,
     pub tls_cert: String,
     pub tls_key: String,
@@ -61,6 +62,7 @@ impl Default for RelayConfig {
             worker_heartbeat_timeout_seconds: 90,
             response_stream_buffer: 256,
             response_stream_max_bytes: 16 * 1024 * 1024,
+            response_stream_backpressure_timeout_ms: 5_000,
             tls_mode: TlsMode::Off,
             tls_cert: String::new(),
             tls_key: String::new(),
@@ -100,6 +102,9 @@ impl RelayConfig {
         }
         if let Some(max_bytes) = args.response_stream_max_bytes {
             self.response_stream_max_bytes = max_bytes;
+        }
+        if let Some(timeout_ms) = args.response_stream_backpressure_timeout_ms {
+            self.response_stream_backpressure_timeout_ms = timeout_ms;
         }
         if let Some(mode) = args.tls_mode {
             self.tls_mode = mode;
@@ -146,6 +151,7 @@ mod tests {
 
         assert_eq!(config.response_stream_buffer, 256);
         assert_eq!(config.response_stream_max_bytes, 16 * 1024 * 1024);
+        assert_eq!(config.response_stream_backpressure_timeout_ms, 5_000);
     }
 
     #[test]
@@ -153,10 +159,12 @@ mod tests {
         let config = RelayConfig::default().merge_args(RelayArgs {
             response_stream_buffer: Some(8),
             response_stream_max_bytes: Some(4096),
+            response_stream_backpressure_timeout_ms: Some(250),
             ..RelayArgs::default()
         });
 
         assert_eq!(config.response_stream_buffer, 8);
         assert_eq!(config.response_stream_max_bytes, 4096);
+        assert_eq!(config.response_stream_backpressure_timeout_ms, 250);
     }
 }

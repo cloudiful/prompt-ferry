@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::{db, worker_admin::AdminState};
+use crate::{db, db::RequestAbortReason, worker_admin::AdminState};
 
 use super::super::request_assembly::{PendingIncomingRequest, RequestCancellation};
 
@@ -14,12 +14,22 @@ pub(super) async fn cancel_request(
     admin_state: Option<&AdminState>,
     request_id: &str,
     reason: &str,
+    response_started: bool,
 ) {
-    let abort_message = abort_message(reason);
+    let abort_reason = RequestAbortReason::from_relay_reason(reason);
+    let abort_message = abort_message(reason, abort_reason);
     if let Some(state) = admin_state
         && let Ok(request_id) = Uuid::parse_str(request_id)
     {
-        match db::abort_request_record(&state.lease_pool, request_id, &abort_message).await {
+        match db::abort_request_record(
+            &state.lease_pool,
+            request_id,
+            abort_reason,
+            response_started,
+            &abort_message,
+        )
+        .await
+        {
             Ok(0) => {
                 debug!(
                     request_id = %request_id,
@@ -54,40 +64,54 @@ pub(super) async fn cancel_request(
     }
 }
 
-fn abort_message(reason: &str) -> String {
-    let source = match reason {
-        "request_cancelled" => "downstream client",
-        "bridge_backpressure" => "relay bridge backpressure",
-        _ => "relay",
-    };
-    format!("request cancelled by {source} before completion (relay reason: {reason})")
+fn abort_message(reason: &str, abort_reason: RequestAbortReason) -> String {
+    format!(
+        "request aborted before completion (relay reason: {reason}; abort reason: {})",
+        abort_reason.as_str()
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::abort_message;
+    use crate::db::RequestAbortReason;
 
     #[test]
     fn classifies_downstream_disconnects() {
         assert_eq!(
-            abort_message("request_cancelled"),
-            "request cancelled by downstream client before completion (relay reason: request_cancelled)"
+            abort_message("downstream_closed", RequestAbortReason::DownstreamClosed),
+            "request aborted before completion (relay reason: downstream_closed; abort reason: downstream_closed)"
         );
     }
 
     #[test]
     fn classifies_bridge_backpressure() {
         assert_eq!(
-            abort_message("bridge_backpressure"),
-            "request cancelled by relay bridge backpressure before completion (relay reason: bridge_backpressure)"
+            abort_message(
+                "bridge_backpressure_full",
+                RequestAbortReason::BridgeBackpressureFull
+            ),
+            "request aborted before completion (relay reason: bridge_backpressure_full; abort reason: bridge_backpressure_full)"
         );
     }
 
     #[test]
     fn preserves_unknown_relay_reason_for_diagnostics() {
         assert_eq!(
-            abort_message("worker_timeout"),
-            "request cancelled by relay before completion (relay reason: worker_timeout)"
+            abort_message("worker_timeout", RequestAbortReason::RelayUnknown),
+            "request aborted before completion (relay reason: worker_timeout; abort reason: relay_unknown)"
+        );
+    }
+
+    #[test]
+    fn maps_legacy_relay_reasons_to_structured_abort_reasons() {
+        assert_eq!(
+            RequestAbortReason::from_relay_reason("request_cancelled"),
+            RequestAbortReason::DownstreamClosed
+        );
+        assert_eq!(
+            RequestAbortReason::from_relay_reason("bridge_backpressure"),
+            RequestAbortReason::BridgeBackpressureFull
         );
     }
 }

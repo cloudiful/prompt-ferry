@@ -37,6 +37,18 @@ pub(crate) struct QueuedRealtimeEvent {
     pub(crate) event: RealtimeServerEventMessage,
 }
 
+#[derive(Debug)]
+pub(crate) enum ForwardedResponseItem {
+    Chunk(QueuedResponseChunk),
+    Error(ResponseError),
+}
+
+#[derive(Debug)]
+pub(crate) enum ForwardedRealtimeItem {
+    Event(QueuedRealtimeEvent),
+    Error(ResponseError),
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct RemoteAddr(pub SocketAddr);
 
@@ -94,25 +106,31 @@ pub(crate) struct RelayState {
 pub(crate) struct PendingRequest {
     pub(crate) start_tx: Option<oneshot::Sender<Result<ResponseStart, ResponseError>>>,
     pub(crate) chunk_tx: mpsc::Sender<Result<QueuedResponseChunk, ResponseError>>,
+    pub(crate) forward_tx: mpsc::UnboundedSender<ForwardedResponseItem>,
     pub(crate) worker_id: usize,
     pub(crate) worker: WorkerSender,
     pub(crate) queued_bytes: usize,
+    pub(crate) response_started: bool,
     pub(crate) awaiting_approval: bool,
 }
 
 pub(crate) struct PendingMcpRequest {
     pub(crate) start_tx: Option<oneshot::Sender<Result<McpResponseStart, ResponseError>>>,
     pub(crate) chunk_tx: mpsc::Sender<Result<QueuedResponseChunk, ResponseError>>,
+    pub(crate) forward_tx: mpsc::UnboundedSender<ForwardedResponseItem>,
     pub(crate) worker_id: usize,
     pub(crate) worker: WorkerSender,
     pub(crate) queued_bytes: usize,
+    pub(crate) response_started: bool,
 }
 
 pub(crate) struct PendingRealtimeSession {
     pub(crate) event_tx: mpsc::Sender<Result<QueuedRealtimeEvent, ResponseError>>,
+    pub(crate) forward_tx: mpsc::UnboundedSender<ForwardedRealtimeItem>,
     pub(crate) worker_id: usize,
     pub(crate) worker: WorkerSender,
     pub(crate) queued_bytes: usize,
+    pub(crate) response_started: bool,
 }
 
 #[cfg(test)]

@@ -60,8 +60,10 @@ OPENAI_API_KEY=<生成的客户端密钥>
 
 如需适配读取较慢的下游客户端，可配置
 `PROMPT_FERRY_RELAY__RESPONSE_STREAM_BUFFER` 和
-`PROMPT_FERRY_RELAY__RESPONSE_STREAM_MAX_BYTES`。默认值分别为 256 个缓冲块和
-16 MiB；两项配置都必须大于零。
+`PROMPT_FERRY_RELAY__RESPONSE_STREAM_MAX_BYTES`。还可通过
+`PROMPT_FERRY_RELAY__RESPONSE_STREAM_BACKPRESSURE_TIMEOUT_MS` 配置每个响应
+forwarding pump 等待慢客户端的时长，默认 5000 毫秒。默认值分别为 256 个缓冲块和
+16 MiB；三项配置都必须大于零。
 
 请保持 `8789` 端口只对本机或受保护的内网开放。Compose 配置项见
 [.env.example](.env.example)。

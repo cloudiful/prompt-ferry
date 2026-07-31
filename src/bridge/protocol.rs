@@ -63,6 +63,8 @@ pub struct RealtimeSessionClose {
     pub code: Option<u16>,
     #[serde(default)]
     pub reason: Option<String>,
+    #[serde(default)]
+    pub response_started: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -111,6 +113,8 @@ pub struct BridgeRequestEnd {
 pub struct BridgeRequestCancel {
     pub request_id: String,
     pub reason: String,
+    #[serde(default)]
+    pub response_started: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,6 +160,8 @@ pub struct McpRequestEnd {
 pub struct McpRequestCancel {
     pub request_id: String,
     pub reason: String,
+    #[serde(default)]
+    pub response_started: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

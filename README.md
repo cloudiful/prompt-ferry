@@ -65,8 +65,11 @@ admin API.
 
 For slow downstream clients, tune the bounded relay response buffer with
 `PROMPT_FERRY_RELAY__RESPONSE_STREAM_BUFFER` and
-`PROMPT_FERRY_RELAY__RESPONSE_STREAM_MAX_BYTES`. The defaults are 256 queued
-chunks and 16 MiB per response; both values must be greater than zero.
+`PROMPT_FERRY_RELAY__RESPONSE_STREAM_MAX_BYTES`. The optional
+`PROMPT_FERRY_RELAY__RESPONSE_STREAM_BACKPRESSURE_TIMEOUT_MS` controls how long
+each response forwarding pump waits for a slow client before aborting; it
+defaults to 5000 ms. The defaults are 256 queued chunks and 16 MiB per response;
+all three values must be greater than zero.
 
 Keep port `8789` private. See [.env.example](.env.example) for the available
 Compose settings.

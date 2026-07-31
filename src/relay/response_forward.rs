@@ -11,17 +11,19 @@ use axum::{http::StatusCode, response::Response};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 
-use super::response_queue::{EnqueueResult, try_enqueue};
+use super::response_queue::{EnqueueResult, reserve_bytes};
 use super::state::{
-    AppState, QueuedRealtimeEvent, QueuedResponseChunk, WorkerSelection, WorkerSender,
+    AppState, ForwardedRealtimeItem, ForwardedResponseItem, QueuedRealtimeEvent,
+    QueuedResponseChunk, WorkerSelection, WorkerSender,
 };
 
 pub(crate) async fn handle_response_start(state: &AppState, start: ResponseStart) {
     let mut pending = state.inner.pending.lock().await;
-    if let Some(entry) = pending.get_mut(&start.request_id)
-        && let Some(tx) = entry.start_tx.take()
-    {
-        let _ = tx.send(Ok(start));
+    if let Some(entry) = pending.get_mut(&start.request_id) {
+        entry.response_started = true;
+        if let Some(tx) = entry.start_tx.take() {
+            let _ = tx.send(Ok(start));
+        }
     }
 }
 
@@ -34,16 +36,24 @@ pub(crate) async fn handle_response_chunk(state: &AppState, chunk: ResponseChunk
         let Some(entry) = pending.get_mut(&request_id) else {
             return;
         };
-        let result = try_enqueue(
-            &entry.chunk_tx,
+        let result = reserve_bytes(
             &mut entry.queued_bytes,
-            Ok(queued),
             chunk_bytes,
             state.config.response_stream_max_bytes,
         );
-        if result == EnqueueResult::Enqueued {
+        if result == EnqueueResult::Enqueued
+            && entry
+                .forward_tx
+                .send(ForwardedResponseItem::Chunk(queued))
+                .is_ok()
+        {
             None
         } else {
+            let result = if result == EnqueueResult::Enqueued {
+                EnqueueResult::Closed
+            } else {
+                result
+            };
             Some((
                 pending.remove(&request_id).expect("pending entry exists"),
                 result,
@@ -65,11 +75,31 @@ pub(crate) async fn handle_response_chunk(state: &AppState, chunk: ResponseChunk
         release_worker(state, entry.worker_id).await;
         match result {
             EnqueueResult::Closed => {
-                send_request_cancel(&entry.worker, &request_id, "request_cancelled");
+                send_request_cancel(
+                    &entry.worker,
+                    &request_id,
+                    "downstream_closed",
+                    entry.response_started,
+                );
             }
-            EnqueueResult::BytesLimit | EnqueueResult::Full => {
+            EnqueueResult::BytesLimit => {
                 let err = backpressure_error(&request_id);
-                send_request_cancel(&entry.worker, &request_id, &err.code);
+                send_request_cancel(
+                    &entry.worker,
+                    &request_id,
+                    "bridge_backpressure_bytes_limit",
+                    entry.response_started,
+                );
+                send_response_error(entry.start_tx, entry.chunk_tx, err);
+            }
+            EnqueueResult::Full => {
+                let err = backpressure_error(&request_id);
+                send_request_cancel(
+                    &entry.worker,
+                    &request_id,
+                    "bridge_backpressure_full",
+                    entry.response_started,
+                );
                 send_response_error(entry.start_tx, entry.chunk_tx, err);
             }
             EnqueueResult::Enqueued => unreachable!(),
@@ -82,7 +112,22 @@ pub(crate) async fn handle_response_end(state: &AppState, end: ResponseEnd) {
 }
 
 pub(crate) async fn handle_response_error(state: &AppState, err: ResponseError) {
-    let entry = state.inner.pending.lock().await.remove(&err.request_id);
+    let entry = {
+        let mut pending = state.inner.pending.lock().await;
+        let Some(current) = pending.get_mut(&err.request_id) else {
+            return;
+        };
+        if current.response_started
+            && current
+                .forward_tx
+                .send(ForwardedResponseItem::Error(err.clone()))
+                .is_ok()
+        {
+            None
+        } else {
+            pending.remove(&err.request_id)
+        }
+    };
     if let Some(mut entry) = entry {
         release_worker(state, entry.worker_id).await;
         if let Some(tx) = entry.start_tx.take() {
@@ -95,10 +140,11 @@ pub(crate) async fn handle_response_error(state: &AppState, err: ResponseError) 
 
 pub(crate) async fn handle_mcp_response_start(state: &AppState, start: McpResponseStart) {
     let mut pending = state.inner.pending_mcp.lock().await;
-    if let Some(entry) = pending.get_mut(&start.request_id)
-        && let Some(tx) = entry.start_tx.take()
-    {
-        let _ = tx.send(Ok(start));
+    if let Some(entry) = pending.get_mut(&start.request_id) {
+        entry.response_started = true;
+        if let Some(tx) = entry.start_tx.take() {
+            let _ = tx.send(Ok(start));
+        }
     }
 }
 
@@ -116,16 +162,24 @@ pub(crate) async fn handle_mcp_response_chunk(state: &AppState, chunk: McpRespon
             );
             return;
         };
-        let result = try_enqueue(
-            &entry.chunk_tx,
+        let result = reserve_bytes(
             &mut entry.queued_bytes,
-            Ok(queued),
             chunk_bytes,
             state.config.response_stream_max_bytes,
         );
-        if result == EnqueueResult::Enqueued {
+        if result == EnqueueResult::Enqueued
+            && entry
+                .forward_tx
+                .send(ForwardedResponseItem::Chunk(queued))
+                .is_ok()
+        {
             None
         } else {
+            let result = if result == EnqueueResult::Enqueued {
+                EnqueueResult::Closed
+            } else {
+                result
+            };
             Some((
                 pending
                     .remove(&request_id)
@@ -149,11 +203,31 @@ pub(crate) async fn handle_mcp_response_chunk(state: &AppState, chunk: McpRespon
         release_worker(state, entry.worker_id).await;
         match result {
             EnqueueResult::Closed => {
-                send_mcp_request_cancel(&entry.worker, &request_id, "request_cancelled");
+                send_mcp_request_cancel(
+                    &entry.worker,
+                    &request_id,
+                    "downstream_closed",
+                    entry.response_started,
+                );
             }
-            EnqueueResult::BytesLimit | EnqueueResult::Full => {
+            EnqueueResult::BytesLimit => {
                 let err = backpressure_error(&request_id);
-                send_mcp_request_cancel(&entry.worker, &request_id, &err.code);
+                send_mcp_request_cancel(
+                    &entry.worker,
+                    &request_id,
+                    "bridge_backpressure_bytes_limit",
+                    entry.response_started,
+                );
+                send_mcp_response_error(entry.start_tx, entry.chunk_tx, err);
+            }
+            EnqueueResult::Full => {
+                let err = backpressure_error(&request_id);
+                send_mcp_request_cancel(
+                    &entry.worker,
+                    &request_id,
+                    "bridge_backpressure_full",
+                    entry.response_started,
+                );
                 send_mcp_response_error(entry.start_tx, entry.chunk_tx, err);
             }
             EnqueueResult::Enqueued => unreachable!(),
@@ -166,7 +240,22 @@ pub(crate) async fn handle_mcp_response_end(state: &AppState, end: McpResponseEn
 }
 
 pub(crate) async fn handle_mcp_response_error(state: &AppState, err: ResponseError) {
-    let entry = state.inner.pending_mcp.lock().await.remove(&err.request_id);
+    let entry = {
+        let mut pending = state.inner.pending_mcp.lock().await;
+        let Some(current) = pending.get_mut(&err.request_id) else {
+            return;
+        };
+        if current.response_started
+            && current
+                .forward_tx
+                .send(ForwardedResponseItem::Error(err.clone()))
+                .is_ok()
+        {
+            None
+        } else {
+            pending.remove(&err.request_id)
+        }
+    };
     if let Some(mut entry) = entry {
         warn!(
             category = "mcp_bridge_diag",
@@ -197,16 +286,25 @@ pub(crate) async fn handle_realtime_server_event(
         let Some(entry) = pending.get_mut(&request_id) else {
             return;
         };
-        let result = try_enqueue(
-            &entry.event_tx,
+        entry.response_started = true;
+        let result = reserve_bytes(
             &mut entry.queued_bytes,
-            Ok(queued),
             event_bytes,
             state.config.response_stream_max_bytes,
         );
-        if result == EnqueueResult::Enqueued {
+        if result == EnqueueResult::Enqueued
+            && entry
+                .forward_tx
+                .send(ForwardedRealtimeItem::Event(queued))
+                .is_ok()
+        {
             None
         } else {
+            let result = if result == EnqueueResult::Enqueued {
+                EnqueueResult::Closed
+            } else {
+                result
+            };
             Some((
                 pending
                     .remove(&request_id)
@@ -230,11 +328,31 @@ pub(crate) async fn handle_realtime_server_event(
         release_worker(state, entry.worker_id).await;
         match result {
             EnqueueResult::Closed => {
-                send_realtime_close(&entry.worker, &request_id, "request_cancelled");
+                send_realtime_close(
+                    &entry.worker,
+                    &request_id,
+                    "downstream_closed",
+                    entry.response_started,
+                );
             }
-            EnqueueResult::BytesLimit | EnqueueResult::Full => {
+            EnqueueResult::BytesLimit => {
                 let err = backpressure_error(&request_id);
-                send_realtime_close(&entry.worker, &request_id, &err.code);
+                send_realtime_close(
+                    &entry.worker,
+                    &request_id,
+                    "bridge_backpressure_bytes_limit",
+                    entry.response_started,
+                );
+                let _ = entry.event_tx.try_send(Err(err));
+            }
+            EnqueueResult::Full => {
+                let err = backpressure_error(&request_id);
+                send_realtime_close(
+                    &entry.worker,
+                    &request_id,
+                    "bridge_backpressure_full",
+                    entry.response_started,
+                );
                 let _ = entry.event_tx.try_send(Err(err));
             }
             EnqueueResult::Enqueued => unreachable!(),
@@ -247,12 +365,21 @@ pub(crate) async fn handle_realtime_session_close(state: &AppState, close: Realt
 }
 
 pub(crate) async fn handle_realtime_session_error(state: &AppState, err: ResponseError) {
-    let entry = state
-        .inner
-        .pending_realtime_sessions
-        .lock()
-        .await
-        .remove(&err.request_id);
+    let entry = {
+        let mut pending = state.inner.pending_realtime_sessions.lock().await;
+        let Some(current) = pending.get_mut(&err.request_id) else {
+            return;
+        };
+        if current
+            .forward_tx
+            .send(ForwardedRealtimeItem::Error(err.clone()))
+            .is_ok()
+        {
+            None
+        } else {
+            pending.remove(&err.request_id)
+        }
+    };
     if let Some(entry) = entry {
         release_worker(state, entry.worker_id).await;
         let _ = entry.event_tx.try_send(Err(err));
@@ -283,7 +410,12 @@ pub(crate) async fn remove_pending(state: &AppState, request_id: &str) {
     let entry = state.inner.pending.lock().await.remove(request_id);
     if let Some(entry) = entry {
         release_worker(state, entry.worker_id).await;
-        send_request_cancel(&entry.worker, request_id, "request_cancelled");
+        send_request_cancel(
+            &entry.worker,
+            request_id,
+            "downstream_closed",
+            entry.response_started,
+        );
     }
 }
 
@@ -297,7 +429,12 @@ pub(crate) async fn remove_mcp_pending(state: &AppState, request_id: &str) {
             "removed pending MCP request after downstream stream ended"
         );
         release_worker(state, entry.worker_id).await;
-        send_mcp_request_cancel(&entry.worker, request_id, "request_cancelled");
+        send_mcp_request_cancel(
+            &entry.worker,
+            request_id,
+            "downstream_closed",
+            entry.response_started,
+        );
     }
 }
 
@@ -310,7 +447,12 @@ pub(crate) async fn remove_realtime_pending(state: &AppState, request_id: &str) 
         .remove(request_id);
     if let Some(entry) = entry {
         release_worker(state, entry.worker_id).await;
-        send_realtime_close(&entry.worker, request_id, "request_cancelled");
+        send_realtime_close(
+            &entry.worker,
+            request_id,
+            "downstream_closed",
+            entry.response_started,
+        );
     }
 }
 
@@ -386,7 +528,13 @@ pub(crate) async fn fail_pending_for_worker(
             err.code = "approval_interrupted".to_string();
             err.message = "approval wait was interrupted".to_string();
         }
-        send_response_error(entry.start_tx.take(), entry.chunk_tx, err.clone());
+        if entry.response_started {
+            let _ = entry
+                .forward_tx
+                .send(ForwardedResponseItem::Error(err.clone()));
+        } else {
+            send_response_error(entry.start_tx.take(), entry.chunk_tx, err.clone());
+        }
     }
 
     let drained = {
@@ -412,7 +560,13 @@ pub(crate) async fn fail_pending_for_worker(
     }
     for (request_id, mut entry) in drained {
         err.request_id = request_id;
-        send_mcp_response_error(entry.start_tx.take(), entry.chunk_tx, err.clone());
+        if entry.response_started {
+            let _ = entry
+                .forward_tx
+                .send(ForwardedResponseItem::Error(err.clone()));
+        } else {
+            send_mcp_response_error(entry.start_tx.take(), entry.chunk_tx, err.clone());
+        }
     }
 
     let drained = {
@@ -429,18 +583,20 @@ pub(crate) async fn fail_pending_for_worker(
     };
     for (request_id, entry) in drained {
         err.request_id = request_id;
-        let _ = entry.event_tx.try_send(Err(err.clone()));
+        let _ = entry
+            .forward_tx
+            .send(ForwardedRealtimeItem::Error(err.clone()));
     }
 }
 
-async fn release_worker(state: &AppState, worker_id: usize) {
+pub(crate) async fn release_worker(state: &AppState, worker_id: usize) {
     let mut loads = state.inner.worker_loads.lock().await;
     if let Some(load) = loads.get_mut(&worker_id) {
         *load = load.saturating_sub(1);
     }
 }
 
-fn send_response_error(
+pub(crate) fn send_response_error(
     start_tx: Option<tokio::sync::oneshot::Sender<Result<ResponseStart, ResponseError>>>,
     chunk_tx: tokio::sync::mpsc::Sender<Result<QueuedResponseChunk, ResponseError>>,
     err: ResponseError,
@@ -452,7 +608,7 @@ fn send_response_error(
     }
 }
 
-fn send_mcp_response_error(
+pub(crate) fn send_mcp_response_error(
     start_tx: Option<tokio::sync::oneshot::Sender<Result<McpResponseStart, ResponseError>>>,
     chunk_tx: tokio::sync::mpsc::Sender<Result<QueuedResponseChunk, ResponseError>>,
     err: ResponseError,
@@ -464,29 +620,47 @@ fn send_mcp_response_error(
     }
 }
 
-fn send_request_cancel(worker: &WorkerSender, request_id: &str, reason: &str) {
+pub(crate) fn send_request_cancel(
+    worker: &WorkerSender,
+    request_id: &str,
+    reason: &str,
+    response_started: bool,
+) {
     let _ = worker.try_send(BridgeMessage::RequestCancel(BridgeRequestCancel {
         request_id: request_id.to_string(),
         reason: reason.to_string(),
+        response_started,
     }));
 }
 
-fn send_mcp_request_cancel(worker: &WorkerSender, request_id: &str, reason: &str) {
+pub(crate) fn send_mcp_request_cancel(
+    worker: &WorkerSender,
+    request_id: &str,
+    reason: &str,
+    response_started: bool,
+) {
     let _ = worker.try_send(BridgeMessage::McpRequestCancel(McpRequestCancel {
         request_id: request_id.to_string(),
         reason: reason.to_string(),
+        response_started,
     }));
 }
 
-fn send_realtime_close(worker: &WorkerSender, request_id: &str, reason: &str) {
+pub(crate) fn send_realtime_close(
+    worker: &WorkerSender,
+    request_id: &str,
+    reason: &str,
+    response_started: bool,
+) {
     let _ = worker.try_send(BridgeMessage::RealtimeSessionClose(RealtimeSessionClose {
         request_id: request_id.to_string(),
         code: None,
         reason: Some(reason.to_string()),
+        response_started,
     }));
 }
 
-fn backpressure_error(request_id: &str) -> ResponseError {
+pub(crate) fn backpressure_error(request_id: &str) -> ResponseError {
     ResponseError {
         request_id: request_id.to_string(),
         status: StatusCode::BAD_GATEWAY.as_u16(),
@@ -508,6 +682,69 @@ pub(crate) fn bridge_error_response(err: ResponseError) -> Response {
     error_response(status, &err.code, &err.message)
 }
 
+#[derive(Clone, Copy)]
+enum PendingCleanupKind {
+    Ai,
+    Mcp,
+    Realtime,
+}
+
+pub(crate) struct PendingCleanup {
+    state: Option<AppState>,
+    request_id: String,
+    kind: PendingCleanupKind,
+}
+
+impl PendingCleanup {
+    pub(crate) fn ai(state: AppState, request_id: String) -> Self {
+        Self {
+            state: Some(state),
+            request_id,
+            kind: PendingCleanupKind::Ai,
+        }
+    }
+
+    pub(crate) fn mcp(state: AppState, request_id: String) -> Self {
+        Self {
+            state: Some(state),
+            request_id,
+            kind: PendingCleanupKind::Mcp,
+        }
+    }
+
+    pub(crate) fn realtime(state: AppState, request_id: String) -> Self {
+        Self {
+            state: Some(state),
+            request_id,
+            kind: PendingCleanupKind::Realtime,
+        }
+    }
+
+    pub(crate) fn disarm(&mut self) {
+        self.state = None;
+    }
+}
+
+impl Drop for PendingCleanup {
+    fn drop(&mut self) {
+        let Some(state) = self.state.take() else {
+            return;
+        };
+        let request_id = self.request_id.clone();
+        let kind = self.kind;
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        handle.spawn(async move {
+            match kind {
+                PendingCleanupKind::Ai => remove_pending(&state, &request_id).await,
+                PendingCleanupKind::Mcp => remove_mcp_pending(&state, &request_id).await,
+                PendingCleanupKind::Realtime => remove_realtime_pending(&state, &request_id).await,
+            }
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{handle_response_chunk, remove_mcp_pending};
@@ -523,14 +760,17 @@ mod tests {
         let (worker, mut worker_rx) = mpsc::channel(1);
         let (start_tx, _start_rx) = oneshot::channel();
         let (chunk_tx, _chunk_rx) = mpsc::channel(1);
+        let (forward_tx, _forward_rx) = mpsc::unbounded_channel();
         state.inner.pending_mcp.lock().await.insert(
             "request-1".to_string(),
             PendingMcpRequest {
                 start_tx: Some(start_tx),
                 chunk_tx,
+                forward_tx,
                 worker_id: 7,
                 worker,
                 queued_bytes: 0,
+                response_started: false,
             },
         );
 
@@ -549,28 +789,32 @@ mod tests {
             Some(BridgeMessage::McpRequestCancel(
                 crate::protocol::McpRequestCancel {
                     request_id: "request-1".to_string(),
-                    reason: "request_cancelled".to_string(),
+                    reason: "downstream_closed".to_string(),
+                    response_started: false,
                 }
             ))
         );
     }
 
     #[tokio::test]
-    async fn full_response_queue_cancels_with_backpressure_reason() {
+    async fn response_byte_budget_cancels_with_backpressure_reason() {
         let mut state = test_state();
         state.config.response_stream_buffer = 1;
-        state.config.response_stream_max_bytes = 1024;
+        state.config.response_stream_max_bytes = 1;
         let (worker, mut worker_rx) = mpsc::channel(1);
         let (start_tx, _start_rx) = oneshot::channel();
         let (chunk_tx, _chunk_rx) = mpsc::channel(1);
+        let (forward_tx, _forward_rx) = mpsc::unbounded_channel();
         state.inner.pending.lock().await.insert(
             "request-1".to_string(),
             PendingRequest {
                 start_tx: Some(start_tx),
                 chunk_tx,
+                forward_tx,
                 worker_id: 7,
                 worker,
                 queued_bytes: 0,
+                response_started: false,
                 awaiting_approval: false,
             },
         );
@@ -598,7 +842,8 @@ mod tests {
             Some(BridgeMessage::RequestCancel(
                 crate::protocol::BridgeRequestCancel {
                     request_id: "request-1".to_string(),
-                    reason: "bridge_backpressure".to_string(),
+                    reason: "bridge_backpressure_bytes_limit".to_string(),
+                    response_started: false,
                 }
             ))
         );
@@ -610,15 +855,19 @@ mod tests {
         let (worker, mut worker_rx) = mpsc::channel(1);
         let (start_tx, _start_rx) = oneshot::channel();
         let (chunk_tx, chunk_rx) = mpsc::channel(1);
+        let (forward_tx, forward_rx) = mpsc::unbounded_channel();
         drop(chunk_rx);
+        drop(forward_rx);
         state.inner.pending.lock().await.insert(
             "request-1".to_string(),
             PendingRequest {
                 start_tx: Some(start_tx),
                 chunk_tx,
+                forward_tx,
                 worker_id: 7,
                 worker,
                 queued_bytes: 0,
+                response_started: false,
                 awaiting_approval: false,
             },
         );
@@ -638,7 +887,8 @@ mod tests {
             Some(BridgeMessage::RequestCancel(
                 crate::protocol::BridgeRequestCancel {
                     request_id: "request-1".to_string(),
-                    reason: "request_cancelled".to_string(),
+                    reason: "downstream_closed".to_string(),
+                    response_started: false,
                 }
             ))
         );
@@ -652,14 +902,17 @@ mod tests {
         let (worker, mut worker_rx) = mpsc::channel(1);
         let (start_tx, start_rx) = oneshot::channel();
         let (chunk_tx, _chunk_rx) = mpsc::channel(4);
+        let (forward_tx, _forward_rx) = mpsc::unbounded_channel();
         state.inner.pending.lock().await.insert(
             "request-1".to_string(),
             PendingRequest {
                 start_tx: Some(start_tx),
                 chunk_tx,
+                forward_tx,
                 worker_id: 7,
                 worker,
                 queued_bytes: 0,
+                response_started: false,
                 awaiting_approval: false,
             },
         );
@@ -680,7 +933,8 @@ mod tests {
             Some(BridgeMessage::RequestCancel(
                 crate::protocol::BridgeRequestCancel {
                     request_id: "request-1".to_string(),
-                    reason: "bridge_backpressure".to_string(),
+                    reason: "bridge_backpressure_bytes_limit".to_string(),
+                    response_started: false,
                 }
             ))
         );

@@ -28,7 +28,10 @@ VALUES (
 )
 ON CONFLICT (request_id) WHERE event_kind = 'request'
 DO UPDATE SET
-    request_state = EXCLUDED.request_state,
+    request_state = CASE
+        WHEN request_records.request_state = 'aborted' THEN request_records.request_state
+        ELSE EXCLUDED.request_state
+    END,
     user_id = COALESCE(EXCLUDED.user_id, request_records.user_id),
     client_key_label = COALESCE(EXCLUDED.client_key_label, request_records.client_key_label),
     request_user_agent = COALESCE(EXCLUDED.request_user_agent, request_records.request_user_agent),

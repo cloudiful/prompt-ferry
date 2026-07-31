@@ -4,8 +4,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::db::types::{
-    RequestRecordToolCall, RequestRecordToolCallCreate, RequestRecordToolCallReplayCandidate,
-    RequestToolCallStatus,
+    RequestAbortReason, RequestRecordToolCall, RequestRecordToolCallCreate,
+    RequestRecordToolCallReplayCandidate, RequestToolCallStatus,
 };
 
 fn parse_request_tool_call_status(value: &str) -> Result<RequestToolCallStatus> {
@@ -58,10 +58,22 @@ pub async fn delete_request_record_lease(pool: &PgPool, request_id: Uuid) -> Res
     Ok(result.rows_affected())
 }
 
-pub async fn abort_request_record(pool: &PgPool, request_id: Uuid, reason: &str) -> Result<u64> {
-    let result = sqlx::query_file!("src/sql/usage/abort_request_record.sql", request_id, reason,)
-        .execute(pool)
-        .await?;
+pub async fn abort_request_record(
+    pool: &PgPool,
+    request_id: Uuid,
+    reason: RequestAbortReason,
+    response_started: bool,
+    message: &str,
+) -> Result<u64> {
+    let result = sqlx::query_file!(
+        "src/sql/usage/abort_request_record.sql",
+        request_id,
+        message,
+        reason.as_str(),
+        response_started,
+    )
+    .execute(pool)
+    .await?;
     Ok(result.rows_affected())
 }
 

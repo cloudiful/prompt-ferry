@@ -69,6 +69,43 @@ impl RequestRecordState {
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text")]
 #[sqlx(rename_all = "snake_case")]
+pub enum RequestAbortReason {
+    DownstreamClosed,
+    BridgeBackpressureFull,
+    BridgeBackpressureBytesLimit,
+    WorkerLeaseExpired,
+    ValkeyLeaseMissing,
+    RelayUnknown,
+}
+
+impl RequestAbortReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DownstreamClosed => "downstream_closed",
+            Self::BridgeBackpressureFull => "bridge_backpressure_full",
+            Self::BridgeBackpressureBytesLimit => "bridge_backpressure_bytes_limit",
+            Self::WorkerLeaseExpired => "worker_lease_expired",
+            Self::ValkeyLeaseMissing => "valkey_lease_missing",
+            Self::RelayUnknown => "relay_unknown",
+        }
+    }
+
+    pub fn from_relay_reason(reason: &str) -> Self {
+        match reason {
+            "request_cancelled" | "downstream_closed" => Self::DownstreamClosed,
+            "bridge_backpressure" | "bridge_backpressure_full" => Self::BridgeBackpressureFull,
+            "bridge_backpressure_bytes_limit" => Self::BridgeBackpressureBytesLimit,
+            "worker_lease_expired" => Self::WorkerLeaseExpired,
+            "valkey_lease_missing" => Self::ValkeyLeaseMissing,
+            _ => Self::RelayUnknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text")]
+#[sqlx(rename_all = "snake_case")]
 pub enum RequestToolCallStatus {
     Emitted,
     OutputReceived,

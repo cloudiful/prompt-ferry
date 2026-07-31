@@ -4,6 +4,7 @@ import PreviewExpansionActions from '@/components/shared/PreviewExpansionActions
 import FlatSection from '@/components/shared/FlatSection.vue'
 import DetailKeyValue from '@/components/usage/detail/DetailKeyValue.vue'
 import DetailMetricCard from '@/components/usage/detail/DetailMetricCard.vue'
+import UsageErrorSection from '@/components/usage/detail/UsageErrorSection.vue'
 import type { RequestRecordDetailView } from '@/models'
 import type { RequestRecordFormatting } from '@/models/request-record-formatting'
 import MarkdownLog from '@/components/shared/MarkdownLog.vue'
@@ -29,7 +30,6 @@ const props = defineProps<{
 
 const visible = defineModel<boolean>('visible', { required: true })
 const responsePreviewLevel = ref(1)
-const errorPreviewLevel = ref(1)
 
 const PREVIEW_STEP_LINES = 120
 const PREVIEW_STEP_CHARS = 10_000
@@ -40,7 +40,6 @@ const requestJsonText = computed(() =>
     : '',
 )
 const responseText = computed(() => props.event?.response_prompt || '')
-const upstreamErrorText = computed(() => props.event?.upstream_error_body || '')
 const requestCompressionText = computed(
   () =>
     props.event?.http_request_content_encoding ||
@@ -64,18 +63,9 @@ const responsePreview = computed(() =>
     PREVIEW_STEP_LINES,
   ),
 )
-const errorPreview = computed(() =>
-  previewText(
-    upstreamErrorText.value,
-    errorPreviewLevel.value,
-    PREVIEW_STEP_CHARS,
-    PREVIEW_STEP_LINES,
-  ),
-)
-
 watch(visible, (nextVisible) => {
   if (!nextVisible) {
-    resetPreviewLevels(responsePreviewLevel, errorPreviewLevel)
+    resetPreviewLevels(responsePreviewLevel)
   }
 })
 
@@ -92,7 +82,6 @@ function createPreviewActions(level: Ref<number>): {
 }
 
 const responsePreviewActions = createPreviewActions(responsePreviewLevel)
-const errorPreviewActions = createPreviewActions(errorPreviewLevel)
 </script>
 
 <template>
@@ -227,42 +216,7 @@ const errorPreviewActions = createPreviewActions(errorPreviewLevel)
           </FlatSection>
         </div>
 
-        <FlatSection
-          v-if="event.error_message || event.upstream_error_body"
-          :title="t('errorDetails')"
-        >
-          <div class="grid gap-2">
-            <div
-              v-if="event.error_message"
-              class="break-all rounded border border-error bg-error/10 p-3 text-error"
-            >
-              {{
-                event.error_code
-                  ? `${event.error_code}: ${event.error_message}`
-                  : event.error_message
-              }}
-            </div>
-            <MarkdownLog
-              v-if="event.upstream_error_body"
-              :text="errorPreview.text"
-              :empty-text="t('contentLoggingOff')"
-              max-height="12rem"
-            />
-            <PreviewExpansionActions
-              v-if="event.upstream_error_body"
-              :all-label="t('showFullContent')"
-              :buttons-class="'flex flex-wrap gap-2'"
-              :collapse-label="t('collapseContent')"
-              :expanded="errorPreviewLevel > 1"
-              :has-more="errorPreview.hasMore"
-              :more-label="t('showMoreContent')"
-              :truncated-label="t('truncatedPreview')"
-              @all="errorPreviewActions.all"
-              @collapse="errorPreviewActions.collapse"
-              @more="errorPreviewActions.more"
-            />
-          </div>
-        </FlatSection>
+        <UsageErrorSection :event="event" :t="t" :visible="visible" />
       </div>
     </template>
   </UModal>

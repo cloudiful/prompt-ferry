@@ -3,9 +3,10 @@ use crate::protocol::BridgeRequestStart;
 use super::super::{
     request_compression::HttpRequestCompressionContext,
     response_forward::{
-        bridge_error_response, choose_worker, release_response_bytes, remove_pending,
-        request_deadline_unix_ms,
+        PendingCleanup, bridge_error_response, choose_worker, release_response_bytes,
+        remove_pending, request_deadline_unix_ms,
     },
+    response_pump::spawn_response_pump,
     router::drain_body_then,
     state::{AppState, PendingRequest, RemoteAddr},
 };
@@ -73,16 +74,29 @@ async fn proxy_request(
 
     let (start_tx, start_rx) = oneshot::channel();
     let (chunk_tx, chunk_rx) = mpsc::channel(state.config.response_stream_buffer);
+    let (forward_tx, forward_rx) = mpsc::unbounded_channel();
+    let chunk_tx_for_pump = chunk_tx.clone();
     state.inner.pending.lock().await.insert(
         request_id.clone(),
         PendingRequest {
             start_tx: Some(start_tx),
             chunk_tx,
+            forward_tx,
             worker_id: selection.worker_id,
             worker: selection.sender.clone(),
             queued_bytes: 0,
+            response_started: false,
             awaiting_approval: false,
         },
+    );
+    spawn_response_pump(
+        state.clone(),
+        request_id.clone(),
+        selection.worker_id,
+        selection.sender.clone(),
+        forward_rx,
+        chunk_tx_for_pump,
+        Duration::from_millis(state.config.response_stream_backpressure_timeout_ms),
     );
     let worker = selection.sender;
 
@@ -112,14 +126,17 @@ async fn proxy_request(
     }
 
     let timeout = Duration::from_secs(state.config.request_timeout_seconds);
+    let mut cleanup = PendingCleanup::ai(state.clone(), request_id.clone());
     let start = match tokio::time::timeout(timeout, start_rx).await {
         Ok(Ok(Ok(start))) => start,
         Ok(Ok(Err(err))) => {
             remove_pending(&state, &request_id).await;
+            cleanup.disarm();
             return bridge_error_response(err);
         }
         Ok(Err(_)) => {
             remove_pending(&state, &request_id).await;
+            cleanup.disarm();
             return crate::auth::error_response(
                 StatusCode::BAD_GATEWAY,
                 "worker_response_closed",
@@ -128,6 +145,7 @@ async fn proxy_request(
         }
         Err(_) => {
             remove_pending(&state, &request_id).await;
+            cleanup.disarm();
             return crate::auth::error_response(
                 StatusCode::GATEWAY_TIMEOUT,
                 "request_timeout",
@@ -140,6 +158,7 @@ async fn proxy_request(
     let stream_state = state.clone();
     let stream_request_id = request_id.clone();
     let stream = async_stream::stream! {
+        let mut cleanup = cleanup;
         let mut chunk_rx = chunk_rx;
         while let Some(item) = chunk_rx.recv().await {
             match item {
@@ -162,6 +181,7 @@ async fn proxy_request(
             }
         }
         remove_pending(&stream_state, &stream_request_id).await;
+        cleanup.disarm();
     };
 
     let mut response = Response::new(Body::from_stream(stream));

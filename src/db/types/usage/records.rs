@@ -1,4 +1,4 @@
-use super::{RequestRecordCategory, RequestRecordState, RequestRecordToolCall};
+use super::{RequestAbortReason, RequestRecordCategory, RequestRecordState, RequestRecordToolCall};
 use crate::db::{RequestFailureFamily, RouteSelectionReason};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -54,6 +54,9 @@ pub struct RequestRecordListRow {
     pub has_parent: bool,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub abort_reason: Option<RequestAbortReason>,
+    pub abort_from_state: Option<RequestRecordState>,
+    pub abort_response_started: Option<bool>,
     pub failure_family: Option<RequestFailureFamily>,
     pub mcp_bearer_token_slot: Option<i16>,
     pub route_selection_reason: RouteSelectionReason,
@@ -123,6 +126,9 @@ pub struct RequestRecordDetail {
     pub upstream_error_body: Option<String>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub abort_reason: Option<RequestAbortReason>,
+    pub abort_from_state: Option<RequestRecordState>,
+    pub abort_response_started: Option<bool>,
     pub failure_family: Option<RequestFailureFamily>,
     pub mcp_bearer_token_slot: Option<i16>,
     pub route_selection_reason: RouteSelectionReason,

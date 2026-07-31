@@ -274,7 +274,7 @@ function applyFilter(): void {
         <template #error_message-cell="{ row }">
           <UButton
             v-if="row.original.error_message"
-            color="error"
+            :color="row.original.request_state === 'aborted' ? 'neutral' : 'error'"
             variant="link"
             class="max-w-56 truncate"
             :label="`${row.original.error_code}: ${row.original.error_message}`"

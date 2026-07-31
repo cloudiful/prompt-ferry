@@ -108,6 +108,7 @@ async fn run_realtime_session(
                             request_id: request.request_id.clone(),
                             code,
                             reason,
+                            response_started: false,
                         }));
                         break;
                     }
@@ -132,6 +133,7 @@ async fn run_realtime_session(
                             request_id: request.request_id.clone(),
                             code: frame.as_ref().map(|frame| u16::from(frame.code)),
                             reason: frame.map(|frame| frame.reason.to_string()),
+                            response_started: true,
                         }));
                         break;
                     }
@@ -146,6 +148,7 @@ async fn run_realtime_session(
                             request_id: request.request_id.clone(),
                             code: None,
                             reason: Some("upstream websocket closed".to_string()),
+                            response_started: true,
                         }));
                         break;
                     }

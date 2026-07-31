@@ -39,6 +39,9 @@ async fn run_inner(config: RelayConfig) -> anyhow::Result<()> {
     if config.response_stream_max_bytes == 0 {
         anyhow::bail!("response_stream_max_bytes must be greater than 0");
     }
+    if config.response_stream_backpressure_timeout_ms == 0 {
+        anyhow::bail!("response_stream_backpressure_timeout_ms must be greater than 0");
+    }
     tls::validate_relay_config(&config)?;
     tls::validate_relay_worker_config(&config)?;
     bridge_crypto::validate_settings(
