@@ -298,6 +298,58 @@ fn matches_tool_calls_when_json_argument_formatting_differs() {
 }
 
 #[test]
+fn matches_tool_calls_when_capture_repaired_invalid_arguments() {
+    let current = json!({
+        "content":"<tool_call>\n<function=search_stocks>\n<parameter=query>正泰电源</parameter>\n<parameter=limit>5</parameter>\n</function>\n</tool_call>",
+        "tool_calls": [{
+            "id": "call_1",
+            "function": {
+                "name": "search_stocks",
+                "arguments": "{\"query\": "
+            }
+        }]
+    });
+    let artifact = json!({
+        "content":"<tool_call>\n<function=search_stocks>\n<parameter=query>正泰电源</parameter>\n<parameter=limit>5</parameter>\n</function>\n</tool_call>",
+        "reasoning_content":"reasoning",
+        "tool_calls": [{
+            "id": "call_1",
+            "function": {
+                "name": "search_stocks",
+                "arguments": "{\"limit\":5,\"query\":\"正泰电源\"}"
+            }
+        }]
+    });
+
+    assert!(tool_calls_match(&current, &artifact));
+}
+
+#[test]
+fn rejects_unrepairable_invalid_arguments_against_valid_artifact() {
+    let current = json!({
+        "content":"plain text",
+        "tool_calls": [{
+            "id": "call_1",
+            "function": {
+                "name": "search_stocks",
+                "arguments": "{\"query\": "
+            }
+        }]
+    });
+    let artifact = json!({
+        "tool_calls": [{
+            "id": "call_1",
+            "function": {
+                "name": "search_stocks",
+                "arguments": "{\"query\":\"正泰电源\"}"
+            }
+        }]
+    });
+
+    assert!(!tool_calls_match(&current, &artifact));
+}
+
+#[test]
 fn rejects_tool_calls_when_json_argument_value_differs() {
     let current = json!({
         "tool_calls": [{
