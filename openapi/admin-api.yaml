@@ -3805,6 +3805,7 @@ components:
         session_affinity_lock_after_turns:
           type: integer
           format: int32
+          deprecated: true
         targets:
           type: array
           items:
@@ -3902,6 +3903,7 @@ components:
           - integer
           - 'null'
           format: int32
+          deprecated: true
         targets:
           type:
           - array

@@ -3,7 +3,7 @@ use anyhow::anyhow;
 use crate::{config::WorkerConfig, db};
 
 use super::super::{
-    EndpointLoadGuard, RequestExecutionContext, check_named_request_budget,
+    RequestExecutionContext, check_named_request_budget,
     context::{RouteExecutionContext, RuntimeServices},
     discover_dynamic_model_route, materialize_route_api_key_selection,
     request_assembly::BufferedBridgeRequest,
@@ -13,10 +13,7 @@ use super::super::{
 use super::errors::respond_with_budget_error;
 
 pub(super) enum RouteResolution {
-    Ready {
-        route: Box<db::RouteConfig>,
-        load_guard: Option<EndpointLoadGuard>,
-    },
+    Ready { route: Box<db::RouteConfig> },
     Responded,
 }
 
@@ -29,7 +26,6 @@ pub(super) async fn resolve_route(
     let Some(state) = services.admin_state() else {
         return Ok(RouteResolution::Ready {
             route: Box::new(default_route(config, request)),
-            load_guard: None,
         });
     };
 
@@ -99,7 +95,6 @@ pub(super) async fn resolve_route(
         .ok_or_else(|| anyhow!("route not found"))?;
         return Ok(RouteResolution::Ready {
             route: Box::new(selected.route),
-            load_guard: selected.load_guard,
         });
     }
 
@@ -130,10 +125,8 @@ pub(super) async fn resolve_route(
     route.api_key = key_selection.selection.secret;
     route.endpoint_key_id = key_selection.selection.key_id;
     route.endpoint_key_label = key_selection.selection.key_label;
-    let load_guard = services.runtime_state.reserve_endpoint(route.route_id);
     Ok(RouteResolution::Ready {
         route: Box::new(route),
-        load_guard,
     })
 }
 

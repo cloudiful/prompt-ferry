@@ -16,6 +16,7 @@ pub struct ModelRouteRequest {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: Option<crate::db::ModelRouteRoutingStrategy>,
+    #[schema(deprecated)]
     pub session_affinity_lock_after_turns: Option<i32>,
     pub daily_max_requests: Option<i32>,
     pub monthly_max_requests: Option<i32>,

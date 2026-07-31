@@ -174,21 +174,6 @@ const targetColumns = computed<
               :use-grouping="false"
             />
           </label>
-          <label
-            v-if="form.routing_strategy === 'responses_session_affinity'"
-            class="grid gap-1"
-          >
-            <span class="text-xs text-muted">{{
-              t('sessionAffinityLockAfterTurns')
-            }}</span>
-            <UInputNumber
-              v-model="form.session_affinity_lock_after_turns"
-              class="w-full"
-              size="sm"
-              :min="1"
-              :use-grouping="false"
-            />
-          </label>
         </div>
         <USelect
           v-if="form.scope === 'user'"

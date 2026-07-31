@@ -546,6 +546,9 @@ export type ModelEndpointRule = {
     routing_strategy: ModelRouteRoutingStrategy;
     rule_id: string;
     scope: string;
+    /**
+     * @deprecated
+     */
     session_affinity_lock_after_turns: number;
     targets: Array<ModelRouteTarget>;
     updated_at: string;
@@ -575,6 +578,9 @@ export type ModelRouteRequest = {
     priority?: number | null;
     routing_strategy?: null | ModelRouteRoutingStrategy;
     scope: string;
+    /**
+     * @deprecated
+     */
     session_affinity_lock_after_turns?: number | null;
     targets?: Array<ModelRouteTargetRequest> | null;
 };

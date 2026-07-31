@@ -63,7 +63,6 @@ export type ModelRouteForm = {
   owner_user_id: number | null
   model_pattern: string
   routing_strategy: 'client_key_rendezvous' | 'responses_session_affinity'
-  session_affinity_lock_after_turns: number
   daily_max_requests: number | null
   monthly_max_requests: number | null
   enabled: boolean

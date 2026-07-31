@@ -1,20 +1,29 @@
 use super::*;
 use crate::{
     db::{self, ModelRouteCandidate, ModelRouteCandidateTarget},
+    endpoint_models::EndpointModelCache,
+    llm_review::LlmReviewSettings,
     mcp::targeting::McpRequestMetadata,
+    mcp::{McpCatalogCache, McpCatalogService},
     redact::{self, RedactionConfig, TEST_REDACTION_LOCK},
+    replay_cache::ReplayCache,
     worker::runtime::context::{ResponseLimits, RuntimeServices},
-    worker_admin_types::{RequestContentLoggingMode, RequestContentLoggingResponse},
+    worker_admin_state::{AdminState, AdminStateInit},
+    worker_admin_types::{
+        RequestContentLoggingMode, RequestContentLoggingResponse, UsageRetentionSettings,
+    },
 };
 use anyhow::anyhow;
 use base64::Engine as _;
 use chrono::Utc;
 use redactor::RedactionRules;
+use sqlx::postgres::PgPoolOptions;
+use std::time::Duration;
 
 use super::connect::is_expected_relay_disconnect;
 use super::routing::{
-    materialize_route_api_key_selection, rendezvous_target, select_route_for_candidate,
-    stable_unrecognized_session_target,
+    RouteAffinityError, materialize_route_api_key_selection, rendezvous_target,
+    select_route_for_candidate,
 };
 
 #[test]
@@ -239,34 +248,11 @@ fn preferred_target_is_stable_for_same_key() {
     assert_eq!(first.endpoint_id, second.endpoint_id);
 }
 
-#[test]
-fn session_affinity_without_stable_identifier_falls_back_to_first_target() {
-    let candidate = session_affinity_candidate();
-    let request = BufferedBridgeRequest {
-        client_key_hash: None,
-        ..sample_request()
-    };
-
-    let selected =
-        stable_unrecognized_session_target(&candidate, &request, &RequestPromptLog::default())
-            .expect("preferred target");
-
-    assert_eq!(selected.endpoint_id, candidate.targets[0].endpoint_id);
-}
-
 #[tokio::test]
 async fn session_affinity_continuation_selects_preferred_target() {
     let runtime_state = WorkerRuntimeState::default();
-    let out_tx = super::context::BridgeSender::test_sender();
-    let services = RuntimeServices::new(
-        None,
-        out_tx,
-        reqwest::Client::new(),
-        runtime_state.clone(),
-        ResponseLimits::default(),
-    );
-    let mut candidate = session_affinity_candidate();
-    candidate.session_affinity_lock_after_turns = 1;
+    let services = session_affinity_services(runtime_state.clone(), ReplayCache::for_tests());
+    let candidate = session_affinity_candidate();
     let preferred = candidate.targets[0].endpoint_id;
     let request_ctx = RequestExecutionContext::new(
         uuid::Uuid::new_v4(),
@@ -300,72 +286,11 @@ async fn session_affinity_continuation_selects_preferred_target() {
 }
 
 #[tokio::test]
-async fn session_affinity_early_turn_uses_least_loaded_endpoint() {
+async fn session_affinity_does_not_switch_busy_preferred_endpoint() {
     let runtime_state = WorkerRuntimeState::default();
-    let out_tx = super::context::BridgeSender::test_sender();
-    let services = RuntimeServices::new(
-        None,
-        out_tx,
-        reqwest::Client::new(),
-        runtime_state.clone(),
-        ResponseLimits::default(),
-    );
-    let candidate = session_affinity_candidate();
-    let busy = candidate.targets[0].endpoint_id;
-    let idle = candidate.targets[1].endpoint_id;
-    let _busy_guard = runtime_state.reserve_endpoint(busy).unwrap();
-    let request_ctx = RequestExecutionContext::new(
-        uuid::Uuid::new_v4(),
-        Instant::now(),
-        Some("gpt-4.1-mini".to_string()),
-        None,
-        None,
-        Some(1),
-        runtime_state.worker_instance_id(),
-        RequestPromptLog {
-            conversation_id: Some(uuid::Uuid::new_v4()),
-            conversation_seq: Some(5),
-            preferred_endpoint_id: Some(busy),
-            ..RequestPromptLog::default()
-        },
-    );
-
-    let selected = select_route_for_candidate(
-        &services,
-        &request_ctx,
-        &candidate,
-        &sample_request(),
-        1,
-        Some("key-a"),
-    )
-    .await
-    .unwrap()
-    .expect("selected route");
-
-    assert_eq!(selected.route.route_id, idle);
-    assert_eq!(
-        selected.route.route_selection_reason,
-        db::RouteSelectionReason::SessionLoadBalance
-    );
-    assert_eq!(runtime_state.endpoint_active_count(idle), 1);
-    drop(selected.load_guard);
-    assert_eq!(runtime_state.endpoint_active_count(idle), 0);
-}
-
-#[tokio::test]
-async fn session_affinity_locks_after_configured_turn() {
-    let runtime_state = WorkerRuntimeState::default();
-    let out_tx = super::context::BridgeSender::test_sender();
-    let services = RuntimeServices::new(
-        None,
-        out_tx,
-        reqwest::Client::new(),
-        runtime_state.clone(),
-        ResponseLimits::default(),
-    );
+    let services = session_affinity_services(runtime_state.clone(), ReplayCache::for_tests());
     let candidate = session_affinity_candidate();
     let preferred = candidate.targets[0].endpoint_id;
-    let _preferred_busy_guard = runtime_state.reserve_endpoint(preferred).unwrap();
     let request_ctx = RequestExecutionContext::new(
         uuid::Uuid::new_v4(),
         Instant::now(),
@@ -376,7 +301,7 @@ async fn session_affinity_locks_after_configured_turn() {
         runtime_state.worker_instance_id(),
         RequestPromptLog {
             conversation_id: Some(uuid::Uuid::new_v4()),
-            conversation_seq: Some(6),
+            conversation_seq: Some(1),
             preferred_endpoint_id: Some(preferred),
             ..RequestPromptLog::default()
         },
@@ -402,21 +327,11 @@ async fn session_affinity_locks_after_configured_turn() {
 }
 
 #[tokio::test]
-async fn force_passthrough_disables_early_session_load_balancing() {
+async fn session_affinity_uses_rendezvous_for_new_identity() {
     let runtime_state = WorkerRuntimeState::default();
-    let out_tx = super::context::BridgeSender::test_sender();
-    let services = RuntimeServices::new(
-        None,
-        out_tx,
-        reqwest::Client::new(),
-        runtime_state.clone(),
-        ResponseLimits::default(),
-    );
-    let mut candidate = session_affinity_candidate();
-    candidate.targets[1].responses_continuation_policy =
-        crate::db::ResponsesContinuationPolicy::ForcePassthrough;
-    let preferred = candidate.targets[0].endpoint_id;
-    let _preferred_busy_guard = runtime_state.reserve_endpoint(preferred).unwrap();
+    let services = session_affinity_services(runtime_state.clone(), ReplayCache::for_tests());
+    let candidate = session_affinity_candidate();
+    let conversation_id = uuid::Uuid::new_v4();
     let request_ctx = RequestExecutionContext::new(
         uuid::Uuid::new_v4(),
         Instant::now(),
@@ -426,9 +341,8 @@ async fn force_passthrough_disables_early_session_load_balancing() {
         Some(1),
         runtime_state.worker_instance_id(),
         RequestPromptLog {
-            conversation_id: Some(uuid::Uuid::new_v4()),
-            conversation_seq: Some(2),
-            preferred_endpoint_id: Some(preferred),
+            conversation_id: Some(conversation_id),
+            conversation_seq: Some(1),
             ..RequestPromptLog::default()
         },
     );
@@ -445,10 +359,78 @@ async fn force_passthrough_disables_early_session_load_balancing() {
     .unwrap()
     .expect("selected route");
 
-    assert_eq!(selected.route.route_id, preferred);
+    let expected = rendezvous_target(&candidate, Some(&format!("conversation:{conversation_id}")))
+        .unwrap()
+        .endpoint_id;
+    assert_eq!(selected.route.route_id, expected);
     assert_eq!(
         selected.route.route_selection_reason,
         db::RouteSelectionReason::SessionAffinity
+    );
+}
+
+#[test]
+fn session_affinity_rendezvous_distributes_independent_identities() {
+    let candidate = session_affinity_candidate();
+    let endpoints = (1..=64)
+        .map(|value| {
+            let conversation_id = uuid::Uuid::from_u128(value);
+            rendezvous_target(&candidate, Some(&format!("conversation:{conversation_id}")))
+                .expect("candidate should have a target")
+                .endpoint_id
+        })
+        .collect::<std::collections::HashSet<_>>();
+
+    assert_eq!(endpoints.len(), candidate.targets.len());
+}
+
+#[tokio::test]
+async fn session_affinity_requires_stable_identity() {
+    let runtime_state = WorkerRuntimeState::default();
+    let out_tx = super::context::BridgeSender::test_sender();
+    let services = RuntimeServices::new(
+        None,
+        out_tx,
+        reqwest::Client::new(),
+        runtime_state.clone(),
+        ResponseLimits::default(),
+    );
+    let candidate = session_affinity_candidate();
+    let request = BufferedBridgeRequest {
+        client_key_hash: None,
+        ..sample_request()
+    };
+    let request_ctx = RequestExecutionContext::new(
+        uuid::Uuid::new_v4(),
+        Instant::now(),
+        Some("gpt-4.1-mini".to_string()),
+        None,
+        None,
+        Some(1),
+        runtime_state.worker_instance_id(),
+        RequestPromptLog {
+            ..RequestPromptLog::default()
+        },
+    );
+
+    let result = select_route_for_candidate(
+        &services,
+        &request_ctx,
+        &candidate,
+        &request,
+        1,
+        Some("key-a"),
+    )
+    .await;
+    let selected = match result {
+        Ok(_) => panic!("missing session identity should be rejected"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        selected
+            .downcast_ref::<RouteAffinityError>()
+            .map(|error| error.code),
+        Some("responses_session_identity_required")
     );
 }
 
@@ -497,6 +479,45 @@ async fn selected_route_carries_target_upstream_model_override() {
     .expect("selected route");
 
     assert_eq!(route.route.upstream_model.as_deref(), Some("gpt-4.1-mini"));
+}
+
+pub(super) fn session_affinity_services(
+    runtime_state: WorkerRuntimeState,
+    replay_cache: ReplayCache,
+) -> RuntimeServices {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://postgres:postgres@localhost/prompt_ferry")
+        .expect("lazy pool");
+    let catalog_cache = McpCatalogCache::new();
+    let admin_state = AdminState::new(AdminStateInit {
+        pool: pool.clone(),
+        lease_pool: pool.clone(),
+        replay_cache,
+        configured_relays: Vec::new(),
+        managed_mode: false,
+        relay_secret_manager: None,
+        redaction_enabled: false,
+        model_route_whitelist_enabled: true,
+        request_content_logging: RequestContentLoggingResponse {
+            mode: RequestContentLoggingMode::Off,
+            raw_retention_days: 3,
+        },
+        usage_retention: UsageRetentionSettings::default(),
+        raw_payload_store: None,
+        stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
+        llm_review_settings: LlmReviewSettings::default(),
+        mcp_catalog_cache: catalog_cache.clone(),
+        mcp_catalog_service: McpCatalogService::new(pool.clone(), catalog_cache),
+        mcp_session_store: None,
+        endpoint_model_cache: EndpointModelCache::new(Duration::from_secs(60)),
+    });
+    RuntimeServices::new(
+        Some(admin_state),
+        super::context::BridgeSender::test_sender(),
+        reqwest::Client::new(),
+        runtime_state,
+        ResponseLimits::default(),
+    )
 }
 
 fn sample_candidate() -> ModelRouteCandidate {
@@ -563,14 +584,14 @@ fn sample_candidate() -> ModelRouteCandidate {
     }
 }
 
-fn session_affinity_candidate() -> ModelRouteCandidate {
+pub(super) fn session_affinity_candidate() -> ModelRouteCandidate {
     ModelRouteCandidate {
         routing_strategy: crate::db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
         ..sample_candidate()
     }
 }
 
-fn sample_request() -> BufferedBridgeRequest {
+pub(super) fn sample_request() -> BufferedBridgeRequest {
     BufferedBridgeRequest {
         request_id: uuid::Uuid::new_v4().to_string(),
         method: "POST".to_string(),
@@ -587,12 +608,6 @@ fn sample_request() -> BufferedBridgeRequest {
         http_request_decompressed_bytes: None,
         http_request_compression_ratio: None,
     }
-}
-
-fn sample_request_with_session_header(session_id: &str) -> BufferedBridgeRequest {
-    let mut request = sample_request();
-    request.headers = vec![("X-Session-Id".to_string(), session_id.to_string())];
-    request
 }
 
 #[test]
@@ -774,18 +789,14 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
 }
 
 #[test]
-fn session_affinity_unrecognized_header_is_stable() {
+fn session_affinity_identity_hash_is_stable() {
     let candidate = session_affinity_candidate();
-    let request = sample_request_with_session_header("sess-123");
-
-    let first =
-        stable_unrecognized_session_target(&candidate, &request, &RequestPromptLog::default())
-            .expect("preferred target")
-            .endpoint_id;
-    let second =
-        stable_unrecognized_session_target(&candidate, &request, &RequestPromptLog::default())
-            .expect("preferred target")
-            .endpoint_id;
+    let first = rendezvous_target(&candidate, Some("session_header:sess-123"))
+        .expect("preferred target")
+        .endpoint_id;
+    let second = rendezvous_target(&candidate, Some("session_header:sess-123"))
+        .expect("preferred target")
+        .endpoint_id;
 
     assert_eq!(first, second);
 }

@@ -57,7 +57,7 @@ async fn run_realtime_session(
     config: &WorkerConfig,
     services: &RuntimeServices,
 ) -> anyhow::Result<()> {
-    let (route, _endpoint_load_guard) = resolve_realtime_route(request, config, services).await?;
+    let route = resolve_realtime_route(request, config, services).await?;
     let effective_model = route.upstream_model.as_deref().unwrap_or(&request.model);
     let upstream = format!(
         "{}?model={}",
@@ -165,10 +165,7 @@ async fn resolve_realtime_route(
     request: &RealtimeSessionStart,
     config: &WorkerConfig,
     services: &RuntimeServices,
-) -> anyhow::Result<(
-    crate::db::RouteConfig,
-    Option<crate::worker::runtime::EndpointLoadGuard>,
-)> {
+) -> anyhow::Result<crate::db::RouteConfig> {
     let fake_request = crate::worker::runtime::request_assembly::BufferedBridgeRequest {
         request_id: request.request_id.clone(),
         method: "GET".to_string(),
@@ -187,10 +184,8 @@ async fn resolve_realtime_route(
     };
     let InitializedRequest { request_ctx, .. } =
         super::request_init::initialize_request(&fake_request, services).await?;
-    let (mut route, load_guard) = match resolve_route(&fake_request, config, services, &request_ctx)
-        .await?
-    {
-        super::request_routes::RouteResolution::Ready { route, load_guard } => (*route, load_guard),
+    let mut route = match resolve_route(&fake_request, config, services, &request_ctx).await? {
+        super::request_routes::RouteResolution::Ready { route } => *route,
         super::request_routes::RouteResolution::Responded => {
             return Err(anyhow!("realtime route was rejected by budget gate"));
         }
@@ -198,7 +193,7 @@ async fn resolve_realtime_route(
     super::request::resolve_auto_protocol(&mut route, &request.path)
         .map_err(|err| anyhow!("{}: {}", err.code, err.message))?;
     (route.native_api == NativeApi::Realtime)
-        .then_some((route, load_guard))
+        .then_some(route)
         .ok_or_else(|| {
             anyhow!(
                 "selected endpoint does not support realtime for model {}",

@@ -5,7 +5,6 @@ mod bridge;
 mod budget;
 mod connect;
 mod context;
-mod endpoint_load;
 mod error_handling;
 #[cfg(test)]
 mod error_handling_tests;
@@ -29,7 +28,6 @@ use tokio::sync::Mutex;
 use self::bootstrap::{build_admin_state, validate_config};
 use self::budget::check_named_request_budget;
 use self::context::RequestExecutionContext;
-use self::endpoint_load::{EndpointLoadGuard, EndpointLoadTracker};
 use self::error_handling::{
     extract_mcp_error, format_mcp_response_body, redaction_enabled, safe_error,
 };
@@ -72,7 +70,6 @@ pub(super) struct WorkerRuntimeState {
     pending_realtime_sessions:
         Arc<Mutex<HashMap<String, tokio::sync::mpsc::Sender<RealtimeInboundMessage>>>>,
     control: RuntimeControl,
-    endpoint_load: EndpointLoadTracker,
 }
 
 #[derive(Debug, Clone)]
@@ -93,7 +90,6 @@ impl Default for WorkerRuntimeState {
             mcp_request_cancellations: Arc::new(Mutex::new(HashMap::new())),
             pending_realtime_sessions: Arc::new(Mutex::new(HashMap::new())),
             control: RuntimeControl::new(),
-            endpoint_load: EndpointLoadTracker::default(),
         }
     }
 }
@@ -121,23 +117,6 @@ impl WorkerRuntimeState {
 
     fn begin_shutdown(&self) {
         self.control.begin_shutdown();
-    }
-
-    fn reserve_endpoint(&self, endpoint_id: uuid::Uuid) -> Option<EndpointLoadGuard> {
-        self.endpoint_load.reserve(endpoint_id)
-    }
-
-    fn reserve_least_loaded_endpoint(
-        &self,
-        endpoint_ids_in_tie_order: &[uuid::Uuid],
-    ) -> Option<(uuid::Uuid, EndpointLoadGuard)> {
-        self.endpoint_load
-            .reserve_least_loaded(endpoint_ids_in_tie_order)
-    }
-
-    #[cfg(test)]
-    fn endpoint_active_count(&self, endpoint_id: uuid::Uuid) -> usize {
-        self.endpoint_load.active_count(endpoint_id)
     }
 
     async fn wait_for_shutdown(&self) {
@@ -173,4 +152,4 @@ fn elapsed_ms(started: Instant) -> i64 {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

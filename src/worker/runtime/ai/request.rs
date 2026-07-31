@@ -3,6 +3,7 @@ use super::super::{
     context::{FailurePayload, RouteExecutionContext, RuntimeServices, is_bridge_send_error},
     error_handling::safe_error,
     request_assembly::BufferedBridgeRequest,
+    routing::RouteAffinityError,
 };
 use super::{
     errors::{respond_with_budget_error, respond_with_client_error, respond_with_local_error},
@@ -74,11 +75,28 @@ pub(in crate::worker::runtime) async fn process_request(
         return Ok(());
     }
 
-    let (mut route, _endpoint_load_guard) =
-        match resolve_route(&request, config, services, &request_ctx).await? {
-            RouteResolution::Ready { route, load_guard } => (*route, load_guard),
-            RouteResolution::Responded => return Ok(()),
-        };
+    let mut route = match resolve_route(&request, config, services, &request_ctx).await {
+        Ok(RouteResolution::Ready { route }) => *route,
+        Ok(RouteResolution::Responded) => return Ok(()),
+        Err(err) => {
+            if let Some(affinity_error) = err.downcast_ref::<RouteAffinityError>() {
+                return respond_with_local_error(
+                    services,
+                    &request,
+                    &request_ctx,
+                    FailurePayload {
+                        status: affinity_error.status,
+                        error_code: affinity_error.code.to_string(),
+                        error_message: affinity_error.message.to_string(),
+                        upstream_error_body: None,
+                        response_body: None,
+                    },
+                )
+                .await;
+            }
+            return Err(err);
+        }
+    };
 
     if let Err(err) = resolve_auto_protocol(&mut route, &request.path) {
         let route_ctx = RouteExecutionContext::new(&route);

@@ -80,8 +80,7 @@ export const endpointMessages = {
       '同一个 client key 稳定命中同一个 target，适合保留当前行为。',
     routingStrategySessionAffinity: '按 Responses 会话固定',
     routingStrategySessionAffinityHint:
-      '回放模式前 N 轮按活跃请求分流，之后固定 target；透传模式立即固定。',
-    sessionAffinityLockAfterTurns: '会话锁定轮次',
+      '从首个请求开始按会话固定 endpoint 和 API key；会话期间不会因瞬时负载切换。',
     saveEndpoint: '保存上游节点',
     saveEndpointFailed: '保存上游节点失败',
     testEndpointFailed: '测试上游节点失败',
@@ -170,8 +169,7 @@ export const endpointMessages = {
       'The same client key consistently prefers the same target. This preserves current behavior.',
     routingStrategySessionAffinity: 'Sticky by responses session',
     routingStrategySessionAffinityHint:
-      'Replay sessions balance by active requests for the first N turns, then stay on one target. Passthrough sessions stay sticky immediately.',
-    sessionAffinityLockAfterTurns: 'Lock session after turns',
+      'Bind the endpoint and API key from the first request; the session never switches for transient load.',
     saveEndpoint: 'Save endpoint',
     saveEndpointFailed: 'Failed to save endpoint',
     testEndpointFailed: 'Failed to test endpoint',

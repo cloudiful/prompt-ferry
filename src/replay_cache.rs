@@ -14,7 +14,8 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::{
-    config::WorkerConfig, db, usage_prompt::PromptMessageRef, worker_admin_types::SessionUser,
+    config::WorkerConfig, db, response_affinity::ResponseAffinityStore,
+    usage_prompt::PromptMessageRef, worker_admin_types::SessionUser,
 };
 
 pub const REPLAY_VALKEY_KEY_PREFIX: &str = "pfy:replay:snapshot:";
@@ -23,9 +24,25 @@ pub const REQUEST_LEASE_VALKEY_KEY_PREFIX: &str = "pfy:req-lease:";
 pub const REPLAY_PG_TURN_THRESHOLD: i32 = 16;
 pub const REPLAY_PG_BYTES_THRESHOLD: usize = 64 * 1024;
 
+const REPLAY_SNAPSHOT_CAS_SCRIPT: &str = r#"
+local current = redis.call('GET', KEYS[1])
+if current then
+    local current_value = cjson.decode(current)
+    local next_value = cjson.decode(ARGV[1])
+    if tonumber(current_value.conversation_seq) > tonumber(next_value.conversation_seq)
+        or (tonumber(current_value.conversation_seq) == tonumber(next_value.conversation_seq)
+            and tonumber(current_value.base_event_id) >= tonumber(next_value.base_event_id)) then
+        return 0
+    end
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+return 1
+"#;
+
 #[derive(Clone)]
 pub struct ReplayCache {
     backend: ReplayCacheBackend,
+    response_affinity: ResponseAffinityStore,
 }
 
 #[derive(Clone)]
@@ -45,7 +62,8 @@ struct LocalBackend {
     sessions: Mutex<HashMap<String, LocalSessionEntry>>,
     session_ttl: Duration,
     max_session_entries: usize,
-    replay_snapshots: Mutex<HashMap<Uuid, ReplaySnapshotValue>>,
+    replay_snapshot_ttl: Duration,
+    replay_snapshots: Mutex<HashMap<Uuid, LocalReplaySnapshotEntry>>,
 }
 
 struct LocalSessionEntry {
@@ -54,12 +72,18 @@ struct LocalSessionEntry {
     last_access: u64,
 }
 
+struct LocalReplaySnapshotEntry {
+    snapshot: ReplaySnapshotValue,
+    expires_at: Instant,
+}
+
 impl LocalBackend {
-    fn new(session_ttl_seconds: u64, max_session_entries: usize) -> Self {
+    fn new(session_ttl_seconds: u64, replay_ttl_seconds: u64, max_session_entries: usize) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             session_ttl: Duration::from_secs(session_ttl_seconds.max(1)),
             max_session_entries: max_session_entries.max(1),
+            replay_snapshot_ttl: Duration::from_secs(replay_ttl_seconds.max(1)),
             replay_snapshots: Mutex::new(HashMap::new()),
         }
     }
@@ -95,6 +119,7 @@ impl Default for ReplayCache {
     fn default() -> Self {
         Self {
             backend: ReplayCacheBackend::Disabled,
+            response_affinity: ResponseAffinityStore::unavailable(),
         }
     }
 }
@@ -111,8 +136,10 @@ impl ReplayCache {
         Self {
             backend: ReplayCacheBackend::Local(Arc::new(LocalBackend::new(
                 config.session_ttl_seconds,
+                config.valkey_ttl_seconds,
                 config.local_session_max_entries,
             ))),
+            response_affinity: ResponseAffinityStore::unavailable(),
         }
     }
 
@@ -137,10 +164,14 @@ impl ReplayCache {
         };
         Self {
             backend: ReplayCacheBackend::Redis(Arc::new(RedisBackend {
-                manager,
-                replay_ttl_seconds: config.valkey_ttl_seconds,
-                session_ttl_seconds: config.session_ttl_seconds,
+                manager: manager.clone(),
+                replay_ttl_seconds: config.valkey_ttl_seconds.max(1),
+                session_ttl_seconds: config.session_ttl_seconds.max(1),
             })),
+            response_affinity: ResponseAffinityStore::from_connection_manager(
+                manager,
+                config.session_ttl_seconds,
+            ),
         }
     }
 
@@ -152,24 +183,42 @@ impl ReplayCache {
         !matches!(self.backend, ReplayCacheBackend::Disabled)
     }
 
+    pub(crate) fn response_affinity(&self) -> ResponseAffinityStore {
+        self.response_affinity.clone()
+    }
+
+    pub(crate) fn replay_snapshots_available(&self) -> bool {
+        !matches!(self.backend, ReplayCacheBackend::Disabled)
+    }
+
     pub fn for_tests() -> Self {
         Self {
             backend: ReplayCacheBackend::Local(Arc::new(LocalBackend::new(
                 7 * 24 * 60 * 60,
+                24 * 60 * 60,
                 10_000,
             ))),
+            response_affinity: ResponseAffinityStore::for_tests(),
         }
     }
 
     pub async fn get_snapshot(&self, conversation_id: Uuid) -> Result<Option<ReplaySnapshotValue>> {
         match &self.backend {
             ReplayCacheBackend::Disabled => Ok(None),
-            ReplayCacheBackend::Local(inner) => Ok(inner
-                .replay_snapshots
-                .lock()
-                .await
-                .get(&conversation_id)
-                .cloned()),
+            ReplayCacheBackend::Local(inner) => {
+                let mut snapshots = inner.replay_snapshots.lock().await;
+                let now = Instant::now();
+                let expired = snapshots
+                    .get(&conversation_id)
+                    .is_some_and(|entry| entry.expires_at <= now);
+                if expired {
+                    snapshots.remove(&conversation_id);
+                    return Ok(None);
+                }
+                Ok(snapshots
+                    .get(&conversation_id)
+                    .map(|entry| entry.snapshot.clone()))
+            }
             ReplayCacheBackend::Redis(inner) => {
                 let key = replay_cache_key(conversation_id);
                 let mut manager = inner.manager.clone();
@@ -197,14 +246,31 @@ impl ReplayCache {
                     updated_at: Utc::now(),
                 };
                 let mut snapshots = inner.replay_snapshots.lock().await;
+                let now = Instant::now();
+                snapshots.retain(|_, entry| entry.expires_at > now);
                 if let Some(current) = snapshots.get(&update.conversation_id)
-                    && (current.conversation_seq > next.conversation_seq
-                        || (current.conversation_seq == next.conversation_seq
-                            && current.base_event_id >= next.base_event_id))
+                    && (current.snapshot.conversation_seq > next.conversation_seq
+                        || (current.snapshot.conversation_seq == next.conversation_seq
+                            && current.snapshot.base_event_id >= next.base_event_id))
                 {
                     return Ok(false);
                 }
-                snapshots.insert(update.conversation_id, next);
+                if snapshots.len() >= inner.max_session_entries
+                    && !snapshots.contains_key(&update.conversation_id)
+                    && let Some(oldest) = snapshots
+                        .iter()
+                        .min_by_key(|(_, entry)| entry.snapshot.updated_at)
+                        .map(|(id, _)| *id)
+                {
+                    snapshots.remove(&oldest);
+                }
+                snapshots.insert(
+                    update.conversation_id,
+                    LocalReplaySnapshotEntry {
+                        snapshot: next,
+                        expires_at: now + inner.replay_snapshot_ttl,
+                    },
+                );
                 Ok(true)
             }
             ReplayCacheBackend::Redis(inner) => {
@@ -218,24 +284,16 @@ impl ReplayCache {
                     updated_at: Utc::now(),
                 };
                 let key = replay_cache_key(update.conversation_id);
-                let mut manager = inner.manager.clone();
-                let current: Option<String> = manager.get(&key).await?;
-                if let Some(current) = current {
-                    let parsed: ReplaySnapshotValue = serde_json::from_str(&current)
-                        .context("invalid replay valkey snapshot json")?;
-                    if parsed.conversation_seq > next.conversation_seq
-                        || (parsed.conversation_seq == next.conversation_seq
-                            && parsed.base_event_id >= next.base_event_id)
-                    {
-                        return Ok(false);
-                    }
-                }
                 let payload = serde_json::to_string(&next)?;
-                let _: () = manager
-                    .set_ex(key, payload, inner.replay_ttl_seconds)
+                let mut manager = inner.manager.clone();
+                let updated: i64 = redis::Script::new(REPLAY_SNAPSHOT_CAS_SCRIPT)
+                    .key(key)
+                    .arg(payload)
+                    .arg(inner.replay_ttl_seconds)
+                    .invoke_async(&mut manager)
                     .await
-                    .context("failed to write replay valkey snapshot")?;
-                Ok(true)
+                    .context("failed to compare-and-set replay valkey snapshot")?;
+                Ok(updated == 1)
             }
         }
     }
@@ -439,11 +497,13 @@ impl ReplayCache {
     pub async fn replace_snapshot_for_tests(&self, snapshot: ReplaySnapshotValue) -> Result<()> {
         match &self.backend {
             ReplayCacheBackend::Local(inner) => {
-                inner
-                    .replay_snapshots
-                    .lock()
-                    .await
-                    .insert(snapshot.conversation_id, snapshot);
+                inner.replay_snapshots.lock().await.insert(
+                    snapshot.conversation_id,
+                    LocalReplaySnapshotEntry {
+                        snapshot,
+                        expires_at: Instant::now() + inner.replay_snapshot_ttl,
+                    },
+                );
                 Ok(())
             }
             ReplayCacheBackend::Disabled | ReplayCacheBackend::Redis(_) => Err(anyhow!(
@@ -458,7 +518,7 @@ pub async fn update_replay_state(
     replay_cache: &ReplayCache,
     update: ReplaySnapshotUpdate,
 ) {
-    if replay_cache.enabled()
+    if replay_cache.replay_snapshots_available()
         && let Err(err) = replay_cache.write_snapshot_if_newer(&update).await
     {
         warn!(error = %err, conversation_id = %update.conversation_id, "failed to update replay valkey snapshot");
@@ -557,5 +617,36 @@ mod tests {
                 && current.base_event_id > same_seq_lower_event.event_id
         );
         assert!(newer.conversation_seq > current.conversation_seq);
+    }
+
+    #[tokio::test]
+    async fn local_snapshot_cache_keeps_newest_out_of_order_update() {
+        let cache = ReplayCache::for_tests();
+        let conversation_id = Uuid::new_v4();
+        let older = ReplaySnapshotUpdate {
+            event_id: 10,
+            conversation_id,
+            conversation_seq: 2,
+            prompt_refs: Vec::new(),
+        };
+        let newer = ReplaySnapshotUpdate {
+            event_id: 12,
+            conversation_id,
+            conversation_seq: 3,
+            prompt_refs: Vec::new(),
+        };
+
+        let _ = tokio::join!(
+            cache.write_snapshot_if_newer(&older),
+            cache.write_snapshot_if_newer(&newer)
+        );
+
+        let snapshot = cache
+            .get_snapshot(conversation_id)
+            .await
+            .unwrap()
+            .expect("newest local snapshot should be retained");
+        assert_eq!(snapshot.conversation_seq, newer.conversation_seq);
+        assert_eq!(snapshot.base_event_id, newer.event_id);
     }
 }

@@ -1,10 +1,10 @@
 use super::super::{
-    EndpointLoadGuard, RequestExecutionContext, context::RuntimeServices,
-    prompt_log::RequestPromptLog, request_assembly::BufferedBridgeRequest,
+    RequestExecutionContext, context::RuntimeServices, prompt_log::RequestPromptLog,
+    request_assembly::BufferedBridgeRequest,
 };
 use crate::{
     db, endpoint_models,
-    openai_compat::{conversation_key, previous_response_id},
+    response_affinity::{ResponseAffinityBinding, api_key_fingerprint},
     routing::stable_candidate_order,
     worker_admin::AdminState,
 };
@@ -15,20 +15,16 @@ use tracing::{info, warn};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreferredRouteReason {
     ConversationOverride,
-    SessionAffinity,
-    SessionLoadBalance,
     Rendezvous,
 }
 
 struct PreferredRoute<'a> {
     target: &'a db::ModelRouteCandidateTarget,
     reason: PreferredRouteReason,
-    load_guard: Option<EndpointLoadGuard>,
 }
 
 pub(in crate::worker::runtime) struct SelectedRoute {
     pub(in crate::worker::runtime) route: db::RouteConfig,
-    pub(in crate::worker::runtime) load_guard: Option<EndpointLoadGuard>,
 }
 
 pub(in crate::worker::runtime) async fn discover_dynamic_model_route(
@@ -90,16 +86,24 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
     user_id: i64,
     routing_key: Option<&str>,
 ) -> anyhow::Result<Option<SelectedRoute>> {
-    let preferred = preferred_target(
-        services,
-        services.admin_state(),
-        candidate,
-        request,
-        &request_ctx.request_prompt_log,
-        user_id,
-        routing_key,
-    )
-    .await?;
+    if candidate.routing_strategy == db::ModelRouteRoutingStrategy::ResponsesSessionAffinity
+        && request.path == "/v1/responses"
+    {
+        let selected =
+            super::session_affinity::select(services, request_ctx, candidate, request, user_id)
+                .await?;
+        return Ok(Some(SelectedRoute {
+            route: route_from_target(
+                selected.target,
+                user_id,
+                candidate.rule_id,
+                selected.key_selection.selection,
+                selected.route_selection_reason,
+            ),
+        }));
+    }
+
+    let preferred = preferred_target(candidate, &request_ctx.request_prompt_log, routing_key);
     let Some(preferred) = preferred else {
         return Ok(None);
     };
@@ -107,8 +111,6 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
         PreferredRouteReason::ConversationOverride => {
             db::RouteSelectionReason::ConversationOverride
         }
-        PreferredRouteReason::SessionAffinity => db::RouteSelectionReason::SessionAffinity,
-        PreferredRouteReason::SessionLoadBalance => db::RouteSelectionReason::SessionLoadBalance,
         PreferredRouteReason::Rendezvous => db::RouteSelectionReason::Default,
     };
     let target = preferred.target;
@@ -119,171 +121,64 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
         key_selection.invalid_conversation_override,
     )
     .await;
-    let route = db::RouteConfig {
+    Ok(Some(SelectedRoute {
+        route: route_from_target(
+            target,
+            user_id,
+            candidate.rule_id,
+            key_selection.selection,
+            route_selection_reason,
+        ),
+    }))
+}
+
+fn route_from_target(
+    target: &db::ModelRouteCandidateTarget,
+    user_id: i64,
+    rule_id: uuid::Uuid,
+    key_selection: db::EndpointApiKeySelection,
+    route_selection_reason: db::RouteSelectionReason,
+) -> db::RouteConfig {
+    db::RouteConfig {
         route_id: target.endpoint_id,
         user_id,
-        model_route_rule_id: Some(candidate.rule_id),
+        model_route_rule_id: Some(rule_id),
         base_url: target.base_url.clone(),
-        api_key: key_selection.selection.secret,
-        endpoint_key_id: key_selection.selection.key_id,
-        endpoint_key_label: key_selection.selection.key_label,
+        api_key: key_selection.secret,
+        endpoint_key_id: key_selection.key_id,
+        endpoint_key_label: key_selection.key_label,
         api_keys: target.api_keys.clone(),
         key_lb_enabled: target.key_lb_enabled,
         native_api: target.native_api,
         upstream_model: target.upstream_model.clone(),
         responses_continuation_policy: target.responses_continuation_policy,
         route_selection_reason,
-    };
-    let load_guard = preferred
-        .load_guard
-        .or_else(|| services.runtime_state.reserve_endpoint(target.endpoint_id));
-    Ok(Some(SelectedRoute { route, load_guard }))
+    }
 }
 
-async fn preferred_target<'a>(
-    services: &RuntimeServices,
-    admin_state: Option<&AdminState>,
+fn preferred_target<'a>(
     candidate: &'a db::ModelRouteCandidate,
-    request: &BufferedBridgeRequest,
     request_prompt_log: &RequestPromptLog,
-    user_id: i64,
     routing_key: Option<&str>,
-) -> anyhow::Result<Option<PreferredRoute<'a>>> {
+) -> Option<PreferredRoute<'a>> {
     if let Some(endpoint_id) = request_prompt_log.conversation_override_endpoint_id
         && let Some(target) = candidate
             .targets
             .iter()
             .find(|target| target.endpoint_id == endpoint_id)
     {
-        return Ok(Some(PreferredRoute {
+        return Some(PreferredRoute {
             target,
             reason: PreferredRouteReason::ConversationOverride,
-            load_guard: None,
-        }));
+        });
     }
-    if candidate.routing_strategy == db::ModelRouteRoutingStrategy::ResponsesSessionAffinity
-        && request.path == "/v1/responses"
-    {
-        if can_load_balance_session(candidate, request_prompt_log)
-            && let Some(preferred) =
-                load_balanced_session_target(services, candidate, request, request_prompt_log)
-        {
-            return Ok(Some(preferred));
-        }
-        if let Some(sticky) =
-            sticky_session_target(admin_state, candidate, request, request_prompt_log, user_id)
-                .await?
-        {
-            return Ok(Some(PreferredRoute {
-                target: sticky,
-                reason: PreferredRouteReason::SessionAffinity,
-                load_guard: None,
-            }));
-        }
-        return Ok(
-            stable_unrecognized_session_target(candidate, request, request_prompt_log).map(
-                |target| PreferredRoute {
-                    target,
-                    reason: PreferredRouteReason::SessionAffinity,
-                    load_guard: None,
-                },
-            ),
-        );
-    }
-    Ok(
-        rendezvous_target(candidate, routing_key).map(|target| PreferredRoute {
-            target,
-            reason: PreferredRouteReason::Rendezvous,
-            load_guard: None,
-        }),
-    )
-}
-
-fn can_load_balance_session(
-    candidate: &db::ModelRouteCandidate,
-    request_prompt_log: &RequestPromptLog,
-) -> bool {
-    let Some(conversation_seq) = request_prompt_log.conversation_seq else {
-        return false;
-    };
-    conversation_seq <= candidate.session_affinity_lock_after_turns
-        && candidate.targets.iter().all(|target| {
-            target.responses_continuation_policy == db::ResponsesContinuationPolicy::ForceReplay
-        })
-}
-
-fn load_balanced_session_target<'a>(
-    services: &RuntimeServices,
-    candidate: &'a db::ModelRouteCandidate,
-    request: &BufferedBridgeRequest,
-    request_prompt_log: &RequestPromptLog,
-) -> Option<PreferredRoute<'a>> {
-    let stable_key = endpoint_key_stickiness_value(request, request_prompt_log)?;
-    let ordered_indices = stable_candidate_order(
-        &candidate.targets,
-        |_, target| stable_session_score(&stable_key, candidate.rule_id, target.endpoint_id),
-        |left_index, left, right_index, right| {
-            left.position
-                .cmp(&right.position)
-                .then_with(|| left_index.cmp(&right_index))
-        },
-    );
-    let endpoint_ids = ordered_indices
-        .iter()
-        .filter_map(|index| candidate.targets.get(*index))
-        .map(|target| target.endpoint_id)
-        .collect::<Vec<_>>();
-    let (endpoint_id, load_guard) = services
-        .runtime_state
-        .reserve_least_loaded_endpoint(&endpoint_ids)?;
-    let target = candidate_target_by_endpoint(candidate, endpoint_id)?;
-    Some(PreferredRoute {
+    rendezvous_target(candidate, routing_key).map(|target| PreferredRoute {
         target,
-        reason: PreferredRouteReason::SessionLoadBalance,
-        load_guard: Some(load_guard),
+        reason: PreferredRouteReason::Rendezvous,
     })
 }
 
-async fn sticky_session_target<'a>(
-    admin_state: Option<&AdminState>,
-    candidate: &'a db::ModelRouteCandidate,
-    request: &BufferedBridgeRequest,
-    request_prompt_log: &RequestPromptLog,
-    user_id: i64,
-) -> anyhow::Result<Option<&'a db::ModelRouteCandidateTarget>> {
-    if let Some(endpoint_id) = request_prompt_log.preferred_endpoint_id {
-        return Ok(candidate_target_by_endpoint(candidate, endpoint_id));
-    }
-    let Some(admin_state) = admin_state else {
-        return Ok(None);
-    };
-    let parent = if let Some(previous_response_id) = previous_response_id(&request.body) {
-        db::get_usage_event_locator_by_provider_response_id(
-            &admin_state.pool,
-            Some(user_id),
-            &previous_response_id,
-        )
-        .await?
-    } else if let Some(provider_conversation_key) = conversation_key(&request.body) {
-        db::latest_usage_event_locator_by_provider_conversation_key(
-            &admin_state.pool,
-            Some(user_id),
-            &provider_conversation_key,
-        )
-        .await?
-    } else {
-        None
-    };
-    let Some(parent) = parent else {
-        return Ok(None);
-    };
-    let Some(endpoint_id) = parent.endpoint_id else {
-        return Ok(None);
-    };
-    Ok(candidate_target_by_endpoint(candidate, endpoint_id))
-}
-
-fn candidate_target_by_endpoint(
+pub(super) fn candidate_target_by_endpoint(
     candidate: &db::ModelRouteCandidate,
     endpoint_id: uuid::Uuid,
 ) -> Option<&db::ModelRouteCandidateTarget> {
@@ -300,34 +195,7 @@ pub(in crate::worker::runtime) fn rendezvous_target<'a>(
     crate::routing::rendezvous_target(candidate, routing_key)
 }
 
-pub(in crate::worker::runtime) fn stable_unrecognized_session_target<'a>(
-    candidate: &'a db::ModelRouteCandidate,
-    request: &BufferedBridgeRequest,
-    request_prompt_log: &RequestPromptLog,
-) -> Option<&'a db::ModelRouteCandidateTarget> {
-    if candidate.targets.is_empty() {
-        return None;
-    }
-    let stable_key = endpoint_key_stickiness_value(request, request_prompt_log);
-    if let Some(stable_key) = stable_key.as_deref() {
-        stable_candidate_order(
-            &candidate.targets,
-            |_, target| stable_session_score(stable_key, candidate.rule_id, target.endpoint_id),
-            |left_index, left, right_index, right| {
-                left.position
-                    .cmp(&right.position)
-                    .then_with(|| left_index.cmp(&right_index))
-            },
-        )
-        .into_iter()
-        .next()
-        .and_then(|index| candidate.targets.get(index))
-    } else {
-        candidate.targets.first()
-    }
-}
-
-pub(in crate::worker::runtime) fn endpoint_key_stickiness_value(
+pub(super) fn endpoint_key_stickiness_value(
     request: &BufferedBridgeRequest,
     request_prompt_log: &RequestPromptLog,
 ) -> Option<String> {
@@ -405,19 +273,7 @@ pub(in crate::worker::runtime) async fn clear_invalid_conversation_endpoint_key_
     }
 }
 
-fn stable_session_score(
-    stable_key: &str,
-    rule_id: uuid::Uuid,
-    endpoint_id: uuid::Uuid,
-) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(stable_key.as_bytes());
-    hasher.update(rule_id.as_bytes());
-    hasher.update(endpoint_id.as_bytes());
-    hasher.finalize().into()
-}
-
-fn select_endpoint_api_key(
+pub(super) fn select_endpoint_api_key(
     target: &db::ModelRouteCandidateTarget,
     request: &BufferedBridgeRequest,
     request_prompt_log: &RequestPromptLog,
@@ -435,6 +291,41 @@ fn select_endpoint_api_key(
 pub(in crate::worker::runtime) struct EndpointApiKeySelectionResult {
     pub(in crate::worker::runtime) selection: db::EndpointApiKeySelection,
     pub(in crate::worker::runtime) invalid_conversation_override: bool,
+}
+
+pub(super) fn select_bound_api_key(
+    target: &db::ModelRouteCandidateTarget,
+    binding: &ResponseAffinityBinding,
+) -> Option<db::EndpointApiKeySelection> {
+    let available_keys = target
+        .api_keys
+        .iter()
+        .filter(|key| {
+            key.endpoint_id == target.endpoint_id && key.enabled && !key.api_key.trim().is_empty()
+        })
+        .collect::<Vec<_>>();
+    let selected = if let Some(key_id) = binding.endpoint_key_id {
+        available_keys.into_iter().find(|key| key.key_id == key_id)
+    } else {
+        available_keys
+            .into_iter()
+            .find(|key| api_key_fingerprint(&key.api_key) == binding.endpoint_key_fingerprint)
+    };
+    selected
+        .map(|key| db::EndpointApiKeySelection {
+            key_id: (!key.key_id.is_nil()).then_some(key.key_id),
+            key_label: (!key.key_id.is_nil()).then(|| key.key_label.clone()),
+            secret: key.api_key.clone(),
+        })
+        .or_else(|| {
+            (binding.endpoint_key_id.is_none()
+                && api_key_fingerprint(&target.api_key) == binding.endpoint_key_fingerprint)
+                .then(|| db::EndpointApiKeySelection {
+                    key_id: None,
+                    key_label: None,
+                    secret: target.api_key.clone(),
+                })
+        })
 }
 
 fn select_api_key(
@@ -514,8 +405,9 @@ fn stable_endpoint_api_key_score(stable_key: &str, key: &db::EndpointApiKey) -> 
     let mut hasher = Sha256::new();
     hasher.update(stable_key.as_bytes());
     hasher.update(key.endpoint_id.as_bytes());
-    hasher.update(key.position.to_le_bytes());
     hasher.update(key.key_id.as_bytes());
-    hasher.update(key.api_key.as_bytes());
+    if key.key_id.is_nil() {
+        hasher.update(key.key_label.as_bytes());
+    }
     hasher.finalize().into()
 }
