@@ -32,10 +32,19 @@ jobs:
       - name: Build Rust artifact
         uses: https://forgejo.cloud1ful.com/actions/workflows/actions/build-rust-artifacts@v0.3.1
         with:
-          build_command: cargo build --release --bin prompt-ferry
+          build_command: cargo build --release --bin prompt-ferry --timings
           binary_mappings: >-
             [{"source":"target/release/prompt-ferry","destination":"prompt-ferry"}]
           show_sccache_stats: "true"
+
+      - name: Upload Cargo timings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cargo-timings
+          path: target/cargo-timings/
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Prepare Docker build input
         shell: bash
