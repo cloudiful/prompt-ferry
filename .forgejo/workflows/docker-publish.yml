@@ -1,0 +1,79 @@
+name: Docker Publish
+run-name: Docker Publish by ${{ github.actor }}
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: aio
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "256"
+      RUSTC_WRAPPER: sccache
+      SQLX_OFFLINE: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Reset Docker build input
+        shell: bash
+        run: rm -rf ci-image-input
+
+      - name: Build Rust artifact
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/build-rust-artifacts@v0.3.1
+        with:
+          build_command: cargo build --release --bin prompt-ferry
+          binary_mappings: >-
+            [{"source":"target/release/prompt-ferry","destination":"prompt-ferry"}]
+          show_sccache_stats: "true"
+
+      - name: Prepare Docker build input
+        shell: bash
+        run: mkdir -p ci-image-input/frontend-dist
+
+      - name: Export OpenAPI
+        run: ci-image-input/prompt-ferry openapi export
+
+      - name: Build frontend
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun install --no-save --minimum-release-age 604800
+          bun run openapi-ts
+          bun run build
+          test -f dist/index.html
+          cp -R dist/. ../ci-image-input/frontend-dist/
+
+      - name: Build and push Docker image
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.3.1
+        with:
+          context: .
+          dockerfile: ./forgejo.Dockerfile
+          platform: linux/amd64
+          targets: >-
+            [{"target":"runtime","image_suffix":""}]
+          builder_name_prefix: prompt-ferry
+          inline_cache: "true"
+          inline_cache_tag: latest-amd64
+          username: ${{ github.actor }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: Publish Docker manifest
+        uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-manifests@v0.3.1
+        with:
+          architectures: amd64
+          targets: >-
+            [{"target":"runtime","image_suffix":""}]
+          username: ${{ github.actor }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
