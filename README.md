@@ -25,6 +25,7 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 - TLS, mutual TLS, and application-layer encryption for relay-worker traffic.
 - Native Responses passthrough, including DeepSeek v4 Flash; use `Responses` or
   `Auto` endpoints with `force_passthrough` model routes.
+- Bounded relay response buffering with configurable queue and byte limits.
 
 ## Deploy
 
@@ -61,6 +62,11 @@ For deployments that keep raw payloads outside PostgreSQL, set the
 3-day lifecycle, server-side encryption, and private access. Object storage
 credentials remain deployment configuration and are not exposed through the
 admin API.
+
+For slow downstream clients, tune the bounded relay response buffer with
+`PROMPT_FERRY_RELAY__RESPONSE_STREAM_BUFFER` and
+`PROMPT_FERRY_RELAY__RESPONSE_STREAM_MAX_BYTES`. The defaults are 256 queued
+chunks and 16 MiB per response; both values must be greater than zero.
 
 Keep port `8789` private. See [.env.example](.env.example) for the available
 Compose settings.

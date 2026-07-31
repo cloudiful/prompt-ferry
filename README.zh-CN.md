@@ -24,6 +24,7 @@
 - 支持 relay-worker 之间的 TLS、双向 TLS 和应用层加密。
 - 支持原生 Responses 透传，包括 DeepSeek v4 flash；endpoint 使用 `Responses` 或
   `Auto`，模型路由使用 `force_passthrough`。
+- 支持有界的 relay 响应缓冲，并可配置队列和字节上限。
 
 ## 部署
 
@@ -56,6 +57,11 @@ OPENAI_API_KEY=<生成的客户端密钥>
 `PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_*` 变量，并在 usage-retention 设置中选择
 `object_store`。对象桶应配置 3 天生命周期、服务端加密和私有访问；对象存储凭据
 只属于部署配置，不会通过管理 API 暴露。
+
+如需适配读取较慢的下游客户端，可配置
+`PROMPT_FERRY_RELAY__RESPONSE_STREAM_BUFFER` 和
+`PROMPT_FERRY_RELAY__RESPONSE_STREAM_MAX_BYTES`。默认值分别为 256 个缓冲块和
+16 MiB；两项配置都必须大于零。
 
 请保持 `8789` 端口只对本机或受保护的内网开放。Compose 配置项见
 [.env.example](.env.example)。

@@ -6,7 +6,7 @@ use super::super::{
         bridge_error_response, choose_worker, release_mcp_response_bytes, remove_mcp_pending,
     },
     router::drain_body_then,
-    state::{AppState, PendingMcpRequest, RESPONSE_STREAM_BUFFER, RemoteAddr, WorkerSender},
+    state::{AppState, PendingMcpRequest, RemoteAddr, WorkerSender},
 };
 use super::{
     DownstreamStreamDiag, authorize_client, enforce_public_ip_policy, header_value, sse_error_event,
@@ -129,7 +129,7 @@ async fn proxy_mcp_request(
     };
     let request_id = Uuid::new_v4().to_string();
     let (start_tx, start_rx) = oneshot::channel();
-    let (chunk_tx, chunk_rx) = mpsc::channel(RESPONSE_STREAM_BUFFER);
+    let (chunk_tx, chunk_rx) = mpsc::channel(state.config.response_stream_buffer);
     state.inner.pending_mcp.lock().await.insert(
         request_id.clone(),
         PendingMcpRequest {

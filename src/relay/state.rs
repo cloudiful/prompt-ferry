@@ -19,9 +19,6 @@ use tokio::{
 };
 
 pub(crate) type WorkerSender = mpsc::Sender<BridgeMessage>;
-pub(crate) const RESPONSE_STREAM_BUFFER: usize = 64;
-pub(crate) const REALTIME_EVENT_BUFFER: usize = RESPONSE_STREAM_BUFFER;
-pub(crate) const RESPONSE_STREAM_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) const MAX_WORKER_CONNECTIONS: usize = 4;
 
 #[derive(Clone)]

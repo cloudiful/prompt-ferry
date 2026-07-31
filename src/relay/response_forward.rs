@@ -11,9 +11,9 @@ use axum::{http::StatusCode, response::Response};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 
+use super::response_queue::{EnqueueResult, try_enqueue};
 use super::state::{
-    AppState, QueuedRealtimeEvent, QueuedResponseChunk, RESPONSE_STREAM_MAX_BYTES, WorkerSelection,
-    WorkerSender,
+    AppState, QueuedRealtimeEvent, QueuedResponseChunk, WorkerSelection, WorkerSender,
 };
 
 pub(crate) async fn handle_response_start(state: &AppState, start: ResponseStart) {
@@ -28,37 +28,52 @@ pub(crate) async fn handle_response_start(state: &AppState, start: ResponseStart
 pub(crate) async fn handle_response_chunk(state: &AppState, chunk: ResponseChunk) {
     let request_id = chunk.request_id.clone();
     let queued = QueuedResponseChunk { data: chunk.data };
+    let chunk_bytes = queued.data.len();
     let removal = {
         let mut pending = state.inner.pending.lock().await;
         let Some(entry) = pending.get_mut(&request_id) else {
             return;
         };
-        let chunk_bytes = queued.data.len();
-        let over_limit = entry
-            .queued_bytes
-            .checked_add(chunk_bytes)
-            .is_none_or(|bytes| bytes > RESPONSE_STREAM_MAX_BYTES);
-        if over_limit {
+        let result = try_enqueue(
+            &entry.chunk_tx,
+            &mut entry.queued_bytes,
+            Ok(queued),
+            chunk_bytes,
+            state.config.response_stream_max_bytes,
+        );
+        if result == EnqueueResult::Enqueued {
+            None
+        } else {
             Some((
                 pending.remove(&request_id).expect("pending entry exists"),
-                backpressure_error(&request_id),
+                result,
             ))
-        } else {
-            entry.queued_bytes += chunk_bytes;
-            if entry.chunk_tx.try_send(Ok(queued)).is_err() {
-                Some((
-                    pending.remove(&request_id).expect("pending entry exists"),
-                    backpressure_error(&request_id),
-                ))
-            } else {
-                None
-            }
         }
     };
-    if let Some((entry, err)) = removal {
+    if let Some((entry, result)) = removal {
+        warn!(
+            category = "relay_bridge_diag",
+            request_id = %request_id,
+            worker_id = entry.worker_id,
+            queue_result = ?result,
+            queued_bytes = entry.queued_bytes,
+            chunk_bytes,
+            queue_capacity = state.config.response_stream_buffer,
+            max_queued_bytes = state.config.response_stream_max_bytes,
+            "failed to enqueue response chunk"
+        );
         release_worker(state, entry.worker_id).await;
-        send_request_cancel(&entry.worker, &request_id, &err.code);
-        send_response_error(entry.start_tx, entry.chunk_tx, err);
+        match result {
+            EnqueueResult::Closed => {
+                send_request_cancel(&entry.worker, &request_id, "request_cancelled");
+            }
+            EnqueueResult::BytesLimit | EnqueueResult::Full => {
+                let err = backpressure_error(&request_id);
+                send_request_cancel(&entry.worker, &request_id, &err.code);
+                send_response_error(entry.start_tx, entry.chunk_tx, err);
+            }
+            EnqueueResult::Enqueued => unreachable!(),
+        }
     }
 }
 
@@ -90,6 +105,7 @@ pub(crate) async fn handle_mcp_response_start(state: &AppState, start: McpRespon
 pub(crate) async fn handle_mcp_response_chunk(state: &AppState, chunk: McpResponseChunk) {
     let request_id = chunk.request_id.clone();
     let queued = QueuedResponseChunk { data: chunk.data };
+    let chunk_bytes = queued.data.len();
     let removal = {
         let mut pending = state.inner.pending_mcp.lock().await;
         let Some(entry) = pending.get_mut(&request_id) else {
@@ -100,44 +116,48 @@ pub(crate) async fn handle_mcp_response_chunk(state: &AppState, chunk: McpRespon
             );
             return;
         };
-        let chunk_bytes = queued.data.len();
-        let over_limit = entry
-            .queued_bytes
-            .checked_add(chunk_bytes)
-            .is_none_or(|bytes| bytes > RESPONSE_STREAM_MAX_BYTES);
-        if over_limit {
+        let result = try_enqueue(
+            &entry.chunk_tx,
+            &mut entry.queued_bytes,
+            Ok(queued),
+            chunk_bytes,
+            state.config.response_stream_max_bytes,
+        );
+        if result == EnqueueResult::Enqueued {
+            None
+        } else {
             Some((
                 pending
                     .remove(&request_id)
                     .expect("pending MCP entry exists"),
-                backpressure_error(&request_id),
+                result,
             ))
-        } else {
-            entry.queued_bytes += chunk_bytes;
-            if entry.chunk_tx.try_send(Ok(queued)).is_err() {
-                Some((
-                    pending
-                        .remove(&request_id)
-                        .expect("pending MCP entry exists"),
-                    backpressure_error(&request_id),
-                ))
-            } else {
-                None
-            }
         }
     };
-    if let Some((entry, err)) = removal {
+    if let Some((entry, result)) = removal {
         warn!(
             category = "mcp_bridge_diag",
             request_id = %request_id,
             worker_id = entry.worker_id,
             queued_bytes = entry.queued_bytes,
-            error_code = %err.code,
+            chunk_bytes,
+            queue_result = ?result,
+            queue_capacity = state.config.response_stream_buffer,
+            max_queued_bytes = state.config.response_stream_max_bytes,
             "removed pending MCP request while forwarding a response chunk"
         );
         release_worker(state, entry.worker_id).await;
-        send_mcp_request_cancel(&entry.worker, &request_id, &err.code);
-        send_mcp_response_error(entry.start_tx, entry.chunk_tx, err);
+        match result {
+            EnqueueResult::Closed => {
+                send_mcp_request_cancel(&entry.worker, &request_id, "request_cancelled");
+            }
+            EnqueueResult::BytesLimit | EnqueueResult::Full => {
+                let err = backpressure_error(&request_id);
+                send_mcp_request_cancel(&entry.worker, &request_id, &err.code);
+                send_mcp_response_error(entry.start_tx, entry.chunk_tx, err);
+            }
+            EnqueueResult::Enqueued => unreachable!(),
+        }
     }
 }
 
@@ -171,41 +191,54 @@ pub(crate) async fn handle_realtime_server_event(
 ) {
     let request_id = event.request_id.clone();
     let queued = QueuedRealtimeEvent { event };
+    let event_bytes = queued.event.event_json.len();
     let removal = {
         let mut pending = state.inner.pending_realtime_sessions.lock().await;
         let Some(entry) = pending.get_mut(&request_id) else {
             return;
         };
-        let event_bytes = queued.event.event_json.len();
-        let over_limit = entry
-            .queued_bytes
-            .checked_add(event_bytes)
-            .is_none_or(|bytes| bytes > RESPONSE_STREAM_MAX_BYTES);
-        if over_limit {
+        let result = try_enqueue(
+            &entry.event_tx,
+            &mut entry.queued_bytes,
+            Ok(queued),
+            event_bytes,
+            state.config.response_stream_max_bytes,
+        );
+        if result == EnqueueResult::Enqueued {
+            None
+        } else {
             Some((
                 pending
                     .remove(&request_id)
                     .expect("pending realtime entry exists"),
-                backpressure_error(&request_id),
+                result,
             ))
-        } else {
-            entry.queued_bytes += event_bytes;
-            if entry.event_tx.try_send(Ok(queued)).is_err() {
-                Some((
-                    pending
-                        .remove(&request_id)
-                        .expect("pending realtime entry exists"),
-                    backpressure_error(&request_id),
-                ))
-            } else {
-                None
-            }
         }
     };
-    if let Some((entry, err)) = removal {
+    if let Some((entry, result)) = removal {
+        warn!(
+            category = "relay_bridge_diag",
+            request_id = %request_id,
+            worker_id = entry.worker_id,
+            queue_result = ?result,
+            queued_bytes = entry.queued_bytes,
+            chunk_bytes = event_bytes,
+            queue_capacity = state.config.response_stream_buffer,
+            max_queued_bytes = state.config.response_stream_max_bytes,
+            "failed to enqueue realtime server event"
+        );
         release_worker(state, entry.worker_id).await;
-        send_realtime_close(&entry.worker, &request_id, &err.code);
-        let _ = entry.event_tx.try_send(Err(err));
+        match result {
+            EnqueueResult::Closed => {
+                send_realtime_close(&entry.worker, &request_id, "request_cancelled");
+            }
+            EnqueueResult::BytesLimit | EnqueueResult::Full => {
+                let err = backpressure_error(&request_id);
+                send_realtime_close(&entry.worker, &request_id, &err.code);
+                let _ = entry.event_tx.try_send(Err(err));
+            }
+            EnqueueResult::Enqueued => unreachable!(),
+        }
     }
 }
 
@@ -477,10 +510,10 @@ pub(crate) fn bridge_error_response(err: ResponseError) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::remove_mcp_pending;
+    use super::{handle_response_chunk, remove_mcp_pending};
     use crate::{
-        protocol::BridgeMessage,
-        relay::state::{PendingMcpRequest, test_state},
+        protocol::{BridgeMessage, ResponseChunk},
+        relay::state::{PendingMcpRequest, PendingRequest, test_state},
     };
     use tokio::sync::{mpsc, oneshot};
 
@@ -517,6 +550,137 @@ mod tests {
                 crate::protocol::McpRequestCancel {
                     request_id: "request-1".to_string(),
                     reason: "request_cancelled".to_string(),
+                }
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn full_response_queue_cancels_with_backpressure_reason() {
+        let mut state = test_state();
+        state.config.response_stream_buffer = 1;
+        state.config.response_stream_max_bytes = 1024;
+        let (worker, mut worker_rx) = mpsc::channel(1);
+        let (start_tx, _start_rx) = oneshot::channel();
+        let (chunk_tx, _chunk_rx) = mpsc::channel(1);
+        state.inner.pending.lock().await.insert(
+            "request-1".to_string(),
+            PendingRequest {
+                start_tx: Some(start_tx),
+                chunk_tx,
+                worker_id: 7,
+                worker,
+                queued_bytes: 0,
+                awaiting_approval: false,
+            },
+        );
+
+        handle_response_chunk(
+            &state,
+            ResponseChunk {
+                request_id: "request-1".to_string(),
+                data: vec![1],
+            },
+        )
+        .await;
+        handle_response_chunk(
+            &state,
+            ResponseChunk {
+                request_id: "request-1".to_string(),
+                data: vec![2],
+            },
+        )
+        .await;
+
+        assert!(!state.inner.pending.lock().await.contains_key("request-1"));
+        assert_eq!(
+            worker_rx.recv().await,
+            Some(BridgeMessage::RequestCancel(
+                crate::protocol::BridgeRequestCancel {
+                    request_id: "request-1".to_string(),
+                    reason: "bridge_backpressure".to_string(),
+                }
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn closed_response_queue_cancels_as_downstream_disconnect() {
+        let state = test_state();
+        let (worker, mut worker_rx) = mpsc::channel(1);
+        let (start_tx, _start_rx) = oneshot::channel();
+        let (chunk_tx, chunk_rx) = mpsc::channel(1);
+        drop(chunk_rx);
+        state.inner.pending.lock().await.insert(
+            "request-1".to_string(),
+            PendingRequest {
+                start_tx: Some(start_tx),
+                chunk_tx,
+                worker_id: 7,
+                worker,
+                queued_bytes: 0,
+                awaiting_approval: false,
+            },
+        );
+
+        handle_response_chunk(
+            &state,
+            ResponseChunk {
+                request_id: "request-1".to_string(),
+                data: vec![1],
+            },
+        )
+        .await;
+
+        assert!(!state.inner.pending.lock().await.contains_key("request-1"));
+        assert_eq!(
+            worker_rx.recv().await,
+            Some(BridgeMessage::RequestCancel(
+                crate::protocol::BridgeRequestCancel {
+                    request_id: "request-1".to_string(),
+                    reason: "request_cancelled".to_string(),
+                }
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn response_byte_limit_returns_backpressure_error() {
+        let mut state = test_state();
+        state.config.response_stream_buffer = 4;
+        state.config.response_stream_max_bytes = 1;
+        let (worker, mut worker_rx) = mpsc::channel(1);
+        let (start_tx, start_rx) = oneshot::channel();
+        let (chunk_tx, _chunk_rx) = mpsc::channel(4);
+        state.inner.pending.lock().await.insert(
+            "request-1".to_string(),
+            PendingRequest {
+                start_tx: Some(start_tx),
+                chunk_tx,
+                worker_id: 7,
+                worker,
+                queued_bytes: 0,
+                awaiting_approval: false,
+            },
+        );
+
+        handle_response_chunk(
+            &state,
+            ResponseChunk {
+                request_id: "request-1".to_string(),
+                data: vec![1, 2],
+            },
+        )
+        .await;
+
+        let error = start_rx.await.unwrap().unwrap_err();
+        assert_eq!(error.code, "bridge_backpressure");
+        assert_eq!(
+            worker_rx.recv().await,
+            Some(BridgeMessage::RequestCancel(
+                crate::protocol::BridgeRequestCancel {
+                    request_id: "request-1".to_string(),
+                    reason: "bridge_backpressure".to_string(),
                 }
             ))
         );

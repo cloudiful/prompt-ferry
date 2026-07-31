@@ -21,7 +21,7 @@ import {
   fetchModelRoutesPage,
   persistEndpoint,
   persistModelRoute,
-  runEndpointTest,
+  runEndpointTest as requestEndpointTest,
   runModelRouteProbe,
   updateEndpointEnabled,
   updateModelRouteEnabled,
@@ -190,7 +190,7 @@ export const useEndpointsStore = defineStore('endpoints', () => {
   ): Promise<EndpointTestResponse> {
     endpointState.testingId.value = endpointId
     try {
-      const result = await runEndpointTest(endpointId)
+      const result = await requestEndpointTest(endpointId)
       endpointState.testResults.value[endpointId] = result
       return result
     } finally {

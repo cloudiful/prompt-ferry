@@ -33,6 +33,12 @@ async fn run_inner(config: RelayConfig) -> anyhow::Result<()> {
     if config.worker_heartbeat_timeout_seconds == 0 {
         anyhow::bail!("worker_heartbeat_timeout_seconds must be greater than 0");
     }
+    if config.response_stream_buffer == 0 {
+        anyhow::bail!("response_stream_buffer must be greater than 0");
+    }
+    if config.response_stream_max_bytes == 0 {
+        anyhow::bail!("response_stream_max_bytes must be greater than 0");
+    }
     tls::validate_relay_config(&config)?;
     tls::validate_relay_worker_config(&config)?;
     bridge_crypto::validate_settings(

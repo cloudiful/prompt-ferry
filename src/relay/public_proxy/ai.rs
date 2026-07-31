@@ -18,10 +18,7 @@ use super::super::{
         remove_realtime_pending, request_deadline_unix_ms,
     },
     router::drain_body_then,
-    state::{
-        AppState, PendingRequest, REALTIME_EVENT_BUFFER, RESPONSE_STREAM_BUFFER, RemoteAddr,
-        WorkerSender,
-    },
+    state::{AppState, PendingRequest, RemoteAddr, WorkerSender},
 };
 use super::{DownstreamStreamDiag, authorize_client, enforce_public_ip_policy};
 use axum::{
@@ -231,7 +228,7 @@ pub(super) async fn proxy_realtime(
         .filter(|value| !value.is_empty())
         .map(str::to_string);
 
-    let (event_tx, event_rx) = mpsc::channel(REALTIME_EVENT_BUFFER);
+    let (event_tx, event_rx) = mpsc::channel(state.config.response_stream_buffer);
     state.inner.pending_realtime_sessions.lock().await.insert(
         request_id.clone(),
         PendingRealtimeSession {
@@ -291,7 +288,7 @@ async fn proxy_request(
     };
 
     let (start_tx, start_rx) = oneshot::channel();
-    let (chunk_tx, chunk_rx) = mpsc::channel(RESPONSE_STREAM_BUFFER);
+    let (chunk_tx, chunk_rx) = mpsc::channel(state.config.response_stream_buffer);
 
     state.inner.pending.lock().await.insert(
         request_id.clone(),

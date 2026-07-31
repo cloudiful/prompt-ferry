@@ -7,7 +7,7 @@ use super::super::{
         request_deadline_unix_ms,
     },
     router::drain_body_then,
-    state::{AppState, PendingRequest, RESPONSE_STREAM_BUFFER, RemoteAddr},
+    state::{AppState, PendingRequest, RemoteAddr},
 };
 use super::{ai::stream_request_body, enforce_public_ip_policy};
 use axum::{
@@ -72,7 +72,7 @@ async fn proxy_request(
     };
 
     let (start_tx, start_rx) = oneshot::channel();
-    let (chunk_tx, chunk_rx) = mpsc::channel(RESPONSE_STREAM_BUFFER);
+    let (chunk_tx, chunk_rx) = mpsc::channel(state.config.response_stream_buffer);
     state.inner.pending.lock().await.insert(
         request_id.clone(),
         PendingRequest {
