@@ -37,7 +37,7 @@ const columns = computed<TableColumn<BillingChargeResponse>[]>(() => [
     : []),
   { id: 'tokens', header: props.t('usageTokens') },
   { accessorKey: 'pricing_status', header: props.t('billingStatus') },
-  { accessorKey: 'adjusted_amount', header: props.t('chargeAmount') },
+  { accessorKey: 'customer_amount', header: props.t('chargeAmount') },
   ...(props.isAdmin
     ? [
         { accessorKey: 'provider_cost', header: props.t('chargeCost') },
@@ -48,7 +48,6 @@ const columns = computed<TableColumn<BillingChargeResponse>[]>(() => [
 ])
 
 function statusLabel(charge: BillingChargeResponse): string {
-  if (charge.pricing_status === 'adjusted') return props.t('pricingAdjusted')
   if (charge.pricing_status === 'priced') return props.t('pricingPriced')
   if (charge.usage_status === 'unknown') return props.t('usageUnknown')
   return props.t('pricingUnpriced')
@@ -57,11 +56,7 @@ function statusLabel(charge: BillingChargeResponse): string {
 function statusColor(
   charge: BillingChargeResponse,
 ): 'success' | 'warning' | 'neutral' {
-  if (
-    charge.pricing_status === 'priced' ||
-    charge.pricing_status === 'adjusted'
-  )
-    return 'success'
+  if (charge.pricing_status === 'priced') return 'success'
   return charge.usage_status === 'unknown' ? 'neutral' : 'warning'
 }
 </script>
@@ -113,9 +108,9 @@ function statusColor(
             variant="subtle"
           />
         </template>
-        <template #adjusted_amount-cell="{ row }">{{
+        <template #customer_amount-cell="{ row }">{{
           formatBillingAmount(
-            row.original.adjusted_amount,
+            row.original.customer_amount,
             row.original.currency,
           )
         }}</template>

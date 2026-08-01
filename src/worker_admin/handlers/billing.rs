@@ -3,7 +3,8 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 
 use crate::db::{
-    self, BillingChargeFilter, BillingPriceRuleCreate, BillingPriceSide as DbBillingPriceSide,
+    self, BillingChargeFilter, BillingPriceRuleCreate, BillingPriceRuleUpdate,
+    BillingPriceSide as DbBillingPriceSide,
 };
 
 pub(super) async fn list_billing_price_rules(
@@ -65,6 +66,41 @@ pub(super) async fn patch_billing_price_rule(
     match db::update_price_rule_status(&state.pool, price_rule_id, body.enabled).await {
         Ok(Some(rule)) => Json(price_rule_response(rule)).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "price rule not found"),
+        Err(err) => internal(&state, err),
+    }
+}
+
+pub(super) async fn update_billing_price_rule(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Path(price_rule_id): Path<Uuid>,
+    Json(body): Json<BillingPriceRuleRequest>,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response;
+    }
+    let input = match billing_price_rule_update_input(body) {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    match db::update_price_rule(&state.pool, price_rule_id, input).await {
+        Ok(Some(rule)) => Json(price_rule_response(rule)).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "price rule not found"),
+        Err(err) => internal(&state, err),
+    }
+}
+
+pub(super) async fn delete_billing_price_rule(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Path(price_rule_id): Path<Uuid>,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response;
+    }
+    match db::delete_price_rule(&state.pool, price_rule_id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, "not_found", "price rule not found"),
         Err(err) => internal(&state, err),
     }
 }
@@ -166,49 +202,8 @@ pub(super) async fn billing_charge_detail(
     Json(BillingChargeDetailResponse {
         charge: charge_response(detail.charge, user.is_admin),
         lines,
-        adjustments: detail
-            .adjustments
-            .into_iter()
-            .map(adjustment_response)
-            .collect(),
     })
     .into_response()
-}
-
-pub(super) async fn add_billing_adjustment(
-    State(state): State<AdminState>,
-    headers: HeaderMap,
-    Path(charge_id): Path<i64>,
-    Json(body): Json<BillingAdjustmentRequest>,
-) -> Response {
-    let user = match ensure_admin(&state, &headers).await {
-        Ok(user) => user,
-        Err(response) => return response,
-    };
-    let amount = match parse_decimal(&body.amount, "amount") {
-        Ok(amount) => amount,
-        Err(response) => return response,
-    };
-    if body.reason.trim().is_empty() {
-        return error(
-            StatusCode::BAD_REQUEST,
-            "invalid_reason",
-            "reason is required",
-        );
-    }
-    match db::add_charge_adjustment(
-        &state.pool,
-        charge_id,
-        amount,
-        body.reason.trim(),
-        user.user_id,
-    )
-    .await
-    {
-        Ok(Some(adjustment)) => Json(adjustment_response(adjustment)).into_response(),
-        Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "charge not found"),
-        Err(err) => internal(&state, err),
-    }
 }
 
 pub(super) async fn reprice_billing(
@@ -277,6 +272,34 @@ fn billing_price_rule_input(
     body: BillingPriceRuleRequest,
     created_by_user_id: i64,
 ) -> Result<BillingPriceRuleCreate, Response> {
+    let BillingPriceRuleUpdate {
+        price_side,
+        public_model,
+        endpoint_id,
+        upstream_model,
+        input_rate,
+        cache_read_rate,
+        cache_write_rate,
+        output_rate,
+        effective_from,
+    } = billing_price_rule_update_input(body)?;
+    Ok(BillingPriceRuleCreate {
+        price_side,
+        public_model,
+        endpoint_id,
+        upstream_model,
+        input_rate,
+        cache_read_rate,
+        cache_write_rate,
+        output_rate,
+        effective_from,
+        created_by_user_id,
+    })
+}
+
+fn billing_price_rule_update_input(
+    body: BillingPriceRuleRequest,
+) -> Result<BillingPriceRuleUpdate, Response> {
     let side = match body.price_side {
         BillingPriceSide::Cost => DbBillingPriceSide::Cost,
         BillingPriceSide::Sale => DbBillingPriceSide::Sale,
@@ -326,7 +349,7 @@ fn billing_price_rule_input(
             "rates must be non-negative",
         ));
     }
-    Ok(BillingPriceRuleCreate {
+    Ok(BillingPriceRuleUpdate {
         price_side: side,
         public_model: body.public_model.map(|value| value.trim().to_string()),
         endpoint_id: body.endpoint_id,
@@ -336,7 +359,6 @@ fn billing_price_rule_input(
         cache_write_rate,
         output_rate,
         effective_from: body.effective_from,
-        created_by_user_id,
     })
 }
 
@@ -377,7 +399,7 @@ fn price_rule_response(rule: db::BillingPriceRuleRow) -> BillingPriceRuleRespons
 
 fn summary_response(summary: db::BillingSummary, is_admin: bool) -> BillingSummaryResponse {
     let gross_margin = is_admin
-        .then(|| decimal_string(summary.summary.adjusted_amount - summary.summary.provider_cost));
+        .then(|| decimal_string(summary.summary.customer_amount - summary.summary.provider_cost));
     BillingSummaryResponse {
         currency: "CNY".to_string(),
         request_count: summary.summary.request_count,
@@ -387,7 +409,6 @@ fn summary_response(summary: db::BillingSummary, is_admin: bool) -> BillingSumma
         unpriced_count: summary.summary.unpriced_count,
         provider_cost: is_admin.then(|| decimal_string(summary.summary.provider_cost)),
         customer_amount: decimal_string(summary.summary.customer_amount),
-        adjusted_amount: decimal_string(summary.summary.adjusted_amount),
         gross_margin,
         by_client_key: summary
             .by_client_key
@@ -411,13 +432,15 @@ fn breakdown_response(row: db::BillingBreakdownRow, is_admin: bool) -> BillingBr
         cache_write_tokens: row.cache_write_tokens,
         output_tokens: row.output_tokens,
         provider_cost: is_admin.then(|| decimal_string(row.provider_cost)),
-        adjusted_amount: decimal_string(row.adjusted_amount),
+        customer_amount: decimal_string(row.customer_amount),
     }
 }
 
 fn charge_response(row: db::BillingChargeRow, is_admin: bool) -> BillingChargeResponse {
-    let gross_margin = match (row.adjusted_amount, row.provider_cost) {
-        (Some(adjusted), Some(cost)) if is_admin => Some(decimal_string(adjusted - cost)),
+    let gross_margin = match (row.customer_amount, row.provider_cost) {
+        (Some(customer_amount), Some(cost)) if is_admin => {
+            Some(decimal_string(customer_amount - cost))
+        }
         _ => None,
     };
     BillingChargeResponse {
@@ -444,7 +467,6 @@ fn charge_response(row: db::BillingChargeRow, is_admin: bool) -> BillingChargeRe
             .flatten()
             .map(decimal_string),
         customer_amount: row.customer_amount.map(decimal_string),
-        adjusted_amount: row.adjusted_amount.map(decimal_string),
         gross_margin,
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -463,19 +485,9 @@ fn line_response(line: db::BillingChargeLineRow) -> BillingChargeLineResponse {
     }
 }
 
-fn adjustment_response(adjustment: db::BillingChargeAdjustmentRow) -> BillingAdjustmentResponse {
-    BillingAdjustmentResponse {
-        adjustment_id: adjustment.adjustment_id,
-        amount: decimal_string(adjustment.amount),
-        reason: adjustment.reason,
-        created_by_user_id: adjustment.created_by_user_id,
-        created_at: adjustment.created_at,
-    }
-}
-
 fn monthly_csv(rows: Vec<db::BillingMonthlyExportRow>, is_admin: bool) -> String {
     let mut output = String::from(
-        "month,currency,request_count,known_count,unknown_count,priced_count,unpriced_count,customer_amount,adjusted_amount",
+        "month,currency,request_count,known_count,unknown_count,priced_count,unpriced_count,customer_amount",
     );
     if is_admin {
         output.push_str(",provider_cost,gross_margin");
@@ -491,11 +503,10 @@ fn monthly_csv(rows: Vec<db::BillingMonthlyExportRow>, is_admin: bool) -> String
             row.priced_count.to_string(),
             row.unpriced_count.to_string(),
             decimal_string(row.customer_amount),
-            decimal_string(row.adjusted_amount),
         ];
         if is_admin {
             fields.push(decimal_string(row.provider_cost));
-            fields.push(decimal_string(row.adjusted_amount - row.provider_cost));
+            fields.push(decimal_string(row.customer_amount - row.provider_cost));
         }
         let refs = fields.iter().map(String::as_str).collect::<Vec<_>>();
         output.push_str(&csv_row(&refs));
@@ -505,7 +516,7 @@ fn monthly_csv(rows: Vec<db::BillingMonthlyExportRow>, is_admin: bool) -> String
 
 fn detail_csv(rows: Vec<db::BillingExportRow>, is_admin: bool) -> String {
     let mut output = String::from(
-        "charge_id,request_id,user,client_key,requested_model,usage_status,pricing_status,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,customer_amount,adjusted_amount",
+        "charge_id,request_id,user,client_key,requested_model,usage_status,pricing_status,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,customer_amount",
     );
     if is_admin {
         output.push_str(",upstream_model,endpoint,provider_cost");
@@ -525,7 +536,6 @@ fn detail_csv(rows: Vec<db::BillingExportRow>, is_admin: bool) -> String {
             row.cache_write_tokens.to_string(),
             row.output_tokens.to_string(),
             row.customer_amount.map(decimal_string).unwrap_or_default(),
-            row.adjusted_amount.map(decimal_string).unwrap_or_default(),
         ];
         if is_admin {
             fields.push(row.upstream_model.unwrap_or_default());

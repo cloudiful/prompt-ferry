@@ -34,8 +34,6 @@ const periodEnd = ref('')
 const priceRuleVisible = ref(false)
 const priceRuleForm = ref<BillingPriceRuleForm>(newBillingPriceRuleForm())
 const detailVisible = ref(false)
-const adjustmentAmount = ref('')
-const adjustmentReason = ref('')
 
 async function refresh(): Promise<void> {
   try {
@@ -66,25 +64,7 @@ async function applyFilters(filters: BillingChargeFilters): Promise<void> {
 async function openDetail(chargeId: number): Promise<void> {
   try {
     await billing.openDetail(chargeId)
-    adjustmentAmount.value = ''
-    adjustmentReason.value = ''
     detailVisible.value = true
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
-async function addAdjustment(): Promise<void> {
-  if (!billing.detail?.charge) return
-  try {
-    await billing.addAdjustment(
-      billing.detail.charge.charge_id,
-      adjustmentAmount.value,
-      adjustmentReason.value,
-    )
-    adjustmentAmount.value = ''
-    adjustmentReason.value = ''
-    notifySuccess(t('adjustmentAdded'))
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -93,21 +73,26 @@ async function addAdjustment(): Promise<void> {
 async function savePriceRule(): Promise<void> {
   const form = priceRuleForm.value
   try {
-    await billing.savePriceRule({
-      price_side: form.price_side,
-      public_model:
-        form.price_side === 'sale' ? form.public_model.trim() : null,
-      endpoint_id: form.price_side === 'cost' ? form.endpoint_id : null,
-      upstream_model:
-        form.price_side === 'cost' ? form.upstream_model.trim() : null,
-      input_rate: form.input_rate.trim(),
-      cache_read_rate: form.cache_read_rate.trim(),
-      cache_write_rate: form.cache_write_rate.trim(),
-      output_rate: form.output_rate.trim(),
-      effective_from: new Date(form.effective_from).toISOString(),
-    })
+    await billing.savePriceRule(
+      {
+        price_side: form.price_side,
+        public_model:
+          form.price_side === 'sale' ? form.public_model.trim() : null,
+        endpoint_id: form.price_side === 'cost' ? form.endpoint_id : null,
+        upstream_model:
+          form.price_side === 'cost' ? form.upstream_model.trim() : null,
+        input_rate: form.input_rate.trim(),
+        cache_read_rate: form.cache_read_rate.trim(),
+        cache_write_rate: form.cache_write_rate.trim(),
+        output_rate: form.output_rate.trim(),
+        effective_from: new Date(form.effective_from).toISOString(),
+      },
+      form.price_rule_id,
+    )
     priceRuleVisible.value = false
-    notifySuccess(t('priceRuleCreated'))
+    notifySuccess(
+      form.price_rule_id ? t('priceRuleUpdated') : t('priceRuleCreated'),
+    )
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -142,9 +127,21 @@ async function download(kind: 'details' | 'monthly'): Promise<void> {
   }
 }
 
-function openPriceRule(): void {
-  priceRuleForm.value = newBillingPriceRuleForm()
+function openPriceRule(rule?: (typeof billing.priceRules)[number]): void {
+  priceRuleForm.value = newBillingPriceRuleForm(rule)
   priceRuleVisible.value = true
+}
+
+async function deletePriceRule(
+  rule: (typeof billing.priceRules)[number],
+): Promise<void> {
+  if (!window.confirm(t('priceRuleDeleteConfirm'))) return
+  try {
+    await billing.removePriceRule(rule.price_rule_id)
+    notifySuccess(t('priceRuleDeleted'))
+  } catch (cause) {
+    notifyApiError(cause)
+  }
 }
 
 onMounted(async () => {
@@ -263,6 +260,8 @@ onMounted(async () => {
       :total="billing.priceRuleTotal"
       :t="t"
       @create="openPriceRule"
+      @edit="openPriceRule"
+      @delete="deletePriceRule"
       @toggle="togglePriceRule"
       @page="billing.refreshPriceRules($event.first, $event.rows)"
     />
@@ -276,13 +275,10 @@ onMounted(async () => {
     />
     <BillingChargeDetailDialog
       v-model:visible="detailVisible"
-      v-model:adjustment-amount="adjustmentAmount"
-      v-model:adjustment-reason="adjustmentReason"
       :detail="billing.detail"
       :is-admin="session.isAdmin"
       :loading="billing.detailLoading"
       :t="t"
-      @add-adjustment="addAdjustment"
     />
   </div>
 </template>

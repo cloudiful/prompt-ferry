@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::db::types::{BillingPriceRuleCreate, BillingPriceRuleRow};
+use crate::db::types::{BillingPriceRuleCreate, BillingPriceRuleRow, BillingPriceRuleUpdate};
 
 pub async fn list_price_rules(
     pool: &PgPool,
@@ -62,6 +62,57 @@ pub async fn update_price_rule_status(
     )
     .fetch_optional(pool)
     .await?)
+}
+
+pub async fn update_price_rule(
+    pool: &PgPool,
+    price_rule_id: Uuid,
+    input: BillingPriceRuleUpdate,
+) -> Result<Option<BillingPriceRuleRow>> {
+    Ok(sqlx::query_file_as!(
+        BillingPriceRuleRow,
+        "src/sql/billing/update_price_rule.sql",
+        price_rule_id,
+        input.price_side.as_str(),
+        input.public_model,
+        input.endpoint_id,
+        input.upstream_model,
+        input.input_rate,
+        input.cache_read_rate,
+        input.cache_write_rate,
+        input.output_rate,
+        input.effective_from,
+    )
+    .fetch_optional(pool)
+    .await?)
+}
+
+pub async fn delete_price_rule(pool: &PgPool, price_rule_id: Uuid) -> Result<bool> {
+    let mut tx = pool.begin().await?;
+    let exists = sqlx::query_file_scalar!("src/sql/billing/lock_price_rule.sql", price_rule_id,)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if exists.is_none() {
+        tx.rollback().await?;
+        return Ok(false);
+    }
+    sqlx::query_file!(
+        "src/sql/billing/reset_price_rule_charges.sql",
+        price_rule_id,
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query_file!(
+        "src/sql/billing/delete_price_rule_charge_lines.sql",
+        price_rule_id,
+    )
+    .execute(&mut *tx)
+    .await?;
+    let result = sqlx::query_file!("src/sql/billing/delete_price_rule.sql", price_rule_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(result.rows_affected() == 1)
 }
 
 pub(super) async fn match_sale_price_rule(

@@ -1,9 +1,10 @@
 INSERT INTO usage_charges (
     event_id, request_id, user_id, client_key_id, client_key_label,
     requested_model, upstream_model, endpoint_id, endpoint_key_id,
-    usage_status, pricing_status, currency, provider_cost, customer_amount, adjusted_amount
+    usage_status, pricing_status, currency, provider_cost, customer_amount,
+    input_tokens, cache_read_tokens, cache_write_tokens, output_tokens
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'CNY', $12, $13, $14)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'CNY', $12, $13, $14, $15, $16, $17)
 ON CONFLICT (event_id)
 DO UPDATE SET
     event_id = EXCLUDED.event_id,
@@ -16,17 +17,12 @@ DO UPDATE SET
     endpoint_id = COALESCE(EXCLUDED.endpoint_id, usage_charges.endpoint_id),
     endpoint_key_id = COALESCE(EXCLUDED.endpoint_key_id, usage_charges.endpoint_key_id),
     usage_status = EXCLUDED.usage_status,
-    pricing_status = CASE
-        WHEN EXISTS (SELECT 1 FROM usage_charge_adjustments WHERE charge_id = usage_charges.charge_id)
-            THEN 'adjusted'
-        ELSE EXCLUDED.pricing_status
-    END,
+    pricing_status = EXCLUDED.pricing_status,
     provider_cost = EXCLUDED.provider_cost,
     customer_amount = EXCLUDED.customer_amount,
-    adjusted_amount = CASE
-        WHEN EXISTS (SELECT 1 FROM usage_charge_adjustments WHERE charge_id = usage_charges.charge_id)
-            THEN usage_charges.adjusted_amount
-        ELSE EXCLUDED.adjusted_amount
-    END,
+    input_tokens = EXCLUDED.input_tokens,
+    cache_read_tokens = EXCLUDED.cache_read_tokens,
+    cache_write_tokens = EXCLUDED.cache_write_tokens,
+    output_tokens = EXCLUDED.output_tokens,
     updated_at = NOW()
-RETURNING charge_id
+RETURNING charge_id AS "charge_id!"

@@ -1,9 +1,9 @@
+use super::schemas::ErrorEnvelope;
 use crate::worker_admin_types::{
-    BillingAdjustmentRequest, BillingAdjustmentResponse, BillingChargeDetailResponse,
-    BillingChargePageResponse, BillingChargesQuery, BillingExportQuery,
-    BillingPriceRulePageResponse, BillingPriceRulePatch, BillingPriceRuleRequest,
-    BillingPriceRuleResponse, BillingPriceRulesQuery, BillingRepriceRequest,
-    BillingRepriceResponse, BillingSummaryQuery, BillingSummaryResponse,
+    BillingChargeDetailResponse, BillingChargePageResponse, BillingChargesQuery,
+    BillingExportQuery, BillingPriceRulePageResponse, BillingPriceRulePatch,
+    BillingPriceRuleRequest, BillingPriceRuleResponse, BillingPriceRulesQuery,
+    BillingRepriceRequest, BillingRepriceResponse, BillingSummaryQuery, BillingSummaryResponse,
 };
 use utoipa::OpenApi;
 
@@ -13,17 +13,16 @@ use utoipa::OpenApi;
         list_billing_price_rules,
         create_billing_price_rule,
         patch_billing_price_rule,
+        update_billing_price_rule,
+        delete_billing_price_rule,
         billing_summary,
         list_billing_charges,
         billing_charge_detail,
-        add_billing_adjustment,
         reprice_billing,
         export_billing
     ),
     components(
         schemas(
-            BillingAdjustmentRequest,
-            BillingAdjustmentResponse,
             BillingChargeDetailResponse,
             BillingChargePageResponse,
             BillingPriceRulePatch,
@@ -68,6 +67,31 @@ pub(super) fn create_billing_price_rule() {}
 pub(super) fn patch_billing_price_rule() {}
 
 #[utoipa::path(
+    put,
+    path = "/api/v1/admin/billing/price-rules/{price_rule_id}",
+    params(("price_rule_id" = uuid::Uuid, Path, description = "Price rule ID")),
+    request_body = BillingPriceRuleRequest,
+    responses(
+        (status = 200, body = BillingPriceRuleResponse, description = "Updated billing price rule"),
+        (status = 404, body = ErrorEnvelope, description = "Price rule not found")
+    ),
+    tag = "billing"
+)]
+pub(super) fn update_billing_price_rule() {}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/billing/price-rules/{price_rule_id}",
+    params(("price_rule_id" = uuid::Uuid, Path, description = "Price rule ID")),
+    responses(
+        (status = 204, description = "Deleted billing price rule"),
+        (status = 404, description = "Price rule not found")
+    ),
+    tag = "billing"
+)]
+pub(super) fn delete_billing_price_rule() {}
+
+#[utoipa::path(
     get,
     path = "/api/v1/admin/billing/summary",
     params(BillingSummaryQuery),
@@ -93,16 +117,6 @@ pub(super) fn list_billing_charges() {}
     tag = "billing"
 )]
 pub(super) fn billing_charge_detail() {}
-
-#[utoipa::path(
-    post,
-    path = "/api/v1/admin/billing/charges/{charge_id}/adjustments",
-    params(("charge_id" = i64, Path, description = "Charge ID")),
-    request_body = BillingAdjustmentRequest,
-    responses((status = 200, body = BillingAdjustmentResponse, description = "Created billing adjustment")),
-    tag = "billing"
-)]
-pub(super) fn add_billing_adjustment() {}
 
 #[utoipa::path(
     post,

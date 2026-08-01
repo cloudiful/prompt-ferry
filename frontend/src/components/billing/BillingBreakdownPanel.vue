@@ -18,7 +18,7 @@ const columns = computed<TableColumn<BillingBreakdownResponse>[]>(() => [
   { accessorKey: 'cache_read_tokens', header: props.t('cacheReadRate') },
   { accessorKey: 'cache_write_tokens', header: props.t('cacheWriteRate') },
   { accessorKey: 'output_tokens', header: props.t('outputRate') },
-  { accessorKey: 'adjusted_amount', header: props.t('chargeAmount') },
+  { accessorKey: 'customer_amount', header: props.t('chargeAmount') },
   ...(props.isAdmin
     ? [{ accessorKey: 'provider_cost', header: props.t('chargeCost') }]
     : []),
@@ -45,8 +45,8 @@ const columns = computed<TableColumn<BillingBreakdownResponse>[]>(() => [
       <template #output_tokens-cell="{ row }">{{
         formatTokenCount(row.original.output_tokens)
       }}</template>
-      <template #adjusted_amount-cell="{ row }">{{
-        formatBillingAmount(row.original.adjusted_amount)
+      <template #customer_amount-cell="{ row }">{{
+        formatBillingAmount(row.original.customer_amount)
       }}</template>
       <template #provider_cost-cell="{ row }">{{
         formatBillingAmount(row.original.provider_cost)

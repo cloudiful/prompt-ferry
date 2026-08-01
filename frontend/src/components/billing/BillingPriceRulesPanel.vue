@@ -21,6 +21,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   create: []
+  edit: [rule: BillingPriceRuleResponse]
+  delete: [rule: BillingPriceRuleResponse]
   toggle: [rule: BillingPriceRuleResponse]
   page: [event: TablePageChange]
 }>()
@@ -99,22 +101,40 @@ function scope(rule: BillingPriceRuleResponse): string {
             variant="subtle"
         /></template>
         <template #actions-cell="{ row }">
-          <UButton
-            size="sm"
-            color="neutral"
-            variant="ghost"
-            :icon="
-              row.original.enabled
-                ? 'i-lucide-circle-pause'
-                : 'i-lucide-circle-play'
-            "
-            :aria-label="
-              row.original.enabled
-                ? t('disablePriceRule')
-                : t('enablePriceRule')
-            "
-            @click="emit('toggle', row.original)"
-          />
+          <div class="flex justify-end gap-1">
+            <UButton
+              size="sm"
+              color="neutral"
+              variant="ghost"
+              icon="i-lucide-pencil"
+              :aria-label="t('editPriceRule')"
+              @click="emit('edit', row.original)"
+            />
+            <UButton
+              size="sm"
+              color="error"
+              variant="ghost"
+              icon="i-lucide-trash-2"
+              :aria-label="t('deletePriceRule')"
+              @click="emit('delete', row.original)"
+            />
+            <UButton
+              size="sm"
+              color="neutral"
+              variant="ghost"
+              :icon="
+                row.original.enabled
+                  ? 'i-lucide-circle-pause'
+                  : 'i-lucide-circle-play'
+              "
+              :aria-label="
+                row.original.enabled
+                  ? t('disablePriceRule')
+                  : t('enablePriceRule')
+              "
+              @click="emit('toggle', row.original)"
+            />
+          </div>
         </template>
       </UTable>
     </div>

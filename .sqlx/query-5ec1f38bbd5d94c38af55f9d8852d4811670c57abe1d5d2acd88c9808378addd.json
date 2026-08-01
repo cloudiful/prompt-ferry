@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.charge_id AS \"charge_id!\", c.request_id AS \"request_id!\", u.login_name AS \"user_login_name?\", c.client_key_label,\n       c.requested_model, c.upstream_model, e.name AS \"endpoint_name?\",\n       c.usage_status AS \"usage_status!\", c.pricing_status AS \"pricing_status!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'input'), 0)::BIGINT AS \"input_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_read'), 0)::BIGINT AS \"cache_read_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'cache_write'), 0)::BIGINT AS \"cache_write_tokens!\",\n       COALESCE(MAX(l.token_count) FILTER (WHERE l.price_side = 'sale' AND l.meter = 'output'), 0)::BIGINT AS \"output_tokens!\",\n       c.provider_cost, c.customer_amount, c.adjusted_amount, c.created_at AS \"created_at!\"\nFROM usage_charges c\nLEFT JOIN users u ON u.user_id = c.user_id\nLEFT JOIN provider_endpoints e ON e.endpoint_id = c.endpoint_id\nLEFT JOIN usage_charge_lines l ON l.charge_id = c.charge_id\nWHERE ($1::BIGINT IS NULL OR c.user_id = $1)\n  AND ($2::BIGINT IS NULL OR c.client_key_id = $2)\n  AND ($3::TEXT IS NULL OR c.requested_model = $3)\n  AND ($4::UUID IS NULL OR c.endpoint_id = $4)\n  AND ($5::TEXT IS NULL OR c.usage_status = $5)\n  AND ($6::TEXT IS NULL OR c.pricing_status = $6)\n  AND ($7::UUID IS NULL OR c.request_id = $7)\n  AND ($8::TIMESTAMPTZ IS NULL OR c.created_at >= $8)\n  AND ($9::TIMESTAMPTZ IS NULL OR c.created_at < $9)\nGROUP BY c.charge_id, u.login_name, e.name\nORDER BY c.created_at ASC, c.charge_id ASC\n",
+  "query": "SELECT c.charge_id AS \"charge_id!\", c.request_id AS \"request_id!\", u.login_name AS \"user_login_name?\", c.client_key_label,\n       c.requested_model, c.upstream_model, e.name AS \"endpoint_name?\",\n       c.usage_status AS \"usage_status!\", c.pricing_status AS \"pricing_status!\",\n       c.input_tokens AS \"input_tokens!\", c.cache_read_tokens AS \"cache_read_tokens!\",\n       c.cache_write_tokens AS \"cache_write_tokens!\", c.output_tokens AS \"output_tokens!\",\n       c.provider_cost, c.customer_amount, c.created_at AS \"created_at!\"\nFROM usage_charges c\nLEFT JOIN users u ON u.user_id = c.user_id\nLEFT JOIN provider_endpoints e ON e.endpoint_id = c.endpoint_id\nWHERE ($1::BIGINT IS NULL OR c.user_id = $1)\n  AND ($2::BIGINT IS NULL OR c.client_key_id = $2)\n  AND ($3::TEXT IS NULL OR c.requested_model = $3)\n  AND ($4::UUID IS NULL OR c.endpoint_id = $4)\n  AND ($5::TEXT IS NULL OR c.usage_status = $5)\n  AND ($6::TEXT IS NULL OR c.pricing_status = $6)\n  AND ($7::UUID IS NULL OR c.request_id = $7)\n  AND ($8::TIMESTAMPTZ IS NULL OR c.created_at >= $8)\n  AND ($9::TIMESTAMPTZ IS NULL OR c.created_at < $9)\nORDER BY c.created_at ASC, c.charge_id ASC\n",
   "describe": {
     "columns": [
       {
@@ -106,25 +106,45 @@
         "ordinal": 9,
         "name": "input_tokens!",
         "type_info": "Int8",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "input_tokens"
+          }
+        }
       },
       {
         "ordinal": 10,
         "name": "cache_read_tokens!",
         "type_info": "Int8",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "cache_read_tokens"
+          }
+        }
       },
       {
         "ordinal": 11,
         "name": "cache_write_tokens!",
         "type_info": "Int8",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "cache_write_tokens"
+          }
+        }
       },
       {
         "ordinal": 12,
         "name": "output_tokens!",
         "type_info": "Int8",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "usage_charges",
+            "name": "output_tokens"
+          }
+        }
       },
       {
         "ordinal": 13,
@@ -150,17 +170,6 @@
       },
       {
         "ordinal": 15,
-        "name": "adjusted_amount",
-        "type_info": "Numeric",
-        "origin": {
-          "Table": {
-            "table": "usage_charges",
-            "name": "adjusted_amount"
-          }
-        }
-      },
-      {
-        "ordinal": 16,
         "name": "created_at!",
         "type_info": "Timestamptz",
         "origin": {
@@ -194,15 +203,14 @@
       false,
       false,
       false,
-      null,
-      null,
-      null,
-      null,
-      true,
+      false,
+      false,
+      false,
+      false,
       true,
       true,
       false
     ]
   },
-  "hash": "7605e7d55fa844587aab0add0e15a0b59748cb7d5b24c175c013c2f305d0c7e6"
+  "hash": "5ec1f38bbd5d94c38af55f9d8852d4811670c57abe1d5d2acd88c9808378addd"
 }

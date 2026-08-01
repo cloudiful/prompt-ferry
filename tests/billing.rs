@@ -7,6 +7,7 @@ use billing_harness::{
     create_sale_and_cost_rules, create_test_endpoint, create_test_user, create_unpriced_charge,
     migrated_schema,
 };
+use chrono::{Duration, Utc};
 use prompt_ferry::db;
 use rust_decimal::Decimal;
 use uuid::Uuid;
@@ -195,6 +196,229 @@ async fn billing_price_rule_migration_rejects_null_rows_with_rule_id() -> anyhow
     assert!(message.contains(&price_rule_id.to_string()));
     assert!(message.contains("currency"));
     assert!(message.contains("effective_from"));
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn billing_cleanup_migration_removes_manual_adjustments_and_keeps_token_snapshots()
+-> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping billing database test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = migrated_schema().await?;
+    let adjusted_column_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)::BIGINT
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'usage_charges'
+          AND column_name = 'adjusted_amount'
+        "#,
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    let adjustment_table_exists = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = current_schema()
+              AND table_name = 'usage_charge_adjustments'
+        )
+        "#,
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    let pricing_constraint = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT pg_get_constraintdef(oid)
+        FROM pg_constraint
+        WHERE conname = 'ck_usage_charges_pricing_status'
+        "#,
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    let snapshot_columns = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)::BIGINT
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'usage_charges'
+          AND column_name IN ('input_tokens', 'cache_read_tokens', 'cache_write_tokens', 'output_tokens')
+        "#,
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    let price_rule_index_exists = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND indexname = 'idx_usage_charge_lines_price_rule_id'
+        )
+        "#,
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+
+    assert_eq!(adjusted_column_count, 0);
+    assert!(!adjustment_table_exists);
+    assert!(!pricing_constraint.contains("adjusted"));
+    assert_eq!(snapshot_columns, 4);
+    assert!(price_rule_index_exists);
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn billing_price_rule_update_preserves_id() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping billing database test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = migrated_schema().await?;
+    let endpoint_id = create_test_endpoint(&schema.pool).await?;
+    let user_id = create_test_user(&schema.pool).await?;
+    let (sale_rule_id, _) = create_sale_and_cost_rules(&schema.pool, endpoint_id, user_id).await?;
+    let updated = db::update_price_rule(
+        &schema.pool,
+        sale_rule_id,
+        db::BillingPriceRuleUpdate {
+            price_side: db::BillingPriceSide::Sale,
+            public_model: Some("renamed-public-model".to_string()),
+            endpoint_id: None,
+            upstream_model: None,
+            input_rate: Decimal::from(3),
+            cache_read_rate: Decimal::from(4),
+            cache_write_rate: Decimal::from(5),
+            output_rate: Decimal::from(6),
+            effective_from: Utc::now() - Duration::minutes(2),
+        },
+    )
+    .await?
+    .expect("price rule should exist");
+
+    assert_eq!(updated.price_rule_id, sale_rule_id);
+    assert_eq!(
+        updated.public_model.as_deref(),
+        Some("renamed-public-model")
+    );
+    assert_eq!(updated.input_rate, Decimal::from(3));
+    assert_eq!(updated.output_rate, Decimal::from(6));
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn deleting_unreferenced_price_rule_removes_only_the_rule() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping billing database test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = migrated_schema().await?;
+    let endpoint_id = create_test_endpoint(&schema.pool).await?;
+    let user_id = create_test_user(&schema.pool).await?;
+    let charge_id = create_unpriced_charge(&schema.pool, endpoint_id).await?;
+    let (sale_rule_id, cost_rule_id) =
+        create_sale_and_cost_rules(&schema.pool, endpoint_id, user_id).await?;
+
+    assert!(db::delete_price_rule(&schema.pool, sale_rule_id).await?);
+    assert!(
+        db::list_price_rules(&schema.pool, 100, 0)
+            .await?
+            .iter()
+            .all(|rule| rule.price_rule_id != sale_rule_id)
+    );
+    assert!(db::get_charge(&schema.pool, charge_id).await?.is_some());
+    assert!(
+        db::list_price_rules(&schema.pool, 100, 0)
+            .await?
+            .iter()
+            .any(|rule| rule.price_rule_id == cost_rule_id)
+    );
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn deleting_referenced_price_rule_resets_charge_and_allows_repricing() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping billing database test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = migrated_schema().await?;
+    let endpoint_id = create_test_endpoint(&schema.pool).await?;
+    let user_id = create_test_user(&schema.pool).await?;
+    let charge_id = create_unpriced_charge(&schema.pool, endpoint_id).await?;
+    let (sale_rule_id, cost_rule_id) =
+        create_sale_and_cost_rules(&schema.pool, endpoint_id, user_id).await?;
+
+    assert_eq!(db::reprice_unpriced_charges(&schema.pool, 10).await?, 1);
+    assert!(db::delete_price_rule(&schema.pool, sale_rule_id).await?);
+    let reset = db::get_charge(&schema.pool, charge_id)
+        .await?
+        .expect("charge record should remain after deleting a price rule");
+    assert_eq!(reset.charge.pricing_status, "unpriced");
+    assert_eq!(reset.charge.provider_cost, None);
+    assert_eq!(reset.charge.customer_amount, None);
+    assert!(reset.lines.is_empty());
+    assert_eq!(reset.charge.input_tokens, 1_000_000);
+    assert_eq!(reset.charge.cache_read_tokens, 0);
+    assert_eq!(reset.charge.cache_write_tokens, 0);
+    assert_eq!(reset.charge.output_tokens, 2_000_000);
+
+    let replacement = db::create_price_rule(
+        &schema.pool,
+        db::BillingPriceRuleCreate {
+            price_side: db::BillingPriceSide::Sale,
+            public_model: Some("public-model".to_string()),
+            endpoint_id: None,
+            upstream_model: None,
+            input_rate: Decimal::from(2),
+            cache_read_rate: Decimal::ZERO,
+            cache_write_rate: Decimal::ZERO,
+            output_rate: Decimal::from(5),
+            effective_from: Utc::now() - Duration::minutes(1),
+            created_by_user_id: user_id,
+        },
+    )
+    .await?;
+    assert_ne!(replacement.price_rule_id, sale_rule_id);
+    assert_eq!(db::reprice_unpriced_charges(&schema.pool, 10).await?, 1);
+    let repriced = db::get_charge(&schema.pool, charge_id)
+        .await?
+        .expect("charge should be repriced");
+    assert_eq!(repriced.charge.pricing_status, "priced");
+    assert_eq!(repriced.lines.len(), 8);
+    assert!(
+        repriced
+            .lines
+            .iter()
+            .filter(|line| line.price_side == "sale")
+            .all(|line| line.price_rule_id == Some(replacement.price_rule_id))
+    );
+    assert!(
+        repriced
+            .lines
+            .iter()
+            .filter(|line| line.price_side == "cost")
+            .all(|line| line.price_rule_id == Some(cost_rule_id))
+    );
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn deleting_missing_price_rule_reports_not_found() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping billing database test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = migrated_schema().await?;
+    assert!(!db::delete_price_rule(&schema.pool, Uuid::new_v4()).await?);
     schema.cleanup().await?;
     Ok(())
 }

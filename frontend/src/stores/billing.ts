@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {
-  createBillingAdjustment,
   createPriceRule,
+  deletePriceRule,
   fetchBillingChargeDetail,
   fetchBillingCharges,
   fetchBillingCsv,
@@ -11,6 +11,7 @@ import {
   fetchBillingSummary,
   repriceUnpriced,
   setPriceRuleEnabled,
+  updatePriceRule,
 } from '../api/billing'
 import type {
   BillingChargeDetailResponse,
@@ -93,7 +94,8 @@ export const useBillingStore = defineStore('billing', () => {
         total.value > 0 &&
         first.value >= total.value
       ) {
-        const previousFirst = Math.floor((total.value - 1) / rows.value) * rows.value
+        const previousFirst =
+          Math.floor((total.value - 1) / rows.value) * rows.value
         await refreshCharges(previousFirst, rows.value)
       }
     } finally {
@@ -169,20 +171,19 @@ export const useBillingStore = defineStore('billing', () => {
     }
   }
 
-  async function addAdjustment(
-    chargeId: number,
-    amount: string,
-    reason: string,
+  async function savePriceRule(
+    body: BillingPriceRuleRequest,
+    priceRuleId?: string,
   ): Promise<void> {
-    await createBillingAdjustment(chargeId, { amount, reason })
-    await Promise.all([refreshSummary(), refreshCharges()])
-    await openDetail(chargeId)
-  }
-
-  async function savePriceRule(body: BillingPriceRuleRequest): Promise<void> {
-    await createPriceRule(body)
+    if (priceRuleId) await updatePriceRule(priceRuleId, body)
+    else await createPriceRule(body)
     await refreshPriceRules()
     await refreshSummary()
+  }
+
+  async function removePriceRule(priceRuleId: string): Promise<void> {
+    await deletePriceRule(priceRuleId)
+    await Promise.all([refreshPriceRules(), refreshSummary(), refreshCharges()])
   }
 
   async function togglePriceRule(
@@ -214,7 +215,6 @@ export const useBillingStore = defineStore('billing', () => {
   }
 
   return {
-    addAdjustment,
     applyFilters,
     applyPeriod,
     charges,
@@ -237,6 +237,7 @@ export const useBillingStore = defineStore('billing', () => {
     refresh,
     refreshCharges,
     reprice,
+    removePriceRule,
     savePriceRule,
     summary,
     togglePriceRule,

@@ -18,6 +18,7 @@ export type BillingChargeFilters = {
 }
 
 export type BillingPriceRuleForm = {
+  price_rule_id?: string
   price_side: 'cost' | 'sale'
   public_model: string
   endpoint_id: string
@@ -62,7 +63,24 @@ export function endOfDate(value: string): string | undefined {
   return date.toISOString()
 }
 
-export function newBillingPriceRuleForm(): BillingPriceRuleForm {
+export function newBillingPriceRuleForm(
+  rule?: BillingPriceRuleResponse,
+): BillingPriceRuleForm {
+  if (rule) {
+    const effectiveFrom = new Date(rule.effective_from)
+    return {
+      price_rule_id: rule.price_rule_id,
+      price_side: rule.price_side as 'cost' | 'sale',
+      public_model: rule.public_model ?? '',
+      endpoint_id: rule.endpoint_id ?? '',
+      upstream_model: rule.upstream_model ?? '',
+      input_rate: rule.input_rate,
+      cache_read_rate: rule.cache_read_rate,
+      cache_write_rate: rule.cache_write_rate,
+      output_rate: rule.output_rate,
+      effective_from: toDateTimeLocal(effectiveFrom),
+    }
+  }
   return {
     price_side: 'sale',
     public_model: '',
@@ -72,8 +90,13 @@ export function newBillingPriceRuleForm(): BillingPriceRuleForm {
     cache_read_rate: '0',
     cache_write_rate: '0',
     output_rate: '0',
-    effective_from: new Date().toISOString().slice(0, 16),
+    effective_from: toDateTimeLocal(new Date()),
   }
+}
+
+function toDateTimeLocal(value: Date): string {
+  const pad = (part: number): string => String(part).padStart(2, '0')
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`
 }
 
 export function formatBillingAmount(

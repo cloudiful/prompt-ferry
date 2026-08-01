@@ -62,23 +62,10 @@ export type AvailableModelsResponse = {
     total: number;
 };
 
-export type BillingAdjustmentRequest = {
-    amount: string;
-    reason: string;
-};
-
-export type BillingAdjustmentResponse = {
-    adjustment_id: number;
-    amount: string;
-    created_at: string;
-    created_by_user_id?: number | null;
-    reason: string;
-};
-
 export type BillingBreakdownResponse = {
-    adjusted_amount: string;
     cache_read_tokens: number;
     cache_write_tokens: number;
+    customer_amount: string;
     grouping_key: string;
     input_tokens: number;
     output_tokens: number;
@@ -87,7 +74,6 @@ export type BillingBreakdownResponse = {
 };
 
 export type BillingChargeDetailResponse = {
-    adjustments: Array<BillingAdjustmentResponse>;
     charge: BillingChargeResponse;
     lines: Array<BillingChargeLineResponse>;
 };
@@ -110,7 +96,6 @@ export type BillingChargePageResponse = {
 };
 
 export type BillingChargeResponse = {
-    adjusted_amount?: string | null;
     cache_read_tokens: number;
     cache_write_tokens: number;
     charge_id: number;
@@ -189,7 +174,6 @@ export type BillingRepriceResponse = {
 };
 
 export type BillingSummaryResponse = {
-    adjusted_amount: string;
     by_client_key: Array<BillingBreakdownResponse>;
     by_model: Array<BillingBreakdownResponse>;
     currency: string;
@@ -1314,27 +1298,6 @@ export type BillingChargeDetailResponses = {
 
 export type BillingChargeDetailResponse2 = BillingChargeDetailResponses[keyof BillingChargeDetailResponses];
 
-export type AddBillingAdjustmentData = {
-    body: BillingAdjustmentRequest;
-    path: {
-        /**
-         * Charge ID
-         */
-        charge_id: number;
-    };
-    query?: never;
-    url: '/api/v1/admin/billing/charges/{charge_id}/adjustments';
-};
-
-export type AddBillingAdjustmentResponses = {
-    /**
-     * Created billing adjustment
-     */
-    200: BillingAdjustmentResponse;
-};
-
-export type AddBillingAdjustmentResponse = AddBillingAdjustmentResponses[keyof AddBillingAdjustmentResponses];
-
 export type ExportBillingData = {
     body?: never;
     path?: never;
@@ -1397,6 +1360,34 @@ export type CreateBillingPriceRuleResponses = {
 
 export type CreateBillingPriceRuleResponse = CreateBillingPriceRuleResponses[keyof CreateBillingPriceRuleResponses];
 
+export type DeleteBillingPriceRuleData = {
+    body?: never;
+    path: {
+        /**
+         * Price rule ID
+         */
+        price_rule_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/billing/price-rules/{price_rule_id}';
+};
+
+export type DeleteBillingPriceRuleErrors = {
+    /**
+     * Price rule not found
+     */
+    404: unknown;
+};
+
+export type DeleteBillingPriceRuleResponses = {
+    /**
+     * Deleted billing price rule
+     */
+    204: void;
+};
+
+export type DeleteBillingPriceRuleResponse = DeleteBillingPriceRuleResponses[keyof DeleteBillingPriceRuleResponses];
+
 export type PatchBillingPriceRuleData = {
     body: BillingPriceRulePatch;
     path: {
@@ -1417,6 +1408,36 @@ export type PatchBillingPriceRuleResponses = {
 };
 
 export type PatchBillingPriceRuleResponse = PatchBillingPriceRuleResponses[keyof PatchBillingPriceRuleResponses];
+
+export type UpdateBillingPriceRuleData = {
+    body: BillingPriceRuleRequest;
+    path: {
+        /**
+         * Price rule ID
+         */
+        price_rule_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/billing/price-rules/{price_rule_id}';
+};
+
+export type UpdateBillingPriceRuleErrors = {
+    /**
+     * Price rule not found
+     */
+    404: ErrorEnvelope;
+};
+
+export type UpdateBillingPriceRuleError = UpdateBillingPriceRuleErrors[keyof UpdateBillingPriceRuleErrors];
+
+export type UpdateBillingPriceRuleResponses = {
+    /**
+     * Updated billing price rule
+     */
+    200: BillingPriceRuleResponse;
+};
+
+export type UpdateBillingPriceRuleResponse = UpdateBillingPriceRuleResponses[keyof UpdateBillingPriceRuleResponses];
 
 export type RepriceBillingData = {
     body: BillingRepriceRequest;

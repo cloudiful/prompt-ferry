@@ -61,9 +61,9 @@ async function logout(): Promise<void> {
       v-model:collapsed="collapsed"
       collapsible
       resizable
-      :min-size="14"
-      :max-size="22"
-      :default-size="17"
+      :min-size="12"
+      :max-size="16"
+      :default-size="13"
     >
       <template #header>
         <div class="flex min-w-0 items-center justify-end px-1">

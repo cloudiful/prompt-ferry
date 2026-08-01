@@ -5,8 +5,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::db::types::{
-    BillingBreakdownRow, BillingChargeAdjustmentRow, BillingChargeFilter, BillingChargeLineRow,
-    BillingChargeRow, BillingExportRow, BillingMeter, BillingMonthlyExportRow, BillingPriceRuleRow,
+    BillingBreakdownRow, BillingChargeFilter, BillingChargeLineRow, BillingChargeRow,
+    BillingExportRow, BillingMeter, BillingMonthlyExportRow, BillingPriceRuleRow,
     BillingSummaryRow, NormalizedBillingUsage, RequestRecordCategory, RequestRecordCreate,
 };
 
@@ -25,7 +25,6 @@ pub struct BillingSummary {
 pub struct BillingChargeDetail {
     pub charge: BillingChargeRow,
     pub lines: Vec<BillingChargeLineRow>,
-    pub adjustments: Vec<BillingChargeAdjustmentRow>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -111,7 +110,14 @@ pub async fn record_usage_charge(
         pricing_status,
         provider_cost,
         customer_amount,
-        customer_amount,
+        usage.map(|usage| usage.input_tokens).unwrap_or_default(),
+        usage
+            .map(|usage| usage.cache_read_tokens)
+            .unwrap_or_default(),
+        usage
+            .map(|usage| usage.cache_write_tokens)
+            .unwrap_or_default(),
+        usage.map(|usage| usage.output_tokens).unwrap_or_default(),
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -190,53 +196,7 @@ pub async fn get_charge(pool: &PgPool, charge_id: i64) -> Result<Option<BillingC
     )
     .fetch_all(pool)
     .await?;
-    let adjustments = sqlx::query_file_as!(
-        BillingChargeAdjustmentRow,
-        "src/sql/billing/list_charge_adjustments.sql",
-        charge_id,
-    )
-    .fetch_all(pool)
-    .await?;
-    Ok(Some(BillingChargeDetail {
-        charge,
-        lines,
-        adjustments,
-    }))
-}
-
-pub async fn add_charge_adjustment(
-    pool: &PgPool,
-    charge_id: i64,
-    amount: Decimal,
-    reason: &str,
-    created_by_user_id: i64,
-) -> Result<Option<BillingChargeAdjustmentRow>> {
-    let mut tx = pool.begin().await?;
-    let exists = sqlx::query_file_as!(
-        BillingChargeRow,
-        "src/sql/billing/get_charge.sql",
-        charge_id,
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
-    if exists.is_none() {
-        return Ok(None);
-    }
-    let adjustment = sqlx::query_file_as!(
-        BillingChargeAdjustmentRow,
-        "src/sql/billing/insert_adjustment.sql",
-        charge_id,
-        amount,
-        reason,
-        created_by_user_id,
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    sqlx::query_file!("src/sql/billing/apply_adjustment.sql", charge_id, amount,)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    Ok(Some(adjustment))
+    Ok(Some(BillingChargeDetail { charge, lines }))
 }
 
 pub async fn billing_summary(
@@ -405,7 +365,6 @@ pub async fn reprice_unpriced_charges(pool: &PgPool, limit: i64) -> Result<u64> 
             "priced",
             provider_cost,
             customer_amount,
-            customer_amount,
         )
         .execute(&mut *tx)
         .await?;
@@ -522,6 +481,5 @@ mod tests {
     fn charge_upsert_is_event_idempotent() {
         let sql = include_str!("../../sql/billing/upsert_charge.sql");
         assert!(sql.contains("ON CONFLICT (event_id)"));
-        assert!(sql.contains("usage_charge_adjustments"));
     }
 }

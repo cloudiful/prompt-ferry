@@ -5,8 +5,7 @@ SELECT date_trunc('month', c.created_at) AS "month!",
        COUNT(*) FILTER (WHERE c.pricing_status = 'priced')::BIGINT AS "priced_count!",
        COUNT(*) FILTER (WHERE c.pricing_status = 'unpriced')::BIGINT AS "unpriced_count!",
        COALESCE(SUM(c.provider_cost), 0)::NUMERIC AS "provider_cost!",
-       COALESCE(SUM(c.customer_amount), 0)::NUMERIC AS "customer_amount!",
-       COALESCE(SUM(c.adjusted_amount), 0)::NUMERIC AS "adjusted_amount!"
+       COALESCE(SUM(c.customer_amount), 0)::NUMERIC AS "customer_amount!"
 FROM usage_charges c
 WHERE ($1::BIGINT IS NULL OR c.user_id = $1)
   AND ($2::BIGINT IS NULL OR c.client_key_id = $2)

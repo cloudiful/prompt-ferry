@@ -109,17 +109,15 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
         )
         .route(
             "/admin/billing/price-rules/{price_rule_id}",
-            patch(patch_billing_price_rule),
+            patch(patch_billing_price_rule)
+                .put(update_billing_price_rule)
+                .delete(delete_billing_price_rule),
         )
         .route("/admin/billing/summary", get(billing_summary))
         .route("/admin/billing/charges", get(list_billing_charges))
         .route(
             "/admin/billing/charges/{charge_id}",
             get(billing_charge_detail),
-        )
-        .route(
-            "/admin/billing/charges/{charge_id}/adjustments",
-            post(add_billing_adjustment),
         )
         .route("/admin/billing/reprice-unpriced", post(reprice_billing))
         .route("/admin/billing/export", get(export_billing))

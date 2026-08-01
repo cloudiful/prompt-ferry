@@ -111,7 +111,7 @@ pub struct BillingBreakdownResponse {
     pub cache_write_tokens: i64,
     pub output_tokens: i64,
     pub provider_cost: Option<String>,
-    pub adjusted_amount: String,
+    pub customer_amount: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -124,7 +124,6 @@ pub struct BillingSummaryResponse {
     pub unpriced_count: i64,
     pub provider_cost: Option<String>,
     pub customer_amount: String,
-    pub adjusted_amount: String,
     pub gross_margin: Option<String>,
     pub by_client_key: Vec<BillingBreakdownResponse>,
     pub by_model: Vec<BillingBreakdownResponse>,
@@ -152,7 +151,6 @@ pub struct BillingChargeResponse {
     pub output_tokens: i64,
     pub provider_cost: Option<String>,
     pub customer_amount: Option<String>,
-    pub adjusted_amount: Option<String>,
     pub gross_margin: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -177,26 +175,10 @@ pub struct BillingChargeLineResponse {
     pub price_rule_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct BillingAdjustmentResponse {
-    pub adjustment_id: i64,
-    pub amount: String,
-    pub reason: String,
-    pub created_by_user_id: Option<i64>,
-    pub created_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Serialize, ToSchema)]
 pub struct BillingChargeDetailResponse {
     pub charge: BillingChargeResponse,
     pub lines: Vec<BillingChargeLineResponse>,
-    pub adjustments: Vec<BillingAdjustmentResponse>,
-}
-
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct BillingAdjustmentRequest {
-    pub amount: String,
-    pub reason: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

@@ -124,7 +124,6 @@ function updateUser(value: unknown): void {
           { label: t('allBillingStates'), value: undefined },
           { label: t('pricingPriced'), value: 'priced' },
           { label: t('pricingUnpriced'), value: 'unpriced' },
-          { label: t('pricingAdjusted'), value: 'adjusted' },
         ]"
         label-key="label"
         value-key="value"

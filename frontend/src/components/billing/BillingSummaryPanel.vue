@@ -19,7 +19,7 @@ function amount(value: string | null | undefined): string {
       <div class="rounded-lg border border-default bg-default p-3">
         <div class="text-xs text-muted">{{ t('billingAmount') }}</div>
         <strong class="mt-1 block text-xl text-highlighted">{{
-          amount(summary?.adjusted_amount)
+          amount(summary?.customer_amount)
         }}</strong>
       </div>
       <div

@@ -14,16 +14,6 @@ const props = defineProps<{
 }>()
 
 const visible = defineModel<boolean>('visible', { required: true })
-const adjustmentAmount = defineModel<string>('adjustmentAmount', {
-  required: true,
-})
-const adjustmentReason = defineModel<string>('adjustmentReason', {
-  required: true,
-})
-
-defineEmits<{
-  addAdjustment: []
-}>()
 </script>
 
 <template>
@@ -41,13 +31,11 @@ defineEmits<{
           <div class="flex flex-wrap items-center gap-2">
             <UBadge
               :label="
-                detail.charge.pricing_status === 'adjusted'
-                  ? t('pricingAdjusted')
-                  : detail.charge.pricing_status === 'priced'
-                    ? t('pricingPriced')
-                    : detail.charge.usage_status === 'unknown'
-                      ? t('usageUnknown')
-                      : t('pricingUnpriced')
+                detail.charge.pricing_status === 'priced'
+                  ? t('pricingPriced')
+                  : detail.charge.usage_status === 'unknown'
+                    ? t('usageUnknown')
+                    : t('pricingUnpriced')
               "
               variant="subtle"
             />
@@ -67,7 +55,7 @@ defineEmits<{
               <span class="text-dimmed">{{ t('chargeAmount') }}</span
               ><strong class="mt-1 block">{{
                 formatBillingAmount(
-                  detail.charge.adjusted_amount,
+                  detail.charge.customer_amount,
                   detail.charge.currency,
                 )
               }}</strong>
@@ -119,51 +107,6 @@ defineEmits<{
             >
           </div>
         </section>
-        <section v-if="detail.adjustments.length" class="grid gap-2">
-          <h3 class="font-semibold text-highlighted">
-            {{ t('billingAdjustments') }}
-          </h3>
-          <div
-            v-for="adjustment in detail.adjustments"
-            :key="adjustment.adjustment_id"
-            class="grid gap-1 border-b border-default py-2"
-          >
-            <div class="flex justify-between gap-2">
-              <span>{{ adjustment.reason }}</span
-              ><strong>{{ formatBillingAmount(adjustment.amount) }}</strong>
-            </div>
-            <span class="text-dimmed">{{
-              formatBillingTime(adjustment.created_at)
-            }}</span>
-          </div>
-        </section>
-        <form
-          v-if="isAdmin"
-          class="grid gap-2 border-t border-default pt-3"
-          @submit.prevent="$emit('addAdjustment')"
-        >
-          <h3 class="font-semibold text-highlighted">
-            {{ t('addAdjustment') }}
-          </h3>
-          <div class="grid gap-2 sm:grid-cols-2">
-            <UInput
-              v-model="adjustmentAmount"
-              :placeholder="t('adjustmentAmount')"
-              inputmode="decimal"
-              required
-            />
-            <UInput
-              v-model="adjustmentReason"
-              :placeholder="t('adjustmentReason')"
-              required
-            />
-          </div>
-          <div>
-            <UButton type="submit" icon="i-lucide-plus">{{
-              t('addAdjustment')
-            }}</UButton>
-          </div>
-        </form>
       </div>
     </template>
   </UModal>

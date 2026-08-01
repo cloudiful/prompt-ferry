@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE usage_charges\nSET pricing_status = 'unpriced',\n    provider_cost = NULL,\n    customer_amount = NULL,\n    updated_at = NOW()\nWHERE charge_id IN (\n    SELECT charge_id\n    FROM usage_charge_lines\n    WHERE price_rule_id = $1\n)\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c40216396544cb340d40f162e4d47c94b5f64e286ca9ec49a743a8730ee9272b"
+}

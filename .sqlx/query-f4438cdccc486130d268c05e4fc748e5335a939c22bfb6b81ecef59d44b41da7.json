@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM usage_charge_lines\nWHERE charge_id IN (\n    SELECT charge_id\n    FROM usage_charge_lines\n    WHERE price_rule_id = $1\n)\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f4438cdccc486130d268c05e4fc748e5335a939c22bfb6b81ecef59d44b41da7"
+}

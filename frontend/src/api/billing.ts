@@ -1,17 +1,17 @@
 import {
-  addBillingAdjustment,
   billingChargeDetail,
   billingSummary,
   createBillingPriceRule,
+  deleteBillingPriceRule,
   exportBilling,
   listBillingCharges,
   listBillingPriceRules,
   listEndpoints,
   patchBillingPriceRule,
   repriceBilling,
+  updateBillingPriceRule,
 } from '../generated/admin-api'
 import type {
-  BillingAdjustmentRequest,
   BillingChargeDetailResponse,
   BillingChargePageResponse,
   BillingPriceRuleRequest,
@@ -49,9 +49,7 @@ export async function fetchBillingPriceRules(
   rows: number,
 ): Promise<BillingPriceRulePageResponse> {
   return expectData(
-    await listBillingPriceRules<true>(
-      withData({ query: { first, rows } }),
-    ),
+    await listBillingPriceRules<true>(withData({ query: { first, rows } })),
   )
 }
 
@@ -65,6 +63,23 @@ export async function createPriceRule(
   body: BillingPriceRuleRequest,
 ): Promise<BillingPriceRuleResponse> {
   return expectData(await createBillingPriceRule<true>(withData({ body })))
+}
+
+export async function updatePriceRule(
+  priceRuleId: string,
+  body: BillingPriceRuleRequest,
+): Promise<BillingPriceRuleResponse> {
+  return expectData(
+    await updateBillingPriceRule<true>(
+      withData({ path: { price_rule_id: priceRuleId }, body }),
+    ),
+  )
+}
+
+export async function deletePriceRule(priceRuleId: string): Promise<void> {
+  await deleteBillingPriceRule<true>(
+    withData({ path: { price_rule_id: priceRuleId } }),
+  )
 }
 
 export async function setPriceRuleEnabled(
@@ -84,17 +99,6 @@ export async function fetchBillingChargeDetail(
   return expectData(
     await billingChargeDetail<true>(
       withData({ path: { charge_id: chargeId } }),
-    ),
-  )
-}
-
-export async function createBillingAdjustment(
-  chargeId: number,
-  body: BillingAdjustmentRequest,
-) {
-  return expectData(
-    await addBillingAdjustment<true>(
-      withData({ path: { charge_id: chargeId }, body }),
     ),
   )
 }

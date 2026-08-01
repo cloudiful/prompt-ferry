@@ -19,7 +19,7 @@ defineEmits<{
 <template>
   <UModal
     v-model:open="visible"
-    :title="t('newPriceRule')"
+    :title="form.price_rule_id ? t('editPriceRule') : t('newPriceRule')"
     :ui="{ content: 'sm:max-w-3xl' }"
   >
     <template #body>

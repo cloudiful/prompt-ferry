@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT price_rule_id AS \"price_rule_id!\"\nFROM billing_price_rules\nWHERE price_rule_id = $1\nFOR UPDATE\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "price_rule_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "billing_price_rules",
+            "name": "price_rule_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "de2f676ffdc25613894b3bbc95b47a869ca4b528dc087348f0cfce1eb38ee574"
+}

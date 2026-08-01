@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM billing_price_rules\nWHERE price_rule_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b912e0a8e22e5082ae199abf234579168f7ab5dfd424e17bc041dbb47405b9b0"
+}

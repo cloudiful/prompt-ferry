@@ -165,6 +165,19 @@ pub struct BillingPriceRuleCreate {
 }
 
 #[derive(Debug, Clone)]
+pub struct BillingPriceRuleUpdate {
+    pub price_side: BillingPriceSide,
+    pub public_model: Option<String>,
+    pub endpoint_id: Option<Uuid>,
+    pub upstream_model: Option<String>,
+    pub input_rate: Decimal,
+    pub cache_read_rate: Decimal,
+    pub cache_write_rate: Decimal,
+    pub output_rate: Decimal,
+    pub effective_from: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
 pub struct BillingChargeFilter {
     pub user_id: Option<i64>,
     pub client_key_id: Option<i64>,
@@ -196,7 +209,6 @@ pub struct BillingChargeRow {
     pub currency: String,
     pub provider_cost: Option<Decimal>,
     pub customer_amount: Option<Decimal>,
-    pub adjusted_amount: Option<Decimal>,
     pub input_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
@@ -219,16 +231,6 @@ pub struct BillingChargeLineRow {
 }
 
 #[derive(Debug, Clone, FromRow)]
-pub struct BillingChargeAdjustmentRow {
-    pub adjustment_id: i64,
-    pub charge_id: i64,
-    pub amount: Decimal,
-    pub reason: String,
-    pub created_by_user_id: Option<i64>,
-    pub created_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, FromRow)]
 pub struct BillingSummaryRow {
     pub request_count: i64,
     pub known_count: i64,
@@ -237,7 +239,6 @@ pub struct BillingSummaryRow {
     pub unpriced_count: i64,
     pub provider_cost: Decimal,
     pub customer_amount: Decimal,
-    pub adjusted_amount: Decimal,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -249,7 +250,7 @@ pub struct BillingBreakdownRow {
     pub cache_write_tokens: i64,
     pub output_tokens: i64,
     pub provider_cost: Decimal,
-    pub adjusted_amount: Decimal,
+    pub customer_amount: Decimal,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -269,7 +270,6 @@ pub struct BillingExportRow {
     pub output_tokens: i64,
     pub provider_cost: Option<Decimal>,
     pub customer_amount: Option<Decimal>,
-    pub adjusted_amount: Option<Decimal>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -283,5 +283,4 @@ pub struct BillingMonthlyExportRow {
     pub unpriced_count: i64,
     pub provider_cost: Decimal,
     pub customer_amount: Decimal,
-    pub adjusted_amount: Decimal,
 }
