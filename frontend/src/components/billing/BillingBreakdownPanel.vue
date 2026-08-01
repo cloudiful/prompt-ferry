@@ -6,7 +6,6 @@ import { formatBillingAmount, formatTokenCount } from '@/models/billing'
 
 const props = defineProps<{
   rows: BillingBreakdownResponse[]
-  isAdmin: boolean
   title: string
   t: TranslateFn
 }>()
@@ -19,9 +18,6 @@ const columns = computed<TableColumn<BillingBreakdownResponse>[]>(() => [
   { accessorKey: 'cache_write_tokens', header: props.t('cacheWriteRate') },
   { accessorKey: 'output_tokens', header: props.t('outputRate') },
   { accessorKey: 'customer_amount', header: props.t('chargeAmount') },
-  ...(props.isAdmin
-    ? [{ accessorKey: 'provider_cost', header: props.t('chargeCost') }]
-    : []),
 ])
 </script>
 
@@ -47,9 +43,6 @@ const columns = computed<TableColumn<BillingBreakdownResponse>[]>(() => [
       }}</template>
       <template #customer_amount-cell="{ row }">{{
         formatBillingAmount(row.original.customer_amount)
-      }}</template>
-      <template #provider_cost-cell="{ row }">{{
-        formatBillingAmount(row.original.provider_cost)
       }}</template>
     </UTable>
   </section>

@@ -3,7 +3,6 @@ import type { BillingSummaryResponse } from '@/generated/admin-api'
 import { formatBillingAmount, formatTokenCount } from '@/models/billing'
 
 const props = defineProps<{
-  isAdmin: boolean
   summary: BillingSummaryResponse | null
   t: TranslateFn
 }>()
@@ -15,29 +14,11 @@ function amount(value: string | null | undefined): string {
 
 <template>
   <section class="grid gap-3">
-    <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+    <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
       <div class="rounded-lg border border-default bg-default p-3">
         <div class="text-xs text-muted">{{ t('billingAmount') }}</div>
         <strong class="mt-1 block text-xl text-highlighted">{{
           amount(summary?.customer_amount)
-        }}</strong>
-      </div>
-      <div
-        v-if="isAdmin"
-        class="rounded-lg border border-default bg-default p-3"
-      >
-        <div class="text-xs text-muted">{{ t('billingCost') }}</div>
-        <strong class="mt-1 block text-xl text-highlighted">{{
-          amount(summary?.provider_cost)
-        }}</strong>
-      </div>
-      <div
-        v-if="isAdmin"
-        class="rounded-lg border border-default bg-default p-3"
-      >
-        <div class="text-xs text-muted">{{ t('billingMargin') }}</div>
-        <strong class="mt-1 block text-xl text-highlighted">{{
-          amount(summary?.gross_margin)
         }}</strong>
       </div>
       <div class="rounded-lg border border-default bg-default p-3">

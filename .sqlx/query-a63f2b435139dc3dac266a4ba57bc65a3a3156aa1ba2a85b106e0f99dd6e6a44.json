@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.charge_id AS \"charge_id!\", c.event_id, c.request_id AS \"request_id!\", c.user_id, u.login_name AS \"user_login_name?\",\n       c.client_key_id, c.client_key_label, c.requested_model, c.upstream_model,\n       c.endpoint_id, e.name AS \"endpoint_name?\", c.endpoint_key_id,\n       c.usage_status AS \"usage_status!\", c.pricing_status AS \"pricing_status!\", c.currency AS \"currency!\", c.provider_cost,\n       c.customer_amount,\n       c.input_tokens AS \"input_tokens!\", c.cache_read_tokens AS \"cache_read_tokens!\",\n       c.cache_write_tokens AS \"cache_write_tokens!\", c.output_tokens AS \"output_tokens!\",\n       c.created_at AS \"created_at!\", c.updated_at AS \"updated_at!\"\nFROM usage_charges c\nLEFT JOIN users u ON u.user_id = c.user_id\nLEFT JOIN provider_endpoints e ON e.endpoint_id = c.endpoint_id\nWHERE c.charge_id = $1\n",
+  "query": "SELECT c.charge_id AS \"charge_id!\", c.event_id, c.request_id AS \"request_id!\", c.user_id, u.login_name AS \"user_login_name?\",\n       c.client_key_id, c.client_key_label, c.requested_model, c.upstream_model,\n       c.endpoint_id, e.name AS \"endpoint_name?\", c.endpoint_key_id,\n       c.usage_status AS \"usage_status!\", c.pricing_status AS \"pricing_status!\", c.currency AS \"currency!\",\n       c.customer_amount,\n       c.input_tokens AS \"input_tokens!\", c.cache_read_tokens AS \"cache_read_tokens!\",\n       c.cache_write_tokens AS \"cache_write_tokens!\", c.output_tokens AS \"output_tokens!\",\n       c.created_at AS \"created_at!\", c.updated_at AS \"updated_at!\"\nFROM usage_charges c\nLEFT JOIN users u ON u.user_id = c.user_id\nLEFT JOIN provider_endpoints e ON e.endpoint_id = c.endpoint_id\nWHERE ($1::BIGINT IS NULL OR c.user_id = $1)\n  AND ($2::BIGINT IS NULL OR c.client_key_id = $2)\n  AND ($3::TEXT IS NULL OR c.requested_model = $3)\n  AND ($4::UUID IS NULL OR c.endpoint_id = $4)\n  AND ($5::TEXT IS NULL OR c.usage_status = $5)\n  AND ($6::TEXT IS NULL OR c.pricing_status = $6)\n  AND ($7::UUID IS NULL OR c.request_id = $7)\n  AND ($8::TIMESTAMPTZ IS NULL OR c.created_at >= $8)\n  AND ($9::TIMESTAMPTZ IS NULL OR c.created_at < $9)\nORDER BY c.created_at DESC, c.charge_id DESC\nLIMIT $10 OFFSET $11\n",
   "describe": {
     "columns": [
       {
@@ -170,17 +170,6 @@
       },
       {
         "ordinal": 15,
-        "name": "provider_cost",
-        "type_info": "Numeric",
-        "origin": {
-          "Table": {
-            "table": "usage_charges",
-            "name": "provider_cost"
-          }
-        }
-      },
-      {
-        "ordinal": 16,
         "name": "customer_amount",
         "type_info": "Numeric",
         "origin": {
@@ -191,7 +180,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 16,
         "name": "input_tokens!",
         "type_info": "Int8",
         "origin": {
@@ -202,7 +191,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 17,
         "name": "cache_read_tokens!",
         "type_info": "Int8",
         "origin": {
@@ -213,7 +202,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 18,
         "name": "cache_write_tokens!",
         "type_info": "Int8",
         "origin": {
@@ -224,7 +213,7 @@
         }
       },
       {
-        "ordinal": 20,
+        "ordinal": 19,
         "name": "output_tokens!",
         "type_info": "Int8",
         "origin": {
@@ -235,7 +224,7 @@
         }
       },
       {
-        "ordinal": 21,
+        "ordinal": 20,
         "name": "created_at!",
         "type_info": "Timestamptz",
         "origin": {
@@ -246,7 +235,7 @@
         }
       },
       {
-        "ordinal": 22,
+        "ordinal": 21,
         "name": "updated_at!",
         "type_info": "Timestamptz",
         "origin": {
@@ -259,6 +248,16 @@
     ],
     "parameters": {
       "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8",
         "Int8"
       ]
     },
@@ -267,18 +266,17 @@
       true,
       false,
       true,
-      true,
-      true,
-      true,
+      false,
       true,
       true,
       true,
       true,
       true,
       false,
-      false,
-      false,
       true,
+      false,
+      false,
+      false,
       true,
       false,
       false,
@@ -288,5 +286,5 @@
       false
     ]
   },
-  "hash": "03580085a586017adba2aa18c26582f43f96181067300b966a4137bfa02db7e3"
+  "hash": "a63f2b435139dc3dac266a4ba57bc65a3a3156aa1ba2a85b106e0f99dd6e6a44"
 }

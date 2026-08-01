@@ -38,12 +38,6 @@ const columns = computed<TableColumn<BillingChargeResponse>[]>(() => [
   { id: 'tokens', header: props.t('usageTokens') },
   { accessorKey: 'pricing_status', header: props.t('billingStatus') },
   { accessorKey: 'customer_amount', header: props.t('chargeAmount') },
-  ...(props.isAdmin
-    ? [
-        { accessorKey: 'provider_cost', header: props.t('chargeCost') },
-        { accessorKey: 'gross_margin', header: props.t('grossMargin') },
-      ]
-    : []),
   { accessorKey: 'created_at', header: props.t('createdAt') },
 ])
 
@@ -113,12 +107,6 @@ function statusColor(
             row.original.customer_amount,
             row.original.currency,
           )
-        }}</template>
-        <template #provider_cost-cell="{ row }">{{
-          formatBillingAmount(row.original.provider_cost, row.original.currency)
-        }}</template>
-        <template #gross_margin-cell="{ row }">{{
-          formatBillingAmount(row.original.gross_margin, row.original.currency)
         }}</template>
         <template #created_at-cell="{ row }">{{
           formatBillingTime(row.original.created_at)

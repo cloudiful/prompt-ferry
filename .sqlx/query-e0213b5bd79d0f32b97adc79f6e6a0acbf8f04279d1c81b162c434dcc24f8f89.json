@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT price_rule_id, price_side, public_model, endpoint_id, upstream_model,\n       input_rate, cache_read_rate, cache_write_rate, output_rate, currency,\n       effective_from, effective_to, enabled, created_by_user_id, created_at, updated_at\nFROM billing_price_rules\nWHERE price_side = 'cost'\n  AND enabled = TRUE\n  AND endpoint_id = $1\n  AND upstream_model = $2\n  AND effective_from <= $3\n  AND (effective_to IS NULL OR effective_to > $3)\nORDER BY effective_from DESC, created_at DESC\nLIMIT 1\n",
+  "query": "SELECT price_rule_id, public_model AS \"public_model!\", input_rate, cache_read_rate, cache_write_rate,\n       output_rate, currency,\n       effective_from, effective_to, enabled, created_by_user_id, created_at, updated_at\nFROM billing_price_rules\nORDER BY public_model, effective_from DESC, created_at DESC, price_rule_id ASC\nLIMIT $1 OFFSET $2\n",
   "describe": {
     "columns": [
       {
@@ -16,18 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "price_side",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "billing_price_rules",
-            "name": "price_side"
-          }
-        }
-      },
-      {
-        "ordinal": 2,
-        "name": "public_model",
+        "name": "public_model!",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -37,29 +26,7 @@
         }
       },
       {
-        "ordinal": 3,
-        "name": "endpoint_id",
-        "type_info": "Uuid",
-        "origin": {
-          "Table": {
-            "table": "billing_price_rules",
-            "name": "endpoint_id"
-          }
-        }
-      },
-      {
-        "ordinal": 4,
-        "name": "upstream_model",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "billing_price_rules",
-            "name": "upstream_model"
-          }
-        }
-      },
-      {
-        "ordinal": 5,
+        "ordinal": 2,
         "name": "input_rate",
         "type_info": "Numeric",
         "origin": {
@@ -70,7 +37,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 3,
         "name": "cache_read_rate",
         "type_info": "Numeric",
         "origin": {
@@ -81,7 +48,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 4,
         "name": "cache_write_rate",
         "type_info": "Numeric",
         "origin": {
@@ -92,7 +59,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 5,
         "name": "output_rate",
         "type_info": "Numeric",
         "origin": {
@@ -103,7 +70,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 6,
         "name": "currency",
         "type_info": "Text",
         "origin": {
@@ -114,7 +81,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 7,
         "name": "effective_from",
         "type_info": "Timestamptz",
         "origin": {
@@ -125,7 +92,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 8,
         "name": "effective_to",
         "type_info": "Timestamptz",
         "origin": {
@@ -136,7 +103,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 9,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -147,7 +114,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 10,
         "name": "created_by_user_id",
         "type_info": "Int8",
         "origin": {
@@ -158,7 +125,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 11,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -169,7 +136,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 12,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -182,16 +149,12 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Timestamptz"
+        "Int8",
+        "Int8"
       ]
     },
     "nullable": [
       false,
-      false,
-      true,
-      true,
       true,
       false,
       false,
@@ -206,5 +169,5 @@
       false
     ]
   },
-  "hash": "5f8b314856501e9118660da9c87b7324ddff3a4c684360b276107bdfe54f0784"
+  "hash": "e0213b5bd79d0f32b97adc79f6e6a0acbf8f04279d1c81b162c434dcc24f8f89"
 }

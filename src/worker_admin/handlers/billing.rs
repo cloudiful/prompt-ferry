@@ -2,10 +2,7 @@ use super::*;
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
-use crate::db::{
-    self, BillingChargeFilter, BillingPriceRuleCreate, BillingPriceRuleUpdate,
-    BillingPriceSide as DbBillingPriceSide,
-};
+use crate::db::{self, BillingChargeFilter, BillingPriceRuleCreate, BillingPriceRuleUpdate};
 
 pub(super) async fn list_billing_price_rules(
     State(state): State<AdminState>,
@@ -130,7 +127,7 @@ pub(super) async fn billing_summary(
         end_at: query.end_at,
     };
     match db::billing_summary(&state.pool, &filter).await {
-        Ok(summary) => Json(summary_response(summary, user.is_admin)).into_response(),
+        Ok(summary) => Json(summary_response(summary)).into_response(),
         Err(err) => internal(&state, err),
     }
 }
@@ -193,12 +190,7 @@ pub(super) async fn billing_charge_detail(
     if !user.is_admin && detail.charge.user_id != Some(user.user_id) {
         return error(StatusCode::NOT_FOUND, "not_found", "charge not found");
     }
-    let lines = detail
-        .lines
-        .into_iter()
-        .filter(|line| user.is_admin || line.price_side == "sale")
-        .map(line_response)
-        .collect();
+    let lines = detail.lines.into_iter().map(line_response).collect();
     Json(BillingChargeDetailResponse {
         charge: charge_response(detail.charge, user.is_admin),
         lines,
@@ -247,7 +239,7 @@ pub(super) async fn export_billing(
     let kind = query.kind.as_deref().unwrap_or("details");
     let csv = if matches!(kind, "monthly" | "summary") {
         match db::list_monthly_export(&state.pool, &filter).await {
-            Ok(rows) => monthly_csv(rows, user.is_admin),
+            Ok(rows) => monthly_csv(rows),
             Err(err) => return internal(&state, err),
         }
     } else {
@@ -273,10 +265,7 @@ fn billing_price_rule_input(
     created_by_user_id: i64,
 ) -> Result<BillingPriceRuleCreate, Response> {
     let BillingPriceRuleUpdate {
-        price_side,
         public_model,
-        endpoint_id,
-        upstream_model,
         input_rate,
         cache_read_rate,
         cache_write_rate,
@@ -284,10 +273,7 @@ fn billing_price_rule_input(
         effective_from,
     } = billing_price_rule_update_input(body)?;
     Ok(BillingPriceRuleCreate {
-        price_side,
         public_model,
-        endpoint_id,
-        upstream_model,
         input_rate,
         cache_read_rate,
         cache_write_rate,
@@ -300,40 +286,13 @@ fn billing_price_rule_input(
 fn billing_price_rule_update_input(
     body: BillingPriceRuleRequest,
 ) -> Result<BillingPriceRuleUpdate, Response> {
-    let side = match body.price_side {
-        BillingPriceSide::Cost => DbBillingPriceSide::Cost,
-        BillingPriceSide::Sale => DbBillingPriceSide::Sale,
-    };
-    match side {
-        DbBillingPriceSide::Sale
-            if body
-                .public_model
-                .as_deref()
-                .is_none_or(|value| value.trim().is_empty())
-                || body.endpoint_id.is_some()
-                || body.upstream_model.is_some() =>
-        {
-            return Err(error(
-                StatusCode::BAD_REQUEST,
-                "invalid_sale_scope",
-                "sale pricing requires public_model only",
-            ));
-        }
-        DbBillingPriceSide::Cost
-            if body.endpoint_id.is_none()
-                || body
-                    .upstream_model
-                    .as_deref()
-                    .is_none_or(|value| value.trim().is_empty())
-                || body.public_model.is_some() =>
-        {
-            return Err(error(
-                StatusCode::BAD_REQUEST,
-                "invalid_cost_scope",
-                "cost pricing requires endpoint_id and upstream_model only",
-            ));
-        }
-        _ => {}
+    let public_model = body.public_model.trim().to_string();
+    if public_model.is_empty() {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "invalid_public_model",
+            "public_model must not be empty",
+        ));
     }
     let input_rate = parse_decimal(&body.input_rate, "input_rate")?;
     let cache_read_rate = parse_decimal(&body.cache_read_rate, "cache_read_rate")?;
@@ -350,10 +309,7 @@ fn billing_price_rule_update_input(
         ));
     }
     Ok(BillingPriceRuleUpdate {
-        price_side: side,
-        public_model: body.public_model.map(|value| value.trim().to_string()),
-        endpoint_id: body.endpoint_id,
-        upstream_model: body.upstream_model.map(|value| value.trim().to_string()),
+        public_model,
         input_rate,
         cache_read_rate,
         cache_write_rate,
@@ -379,10 +335,7 @@ fn decimal_string(value: Decimal) -> String {
 fn price_rule_response(rule: db::BillingPriceRuleRow) -> BillingPriceRuleResponse {
     BillingPriceRuleResponse {
         price_rule_id: rule.price_rule_id,
-        price_side: rule.price_side,
         public_model: rule.public_model,
-        endpoint_id: rule.endpoint_id,
-        upstream_model: rule.upstream_model,
         input_rate: decimal_string(rule.input_rate),
         cache_read_rate: decimal_string(rule.cache_read_rate),
         cache_write_rate: decimal_string(rule.cache_write_rate),
@@ -397,9 +350,7 @@ fn price_rule_response(rule: db::BillingPriceRuleRow) -> BillingPriceRuleRespons
     }
 }
 
-fn summary_response(summary: db::BillingSummary, is_admin: bool) -> BillingSummaryResponse {
-    let gross_margin = is_admin
-        .then(|| decimal_string(summary.summary.customer_amount - summary.summary.provider_cost));
+fn summary_response(summary: db::BillingSummary) -> BillingSummaryResponse {
     BillingSummaryResponse {
         currency: "CNY".to_string(),
         request_count: summary.summary.request_count,
@@ -407,23 +358,21 @@ fn summary_response(summary: db::BillingSummary, is_admin: bool) -> BillingSumma
         unknown_count: summary.summary.unknown_count,
         priced_count: summary.summary.priced_count,
         unpriced_count: summary.summary.unpriced_count,
-        provider_cost: is_admin.then(|| decimal_string(summary.summary.provider_cost)),
         customer_amount: decimal_string(summary.summary.customer_amount),
-        gross_margin,
         by_client_key: summary
             .by_client_key
             .into_iter()
-            .map(|row| breakdown_response(row, is_admin))
+            .map(breakdown_response)
             .collect(),
         by_model: summary
             .by_model
             .into_iter()
-            .map(|row| breakdown_response(row, is_admin))
+            .map(breakdown_response)
             .collect(),
     }
 }
 
-fn breakdown_response(row: db::BillingBreakdownRow, is_admin: bool) -> BillingBreakdownResponse {
+fn breakdown_response(row: db::BillingBreakdownRow) -> BillingBreakdownResponse {
     BillingBreakdownResponse {
         grouping_key: row.grouping_key,
         request_count: row.request_count,
@@ -431,18 +380,11 @@ fn breakdown_response(row: db::BillingBreakdownRow, is_admin: bool) -> BillingBr
         cache_read_tokens: row.cache_read_tokens,
         cache_write_tokens: row.cache_write_tokens,
         output_tokens: row.output_tokens,
-        provider_cost: is_admin.then(|| decimal_string(row.provider_cost)),
         customer_amount: decimal_string(row.customer_amount),
     }
 }
 
 fn charge_response(row: db::BillingChargeRow, is_admin: bool) -> BillingChargeResponse {
-    let gross_margin = match (row.customer_amount, row.provider_cost) {
-        (Some(customer_amount), Some(cost)) if is_admin => {
-            Some(decimal_string(customer_amount - cost))
-        }
-        _ => None,
-    };
     BillingChargeResponse {
         charge_id: row.charge_id,
         request_id: row.request_id,
@@ -462,12 +404,7 @@ fn charge_response(row: db::BillingChargeRow, is_admin: bool) -> BillingChargeRe
         cache_read_tokens: row.cache_read_tokens,
         cache_write_tokens: row.cache_write_tokens,
         output_tokens: row.output_tokens,
-        provider_cost: is_admin
-            .then(|| row.provider_cost)
-            .flatten()
-            .map(decimal_string),
         customer_amount: row.customer_amount.map(decimal_string),
-        gross_margin,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -476,7 +413,6 @@ fn charge_response(row: db::BillingChargeRow, is_admin: bool) -> BillingChargeRe
 fn line_response(line: db::BillingChargeLineRow) -> BillingChargeLineResponse {
     BillingChargeLineResponse {
         line_id: line.line_id,
-        price_side: line.price_side,
         meter: line.meter,
         token_count: line.token_count,
         unit_rate: decimal_string(line.unit_rate),
@@ -485,16 +421,13 @@ fn line_response(line: db::BillingChargeLineRow) -> BillingChargeLineResponse {
     }
 }
 
-fn monthly_csv(rows: Vec<db::BillingMonthlyExportRow>, is_admin: bool) -> String {
+fn monthly_csv(rows: Vec<db::BillingMonthlyExportRow>) -> String {
     let mut output = String::from(
         "month,currency,request_count,known_count,unknown_count,priced_count,unpriced_count,customer_amount",
     );
-    if is_admin {
-        output.push_str(",provider_cost,gross_margin");
-    }
     output.push('\n');
     for row in rows {
-        let mut fields = vec![
+        let fields = vec![
             row.month.format("%Y-%m").to_string(),
             "CNY".to_string(),
             row.request_count.to_string(),
@@ -504,10 +437,6 @@ fn monthly_csv(rows: Vec<db::BillingMonthlyExportRow>, is_admin: bool) -> String
             row.unpriced_count.to_string(),
             decimal_string(row.customer_amount),
         ];
-        if is_admin {
-            fields.push(decimal_string(row.provider_cost));
-            fields.push(decimal_string(row.customer_amount - row.provider_cost));
-        }
         let refs = fields.iter().map(String::as_str).collect::<Vec<_>>();
         output.push_str(&csv_row(&refs));
     }
@@ -519,7 +448,7 @@ fn detail_csv(rows: Vec<db::BillingExportRow>, is_admin: bool) -> String {
         "charge_id,request_id,user,client_key,requested_model,usage_status,pricing_status,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,customer_amount",
     );
     if is_admin {
-        output.push_str(",upstream_model,endpoint,provider_cost");
+        output.push_str(",upstream_model,endpoint");
     }
     output.push_str(",created_at\n");
     for row in rows {
@@ -540,7 +469,6 @@ fn detail_csv(rows: Vec<db::BillingExportRow>, is_admin: bool) -> String {
         if is_admin {
             fields.push(row.upstream_model.unwrap_or_default());
             fields.push(row.endpoint_name.unwrap_or_default());
-            fields.push(row.provider_cost.map(decimal_string).unwrap_or_default());
         }
         fields.push(row.created_at.to_rfc3339());
         let refs = fields.iter().map(String::as_str).collect::<Vec<_>>();

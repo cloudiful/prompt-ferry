@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE usage_charges\nSET pricing_status = $2,\n    customer_amount = $3,\n    updated_at = NOW()\nWHERE charge_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d273854bd7685b0fa28220314edf3d57d5d79f19fe6d8a8b7c32e8840c8c510c"
+}

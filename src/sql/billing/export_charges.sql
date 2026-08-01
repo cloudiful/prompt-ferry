@@ -3,7 +3,7 @@ SELECT c.charge_id AS "charge_id!", c.request_id AS "request_id!", u.login_name 
        c.usage_status AS "usage_status!", c.pricing_status AS "pricing_status!",
        c.input_tokens AS "input_tokens!", c.cache_read_tokens AS "cache_read_tokens!",
        c.cache_write_tokens AS "cache_write_tokens!", c.output_tokens AS "output_tokens!",
-       c.provider_cost, c.customer_amount, c.created_at AS "created_at!"
+       c.customer_amount, c.created_at AS "created_at!"
 FROM usage_charges c
 LEFT JOIN users u ON u.user_id = c.user_id
 LEFT JOIN provider_endpoints e ON e.endpoint_id = c.endpoint_id

@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 use crate::db::types::{
     BillingBreakdownRow, BillingChargeFilter, BillingChargeLineRow, BillingChargeRow,
@@ -10,7 +9,7 @@ use crate::db::types::{
     BillingSummaryRow, NormalizedBillingUsage, RequestRecordCategory, RequestRecordCreate,
 };
 
-use super::prices::{match_cost_price_rule, match_sale_price_rule};
+use super::prices::match_price_rule;
 
 const TOKENS_PER_MILLION: i64 = 1_000_000;
 
@@ -31,8 +30,6 @@ pub struct BillingChargeDetail {
 struct UnpricedChargeRow {
     charge_id: i64,
     requested_model: Option<String>,
-    upstream_model: Option<String>,
-    endpoint_id: Option<Uuid>,
     created_at: DateTime<Utc>,
     input_tokens: i64,
     cache_read_tokens: i64,
@@ -57,44 +54,22 @@ pub async fn record_usage_charge(
     let at = sqlx::query_file_scalar!("src/sql/billing/charge_pricing_time.sql", event_id,)
         .fetch_one(&mut *tx)
         .await?;
-    let sale_rule = match requested_model {
-        Some(model) => match_sale_price_rule(&mut *tx, model, at)
+    let price_rule = match requested_model {
+        Some(model) => match_price_rule(&mut *tx, model, at)
             .await
             .with_context(|| {
                 format!(
                     "billing price lookup failed: event_id={event_id} charge_id=<pending> \
-                     price_side=sale public_model={model} endpoint_id={} upstream_model={} billing_at={at}",
-                    input
-                        .endpoint_id
-                        .map_or_else(|| "<none>".to_string(), |id| id.to_string()),
-                    upstream_model.unwrap_or("<none>"),
+                     public_model={model} billing_at={at}",
                 )
             })?,
         None => None,
     };
-    let cost_rule = match (input.endpoint_id, upstream_model) {
-        (Some(endpoint_id), Some(model)) => match_cost_price_rule(&mut *tx, endpoint_id, model, at)
-            .await
-            .with_context(|| {
-                format!(
-                    "billing price lookup failed: event_id={event_id} charge_id=<pending> \
-                         price_side=cost public_model={} endpoint_id={endpoint_id} \
-                         upstream_model={model} billing_at={at}",
-                    requested_model.unwrap_or("<none>"),
-                )
-            })?,
-        _ => None,
-    };
-    let priced = usage.is_some() && sale_rule.is_some() && cost_rule.is_some();
+    let priced = usage.is_some() && price_rule.is_some();
     let pricing_status = if priced { "priced" } else { "unpriced" };
-    let (provider_cost, customer_amount) = usage
-        .map(|usage| {
-            (
-                cost_rule.as_ref().map(|rule| amount_for_usage(rule, usage)),
-                sale_rule.as_ref().map(|rule| amount_for_usage(rule, usage)),
-            )
-        })
-        .unwrap_or((None, None));
+    let customer_amount = usage
+        .zip(price_rule.as_ref())
+        .map(|(usage, rule)| amount_for_usage(rule, usage));
     let charge_id = sqlx::query_file_scalar!(
         "src/sql/billing/upsert_charge.sql",
         event_id,
@@ -108,7 +83,6 @@ pub async fn record_usage_charge(
         input.endpoint_key_id,
         usage_status,
         pricing_status,
-        provider_cost,
         customer_amount,
         usage.map(|usage| usage.input_tokens).unwrap_or_default(),
         usage
@@ -125,14 +99,7 @@ pub async fn record_usage_charge(
         .execute(&mut *tx)
         .await?;
     if let Some(usage) = usage {
-        insert_lines(
-            &mut tx,
-            charge_id,
-            usage,
-            sale_rule.as_ref(),
-            cost_rule.as_ref(),
-        )
-        .await?;
+        insert_lines(&mut tx, charge_id, usage, price_rule.as_ref()).await?;
     }
     tx.commit().await?;
     Ok(())
@@ -316,54 +283,27 @@ pub async fn reprice_unpriced_charges(pool: &PgPool, limit: i64) -> Result<u64> 
             output_tokens: row.output_tokens,
         };
         let mut tx = pool.begin().await?;
-        let sale_rule = match row.requested_model.as_deref() {
-            Some(model) => match_sale_price_rule(&mut *tx, model, row.created_at)
+        let price_rule = match row.requested_model.as_deref() {
+            Some(model) => match_price_rule(&mut *tx, model, row.created_at)
                 .await
                 .with_context(|| {
                     format!(
-                        "billing price lookup failed: charge_id={} price_side=sale \
-                         public_model={model} endpoint_id={} upstream_model={} billing_at={}",
-                        row.charge_id,
-                        row.endpoint_id
-                            .map_or_else(|| "<none>".to_string(), |id| id.to_string()),
-                        row.upstream_model.as_deref().unwrap_or("<none>"),
-                        row.created_at,
+                        "billing price lookup failed: charge_id={} public_model={model} \
+                         billing_at={}",
+                        row.charge_id, row.created_at,
                     )
                 })?,
             None => None,
         };
-        let cost_rule = match (row.endpoint_id, row.upstream_model.as_deref()) {
-            (Some(endpoint_id), Some(model)) => {
-                match_cost_price_rule(&mut *tx, endpoint_id, model, row.created_at)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "billing price lookup failed: charge_id={} price_side=cost \
-                             public_model={} endpoint_id={endpoint_id} upstream_model={model} \
-                             billing_at={}",
-                            row.charge_id,
-                            row.requested_model.as_deref().unwrap_or("<none>"),
-                            row.created_at,
-                        )
-                    })?
-            }
-            _ => None,
-        };
-        let Some(sale_rule) = sale_rule else {
+        let Some(price_rule) = price_rule else {
             tx.rollback().await?;
             continue;
         };
-        let Some(cost_rule) = cost_rule else {
-            tx.rollback().await?;
-            continue;
-        };
-        let provider_cost = amount_for_usage(&cost_rule, usage);
-        let customer_amount = amount_for_usage(&sale_rule, usage);
+        let customer_amount = amount_for_usage(&price_rule, usage);
         sqlx::query_file!(
             "src/sql/billing/reprice_charge.sql",
             row.charge_id,
             "priced",
-            provider_cost,
             customer_amount,
         )
         .execute(&mut *tx)
@@ -371,14 +311,7 @@ pub async fn reprice_unpriced_charges(pool: &PgPool, limit: i64) -> Result<u64> 
         sqlx::query_file!("src/sql/billing/delete_charge_lines.sql", row.charge_id)
             .execute(&mut *tx)
             .await?;
-        insert_lines(
-            &mut tx,
-            row.charge_id,
-            usage,
-            Some(&sale_rule),
-            Some(&cost_rule),
-        )
-        .await?;
+        insert_lines(&mut tx, row.charge_id, usage, Some(&price_rule)).await?;
         tx.commit().await?;
         changed += 1;
     }
@@ -409,27 +342,25 @@ async fn insert_lines(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     charge_id: i64,
     usage: NormalizedBillingUsage,
-    sale_rule: Option<&BillingPriceRuleRow>,
-    cost_rule: Option<&BillingPriceRuleRow>,
+    price_rule: Option<&BillingPriceRuleRow>,
 ) -> Result<()> {
-    for (side, rule) in [("sale", sale_rule), ("cost", cost_rule)] {
-        for meter in BillingMeter::ALL {
-            let token_count = usage.token_count(meter);
-            let unit_rate = rule.map(|rule| rule.rate(meter)).unwrap_or(Decimal::ZERO);
-            let amount = Decimal::from(token_count) * unit_rate / Decimal::from(TOKENS_PER_MILLION);
-            sqlx::query_file!(
-                "src/sql/billing/insert_charge_line.sql",
-                charge_id,
-                side,
-                meter.as_str(),
-                token_count,
-                unit_rate,
-                amount,
-                rule.map(|rule| rule.price_rule_id),
-            )
-            .execute(&mut **tx)
-            .await?;
-        }
+    for meter in BillingMeter::ALL {
+        let token_count = usage.token_count(meter);
+        let unit_rate = price_rule
+            .map(|rule| rule.rate(meter))
+            .unwrap_or(Decimal::ZERO);
+        let amount = Decimal::from(token_count) * unit_rate / Decimal::from(TOKENS_PER_MILLION);
+        sqlx::query_file!(
+            "src/sql/billing/insert_charge_line.sql",
+            charge_id,
+            meter.as_str(),
+            token_count,
+            unit_rate,
+            amount,
+            price_rule.map(|rule| rule.price_rule_id),
+        )
+        .execute(&mut **tx)
+        .await?;
     }
     Ok(())
 }
@@ -448,10 +379,7 @@ mod tests {
     fn calculates_decimal_amounts_per_million_without_float_rounding() {
         let rule = BillingPriceRuleRow {
             price_rule_id: Uuid::nil(),
-            price_side: "sale".to_string(),
-            public_model: Some("gpt-test".to_string()),
-            endpoint_id: None,
-            upstream_model: None,
+            public_model: "gpt-test".to_string(),
             input_rate: Decimal::from_str("0.125").unwrap(),
             cache_read_rate: Decimal::from_str("0.025").unwrap(),
             cache_write_rate: Decimal::from_str("0.05").unwrap(),

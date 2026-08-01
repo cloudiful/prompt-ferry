@@ -1,4 +1,4 @@
-SELECT c.charge_id AS "charge_id!", c.requested_model, c.upstream_model, c.endpoint_id,
+SELECT c.charge_id AS "charge_id!", c.requested_model,
        c.created_at AS "created_at!",
        c.input_tokens AS "input_tokens!", c.cache_read_tokens AS "cache_read_tokens!",
        c.cache_write_tokens AS "cache_write_tokens!", c.output_tokens AS "output_tokens!"

@@ -63,7 +63,7 @@ function emitRankingDrilldown(
             </div>
             <div class="overflow-hidden rounded-lg border border-default">
               <table class="w-full text-left text-sm">
-                <thead class="bg-muted text-muted">
+                <thead class="bg-muted text-muted whitespace-nowrap">
                   <tr>
                     <th class="px-3 py-2">{{ t('overviewObject') }}</th>
                     <th class="px-3 py-2">{{ t('overviewQuality') }}</th>

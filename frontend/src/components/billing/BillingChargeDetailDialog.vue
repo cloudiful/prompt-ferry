@@ -41,7 +41,7 @@ const visible = defineModel<boolean>('visible', { required: true })
             />
             <span class="text-dimmed">{{ detail.charge.request_id }}</span>
           </div>
-          <div class="grid gap-2 sm:grid-cols-3">
+          <div class="grid gap-2 sm:grid-cols-2">
             <div>
               <span class="text-dimmed">{{ t('usageTokens') }}</span
               ><strong class="mt-1 block"
@@ -56,15 +56,6 @@ const visible = defineModel<boolean>('visible', { required: true })
               ><strong class="mt-1 block">{{
                 formatBillingAmount(
                   detail.charge.customer_amount,
-                  detail.charge.currency,
-                )
-              }}</strong>
-            </div>
-            <div v-if="isAdmin">
-              <span class="text-dimmed">{{ t('grossMargin') }}</span
-              ><strong class="mt-1 block">{{
-                formatBillingAmount(
-                  detail.charge.gross_margin,
                   detail.charge.currency,
                 )
               }}</strong>
@@ -96,8 +87,7 @@ const visible = defineModel<boolean>('visible', { required: true })
             class="flex flex-wrap items-center justify-between gap-2 border-b border-default py-2"
           >
             <span
-              >{{ line.price_side }} / {{ line.meter }} /
-              {{ formatTokenCount(line.token_count) }}</span
+              >{{ line.meter }} / {{ formatTokenCount(line.token_count) }}</span
             >
             <span
               >{{ formatBillingAmount(line.amount) }} ({{

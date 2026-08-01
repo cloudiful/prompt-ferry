@@ -97,6 +97,11 @@ export default defineConfig({
           primary: 'blue',
           neutral: 'slate',
         },
+        table: {
+          slots: {
+            th: 'whitespace-nowrap',
+          },
+        },
       },
     }),
   ],

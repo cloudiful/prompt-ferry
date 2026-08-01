@@ -19,10 +19,7 @@ export type BillingChargeFilters = {
 
 export type BillingPriceRuleForm = {
   price_rule_id?: string
-  price_side: 'cost' | 'sale'
   public_model: string
-  endpoint_id: string
-  upstream_model: string
   input_rate: string
   cache_read_rate: string
   cache_write_rate: string
@@ -70,10 +67,7 @@ export function newBillingPriceRuleForm(
     const effectiveFrom = new Date(rule.effective_from)
     return {
       price_rule_id: rule.price_rule_id,
-      price_side: rule.price_side as 'cost' | 'sale',
-      public_model: rule.public_model ?? '',
-      endpoint_id: rule.endpoint_id ?? '',
-      upstream_model: rule.upstream_model ?? '',
+      public_model: rule.public_model,
       input_rate: rule.input_rate,
       cache_read_rate: rule.cache_read_rate,
       cache_write_rate: rule.cache_write_rate,
@@ -82,10 +76,7 @@ export function newBillingPriceRuleForm(
     }
   }
   return {
-    price_side: 'sale',
     public_model: '',
-    endpoint_id: '',
-    upstream_model: '',
     input_rate: '0',
     cache_read_rate: '0',
     cache_write_rate: '0',

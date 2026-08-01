@@ -3,28 +3,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum BillingPriceSide {
-    Cost,
-    Sale,
-}
-
-impl BillingPriceSide {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Cost => "cost",
-            Self::Sale => "sale",
-        }
-    }
-}
-
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BillingPriceRuleRequest {
-    pub price_side: BillingPriceSide,
-    pub public_model: Option<String>,
-    pub endpoint_id: Option<Uuid>,
-    pub upstream_model: Option<String>,
+    pub public_model: String,
     pub input_rate: String,
     pub cache_read_rate: String,
     pub cache_write_rate: String,
@@ -40,10 +21,7 @@ pub struct BillingPriceRulePatch {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct BillingPriceRuleResponse {
     pub price_rule_id: Uuid,
-    pub price_side: String,
-    pub public_model: Option<String>,
-    pub endpoint_id: Option<Uuid>,
-    pub upstream_model: Option<String>,
+    pub public_model: String,
     pub input_rate: String,
     pub cache_read_rate: String,
     pub cache_write_rate: String,
@@ -110,7 +88,6 @@ pub struct BillingBreakdownResponse {
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
     pub output_tokens: i64,
-    pub provider_cost: Option<String>,
     pub customer_amount: String,
 }
 
@@ -122,9 +99,7 @@ pub struct BillingSummaryResponse {
     pub unknown_count: i64,
     pub priced_count: i64,
     pub unpriced_count: i64,
-    pub provider_cost: Option<String>,
     pub customer_amount: String,
-    pub gross_margin: Option<String>,
     pub by_client_key: Vec<BillingBreakdownResponse>,
     pub by_model: Vec<BillingBreakdownResponse>,
 }
@@ -149,9 +124,7 @@ pub struct BillingChargeResponse {
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
     pub output_tokens: i64,
-    pub provider_cost: Option<String>,
     pub customer_amount: Option<String>,
-    pub gross_margin: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -167,7 +140,6 @@ pub struct BillingChargePageResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct BillingChargeLineResponse {
     pub line_id: i64,
-    pub price_side: String,
     pub meter: String,
     pub token_count: i64,
     pub unit_rate: String,

@@ -69,7 +69,6 @@ export type BillingBreakdownResponse = {
     grouping_key: string;
     input_tokens: number;
     output_tokens: number;
-    provider_cost?: string | null;
     request_count: number;
 };
 
@@ -83,7 +82,6 @@ export type BillingChargeLineResponse = {
     line_id: number;
     meter: string;
     price_rule_id?: string | null;
-    price_side: string;
     token_count: number;
     unit_rate: string;
 };
@@ -107,11 +105,9 @@ export type BillingChargeResponse = {
     endpoint_id?: string | null;
     endpoint_key_id?: string | null;
     endpoint_name?: string | null;
-    gross_margin?: string | null;
     input_tokens: number;
     output_tokens: number;
     pricing_status: string;
-    provider_cost?: string | null;
     request_id: string;
     requested_model?: string | null;
     updated_at: string;
@@ -136,12 +132,9 @@ export type BillingPriceRuleRequest = {
     cache_read_rate: string;
     cache_write_rate: string;
     effective_from: string;
-    endpoint_id?: string | null;
     input_rate: string;
     output_rate: string;
-    price_side: BillingPriceSide;
-    public_model?: string | null;
-    upstream_model?: string | null;
+    public_model: string;
 };
 
 export type BillingPriceRuleResponse = {
@@ -153,17 +146,12 @@ export type BillingPriceRuleResponse = {
     effective_from: string;
     effective_to?: string | null;
     enabled: boolean;
-    endpoint_id?: string | null;
     input_rate: string;
     output_rate: string;
     price_rule_id: string;
-    price_side: string;
-    public_model?: string | null;
+    public_model: string;
     updated_at: string;
-    upstream_model?: string | null;
 };
-
-export type BillingPriceSide = 'cost' | 'sale';
 
 export type BillingRepriceRequest = {
     limit?: number | null;
@@ -178,10 +166,8 @@ export type BillingSummaryResponse = {
     by_model: Array<BillingBreakdownResponse>;
     currency: string;
     customer_amount: string;
-    gross_margin?: string | null;
     known_count: number;
     priced_count: number;
-    provider_cost?: string | null;
     request_count: number;
     unknown_count: number;
     unpriced_count: number;

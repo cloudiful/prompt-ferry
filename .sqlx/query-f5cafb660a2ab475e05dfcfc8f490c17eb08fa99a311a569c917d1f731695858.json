@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH per_charge AS (\n    SELECT c.charge_id, COALESCE(c.requested_model, 'unknown') AS grouping_key,\n           c.customer_amount,\n           c.input_tokens, c.cache_read_tokens, c.cache_write_tokens, c.output_tokens\n    FROM usage_charges c\n    WHERE ($1::BIGINT IS NULL OR c.user_id = $1)\n      AND ($2::BIGINT IS NULL OR c.client_key_id = $2)\n      AND ($3::TEXT IS NULL OR c.requested_model = $3)\n      AND ($4::UUID IS NULL OR c.endpoint_id = $4)\n      AND ($5::TEXT IS NULL OR c.usage_status = $5)\n      AND ($6::TEXT IS NULL OR c.pricing_status = $6)\n      AND ($7::UUID IS NULL OR c.request_id = $7)\n      AND ($8::TIMESTAMPTZ IS NULL OR c.created_at >= $8)\n      AND ($9::TIMESTAMPTZ IS NULL OR c.created_at < $9)\n)\nSELECT grouping_key AS \"grouping_key!\", COUNT(*)::BIGINT AS \"request_count!\",\n       SUM(input_tokens)::BIGINT AS \"input_tokens!\", SUM(cache_read_tokens)::BIGINT AS \"cache_read_tokens!\",\n       SUM(cache_write_tokens)::BIGINT AS \"cache_write_tokens!\", SUM(output_tokens)::BIGINT AS \"output_tokens!\",\n       COALESCE(SUM(customer_amount), 0)::NUMERIC AS \"customer_amount!\"\nFROM per_charge\nGROUP BY grouping_key\nORDER BY SUM(customer_amount) DESC, grouping_key\nLIMIT $10\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "grouping_key!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "customer_amount!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f5cafb660a2ab475e05dfcfc8f490c17eb08fa99a311a569c917d1f731695858"
+}

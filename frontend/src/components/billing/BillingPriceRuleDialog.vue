@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import type { ProviderEndpoint } from '@/generated/admin-api'
 import type { BillingPriceRuleForm } from '@/models/billing'
 
 defineProps<{
   busy: boolean
-  endpoints: ProviderEndpoint[]
   t: TranslateFn
 }>()
 
@@ -24,19 +22,7 @@ defineEmits<{
   >
     <template #body>
       <form class="grid gap-3 text-xs" @submit.prevent="$emit('save')">
-        <div class="grid gap-2 sm:grid-cols-2">
-          <UFormField :label="t('billingStatus')">
-            <USelect
-              v-model="form.price_side"
-              :items="[
-                { label: t('salePrice'), value: 'sale' },
-                { label: t('costPrice'), value: 'cost' },
-              ]"
-              label-key="label"
-              value-key="value"
-              class="w-full"
-            />
-          </UFormField>
+        <div class="grid gap-2">
           <UFormField :label="t('effectiveFrom')">
             <UInput
               v-model="form.effective_from"
@@ -46,24 +32,9 @@ defineEmits<{
             />
           </UFormField>
         </div>
-        <UFormField v-if="form.price_side === 'sale'" :label="t('publicModel')">
+        <UFormField :label="t('publicModel')">
           <UInput v-model="form.public_model" class="w-full" required />
         </UFormField>
-        <div v-else class="grid gap-2 sm:grid-cols-2">
-          <UFormField :label="t('endpoint')">
-            <USelect
-              v-model="form.endpoint_id"
-              :items="endpoints"
-              label-key="name"
-              value-key="endpoint_id"
-              class="w-full"
-              required
-            />
-          </UFormField>
-          <UFormField :label="t('upstreamModel')">
-            <UInput v-model="form.upstream_model" class="w-full" required />
-          </UFormField>
-        </div>
         <div class="grid gap-2 sm:grid-cols-2">
           <UFormField :label="`${t('inputRate')} (${t('perMillionTokens')})`"
             ><UInput

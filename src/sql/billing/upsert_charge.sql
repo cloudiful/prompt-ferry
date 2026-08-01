@@ -1,10 +1,10 @@
 INSERT INTO usage_charges (
     event_id, request_id, user_id, client_key_id, client_key_label,
     requested_model, upstream_model, endpoint_id, endpoint_key_id,
-    usage_status, pricing_status, currency, provider_cost, customer_amount,
+    usage_status, pricing_status, currency, customer_amount,
     input_tokens, cache_read_tokens, cache_write_tokens, output_tokens
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'CNY', $12, $13, $14, $15, $16, $17)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'CNY', $12, $13, $14, $15, $16)
 ON CONFLICT (event_id)
 DO UPDATE SET
     event_id = EXCLUDED.event_id,
@@ -18,7 +18,6 @@ DO UPDATE SET
     endpoint_key_id = COALESCE(EXCLUDED.endpoint_key_id, usage_charges.endpoint_key_id),
     usage_status = EXCLUDED.usage_status,
     pricing_status = EXCLUDED.pricing_status,
-    provider_cost = EXCLUDED.provider_cost,
     customer_amount = EXCLUDED.customer_amount,
     input_tokens = EXCLUDED.input_tokens,
     cache_read_tokens = EXCLUDED.cache_read_tokens,

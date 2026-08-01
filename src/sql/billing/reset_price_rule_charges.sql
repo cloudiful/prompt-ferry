@@ -1,6 +1,5 @@
 UPDATE usage_charges
 SET pricing_status = 'unpriced',
-    provider_cost = NULL,
     customer_amount = NULL,
     updated_at = NOW()
 WHERE charge_id IN (

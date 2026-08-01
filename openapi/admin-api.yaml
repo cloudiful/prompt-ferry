@@ -2398,10 +2398,6 @@ components:
         output_tokens:
           type: integer
           format: int64
-        provider_cost:
-          type:
-          - string
-          - 'null'
         request_count:
           type: integer
           format: int64
@@ -2421,7 +2417,6 @@ components:
       type: object
       required:
       - line_id
-      - price_side
       - meter
       - token_count
       - unit_rate
@@ -2439,8 +2434,6 @@ components:
           - string
           - 'null'
           format: uuid
-        price_side:
-          type: string
         token_count:
           type: integer
           format: int64
@@ -2523,10 +2516,6 @@ components:
           type:
           - string
           - 'null'
-        gross_margin:
-          type:
-          - string
-          - 'null'
         input_tokens:
           type: integer
           format: int64
@@ -2535,10 +2524,6 @@ components:
           format: int64
         pricing_status:
           type: string
-        provider_cost:
-          type:
-          - string
-          - 'null'
         request_id:
           type: string
           format: uuid
@@ -2595,7 +2580,7 @@ components:
     BillingPriceRuleRequest:
       type: object
       required:
-      - price_side
+      - public_model
       - input_rate
       - cache_read_rate
       - cache_write_rate
@@ -2609,30 +2594,17 @@ components:
         effective_from:
           type: string
           format: date-time
-        endpoint_id:
-          type:
-          - string
-          - 'null'
-          format: uuid
         input_rate:
           type: string
         output_rate:
           type: string
-        price_side:
-          $ref: '#/components/schemas/BillingPriceSide'
         public_model:
-          type:
-          - string
-          - 'null'
-        upstream_model:
-          type:
-          - string
-          - 'null'
+          type: string
     BillingPriceRuleResponse:
       type: object
       required:
       - price_rule_id
-      - price_side
+      - public_model
       - input_rate
       - cache_read_rate
       - cache_write_rate
@@ -2667,11 +2639,6 @@ components:
           format: date-time
         enabled:
           type: boolean
-        endpoint_id:
-          type:
-          - string
-          - 'null'
-          format: uuid
         input_rate:
           type: string
         output_rate:
@@ -2679,24 +2646,11 @@ components:
         price_rule_id:
           type: string
           format: uuid
-        price_side:
-          type: string
         public_model:
-          type:
-          - string
-          - 'null'
+          type: string
         updated_at:
           type: string
           format: date-time
-        upstream_model:
-          type:
-          - string
-          - 'null'
-    BillingPriceSide:
-      type: string
-      enum:
-      - cost
-      - sale
     BillingRepriceRequest:
       type: object
       properties:
@@ -2739,20 +2693,12 @@ components:
           type: string
         customer_amount:
           type: string
-        gross_margin:
-          type:
-          - string
-          - 'null'
         known_count:
           type: integer
           format: int64
         priced_count:
           type: integer
           format: int64
-        provider_cost:
-          type:
-          - string
-          - 'null'
         request_count:
           type: integer
           format: int64

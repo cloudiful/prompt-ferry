@@ -1,0 +1,73 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT date_trunc('month', c.created_at) AS \"month!\",\n       COUNT(*)::BIGINT AS \"request_count!\",\n       COUNT(*) FILTER (WHERE c.usage_status = 'known')::BIGINT AS \"known_count!\",\n       COUNT(*) FILTER (WHERE c.usage_status = 'unknown')::BIGINT AS \"unknown_count!\",\n       COUNT(*) FILTER (WHERE c.pricing_status = 'priced')::BIGINT AS \"priced_count!\",\n       COUNT(*) FILTER (WHERE c.pricing_status = 'unpriced')::BIGINT AS \"unpriced_count!\",\n       COALESCE(SUM(c.customer_amount), 0)::NUMERIC AS \"customer_amount!\"\nFROM usage_charges c\nWHERE ($1::BIGINT IS NULL OR c.user_id = $1)\n  AND ($2::BIGINT IS NULL OR c.client_key_id = $2)\n  AND ($3::TEXT IS NULL OR c.requested_model = $3)\n  AND ($4::UUID IS NULL OR c.endpoint_id = $4)\n  AND ($5::TEXT IS NULL OR c.usage_status = $5)\n  AND ($6::TEXT IS NULL OR c.pricing_status = $6)\n  AND ($7::UUID IS NULL OR c.request_id = $7)\n  AND ($8::TIMESTAMPTZ IS NULL OR c.created_at >= $8)\n  AND ($9::TIMESTAMPTZ IS NULL OR c.created_at < $9)\nGROUP BY date_trunc('month', c.created_at)\nORDER BY date_trunc('month', c.created_at) ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "month!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "known_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "unknown_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "priced_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "unpriced_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "customer_amount!",
+        "type_info": "Numeric",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "525931bec69cb9dc59c67c1a4d05ee6d8c6d657457300363f3638ffaf55e1211"
+}

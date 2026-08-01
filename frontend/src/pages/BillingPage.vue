@@ -75,12 +75,7 @@ async function savePriceRule(): Promise<void> {
   try {
     await billing.savePriceRule(
       {
-        price_side: form.price_side,
-        public_model:
-          form.price_side === 'sale' ? form.public_model.trim() : null,
-        endpoint_id: form.price_side === 'cost' ? form.endpoint_id : null,
-        upstream_model:
-          form.price_side === 'cost' ? form.upstream_model.trim() : null,
+        public_model: form.public_model.trim(),
         input_rate: form.input_rate.trim(),
         cache_read_rate: form.cache_read_rate.trim(),
         cache_write_rate: form.cache_write_rate.trim(),
@@ -220,21 +215,15 @@ onMounted(async () => {
       @apply="applyFilters"
       @period="applyPeriod"
     />
-    <BillingSummaryPanel
-      :summary="billing.summary"
-      :is-admin="session.isAdmin"
-      :t="t"
-    />
+    <BillingSummaryPanel :summary="billing.summary" :t="t" />
     <div class="grid gap-3 xl:grid-cols-2">
       <BillingBreakdownPanel
         :rows="billing.summary?.by_client_key ?? []"
-        :is-admin="session.isAdmin"
         :title="t('billingClientKeys')"
         :t="t"
       />
       <BillingBreakdownPanel
         :rows="billing.summary?.by_model ?? []"
-        :is-admin="session.isAdmin"
         :title="t('billingModels')"
         :t="t"
       />
@@ -252,7 +241,6 @@ onMounted(async () => {
     />
     <BillingPriceRulesPanel
       v-if="session.isAdmin"
-      :endpoints="billing.endpoints"
       :first="billing.priceRuleFirst"
       :loading="billing.priceRulesLoading"
       :rules="billing.priceRules"
@@ -269,7 +257,6 @@ onMounted(async () => {
       v-model:visible="priceRuleVisible"
       v-model:form="priceRuleForm"
       :busy="billing.loading"
-      :endpoints="billing.endpoints"
       :t="t"
       @save="savePriceRule"
     />

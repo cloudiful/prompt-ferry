@@ -26,21 +26,6 @@ impl BillingMeter {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BillingPriceSide {
-    Cost,
-    Sale,
-}
-
-impl BillingPriceSide {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Cost => "cost",
-            Self::Sale => "sale",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NormalizedBillingUsage {
     pub input_tokens: i64,
@@ -122,10 +107,7 @@ mod tests {
 #[derive(Debug, Clone, FromRow)]
 pub struct BillingPriceRuleRow {
     pub price_rule_id: Uuid,
-    pub price_side: String,
-    pub public_model: Option<String>,
-    pub endpoint_id: Option<Uuid>,
-    pub upstream_model: Option<String>,
+    pub public_model: String,
     pub input_rate: Decimal,
     pub cache_read_rate: Decimal,
     pub cache_write_rate: Decimal,
@@ -152,10 +134,7 @@ impl BillingPriceRuleRow {
 
 #[derive(Debug, Clone)]
 pub struct BillingPriceRuleCreate {
-    pub price_side: BillingPriceSide,
-    pub public_model: Option<String>,
-    pub endpoint_id: Option<Uuid>,
-    pub upstream_model: Option<String>,
+    pub public_model: String,
     pub input_rate: Decimal,
     pub cache_read_rate: Decimal,
     pub cache_write_rate: Decimal,
@@ -166,10 +145,7 @@ pub struct BillingPriceRuleCreate {
 
 #[derive(Debug, Clone)]
 pub struct BillingPriceRuleUpdate {
-    pub price_side: BillingPriceSide,
-    pub public_model: Option<String>,
-    pub endpoint_id: Option<Uuid>,
-    pub upstream_model: Option<String>,
+    pub public_model: String,
     pub input_rate: Decimal,
     pub cache_read_rate: Decimal,
     pub cache_write_rate: Decimal,
@@ -207,7 +183,6 @@ pub struct BillingChargeRow {
     pub usage_status: String,
     pub pricing_status: String,
     pub currency: String,
-    pub provider_cost: Option<Decimal>,
     pub customer_amount: Option<Decimal>,
     pub input_tokens: i64,
     pub cache_read_tokens: i64,
@@ -221,7 +196,6 @@ pub struct BillingChargeRow {
 pub struct BillingChargeLineRow {
     pub line_id: i64,
     pub charge_id: i64,
-    pub price_side: String,
     pub meter: String,
     pub token_count: i64,
     pub unit_rate: Decimal,
@@ -237,7 +211,6 @@ pub struct BillingSummaryRow {
     pub unknown_count: i64,
     pub priced_count: i64,
     pub unpriced_count: i64,
-    pub provider_cost: Decimal,
     pub customer_amount: Decimal,
 }
 
@@ -249,7 +222,6 @@ pub struct BillingBreakdownRow {
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
     pub output_tokens: i64,
-    pub provider_cost: Decimal,
     pub customer_amount: Decimal,
 }
 
@@ -268,7 +240,6 @@ pub struct BillingExportRow {
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
     pub output_tokens: i64,
-    pub provider_cost: Option<Decimal>,
     pub customer_amount: Option<Decimal>,
     pub created_at: DateTime<Utc>,
 }
@@ -281,6 +252,5 @@ pub struct BillingMonthlyExportRow {
     pub unknown_count: i64,
     pub priced_count: i64,
     pub unpriced_count: i64,
-    pub provider_cost: Decimal,
     pub customer_amount: Decimal,
 }

@@ -1,16 +1,12 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import { computed } from 'vue'
-import type {
-  BillingPriceRuleResponse,
-  ProviderEndpoint,
-} from '@/generated/admin-api'
+import type { BillingPriceRuleResponse } from '@/generated/admin-api'
 import { formatBillingRate, formatBillingTime } from '@/models/billing'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
 const props = defineProps<{
-  endpoints: ProviderEndpoint[]
   first: number
   loading: boolean
   rules: BillingPriceRuleResponse[]
@@ -28,8 +24,7 @@ const emit = defineEmits<{
 }>()
 
 const columns = computed<TableColumn<BillingPriceRuleResponse>[]>(() => [
-  { accessorKey: 'price_side', header: props.t('billingStatus') },
-  { id: 'scope', header: props.t('publicModel') },
+  { accessorKey: 'public_model', header: props.t('publicModel') },
   { accessorKey: 'input_rate', header: props.t('inputRate') },
   { accessorKey: 'cache_read_rate', header: props.t('cacheReadRate') },
   { accessorKey: 'cache_write_rate', header: props.t('cacheWriteRate') },
@@ -38,14 +33,6 @@ const columns = computed<TableColumn<BillingPriceRuleResponse>[]>(() => [
   { accessorKey: 'enabled', header: props.t('status') },
   { id: 'actions' },
 ])
-
-function scope(rule: BillingPriceRuleResponse): string {
-  if (rule.price_side === 'sale') return rule.public_model || '-'
-  const endpoint = props.endpoints.find(
-    (item) => item.endpoint_id === rule.endpoint_id,
-  )
-  return `${endpoint?.name || rule.endpoint_id || '-'} / ${rule.upstream_model || '-'}`
-}
 </script>
 
 <template>
@@ -66,16 +53,6 @@ function scope(rule: BillingPriceRuleResponse): string {
         class="min-w-[64rem]"
       >
         <template #empty>{{ t('noPriceRules') }}</template>
-        <template #price_side-cell="{ row }"
-          ><UBadge
-            :label="
-              row.original.price_side === 'sale'
-                ? t('salePrice')
-                : t('costPrice')
-            "
-            variant="subtle"
-        /></template>
-        <template #scope-cell="{ row }">{{ scope(row.original) }}</template>
         <template #input_rate-cell="{ row }">{{
           formatBillingRate(row.original.input_rate, row.original.currency)
         }}</template>

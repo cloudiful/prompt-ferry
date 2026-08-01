@@ -78,19 +78,15 @@ pub async fn create_unpriced_charge(pool: &sqlx::PgPool, endpoint_id: Uuid) -> a
     .await
 }
 
-pub async fn create_sale_and_cost_rules(
+pub async fn create_customer_price_rule(
     pool: &sqlx::PgPool,
-    endpoint_id: Uuid,
     created_by_user_id: i64,
-) -> anyhow::Result<(Uuid, Uuid)> {
+) -> anyhow::Result<Uuid> {
     let effective_from = Utc::now() - Duration::minutes(1);
-    let sale = db::create_price_rule(
+    let rule = db::create_price_rule(
         pool,
         db::BillingPriceRuleCreate {
-            price_side: db::BillingPriceSide::Sale,
-            public_model: Some("public-model".to_string()),
-            endpoint_id: None,
-            upstream_model: None,
+            public_model: "public-model".to_string(),
             input_rate: Decimal::ONE,
             cache_read_rate: Decimal::ZERO,
             cache_write_rate: Decimal::ZERO,
@@ -100,21 +96,5 @@ pub async fn create_sale_and_cost_rules(
         },
     )
     .await?;
-    let cost = db::create_price_rule(
-        pool,
-        db::BillingPriceRuleCreate {
-            price_side: db::BillingPriceSide::Cost,
-            public_model: None,
-            endpoint_id: Some(endpoint_id),
-            upstream_model: Some("upstream-model".to_string()),
-            input_rate: Decimal::new(5, 1),
-            cache_read_rate: Decimal::ZERO,
-            cache_write_rate: Decimal::ZERO,
-            output_rate: Decimal::from(2),
-            effective_from,
-            created_by_user_id,
-        },
-    )
-    .await?;
-    Ok((sale.price_rule_id, cost.price_rule_id))
+    Ok(rule.price_rule_id)
 }
