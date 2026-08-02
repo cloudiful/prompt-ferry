@@ -14,12 +14,14 @@ use uuid::Uuid;
 
 pub(crate) const RESPONSE_AFFINITY_VALKEY_KEY_PREFIX: &str = "pfy:responses-affinity:";
 
-const BIND_IF_ABSENT_SCRIPT: &str = r#"
-if redis.call('EXISTS', KEYS[1]) == 1 then
-    return 0
+const GET_OR_CREATE_SCRIPT: &str = r#"
+local payload = redis.call('GET', KEYS[1])
+if payload then
+    redis.call('EXPIRE', KEYS[1], ARGV[2])
+    return payload
 end
 redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
-return 1
+return ARGV[1]
 "#;
 
 const GET_AND_REFRESH_SCRIPT: &str = r#"
@@ -181,24 +183,17 @@ impl ResponseAffinityStore {
                 Ok(candidate.clone())
             }
             ResponseAffinityBackend::Redis(inner) => {
-                if let Some(binding) = self.get(key).await? {
-                    return Ok(binding);
-                }
                 let payload = serde_json::to_string(candidate)?;
                 let mut manager = inner.manager.clone();
-                let created: i64 = redis::Script::new(BIND_IF_ABSENT_SCRIPT)
+                let payload: String = redis::Script::new(GET_OR_CREATE_SCRIPT)
                     .key(key)
                     .arg(payload)
                     .arg(inner.ttl_seconds)
                     .invoke_async(&mut manager)
                     .await
-                    .context("failed to create response affinity binding")?;
-                if created == 1 {
-                    return Ok(candidate.clone());
-                }
-                self.get(key).await?.ok_or_else(|| {
-                    anyhow!("response affinity binding disappeared after creation race")
-                })
+                    .context("failed to get or create response affinity binding")?;
+                serde_json::from_str(&payload)
+                    .context("invalid response affinity binding returned by Valkey")
             }
         }
     }

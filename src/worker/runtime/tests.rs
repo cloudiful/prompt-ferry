@@ -248,6 +248,62 @@ fn preferred_target_is_stable_for_same_key() {
     assert_eq!(first.endpoint_id, second.endpoint_id);
 }
 
+#[test]
+fn rendezvous_target_matches_full_order_for_empty_single_and_multiple_targets() {
+    let empty = ModelRouteCandidate {
+        targets: Vec::new(),
+        ..sample_candidate()
+    };
+    assert!(rendezvous_target(&empty, Some("key-a")).is_none());
+    assert!(crate::routing::choose_preferred_target(&empty, Some("key-a")).is_none());
+
+    let mut single = sample_candidate();
+    single.targets.truncate(1);
+    let single_expected = crate::routing::ordered_route_targets(&single, Some("key-a"))
+        .first()
+        .map(|target| target.endpoint_id);
+    assert_eq!(
+        rendezvous_target(&single, Some("key-a")).map(|target| target.endpoint_id),
+        single_expected
+    );
+
+    let multiple = sample_candidate();
+    let multiple_expected = crate::routing::ordered_route_targets(&multiple, Some("key-a"))
+        .first()
+        .map(|target| target.endpoint_id);
+    assert_eq!(
+        rendezvous_target(&multiple, Some("key-a")).map(|target| target.endpoint_id),
+        multiple_expected
+    );
+    assert_eq!(
+        crate::routing::choose_preferred_target(&multiple, Some("key-a"))
+            .map(|target| target.endpoint_id),
+        multiple_expected
+    );
+}
+
+#[test]
+fn rendezvous_target_preserves_position_and_input_order_ties() {
+    let mut by_position = sample_candidate();
+    by_position.targets[1].endpoint_id = by_position.targets[0].endpoint_id;
+    by_position.targets[1].position = by_position.targets[0].position + 1;
+    assert_eq!(
+        rendezvous_target(&by_position, Some("key-a"))
+            .unwrap()
+            .position,
+        by_position.targets[0].position
+    );
+
+    let mut by_input_order = by_position.clone();
+    by_input_order.targets[1].position = by_input_order.targets[0].position;
+    assert_eq!(
+        rendezvous_target(&by_input_order, Some("key-a"))
+            .unwrap()
+            .endpoint_id,
+        by_input_order.targets[0].endpoint_id
+    );
+}
+
 #[tokio::test]
 async fn session_affinity_uses_preferred_endpoint() {
     let runtime_state = WorkerRuntimeState::default();

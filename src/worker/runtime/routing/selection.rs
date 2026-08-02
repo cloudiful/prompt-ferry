@@ -297,19 +297,20 @@ pub(super) fn select_bound_api_key(
     target: &db::ModelRouteCandidateTarget,
     binding: &ResponseAffinityBinding,
 ) -> Option<db::EndpointApiKeySelection> {
-    let available_keys = target
-        .api_keys
-        .iter()
-        .filter(|key| {
-            key.endpoint_id == target.endpoint_id && key.enabled && !key.api_key.trim().is_empty()
-        })
-        .collect::<Vec<_>>();
     let selected = if let Some(key_id) = binding.endpoint_key_id {
-        available_keys.into_iter().find(|key| key.key_id == key_id)
+        target.api_keys.iter().find(|key| {
+            key.endpoint_id == target.endpoint_id
+                && key.enabled
+                && !key.api_key.trim().is_empty()
+                && key.key_id == key_id
+        })
     } else {
-        available_keys
-            .into_iter()
-            .find(|key| api_key_fingerprint(&key.api_key) == binding.endpoint_key_fingerprint)
+        target.api_keys.iter().find(|key| {
+            key.endpoint_id == target.endpoint_id
+                && key.enabled
+                && !key.api_key.trim().is_empty()
+                && api_key_fingerprint(&key.api_key) == binding.endpoint_key_fingerprint
+        })
     };
     selected
         .map(|key| db::EndpointApiKeySelection {

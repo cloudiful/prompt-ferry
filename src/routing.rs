@@ -6,9 +6,7 @@ pub fn choose_preferred_target(
     candidate: &ModelRouteCandidate,
     routing_key: Option<&str>,
 ) -> Option<ModelRouteCandidateTarget> {
-    ordered_route_targets(candidate, routing_key)
-        .into_iter()
-        .next()
+    rendezvous_target(candidate, routing_key).cloned()
 }
 
 pub fn ordered_route_targets(
@@ -35,20 +33,27 @@ pub fn rendezvous_target<'a>(
     candidate: &'a ModelRouteCandidate,
     routing_key: Option<&str>,
 ) -> Option<&'a ModelRouteCandidateTarget> {
-    stable_candidate_order(
-        &candidate.targets,
-        |_, target| {
-            rendezvous_score(
-                routing_key.unwrap_or("default"),
-                candidate.rule_id,
-                target.endpoint_id,
+    let routing_key = routing_key.unwrap_or("default");
+    candidate
+        .targets
+        .iter()
+        .enumerate()
+        .map(|(index, target)| {
+            (
+                index,
+                target,
+                rendezvous_score(routing_key, candidate.rule_id, target.endpoint_id),
             )
-        },
-        |_, left, _, right| left.position.cmp(&right.position),
-    )
-    .into_iter()
-    .next()
-    .and_then(|index| candidate.targets.get(index))
+        })
+        .max_by(
+            |(left_index, left, left_score), (right_index, right, right_score)| {
+                left_score
+                    .cmp(right_score)
+                    .then_with(|| right.position.cmp(&left.position))
+                    .then_with(|| right_index.cmp(left_index))
+            },
+        )
+        .map(|(_, target, _)| target)
 }
 
 pub fn rendezvous_score(
