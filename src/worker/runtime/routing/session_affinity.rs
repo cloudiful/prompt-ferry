@@ -15,8 +15,8 @@ use super::super::{
     request_assembly::BufferedBridgeRequest,
 };
 use super::selection::{
-    EndpointApiKeySelectionResult, candidate_target_by_endpoint, endpoint_key_stickiness_value,
-    rendezvous_target, select_bound_api_key, select_endpoint_api_key,
+    candidate_target_by_endpoint, endpoint_key_stickiness_value, rendezvous_target,
+    select_bound_api_key, select_endpoint_api_key,
 };
 
 #[derive(Debug)]
@@ -70,7 +70,7 @@ impl std::error::Error for RouteAffinityError {}
 
 pub(super) struct SessionAffinitySelection<'a> {
     pub(super) target: &'a db::ModelRouteCandidateTarget,
-    pub(super) key_selection: EndpointApiKeySelectionResult,
+    pub(super) key_selection: db::EndpointApiKeySelection,
     pub(super) route_selection_reason: db::RouteSelectionReason,
 }
 
@@ -114,24 +114,13 @@ pub(super) async fn select<'a>(
                 return Err(anyhow::Error::new(RouteAffinityError::target_unavailable()));
             }
 
-            let (target, route_selection_reason) =
-                session_target_for_new_binding(candidate, request_prompt_log, &stable_identity)?;
-            let key_selection = select_endpoint_api_key(target, request, request_prompt_log);
-            if key_selection.invalid_conversation_override {
-                return Err(anyhow::Error::new(RouteAffinityError::conflict()));
-            }
-            let replacement = binding_for_selection(target, &key_selection);
+            let (selection, replacement) =
+                select_new_binding(candidate, request, request_prompt_log, &stable_identity)?;
             match store
                 .replace_if_current(&cache_key, current_binding, &replacement)
                 .await
             {
-                Ok(true) => {
-                    return Ok(SessionAffinitySelection {
-                        target,
-                        key_selection,
-                        route_selection_reason,
-                    });
-                }
+                Ok(true) => return Ok(selection),
                 Ok(false) => {}
                 Err(err) => {
                     log_unavailable(&err);
@@ -148,13 +137,8 @@ pub(super) async fn select<'a>(
             continue;
         }
 
-        let (target, route_selection_reason) =
-            session_target_for_new_binding(candidate, request_prompt_log, &stable_identity)?;
-        let key_selection = select_endpoint_api_key(target, request, request_prompt_log);
-        if key_selection.invalid_conversation_override {
-            return Err(anyhow::Error::new(RouteAffinityError::conflict()));
-        }
-        let candidate_binding = binding_for_selection(target, &key_selection);
+        let (selection, candidate_binding) =
+            select_new_binding(candidate, request, request_prompt_log, &stable_identity)?;
         let created = match store.get_or_create(&cache_key, &candidate_binding).await {
             Ok(binding) => binding,
             Err(err) => {
@@ -163,11 +147,7 @@ pub(super) async fn select<'a>(
             }
         };
         if created == candidate_binding {
-            return Ok(SessionAffinitySelection {
-                target,
-                key_selection,
-                route_selection_reason,
-            });
+            return Ok(selection);
         }
         binding = Some(created);
     }
@@ -175,40 +155,52 @@ pub(super) async fn select<'a>(
     Err(anyhow::Error::new(RouteAffinityError::target_unavailable()))
 }
 
-fn initial_session_target<'a>(
-    candidate: &'a db::ModelRouteCandidate,
-    request_prompt_log: &RequestPromptLog,
-) -> Result<Option<(&'a db::ModelRouteCandidateTarget, db::RouteSelectionReason)>> {
-    if let Some(endpoint_id) = request_prompt_log.conversation_override_endpoint_id {
-        let target = candidate_target_by_endpoint(candidate, endpoint_id)
-            .filter(|target| target.enabled)
-            .ok_or_else(|| anyhow::Error::new(RouteAffinityError::target_unavailable()))?;
-        return Ok(Some((
-            target,
-            db::RouteSelectionReason::ConversationOverride,
-        )));
-    }
-    if let Some(endpoint_id) = request_prompt_log.preferred_endpoint_id {
-        if let Some(target) =
-            candidate_target_by_endpoint(candidate, endpoint_id).filter(|target| target.enabled)
-        {
-            return Ok(Some((target, db::RouteSelectionReason::SessionAffinity)));
-        }
-    }
-    Ok(None)
-}
-
 fn session_target_for_new_binding<'a>(
     candidate: &'a db::ModelRouteCandidate,
     request_prompt_log: &RequestPromptLog,
     stable_identity: &str,
 ) -> Result<(&'a db::ModelRouteCandidateTarget, db::RouteSelectionReason)> {
-    initial_session_target(candidate, request_prompt_log)?
-        .or_else(|| {
-            rendezvous_target(candidate, Some(stable_identity))
-                .map(|target| (target, db::RouteSelectionReason::SessionAffinity))
-        })
+    if let Some(endpoint_id) = request_prompt_log.conversation_override_endpoint_id {
+        let target = candidate_target_by_endpoint(candidate, endpoint_id)
+            .filter(|target| target.enabled)
+            .ok_or_else(|| anyhow::Error::new(RouteAffinityError::target_unavailable()))?;
+        return Ok((target, db::RouteSelectionReason::ConversationOverride));
+    }
+
+    if let Some(target) = request_prompt_log
+        .preferred_endpoint_id
+        .and_then(|endpoint_id| candidate_target_by_endpoint(candidate, endpoint_id))
+        .filter(|target| target.enabled)
+    {
+        return Ok((target, db::RouteSelectionReason::SessionAffinity));
+    }
+
+    rendezvous_target(candidate, Some(stable_identity))
+        .map(|target| (target, db::RouteSelectionReason::SessionAffinity))
         .ok_or_else(|| anyhow::Error::new(RouteAffinityError::target_unavailable()))
+}
+
+fn select_new_binding<'a>(
+    candidate: &'a db::ModelRouteCandidate,
+    request: &BufferedBridgeRequest,
+    request_prompt_log: &RequestPromptLog,
+    stable_identity: &str,
+) -> Result<(SessionAffinitySelection<'a>, ResponseAffinityBinding)> {
+    let (target, route_selection_reason) =
+        session_target_for_new_binding(candidate, request_prompt_log, stable_identity)?;
+    let key_selection = select_endpoint_api_key(target, request, request_prompt_log);
+    if key_selection.invalid_conversation_override {
+        return Err(anyhow::Error::new(RouteAffinityError::conflict()));
+    }
+    let binding = binding_for_selection(target, &key_selection.selection);
+    Ok((
+        SessionAffinitySelection {
+            target,
+            key_selection: key_selection.selection,
+            route_selection_reason,
+        },
+        binding,
+    ))
 }
 
 fn selection_for_binding<'a>(
@@ -220,10 +212,7 @@ fn selection_for_binding<'a>(
     let key_selection = select_bound_api_key(target, binding)?;
     Some(SessionAffinitySelection {
         target,
-        key_selection: EndpointApiKeySelectionResult {
-            selection: key_selection,
-            invalid_conversation_override: false,
-        },
+        key_selection,
         route_selection_reason: db::RouteSelectionReason::SessionAffinity,
     })
 }
@@ -242,11 +231,11 @@ fn binding_conflicts_with_override(
 
 fn binding_for_selection(
     target: &db::ModelRouteCandidateTarget,
-    key_selection: &EndpointApiKeySelectionResult,
+    key_selection: &db::EndpointApiKeySelection,
 ) -> ResponseAffinityBinding {
     ResponseAffinityBinding {
         endpoint_id: target.endpoint_id,
-        endpoint_key_id: key_selection.selection.key_id,
-        endpoint_key_fingerprint: api_key_fingerprint(&key_selection.selection.secret),
+        endpoint_key_id: key_selection.key_id,
+        endpoint_key_fingerprint: api_key_fingerprint(&key_selection.secret),
     }
 }

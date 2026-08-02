@@ -249,44 +249,7 @@ fn preferred_target_is_stable_for_same_key() {
 }
 
 #[tokio::test]
-async fn session_affinity_continuation_selects_preferred_target() {
-    let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), ReplayCache::for_tests());
-    let candidate = session_affinity_candidate();
-    let preferred = candidate.targets[0].endpoint_id;
-    let request_ctx = RequestExecutionContext::new(
-        uuid::Uuid::new_v4(),
-        Instant::now(),
-        Some("gpt-4.1-mini".to_string()),
-        None,
-        None,
-        Some(1),
-        runtime_state.worker_instance_id(),
-        RequestPromptLog {
-            conversation_id: Some(uuid::Uuid::new_v4()),
-            conversation_seq: Some(2),
-            preferred_endpoint_id: Some(preferred),
-            ..RequestPromptLog::default()
-        },
-    );
-
-    let route = select_route_for_candidate(
-        &services,
-        &request_ctx,
-        &candidate,
-        &sample_request(),
-        1,
-        Some("key-a"),
-    )
-    .await
-    .unwrap()
-    .expect("selected route");
-
-    assert_eq!(route.route.route_id, preferred);
-}
-
-#[tokio::test]
-async fn session_affinity_does_not_switch_busy_preferred_endpoint() {
+async fn session_affinity_uses_preferred_endpoint() {
     let runtime_state = WorkerRuntimeState::default();
     let services = session_affinity_services(runtime_state.clone(), ReplayCache::for_tests());
     let candidate = session_affinity_candidate();
@@ -786,17 +749,4 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
         materialize_route_api_key_selection(&cross_endpoint, &sample_request(), &fixed_prompt_log);
     assert_eq!(cross_endpoint.selection.secret, "primary-key");
     assert!(cross_endpoint.invalid_conversation_override);
-}
-
-#[test]
-fn session_affinity_identity_hash_is_stable() {
-    let candidate = session_affinity_candidate();
-    let first = rendezvous_target(&candidate, Some("session_header:sess-123"))
-        .expect("preferred target")
-        .endpoint_id;
-    let second = rendezvous_target(&candidate, Some("session_header:sess-123"))
-        .expect("preferred target")
-        .endpoint_id;
-
-    assert_eq!(first, second);
 }

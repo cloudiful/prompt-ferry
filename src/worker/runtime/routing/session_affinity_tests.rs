@@ -10,7 +10,10 @@ use super::super::{
 use super::{RouteAffinityError, select_route_for_candidate};
 use crate::{db, replay_cache::ReplayCache};
 
-fn request_context(worker_id: uuid::Uuid, prompt_log: RequestPromptLog) -> RequestExecutionContext {
+pub(super) fn request_context(
+    worker_id: uuid::Uuid,
+    prompt_log: RequestPromptLog,
+) -> RequestExecutionContext {
     RequestExecutionContext::new(
         uuid::Uuid::new_v4(),
         Instant::now(),

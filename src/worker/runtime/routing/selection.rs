@@ -97,7 +97,7 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
                 selected.target,
                 user_id,
                 candidate.rule_id,
-                selected.key_selection.selection,
+                selected.key_selection,
                 selected.route_selection_reason,
             ),
         }));

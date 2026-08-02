@@ -1,25 +1,12 @@
-use std::time::Instant;
-
 use super::super::{
-    RequestExecutionContext, WorkerRuntimeState,
+    WorkerRuntimeState,
     prompt_log::RequestPromptLog,
     tests::{sample_request, session_affinity_candidate, session_affinity_services},
 };
-use super::{rendezvous_target, select_route_for_candidate};
+use super::{
+    rendezvous_target, select_route_for_candidate, session_affinity_tests::request_context,
+};
 use crate::replay_cache::ReplayCache;
-
-fn request_context(worker_id: uuid::Uuid, prompt_log: RequestPromptLog) -> RequestExecutionContext {
-    RequestExecutionContext::new(
-        uuid::Uuid::new_v4(),
-        Instant::now(),
-        Some("gpt-4.1-mini".to_string()),
-        None,
-        None,
-        Some(1),
-        worker_id,
-        prompt_log,
-    )
-}
 
 #[tokio::test]
 async fn ignores_preferred_endpoint_from_another_model_route() {
