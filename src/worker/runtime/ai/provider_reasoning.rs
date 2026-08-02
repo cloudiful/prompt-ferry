@@ -1,14 +1,16 @@
 use crate::{db, upstream_adapter::ResponseAdapter, worker_admin::AdminState};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
-use tracing::warn;
 
 mod replay;
+mod responses;
 
 use replay::{
-    ReplayFailureKind, assistant_tool_call_ids, replay_unavailable, resolve_replay_parents,
-    restore_reasoning_from_replay, targets_deepseek, targets_reasoning_provider,
+    ReplayFailureKind, assistant_tool_call_ids, load_tool_call_replay_state, replay_unavailable,
+    resolve_replay_parents, restore_reasoning_from_replay, targets_deepseek,
+    targets_reasoning_provider,
 };
+
+pub(super) use responses::restore_responses_reasoning;
 
 #[cfg(test)]
 use replay::tool_calls_match;
@@ -50,56 +52,16 @@ pub(super) async fn restore_provider_reasoning(
         )
     })?;
     let endpoint_id = Some(route.route_id).filter(|id| !id.is_nil());
-    let records = db::find_request_record_tool_calls_by_call_ids(
-        &state.pool,
+    let (candidates_by_call_id, artifacts_by_event_id) = load_tool_call_replay_state(
+        state,
         &requested_call_ids,
         user_id,
         endpoint_id,
         conversation_id,
         parent_event_id,
     )
-    .await
-    .map_err(|err| {
-        warn!(error = %err, "failed to load provider tool-call replay records");
-        replay_unavailable(
-            ReplayFailureKind::Storage,
-            "stored tool-call replay records could not be loaded",
-        )
-    })?;
-
+    .await?;
     let has_provenance = conversation_id.is_some() || parent_event_id.is_some();
-    let mut candidates_by_call_id: HashMap<String, Vec<(i64, bool)>> = HashMap::new();
-    for candidate in records {
-        let tool_call = candidate.tool_call;
-        candidates_by_call_id
-            .entry(tool_call.call_id)
-            .or_default()
-            .push((tool_call.parent_event_id, candidate.has_assistant_artifact));
-    }
-    let candidate_parent_event_ids = candidates_by_call_id
-        .values()
-        .flatten()
-        .filter_map(|(parent_event_id, has_artifact)| has_artifact.then_some(*parent_event_id))
-        .collect::<HashSet<_>>();
-    let artifacts = db::get_usage_assistant_artifacts(
-        &state.pool,
-        &candidate_parent_event_ids
-            .iter()
-            .copied()
-            .collect::<Vec<_>>(),
-    )
-    .await
-    .map_err(|err| {
-        warn!(error = %err, "failed to load provider assistant replay artifacts");
-        replay_unavailable(
-            ReplayFailureKind::Storage,
-            "stored assistant replay artifacts could not be loaded",
-        )
-    })?;
-    let artifacts_by_event_id = artifacts
-        .into_iter()
-        .map(|artifact| (artifact.event_id, artifact.message_json))
-        .collect::<HashMap<_, _>>();
     let parent_by_assistant_index = resolve_replay_parents(
         messages,
         &candidates_by_call_id,

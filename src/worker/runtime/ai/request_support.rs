@@ -345,24 +345,38 @@ async fn apply_provider_request_defaults(
     parent_event_id: Option<i64>,
     prepared: &mut PreparedUpstreamRequest,
 ) -> Result<(), CompatError> {
-    if prepared.path != crate::config::NativeApi::Chat.path() {
-        return Ok(());
-    }
     let original_body = match &prepared.body {
         PreparedRequestBody::PassthroughStream(bytes)
         | PreparedRequestBody::BufferedBytes(bytes) => bytes.clone(),
     };
-    let mut body = super::provider_reasoning::restore_provider_reasoning(
-        admin_state,
-        user_id,
-        route,
-        conversation_id,
-        parent_event_id,
-        prepared.response_adapter,
-        &original_body,
-    )
-    .await?
-    .unwrap_or(original_body);
+    let mut body = if prepared.path == crate::config::NativeApi::Chat.path() {
+        super::provider_reasoning::restore_provider_reasoning(
+            admin_state,
+            user_id,
+            route,
+            conversation_id,
+            parent_event_id,
+            prepared.response_adapter,
+            &original_body,
+        )
+        .await?
+        .unwrap_or(original_body)
+    } else if prepared.path == crate::config::NativeApi::Responses.path()
+        && prepared.response_adapter == ResponseAdapter::Passthrough
+    {
+        super::provider_reasoning::restore_responses_reasoning(
+            admin_state,
+            user_id,
+            route,
+            conversation_id,
+            parent_event_id,
+            &original_body,
+        )
+        .await?
+        .unwrap_or(original_body)
+    } else {
+        original_body
+    };
     if let Some(updated) = with_minimax_chat_request_defaults(route, &body) {
         body = updated;
     }

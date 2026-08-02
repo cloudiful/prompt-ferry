@@ -6,10 +6,12 @@ use tracing::warn;
 
 mod resolution;
 mod signatures;
+mod storage;
 
 pub(super) use resolution::resolve_replay_parents;
 use signatures::signature_hash;
 pub(super) use signatures::tool_calls_match;
+pub(super) use storage::load_tool_call_replay_state;
 
 #[derive(Debug, Copy, Clone)]
 pub(super) enum ReplayFailureKind {
