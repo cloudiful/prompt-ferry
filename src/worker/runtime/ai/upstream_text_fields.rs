@@ -1,16 +1,9 @@
-use serde_json::Value;
-
 pub(super) fn should_process_ai_string_field(
     request_path: &str,
     json_path: &str,
     object_type: Option<&str>,
     key: &str,
-    value: &Value,
 ) -> bool {
-    if !matches!(value, Value::String(_)) {
-        return false;
-    }
-
     match request_path {
         "/v1/chat/completions" => should_process_chat_string_field(json_path, key),
         "/v1/responses" => should_process_responses_string_field(json_path, object_type, key),
@@ -50,43 +43,36 @@ fn should_process_responses_string_field(
 #[cfg(test)]
 mod tests {
     use super::should_process_ai_string_field;
-    use serde_json::Value;
 
     #[test]
     fn matches_top_level_responses_instructions_and_input() {
-        let value = Value::String("secret".to_string());
         assert!(should_process_ai_string_field(
             "/v1/responses",
             "/instructions",
             None,
             "instructions",
-            &value,
         ));
         assert!(should_process_ai_string_field(
             "/v1/responses",
             "/input",
             None,
             "input",
-            &value,
         ));
     }
 
     #[test]
     fn matches_nested_chat_tool_call_arguments_but_not_name() {
-        let value = Value::String("secret".to_string());
         assert!(should_process_ai_string_field(
             "/v1/chat/completions",
             "/messages/1/tool_calls/0/function",
             None,
             "arguments",
-            &value,
         ));
         assert!(!should_process_ai_string_field(
             "/v1/chat/completions",
             "/messages/1/tool_calls/0/function",
             None,
             "name",
-            &value,
         ));
     }
 }

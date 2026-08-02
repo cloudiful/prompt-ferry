@@ -132,9 +132,13 @@ pub(super) async fn prepare_upstream_request_with_replay(
         ));
     }
     let effective_request_body = effective_request_body(route, request.body.as_slice());
-    let prior_session = load_prior_session(admin_state, conversation_id).await;
     let redaction_enabled =
-        redact::effective_config_for_user(request.user_id.filter(|id| *id > 0)).enabled;
+        redact::redaction_enabled_for_user(request.user_id.filter(|id| *id > 0));
+    let prior_session = if redaction_enabled {
+        load_prior_session(admin_state, conversation_id).await?
+    } else {
+        None
+    };
     let (plain_request_body, redacted_request) = if redaction_enabled {
         let redacted = redact_ai_request_json_blocking(
             request.path.clone(),
@@ -281,23 +285,48 @@ pub(super) async fn prepare_upstream_request_with_replay(
 async fn load_prior_session(
     admin_state: Option<&AdminState>,
     conversation_id: Option<uuid::Uuid>,
-) -> Option<UpstreamRedactionSession> {
-    let state = admin_state?;
-    let conversation_id = conversation_id?;
+) -> Result<Option<UpstreamRedactionSession>, CompatError> {
+    let Some(state) = admin_state else {
+        return Ok(None);
+    };
+    let Some(conversation_id) = conversation_id else {
+        return Ok(None);
+    };
     let row = db::get_conversation_redaction_session(&state.pool, conversation_id)
         .await
-        .ok()
-        .flatten()?;
+        .map_err(|err| {
+            CompatError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "redaction_session_load_failed",
+                format!("failed to load upstream redaction session: {err}"),
+            )
+        })?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let manager = state.relay_secret_manager().map_err(|err| {
+        CompatError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "redaction_session_load_failed",
+            format!("failed to initialize upstream redaction session secrets: {err}"),
+        )
+    })?;
     let session = decrypt_upstream_session(
-        state.relay_secret_manager().ok()?,
+        manager,
         &crate::relay_secrets::EncryptedSecretEnvelope {
             ciphertext: row.session_ciphertext,
             nonce: row.session_nonce,
             key_version: row.session_key_version,
         },
     )
-    .ok()?;
-    Some(session)
+    .map_err(|err| {
+        CompatError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "redaction_session_load_failed",
+            format!("failed to decrypt upstream redaction session: {err}"),
+        )
+    })?;
+    Ok(Some(session))
 }
 
 fn effective_request_body(route: &db::RouteConfig, request_body: &[u8]) -> Vec<u8> {

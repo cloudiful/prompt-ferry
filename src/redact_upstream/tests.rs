@@ -1,7 +1,6 @@
 use super::{UpstreamRedactionSession, redact_text_with_stateful_session, restore_text};
-use crate::redact::{RedactionConfig, apply_config};
+use crate::redact_test_support::domain_redaction;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use redactor::RedactionRules;
 
 fn token_for(session: &UpstreamRedactionSession, original: &str) -> String {
     session
@@ -13,30 +12,17 @@ fn token_for(session: &UpstreamRedactionSession, original: &str) -> String {
         .expect("token")
 }
 
-fn enable_domain_redaction() -> std::sync::MutexGuard<'static, ()> {
-    let guard = crate::redact::TEST_REDACTION_LOCK.lock().expect("lock");
-    apply_config(&RedactionConfig {
-        enabled: true,
-        rules: RedactionRules {
-            domain: true,
-            ..RedactionRules::default()
-        },
-        custom_strings: Vec::new(),
-    })
-    .expect("config");
-    guard
-}
-
 #[test]
 fn stateful_tokens_reused_across_turns() {
-    let _guard = enable_domain_redaction();
+    let _guard = domain_redaction();
     let first = redact_text_with_stateful_session(
         "a.example.com and b.example.com",
         redactor::InputKind::Text,
         None,
         Some("conv-1"),
         None,
-    );
+    )
+    .expect("redact");
     let first_session = first.session.expect("session");
     let second = redact_text_with_stateful_session(
         "b.example.com then c.example.com",
@@ -44,7 +30,8 @@ fn stateful_tokens_reused_across_turns() {
         None,
         Some("conv-1"),
         Some(&first_session),
-    );
+    )
+    .expect("redact");
     let second_session = second.session.expect("session");
 
     assert!(first.redacted_text.contains("[[RDX:v2:"));
@@ -66,7 +53,7 @@ fn stateful_tokens_reused_across_turns() {
 
 #[test]
 fn unauthorized_token_is_preserved_and_reported() {
-    let _guard = enable_domain_redaction();
+    let _guard = domain_redaction();
     let first = redact_text_with_stateful_session(
         "a.example.com",
         redactor::InputKind::Text,
@@ -74,6 +61,7 @@ fn unauthorized_token_is_preserved_and_reported() {
         Some("conv-1"),
         None,
     )
+    .expect("redact")
     .session
     .expect("first");
     let second = redact_text_with_stateful_session(
@@ -83,6 +71,7 @@ fn unauthorized_token_is_preserved_and_reported() {
         Some("conv-1"),
         Some(&first),
     )
+    .expect("redact")
     .session
     .expect("second");
 
@@ -100,7 +89,7 @@ fn unauthorized_token_is_preserved_and_reported() {
 
 #[test]
 fn encrypted_session_round_trip() {
-    let _guard = enable_domain_redaction();
+    let _guard = domain_redaction();
     let key = STANDARD.encode([7_u8; 32]);
     let manager = crate::relay_secrets::RelaySecretManager::from_base64(&key).expect("mgr");
     let session = redact_text_with_stateful_session(
@@ -110,6 +99,7 @@ fn encrypted_session_round_trip() {
         Some("conv-1"),
         None,
     )
+    .expect("redact")
     .session
     .expect("session");
     let encrypted = super::encrypt_upstream_session(&manager, &session).expect("encrypt");
@@ -119,7 +109,7 @@ fn encrypted_session_round_trip() {
 
 #[test]
 fn legacy_session_envelope_is_rejected() {
-    let _guard = enable_domain_redaction();
+    let _guard = domain_redaction();
     let key = STANDARD.encode([7_u8; 32]);
     let manager = crate::relay_secrets::RelaySecretManager::from_base64(&key).expect("mgr");
     let session = redact_text_with_stateful_session(
@@ -129,6 +119,7 @@ fn legacy_session_envelope_is_rejected() {
         Some("conv-1"),
         None,
     )
+    .expect("redact")
     .session
     .expect("session");
     let legacy = serde_json::json!({"request_session": session.request_session()});
@@ -141,7 +132,7 @@ fn legacy_session_envelope_is_rejected() {
 
 #[test]
 fn later_session_restores_earlier_and_new_tokens() {
-    let _guard = enable_domain_redaction();
+    let _guard = domain_redaction();
     let first = redact_text_with_stateful_session(
         "a.example.com",
         redactor::InputKind::Text,
@@ -149,6 +140,7 @@ fn later_session_restores_earlier_and_new_tokens() {
         Some("conv-1"),
         None,
     )
+    .expect("redact")
     .session
     .expect("first");
     let second = redact_text_with_stateful_session(
@@ -158,6 +150,7 @@ fn later_session_restores_earlier_and_new_tokens() {
         Some("conv-1"),
         Some(&first),
     )
+    .expect("redact")
     .session
     .expect("second");
 
@@ -176,7 +169,7 @@ fn later_session_restores_earlier_and_new_tokens() {
 
 #[test]
 fn prior_state_survives_turn_without_new_replacements() {
-    let _guard = enable_domain_redaction();
+    let _guard = domain_redaction();
     let first = redact_text_with_stateful_session(
         "a.example.com",
         redactor::InputKind::Text,
@@ -184,6 +177,7 @@ fn prior_state_survives_turn_without_new_replacements() {
         Some("conv-1"),
         None,
     )
+    .expect("redact")
     .session
     .expect("first");
     let token = token_for(&first, "a.example.com");
@@ -193,7 +187,8 @@ fn prior_state_survives_turn_without_new_replacements() {
         None,
         Some("conv-1"),
         Some(&first),
-    );
+    )
+    .expect("redact");
 
     assert!(!second.applied);
     let second = second.session.expect("retained state");

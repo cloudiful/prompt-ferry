@@ -9,6 +9,7 @@ mod error_handling;
 #[cfg(test)]
 mod error_handling_tests;
 mod inbound;
+mod json_walker;
 mod lifecycle;
 mod mcp_support;
 mod prompt_log;

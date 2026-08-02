@@ -135,9 +135,33 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case("x-prompt-ferry-conversation-id"))
         .and_then(|(_, value)| uuid::Uuid::parse_str(value).ok());
-    let prior_session = load_prior_session(state, conversation_id).await;
+    let upstream_redaction_enabled =
+        crate::redact::redaction_enabled_for_user(request.user_id.filter(|id| *id > 0));
+    let prior_session = if upstream_redaction_enabled {
+        match load_prior_session(state, conversation_id).await {
+            Ok(session) => session,
+            Err(err) => {
+                send_mcp_failure(
+                    services,
+                    &request,
+                    &request_ctx,
+                    &metadata,
+                    &request_content_logging,
+                    redact_content,
+                    server.as_ref(),
+                    err.status,
+                    err.code,
+                    err.message,
+                )
+                .await;
+                return;
+            }
+        }
+    } else {
+        None
+    };
     let (effective_body, upstream_redacted_request_json, upstream_restore_session) =
-        if crate::redact::effective_config_for_user(request.user_id.filter(|id| *id > 0)).enabled {
+        if upstream_redaction_enabled {
             match redact_mcp_request_body_blocking(
                 request.body.clone(),
                 request.user_id.filter(|id| *id > 0),
@@ -146,40 +170,23 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
             )
             .await
             {
-                Ok(value) => value,
+                Ok(prepared) => (
+                    prepared.body,
+                    prepared.redacted_request_json,
+                    prepared.restore_session,
+                ),
                 Err(err) => {
-                    let body = serde_json::json!({
-                        "error": {"code":"invalid_request","message": err.to_string()}
-                    })
-                    .to_string();
-                    send_mcp_response(
+                    send_mcp_failure(
                         services,
-                        &request.request_id,
-                        StatusCode::BAD_REQUEST.as_u16(),
-                        Some("application/json".to_string()),
-                        Vec::new(),
-                        body.clone().into_bytes(),
-                    );
-                    record_mcp_request_event(
-                        &McpResponseContext {
-                            request: &request,
-                            request_ctx: &request_ctx,
-                            metadata: &metadata,
-                            request_content_logging: &request_content_logging,
-                            redact_content,
-                            upstream_redacted_request_json: None,
-                            upstream_restore_session: None,
-                            selected_token_slot: None,
-                            server: server.as_ref(),
-                            services,
-                        },
-                        FailurePayload {
-                            status: StatusCode::BAD_REQUEST,
-                            error_code: "invalid_request".to_string(),
-                            error_message: err.to_string(),
-                            upstream_error_body: Some(body),
-                            response_body: None,
-                        },
+                        &request,
+                        &request_ctx,
+                        &metadata,
+                        &request_content_logging,
+                        redact_content,
+                        server.as_ref(),
+                        StatusCode::BAD_REQUEST,
+                        "redaction_failed".to_string(),
+                        err.to_string(),
                     )
                     .await;
                     return;
@@ -287,22 +294,94 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
 async fn load_prior_session(
     state: &crate::worker_admin::AdminState,
     conversation_id: Option<uuid::Uuid>,
-) -> Option<UpstreamRedactionSession> {
-    let conversation_id = conversation_id?;
+) -> Result<Option<UpstreamRedactionSession>, crate::openai_compat::CompatError> {
+    let Some(conversation_id) = conversation_id else {
+        return Ok(None);
+    };
     let row = db::get_conversation_redaction_session(&state.pool, conversation_id)
         .await
-        .ok()
-        .flatten()?;
+        .map_err(|err| {
+            crate::openai_compat::CompatError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "redaction_session_load_failed",
+                format!("failed to load upstream redaction session: {err}"),
+            )
+        })?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let manager = state.relay_secret_manager().map_err(|err| {
+        crate::openai_compat::CompatError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "redaction_session_load_failed",
+            format!("failed to initialize upstream redaction session secrets: {err}"),
+        )
+    })?;
     let session = decrypt_upstream_session(
-        state.relay_secret_manager().ok()?,
+        manager,
         &crate::relay_secrets::EncryptedSecretEnvelope {
             ciphertext: row.session_ciphertext,
             nonce: row.session_nonce,
             key_version: row.session_key_version,
         },
     )
-    .ok()?;
-    Some(session)
+    .map_err(|err| {
+        crate::openai_compat::CompatError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "redaction_session_load_failed",
+            format!("failed to decrypt upstream redaction session: {err}"),
+        )
+    })?;
+    Ok(Some(session))
+}
+
+async fn send_mcp_failure(
+    services: &RuntimeServices,
+    request: &BufferedMcpRequest,
+    request_ctx: &RequestExecutionContext,
+    metadata: &crate::mcp::targeting::McpRequestMetadata,
+    request_content_logging: &RequestContentLoggingResponse,
+    redact_content: bool,
+    server: Option<&db::McpServer>,
+    status: StatusCode,
+    error_code: impl Into<String>,
+    error_message: String,
+) {
+    let error_code = error_code.into();
+    let body = serde_json::json!({
+        "error": {"code": error_code, "message": error_message}
+    })
+    .to_string();
+    send_mcp_response(
+        services,
+        &request.request_id,
+        status.as_u16(),
+        Some("application/json".to_string()),
+        Vec::new(),
+        body.clone().into_bytes(),
+    );
+    record_mcp_request_event(
+        &McpResponseContext {
+            request,
+            request_ctx,
+            metadata,
+            request_content_logging,
+            redact_content,
+            upstream_redacted_request_json: None,
+            upstream_restore_session: None,
+            selected_token_slot: None,
+            server,
+            services,
+        },
+        FailurePayload {
+            status,
+            error_code,
+            error_message,
+            upstream_error_body: Some(body),
+            response_body: None,
+        },
+    )
+    .await;
 }
 
 fn send_mcp_response(

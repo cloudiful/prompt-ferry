@@ -1,9 +1,10 @@
 use anyhow::Result;
 use redactor::{
-    InputKind, RedactionSession, RedactorError, RestoreContext, RestoreResult, RestoreState,
-    SessionRedactor,
+    InputKind, RedactionSession, RedactorError, RestoreResult, RestoreState, SessionRedactor,
+    ensure_restore_valid,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::{
     redact,
@@ -13,6 +14,13 @@ use crate::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UpstreamRedactionSession {
     pub restore_state: RestoreState,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct UpstreamRedactedRequest {
+    pub(crate) body: Vec<u8>,
+    pub(crate) redacted_request_json: Option<Value>,
+    pub(crate) restore_session: Option<UpstreamRedactionSession>,
 }
 
 impl UpstreamRedactionSession {
@@ -44,15 +52,7 @@ impl UpstreamRedactionProcessor {
             RedactorError::Validation("redaction is disabled for this user".to_string())
         })?;
         let prior_session = prior.map(UpstreamRedactionSession::request_session);
-        let session = SessionRedactor::with_prior_session(prior_session, external_id).or_else(
-            |prior_error| {
-                if prior_session.is_some() {
-                    SessionRedactor::with_prior_session(None, external_id).or(Err(prior_error))
-                } else {
-                    Err(prior_error)
-                }
-            },
-        )?;
+        let session = SessionRedactor::with_prior_session(prior_session, external_id)?;
         Ok(Self {
             redactor,
             session,
@@ -93,22 +93,6 @@ impl UpstreamRedactionProcessor {
     }
 }
 
-pub struct UpstreamRestoreContext<'a> {
-    context: RestoreContext<'a>,
-}
-
-impl<'a> UpstreamRestoreContext<'a> {
-    pub fn new(session: &'a UpstreamRedactionSession) -> Result<Self> {
-        Ok(Self {
-            context: session.restore_state.restore_context()?,
-        })
-    }
-
-    pub fn restore_text(&self, text: &str) -> RestoreResult {
-        self.context.restore_text(text)
-    }
-}
-
 pub fn encrypt_upstream_session(
     manager: &RelaySecretManager,
     session: &UpstreamRedactionSession,
@@ -131,47 +115,23 @@ pub fn redact_text_with_stateful_session(
     user_id: Option<i64>,
     external_id: Option<&str>,
     prior: Option<&UpstreamRedactionSession>,
-) -> UpstreamRedactionResult {
-    let mut processor = match UpstreamRedactionProcessor::new(user_id, external_id, prior) {
-        Ok(processor) => processor,
-        Err(_) => {
-            return UpstreamRedactionResult {
-                redacted_text: text.to_string(),
-                session: None,
-                applied: false,
-            };
-        }
-    };
-    let redacted_text = match processor.redact_fragment(text, input_kind) {
-        Ok(redacted_text) => redacted_text,
-        Err(_) => {
-            return UpstreamRedactionResult {
-                redacted_text: text.to_string(),
-                session: None,
-                applied: false,
-            };
-        }
-    };
+) -> Result<UpstreamRedactionResult, RedactorError> {
+    let mut processor = UpstreamRedactionProcessor::new(user_id, external_id, prior)?;
+    let redacted_text = processor.redact_fragment(text, input_kind)?;
     let applied = processor.has_applied_replacements();
-    let session = match processor.finish_state(text, &redacted_text) {
-        Ok(session) => session,
-        Err(_) => {
-            return UpstreamRedactionResult {
-                redacted_text: text.to_string(),
-                session: prior.cloned(),
-                applied: false,
-            };
-        }
-    };
-    UpstreamRedactionResult {
+    let session = processor.finish_state(text, &redacted_text)?;
+    Ok(UpstreamRedactionResult {
         redacted_text,
         applied,
         session,
-    }
+    })
 }
 
 pub fn restore_text(text: &str, session: &UpstreamRedactionSession) -> Result<RestoreResult> {
-    Ok(UpstreamRestoreContext::new(session)?.restore_text(text))
+    let context = session.restore_state.restore_context()?;
+    let restored = context.restore_text(text);
+    ensure_restore_valid(&restored)?;
+    Ok(restored)
 }
 
 #[cfg(test)]

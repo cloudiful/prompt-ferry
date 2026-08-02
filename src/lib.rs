@@ -19,6 +19,8 @@ pub mod openapi_export;
 pub mod raw_payload_store;
 pub mod realtime;
 pub mod redact;
+#[cfg(test)]
+mod redact_test_support;
 pub mod redact_upstream;
 pub mod relay;
 pub(crate) mod relay_secrets;

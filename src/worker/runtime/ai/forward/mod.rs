@@ -274,21 +274,11 @@ mod status_tests {
 #[cfg(test)]
 mod tests {
     use super::response_logging_payload;
-    use crate::redact::{self, RedactionConfig, TEST_REDACTION_LOCK};
-    use redactor::RedactionRules;
+    use crate::redact_test_support::secret_redaction;
 
     #[test]
     fn normalized_and_raw_logs_only_plain_raw_response() {
-        let _guard = TEST_REDACTION_LOCK.lock().expect("lock");
-        redact::apply_config(&RedactionConfig {
-            enabled: true,
-            rules: RedactionRules {
-                secret: true,
-                ..RedactionRules::default()
-            },
-            ..Default::default()
-        })
-        .expect("config");
+        let _guard = secret_redaction();
 
         let (response_prompt, response_raw_body) = response_logging_payload(
             "API_TOKEN=sk_live_1234567890ABCDEFghij",
@@ -307,16 +297,7 @@ mod tests {
 
     #[test]
     fn normalized_only_keeps_redacted_response_prompt() {
-        let _guard = TEST_REDACTION_LOCK.lock().expect("lock");
-        redact::apply_config(&RedactionConfig {
-            enabled: true,
-            rules: RedactionRules {
-                secret: true,
-                ..RedactionRules::default()
-            },
-            ..Default::default()
-        })
-        .expect("config");
+        let _guard = secret_redaction();
 
         let (response_prompt, response_raw_body) = response_logging_payload(
             "API_TOKEN=sk_live_1234567890ABCDEFghij",

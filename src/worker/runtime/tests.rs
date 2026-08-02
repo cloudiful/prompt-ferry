@@ -5,7 +5,7 @@ use crate::{
     llm_review::LlmReviewSettings,
     mcp::targeting::McpRequestMetadata,
     mcp::{McpCatalogCache, McpCatalogService},
-    redact::{self, RedactionConfig, TEST_REDACTION_LOCK},
+    redact_test_support::secret_redaction,
     replay_cache::ReplayCache,
     worker::runtime::context::{ResponseLimits, RuntimeServices},
     worker_admin_state::{AdminState, AdminStateInit},
@@ -16,7 +16,6 @@ use crate::{
 use anyhow::anyhow;
 use base64::Engine as _;
 use chrono::Utc;
-use redactor::RedactionRules;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 
@@ -83,16 +82,7 @@ fn managed_mode_allows_zero_relays_with_master_key() {
 
 #[test]
 fn safe_error_redacts_and_truncates() {
-    let _guard = TEST_REDACTION_LOCK.lock().expect("test lock poisoned");
-    redact::apply_config(&RedactionConfig {
-        enabled: true,
-        rules: RedactionRules {
-            secret: true,
-            ..RedactionRules::default()
-        },
-        ..Default::default()
-    })
-    .expect("config should apply");
+    let _guard = secret_redaction();
     let message = safe_error(
         &anyhow!("API_TOKEN=sk_live_1234567890ABCDEFghij failed"),
         true,

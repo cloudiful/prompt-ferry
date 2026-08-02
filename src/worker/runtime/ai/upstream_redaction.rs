@@ -1,19 +1,17 @@
-use anyhow::Result;
-use serde_json::{Map, Value};
+use anyhow::{Error, Result};
+use serde_json::Value;
 
 use crate::{
     openai_compat::CompatError,
-    redact_upstream::{UpstreamRedactionProcessor, UpstreamRedactionSession},
+    redact_upstream::{
+        UpstreamRedactedRequest, UpstreamRedactionProcessor, UpstreamRedactionSession,
+    },
 };
 
 use super::upstream_text_fields::should_process_ai_string_field;
+use crate::worker::runtime::json_walker::walk_json_strings;
 
-#[derive(Debug, Clone, Default)]
-pub(super) struct PreparedRedactedRequest {
-    pub(super) body: Vec<u8>,
-    pub(super) redacted_request_json: Option<Value>,
-    pub(super) restore_session: Option<UpstreamRedactionSession>,
-}
+pub(super) type PreparedRedactedRequest = UpstreamRedactedRequest;
 
 pub(super) fn redact_ai_request_json(
     path: &str,
@@ -40,7 +38,24 @@ pub(super) fn redact_ai_request_json(
                 )
             },
         )?;
-    redact_value(path, "", &mut value, &mut processor);
+    walk_json_strings(&mut value, |context, text| {
+        let field_name = context.field_name.unwrap_or_default();
+        if !should_process_ai_string_field(path, context.json_path, context.object_type, field_name)
+        {
+            return Ok(None);
+        }
+        processor
+            .redact_fragment(text, redactor::InputKind::Text)
+            .map(Some)
+            .map_err(Error::new)
+    })
+    .map_err(|err| {
+        CompatError::new(
+            reqwest::StatusCode::BAD_REQUEST,
+            "redaction_failed",
+            format!("failed to redact upstream request: {err}"),
+        )
+    })?;
     let redacted_body = serde_json::to_vec(&value).map_err(|err| {
         CompatError::new(
             reqwest::StatusCode::BAD_REQUEST,
@@ -100,95 +115,6 @@ pub(super) async fn redact_ai_request_json_blocking(
     })?
 }
 
-fn redact_value(
-    request_path: &str,
-    json_path: &str,
-    value: &mut Value,
-    processor: &mut UpstreamRedactionProcessor,
-) {
-    match value {
-        Value::Object(object) => redact_object(request_path, json_path, object, processor),
-        Value::Array(items) => {
-            for (index, item) in items.iter_mut().enumerate() {
-                redact_value(
-                    request_path,
-                    &format!("{json_path}/{index}"),
-                    item,
-                    processor,
-                );
-            }
-        }
-        _ => {}
-    }
-}
-
-fn redact_object(
-    request_path: &str,
-    json_path: &str,
-    object: &mut Map<String, Value>,
-    processor: &mut UpstreamRedactionProcessor,
-) {
-    let object_type = object
-        .get("type")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let role = object
-        .get("role")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let key_names = object.keys().cloned().collect::<Vec<_>>();
-    for key in key_names {
-        let Some(value) = object.get_mut(&key) else {
-            continue;
-        };
-        let child_path = format!("{json_path}/{key}");
-        let should_redact = should_redact_field(
-            request_path,
-            &child_path,
-            role.as_deref(),
-            object_type.as_deref(),
-            &key,
-            value,
-        );
-        match value {
-            Value::String(text) if should_redact => {
-                apply_redaction(text, processor);
-            }
-            Value::Array(items) => {
-                for (index, item) in items.iter_mut().enumerate() {
-                    redact_value(
-                        request_path,
-                        &format!("{child_path}/{index}"),
-                        item,
-                        processor,
-                    );
-                }
-            }
-            Value::Object(inner) => {
-                redact_object(request_path, &child_path, inner, processor);
-            }
-            _ => {}
-        }
-    }
-}
-
-fn should_redact_field(
-    request_path: &str,
-    json_path: &str,
-    _role: Option<&str>,
-    object_type: Option<&str>,
-    key: &str,
-    value: &Value,
-) -> bool {
-    should_process_ai_string_field(request_path, json_path, object_type, key, value)
-}
-
-fn apply_redaction(text: &mut String, processor: &mut UpstreamRedactionProcessor) {
-    if let Ok(redacted_text) = processor.redact_fragment(text, redactor::InputKind::Text) {
-        *text = redacted_text;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::{
@@ -197,22 +123,12 @@ mod tests {
     };
 
     use super::{redact_ai_request_json, redact_ai_request_json_blocking};
-    use crate::redact::{RedactionConfig, apply_config};
-    use redactor::RedactionRules;
+    use crate::redact_test_support::domain_redaction;
     use serde_json::{Value, json};
 
     #[test]
     fn redacts_responses_text_fields_without_touching_control_fields() {
-        let _guard = crate::redact::TEST_REDACTION_LOCK.lock().expect("lock");
-        apply_config(&RedactionConfig {
-            enabled: true,
-            rules: RedactionRules {
-                domain: true,
-                ..RedactionRules::default()
-            },
-            custom_strings: Vec::new(),
-        })
-        .expect("config");
+        let _guard = domain_redaction();
 
         let body = json!({
             "model": "gpt-test",
@@ -277,16 +193,7 @@ mod tests {
 
     #[test]
     fn redacts_nested_chat_tool_call_arguments() {
-        let _guard = crate::redact::TEST_REDACTION_LOCK.lock().expect("lock");
-        apply_config(&RedactionConfig {
-            enabled: true,
-            rules: RedactionRules {
-                domain: true,
-                ..RedactionRules::default()
-            },
-            custom_strings: Vec::new(),
-        })
-        .expect("config");
+        let _guard = domain_redaction();
 
         let body = json!({
             "messages": [
@@ -330,16 +237,7 @@ mod tests {
 
     #[test]
     fn does_not_keep_full_json_when_prior_session_has_no_new_replacements() {
-        let _guard = crate::redact::TEST_REDACTION_LOCK.lock().expect("lock");
-        apply_config(&RedactionConfig {
-            enabled: true,
-            rules: RedactionRules {
-                domain: true,
-                ..RedactionRules::default()
-            },
-            custom_strings: Vec::new(),
-        })
-        .expect("config");
+        let _guard = domain_redaction();
 
         let first = redact_ai_request_json(
             "/v1/responses",
@@ -367,16 +265,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn blocking_redaction_yields_to_the_async_runtime() {
         {
-            let _guard = crate::redact::TEST_REDACTION_LOCK.lock().expect("lock");
-            apply_config(&RedactionConfig {
-                enabled: true,
-                rules: RedactionRules {
-                    domain: true,
-                    ..RedactionRules::default()
-                },
-                custom_strings: Vec::new(),
-            })
-            .expect("config");
+            let _guard = domain_redaction();
         }
         let body = serde_json::to_vec(&json!({
             "model": "gpt-test",

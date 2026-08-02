@@ -6,6 +6,8 @@ use crate::{
 use anyhow::Result;
 use serde_json::Value;
 
+use crate::worker::runtime::json_walker::walk_json_strings;
+
 pub(super) async fn reconstruct_prompt_chain(
     pool: &sqlx::PgPool,
     entry: &db::UsageEventChainEntry,
@@ -60,21 +62,10 @@ pub(super) fn redact_prompt_item(item: PromptBlockSeed, user_id: Option<i64>) ->
 }
 
 fn redact_prompt_value(value: &Value, user_id: Option<i64>) -> Value {
-    match value {
-        Value::String(text) => Value::String(redact::redact_text_for_user(text, user_id)),
-        Value::Array(items) => Value::Array(
-            items
-                .iter()
-                .map(|item| redact_prompt_value(item, user_id))
-                .collect(),
-        ),
-        Value::Object(object) => {
-            let mut next = serde_json::Map::new();
-            for (key, value) in object {
-                next.insert(key.clone(), redact_prompt_value(value, user_id));
-            }
-            Value::Object(next)
-        }
-        _ => value.clone(),
-    }
+    let mut redacted = value.clone();
+    walk_json_strings(&mut redacted, |_, text| {
+        Ok(Some(redact::redact_text_for_user(text, user_id)))
+    })
+    .expect("prompt log JSON walker cannot fail");
+    redacted
 }

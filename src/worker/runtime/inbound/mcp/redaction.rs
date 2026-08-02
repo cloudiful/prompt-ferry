@@ -1,24 +1,41 @@
-use anyhow::Result;
+use anyhow::{Error, Result};
 use serde_json::Value;
 
-use crate::redact_upstream::{UpstreamRedactionProcessor, UpstreamRedactionSession};
+use crate::{
+    redact_upstream::{
+        UpstreamRedactedRequest, UpstreamRedactionProcessor, UpstreamRedactionSession,
+    },
+    worker::runtime::json_walker::walk_json_strings,
+};
 
 pub(super) fn redact_mcp_request_body(
     body: &[u8],
     user_id: Option<i64>,
     conversation_id: Option<uuid::Uuid>,
     prior_session: Option<&UpstreamRedactionSession>,
-) -> Result<(Vec<u8>, Option<Value>, Option<UpstreamRedactionSession>)> {
+) -> Result<UpstreamRedactedRequest> {
     let mut value: Value = serde_json::from_slice(body)?;
     let external_id = conversation_id.as_ref().map(uuid::Uuid::to_string);
     let mut processor =
         UpstreamRedactionProcessor::new(user_id, external_id.as_deref(), prior_session)?;
-    redact_mcp_value(&mut value, "", &mut processor);
+    walk_json_strings(&mut value, |context, text| {
+        if !should_redact_mcp_string(context.json_path) {
+            return Ok(None);
+        }
+        processor
+            .redact_fragment(text, redactor::InputKind::Text)
+            .map(Some)
+            .map_err(Error::new)
+    })?;
     let redacted_body = serde_json::to_vec(&value)?;
     let original_text = std::str::from_utf8(body)?;
     let redacted_text = std::str::from_utf8(&redacted_body).expect("serialized JSON is UTF-8");
     let request_session = processor.finish_state(original_text, redacted_text)?;
-    Ok((redacted_body, Some(value), request_session))
+    Ok(UpstreamRedactedRequest {
+        body: redacted_body,
+        redacted_request_json: processor.has_applied_replacements().then_some(value),
+        restore_session: request_session,
+    })
 }
 
 pub(super) async fn redact_mcp_request_body_blocking(
@@ -26,39 +43,11 @@ pub(super) async fn redact_mcp_request_body_blocking(
     user_id: Option<i64>,
     conversation_id: Option<uuid::Uuid>,
     prior_session: Option<UpstreamRedactionSession>,
-) -> Result<(Vec<u8>, Option<Value>, Option<UpstreamRedactionSession>)> {
+) -> Result<UpstreamRedactedRequest> {
     tokio::task::spawn_blocking(move || {
         redact_mcp_request_body(&body, user_id, conversation_id, prior_session.as_ref())
     })
     .await?
-}
-
-fn redact_mcp_value(
-    value: &mut Value,
-    json_path: &str,
-    processor: &mut UpstreamRedactionProcessor,
-) {
-    match value {
-        Value::String(text) => {
-            if !should_redact_mcp_string(json_path) {
-                return;
-            }
-            if let Ok(redacted_text) = processor.redact_fragment(text, redactor::InputKind::Text) {
-                *text = redacted_text;
-            }
-        }
-        Value::Array(items) => {
-            for (index, item) in items.iter_mut().enumerate() {
-                redact_mcp_value(item, &format!("{json_path}/{index}"), processor);
-            }
-        }
-        Value::Object(object) => {
-            for (key, value) in object.iter_mut() {
-                redact_mcp_value(value, &format!("{json_path}/{key}"), processor);
-            }
-        }
-        _ => {}
-    }
 }
 
 fn should_redact_mcp_string(json_path: &str) -> bool {
@@ -80,25 +69,12 @@ fn should_redact_mcp_string(json_path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::redact_mcp_request_body;
-    use crate::{
-        redact::{RedactionConfig, apply_config},
-        redact_upstream::restore_text,
-    };
-    use redactor::RedactionRules;
+    use crate::{redact_test_support::domain_redaction, redact_upstream::restore_text};
     use serde_json::{Value, json};
 
     #[test]
     fn redacts_body_text_but_preserves_protocol_fields() {
-        let _guard = crate::redact::TEST_REDACTION_LOCK.lock().expect("lock");
-        apply_config(&RedactionConfig {
-            enabled: true,
-            rules: RedactionRules {
-                domain: true,
-                ..RedactionRules::default()
-            },
-            custom_strings: Vec::new(),
-        })
-        .expect("config");
+        let _guard = domain_redaction();
 
         let body = json!({
             "jsonrpc": "2.0",
@@ -113,8 +89,10 @@ mod tests {
             }
         });
 
-        let (bytes, _, session) =
+        let prepared =
             redact_mcp_request_body(body.to_string().as_bytes(), None, None, None).expect("redact");
+        let bytes = prepared.body;
+        let session = prepared.restore_session;
         let redacted: Value = serde_json::from_slice(&bytes).expect("json");
 
         assert_eq!(redacted["method"].as_str(), Some("tools/call"));
