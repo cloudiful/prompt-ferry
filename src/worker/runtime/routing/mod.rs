@@ -1,6 +1,8 @@
 mod selection;
 mod session_affinity;
 #[cfg(test)]
+mod session_affinity_recovery_tests;
+#[cfg(test)]
 mod session_affinity_tests;
 
 #[cfg(test)]

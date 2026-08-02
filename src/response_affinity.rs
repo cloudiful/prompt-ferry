@@ -31,6 +31,15 @@ redis.call('EXPIRE', KEYS[1], ARGV[1])
 return payload
 "#;
 
+const REPLACE_IF_MATCH_SCRIPT: &str = r#"
+local current = redis.call('GET', KEYS[1])
+if not current or current ~= ARGV[1] then
+    return 0
+end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+return 1
+"#;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ResponseAffinityBinding {
     pub(crate) endpoint_id: Uuid,
@@ -193,6 +202,50 @@ impl ResponseAffinityStore {
             }
         }
     }
+
+    pub(crate) async fn replace_if_current(
+        &self,
+        key: &str,
+        expected: &ResponseAffinityBinding,
+        replacement: &ResponseAffinityBinding,
+    ) -> Result<bool> {
+        match &self.backend {
+            ResponseAffinityBackend::Unavailable => {
+                Err(anyhow!("response affinity backend unavailable"))
+            }
+            ResponseAffinityBackend::Local(inner) => {
+                let mut bindings = inner.bindings.lock().await;
+                let now = Instant::now();
+                let Some(entry) = bindings.get_mut(key) else {
+                    return Ok(false);
+                };
+                if entry.expires_at <= now {
+                    bindings.remove(key);
+                    return Ok(false);
+                }
+                if entry.binding != *expected {
+                    return Ok(false);
+                }
+                entry.binding = replacement.clone();
+                entry.expires_at = now + inner.ttl;
+                Ok(true)
+            }
+            ResponseAffinityBackend::Redis(inner) => {
+                let expected_payload = serde_json::to_string(expected)?;
+                let replacement_payload = serde_json::to_string(replacement)?;
+                let mut manager = inner.manager.clone();
+                let replaced: i64 = redis::Script::new(REPLACE_IF_MATCH_SCRIPT)
+                    .key(key)
+                    .arg(expected_payload)
+                    .arg(replacement_payload)
+                    .arg(inner.ttl_seconds)
+                    .invoke_async(&mut manager)
+                    .await
+                    .context("failed to replace response affinity binding")?;
+                Ok(replaced == 1)
+            }
+        }
+    }
 }
 
 fn hex_digest(bytes: &[u8]) -> String {
@@ -210,40 +263,4 @@ pub(crate) fn log_unavailable(error: &anyhow::Error) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn binding(endpoint_id: Uuid) -> ResponseAffinityBinding {
-        ResponseAffinityBinding {
-            endpoint_id,
-            endpoint_key_id: None,
-            endpoint_key_fingerprint: "fingerprint".to_string(),
-        }
-    }
-
-    #[tokio::test]
-    async fn local_store_keeps_first_binding_for_concurrent_creators() {
-        let store = ResponseAffinityStore::for_tests();
-        let key = "affinity-key";
-        let first = binding(Uuid::new_v4());
-        let second = binding(Uuid::new_v4());
-        let (left, right) = tokio::join!(
-            store.get_or_create(key, &first),
-            store.get_or_create(key, &second)
-        );
-        let left = left.unwrap();
-        let right = right.unwrap();
-        assert_eq!(left, right);
-        assert!(left == first || left == second);
-    }
-
-    #[test]
-    fn cache_key_is_hashed_and_scope_sensitive() {
-        let rule_id = Uuid::new_v4();
-        let first = ResponseAffinityStore::cache_key(1, rule_id, "session-a");
-        let second = ResponseAffinityStore::cache_key(1, rule_id, "session-b");
-        assert!(first.starts_with(RESPONSE_AFFINITY_VALKEY_KEY_PREFIX));
-        assert_ne!(first, second);
-        assert!(!first.contains("session-a"));
-    }
-}
+mod tests;
