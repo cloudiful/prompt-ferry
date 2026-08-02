@@ -112,9 +112,12 @@ defineProps<{
           <span class="break-all">{{ event.conversation_id || '-' }}</span>
         </DetailKeyValue>
         <DetailKeyValue :label="t('session')">
-          <span class="flex flex-wrap gap-1">
-            <UBadge :label="`#${event.conversation_seq}`" />
-            <UBadge :label="t('firstTurn')" />
+          <span v-if="event.is_session_recognized" class="flex flex-wrap gap-1">
+            <UBadge
+              v-if="event.conversation_seq != null"
+              :label="`#${event.conversation_seq}`"
+            />
+            <UBadge v-if="event.is_first_turn" :label="t('firstTurn')" />
             <UBadge
               v-if="
                 event.conversation_id &&
@@ -125,6 +128,7 @@ defineProps<{
               color="warning"
             />
           </span>
+          <span v-else>-</span>
         </DetailKeyValue>
         <DetailKeyValue :label="t('conversationSource')">
           {{ conversationSourceText }}
