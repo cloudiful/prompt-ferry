@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use prompt_ferry::{
     redact::{RedactionConfig, apply_config},
-    redact_upstream::{UpstreamRedactionProcessor, UpstreamRestoreContext},
+    redact_upstream::UpstreamRedactionProcessor,
 };
 use redactor::RedactionRules;
 
@@ -67,7 +67,10 @@ fn main() {
         .expect("finish state")
         .expect("session");
     timed("prompt_ferry_restore_512_entries_128_fields", 100, || {
-        let context = UpstreamRestoreContext::new(&session).expect("restore context");
+        let context = session
+            .restore_state
+            .restore_context()
+            .expect("restore context");
         for field in redacted.iter().take(128) {
             black_box(context.restore_text(black_box(field)));
         }
