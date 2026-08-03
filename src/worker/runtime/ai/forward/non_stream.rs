@@ -33,6 +33,7 @@ pub(super) async fn send_json_response(
             content_type: Some("application/json".to_string()),
             headers: Vec::new(),
         }))
+        .await
         .context("relay response channel closed")?;
     services
         .out_tx
@@ -40,12 +41,14 @@ pub(super) async fn send_json_response(
             request_id: request_id.to_string(),
             data: body,
         }))
+        .await
         .context("relay response channel closed")?;
     services
         .out_tx
         .send(BridgeMessage::ResponseEnd(ResponseEnd {
             request_id: request_id.to_string(),
         }))
+        .await
         .context("relay response channel closed")?;
     Ok(())
 }

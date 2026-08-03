@@ -157,12 +157,11 @@ pub(super) async fn connect_once(
     let admin_out_tx = out_tx.clone();
     let admin_forward_task = tokio::spawn(async move {
         while let Some(message) = admin_rx.recv().await {
-            if admin_out_tx.send(message).is_err() {
+            if admin_out_tx.send(message).await.is_err() {
                 break;
             }
         }
     });
-    let writer_out_tx = out_tx.clone();
     if let Some(state) = admin_state.as_ref() {
         worker_admin::set_bridge_sender(state, &relay.relay_key, Some(admin_tx)).await;
         mark_relay_connected(state, relay).await;
@@ -197,7 +196,6 @@ pub(super) async fn connect_once(
                     } else {
                         bridge_wire::encode_message(&item.message)
                     };
-                    writer_out_tx.release_data(item.bytes);
                     let payload = payload.context("failed to encode bridge data message")?;
                     ws_tx
                         .send(Message::Binary(payload.into()))
@@ -265,7 +263,7 @@ pub(super) async fn connect_once(
                 }
             }
             Ok(Message::Ping(_)) => {
-                let _ = out_tx.send(BridgeMessage::Pong);
+                let _ = out_tx.send(BridgeMessage::Pong).await;
             }
             Ok(Message::Pong(_)) => {}
             Ok(Message::Close(_)) => break,

@@ -194,19 +194,21 @@ pub(super) async fn collect_request_chunks(
     (body, stats)
 }
 
-pub(super) fn send_worker_shutdown_response(
+pub(super) async fn send_worker_shutdown_response(
     out_tx: &super::context::BridgeSender,
     request_id: &str,
 ) {
-    let _ = out_tx.send(BridgeMessage::ResponseError(ResponseError {
-        request_id: request_id.to_string(),
-        status: StatusCode::SERVICE_UNAVAILABLE.as_u16(),
-        code: "worker_shutting_down".to_string(),
-        message: "worker is shutting down and no longer accepts new requests".to_string(),
-    }));
+    let _ = out_tx
+        .send(BridgeMessage::ResponseError(ResponseError {
+            request_id: request_id.to_string(),
+            status: StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+            code: "worker_shutting_down".to_string(),
+            message: "worker is shutting down and no longer accepts new requests".to_string(),
+        }))
+        .await;
 }
 
-pub(super) fn send_worker_shutdown_mcp_response(
+pub(super) async fn send_worker_shutdown_mcp_response(
     out_tx: &super::context::BridgeSender,
     request_id: &str,
 ) {
@@ -217,17 +219,23 @@ pub(super) fn send_worker_shutdown_mcp_response(
         }
     })
     .to_string();
-    let _ = out_tx.send(BridgeMessage::McpResponseStart(McpResponseStart {
-        request_id: request_id.to_string(),
-        status: StatusCode::SERVICE_UNAVAILABLE.as_u16(),
-        content_type: Some("application/json".to_string()),
-        headers: Vec::new(),
-    }));
-    let _ = out_tx.send(BridgeMessage::McpResponseChunk(McpResponseChunk {
-        request_id: request_id.to_string(),
-        data: body.into_bytes(),
-    }));
-    let _ = out_tx.send(BridgeMessage::McpResponseEnd(McpResponseEnd {
-        request_id: request_id.to_string(),
-    }));
+    let _ = out_tx
+        .send(BridgeMessage::McpResponseStart(McpResponseStart {
+            request_id: request_id.to_string(),
+            status: StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+            content_type: Some("application/json".to_string()),
+            headers: Vec::new(),
+        }))
+        .await;
+    let _ = out_tx
+        .send(BridgeMessage::McpResponseChunk(McpResponseChunk {
+            request_id: request_id.to_string(),
+            data: body.into_bytes(),
+        }))
+        .await;
+    let _ = out_tx
+        .send(BridgeMessage::McpResponseEnd(McpResponseEnd {
+            request_id: request_id.to_string(),
+        }))
+        .await;
 }

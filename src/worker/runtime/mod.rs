@@ -2,6 +2,8 @@ mod admin_proxy;
 mod ai;
 mod bootstrap;
 mod bridge;
+#[cfg(test)]
+mod bridge_tests;
 mod budget;
 mod connect;
 mod context;

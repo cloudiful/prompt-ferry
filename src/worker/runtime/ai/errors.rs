@@ -27,6 +27,7 @@ pub(super) async fn respond_with_local_error(
             code: failure.error_code.clone(),
             message: failure.error_message.clone(),
         }))
+        .await
         .context("relay response channel closed")?;
     record_usage_event(
         services.admin_state(),
@@ -82,6 +83,7 @@ pub(super) async fn respond_with_client_error(
             content_type: Some("application/json".to_string()),
             headers: Vec::new(),
         }))
+        .await
         .context("relay response channel closed")?;
     services
         .out_tx
@@ -89,12 +91,14 @@ pub(super) async fn respond_with_client_error(
             request_id: request.request_id.clone(),
             data: body.clone().into_bytes(),
         }))
+        .await
         .context("relay response channel closed")?;
     services
         .out_tx
         .send(BridgeMessage::ResponseEnd(ResponseEnd {
             request_id: request.request_id.clone(),
         }))
+        .await
         .context("relay response channel closed")?;
     record_usage_event(
         services.admin_state(),
@@ -145,6 +149,7 @@ pub(super) async fn respond_with_budget_error(
             content_type: Some("application/json".to_string()),
             headers: Vec::new(),
         }))
+        .await
         .context("relay response channel closed")?;
     services
         .out_tx
@@ -152,12 +157,14 @@ pub(super) async fn respond_with_budget_error(
             request_id: request.request_id.clone(),
             data: body.clone().into_bytes(),
         }))
+        .await
         .context("relay response channel closed")?;
     services
         .out_tx
         .send(BridgeMessage::ResponseEnd(ResponseEnd {
             request_id: request.request_id.clone(),
         }))
+        .await
         .context("relay response channel closed")?;
     record_usage_event(
         services.admin_state(),

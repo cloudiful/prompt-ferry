@@ -169,18 +169,39 @@ fn response_adapter_name(adapter: ResponseAdapter) -> &'static str {
     }
 }
 
-fn send_stream_message(
+async fn send_stream_message(
     out_tx: &BridgeSender,
     message: BridgeMessage,
     stream_diag: &mut UpstreamStreamDiag,
 ) -> anyhow::Result<()> {
-    out_tx.send(message).map_err(|err| {
+    out_tx.send(message).await.map_err(|err| {
         let reason = err.diagnostic_reason();
         let error_message = err.to_string();
         stream_diag.mark_terminal(reason, Some(error_message));
         stream_diag.finish();
         anyhow::Error::new(err).context("failed sending response to relay")
     })
+}
+
+async fn emit_output_chunks(
+    request_id: &str,
+    output_chunks: Vec<Vec<u8>>,
+    out_tx: &BridgeSender,
+    stream_diag: &mut UpstreamStreamDiag,
+) -> anyhow::Result<()> {
+    for output_chunk in output_chunks {
+        stream_diag.record_emitted_chunk(output_chunk.len());
+        send_stream_message(
+            out_tx,
+            BridgeMessage::ResponseChunk(ResponseChunk {
+                request_id: request_id.to_string(),
+                data: output_chunk,
+            }),
+            stream_diag,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 pub(super) async fn forward_streaming_response(
@@ -255,7 +276,8 @@ pub(super) async fn forward_streaming_response(
             headers: Vec::new(),
         }),
         &mut stream_diag,
-    )?;
+    )
+    .await?;
     let log_stream_adapter_error =
         |provider_response_id: Option<&str>, provider_model: Option<&str>, err: &CompatError| {
             error!(
@@ -322,24 +344,6 @@ pub(super) async fn forward_streaming_response(
     if let Some(interval) = flush_interval.as_mut() {
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
     }
-    let emit_output_chunks = |output_chunks: Vec<Vec<u8>>,
-                              out_tx: &BridgeSender,
-                              stream_diag: &mut UpstreamStreamDiag|
-     -> anyhow::Result<()> {
-        for output_chunk in output_chunks {
-            stream_diag.record_emitted_chunk(output_chunk.len());
-            send_stream_message(
-                out_tx,
-                BridgeMessage::ResponseChunk(ResponseChunk {
-                    request_id: request.request_id.clone(),
-                    data: output_chunk,
-                }),
-                stream_diag,
-            )?;
-        }
-        Ok(())
-    };
-
     loop {
         tokio::select! {
             _ = async {
@@ -347,11 +351,11 @@ pub(super) async fn forward_streaming_response(
                     interval.tick().await;
                 }
             }, if flush_interval.is_some() => {
-                emit_output_chunks(
+                emit_output_chunks(&request.request_id,
                     stream_delta_batcher.flush_due()?,
                     &services.out_tx,
                     &mut stream_diag,
-                )?;
+                ).await?;
             }
             maybe_chunk = stream.next() => {
                 let Some(chunk) = maybe_chunk else {
@@ -523,11 +527,11 @@ pub(super) async fn forward_streaming_response(
                     None => output_chunks,
                 };
                 for output_chunk in output_chunks {
-                    emit_output_chunks(
+                    emit_output_chunks(&request.request_id,
                         stream_delta_batcher.push_chunk(output_chunk)?,
                         &services.out_tx,
                         &mut stream_diag,
-                    )?;
+                    ).await?;
                 }
                 if passthrough_sse_filter
                     .as_ref()
@@ -561,10 +565,12 @@ pub(super) async fn forward_streaming_response(
         };
         for output_chunk in output_chunks {
             emit_output_chunks(
+                &request.request_id,
                 stream_delta_batcher.push_chunk(output_chunk)?,
                 &services.out_tx,
                 &mut stream_diag,
-            )?;
+            )
+            .await?;
         }
     }
 
@@ -587,10 +593,12 @@ pub(super) async fn forward_streaming_response(
         };
         for output_chunk in output_chunks {
             emit_output_chunks(
+                &request.request_id,
                 stream_delta_batcher.push_chunk(output_chunk)?,
                 &services.out_tx,
                 &mut stream_diag,
-            )?;
+            )
+            .await?;
         }
     }
 
@@ -613,10 +621,12 @@ pub(super) async fn forward_streaming_response(
         };
         for output_chunk in output_chunks {
             emit_output_chunks(
+                &request.request_id,
                 stream_delta_batcher.push_chunk(output_chunk)?,
                 &services.out_tx,
                 &mut stream_diag,
-            )?;
+            )
+            .await?;
         }
     } else if let Some(filter) = passthrough_sse_filter.as_mut() {
         let output_chunks = match filter.finish() {
@@ -629,20 +639,24 @@ pub(super) async fn forward_streaming_response(
         };
         for output_chunk in output_chunks {
             emit_output_chunks(
+                &request.request_id,
                 stream_delta_batcher.push_chunk(output_chunk)?,
                 &services.out_tx,
                 &mut stream_diag,
-            )?;
+            )
+            .await?;
         }
     }
     let (responses_stream_terminal, responses_error_body) =
         if let Some(filter) = sse_restore_filter.as_mut() {
             for output_chunk in filter.finish()? {
                 emit_output_chunks(
+                    &request.request_id,
                     stream_delta_batcher.push_chunk(output_chunk)?,
                     &services.out_tx,
                     &mut stream_diag,
-                )?;
+                )
+                .await?;
             }
             (
                 filter.responses_terminal(),
@@ -666,7 +680,13 @@ pub(super) async fn forward_streaming_response(
             Some(ResponsesSseTerminal::Completed)
         )
     {
-        emit_output_chunks(buffered_output, &services.out_tx, &mut stream_diag)?;
+        emit_output_chunks(
+            &request.request_id,
+            buffered_output,
+            &services.out_tx,
+            &mut stream_diag,
+        )
+        .await?;
         if capture.finish() && ttft_ms.is_none() {
             ttft_ms = Some(request_ctx.elapsed_ms());
         }
@@ -685,7 +705,13 @@ pub(super) async fn forward_streaming_response(
         stream_diag.finish();
         return Ok(());
     }
-    emit_output_chunks(buffered_output, &services.out_tx, &mut stream_diag)?;
+    emit_output_chunks(
+        &request.request_id,
+        buffered_output,
+        &services.out_tx,
+        &mut stream_diag,
+    )
+    .await?;
     if capture.finish() && ttft_ms.is_none() {
         ttft_ms = Some(request_ctx.elapsed_ms());
     }
@@ -702,7 +728,8 @@ pub(super) async fn forward_streaming_response(
             request_id: request.request_id.clone(),
         }),
         &mut stream_diag,
-    )?;
+    )
+    .await?;
     stream_diag.mark_terminal("completed", None);
     stream_diag.finish();
     let captured_artifact = assistant_capture
@@ -896,7 +923,8 @@ async fn forward_buffered_non_sse_response(
             headers: Vec::new(),
         }),
         &mut stream_diag,
-    )?;
+    )
+    .await?;
     stream_diag.record_emitted_chunk(restored_output.len());
     send_stream_message(
         &services.out_tx,
@@ -905,14 +933,16 @@ async fn forward_buffered_non_sse_response(
             data: restored_output,
         }),
         &mut stream_diag,
-    )?;
+    )
+    .await?;
     send_stream_message(
         &services.out_tx,
         BridgeMessage::ResponseEnd(ResponseEnd {
             request_id: request.request_id.clone(),
         }),
         &mut stream_diag,
-    )?;
+    )
+    .await?;
     stream_diag.mark_terminal("completed", None);
     stream_diag.finish();
 

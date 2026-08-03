@@ -22,7 +22,8 @@ pub(super) async fn process_admin_request(
             StatusCode::NOT_FOUND,
             "text/plain; charset=utf-8",
             b"admin UI unavailable".to_vec(),
-        );
+        )
+        .await;
     };
 
     let mut builder = Request::builder()
@@ -72,6 +73,7 @@ async fn stream_admin_response(
             content_type,
             headers: bridge_response_headers(&parts.headers),
         }))
+        .await
         .context("relay response channel closed")?;
 
     let mut stream = body.into_data_stream();
@@ -83,6 +85,7 @@ async fn stream_admin_response(
                         request_id: request_id.to_string(),
                         data: chunk.to_vec(),
                     }))
+                    .await
                     .context("relay response channel closed")?;
             }
             Err(err) => {
@@ -93,6 +96,7 @@ async fn stream_admin_response(
                         code: "admin_response_read_failed".to_string(),
                         message: format!("failed to read admin response body: {err}"),
                     }))
+                    .await
                     .context("relay response channel closed")?;
                 return Ok(());
             }
@@ -103,6 +107,7 @@ async fn stream_admin_response(
         .send(BridgeMessage::ResponseEnd(ResponseEnd {
             request_id: request_id.to_string(),
         }))
+        .await
         .context("relay response channel closed")?;
     Ok(())
 }
@@ -140,7 +145,7 @@ fn is_hop_by_hop_response_header(name: &header::HeaderName) -> bool {
     )
 }
 
-fn send_static_response(
+async fn send_static_response(
     out_tx: &BridgeSender,
     request_id: &str,
     status: StatusCode,
@@ -154,17 +159,20 @@ fn send_static_response(
             content_type: Some(content_type.to_string()),
             headers: Vec::new(),
         }))
+        .await
         .context("relay response channel closed")?;
     out_tx
         .send(BridgeMessage::ResponseChunk(ResponseChunk {
             request_id: request_id.to_string(),
             data: body,
         }))
+        .await
         .context("relay response channel closed")?;
     out_tx
         .send(BridgeMessage::ResponseEnd(ResponseEnd {
             request_id: request_id.to_string(),
         }))
+        .await
         .context("relay response channel closed")?;
     Ok(())
 }

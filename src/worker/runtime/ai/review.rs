@@ -110,6 +110,7 @@ pub(super) async fn handle_llm_review_gate(
                         request_id: request.request_id.clone(),
                     },
                 ))
+                .await
                 .is_err()
             {
                 state

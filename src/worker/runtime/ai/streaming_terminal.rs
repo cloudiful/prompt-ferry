@@ -103,6 +103,7 @@ pub(super) async fn finish_failure(
             .send(BridgeMessage::ResponseEnd(ResponseEnd {
                 request_id: request.request_id.clone(),
             }))
+            .await
             .context("relay response channel closed")?;
     } else {
         services
@@ -113,6 +114,7 @@ pub(super) async fn finish_failure(
                 code: code.to_string(),
                 message: message.to_string(),
             }))
+            .await
             .context("relay response channel closed")?;
     }
     Ok(())

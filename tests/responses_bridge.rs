@@ -234,6 +234,50 @@ async fn preserves_native_responses_failure_terminals_without_synthetic_error() 
 }
 
 #[tokio::test]
+async fn streams_many_sse_events_from_single_upstream_chunk_without_bridge_backpressure() {
+    let upstream_addr = spawn_native_responses_upstream(ResponsesUpstreamMode::ManyEvents).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Responses);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "gpt-test",
+            "input": "hello",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.unwrap();
+    assert_eq!(
+        body.matches("\"type\":\"response.output_text.delta\"")
+            .count(),
+        MANY_EVENTS_COUNT,
+        "body={body}"
+    );
+    assert!(
+        body.contains("\"type\":\"response.completed\""),
+        "body={body}"
+    );
+    assert!(!body.contains("relay_bridge_backpressure"), "body={body}");
+    assert!(
+        !body.contains("\"code\":\"relay_bridge_error\""),
+        "body={body}"
+    );
+
+    worker_handle.abort();
+}
+
+#[tokio::test]
 async fn wraps_native_responses_midstream_failure_as_sse_error_event() {
     let upstream_addr =
         spawn_native_responses_upstream(ResponsesUpstreamMode::MidstreamError).await;
@@ -1078,7 +1122,10 @@ enum ResponsesUpstreamMode {
     IncompleteTerminal,
     ErrorTerminal,
     MidstreamError,
+    ManyEvents,
 }
+
+const MANY_EVENTS_COUNT: usize = 300;
 
 async fn fetch_native_responses(mode: ResponsesUpstreamMode) -> (StatusCode, String) {
     let upstream_addr = spawn_native_responses_upstream(mode).await;
@@ -1221,6 +1268,11 @@ async fn fake_native_responses_stream(
             ))]
         }
         ResponsesUpstreamMode::MidstreamError => unreachable!("handled by raw tcp server"),
+        ResponsesUpstreamMode::ManyEvents => {
+            vec![Ok::<Bytes, std::io::Error>(Bytes::from(
+                native_responses_many_events_sse(MANY_EVENTS_COUNT),
+            ))]
+        }
     };
     let stream = futures::stream::iter(chunks);
     let mut response = Response::new(Body::from_stream(stream));
@@ -1300,6 +1352,24 @@ async fn write_chunk(stream: &mut tokio::net::TcpStream, body: &[u8]) {
         .unwrap();
     stream.write_all(body).await.unwrap();
     stream.write_all(b"\r\n").await.unwrap();
+}
+
+fn native_responses_many_events_sse(event_count: usize) -> String {
+    let mut body = String::from(
+        "event: response.created\n\
+         data: {\"type\":\"response.created\"}\n\n",
+    );
+    for index in 0..event_count {
+        body.push_str("event: response.output_text.delta\n");
+        body.push_str(&format!(
+            "data: {{\"type\":\"response.output_text.delta\",\"delta\":\"evt_{index}\"}}\n\n"
+        ));
+    }
+    body.push_str(
+        "event: response.completed\n\
+         data: {\"type\":\"response.completed\"}\n\n",
+    );
+    body
 }
 
 fn native_responses_passthrough_sse() -> String {

@@ -119,17 +119,20 @@ pub(super) async fn process_models_request(
                 content_type: Some("application/json".to_string()),
                 headers: Vec::new(),
             }))
+            .await
             .context("relay response channel closed")?;
         out_tx
             .send(BridgeMessage::ResponseChunk(ResponseChunk {
                 request_id: request.request_id.clone(),
                 data: body.clone().into_bytes(),
             }))
+            .await
             .context("relay response channel closed")?;
         out_tx
             .send(BridgeMessage::ResponseEnd(ResponseEnd {
                 request_id: request.request_id.clone(),
             }))
+            .await
             .context("relay response channel closed")?;
         record_usage_event(
             Some(state),
@@ -185,17 +188,20 @@ pub(super) async fn process_models_request(
             content_type: Some("application/json".to_string()),
             headers: Vec::new(),
         }))
+        .await
         .context("relay response channel closed")?;
     out_tx
         .send(BridgeMessage::ResponseChunk(ResponseChunk {
             request_id: request.request_id.clone(),
             data: body.clone().into_bytes(),
         }))
+        .await
         .context("relay response channel closed")?;
     out_tx
         .send(BridgeMessage::ResponseEnd(ResponseEnd {
             request_id: request.request_id.clone(),
         }))
+        .await
         .context("relay response channel closed")?;
     record_usage_event(
         Some(state),

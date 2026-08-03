@@ -68,7 +68,8 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
                 status: StatusCode::SERVICE_UNAVAILABLE.as_u16(),
                 content_type: Some("application/json".to_string()),
                 headers: Vec::new(),
-            }));
+            }))
+            .await;
         return;
     };
     let server = if let Some(server_name) = metadata.server_name.as_deref() {
@@ -105,7 +106,8 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
             Some("application/json".to_string()),
             Vec::new(),
             body.clone().into_bytes(),
-        );
+        )
+        .await;
         record_mcp_request_event(
             &McpResponseContext {
                 request: &request,
@@ -271,7 +273,8 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
                 Some("application/json".to_string()),
                 Vec::new(),
                 body.clone().into_bytes(),
-            );
+            )
+            .await;
             record_mcp_request_event(
                 &response_context,
                 FailurePayload {
@@ -359,7 +362,8 @@ async fn send_mcp_failure(
         Some("application/json".to_string()),
         Vec::new(),
         body.clone().into_bytes(),
-    );
+    )
+    .await;
     record_mcp_request_event(
         &McpResponseContext {
             request,
@@ -384,7 +388,7 @@ async fn send_mcp_failure(
     .await;
 }
 
-fn send_mcp_response(
+async fn send_mcp_response(
     services: &RuntimeServices,
     request_id: &str,
     status: u16,
@@ -399,18 +403,21 @@ fn send_mcp_response(
             status,
             content_type,
             headers,
-        }));
+        }))
+        .await;
     if !body.is_empty() {
         let _ = services
             .out_tx
             .send(BridgeMessage::McpResponseChunk(McpResponseChunk {
                 request_id: request_id.to_string(),
                 data: body,
-            }));
+            }))
+            .await;
     }
     let _ = services
         .out_tx
         .send(BridgeMessage::McpResponseEnd(McpResponseEnd {
             request_id: request_id.to_string(),
-        }));
+        }))
+        .await;
 }

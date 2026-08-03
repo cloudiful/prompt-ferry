@@ -21,7 +21,7 @@ pub(super) async fn handle_relay_bridge_message(
     match message {
         BridgeMessage::RequestStart(request) => {
             let Some(active_guard) = services.runtime_state.try_track_request() else {
-                send_worker_shutdown_response(&services.out_tx, &request.request_id);
+                send_worker_shutdown_response(&services.out_tx, &request.request_id).await;
                 return;
             };
             let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>(REQUEST_STREAM_BUFFER);
@@ -84,7 +84,8 @@ pub(super) async fn handle_relay_bridge_message(
                                     status: StatusCode::BAD_GATEWAY.as_u16(),
                                     code: error_code.to_string(),
                                     message: safe_error(&err, redact_enabled, request.user_id),
-                                }));
+                                }))
+                                .await;
                         }
                     }
                 }
@@ -129,7 +130,7 @@ pub(super) async fn handle_relay_bridge_message(
         }
         BridgeMessage::McpRequestStart(request) => {
             let Some(active_guard) = services.runtime_state.try_track_request() else {
-                send_worker_shutdown_mcp_response(&services.out_tx, &request.request_id);
+                send_worker_shutdown_mcp_response(&services.out_tx, &request.request_id).await;
                 return;
             };
             let (chunk_tx, chunk_rx) = mpsc::channel::<Vec<u8>>(REQUEST_STREAM_BUFFER);
@@ -221,7 +222,7 @@ pub(super) async fn handle_relay_bridge_message(
         }
         BridgeMessage::RealtimeSessionStart(request) => {
             let Some(active_guard) = services.runtime_state.try_track_request() else {
-                send_worker_shutdown_response(&services.out_tx, &request.request_id);
+                send_worker_shutdown_response(&services.out_tx, &request.request_id).await;
                 return;
             };
             let (event_tx, event_rx) =
@@ -270,7 +271,7 @@ pub(super) async fn handle_relay_bridge_message(
             }
         }
         BridgeMessage::Ping => {
-            let _ = services.out_tx.send(BridgeMessage::Pong);
+            let _ = services.out_tx.send(BridgeMessage::Pong).await;
         }
         BridgeMessage::Pong => {}
         BridgeMessage::ApprovalPending(ApprovalPending { .. })

@@ -70,7 +70,8 @@ pub(super) async fn handle_streaming_transport_response<S>(
             Some(content_type),
             headers,
             restored_body.clone(),
-        );
+        )
+        .await;
         let ok = (200..300).contains(&status);
         let response_body = (ok && request_content_logging.mode.captures_normalized())
             .then(|| format_mcp_response_body(&restored_body))
@@ -104,34 +105,35 @@ pub(super) async fn handle_streaming_transport_response<S>(
     let mut success_body_truncated = false;
     let mut streamed_chunks = 0usize;
     let mut streamed_bytes = 0usize;
-    let mut failure =
-        match services
-            .out_tx
-            .send(BridgeMessage::McpResponseStart(McpResponseStart {
-                request_id: request.request_id.clone(),
+    let mut failure = match services
+        .out_tx
+        .send(BridgeMessage::McpResponseStart(McpResponseStart {
+            request_id: request.request_id.clone(),
+            status,
+            content_type: Some(content_type.clone()),
+            headers,
+        }))
+        .await
+    {
+        Ok(()) => None,
+        Err(err) => {
+            warn!(
+                category = "mcp_bridge_diag",
+                phase = "response_start",
+                request_id = %request.request_id,
                 status,
-                content_type: Some(content_type.clone()),
-                headers,
-            })) {
-            Ok(()) => None,
-            Err(err) => {
-                warn!(
-                    category = "mcp_bridge_diag",
-                    phase = "response_start",
-                    request_id = %request.request_id,
-                    status,
-                    error = %err,
-                    "failed to send MCP response start from worker to relay"
-                );
-                Some(FailurePayload {
-                    status: StatusCode::BAD_GATEWAY,
-                    error_code: "mcp_stream_disconnected".to_string(),
-                    error_message: format!("failed to send MCP response start to relay: {err}"),
-                    upstream_error_body: None,
-                    response_body: None,
-                })
-            }
-        };
+                error = %err,
+                "failed to send MCP response start from worker to relay"
+            );
+            Some(FailurePayload {
+                status: StatusCode::BAD_GATEWAY,
+                error_code: "mcp_stream_disconnected".to_string(),
+                error_message: format!("failed to send MCP response start to relay: {err}"),
+                upstream_error_body: None,
+                response_body: None,
+            })
+        }
+    };
     while failure.is_none() {
         let Some(chunk) = futures::StreamExt::next(&mut stream).await else {
             break;
@@ -157,7 +159,9 @@ pub(super) async fn handle_streaming_transport_response<S>(
                     .send(BridgeMessage::McpResponseChunk(McpResponseChunk {
                         request_id: request.request_id.clone(),
                         data: chunk.to_vec(),
-                    })) {
+                    }))
+                    .await
+                {
                     Ok(()) => {
                         streamed_chunks += 1;
                         streamed_bytes += chunk_bytes;
@@ -193,15 +197,15 @@ pub(super) async fn handle_streaming_transport_response<S>(
                     redaction_enabled(services.admin_state()),
                     request_ctx.user_id,
                 );
-                if let Err(send_err) =
-                    services
-                        .out_tx
-                        .send(BridgeMessage::ResponseError(ResponseError {
-                            request_id: request.request_id.clone(),
-                            status: StatusCode::BAD_GATEWAY.as_u16(),
-                            code: "mcp_stream_error".to_string(),
-                            message: error_message.clone(),
-                        }))
+                if let Err(send_err) = services
+                    .out_tx
+                    .send(BridgeMessage::ResponseError(ResponseError {
+                        request_id: request.request_id.clone(),
+                        status: StatusCode::BAD_GATEWAY.as_u16(),
+                        code: "mcp_stream_error".to_string(),
+                        message: error_message.clone(),
+                    }))
+                    .await
                 {
                     warn!(
                         category = "mcp_bridge_diag",
@@ -230,6 +234,7 @@ pub(super) async fn handle_streaming_transport_response<S>(
             .send(BridgeMessage::McpResponseEnd(McpResponseEnd {
                 request_id: request.request_id.clone(),
             }))
+            .await
         {
             warn!(
                 category = "mcp_bridge_diag",
@@ -318,7 +323,8 @@ pub(super) async fn handle_buffered_transport_response(
         Some(content_type),
         headers,
         body,
-    );
+    )
+    .await;
     record_mcp_request_event(
         context,
         FailurePayload {

@@ -41,7 +41,8 @@ pub(in crate::worker::runtime) async fn start_realtime_session(
                 status: StatusCode::BAD_GATEWAY.as_u16(),
                 code: code.to_string(),
                 message,
-            }));
+            }))
+            .await;
     }
     services
         .runtime_state
@@ -109,7 +110,7 @@ async fn run_realtime_session(
                             code,
                             reason,
                             response_started: false,
-                        }));
+                        })).await;
                         break;
                     }
                     None => break,
@@ -123,7 +124,7 @@ async fn run_realtime_session(
                         let _ = services.out_tx.send(BridgeMessage::RealtimeServerEvent(RealtimeServerEventMessage {
                             request_id: request.request_id.clone(),
                             event_json: serialized,
-                        }));
+                        })).await;
                     }
                     Some(Ok(Message::Binary(_))) => {
                         return Err(anyhow!("upstream returned unsupported binary Realtime frame"));
@@ -134,7 +135,7 @@ async fn run_realtime_session(
                             code: frame.as_ref().map(|frame| u16::from(frame.code)),
                             reason: frame.map(|frame| frame.reason.to_string()),
                             response_started: true,
-                        }));
+                        })).await;
                         break;
                     }
                     Some(Ok(Message::Ping(payload))) => {
@@ -149,7 +150,7 @@ async fn run_realtime_session(
                             code: None,
                             reason: Some("upstream websocket closed".to_string()),
                             response_started: true,
-                        }));
+                        })).await;
                         break;
                     }
                 }

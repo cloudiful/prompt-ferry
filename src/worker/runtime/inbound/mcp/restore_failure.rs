@@ -25,7 +25,8 @@ pub(super) async fn handle_restore_failure(
         Some("application/json".to_string()),
         Vec::new(),
         client_body,
-    );
+    )
+    .await;
     record_mcp_request_event(
         context,
         FailurePayload {

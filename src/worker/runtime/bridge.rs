@@ -1,13 +1,7 @@
-use std::{
-    fmt,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
+use std::{fmt, sync::Arc};
 
-use crate::protocol::BridgeMessage;
-use tokio::sync::mpsc;
+use crate::protocol::{BridgeMessage, McpResponseChunk, ResponseChunk};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 
 const BRIDGE_OUTBOUND_MAX_BYTES: usize = 16 * 1024 * 1024;
 
@@ -15,18 +9,19 @@ const BRIDGE_OUTBOUND_MAX_BYTES: usize = 16 * 1024 * 1024;
 pub(super) struct BridgeSender {
     data_tx: mpsc::Sender<BridgeData>,
     control_tx: mpsc::UnboundedSender<BridgeMessage>,
-    queued_bytes: Arc<AtomicUsize>,
+    queued_bytes: Arc<Semaphore>,
 }
 
 pub(super) struct BridgeData {
     pub(super) message: BridgeMessage,
-    pub(super) bytes: usize,
+    #[allow(dead_code)]
+    permit: OwnedSemaphorePermit,
 }
 
 #[derive(Debug)]
 pub(super) enum BridgeSendError {
     Closed,
-    Full,
+    TooLarge,
     Encoding(String),
 }
 
@@ -34,7 +29,7 @@ impl BridgeSendError {
     pub(super) fn diagnostic_reason(&self) -> &'static str {
         match self {
             Self::Closed => "relay_bridge_closed",
-            Self::Full => "relay_bridge_backpressure",
+            Self::TooLarge => "relay_bridge_message_too_large",
             Self::Encoding(_) => "relay_bridge_encode_error",
         }
     }
@@ -44,7 +39,9 @@ impl fmt::Display for BridgeSendError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Closed => formatter.write_str("relay bridge channel closed"),
-            Self::Full => formatter.write_str("relay bridge outbound queue is full"),
+            Self::TooLarge => {
+                formatter.write_str("relay bridge message exceeds the outbound byte budget")
+            }
             Self::Encoding(error) => write!(formatter, "failed to encode bridge message: {error}"),
         }
     }
@@ -64,7 +61,7 @@ impl BridgeSender {
             Self {
                 data_tx,
                 control_tx,
-                queued_bytes: Arc::new(AtomicUsize::new(0)),
+                queued_bytes: Arc::new(Semaphore::new(BRIDGE_OUTBOUND_MAX_BYTES)),
             },
             control_rx,
             data_rx,
@@ -76,50 +73,88 @@ impl BridgeSender {
         Self::channel().0
     }
 
-    pub(super) fn send(&self, message: BridgeMessage) -> Result<(), BridgeSendError> {
+    #[cfg(test)]
+    pub(super) fn test_channel_with_byte_budget(
+        byte_budget: usize,
+    ) -> (
+        Self,
+        mpsc::UnboundedReceiver<BridgeMessage>,
+        mpsc::Receiver<BridgeData>,
+    ) {
+        let (control_tx, control_rx) = mpsc::unbounded_channel();
+        let (data_tx, data_rx) = mpsc::channel(256);
+        (
+            Self {
+                data_tx,
+                control_tx,
+                queued_bytes: Arc::new(Semaphore::new(byte_budget)),
+            },
+            control_rx,
+            data_rx,
+        )
+    }
+
+    pub(super) async fn send(&self, message: BridgeMessage) -> Result<(), BridgeSendError> {
         if is_control_message(&message) {
             return self
                 .control_tx
                 .send(message)
                 .map_err(|_| BridgeSendError::Closed);
         }
-        let bytes = crate::bridge_wire::encode_message(&message)
-            .map_err(|error| BridgeSendError::Encoding(error.to_string()))?
-            .len();
-        let mut current = self.queued_bytes.load(Ordering::Acquire);
-        loop {
-            let Some(next) = current.checked_add(bytes) else {
-                return Err(BridgeSendError::Full);
-            };
-            if next > BRIDGE_OUTBOUND_MAX_BYTES {
-                return Err(BridgeSendError::Full);
-            }
-            match self.queued_bytes.compare_exchange_weak(
-                current,
-                next,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => break,
-                Err(actual) => current = actual,
-            }
+        let prepared = prepare_bridge_messages(message)?;
+        for (message, bytes) in prepared {
+            self.send_data_message(message, bytes).await?;
         }
-        match self.data_tx.try_send(BridgeData { message, bytes }) {
-            Ok(()) => Ok(()),
-            Err(mpsc::error::TrySendError::Closed(_)) => {
-                self.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
-                Err(BridgeSendError::Closed)
-            }
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                self.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
-                Err(BridgeSendError::Full)
-            }
-        }
+        Ok(())
     }
 
-    pub(super) fn release_data(&self, bytes: usize) {
-        self.queued_bytes.fetch_sub(bytes, Ordering::AcqRel);
+    async fn send_data_message(
+        &self,
+        message: BridgeMessage,
+        bytes: usize,
+    ) -> Result<(), BridgeSendError> {
+        let permit = self
+            .queued_bytes
+            .clone()
+            .acquire_many_owned(bytes as u32)
+            .await
+            .map_err(|_| BridgeSendError::Closed)?;
+        self.data_tx
+            .send(BridgeData { message, permit })
+            .await
+            .map_err(|_| BridgeSendError::Closed)
     }
+}
+
+fn prepare_bridge_messages(
+    message: BridgeMessage,
+) -> Result<Vec<(BridgeMessage, usize)>, BridgeSendError> {
+    let bytes = crate::bridge_wire::encode_message(&message)
+        .map_err(|error| BridgeSendError::Encoding(error.to_string()))?
+        .len();
+    if bytes <= BRIDGE_OUTBOUND_MAX_BYTES {
+        return Ok(vec![(message, bytes)]);
+    }
+    let mut pending: std::collections::VecDeque<BridgeMessage> = fragment_chunk_message(message)
+        .ok_or(BridgeSendError::TooLarge)?
+        .into();
+    let mut prepared = Vec::new();
+    while let Some(fragment) = pending.pop_front() {
+        let bytes = crate::bridge_wire::encode_message(&fragment)
+            .map_err(|error| BridgeSendError::Encoding(error.to_string()))?
+            .len();
+        if bytes <= BRIDGE_OUTBOUND_MAX_BYTES {
+            prepared.push((fragment, bytes));
+            continue;
+        }
+        // zstd can expand an incompressible payload just past the budget; requesting
+        // more permits than the semaphore capacity would wait forever, so halve the
+        // fragment until its encoded size fits.
+        let (head, tail) = halve_chunk_message(fragment).ok_or(BridgeSendError::TooLarge)?;
+        pending.push_front(tail);
+        pending.push_front(head);
+    }
+    Ok(prepared)
 }
 
 fn is_control_message(message: &BridgeMessage) -> bool {
@@ -130,59 +165,47 @@ fn is_control_message(message: &BridgeMessage) -> bool {
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{BridgeSendError, BridgeSender};
-    use crate::protocol::{BridgeMessage, ResponseChunk, ResponseError};
-
-    fn response_chunk() -> BridgeMessage {
-        BridgeMessage::ResponseChunk(ResponseChunk {
-            request_id: "request-1".to_string(),
-            data: vec![1],
-        })
+fn fragment_chunk_message(message: BridgeMessage) -> Option<Vec<BridgeMessage>> {
+    let (request_id, mut data, is_mcp) = take_chunk_parts(message)?;
+    let fragment_limit = fragment_data_limit(&request_id, is_mcp)?;
+    let mut fragments = Vec::new();
+    while !data.is_empty() {
+        let mut head = std::mem::take(&mut data);
+        data = head.split_off(head.len().min(fragment_limit));
+        fragments.push(build_chunk_message(request_id.clone(), head, is_mcp));
     }
+    Some(fragments)
+}
 
-    #[test]
-    fn distinguishes_closed_data_queue() {
-        let (sender, _control_rx, data_rx) = BridgeSender::channel();
-        drop(data_rx);
+fn fragment_data_limit(request_id: &str, is_mcp: bool) -> Option<usize> {
+    let empty = build_chunk_message(request_id.to_string(), Vec::new(), is_mcp);
+    let overhead = crate::bridge_wire::encode_message(&empty).ok()?.len();
+    let limit = BRIDGE_OUTBOUND_MAX_BYTES.saturating_sub(overhead);
+    (limit > 0).then_some(limit)
+}
 
-        assert!(matches!(
-            sender.send(response_chunk()),
-            Err(BridgeSendError::Closed)
-        ));
+fn halve_chunk_message(message: BridgeMessage) -> Option<(BridgeMessage, BridgeMessage)> {
+    let (request_id, mut data, is_mcp) = take_chunk_parts(message)?;
+    let mut head = std::mem::take(&mut data);
+    data = head.split_off(head.len() / 2);
+    Some((
+        build_chunk_message(request_id.clone(), head, is_mcp),
+        build_chunk_message(request_id, data, is_mcp),
+    ))
+}
+
+fn take_chunk_parts(message: BridgeMessage) -> Option<(String, Vec<u8>, bool)> {
+    match message {
+        BridgeMessage::ResponseChunk(chunk) => Some((chunk.request_id, chunk.data, false)),
+        BridgeMessage::McpResponseChunk(chunk) => Some((chunk.request_id, chunk.data, true)),
+        _ => None,
     }
+}
 
-    #[test]
-    fn distinguishes_full_data_queue() {
-        let (sender, _control_rx, _data_rx) = BridgeSender::channel();
-        for _ in 0..256 {
-            sender.send(response_chunk()).expect("queue has capacity");
-        }
-
-        assert!(matches!(
-            sender.send(response_chunk()),
-            Err(BridgeSendError::Full)
-        ));
-    }
-
-    #[test]
-    fn terminal_errors_bypass_full_data_queue() {
-        let (sender, mut control_rx, _data_rx) = BridgeSender::channel();
-        for _ in 0..256 {
-            sender.send(response_chunk()).expect("queue has capacity");
-        }
-
-        let error = BridgeMessage::ResponseError(ResponseError {
-            request_id: "request-1".to_string(),
-            status: 502,
-            code: "relay_bridge_error".to_string(),
-            message: "bridge failed".to_string(),
-        });
-        sender
-            .send(error.clone())
-            .expect("terminal errors are prioritized");
-
-        assert_eq!(control_rx.try_recv(), Ok(error));
+fn build_chunk_message(request_id: String, data: Vec<u8>, is_mcp: bool) -> BridgeMessage {
+    if is_mcp {
+        BridgeMessage::McpResponseChunk(McpResponseChunk { request_id, data })
+    } else {
+        BridgeMessage::ResponseChunk(ResponseChunk { request_id, data })
     }
 }
