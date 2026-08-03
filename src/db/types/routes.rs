@@ -40,6 +40,30 @@ impl ResponsesContinuationPolicy {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatReasoningReplayPolicy {
+    /// Restore reasoning only for recognized direct DeepSeek/Minimax endpoints
+    /// combined with a known reasoning model.
+    #[default]
+    Auto,
+    /// Always restore reasoning from stored artifacts, even for proxy targets.
+    ForceReplay,
+    /// Forward chat history untouched: never read artifacts, never inject
+    /// reasoning, never reject locally for missing reasoning.
+    ForcePassthrough,
+}
+
+impl ChatReasoningReplayPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::ForceReplay => "force_replay",
+            Self::ForcePassthrough => "force_passthrough",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct StreamDeltaBatchingSettings {
     pub enabled: bool,
@@ -77,6 +101,7 @@ pub struct RouteConfig {
     pub native_api: NativeApi,
     pub upstream_model: Option<String>,
     pub responses_continuation_policy: ResponsesContinuationPolicy,
+    pub chat_reasoning_replay_policy: ChatReasoningReplayPolicy,
     pub route_selection_reason: RouteSelectionReason,
 }
 
@@ -91,6 +116,7 @@ pub struct ModelRouteTarget {
     pub enabled: bool,
     pub upstream_model: Option<String>,
     pub responses_continuation_policy: ResponsesContinuationPolicy,
+    pub chat_reasoning_replay_policy: ChatReasoningReplayPolicy,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -133,6 +159,7 @@ pub struct ModelRouteTargetCreate {
     pub enabled: bool,
     pub upstream_model: Option<String>,
     pub responses_continuation_policy: ResponsesContinuationPolicy,
+    pub chat_reasoning_replay_policy: ChatReasoningReplayPolicy,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -177,6 +204,7 @@ pub struct ModelRouteCandidateTarget {
     pub enabled: bool,
     pub upstream_model: Option<String>,
     pub responses_continuation_policy: ResponsesContinuationPolicy,
+    pub chat_reasoning_replay_policy: ChatReasoningReplayPolicy,
 }
 
 #[derive(Debug, Clone)]

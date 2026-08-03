@@ -4,9 +4,10 @@ use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::config::NativeApi;
 use crate::db::types::{
-    EndpointApiKey, ModelEndpointRule, ModelEndpointRuleCreate, ModelEndpointRuleRow,
-    ModelRouteCandidate, ModelRouteCandidateTarget, ModelRoutePage, ModelRouteRoutingStrategy,
-    ModelRouteTarget, ResponsesContinuationPolicy, RouteConfig, SnapshotKey,
+    ChatReasoningReplayPolicy, EndpointApiKey, ModelEndpointRule, ModelEndpointRuleCreate,
+    ModelEndpointRuleRow, ModelRouteCandidate, ModelRouteCandidateTarget, ModelRoutePage,
+    ModelRouteRoutingStrategy, ModelRouteTarget, ResponsesContinuationPolicy, RouteConfig,
+    SnapshotKey,
 };
 
 mod hydrate;
@@ -50,6 +51,7 @@ struct ModelRouteCandidateRow {
     target_enabled: bool,
     upstream_model: Option<String>,
     responses_continuation_policy: String,
+    chat_reasoning_replay_policy: String,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -63,6 +65,7 @@ struct ModelRouteTargetRow {
     enabled: bool,
     upstream_model: Option<String>,
     responses_continuation_policy: String,
+    chat_reasoning_replay_policy: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -106,4 +109,9 @@ fn parse_routing_strategy(value: &str) -> ModelRouteRoutingStrategy {
 fn parse_responses_continuation_policy(value: &str) -> ResponsesContinuationPolicy {
     serde_json::from_value(serde_json::Value::String(value.to_string()))
         .unwrap_or(ResponsesContinuationPolicy::ForceReplay)
+}
+
+fn parse_chat_reasoning_replay_policy(value: &str) -> ChatReasoningReplayPolicy {
+    serde_json::from_value(serde_json::Value::String(value.to_string()))
+        .unwrap_or(ChatReasoningReplayPolicy::Auto)
 }

@@ -103,6 +103,7 @@ mod tests {
             native_api: NativeApi::Responses,
             upstream_model: None,
             responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
+            chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
             route_selection_reason: RouteSelectionReason::Default,
         };
         let response = send_upstream_request(

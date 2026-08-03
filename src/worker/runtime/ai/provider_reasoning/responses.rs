@@ -1,6 +1,6 @@
 use super::replay::{
-    ReplayFailureKind, load_tool_call_replay_state, replay_unavailable, resolve_replay_parents,
-    targets_deepseek,
+    ReplayFailureKind, load_tool_call_replay_state, replay_recognition_basis, replay_unavailable,
+    resolve_replay_parents, responses_reasoning_replay_enabled,
 };
 use crate::{
     db,
@@ -8,6 +8,7 @@ use crate::{
     worker_admin::AdminState,
 };
 use serde_json::{Value, json};
+use tracing::Instrument;
 
 pub(crate) async fn restore_responses_reasoning(
     admin_state: Option<&AdminState>,
@@ -27,9 +28,36 @@ pub(crate) async fn restore_responses_reasoning(
         .get("model")
         .and_then(Value::as_str)
         .map(str::to_string);
-    if !targets_deepseek(route, model.as_deref()) {
+    if !responses_reasoning_replay_enabled(route, model.as_deref()) {
         return Ok(None);
     }
+    let span = tracing::warn_span!(
+        "provider_responses_reasoning_replay",
+        stage = "before_forward",
+        policy = route.chat_reasoning_replay_policy.as_str(),
+        recognition = replay_recognition_basis(route, model.as_deref()),
+    );
+    restore_responses_reasoning_with_replay(
+        admin_state,
+        user_id,
+        route,
+        conversation_id,
+        parent_event_id,
+        value,
+    )
+    .instrument(span)
+    .await
+}
+
+async fn restore_responses_reasoning_with_replay(
+    admin_state: Option<&AdminState>,
+    user_id: Option<i64>,
+    route: &db::RouteConfig,
+    conversation_id: Option<uuid::Uuid>,
+    parent_event_id: Option<i64>,
+    mut value: Value,
+) -> Result<Option<Vec<u8>>, crate::openai_compat::CompatError> {
+    let object = value.as_object_mut().expect("request body is an object");
     let Some(input) = object.get_mut("input").and_then(Value::as_array_mut) else {
         return Ok(None);
     };

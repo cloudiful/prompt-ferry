@@ -266,6 +266,316 @@ async fn preserves_deepseek_reasoning_content_for_direct_chat_passthrough() -> a
 }
 
 #[tokio::test]
+async fn opencode_go_chat_history_passes_through_without_local_rejection() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    enable_prompt_logging(&schema).await?;
+
+    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_addr = spawn_replay_upstream(upstream_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let mut worker_handle =
+        spawn_worker(worker_addr, upstream_addr, &worker_database_url(&schema)?).await;
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let pool = db::connect(&worker_database_url(&schema)?).await?;
+    let endpoint = db::create_endpoint(
+        &pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "opencode-go-aggregate".to_string(),
+            base_url: format!("http://{upstream_addr}"),
+            native_api: prompt_ferry::config::NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "upstream-key".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    db::create_model_endpoint_rule(
+        &pool,
+        db::ModelEndpointRuleCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            model_pattern: "deepseek-v4-flash".to_string(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            session_affinity_lock_after_turns: 5,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            targets: vec![db::ModelRouteTargetCreate {
+                endpoint_id: endpoint.endpoint_id,
+                enabled: true,
+                upstream_model: None,
+                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::ForcePassthrough,
+            }],
+        },
+    )
+    .await?;
+    pool.close().await;
+
+    let client = reqwest::Client::new();
+    let turn1 = client
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "messages": [{"role":"user","content":"need weather"}],
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(turn1.status(), StatusCode::OK);
+    assert_eq!(wait_for_assistant_artifact(&schema).await?, (true, true));
+
+    let turn2 = client
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "messages": [
+                {"role":"user","content":"need weather"},
+                {"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Boston\"}"}}]},
+                {"role":"tool","tool_call_id":"call_1","content":"72F"}
+            ],
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(turn2.status(), StatusCode::OK);
+
+    let requests = upstream_log.bodies.lock().await;
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[1]["messages"][1]
+            .get("reasoning_content")
+            .is_none()
+    );
+    assert_eq!(
+        requests[1]["messages"][1]["tool_calls"][0]["id"].as_str(),
+        Some("call_1")
+    );
+    assert_eq!(requests[1]["messages"][2]["content"].as_str(), Some("72F"));
+
+    worker_handle.abort();
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn direct_deepseek_auto_restores_reasoning_content_for_chat_history() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    enable_prompt_logging(&schema).await?;
+
+    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_addr = spawn_replay_upstream(upstream_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let mut worker_handle =
+        spawn_worker(worker_addr, upstream_addr, &worker_database_url(&schema)?).await;
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let pool = db::connect(&worker_database_url(&schema)?).await?;
+    let endpoint = db::create_endpoint(
+        &pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "direct-deepseek".to_string(),
+            base_url: format!("http://{upstream_addr}/deepseek"),
+            native_api: prompt_ferry::config::NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "upstream-key".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    db::create_model_endpoint_rule(
+        &pool,
+        db::ModelEndpointRuleCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            model_pattern: "deepseek-v4-pro".to_string(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            session_affinity_lock_after_turns: 5,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            targets: vec![db::ModelRouteTargetCreate {
+                endpoint_id: endpoint.endpoint_id,
+                enabled: true,
+                upstream_model: None,
+                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
+            }],
+        },
+    )
+    .await?;
+    pool.close().await;
+
+    let client = reqwest::Client::new();
+    let turn1 = client
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "messages": [{"role":"user","content":"need weather"}],
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(turn1.status(), StatusCode::OK);
+    let artifact_row = wait_for_assistant_artifact(&schema).await?;
+    assert_eq!(artifact_row, (true, true));
+
+    let turn2 = client
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "messages": [
+                {"role":"user","content":"need weather"},
+                {"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Boston\"}"}}]},
+                {"role":"tool","tool_call_id":"call_1","content":"72F"}
+            ],
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(turn2.status(), StatusCode::OK);
+
+    let requests = upstream_log.bodies.lock().await;
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[1]["messages"][1]["reasoning_content"].as_str(),
+        Some("internal steps")
+    );
+
+    worker_handle.abort();
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn direct_deepseek_auto_rejects_missing_reasoning_before_forwarding() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    enable_prompt_logging(&schema).await?;
+
+    let upstream_log = Arc::new(ChatRequestLog {
+        omit_reasoning: true,
+        ..ChatRequestLog::default()
+    });
+    let upstream_addr = spawn_replay_upstream(upstream_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let mut worker_handle =
+        spawn_worker(worker_addr, upstream_addr, &worker_database_url(&schema)?).await;
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let pool = db::connect(&worker_database_url(&schema)?).await?;
+    let endpoint = db::create_endpoint(
+        &pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "direct-deepseek".to_string(),
+            base_url: format!("http://{upstream_addr}/deepseek"),
+            native_api: prompt_ferry::config::NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "upstream-key".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    db::create_model_endpoint_rule(
+        &pool,
+        db::ModelEndpointRuleCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            model_pattern: "deepseek-v4-pro".to_string(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            session_affinity_lock_after_turns: 5,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            targets: vec![db::ModelRouteTargetCreate {
+                endpoint_id: endpoint.endpoint_id,
+                enabled: true,
+                upstream_model: None,
+                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
+            }],
+        },
+    )
+    .await?;
+    pool.close().await;
+
+    let client = reqwest::Client::new();
+    let turn1 = client
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "messages": [{"role":"user","content":"need weather"}],
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(turn1.status(), StatusCode::OK);
+    let artifact_row = wait_for_assistant_artifact(&schema).await?;
+    assert_eq!(artifact_row, (false, true));
+
+    let turn2 = client
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "messages": [
+                {"role":"user","content":"need weather"},
+                {"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Boston\"}"}}]},
+                {"role":"tool","tool_call_id":"call_1","content":"72F"}
+            ],
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(turn2.status(), StatusCode::BAD_REQUEST);
+    let error_body = turn2.text().await?;
+    assert!(error_body.contains("replay_unavailable"));
+    assert!(error_body.contains("missing_reasoning"));
+
+    let requests = upstream_log.bodies.lock().await;
+    assert_eq!(requests.len(), 1);
+
+    worker_handle.abort();
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn replays_minimax_reasoning_details_for_chat_native_continuations() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
@@ -852,7 +1162,6 @@ async fn replays_without_reasoning_for_non_deepseek_routes() -> anyhow::Result<(
         }))
         .send()
         .await?;
-    assert_eq!(turn2.status(), StatusCode::OK);
 
     let requests = upstream_log.bodies.lock().await;
     assert_eq!(requests.len(), 2);
@@ -1156,6 +1465,7 @@ async fn passthrough_responses_native_tool_continuations_use_stored_replay() -> 
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -1267,6 +1577,7 @@ async fn restores_deepseek_responses_reasoning_without_conversation_identity() -
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForcePassthrough,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::ForceReplay,
             }],
         },
     )
@@ -1388,6 +1699,7 @@ async fn force_replay_does_not_infer_session_from_tool_output_without_explicit_i
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -1506,6 +1818,7 @@ async fn codex_thread_identity_keeps_tool_output_replay_on_one_conversation() ->
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -1681,12 +1994,14 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
                     enabled: true,
                     upstream_model: None,
                     responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                    chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
                 },
                 db::ModelRouteTargetCreate {
                     endpoint_id: right_code.endpoint_id,
                     enabled: true,
                     upstream_model: None,
                     responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                    chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
                 },
             ],
         },
@@ -1793,6 +2108,7 @@ async fn raw_passthrough_keeps_previous_response_id_without_replay_state() -> an
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForcePassthrough,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -1880,6 +2196,7 @@ async fn raw_passthrough_keeps_conversation_without_replay_state() -> anyhow::Re
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForcePassthrough,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -1963,6 +2280,7 @@ async fn replays_conversation_for_responses_native_upstream() -> anyhow::Result<
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -2198,6 +2516,7 @@ async fn local_conversation_replay_survives_upstream_without_conversation_id() -
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -2348,6 +2667,7 @@ async fn explicit_conversation_skips_failed_turn_when_selecting_parent() -> anyh
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )

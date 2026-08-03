@@ -63,7 +63,9 @@ pub(super) fn restore_reasoning_from_replay(
             );
             replay_unavailable(
                 ReplayFailureKind::MissingArtifact,
-                "stored replay state is missing an assistant tool-call artifact",
+                format!(
+                    "stored replay state is missing an assistant tool-call artifact for event `{parent_event_id}`"
+                ),
             )
         })?;
         let artifact_message = persisted_assistant_message(artifact).map_err(|_| {
@@ -99,7 +101,9 @@ pub(super) fn restore_reasoning_from_replay(
                 );
                 replay_unavailable(
                     ReplayFailureKind::MissingReasoning,
-                    "stored assistant tool-call turn is missing complete reasoning for the target reasoning provider",
+                    format!(
+                        "stored assistant tool-call turn (event `{parent_event_id}`) is missing complete reasoning for the target reasoning provider"
+                    ),
                 )
             })?;
         let assistant = messages[assistant_index].as_object_mut().ok_or_else(|| {
@@ -186,31 +190,118 @@ pub(super) fn replay_unavailable(
     warn!(
         failure_kind = kind.as_str(),
         error_code = "replay_unavailable",
+        stage = "before_forward",
         error_message = %message,
-        "provider reasoning replay is unavailable"
+        "provider reasoning replay is unavailable before forwarding"
     );
     crate::openai_compat::CompatError::new(
         StatusCode::BAD_REQUEST,
         "replay_unavailable",
         format!(
-            "{}: {message}. Start a new conversation or remove the old tool-call history.",
+            "{}: {message} The request was rejected before forwarding; the upstream provider was never called. Start a new conversation or remove the old tool-call history.",
             kind.as_str()
         ),
     )
 }
 
-pub(super) fn targets_reasoning_provider(route: &db::RouteConfig, model: Option<&str>) -> bool {
-    targets_deepseek(route, model) || targets_minimax(route, model)
+/// Whether chat request history should have reasoning restored for the route.
+///
+/// - `force_passthrough` never restores: history is forwarded untouched and the
+///   upstream decides whether it accepts the request.
+/// - `force_replay` always restores, overriding endpoint/model judgment for
+///   proxies that are known to forward to a reasoning provider.
+/// - `auto` requires both a recognized direct provider base URL and a known
+///   reasoning model, so aggregate proxies are no longer classified as direct
+///   reasoning providers by model name prefix alone.
+pub(super) fn chat_reasoning_replay_enabled(route: &db::RouteConfig, model: Option<&str>) -> bool {
+    match route.chat_reasoning_replay_policy {
+        db::ChatReasoningReplayPolicy::ForcePassthrough => false,
+        db::ChatReasoningReplayPolicy::ForceReplay => true,
+        db::ChatReasoningReplayPolicy::Auto => {
+            (direct_deepseek_endpoint(route) && deepseek_reasoning_model(model))
+                || (direct_minimax_endpoint(route) && minimax_reasoning_model(model))
+        }
+    }
 }
 
-pub(super) fn targets_deepseek(route: &db::RouteConfig, model: Option<&str>) -> bool {
+/// Whether Responses input items should have reasoning restored for the route.
+pub(super) fn responses_reasoning_replay_enabled(
+    route: &db::RouteConfig,
+    model: Option<&str>,
+) -> bool {
+    match route.chat_reasoning_replay_policy {
+        db::ChatReasoningReplayPolicy::ForcePassthrough => false,
+        db::ChatReasoningReplayPolicy::ForceReplay => true,
+        db::ChatReasoningReplayPolicy::Auto => {
+            direct_deepseek_endpoint(route) && deepseek_reasoning_model(model)
+        }
+    }
+}
+
+/// Why the route was recognized as a reasoning replay target (or not).
+pub(super) fn replay_recognition_basis(
+    route: &db::RouteConfig,
+    model: Option<&str>,
+) -> &'static str {
+    match route.chat_reasoning_replay_policy {
+        db::ChatReasoningReplayPolicy::ForcePassthrough => "policy_force_passthrough",
+        db::ChatReasoningReplayPolicy::ForceReplay => "policy_force_replay",
+        db::ChatReasoningReplayPolicy::Auto if chat_reasoning_replay_enabled(route, model) => {
+            "direct_endpoint_and_reasoning_model"
+        }
+        db::ChatReasoningReplayPolicy::Auto => {
+            if direct_deepseek_endpoint(route) || direct_minimax_endpoint(route) {
+                "direct_endpoint_without_reasoning_model"
+            } else {
+                "no_direct_reasoning_endpoint"
+            }
+        }
+    }
+}
+
+pub(super) fn direct_deepseek_endpoint(route: &db::RouteConfig) -> bool {
     route.base_url.to_ascii_lowercase().contains("deepseek")
-        || model.is_some_and(|model| model.trim().to_ascii_lowercase().starts_with("deepseek-"))
 }
 
-pub(super) fn targets_minimax(route: &db::RouteConfig, model: Option<&str>) -> bool {
+pub(super) fn direct_minimax_endpoint(route: &db::RouteConfig) -> bool {
     route.base_url.to_ascii_lowercase().contains("minimax")
-        || model.is_some_and(|model| model.trim().to_ascii_lowercase().starts_with("minimax-"))
+}
+
+pub(super) fn deepseek_reasoning_model(model: Option<&str>) -> bool {
+    model.is_some_and(|model| {
+        let model = model.trim().to_ascii_lowercase();
+        model.starts_with("deepseek-reasoner") || model.starts_with("deepseek-v4")
+    })
+}
+
+pub(super) fn minimax_reasoning_model(model: Option<&str>) -> bool {
+    model.is_some_and(|model| {
+        let model = model.trim().to_ascii_lowercase();
+        model.starts_with("minimax-m1")
+            || model.starts_with("minimax-m2")
+            || model.starts_with("minimax-m3")
+    })
+}
+
+/// Whether the route targets a Minimax reasoning provider for chat body
+/// defaults (`reasoning_split`, `reasoning_details` conversion).
+///
+/// `force_passthrough` never rewrites chat history; `force_replay` keeps the
+/// legacy endpoint-or-model-prefix judgment for proxies that forward to
+/// Minimax; `auto` requires a direct Minimax base URL and a known reasoning
+/// model.
+pub(crate) fn targets_minimax(route: &db::RouteConfig, model: Option<&str>) -> bool {
+    match route.chat_reasoning_replay_policy {
+        db::ChatReasoningReplayPolicy::ForcePassthrough => false,
+        db::ChatReasoningReplayPolicy::ForceReplay => {
+            route.base_url.to_ascii_lowercase().contains("minimax")
+                || model
+                    .is_some_and(|model| model.trim().to_ascii_lowercase().starts_with("minimax-"))
+        }
+        db::ChatReasoningReplayPolicy::Auto => {
+            direct_minimax_endpoint(route) && minimax_reasoning_model(model)
+        }
+    }
 }
 
 pub(super) fn has_meaningful_value(value: &Value) -> bool {

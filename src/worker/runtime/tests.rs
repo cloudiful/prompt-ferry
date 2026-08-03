@@ -565,6 +565,7 @@ fn sample_candidate() -> ModelRouteCandidate {
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
             },
             ModelRouteCandidateTarget {
                 target_id: uuid::Uuid::new_v4(),
@@ -588,6 +589,7 @@ fn sample_candidate() -> ModelRouteCandidate {
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
             },
         ],
     }
@@ -658,6 +660,7 @@ fn endpoint_key_lb_uses_stable_selection_and_first_key_fallback() {
         native_api: crate::config::NativeApi::Responses,
         upstream_model: None,
         responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
+        chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
         route_selection_reason: db::RouteSelectionReason::Default,
     };
     let sticky_prompt_log = RequestPromptLog {
@@ -732,6 +735,7 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
         native_api: crate::config::NativeApi::Responses,
         upstream_model: None,
         responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
+        chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
         route_selection_reason: db::RouteSelectionReason::Default,
     };
     let fixed_prompt_log = RequestPromptLog {

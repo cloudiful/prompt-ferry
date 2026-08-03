@@ -439,8 +439,7 @@ fn with_minimax_chat_request_defaults(
 }
 
 fn targets_minimax(route: &db::RouteConfig, model: Option<&str>) -> bool {
-    route.base_url.to_ascii_lowercase().contains("minimax")
-        || model.is_some_and(|model| model.trim().to_ascii_lowercase().starts_with("minimax-"))
+    super::provider_reasoning::targets_minimax(route, model)
 }
 
 fn should_passthrough_responses(route: &db::RouteConfig) -> bool {
@@ -529,6 +528,14 @@ mod tests {
     }
 
     #[test]
+    fn does_not_rewrite_minimax_requests_when_auto_has_no_direct_endpoint() {
+        let route = sample_route("https://gateway.example.com");
+        let body = br#"{"model":"MiniMax-M2.5","messages":[{"role":"user","content":"ping"}]}"#;
+
+        assert!(with_minimax_chat_request_defaults(&route, body).is_none());
+    }
+
+    #[test]
     fn preserves_existing_reasoning_split_for_minimax_chat_requests() {
         let route = sample_route("https://api.minimax.io");
         let body =
@@ -538,8 +545,11 @@ mod tests {
     }
 
     #[test]
-    fn adds_reasoning_split_when_proxy_route_targets_minimax_model() {
-        let route = sample_route("https://gateway.example.com");
+    fn force_replay_overrides_auto_for_proxy_endpoints_targeting_minimax_models() {
+        let route = db::RouteConfig {
+            chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::ForceReplay,
+            ..sample_route("https://gateway.example.com")
+        };
         let body = br#"{"model":"MiniMax-M2.5","messages":[{"role":"user","content":"ping"}]}"#;
 
         let patched =
@@ -547,6 +557,17 @@ mod tests {
         let json: Value = serde_json::from_slice(&patched).expect("patched body should be json");
 
         assert_eq!(json["reasoning_split"], Value::Bool(true));
+    }
+
+    #[test]
+    fn force_passthrough_never_rewrites_minimax_chat_requests() {
+        let route = db::RouteConfig {
+            chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::ForcePassthrough,
+            ..sample_route("https://api.minimax.io")
+        };
+        let body = br#"{"model":"MiniMax-M3","messages":[{"role":"user","content":"ping"}]}"#;
+
+        assert!(with_minimax_chat_request_defaults(&route, body).is_none());
     }
 
     #[test]
@@ -573,6 +594,15 @@ mod tests {
         assert!(with_minimax_chat_request_defaults(&route, body).is_none());
     }
 
+    #[test]
+    fn skips_auto_replay_for_proxy_endpoint_with_deepseek_model_prefix() {
+        let route = sample_route("https://gateway.example.com");
+        let body =
+            br#"{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"ping"}]}"#;
+
+        assert!(with_minimax_chat_request_defaults(&route, body).is_none());
+    }
+
     fn sample_route(base_url: &str) -> db::RouteConfig {
         db::RouteConfig {
             route_id: uuid::Uuid::new_v4(),
@@ -587,6 +617,7 @@ mod tests {
             native_api: crate::config::NativeApi::Chat,
             upstream_model: None,
             responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
+            chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
             route_selection_reason: RouteSelectionReason::Default,
         }
     }

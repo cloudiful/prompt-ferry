@@ -237,6 +237,7 @@ mod auto_protocol_tests {
             native_api,
             upstream_model: None,
             responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+            chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
             route_selection_reason: db::RouteSelectionReason::Default,
         }
     }

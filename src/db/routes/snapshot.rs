@@ -17,6 +17,7 @@ pub async fn effective_route(pool: &PgPool, user_id: i64) -> Result<Option<Route
             native_api: parse_native_api(&row.native_api),
             upstream_model: None,
             responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
+            chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
             route_selection_reason: crate::db::RouteSelectionReason::Default,
         });
     match route {

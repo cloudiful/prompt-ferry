@@ -26,6 +26,7 @@ function addTarget(): void {
     enabled: true,
     upstream_model: '',
     responses_continuation_policy: 'force_replay',
+    chat_reasoning_replay_policy: 'auto',
   })
 }
 
@@ -103,6 +104,23 @@ const continuationPolicyOptions = computed(
   ],
 )
 
+const reasoningReplayPolicyOptions = computed(
+  (): Array<{
+    label: string
+    value: 'auto' | 'force_replay' | 'force_passthrough'
+  }> => [
+    { label: props.t('reasoningReplayPolicyAuto'), value: 'auto' },
+    {
+      label: props.t('reasoningReplayPolicyForceReplay'),
+      value: 'force_replay',
+    },
+    {
+      label: props.t('reasoningReplayPolicyForcePassthrough'),
+      value: 'force_passthrough',
+    },
+  ],
+)
+
 const targetColumns = computed<
   TableColumn<ModelRouteForm['targets'][number]>[]
 >(() => [
@@ -110,6 +128,7 @@ const targetColumns = computed<
   { id: 'endpoint', header: props.t('endpoint') },
   { id: 'status', header: props.t('status') },
   { id: 'continuation', header: props.t('continuationPolicy') },
+  { id: 'reasoning', header: props.t('reasoningReplayPolicy') },
   { id: 'actions' },
 ])
 </script>
@@ -251,6 +270,15 @@ const targetColumns = computed<
                 v-model="row.original.responses_continuation_policy"
                 class="w-full"
                 :items="continuationPolicyOptionsFor(row.original.endpoint_id)"
+                label-key="label"
+                value-key="value"
+              />
+            </template>
+            <template #reasoning-cell="{ row }">
+              <USelect
+                v-model="row.original.chat_reasoning_replay_policy"
+                class="w-full"
+                :items="reasoningReplayPolicyOptions"
                 label-key="label"
                 value-key="value"
               />

@@ -25,7 +25,9 @@ pub async fn spawn_replay_upstream(log: Arc<ChatRequestLog>) -> std::net::Socket
     let addr = listener.local_addr().unwrap();
     let app = Router::new()
         .route("/v1/chat/completions", post(fake_chat_completion))
+        .route("/deepseek/v1/chat/completions", post(fake_chat_completion))
         .route("/v1/models", get(fake_models))
+        .route("/deepseek/v1/models", get(fake_models))
         .with_state(log);
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();

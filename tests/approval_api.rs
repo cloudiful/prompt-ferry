@@ -599,6 +599,7 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -689,6 +690,7 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )

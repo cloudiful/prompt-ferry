@@ -54,6 +54,9 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
             responses_continuation_policy: parse_responses_continuation_policy(
                 &row.responses_continuation_policy,
             ),
+            chat_reasoning_replay_policy: parse_chat_reasoning_replay_policy(
+                &row.chat_reasoning_replay_policy,
+            ),
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -117,6 +120,9 @@ pub(super) async fn model_route_candidates_by_rule(
                 responses_continuation_policy: parse_responses_continuation_policy(
                     &row.responses_continuation_policy,
                 ),
+                chat_reasoning_replay_policy: parse_chat_reasoning_replay_policy(
+                    &row.chat_reasoning_replay_policy,
+                ),
             });
             continue;
         }
@@ -144,6 +150,9 @@ pub(super) async fn model_route_candidates_by_rule(
                 upstream_model: row.upstream_model,
                 responses_continuation_policy: parse_responses_continuation_policy(
                     &row.responses_continuation_policy,
+                ),
+                chat_reasoning_replay_policy: parse_chat_reasoning_replay_policy(
+                    &row.chat_reasoning_replay_policy,
                 ),
             }],
         });

@@ -193,21 +193,10 @@ fn resolves_reused_call_id_per_assistant_turn_with_provenance() {
 
 #[tokio::test]
 async fn bypasses_reasoning_recovery_for_non_reasoning_providers() {
-    let route = db::RouteConfig {
-        route_id: uuid::Uuid::nil(),
-        user_id: 1,
-        model_route_rule_id: None,
-        base_url: "https://api.openai.example".to_string(),
-        api_key: "key".to_string(),
-        endpoint_key_id: None,
-        endpoint_key_label: None,
-        api_keys: Vec::new(),
-        key_lb_enabled: false,
-        native_api: crate::config::NativeApi::Chat,
-        upstream_model: None,
-        responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-        route_selection_reason: db::RouteSelectionReason::Default,
-    };
+    let route = sample_route(
+        "https://api.openai.example",
+        db::ChatReasoningReplayPolicy::Auto,
+    );
     let body = serde_json::to_vec(&json!({
         "model":"gpt-test",
         "messages":[{
@@ -234,21 +223,10 @@ async fn bypasses_reasoning_recovery_for_non_reasoning_providers() {
 
 #[tokio::test]
 async fn skips_deepseek_reasoning_recovery_for_chat_to_responses() {
-    let route = db::RouteConfig {
-        route_id: uuid::Uuid::nil(),
-        user_id: 1,
-        model_route_rule_id: None,
-        base_url: "https://api.deepseek.com".to_string(),
-        api_key: "key".to_string(),
-        endpoint_key_id: None,
-        endpoint_key_label: None,
-        api_keys: Vec::new(),
-        key_lb_enabled: false,
-        native_api: crate::config::NativeApi::Chat,
-        upstream_model: None,
-        responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-        route_selection_reason: db::RouteSelectionReason::Default,
-    };
+    let route = sample_route(
+        "https://api.deepseek.com",
+        db::ChatReasoningReplayPolicy::Auto,
+    );
     let body = serde_json::to_vec(&json!({
         "model":"deepseek-v4-flash",
         "messages":[{
@@ -271,6 +249,212 @@ async fn skips_deepseek_reasoning_recovery_for_chat_to_responses() {
     .unwrap();
 
     assert!(restored.is_none());
+}
+
+#[tokio::test]
+async fn auto_skips_proxy_endpoint_with_deepseek_model_prefix() {
+    let route = sample_route(
+        "https://gateway.example.com",
+        db::ChatReasoningReplayPolicy::Auto,
+    );
+    let body = serde_json::to_vec(&json!({
+        "model":"deepseek-v4-flash",
+        "messages":[{
+            "role":"assistant",
+            "tool_calls":[{"id":"call_1","function":{"name":"one","arguments":"{}"}}]
+        }]
+    }))
+    .unwrap();
+
+    let restored = restore_provider_reasoning(
+        None,
+        Some(1),
+        &route,
+        None,
+        None,
+        crate::upstream_adapter::ResponseAdapter::Passthrough,
+        &body,
+    )
+    .await
+    .unwrap();
+
+    assert!(restored.is_none());
+}
+
+#[tokio::test]
+async fn auto_triggers_for_direct_deepseek_endpoint_and_reasoning_model() {
+    let route = sample_route(
+        "https://api.deepseek.com",
+        db::ChatReasoningReplayPolicy::Auto,
+    );
+    let body = serde_json::to_vec(&json!({
+        "model":"deepseek-v4-flash",
+        "messages":[{
+            "role":"assistant",
+            "tool_calls":[{"id":"call_1","function":{"name":"one","arguments":"{}"}}]
+        }]
+    }))
+    .unwrap();
+
+    let error = restore_provider_reasoning(
+        None,
+        Some(1),
+        &route,
+        None,
+        None,
+        crate::upstream_adapter::ResponseAdapter::Passthrough,
+        &body,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(error.code, "replay_unavailable");
+    assert!(error.message.contains("missing_artifact"));
+    assert!(error.message.contains("before forwarding"));
+}
+
+#[tokio::test]
+async fn auto_triggers_for_direct_minimax_endpoint_and_reasoning_model() {
+    let route = sample_route(
+        "https://api.minimax.io",
+        db::ChatReasoningReplayPolicy::Auto,
+    );
+    let body = serde_json::to_vec(&json!({
+        "model":"MiniMax-M3",
+        "messages":[{
+            "role":"assistant",
+            "tool_calls":[{"id":"call_1","function":{"name":"one","arguments":"{}"}}]
+        }]
+    }))
+    .unwrap();
+
+    let error = restore_provider_reasoning(
+        None,
+        Some(1),
+        &route,
+        None,
+        None,
+        crate::upstream_adapter::ResponseAdapter::Passthrough,
+        &body,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(error.code, "replay_unavailable");
+    assert!(error.message.contains("missing_artifact"));
+}
+
+#[tokio::test]
+async fn auto_skips_direct_deepseek_endpoint_with_non_reasoning_model() {
+    let route = sample_route(
+        "https://api.deepseek.com",
+        db::ChatReasoningReplayPolicy::Auto,
+    );
+    let body = serde_json::to_vec(&json!({
+        "model":"deepseek-chat",
+        "messages":[{
+            "role":"assistant",
+            "tool_calls":[{"id":"call_1","function":{"name":"one","arguments":"{}"}}]
+        }]
+    }))
+    .unwrap();
+
+    let restored = restore_provider_reasoning(
+        None,
+        Some(1),
+        &route,
+        None,
+        None,
+        crate::upstream_adapter::ResponseAdapter::Passthrough,
+        &body,
+    )
+    .await
+    .unwrap();
+
+    assert!(restored.is_none());
+}
+
+#[tokio::test]
+async fn force_replay_overrides_auto_judgment_for_proxy_endpoint() {
+    let route = sample_route(
+        "https://gateway.example.com",
+        db::ChatReasoningReplayPolicy::ForceReplay,
+    );
+    let body = serde_json::to_vec(&json!({
+        "model":"deepseek-v4-flash",
+        "messages":[{
+            "role":"assistant",
+            "tool_calls":[{"id":"call_1","function":{"name":"one","arguments":"{}"}}]
+        }]
+    }))
+    .unwrap();
+
+    let error = restore_provider_reasoning(
+        None,
+        Some(1),
+        &route,
+        None,
+        None,
+        crate::upstream_adapter::ResponseAdapter::Passthrough,
+        &body,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(error.code, "replay_unavailable");
+    assert!(error.message.contains("missing_artifact"));
+}
+
+#[tokio::test]
+async fn force_passthrough_overrides_model_prefix_judgment() {
+    let route = sample_route(
+        "https://api.deepseek.com",
+        db::ChatReasoningReplayPolicy::ForcePassthrough,
+    );
+    let body = serde_json::to_vec(&json!({
+        "model":"deepseek-v4-flash",
+        "messages":[{
+            "role":"assistant",
+            "tool_calls":[{"id":"call_1","function":{"name":"one","arguments":"{}"}}]
+        }]
+    }))
+    .unwrap();
+
+    let restored = restore_provider_reasoning(
+        None,
+        Some(1),
+        &route,
+        None,
+        None,
+        crate::upstream_adapter::ResponseAdapter::Passthrough,
+        &body,
+    )
+    .await
+    .unwrap();
+
+    assert!(restored.is_none());
+}
+
+fn sample_route(
+    base_url: &str,
+    chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy,
+) -> db::RouteConfig {
+    db::RouteConfig {
+        route_id: uuid::Uuid::nil(),
+        user_id: 1,
+        model_route_rule_id: None,
+        base_url: base_url.to_string(),
+        api_key: "key".to_string(),
+        endpoint_key_id: None,
+        endpoint_key_label: None,
+        api_keys: Vec::new(),
+        key_lb_enabled: false,
+        native_api: crate::config::NativeApi::Chat,
+        upstream_model: None,
+        responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+        chat_reasoning_replay_policy,
+        route_selection_reason: db::RouteSelectionReason::Default,
+    }
 }
 
 #[test]

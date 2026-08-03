@@ -73,6 +73,7 @@ mod tests {
             native_api: NativeApi::Chat,
             upstream_model: None,
             responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
+            chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
             model_route_rule_id: None,
             route_selection_reason: RouteSelectionReason::Default,
         }

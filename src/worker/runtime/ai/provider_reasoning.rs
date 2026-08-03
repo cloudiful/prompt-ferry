@@ -1,15 +1,17 @@
 use crate::{db, upstream_adapter::ResponseAdapter, worker_admin::AdminState};
 use serde_json::Value;
+use tracing::Instrument;
 
 mod replay;
 mod responses;
 
 use replay::{
-    ReplayFailureKind, assistant_tool_call_ids, load_tool_call_replay_state, replay_unavailable,
-    resolve_replay_parents, restore_reasoning_from_replay, targets_deepseek,
-    targets_reasoning_provider,
+    ReplayFailureKind, assistant_tool_call_ids, chat_reasoning_replay_enabled,
+    load_tool_call_replay_state, replay_recognition_basis, replay_unavailable,
+    resolve_replay_parents, restore_reasoning_from_replay,
 };
 
+pub(crate) use replay::targets_minimax;
 pub(super) use responses::restore_responses_reasoning;
 
 #[cfg(test)]
@@ -31,12 +33,40 @@ pub(super) async fn restore_provider_reasoning(
         return Ok(None);
     };
     let model = object.get("model").and_then(Value::as_str);
-    if response_adapter == ResponseAdapter::ChatToResponses && targets_deepseek(route, model) {
+    let replay_enabled = chat_reasoning_replay_enabled(route, model);
+    if response_adapter == ResponseAdapter::ChatToResponses && replay_enabled {
         return Ok(None);
     }
-    if !targets_reasoning_provider(route, model) {
+    if !replay_enabled {
         return Ok(None);
     }
+    let span = tracing::warn_span!(
+        "provider_reasoning_replay",
+        stage = "before_forward",
+        policy = route.chat_reasoning_replay_policy.as_str(),
+        recognition = replay_recognition_basis(route, model),
+    );
+    restore_provider_reasoning_with_replay(
+        admin_state,
+        user_id,
+        route,
+        conversation_id,
+        parent_event_id,
+        value,
+    )
+    .instrument(span)
+    .await
+}
+
+async fn restore_provider_reasoning_with_replay(
+    admin_state: Option<&AdminState>,
+    user_id: Option<i64>,
+    route: &db::RouteConfig,
+    conversation_id: Option<uuid::Uuid>,
+    parent_event_id: Option<i64>,
+    mut value: Value,
+) -> Result<Option<Vec<u8>>, crate::openai_compat::CompatError> {
+    let object = value.as_object_mut().expect("request body is an object");
     let Some(messages) = object.get_mut("messages").and_then(Value::as_array_mut) else {
         return Ok(None);
     };
