@@ -1,8 +1,8 @@
-use crate::{bridge_wire::BRIDGE_WIRE_VERSION, naming::BRIDGE_FRAME_PREFIX};
+use crate::naming::BRIDGE_FRAME_PREFIX;
 use anyhow::anyhow;
 use rand::Rng;
 
-use super::{ALG, Direction, FRAME_NONCE_BYTES, VERSION};
+use super::{ALG, Direction, FRAME_NONCE_BYTES, FRAME_VERSION, VERSION};
 
 pub(super) fn random_frame_nonce() -> [u8; FRAME_NONCE_BYTES] {
     let mut nonce = [0_u8; FRAME_NONCE_BYTES];
@@ -17,7 +17,7 @@ pub(super) fn encode_encrypted_frame(
 ) -> Vec<u8> {
     let mut frame =
         Vec::with_capacity(1 + std::mem::size_of::<u64>() + FRAME_NONCE_BYTES + ciphertext.len());
-    frame.push(BRIDGE_WIRE_VERSION);
+    frame.push(FRAME_VERSION);
     frame.extend_from_slice(&seq.to_be_bytes());
     frame.extend_from_slice(nonce);
     frame.extend_from_slice(ciphertext);
@@ -32,9 +32,9 @@ pub(super) fn decode_encrypted_frame(
         return Err(anyhow!("encrypted bridge frame too short"));
     }
     let version = bytes[0];
-    if version != BRIDGE_WIRE_VERSION {
+    if version != FRAME_VERSION {
         return Err(anyhow!(
-            "unsupported encrypted bridge frame version {version}, expected {BRIDGE_WIRE_VERSION}"
+            "unsupported encrypted bridge frame version {version}, expected {FRAME_VERSION}"
         ));
     }
     let seq = u64::from_be_bytes(

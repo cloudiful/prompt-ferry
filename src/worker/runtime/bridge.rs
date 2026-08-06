@@ -55,26 +55,10 @@ impl BridgeSender {
         mpsc::UnboundedReceiver<BridgeMessage>,
         mpsc::Receiver<BridgeData>,
     ) {
-        let (control_tx, control_rx) = mpsc::unbounded_channel();
-        let (data_tx, data_rx) = mpsc::channel(256);
-        (
-            Self {
-                data_tx,
-                control_tx,
-                queued_bytes: Arc::new(Semaphore::new(BRIDGE_OUTBOUND_MAX_BYTES)),
-            },
-            control_rx,
-            data_rx,
-        )
+        Self::channel_with_byte_budget(BRIDGE_OUTBOUND_MAX_BYTES)
     }
 
-    #[cfg(test)]
-    pub(super) fn test_sender() -> Self {
-        Self::channel().0
-    }
-
-    #[cfg(test)]
-    pub(super) fn test_channel_with_byte_budget(
+    pub(super) fn channel_with_byte_budget(
         byte_budget: usize,
     ) -> (
         Self,
@@ -92,6 +76,11 @@ impl BridgeSender {
             control_rx,
             data_rx,
         )
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_sender() -> Self {
+        Self::channel().0
     }
 
     pub(super) async fn send(&self, message: BridgeMessage) -> Result<(), BridgeSendError> {

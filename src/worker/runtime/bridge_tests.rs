@@ -78,7 +78,7 @@ async fn send_waits_for_queue_capacity_instead_of_failing_full() {
 
 #[tokio::test]
 async fn byte_budget_blocks_then_releases_when_writer_consumes() {
-    let (sender, _control_rx, mut data_rx) = BridgeSender::test_channel_with_byte_budget(4096);
+    let (sender, _control_rx, mut data_rx) = BridgeSender::channel_with_byte_budget(4096);
     sender
         .send(response_chunk_with_data(vec![0u8; 3000]))
         .await
@@ -102,7 +102,7 @@ async fn byte_budget_blocks_then_releases_when_writer_consumes() {
 
 #[tokio::test]
 async fn cancelling_a_waiting_send_does_not_leak_permits() {
-    let (sender, _control_rx, mut data_rx) = BridgeSender::test_channel_with_byte_budget(4096);
+    let (sender, _control_rx, mut data_rx) = BridgeSender::channel_with_byte_budget(4096);
     sender
         .send(response_chunk_with_data(vec![0u8; 3000]))
         .await

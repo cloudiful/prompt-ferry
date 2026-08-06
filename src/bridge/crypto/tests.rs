@@ -102,7 +102,7 @@ fn large_messages_round_trip_with_compression_and_encryption() {
     });
 
     let encrypted = worker.encrypt_message(&message).unwrap();
-    assert_eq!(encrypted[0], bridge_wire::BRIDGE_WIRE_VERSION);
+    assert_eq!(encrypted[0], FRAME_VERSION);
     assert_eq!(relay.decrypt_message(&encrypted).unwrap(), message);
 }
 
@@ -199,6 +199,6 @@ fn invalid_frame_version_fails() {
     )
     .unwrap();
     let mut encrypted = worker.encrypt_message(&BridgeMessage::Ping).unwrap();
-    encrypted[0] = bridge_wire::BRIDGE_WIRE_VERSION + 1;
+    encrypted[0] = FRAME_VERSION + 1;
     assert!(relay.decrypt_message(&encrypted).is_err());
 }

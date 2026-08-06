@@ -11,8 +11,8 @@ mod frame;
 mod handshake;
 
 pub use handshake::{
-    BridgeWireMessage, EncryptionHandshake, decode_hello, decode_ready, encode_hello, encode_ready,
-    random_handshake_nonce, validate_settings,
+    decode_hello, decode_ready, encode_hello, encode_ready, random_handshake_nonce,
+    validate_settings,
 };
 
 #[cfg(test)]
@@ -20,6 +20,10 @@ mod tests;
 
 pub(crate) const ALG: &str = "chacha20poly1305_hkdf_sha256_v1";
 pub(crate) const VERSION: u8 = 1;
+/// Encrypted frame envelope version, fixed independently of the wire payload
+/// schema: existing encrypted deployments validate this byte, so it stays 3
+/// while payload schemas evolve via [`bridge_wire::BRIDGE_WIRE_VERSION`].
+pub(crate) const FRAME_VERSION: u8 = 3;
 pub(crate) const KEY_BYTES: usize = 32;
 pub(crate) const HANDSHAKE_NONCE_BYTES: usize = 32;
 pub(crate) const FRAME_NONCE_BYTES: usize = 12;
@@ -74,6 +78,7 @@ impl BridgeCipher {
         })
     }
 
+    /// Encode the message on the wire and encrypt it into a versioned frame.
     pub fn encrypt_message(&mut self, message: &BridgeMessage) -> anyhow::Result<Vec<u8>> {
         let seq = self.next_send_seq;
         self.next_send_seq = self
@@ -93,11 +98,12 @@ impl BridgeCipher {
                     aad: &aad,
                 },
             )
-            .map_err(|_| anyhow!("failed to encrypt bridge message"))?;
+            .map_err(|_| anyhow!("failed to encrypt bridge message (seq {seq})"))?;
 
         Ok(frame::encode_encrypted_frame(seq, &nonce, &ciphertext))
     }
 
+    /// Decrypt a frame and decode the plaintext wire message.
     pub fn decrypt_message(&mut self, bytes: &[u8]) -> anyhow::Result<BridgeMessage> {
         let (seq, nonce, ciphertext) = frame::decode_encrypted_frame(bytes)?;
         if seq != self.next_recv_seq {
@@ -118,7 +124,12 @@ impl BridgeCipher {
                     aad: &aad,
                 },
             )
-            .map_err(|_| anyhow!("failed to decrypt bridge message"))?;
+            .map_err(|_| {
+                anyhow!(
+                    "failed to decrypt bridge message (seq {seq}, frame {} bytes)",
+                    bytes.len()
+                )
+            })?;
         self.next_recv_seq = self
             .next_recv_seq
             .checked_add(1)

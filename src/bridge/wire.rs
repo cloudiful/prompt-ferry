@@ -1,15 +1,14 @@
-use crate::protocol::{
-    ApprovalPending, BridgeMessage, BridgeRequestCancel, BridgeRequestChunk, BridgeRequestEnd,
-    BridgeRequestStart, ClientRoute, ConfigSnapshot, McpRequestCancel, McpRequestChunk,
-    McpRequestEnd, McpRequestStart, McpResponseChunk, McpResponseEnd, McpResponseStart,
-    RealtimeClientEventMessage, RealtimeServerEventMessage, RealtimeSessionClose,
-    RealtimeSessionStart, RelayIpPolicy, ResponseChunk, ResponseEnd, ResponseError, ResponseStart,
-};
-use anyhow::{Context, anyhow};
-use serde::{Deserialize, Serialize};
+pub mod payload;
+
 use std::io::Cursor;
 
-pub const BRIDGE_WIRE_VERSION: u8 = 3;
+use anyhow::{Context, anyhow};
+
+use crate::protocol::BridgeMessage;
+
+/// Current plaintext wire envelope version. Bump when the payload schema
+/// changes; peers reject envelopes with other versions.
+pub const BRIDGE_WIRE_VERSION: u8 = 4;
 pub const PUBLIC_API_BODY_LIMIT_BYTES: usize = 256 * 1024 * 1024;
 pub const BRIDGE_WS_MAX_MESSAGE_BYTES: usize = PUBLIC_API_BODY_LIMIT_BYTES + 1024 * 1024;
 pub const BRIDGE_WS_MAX_FRAME_BYTES: usize = BRIDGE_WS_MAX_MESSAGE_BYTES;
@@ -19,120 +18,6 @@ const COMPRESSION_NONE: u8 = 0;
 const COMPRESSION_ZSTD: u8 = 1;
 const ZSTD_LEVEL: i32 = 3;
 const HEADER_BYTES: usize = 2;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-enum BridgeWirePayload {
-    RequestStart(BridgeRequestStart),
-    RequestChunk(BridgeRequestChunk),
-    RequestEnd(BridgeRequestEnd),
-    RequestCancel(BridgeRequestCancel),
-    ApprovalPending(ApprovalPending),
-    RealtimeSessionStart(RealtimeSessionStart),
-    RealtimeClientEvent(RealtimeClientEventMessage),
-    RealtimeServerEvent(RealtimeServerEventMessage),
-    RealtimeSessionClose(RealtimeSessionClose),
-    McpRequestStart(McpRequestStart),
-    McpRequestChunk(McpRequestChunk),
-    McpRequestEnd(McpRequestEnd),
-    McpRequestCancel(McpRequestCancel),
-    McpResponseStart(McpResponseStart),
-    McpResponseChunk(McpResponseChunk),
-    McpResponseEnd(McpResponseEnd),
-    ConfigSnapshot(BridgeWireConfigSnapshot),
-    ResponseStart(ResponseStart),
-    ResponseChunk(ResponseChunk),
-    ResponseEnd(ResponseEnd),
-    ResponseError(ResponseError),
-    Ping,
-    Pong,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct BridgeWireConfigSnapshot {
-    version: i64,
-    keys: Vec<ClientRoute>,
-    relay_ip_policy: RelayIpPolicy,
-}
-
-impl From<&BridgeMessage> for BridgeWirePayload {
-    fn from(message: &BridgeMessage) -> Self {
-        match message {
-            BridgeMessage::RequestStart(value) => Self::RequestStart(value.clone()),
-            BridgeMessage::RequestChunk(value) => Self::RequestChunk(value.clone()),
-            BridgeMessage::RequestEnd(value) => Self::RequestEnd(value.clone()),
-            BridgeMessage::RequestCancel(value) => Self::RequestCancel(value.clone()),
-            BridgeMessage::ApprovalPending(value) => Self::ApprovalPending(value.clone()),
-            BridgeMessage::RealtimeSessionStart(value) => Self::RealtimeSessionStart(value.clone()),
-            BridgeMessage::RealtimeClientEvent(value) => Self::RealtimeClientEvent(value.clone()),
-            BridgeMessage::RealtimeServerEvent(value) => Self::RealtimeServerEvent(value.clone()),
-            BridgeMessage::RealtimeSessionClose(value) => Self::RealtimeSessionClose(value.clone()),
-            BridgeMessage::McpRequestStart(value) => Self::McpRequestStart(value.clone()),
-            BridgeMessage::McpRequestChunk(value) => Self::McpRequestChunk(value.clone()),
-            BridgeMessage::McpRequestEnd(value) => Self::McpRequestEnd(value.clone()),
-            BridgeMessage::McpRequestCancel(value) => Self::McpRequestCancel(value.clone()),
-            BridgeMessage::McpResponseStart(value) => Self::McpResponseStart(value.clone()),
-            BridgeMessage::McpResponseChunk(value) => Self::McpResponseChunk(value.clone()),
-            BridgeMessage::McpResponseEnd(value) => Self::McpResponseEnd(value.clone()),
-            BridgeMessage::ConfigSnapshot(value) => Self::ConfigSnapshot(value.into()),
-            BridgeMessage::ResponseStart(value) => Self::ResponseStart(value.clone()),
-            BridgeMessage::ResponseChunk(value) => Self::ResponseChunk(value.clone()),
-            BridgeMessage::ResponseEnd(value) => Self::ResponseEnd(value.clone()),
-            BridgeMessage::ResponseError(value) => Self::ResponseError(value.clone()),
-            BridgeMessage::Ping => Self::Ping,
-            BridgeMessage::Pong => Self::Pong,
-        }
-    }
-}
-
-impl From<&ConfigSnapshot> for BridgeWireConfigSnapshot {
-    fn from(value: &ConfigSnapshot) -> Self {
-        Self {
-            version: value.version,
-            keys: value.keys.clone(),
-            relay_ip_policy: value.relay_ip_policy.clone(),
-        }
-    }
-}
-
-impl From<BridgeWireConfigSnapshot> for ConfigSnapshot {
-    fn from(value: BridgeWireConfigSnapshot) -> Self {
-        Self {
-            version: value.version,
-            keys: value.keys,
-            relay_ip_policy: value.relay_ip_policy,
-        }
-    }
-}
-
-impl BridgeWirePayload {
-    fn into_bridge_message(self) -> BridgeMessage {
-        match self {
-            Self::RequestStart(value) => BridgeMessage::RequestStart(value),
-            Self::RequestChunk(value) => BridgeMessage::RequestChunk(value),
-            Self::RequestEnd(value) => BridgeMessage::RequestEnd(value),
-            Self::RequestCancel(value) => BridgeMessage::RequestCancel(value),
-            Self::ApprovalPending(value) => BridgeMessage::ApprovalPending(value),
-            Self::RealtimeSessionStart(value) => BridgeMessage::RealtimeSessionStart(value),
-            Self::RealtimeClientEvent(value) => BridgeMessage::RealtimeClientEvent(value),
-            Self::RealtimeServerEvent(value) => BridgeMessage::RealtimeServerEvent(value),
-            Self::RealtimeSessionClose(value) => BridgeMessage::RealtimeSessionClose(value),
-            Self::McpRequestStart(value) => BridgeMessage::McpRequestStart(value),
-            Self::McpRequestChunk(value) => BridgeMessage::McpRequestChunk(value),
-            Self::McpRequestEnd(value) => BridgeMessage::McpRequestEnd(value),
-            Self::McpRequestCancel(value) => BridgeMessage::McpRequestCancel(value),
-            Self::McpResponseStart(value) => BridgeMessage::McpResponseStart(value),
-            Self::McpResponseChunk(value) => BridgeMessage::McpResponseChunk(value),
-            Self::McpResponseEnd(value) => BridgeMessage::McpResponseEnd(value),
-            Self::ConfigSnapshot(value) => BridgeMessage::ConfigSnapshot(value.into()),
-            Self::ResponseStart(value) => BridgeMessage::ResponseStart(value),
-            Self::ResponseChunk(value) => BridgeMessage::ResponseChunk(value),
-            Self::ResponseEnd(value) => BridgeMessage::ResponseEnd(value),
-            Self::ResponseError(value) => BridgeMessage::ResponseError(value),
-            Self::Ping => BridgeMessage::Ping,
-            Self::Pong => BridgeMessage::Pong,
-        }
-    }
-}
 
 pub fn encode_message(message: &BridgeMessage) -> anyhow::Result<Vec<u8>> {
     encode_message_with_limit(
@@ -144,7 +29,10 @@ pub fn encode_message(message: &BridgeMessage) -> anyhow::Result<Vec<u8>> {
 
 pub fn decode_message(bytes: &[u8]) -> anyhow::Result<BridgeMessage> {
     if bytes.len() < HEADER_BYTES {
-        return Err(anyhow!("bridge wire message too short"));
+        return Err(anyhow!(
+            "bridge wire message too short ({} bytes)",
+            bytes.len()
+        ));
     }
     let version = bytes[0];
     if version != BRIDGE_WIRE_VERSION {
@@ -156,13 +44,20 @@ pub fn decode_message(bytes: &[u8]) -> anyhow::Result<BridgeMessage> {
     let payload = &bytes[HEADER_BYTES..];
     let decoded = match compression {
         COMPRESSION_NONE => payload.to_vec(),
-        COMPRESSION_ZSTD => zstd::stream::decode_all(Cursor::new(payload))
-            .context("failed to decompress bridge payload")?,
+        COMPRESSION_ZSTD => zstd::stream::decode_all(Cursor::new(payload)).with_context(|| {
+            format!(
+                "failed to decompress bridge payload (frame {} bytes, compression {compression})",
+                bytes.len()
+            )
+        })?,
         other => return Err(anyhow!("unsupported bridge wire compression {other}")),
     };
-    let payload: BridgeWirePayload =
-        bincode::deserialize(&decoded).context("failed to decode bridge payload")?;
-    Ok(payload.into_bridge_message())
+    payload::decode_payload(&decoded).with_context(|| {
+        format!(
+            "failed to decode bridge payload (frame {} bytes, compression {compression})",
+            bytes.len()
+        )
+    })
 }
 
 fn encode_message_with_limit(
@@ -170,8 +65,7 @@ fn encode_message_with_limit(
     max_message_bytes: usize,
     compression_threshold_bytes: usize,
 ) -> anyhow::Result<Vec<u8>> {
-    let payload = bincode::serialize(&BridgeWirePayload::from(message))
-        .context("failed to encode bridge payload")?;
+    let payload = payload::encode_payload(message)?;
     let (compression, payload) = if payload.len() >= compression_threshold_bytes {
         (
             COMPRESSION_ZSTD,
@@ -198,12 +92,10 @@ fn encode_message_with_limit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{
-        BridgeRequestChunk, BridgeRequestStart, ConfigSnapshot, RelayIpPolicy, ResponseChunk,
-    };
+    use crate::protocol::{BridgeRequestStart, ResponseChunk};
 
     #[test]
-    fn bridge_message_round_trips_with_bincode_wire() {
+    fn messages_round_trip_with_bincode_wire() {
         let message = BridgeMessage::RequestStart(BridgeRequestStart {
             request_id: "req".to_string(),
             method: "POST".to_string(),
@@ -217,16 +109,6 @@ mod tests {
             http_request_content_encoding: Some("gzip".to_string()),
             http_request_compressed: true,
             http_request_compressed_bytes: Some(1024),
-        });
-        let encoded = encode_message(&message).unwrap();
-        assert_eq!(decode_message(&encoded).unwrap(), message);
-    }
-
-    #[test]
-    fn request_chunk_round_trips_with_bincode_wire() {
-        let message = BridgeMessage::RequestChunk(BridgeRequestChunk {
-            request_id: "req".to_string(),
-            data: vec![b'a'; BRIDGE_COMPRESSION_THRESHOLD_BYTES + 1024],
         });
         let encoded = encode_message(&message).unwrap();
         assert_eq!(decode_message(&encoded).unwrap(), message);
@@ -284,31 +166,6 @@ mod tests {
             err.to_string()
                 .contains("failed to decompress bridge payload")
         );
-    }
-
-    #[test]
-    fn config_snapshot_round_trips_with_binary_payload() {
-        let message = BridgeMessage::ConfigSnapshot(ConfigSnapshot {
-            version: 7,
-            keys: vec![crate::protocol::ClientRoute {
-                key_hash: "hash".to_string(),
-                key_prefix: "pref".to_string(),
-                user_id: 42,
-                route_id: "route".to_string(),
-            }],
-            relay_ip_policy: RelayIpPolicy {
-                allowed_cidrs: vec!["10.0.0.0/8".to_string()],
-                trusted_proxy_cidrs: vec!["192.168.0.0/16".to_string()],
-            },
-        });
-        let encoded = encode_message(&message).unwrap();
-        assert_eq!(decode_message(&encoded).unwrap(), message);
-    }
-
-    #[test]
-    fn ping_round_trips_with_binary_payload() {
-        let encoded = encode_message(&BridgeMessage::Ping).unwrap();
-        assert_eq!(decode_message(&encoded).unwrap(), BridgeMessage::Ping);
     }
 
     #[test]
