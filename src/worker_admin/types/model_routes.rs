@@ -16,8 +16,6 @@ pub struct ModelRouteRequest {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: Option<crate::db::ModelRouteRoutingStrategy>,
-    #[schema(deprecated)]
-    pub session_affinity_lock_after_turns: Option<i32>,
     pub daily_max_requests: Option<i32>,
     pub monthly_max_requests: Option<i32>,
     pub enabled: Option<bool>,
@@ -110,7 +108,6 @@ impl ModelRouteRequest {
             owner_user_id: self.owner_user_id,
             model_pattern: self.model_pattern,
             routing_strategy: self.routing_strategy.unwrap_or_default(),
-            session_affinity_lock_after_turns: self.session_affinity_lock_after_turns.unwrap_or(5),
             daily_max_requests: self.daily_max_requests,
             monthly_max_requests: self.monthly_max_requests,
             enabled: self.enabled.unwrap_or(true),
@@ -127,16 +124,6 @@ impl ModelRouteRequest {
             .map_err(|response| *response)?;
         validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")
             .map_err(|response| *response)?;
-        if self
-            .session_affinity_lock_after_turns
-            .is_some_and(|turns| turns <= 0)
-        {
-            return Err(error(
-                StatusCode::BAD_REQUEST,
-                "invalid_session_affinity_lock_after_turns",
-                "session_affinity_lock_after_turns must be greater than zero",
-            ));
-        }
         let pattern = self.model_pattern.trim();
         if pattern.is_empty() {
             return Err(error(

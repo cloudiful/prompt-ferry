@@ -1,0 +1,5 @@
+ALTER TABLE model_endpoint_rules
+DROP CONSTRAINT IF EXISTS ck_model_endpoint_rules_session_affinity_lock_after_turns;
+
+ALTER TABLE model_endpoint_rules
+DROP COLUMN IF EXISTS session_affinity_lock_after_turns;

@@ -3743,7 +3743,6 @@ components:
       - scope
       - model_pattern
       - routing_strategy
-      - session_affinity_lock_after_turns
       - enabled
       - created_at
       - updated_at
@@ -3778,10 +3777,6 @@ components:
           format: uuid
         scope:
           type: string
-        session_affinity_lock_after_turns:
-          type: integer
-          format: int32
-          deprecated: true
         targets:
           type: array
           items:
@@ -3874,12 +3869,6 @@ components:
           - $ref: '#/components/schemas/ModelRouteRoutingStrategy'
         scope:
           type: string
-        session_affinity_lock_after_turns:
-          type:
-          - integer
-          - 'null'
-          format: int32
-          deprecated: true
         targets:
           type:
           - array

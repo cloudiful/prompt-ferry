@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE model_endpoint_rules\nSET\n    scope = $2,\n    owner_user_id = $3,\n    model_pattern = $4,\n    routing_strategy = $5,\n    session_affinity_lock_after_turns = $6,\n    daily_max_requests = $7,\n    monthly_max_requests = $8,\n    endpoint_id = $9,\n    priority = 0,\n    enabled = $10,\n    updated_at = NOW()\nWHERE rule_id = $1\nRETURNING rule_id, scope, owner_user_id, model_pattern, routing_strategy, session_affinity_lock_after_turns, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\n",
+  "query": "INSERT INTO model_endpoint_rules(\n    scope,\n    owner_user_id,\n    model_pattern,\n    routing_strategy,\n    daily_max_requests,\n    monthly_max_requests,\n    endpoint_id,\n    priority,\n    enabled\n)\nVALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8)\nRETURNING rule_id, scope, owner_user_id, model_pattern, routing_strategy, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\n",
   "describe": {
     "columns": [
       {
@@ -60,17 +60,6 @@
       },
       {
         "ordinal": 5,
-        "name": "session_affinity_lock_after_turns",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "model_endpoint_rules",
-            "name": "session_affinity_lock_after_turns"
-          }
-        }
-      },
-      {
-        "ordinal": 6,
         "name": "daily_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -81,7 +70,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "monthly_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -92,7 +81,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -103,7 +92,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +103,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -127,12 +116,10 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
         "Text",
         "Int8",
         "Text",
         "Text",
-        "Int4",
         "Int4",
         "Int4",
         "Uuid",
@@ -145,7 +132,6 @@
       true,
       false,
       false,
-      false,
       true,
       true,
       false,
@@ -153,5 +139,5 @@
       false
     ]
   },
-  "hash": "7e8fe614a6f750e5bb0cc9208ab7989ee8110965031bc859d365f2053f53b9f7"
+  "hash": "e1ae2185c4a3883205ab7be089256befd00922d69fffd4da9e8ccc964278b83b"
 }

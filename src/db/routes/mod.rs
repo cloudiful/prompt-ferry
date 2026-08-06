@@ -36,7 +36,6 @@ struct ModelRouteCandidateRow {
     owner_user_id: Option<i64>,
     model_pattern: String,
     routing_strategy: String,
-    session_affinity_lock_after_turns: i32,
     daily_max_requests: Option<i32>,
     monthly_max_requests: Option<i32>,
     updated_at: DateTime<Utc>,

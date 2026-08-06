@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT rule_id, scope, owner_user_id, model_pattern, routing_strategy, session_affinity_lock_after_turns, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\nFROM model_endpoint_rules\nWHERE rule_id = $1\n",
+  "query": "SELECT rule_id, scope, owner_user_id, model_pattern, routing_strategy, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\nFROM model_endpoint_rules\nORDER BY\n  CASE WHEN scope = 'user' THEN 0 ELSE 1 END,\n  owner_user_id NULLS FIRST,\n  model_pattern ASC,\n  updated_at DESC\n",
   "describe": {
     "columns": [
       {
@@ -60,17 +60,6 @@
       },
       {
         "ordinal": 5,
-        "name": "session_affinity_lock_after_turns",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "model_endpoint_rules",
-            "name": "session_affinity_lock_after_turns"
-          }
-        }
-      },
-      {
-        "ordinal": 6,
         "name": "daily_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -81,7 +70,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "monthly_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -92,7 +81,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -103,7 +92,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +103,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -126,15 +115,12 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
       false,
       true,
-      false,
       false,
       false,
       true,
@@ -144,5 +130,5 @@
       false
     ]
   },
-  "hash": "cd5385708aa387c674fe4f86850f7beabad1b3ecc4afe5c6f2d9f9d2930ca865"
+  "hash": "86627433169f923abb98e1642b3e188757d07e1e4ac98321cc09fda002e3ebea"
 }

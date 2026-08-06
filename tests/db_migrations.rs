@@ -563,7 +563,6 @@ async fn migrate_adds_session_load_balancing_contract() -> anyhow::Result<()> {
         .fetch_one(&schema.pool)
         .await?;
 
-    assert!(contract.lock_turns_column_exists);
     assert!(contract.route_reason_exists);
     schema.cleanup().await?;
     Ok(())

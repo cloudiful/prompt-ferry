@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO model_endpoint_rules(\n    scope,\n    owner_user_id,\n    model_pattern,\n    routing_strategy,\n    session_affinity_lock_after_turns,\n    daily_max_requests,\n    monthly_max_requests,\n    endpoint_id,\n    priority,\n    enabled\n)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, $9)\nRETURNING rule_id, scope, owner_user_id, model_pattern, routing_strategy, session_affinity_lock_after_turns, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\n",
+  "query": "SELECT rule_id, scope, owner_user_id, model_pattern, routing_strategy, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\nFROM model_endpoint_rules\nWHERE rule_id = $1\n",
   "describe": {
     "columns": [
       {
@@ -60,17 +60,6 @@
       },
       {
         "ordinal": 5,
-        "name": "session_affinity_lock_after_turns",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "model_endpoint_rules",
-            "name": "session_affinity_lock_after_turns"
-          }
-        }
-      },
-      {
-        "ordinal": 6,
         "name": "daily_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -81,7 +70,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "monthly_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -92,7 +81,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -103,7 +92,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +103,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -127,22 +116,13 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Int8",
-        "Text",
-        "Text",
-        "Int4",
-        "Int4",
-        "Int4",
-        "Uuid",
-        "Bool"
+        "Uuid"
       ]
     },
     "nullable": [
       false,
       false,
       true,
-      false,
       false,
       false,
       true,
@@ -152,5 +132,5 @@
       false
     ]
   },
-  "hash": "e393f3ae922fcc05ba71eba477e7b86ec5b626811e1670de644b4918aa9fcd86"
+  "hash": "08c4974a4d4bcf96ed3ee5970216925bbfc0ca65f6a26169b2d417ace73181a9"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT rule_id, scope, owner_user_id, model_pattern, routing_strategy, session_affinity_lock_after_turns, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\nFROM model_endpoint_rules\nORDER BY\n  CASE WHEN scope = 'user' THEN 0 ELSE 1 END,\n  owner_user_id NULLS FIRST,\n  model_pattern ASC,\n  updated_at DESC\n",
+  "query": "UPDATE model_endpoint_rules\nSET\n    scope = $2,\n    owner_user_id = $3,\n    model_pattern = $4,\n    routing_strategy = $5,\n    daily_max_requests = $6,\n    monthly_max_requests = $7,\n    endpoint_id = $8,\n    priority = 0,\n    enabled = $9,\n    updated_at = NOW()\nWHERE rule_id = $1\nRETURNING rule_id, scope, owner_user_id, model_pattern, routing_strategy, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\n",
   "describe": {
     "columns": [
       {
@@ -60,17 +60,6 @@
       },
       {
         "ordinal": 5,
-        "name": "session_affinity_lock_after_turns",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "model_endpoint_rules",
-            "name": "session_affinity_lock_after_turns"
-          }
-        }
-      },
-      {
-        "ordinal": 6,
         "name": "daily_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -81,7 +70,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "monthly_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -92,7 +81,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -103,7 +92,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +103,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -126,13 +115,22 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4",
+        "Uuid",
+        "Bool"
+      ]
     },
     "nullable": [
       false,
       false,
       true,
-      false,
       false,
       false,
       true,
@@ -142,5 +140,5 @@
       false
     ]
   },
-  "hash": "b43fa25063b6be30eb914a82fbc0c1f90a10539b27b810cd8fe0cb15338ded45"
+  "hash": "d0efdb7e1eeed3ac07f2353d168101d33dddcff6dbe250ddd3f603387739c4ee"
 }

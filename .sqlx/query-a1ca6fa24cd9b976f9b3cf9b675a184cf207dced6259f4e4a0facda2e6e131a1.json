@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT rule_id, scope, owner_user_id, model_pattern, routing_strategy, session_affinity_lock_after_turns, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\nFROM model_endpoint_rules\nORDER BY\n  CASE WHEN scope = 'user' THEN 0 ELSE 1 END,\n  owner_user_id NULLS FIRST,\n  model_pattern ASC,\n  updated_at DESC,\n  rule_id ASC\nOFFSET $1\nLIMIT $2\n",
+  "query": "SELECT rule_id, scope, owner_user_id, model_pattern, routing_strategy, daily_max_requests, monthly_max_requests, enabled, created_at, updated_at\nFROM model_endpoint_rules\nORDER BY\n  CASE WHEN scope = 'user' THEN 0 ELSE 1 END,\n  owner_user_id NULLS FIRST,\n  model_pattern ASC,\n  updated_at DESC,\n  rule_id ASC\nOFFSET $1\nLIMIT $2\n",
   "describe": {
     "columns": [
       {
@@ -60,17 +60,6 @@
       },
       {
         "ordinal": 5,
-        "name": "session_affinity_lock_after_turns",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "model_endpoint_rules",
-            "name": "session_affinity_lock_after_turns"
-          }
-        }
-      },
-      {
-        "ordinal": 6,
         "name": "daily_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -81,7 +70,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "monthly_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -92,7 +81,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -103,7 +92,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +103,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -137,7 +126,6 @@
       true,
       false,
       false,
-      false,
       true,
       true,
       false,
@@ -145,5 +133,5 @@
       false
     ]
   },
-  "hash": "94cd27b7cfc19c7a3039508ef5577a5c38af395733b16e08ede7e532bef5c744"
+  "hash": "a1ca6fa24cd9b976f9b3cf9b675a184cf207dced6259f4e4a0facda2e6e131a1"
 }

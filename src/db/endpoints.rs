@@ -289,9 +289,26 @@ async fn replace_endpoint_api_keys(
                 .find(|key| key.key_label == api_key.key_label)
                 .map(|key| key.key_id)
         });
+        if let Some(key_id) = key_id {
+            retained.push(key_id);
+        }
+    }
+    sqlx::query_file!(
+        "src/sql/endpoints/delete_endpoint_api_keys_except.sql",
+        endpoint_id,
+        &retained,
+    )
+    .execute(&mut *tx)
+    .await?;
+    for api_key in api_keys {
+        let key_id = api_key.key_id.or_else(|| {
+            existing
+                .iter()
+                .find(|key| key.key_label == api_key.key_label)
+                .map(|key| key.key_id)
+        });
         match key_id {
             Some(key_id) => {
-                retained.push(key_id);
                 sqlx::query_file!(
                     "src/sql/endpoints/update_endpoint_api_key.sql",
                     endpoint_id,
@@ -317,15 +334,6 @@ async fn replace_endpoint_api_keys(
                 .await?;
             }
         }
-    }
-    if !retained.is_empty() {
-        sqlx::query_file!(
-            "src/sql/endpoints/delete_endpoint_api_keys_except.sql",
-            endpoint_id,
-            &retained,
-        )
-        .execute(&mut *tx)
-        .await?;
     }
     tx.commit().await?;
     Ok(())

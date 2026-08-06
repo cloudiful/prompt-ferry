@@ -128,8 +128,6 @@ pub struct ModelEndpointRule {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: ModelRouteRoutingStrategy,
-    #[schema(deprecated)]
-    pub session_affinity_lock_after_turns: i32,
     pub daily_max_requests: Option<i32>,
     pub monthly_max_requests: Option<i32>,
     pub enabled: bool,
@@ -145,7 +143,6 @@ pub struct ModelEndpointRuleRow {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: String,
-    pub session_affinity_lock_after_turns: i32,
     pub daily_max_requests: Option<i32>,
     pub monthly_max_requests: Option<i32>,
     pub enabled: bool,
@@ -168,8 +165,6 @@ pub struct ModelEndpointRuleCreate {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: ModelRouteRoutingStrategy,
-    #[schema(deprecated)]
-    pub session_affinity_lock_after_turns: i32,
     pub daily_max_requests: Option<i32>,
     pub monthly_max_requests: Option<i32>,
     pub enabled: bool,
@@ -183,7 +178,6 @@ pub struct ModelRouteCandidate {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: ModelRouteRoutingStrategy,
-    pub session_affinity_lock_after_turns: i32,
     pub daily_max_requests: Option<i32>,
     pub monthly_max_requests: Option<i32>,
     pub updated_at: DateTime<Utc>,

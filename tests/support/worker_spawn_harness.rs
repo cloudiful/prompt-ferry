@@ -34,7 +34,6 @@ pub async fn spawn_worker(
             owner_user_id: None,
             model_pattern: "*".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
-            session_affinity_lock_after_turns: 5,
             daily_max_requests: None,
             monthly_max_requests: None,
             enabled: true,

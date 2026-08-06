@@ -712,6 +712,42 @@ async fn endpoint_key_update_preserves_key_identity() -> anyhow::Result<()> {
         "renaming via key_id must keep the stored secret"
     );
 
+    let replaced = db::update_endpoint(
+        &schema.pool,
+        endpoint.endpoint_id,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "key-identity-test".to_string(),
+            base_url: "http://key-identity.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "legacy-key".to_string(),
+            api_keys: vec![db::EndpointApiKeyCreate {
+                key_label: "brand-new".to_string(),
+                api_key: "brand-new-secret".to_string(),
+                position: 0,
+                enabled: true,
+                key_id: None,
+            }],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?
+    .expect("endpoint updated");
+    assert_eq!(
+        replaced.api_keys.len(),
+        1,
+        "replacing all keys must drop the previous keys"
+    );
+    assert_eq!(replaced.api_keys[0].key_label, "brand-new");
+    assert_eq!(replaced.api_keys[0].api_key, "brand-new-secret");
+    assert_ne!(replaced.api_keys[0].key_id, primary_id);
+    assert_ne!(replaced.api_keys[0].key_id, secondary_id);
+
     schema.cleanup().await?;
     Ok(())
 }
@@ -751,7 +787,6 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
             owner_user_id: None,
             model_pattern: "gpt-affinity-reset".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
-            session_affinity_lock_after_turns: 5,
             daily_max_requests: None,
             monthly_max_requests: None,
             enabled: true,
@@ -876,7 +911,6 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
             owner_user_id: None,
             model_pattern: "gpt-routed".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
-            session_affinity_lock_after_turns: 5,
             daily_max_requests: None,
             monthly_max_requests: None,
             enabled: true,
@@ -967,7 +1001,6 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
             owner_user_id: None,
             model_pattern: "glm-5".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
-            session_affinity_lock_after_turns: 5,
             daily_max_requests: None,
             monthly_max_requests: None,
             enabled: true,

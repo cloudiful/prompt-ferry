@@ -84,13 +84,13 @@ impl Default for ResponseAffinityStore {
 }
 
 impl ResponseAffinityStore {
-    pub fn unavailable() -> Self {
+    pub(crate) fn unavailable() -> Self {
         Self {
             backend: ResponseAffinityBackend::Unavailable,
         }
     }
 
-    pub fn for_tests() -> Self {
+    pub(crate) fn for_tests() -> Self {
         Self {
             backend: ResponseAffinityBackend::Local(Arc::new(LocalAffinityBackend {
                 bindings: Mutex::new(HashMap::new()),
@@ -99,7 +99,7 @@ impl ResponseAffinityStore {
         }
     }
 
-    pub fn from_connection_manager(manager: ConnectionManager, ttl_seconds: u64) -> Self {
+    pub(crate) fn from_connection_manager(manager: ConnectionManager, ttl_seconds: u64) -> Self {
         Self {
             backend: ResponseAffinityBackend::Redis(Arc::new(RedisAffinityBackend {
                 manager,
@@ -219,7 +219,7 @@ impl ResponseAffinityStore {
         }
     }
 
-    pub async fn replace_if_current(
+    pub(crate) async fn replace_if_current(
         &self,
         key: &str,
         expected: &ResponseAffinityBinding,
@@ -268,7 +268,7 @@ fn hex_digest(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-pub fn api_key_fingerprint(secret: &str) -> String {
+pub(crate) fn api_key_fingerprint(secret: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(secret.as_bytes());
     hex_digest(&hasher.finalize())
