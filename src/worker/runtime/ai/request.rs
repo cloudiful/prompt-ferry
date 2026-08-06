@@ -6,7 +6,10 @@ use super::super::{
     routing::RouteAffinityError,
 };
 use super::{
-    errors::{respond_with_budget_error, respond_with_client_error, respond_with_local_error},
+    errors::{
+        respond_with_affinity_error, respond_with_budget_error, respond_with_client_error,
+        respond_with_local_error,
+    },
     models::{ModelsRequestContext, process_models_request},
     request_attempts::{ForwardOutcome, RouteForwardRequest, forward_route_request},
     request_init::initialize_request,
@@ -80,17 +83,11 @@ pub(in crate::worker::runtime) async fn process_request(
         Ok(RouteResolution::Responded) => return Ok(()),
         Err(err) => {
             if let Some(affinity_error) = err.downcast_ref::<RouteAffinityError>() {
-                return respond_with_local_error(
+                return respond_with_affinity_error(
                     services,
                     &request,
                     &request_ctx,
-                    FailurePayload {
-                        status: affinity_error.status,
-                        error_code: affinity_error.code.to_string(),
-                        error_message: affinity_error.message.to_string(),
-                        upstream_error_body: None,
-                        response_body: None,
-                    },
+                    affinity_error.clone(),
                 )
                 .await;
             }

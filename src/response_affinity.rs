@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
+use redis::AsyncCommands;
 use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -43,14 +44,14 @@ return 1
 "#;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct ResponseAffinityBinding {
-    pub(crate) endpoint_id: Uuid,
-    pub(crate) endpoint_key_id: Option<Uuid>,
-    pub(crate) endpoint_key_fingerprint: String,
+pub struct ResponseAffinityBinding {
+    pub endpoint_id: Uuid,
+    pub endpoint_key_id: Option<Uuid>,
+    pub endpoint_key_fingerprint: String,
 }
 
 #[derive(Clone)]
-pub(crate) struct ResponseAffinityStore {
+pub struct ResponseAffinityStore {
     backend: ResponseAffinityBackend,
 }
 
@@ -83,13 +84,13 @@ impl Default for ResponseAffinityStore {
 }
 
 impl ResponseAffinityStore {
-    pub(crate) fn unavailable() -> Self {
+    pub fn unavailable() -> Self {
         Self {
             backend: ResponseAffinityBackend::Unavailable,
         }
     }
 
-    pub(crate) fn for_tests() -> Self {
+    pub fn for_tests() -> Self {
         Self {
             backend: ResponseAffinityBackend::Local(Arc::new(LocalAffinityBackend {
                 bindings: Mutex::new(HashMap::new()),
@@ -98,7 +99,7 @@ impl ResponseAffinityStore {
         }
     }
 
-    pub(crate) fn from_connection_manager(manager: ConnectionManager, ttl_seconds: u64) -> Self {
+    pub fn from_connection_manager(manager: ConnectionManager, ttl_seconds: u64) -> Self {
         Self {
             backend: ResponseAffinityBackend::Redis(Arc::new(RedisAffinityBackend {
                 manager,
@@ -107,7 +108,7 @@ impl ResponseAffinityStore {
         }
     }
 
-    pub(crate) fn cache_key(user_id: i64, rule_id: Uuid, stable_identity: &str) -> String {
+    pub fn cache_key(user_id: i64, rule_id: Uuid, stable_identity: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(user_id.to_string().as_bytes());
         hasher.update([0]);
@@ -120,7 +121,7 @@ impl ResponseAffinityStore {
         )
     }
 
-    pub(crate) async fn get(&self, key: &str) -> Result<Option<ResponseAffinityBinding>> {
+    pub async fn get(&self, key: &str) -> Result<Option<ResponseAffinityBinding>> {
         match &self.backend {
             ResponseAffinityBackend::Unavailable => {
                 Err(anyhow!("response affinity backend unavailable"))
@@ -155,7 +156,7 @@ impl ResponseAffinityStore {
         }
     }
 
-    pub(crate) async fn get_or_create(
+    pub async fn get_or_create(
         &self,
         key: &str,
         candidate: &ResponseAffinityBinding,
@@ -198,7 +199,27 @@ impl ResponseAffinityStore {
         }
     }
 
-    pub(crate) async fn replace_if_current(
+    pub async fn delete(&self, key: &str) -> Result<()> {
+        match &self.backend {
+            ResponseAffinityBackend::Unavailable => {
+                Err(anyhow!("response affinity backend unavailable"))
+            }
+            ResponseAffinityBackend::Local(inner) => {
+                inner.bindings.lock().await.remove(key);
+                Ok(())
+            }
+            ResponseAffinityBackend::Redis(inner) => {
+                let mut manager = inner.manager.clone();
+                let _: usize = manager
+                    .del(key)
+                    .await
+                    .context("failed to delete response affinity binding")?;
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn replace_if_current(
         &self,
         key: &str,
         expected: &ResponseAffinityBinding,
@@ -247,7 +268,7 @@ fn hex_digest(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-pub(crate) fn api_key_fingerprint(secret: &str) -> String {
+pub fn api_key_fingerprint(secret: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(secret.as_bytes());
     hex_digest(&hasher.finalize())

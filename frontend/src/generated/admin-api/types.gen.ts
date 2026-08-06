@@ -262,6 +262,10 @@ export type EndpointApiKey = {
 export type EndpointApiKeyRequest = {
     api_key: string;
     enabled?: boolean | null;
+    /**
+     * Stable key identity; when omitted or null the key is matched by key_label on update
+     */
+    key_id?: string | null;
     key_label: string;
 };
 
@@ -2241,6 +2245,42 @@ export type RequestRecordSessionRouteOptionsResponses = {
 };
 
 export type RequestRecordSessionRouteOptionsResponse = RequestRecordSessionRouteOptionsResponses[keyof RequestRecordSessionRouteOptionsResponses];
+
+export type RequestRecordResetSessionAffinityData = {
+    body?: never;
+    path: {
+        /**
+         * Request record ID
+         */
+        record_id: number;
+    };
+    query?: never;
+    url: '/api/v1/admin/request-records/{record_id}/reset-session-affinity';
+};
+
+export type RequestRecordResetSessionAffinityErrors = {
+    /**
+     * Request record has no conversation or no route resolved
+     */
+    400: ErrorEnvelope;
+    403: ErrorEnvelope;
+    404: ErrorEnvelope;
+    /**
+     * Response affinity backend unavailable
+     */
+    503: ErrorEnvelope;
+};
+
+export type RequestRecordResetSessionAffinityError = RequestRecordResetSessionAffinityErrors[keyof RequestRecordResetSessionAffinityErrors];
+
+export type RequestRecordResetSessionAffinityResponses = {
+    /**
+     * Session affinity binding cleared
+     */
+    204: void;
+};
+
+export type RequestRecordResetSessionAffinityResponse = RequestRecordResetSessionAffinityResponses[keyof RequestRecordResetSessionAffinityResponses];
 
 export type ListUsersData = {
     body?: never;

@@ -165,7 +165,150 @@ async fn concurrent_first_requests_share_binding_and_follow_key_rotation() {
 }
 
 #[tokio::test]
-async fn rejects_endpoint_and_key_override_conflicts() {
+async fn rebinds_to_force_replay_endpoint_override() {
+    let replay_cache = ReplayCache::for_tests();
+    let runtime_state = WorkerRuntimeState::default();
+    let services = session_affinity_services(runtime_state.clone(), replay_cache);
+    let candidate = session_affinity_candidate();
+    let conversation_id = uuid::Uuid::new_v4();
+    let first_context = request_context(
+        runtime_state.worker_instance_id(),
+        RequestPromptLog {
+            conversation_id: Some(conversation_id),
+            conversation_seq: Some(1),
+            ..RequestPromptLog::default()
+        },
+    );
+    let first = select_route_for_candidate(
+        &services,
+        &first_context,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .expect("initial route should be selected");
+
+    let other_endpoint_id = candidate
+        .targets
+        .iter()
+        .find(|target| target.endpoint_id != first.route.route_id)
+        .expect("candidate should have another endpoint")
+        .endpoint_id;
+    let override_context = request_context(
+        runtime_state.worker_instance_id(),
+        RequestPromptLog {
+            conversation_id: Some(conversation_id),
+            conversation_override_endpoint_id: Some(other_endpoint_id),
+            ..RequestPromptLog::default()
+        },
+    );
+    let rebound = select_route_for_candidate(
+        &services,
+        &override_context,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .expect("force_replay override should rebind the session");
+    assert_eq!(rebound.route.route_id, other_endpoint_id);
+    assert_eq!(
+        rebound.route.route_selection_reason,
+        db::RouteSelectionReason::ConversationOverride
+    );
+
+    let follow_up = select_route_for_candidate(
+        &services,
+        &first_context,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .expect("rebound session should stay on the override target");
+    assert_eq!(follow_up.route.route_id, other_endpoint_id);
+}
+
+#[tokio::test]
+async fn rebinds_to_force_replay_key_override() {
+    let replay_cache = ReplayCache::for_tests();
+    let runtime_state = WorkerRuntimeState::default();
+    let services = session_affinity_services(runtime_state.clone(), replay_cache);
+    let mut candidate = session_affinity_candidate();
+    let conversation_id = uuid::Uuid::new_v4();
+    let first_context = request_context(
+        runtime_state.worker_instance_id(),
+        RequestPromptLog {
+            conversation_id: Some(conversation_id),
+            conversation_seq: Some(1),
+            ..RequestPromptLog::default()
+        },
+    );
+    let first = select_route_for_candidate(
+        &services,
+        &first_context,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .expect("initial route should be selected");
+
+    let secondary_key_id = uuid::Uuid::new_v4();
+    let bound_target = candidate
+        .targets
+        .iter_mut()
+        .find(|target| target.endpoint_id == first.route.route_id)
+        .expect("bound target exists");
+    bound_target.api_keys.push(db::EndpointApiKey {
+        key_id: secondary_key_id,
+        endpoint_id: first.route.route_id,
+        key_label: "secondary".to_string(),
+        api_key: "secondary-key".to_string(),
+        position: 1,
+        enabled: true,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    });
+    let key_override_context = request_context(
+        runtime_state.worker_instance_id(),
+        RequestPromptLog {
+            conversation_id: Some(conversation_id),
+            conversation_override_endpoint_id: Some(first.route.route_id),
+            conversation_override_endpoint_key_id: Some(secondary_key_id),
+            ..RequestPromptLog::default()
+        },
+    );
+    let rebound = select_route_for_candidate(
+        &services,
+        &key_override_context,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .expect("force_replay key override should rebind the session");
+    assert_eq!(rebound.route.route_id, first.route.route_id);
+    assert_eq!(
+        rebound.route.endpoint_key_id,
+        Some(secondary_key_id),
+        "key override should rebind to the requested key"
+    );
+}
+
+#[tokio::test]
+async fn rejects_force_passthrough_endpoint_and_key_override_conflicts() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
     let services = session_affinity_services(runtime_state.clone(), replay_cache);
@@ -197,6 +340,12 @@ async fn rejects_endpoint_and_key_override_conflicts() {
         .find(|target| target.endpoint_id != first.route.route_id)
         .expect("candidate should have another endpoint")
         .endpoint_id;
+    candidate
+        .targets
+        .iter_mut()
+        .find(|target| target.endpoint_id == other_endpoint_id)
+        .expect("override target exists")
+        .responses_continuation_policy = db::ResponsesContinuationPolicy::ForcePassthrough;
     let endpoint_override_context = request_context(
         runtime_state.worker_instance_id(),
         RequestPromptLog {
@@ -215,7 +364,7 @@ async fn rejects_endpoint_and_key_override_conflicts() {
     )
     .await
     {
-        Ok(_) => panic!("endpoint override must not replace an existing binding"),
+        Ok(_) => panic!("force_passthrough endpoint override must not replace an existing binding"),
         Err(error) => error,
     };
     assert_eq!(
@@ -231,6 +380,7 @@ async fn rejects_endpoint_and_key_override_conflicts() {
         .iter_mut()
         .find(|target| target.endpoint_id == first.route.route_id)
         .expect("bound target exists");
+    bound_target.responses_continuation_policy = db::ResponsesContinuationPolicy::ForcePassthrough;
     bound_target.api_keys.push(db::EndpointApiKey {
         key_id: conflicting_key_id,
         endpoint_id: first.route.route_id,
@@ -260,7 +410,7 @@ async fn rejects_endpoint_and_key_override_conflicts() {
     )
     .await
     {
-        Ok(_) => panic!("API key override must not replace an existing binding"),
+        Ok(_) => panic!("force_passthrough key override must not replace an existing binding"),
         Err(error) => error,
     };
     assert_eq!(
@@ -269,4 +419,80 @@ async fn rejects_endpoint_and_key_override_conflicts() {
             .map(|error| error.code),
         Some("responses_session_affinity_conflict")
     );
+}
+
+#[tokio::test]
+async fn heals_stale_key_id_when_secret_fingerprint_matches() {
+    use crate::response_affinity::{ResponseAffinityStore, api_key_fingerprint};
+
+    let replay_cache = ReplayCache::for_tests();
+    let runtime_state = WorkerRuntimeState::default();
+    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let mut candidate = session_affinity_candidate();
+    let conversation_id = uuid::Uuid::new_v4();
+    let bound_target = candidate.targets.first_mut().expect("bound target exists");
+    let endpoint_id = bound_target.endpoint_id;
+    let old_key_id = bound_target.api_keys[0].key_id;
+    let stale_binding = crate::response_affinity::ResponseAffinityBinding {
+        endpoint_id,
+        endpoint_key_id: Some(old_key_id),
+        endpoint_key_fingerprint: api_key_fingerprint("key-a"),
+    };
+    let store = replay_cache.response_affinity();
+    let cache_key = ResponseAffinityStore::cache_key(
+        1,
+        candidate.rule_id,
+        &format!("conversation:{conversation_id}"),
+    );
+    store
+        .get_or_create(&cache_key, &stale_binding)
+        .await
+        .unwrap();
+
+    bound_target.api_keys[0].key_id = uuid::Uuid::new_v4();
+    let new_key_id = bound_target.api_keys[0].key_id;
+    let request_ctx = request_context(
+        runtime_state.worker_instance_id(),
+        RequestPromptLog {
+            conversation_id: Some(conversation_id),
+            conversation_seq: Some(1),
+            ..RequestPromptLog::default()
+        },
+    );
+    let healed = select_route_for_candidate(
+        &services,
+        &request_ctx,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .expect("stale key_id with matching fingerprint should heal to the new key");
+    assert_eq!(healed.route.endpoint_key_id, Some(new_key_id));
+
+    let healed_binding = store
+        .get(&cache_key)
+        .await
+        .unwrap()
+        .expect("binding exists");
+    assert_eq!(
+        healed_binding.endpoint_key_id,
+        Some(new_key_id),
+        "binding should be healed to the new key_id"
+    );
+
+    let follow_up = select_route_for_candidate(
+        &services,
+        &request_ctx,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .expect("healed binding should stay usable");
+    assert_eq!(follow_up.route.endpoint_key_id, Some(new_key_id));
 }

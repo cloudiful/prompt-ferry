@@ -8,6 +8,7 @@ use crate::{
     response_affinity::{
         ResponseAffinityBinding, ResponseAffinityStore, api_key_fingerprint, log_unavailable,
     },
+    worker::runtime::context::AffinityFailureAudit,
 };
 
 use super::super::{
@@ -19,11 +20,12 @@ use super::selection::{
     select_bound_api_key, select_endpoint_api_key,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(in crate::worker::runtime) struct RouteAffinityError {
     pub(in crate::worker::runtime) status: StatusCode,
     pub(in crate::worker::runtime) code: &'static str,
     pub(in crate::worker::runtime) message: &'static str,
+    pub(in crate::worker::runtime) audit: AffinityFailureAudit,
 }
 
 impl RouteAffinityError {
@@ -32,6 +34,7 @@ impl RouteAffinityError {
             status: StatusCode::BAD_REQUEST,
             code: "responses_session_identity_required",
             message: "responses session affinity requires a stable session identity",
+            audit: AffinityFailureAudit::default(),
         }
     }
 
@@ -40,22 +43,25 @@ impl RouteAffinityError {
             status: StatusCode::SERVICE_UNAVAILABLE,
             code: "responses_session_affinity_unavailable",
             message: "responses session affinity backend is unavailable",
+            audit: AffinityFailureAudit::default(),
         }
     }
 
-    fn target_unavailable() -> Self {
+    fn target_unavailable(audit: AffinityFailureAudit) -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
             code: "responses_session_affinity_target_unavailable",
             message: "the bound responses session endpoint or API key is unavailable",
+            audit,
         }
     }
 
-    fn conflict() -> Self {
+    fn conflict(audit: AffinityFailureAudit) -> Self {
         Self {
             status: StatusCode::CONFLICT,
             code: "responses_session_affinity_conflict",
             message: "the requested endpoint or API key conflicts with the bound responses session",
+            audit,
         }
     }
 }
@@ -102,20 +108,62 @@ pub(super) async fn select<'a>(
 
     for _ in 0..2 {
         if let Some(current_binding) = binding.as_ref() {
-            if binding_conflicts_with_override(current_binding, request_prompt_log) {
-                return Err(anyhow::Error::new(RouteAffinityError::conflict()));
+            let audit = binding_audit(candidate.rule_id, Some(current_binding), request_prompt_log);
+            if override_conflicts_with_binding(current_binding, request_prompt_log) {
+                let rebindable =
+                    override_rebind_target(candidate, request_prompt_log).is_some_and(|target| {
+                        target.responses_continuation_policy
+                            == db::ResponsesContinuationPolicy::ForceReplay
+                    });
+                if !rebindable {
+                    return Err(anyhow::Error::new(RouteAffinityError::conflict(audit)));
+                }
+                let (selection, replacement) = select_new_binding(
+                    candidate,
+                    request,
+                    request_prompt_log,
+                    &stable_identity,
+                    &audit,
+                )?;
+                match store
+                    .replace_if_current(&cache_key, current_binding, &replacement)
+                    .await
+                {
+                    Ok(true) => return Ok(selection),
+                    Ok(false) => {}
+                    Err(err) => {
+                        log_unavailable(&err);
+                        return Err(anyhow::Error::new(RouteAffinityError::backend_unavailable()));
+                    }
+                }
+                binding = match store.get(&cache_key).await {
+                    Ok(binding) => binding,
+                    Err(err) => {
+                        log_unavailable(&err);
+                        return Err(anyhow::Error::new(RouteAffinityError::backend_unavailable()));
+                    }
+                };
+                continue;
             }
             if let Some(selection) = selection_for_binding(candidate, current_binding) {
+                heal_stale_binding(&store, &cache_key, current_binding, &selection).await;
                 return Ok(selection);
             }
             if candidate_target_by_endpoint(candidate, current_binding.endpoint_id)
                 .is_some_and(|target| target.enabled)
             {
-                return Err(anyhow::Error::new(RouteAffinityError::target_unavailable()));
+                return Err(anyhow::Error::new(RouteAffinityError::target_unavailable(
+                    audit,
+                )));
             }
 
-            let (selection, replacement) =
-                select_new_binding(candidate, request, request_prompt_log, &stable_identity)?;
+            let (selection, replacement) = select_new_binding(
+                candidate,
+                request,
+                request_prompt_log,
+                &stable_identity,
+                &audit,
+            )?;
             match store
                 .replace_if_current(&cache_key, current_binding, &replacement)
                 .await
@@ -137,8 +185,13 @@ pub(super) async fn select<'a>(
             continue;
         }
 
-        let (selection, candidate_binding) =
-            select_new_binding(candidate, request, request_prompt_log, &stable_identity)?;
+        let (selection, candidate_binding) = select_new_binding(
+            candidate,
+            request,
+            request_prompt_log,
+            &stable_identity,
+            &AffinityFailureAudit::default(),
+        )?;
         let created = match store.get_or_create(&cache_key, &candidate_binding).await {
             Ok(binding) => binding,
             Err(err) => {
@@ -152,18 +205,69 @@ pub(super) async fn select<'a>(
         binding = Some(created);
     }
 
-    Err(anyhow::Error::new(RouteAffinityError::target_unavailable()))
+    Err(anyhow::Error::new(RouteAffinityError::target_unavailable(
+        binding_audit(candidate.rule_id, binding.as_ref(), request_prompt_log),
+    )))
+}
+
+fn binding_audit(
+    rule_id: uuid::Uuid,
+    binding: Option<&ResponseAffinityBinding>,
+    request_prompt_log: &RequestPromptLog,
+) -> AffinityFailureAudit {
+    AffinityFailureAudit {
+        model_route_rule_id: Some(rule_id),
+        endpoint_id: binding.map(|entry| entry.endpoint_id),
+        endpoint_key_id: binding.and_then(|entry| entry.endpoint_key_id),
+        requested_endpoint_id: request_prompt_log.conversation_override_endpoint_id,
+        requested_key_id: request_prompt_log.conversation_override_endpoint_key_id,
+    }
+}
+
+fn override_rebind_target<'a>(
+    candidate: &'a db::ModelRouteCandidate,
+    request_prompt_log: &RequestPromptLog,
+) -> Option<&'a db::ModelRouteCandidateTarget> {
+    request_prompt_log
+        .conversation_override_endpoint_id
+        .and_then(|endpoint_id| candidate_target_by_endpoint(candidate, endpoint_id))
+        .filter(|target| target.enabled)
+}
+
+async fn heal_stale_binding(
+    store: &ResponseAffinityStore,
+    cache_key: &str,
+    binding: &ResponseAffinityBinding,
+    selection: &SessionAffinitySelection<'_>,
+) {
+    let replacement = ResponseAffinityBinding {
+        endpoint_id: selection.target.endpoint_id,
+        endpoint_key_id: selection.key_selection.key_id,
+        endpoint_key_fingerprint: api_key_fingerprint(&selection.key_selection.secret),
+    };
+    if replacement == *binding {
+        return;
+    }
+    if let Err(err) = store
+        .replace_if_current(cache_key, binding, &replacement)
+        .await
+    {
+        log_unavailable(&err);
+    }
 }
 
 fn session_target_for_new_binding<'a>(
     candidate: &'a db::ModelRouteCandidate,
     request_prompt_log: &RequestPromptLog,
     stable_identity: &str,
+    audit: &AffinityFailureAudit,
 ) -> Result<(&'a db::ModelRouteCandidateTarget, db::RouteSelectionReason)> {
     if let Some(endpoint_id) = request_prompt_log.conversation_override_endpoint_id {
         let target = candidate_target_by_endpoint(candidate, endpoint_id)
             .filter(|target| target.enabled)
-            .ok_or_else(|| anyhow::Error::new(RouteAffinityError::target_unavailable()))?;
+            .ok_or_else(|| {
+                anyhow::Error::new(RouteAffinityError::target_unavailable(audit.clone()))
+            })?;
         return Ok((target, db::RouteSelectionReason::ConversationOverride));
     }
 
@@ -177,7 +281,7 @@ fn session_target_for_new_binding<'a>(
 
     rendezvous_target(candidate, Some(stable_identity))
         .map(|target| (target, db::RouteSelectionReason::SessionAffinity))
-        .ok_or_else(|| anyhow::Error::new(RouteAffinityError::target_unavailable()))
+        .ok_or_else(|| anyhow::Error::new(RouteAffinityError::target_unavailable(audit.clone())))
 }
 
 fn select_new_binding<'a>(
@@ -185,12 +289,15 @@ fn select_new_binding<'a>(
     request: &BufferedBridgeRequest,
     request_prompt_log: &RequestPromptLog,
     stable_identity: &str,
+    audit: &AffinityFailureAudit,
 ) -> Result<(SessionAffinitySelection<'a>, ResponseAffinityBinding)> {
     let (target, route_selection_reason) =
-        session_target_for_new_binding(candidate, request_prompt_log, stable_identity)?;
+        session_target_for_new_binding(candidate, request_prompt_log, stable_identity, audit)?;
     let key_selection = select_endpoint_api_key(target, request, request_prompt_log);
     if key_selection.invalid_conversation_override {
-        return Err(anyhow::Error::new(RouteAffinityError::conflict()));
+        return Err(anyhow::Error::new(RouteAffinityError::conflict(
+            audit.clone(),
+        )));
     }
     let binding = binding_for_selection(target, &key_selection.selection);
     Ok((
@@ -217,7 +324,7 @@ fn selection_for_binding<'a>(
     })
 }
 
-fn binding_conflicts_with_override(
+fn override_conflicts_with_binding(
     binding: &ResponseAffinityBinding,
     request_prompt_log: &RequestPromptLog,
 ) -> bool {

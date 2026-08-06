@@ -150,19 +150,29 @@ pub(super) async fn resolve_endpoint_input(
     for (index, submitted) in body.api_keys.into_iter().enumerate() {
         let key_label = submitted.key_label.trim();
         let raw_api_key = submitted.api_key.trim();
-        let existing_key = if key_label.is_empty() {
-            None
-        } else {
-            if !submitted_key_labels.insert(key_label.to_string()) {
+        if !key_label.is_empty() && !submitted_key_labels.insert(key_label.to_string()) {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                "endpoint api key labels must not contain duplicates",
+            ));
+        }
+        let existing_key = if let Some(key_id) = submitted.key_id {
+            let matched = existing_api_keys.iter().find(|key| key.key_id == key_id);
+            if matched.is_none() {
                 return Err(error(
                     StatusCode::BAD_REQUEST,
-                    "bad_request",
-                    "endpoint api key labels must not contain duplicates",
+                    "invalid_endpoint_key",
+                    "endpoint key not found for this endpoint",
                 ));
             }
+            matched
+        } else if !key_label.is_empty() {
             existing_api_keys
                 .iter()
                 .find(|key| key.key_label == key_label)
+        } else {
+            None
         };
         let resolved_api_key = if raw_api_key.is_empty() {
             existing_key
@@ -192,6 +202,7 @@ pub(super) async fn resolve_endpoint_input(
             enabled: submitted
                 .enabled
                 .unwrap_or_else(|| existing_key.map(|key| key.enabled).unwrap_or(true)),
+            key_id: existing_key.map(|key| key.key_id),
         });
     }
     if api_keys.is_empty() && !body.api_key.trim().is_empty() {
@@ -204,6 +215,7 @@ pub(super) async fn resolve_endpoint_input(
             api_key: body.api_key.clone(),
             position: 0,
             enabled: true,
+            key_id: None,
         });
     }
     if api_keys.is_empty() {

@@ -1347,6 +1347,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionRouteOptionsResponse'
+  /api/v1/admin/request-records/{record_id}/reset-session-affinity:
+    post:
+      tags:
+      - request-records
+      operationId: request_record_reset_session_affinity
+      parameters:
+      - name: record_id
+        in: path
+        description: Request record ID
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: Session affinity binding cleared
+        '400':
+          description: Request record has no conversation or no route resolved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Response affinity backend unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/admin/users:
     get:
       tags:
@@ -2964,6 +3004,13 @@ components:
           type:
           - boolean
           - 'null'
+        key_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: Stable key identity; when omitted or null the key is matched
+            by key_label on update
         key_label:
           type: string
     EndpointPage:

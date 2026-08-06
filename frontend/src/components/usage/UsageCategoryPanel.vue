@@ -33,6 +33,7 @@ defineEmits<{
   'update:detailVisible': [value: boolean]
   'update:filters': [value: RequestRecordFilterModel]
   clearConversationOverride: []
+  resetSessionAffinity: []
   drilldown: [filter: RequestOverviewDrilldown]
   filter: [event: TableFilterChange]
   loadDetailRequestFull: []
@@ -80,6 +81,7 @@ const McpUsagePanel = defineAsyncComponent(
         @open-clear-dialog="$emit('openClearDialog')"
         @open-detail="$emit('openDetail', $event)"
         @page="$emit('page', $event)"
+        @reset-session-affinity="$emit('resetSessionAffinity')"
         @save-conversation-override="$emit('saveConversationOverride', $event)"
         @search="$emit('search')"
         @sort="$emit('sort', $event)"

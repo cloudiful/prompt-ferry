@@ -242,6 +242,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     requestFullLoading: detailState.requestFullLoading,
     requestStateOptions,
     resetDetail: detailState.resetDetail,
+    resetSessionAffinity: detailState.resetSessionAffinity,
     applyDrilldown,
     routeOptionsLoading: detailState.routeOptionsLoading,
     rows: recordState.rows,

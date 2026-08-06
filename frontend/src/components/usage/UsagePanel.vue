@@ -25,6 +25,7 @@ const emit = defineEmits<{
   clearConversationOverride: []
   filter: [event: TableFilterChange]
   loadDetailRequestFull: []
+  resetSessionAffinity: []
   openClearDialog: []
   openDetail: [record: RequestRecordRowView]
   page: [event: TablePageChange]
@@ -296,6 +297,7 @@ function applyFilter(): void {
       :t="t"
       @clear-conversation-override="$emit('clearConversationOverride')"
       @load-request-full="$emit('loadDetailRequestFull')"
+      @reset-session-affinity="$emit('resetSessionAffinity')"
       @save-conversation-override="$emit('saveConversationOverride', $event)"
     />
   </div>

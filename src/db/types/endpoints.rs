@@ -109,6 +109,7 @@ pub struct EndpointApiKeyCreate {
     pub api_key: String,
     pub position: i32,
     pub enabled: bool,
+    pub key_id: Option<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

@@ -169,3 +169,6 @@ mod tests {
         assert_eq!(parse_status_from_message("boom"), None);
     }
 }
+
+#[cfg(test)]
+mod v2_tests;

@@ -357,18 +357,21 @@ async fn endpoint_key_override_and_request_snapshot_are_preserved() -> anyhow::R
                     api_key: "primary-secret".to_string(),
                     position: 0,
                     enabled: true,
+                    key_id: None,
                 },
                 db::EndpointApiKeyCreate {
                     key_label: "secondary".to_string(),
                     api_key: "secondary-secret".to_string(),
                     position: 1,
                     enabled: true,
+                    key_id: None,
                 },
                 db::EndpointApiKeyCreate {
                     key_label: "disabled".to_string(),
                     api_key: "disabled-secret".to_string(),
                     position: 2,
                     enabled: false,
+                    key_id: None,
                 },
             ],
             key_lb_enabled: true,
@@ -501,6 +504,7 @@ async fn endpoint_key_override_and_request_snapshot_are_preserved() -> anyhow::R
                 api_key: secondary.api_key.clone(),
                 position: secondary.position,
                 enabled: true,
+                key_id: Some(secondary.key_id),
             }],
             key_lb_enabled: endpoint.key_lb_enabled,
             enabled: endpoint.enabled,
@@ -512,7 +516,11 @@ async fn endpoint_key_override_and_request_snapshot_are_preserved() -> anyhow::R
             .await?
             .expect("endpoint override after key deletion");
     assert_eq!(override_after_key_delete.endpoint_id, endpoint.endpoint_id);
-    assert_eq!(override_after_key_delete.endpoint_key_id, None);
+    assert_eq!(
+        override_after_key_delete.endpoint_key_id,
+        Some(secondary.key_id),
+        "override key must survive the key update because the key_id is preserved"
+    );
     let detail = db::get_visible_usage_event_detail(&schema.pool, record_id, None)
         .await?
         .expect("request detail after key deletion");
@@ -531,6 +539,284 @@ async fn endpoint_key_override_and_request_snapshot_are_preserved() -> anyhow::R
         db::get_conversation_endpoint_override(&schema.pool, conversation_id)
             .await?
             .is_none()
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn endpoint_key_update_preserves_key_identity() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping endpoint key integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "key-identity-test".to_string(),
+            base_url: "http://key-identity.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "legacy-key".to_string(),
+            api_keys: vec![
+                db::EndpointApiKeyCreate {
+                    key_label: "primary".to_string(),
+                    api_key: "primary-secret".to_string(),
+                    position: 0,
+                    enabled: true,
+                    key_id: None,
+                },
+                db::EndpointApiKeyCreate {
+                    key_label: "secondary".to_string(),
+                    api_key: "secondary-secret".to_string(),
+                    position: 1,
+                    enabled: true,
+                    key_id: None,
+                },
+            ],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    let primary_id = endpoint
+        .api_keys
+        .iter()
+        .find(|key| key.key_label == "primary")
+        .expect("primary endpoint key")
+        .key_id;
+    let secondary_id = endpoint
+        .api_keys
+        .iter()
+        .find(|key| key.key_label == "secondary")
+        .expect("secondary endpoint key")
+        .key_id;
+
+    let legacy_updated = db::update_endpoint(
+        &schema.pool,
+        endpoint.endpoint_id,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "key-identity-test".to_string(),
+            base_url: "http://key-identity.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "legacy-key".to_string(),
+            api_keys: vec![
+                db::EndpointApiKeyCreate {
+                    key_label: "primary".to_string(),
+                    api_key: "rotated-primary-secret".to_string(),
+                    position: 0,
+                    enabled: true,
+                    key_id: None,
+                },
+                db::EndpointApiKeyCreate {
+                    key_label: "secondary".to_string(),
+                    api_key: "".to_string(),
+                    position: 1,
+                    enabled: true,
+                    key_id: None,
+                },
+            ],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?
+    .expect("endpoint updated");
+    assert_eq!(
+        legacy_updated
+            .api_keys
+            .iter()
+            .find(|key| key.key_label == "primary")
+            .map(|key| key.key_id),
+        Some(primary_id),
+        "label-matched update must preserve the primary key_id"
+    );
+    assert_eq!(
+        legacy_updated
+            .api_keys
+            .iter()
+            .find(|key| key.key_label == "primary")
+            .map(|key| key.api_key.as_str()),
+        Some("rotated-primary-secret"),
+        "secret rotation must apply to the existing key"
+    );
+    assert_eq!(
+        legacy_updated
+            .api_keys
+            .iter()
+            .find(|key| key.key_label == "secondary")
+            .map(|key| key.key_id),
+        Some(secondary_id),
+        "label-matched update must preserve the secondary key_id"
+    );
+
+    let swapped = db::update_endpoint(
+        &schema.pool,
+        endpoint.endpoint_id,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "key-identity-test".to_string(),
+            base_url: "http://key-identity.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "legacy-key".to_string(),
+            api_keys: vec![
+                db::EndpointApiKeyCreate {
+                    key_label: "secondary".to_string(),
+                    api_key: "".to_string(),
+                    position: 0,
+                    enabled: true,
+                    key_id: Some(secondary_id),
+                },
+                db::EndpointApiKeyCreate {
+                    key_label: "renamed-primary".to_string(),
+                    api_key: "rotated-primary-secret".to_string(),
+                    position: 1,
+                    enabled: true,
+                    key_id: Some(primary_id),
+                },
+            ],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?
+    .expect("endpoint updated");
+    let mut by_position = swapped.api_keys.clone();
+    by_position.sort_by_key(|key| key.position);
+    assert_eq!(by_position[0].key_id, secondary_id);
+    assert_eq!(by_position[0].key_label, "secondary");
+    assert_eq!(by_position[0].position, 0);
+    assert_eq!(by_position[1].key_id, primary_id);
+    assert_eq!(
+        by_position[1].key_label, "renamed-primary",
+        "explicit key_id must win over the label"
+    );
+    assert_eq!(by_position[1].position, 1);
+    assert_eq!(
+        by_position[1].api_key, "rotated-primary-secret",
+        "renaming via key_id must keep the stored secret"
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-affinity-reset", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    let endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "affinity-reset-test".to_string(),
+            base_url: "http://affinity-reset.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "affinity-key".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    let rule = db::create_model_endpoint_rule(
+        &schema.pool,
+        db::ModelEndpointRuleCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            model_pattern: "gpt-affinity-reset".to_string(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
+            session_affinity_lock_after_turns: 5,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            targets: vec![db::ModelRouteTargetCreate {
+                endpoint_id: endpoint.endpoint_id,
+                enabled: true,
+                upstream_model: None,
+                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
+            }],
+        },
+    )
+    .await?;
+    let conversation_id = Uuid::new_v4();
+    let record_id = db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_route(Some(endpoint.endpoint_id), Some(rule.rule_id))
+            .with_model(Some("gpt-affinity-reset".to_string()))
+            .with_request_context(db::RequestRecordContextInput {
+                conversation_id: Some(conversation_id),
+                parent_event_id: None,
+                conversation_seq: Some(1),
+                conversation_source: "session_header".to_string(),
+                client_installation_id: None,
+                normalized_item_count: None,
+                normalized_chain_hash: None,
+                normalized_first_ref_hash: None,
+                normalized_last_ref_hash: None,
+                base_checkpoint_event_id: None,
+            }),
+    )
+    .await?;
+
+    let cache_key = prompt_ferry::response_affinity::ResponseAffinityStore::cache_key(
+        admin.user_id,
+        rule.rule_id,
+        &format!("conversation:{conversation_id}"),
+    );
+    let store = state.replay_cache.response_affinity();
+    let binding = prompt_ferry::response_affinity::ResponseAffinityBinding {
+        endpoint_id: endpoint.endpoint_id,
+        endpoint_key_id: None,
+        endpoint_key_fingerprint: "fingerprint".to_string(),
+    };
+    store.get_or_create(&cache_key, &binding).await?;
+    assert_eq!(
+        store.get(&cache_key).await?,
+        Some(binding.clone()),
+        "binding should exist before reset"
+    );
+
+    let response = worker_admin::router(state.clone())
+        .oneshot(auth_request(
+            "POST",
+            format!("/api/v1/admin/request-records/{record_id}/reset-session-affinity"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        store.get(&cache_key).await?,
+        None,
+        "binding should be cleared after reset"
     );
 
     schema.cleanup().await?;

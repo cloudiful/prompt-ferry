@@ -623,3 +623,144 @@ async fn delete_session_removes_session_state_from_store() {
     assert!(!store.states.read().await.contains_key(&session_id));
     assert!(store.deleted.read().await.contains(&session_id));
 }
+
+const MCP_V2_META: &str = r#"{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"stateless-test","version":"1.0"}}"#;
+
+fn v2_body(method: &str, id: i64) -> Vec<u8> {
+    format!(
+        r#"{{"jsonrpc":"2.0","id":{id},"method":"{method}","params":{{"_meta":{MCP_V2_META}}}}}"#
+    )
+    .into_bytes()
+}
+
+fn v2_headers(method: &str) -> Vec<(String, String)> {
+    vec![
+        ("Mcp-Protocol-Version".to_string(), "2026-07-28".to_string()),
+        ("Mcp-Method".to_string(), method.to_string()),
+    ]
+}
+
+#[tokio::test]
+async fn stateless_discover_advertises_2026_07_28_protocol() {
+    let pool = test_pool();
+    let cache = McpCatalogCache::new();
+    let body = v2_body("server/discover", 1);
+    let (status, content_type, headers, body) = collect_response(
+        handle_stream(
+            &pool,
+            &cache,
+            request("POST", "/mcp", &v2_headers("server/discover"), &body),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    assert_eq!(content_type, "text/event-stream");
+    assert!(
+        !headers.iter().any(|(name, _)| name == "mcp-session-id"),
+        "stateless discover must not create a session"
+    );
+    let value = last_sse_json(&body);
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+    let versions = value["result"]["supportedVersions"].as_array().unwrap();
+    assert!(versions.iter().any(|v| v.as_str() == Some("2026-07-28")));
+    assert!(versions.iter().any(|v| v.as_str() == Some("2025-11-25")));
+    assert!(value["result"]["capabilities"]["tools"].is_object());
+    assert!(value["result"]["capabilities"]["resources"].is_object());
+    assert!(value["result"]["capabilities"]["prompts"].is_object());
+}
+
+#[tokio::test]
+async fn stateless_request_is_served_without_session_header() {
+    let pool = test_pool();
+    let cache = McpCatalogCache::new();
+    let body = v2_body("resources/templates/list", 2);
+    let (status, content_type, headers, body) = collect_response(
+        handle_stream(
+            &pool,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &v2_headers("resources/templates/list"),
+                &body,
+            ),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    assert_eq!(content_type, "text/event-stream");
+    assert!(
+        !headers.iter().any(|(name, _)| name == "mcp-session-id"),
+        "stateless requests must not receive a session header"
+    );
+    let value = last_sse_json(&body);
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+    assert!(value["result"]["resourceTemplates"].is_array());
+}
+
+#[tokio::test]
+async fn stateless_legacy_client_still_gets_initialize_session() {
+    let pool = test_pool();
+    let cache = McpCatalogCache::new();
+    let (_, _, headers, body) = collect_response(
+        handle_stream(
+            &pool,
+            &cache,
+            request(
+                "POST",
+                "/mcp",
+                &[],
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            ),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert!(headers.iter().any(|(name, _)| name == "mcp-session-id"));
+    let value = last_sse_json(&body);
+    assert_eq!(
+        value["result"]["protocolVersion"].as_str(),
+        Some("2025-11-25")
+    );
+    assert_eq!(
+        value["result"].get("resultType"),
+        None,
+        "legacy initialize result must not carry resultType"
+    );
+}
+
+#[tokio::test]
+async fn stateless_tools_list_aggregates_visible_servers() {
+    let Ok(url) = std::env::var("PROMPT_FERRY_TEST_DATABASE_URL") else {
+        eprintln!(
+            "skipping stateless tools/list DB test: PROMPT_FERRY_TEST_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let pool = PgPoolOptions::new().connect_lazy(&url).unwrap();
+    let cache = McpCatalogCache::new();
+    let body = v2_body("tools/list", 3);
+    let (status, _, _, body) = collect_response(
+        handle_stream(
+            &pool,
+            &cache,
+            request("POST", "/mcp", &v2_headers("tools/list"), &body),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    let value = last_sse_json(&body);
+    assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
+    assert!(value["result"]["tools"].is_array());
+}

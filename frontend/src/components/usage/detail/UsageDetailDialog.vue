@@ -172,6 +172,7 @@ function saveOverride(): void {
             :t="t"
             @save-override="saveOverride"
             @clear-override="emit('clearConversationOverride')"
+            @reset-affinity="emit('resetSessionAffinity')"
           />
         </div>
         <UsageErrorSection :event="detail.record" :t="t" :visible="visible" />

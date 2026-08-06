@@ -90,6 +90,7 @@ watch(activeSection, (next) => {
       @open-clear-dialog="clearDialogVisible = true"
       @open-detail="openDetail"
       @page="onPage"
+      @reset-session-affinity="resetSessionAffinity"
       @save-conversation-override="saveConversationOverride"
       @search="refreshRecords"
       @sort="onSort"

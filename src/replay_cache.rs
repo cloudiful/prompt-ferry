@@ -183,7 +183,7 @@ impl ReplayCache {
         !matches!(self.backend, ReplayCacheBackend::Disabled)
     }
 
-    pub(crate) fn response_affinity(&self) -> ResponseAffinityStore {
+    pub fn response_affinity(&self) -> ResponseAffinityStore {
         self.response_affinity.clone()
     }
 

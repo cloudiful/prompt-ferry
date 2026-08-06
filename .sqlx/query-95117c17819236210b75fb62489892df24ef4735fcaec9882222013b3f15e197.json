@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE endpoint_api_keys\nSET\n    key_label = $3,\n    api_key = $4,\n    position = $5,\n    enabled = $6,\n    updated_at = NOW()\nWHERE endpoint_id = $1 AND key_id = $2\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "95117c17819236210b75fb62489892df24ef4735fcaec9882222013b3f15e197"
+}

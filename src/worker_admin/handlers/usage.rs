@@ -205,6 +205,63 @@ pub(super) async fn usage_event_session_route_options(
     }
 }
 
+pub(super) async fn usage_event_session_affinity_reset(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Path(record_id): Path<i64>,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response;
+    }
+    let event = match get_visible_usage_event_detail_or_not_found(&state, record_id, None).await {
+        Ok(event) => event,
+        Err(response) => return response,
+    };
+    let Some(conversation_id) = event.conversation_id else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "no_conversation_id",
+            "request record has no conversation_id",
+        );
+    };
+    let route_user_id = event.user_id.unwrap_or_default();
+    let (_, candidate) = match db::resolve_model_route_with_fallback(
+        &state.pool,
+        route_user_id,
+        event.model.as_deref(),
+        true,
+    )
+    .await
+    {
+        Ok((route, candidate)) => (route, candidate),
+        Err(err) => return internal(&state, err),
+    };
+    let Some(candidate) = candidate else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "no_route_resolved",
+            "no model route resolved for the request model",
+        );
+    };
+    let cache_key = crate::response_affinity::ResponseAffinityStore::cache_key(
+        route_user_id,
+        candidate.rule_id,
+        &format!("conversation:{conversation_id}"),
+    );
+    let store = state.replay_cache.response_affinity();
+    match store.delete(&cache_key).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to reset session affinity binding");
+            error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "responses_session_affinity_unavailable",
+                "response affinity backend is unavailable",
+            )
+        }
+    }
+}
+
 pub(super) async fn get_conversation_endpoint_override(
     State(state): State<AdminState>,
     headers: HeaderMap,

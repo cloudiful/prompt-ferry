@@ -285,3 +285,12 @@ pub(super) struct FailurePayload {
     pub(super) upstream_error_body: Option<String>,
     pub(super) response_body: Option<String>,
 }
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct AffinityFailureAudit {
+    pub(super) endpoint_id: Option<uuid::Uuid>,
+    pub(super) endpoint_key_id: Option<uuid::Uuid>,
+    pub(super) model_route_rule_id: Option<uuid::Uuid>,
+    pub(super) requested_endpoint_id: Option<uuid::Uuid>,
+    pub(super) requested_key_id: Option<uuid::Uuid>,
+}

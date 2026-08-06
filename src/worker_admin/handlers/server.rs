@@ -98,6 +98,10 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             get(usage_event_session_route_options),
         )
         .route(
+            "/admin/request-records/{record_id}/reset-session-affinity",
+            post(usage_event_session_affinity_reset),
+        )
+        .route(
             "/admin/request-records/{record_id}/request-full",
             get(usage_request_full),
         )

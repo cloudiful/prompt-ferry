@@ -219,7 +219,7 @@ fn append_response_headers(target: &mut HeaderMap, headers: Vec<(String, String)
     }
 }
 
-fn is_hop_by_hop_request_header(name: &header::HeaderName) -> bool {
+pub(super) fn is_hop_by_hop_request_header(name: &header::HeaderName) -> bool {
     matches!(
         name.as_str(),
         "host"

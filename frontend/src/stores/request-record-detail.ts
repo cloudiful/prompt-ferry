@@ -3,6 +3,7 @@ import {
   deleteConversationEndpointOverride,
   requestRecordDetail,
   requestRecordFull,
+  requestRecordResetSessionAffinity,
   requestRecordSessionRouteOptions,
   setConversationEndpointOverride,
 } from '../generated/admin-api'
@@ -207,6 +208,20 @@ export function createRequestRecordDetailState() {
     }
   }
 
+  async function resetSessionAffinity(recordId: number): Promise<void> {
+    overrideSaving.value = true
+    try {
+      await requestRecordResetSessionAffinity<true>(
+        withData({ path: { record_id: recordId } }),
+      )
+      if (detailRecord.value) {
+        await loadSessionRouteOptions(detailRecord.value.record_id)
+      }
+    } finally {
+      overrideSaving.value = false
+    }
+  }
+
   function resetDetail(): void {
     detailLoadVersion += 1
     detailLoading.value = false
@@ -230,6 +245,7 @@ export function createRequestRecordDetailState() {
     requestFull,
     requestFullLoading,
     resetDetail,
+    resetSessionAffinity,
     routeOptionsLoading,
     saveConversationOverride,
     sessionRouteOptions,

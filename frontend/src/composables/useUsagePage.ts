@@ -100,6 +100,17 @@ export function useUsagePage() {
     }
   }
 
+  async function resetSessionAffinity(): Promise<void> {
+    const recordId = requestRecordsStore.detailRecord?.record_id
+    if (!recordId) return
+    try {
+      await requestRecordsStore.resetSessionAffinity(recordId)
+      notifySuccess(t('affinityReset'))
+    } catch (cause) {
+      notifyApiError(cause)
+    }
+  }
+
   async function submitClearHistory(): Promise<void> {
     try {
       const result = await requestRecordsStore.clearHistory(clearForm.value)
@@ -168,6 +179,7 @@ export function useUsagePage() {
     refresh,
     refreshRecords,
     requestRecordsStore,
+    resetSessionAffinity,
     saveConversationOverride,
     session,
     setActiveMode,

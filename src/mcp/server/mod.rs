@@ -1,13 +1,14 @@
-use std::sync::Mutex;
+use std::{borrow::Cow, sync::Mutex};
 
 use rmcp::{
-    ErrorData,
+    ErrorData, ServerHandler,
     model::{
-        ClientNotification, ClientRequest, CompleteResult, ErrorCode, ListResourceTemplatesResult,
-        ServerInfo, ServerResult, SetLevelRequestMethod, SubscribeRequestMethod,
-        UnsubscribeRequestMethod,
+        CallToolRequestParams, CallToolResponse, GetPromptRequestParams, GetPromptResponse,
+        InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourcesResult,
+        ListToolsResult, PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams,
+        ReadResourceResponse, ServerInfo,
     },
-    service::{NotificationContext, RequestContext, RoleServer, Service},
+    service::{NotificationContext, RequestContext, RoleServer},
 };
 
 use crate::db::McpServer;
@@ -115,101 +116,100 @@ impl ProxyService {
     }
 }
 
-impl Service<RoleServer> for ProxyService {
-    async fn handle_request(
+impl ServerHandler for ProxyService {
+    async fn initialize(
         &self,
-        request: ClientRequest,
+        request: InitializeRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<ServerResult, ErrorData> {
-        match request {
-            ClientRequest::InitializeRequest(request) => {
-                if context.peer.peer_info().is_none() {
-                    context.peer.set_peer_info(request.params);
-                }
-                self.bind_scope(&context.extensions)?;
-                Ok(ServerResult::InitializeResult(server_info()))
-            }
-            ClientRequest::PingRequest(_) => Ok(ServerResult::empty(())),
-            ClientRequest::CompleteRequest(_) => {
-                Ok(ServerResult::CompleteResult(CompleteResult::default()))
-            }
-            ClientRequest::SetLevelRequest(_) => {
-                Err(ErrorData::method_not_found::<SetLevelRequestMethod>())
-            }
-            ClientRequest::ListToolsRequest(request) => {
-                let scope = self.bind_scope(&context.extensions)?;
-                Ok(ServerResult::ListToolsResult(
-                    self.list_tools_for_scope(&scope, &context.id, request.params)
-                        .await?,
-                ))
-            }
-            ClientRequest::CallToolRequest(request) => {
-                let scope = self.bind_scope(&context.extensions)?;
-                Ok(ServerResult::CallToolResult(
-                    self.call_tool_for_scope(&scope, &context.id, request.params)
-                        .await?,
-                ))
-            }
-            ClientRequest::ListResourcesRequest(request) => {
-                let scope = self.bind_scope(&context.extensions)?;
-                Ok(ServerResult::ListResourcesResult(
-                    self.list_resources_for_scope(&scope, &context.id, request.params)
-                        .await?,
-                ))
-            }
-            ClientRequest::ListResourceTemplatesRequest(_) => Ok(
-                ServerResult::ListResourceTemplatesResult(ListResourceTemplatesResult::default()),
-            ),
-            ClientRequest::ReadResourceRequest(request) => {
-                let scope = self.bind_scope(&context.extensions)?;
-                Ok(ServerResult::ReadResourceResult(
-                    self.read_resource_for_scope(&scope, &context.id, request.params)
-                        .await?,
-                ))
-            }
-            ClientRequest::SubscribeRequest(_) => {
-                Err(ErrorData::method_not_found::<SubscribeRequestMethod>())
-            }
-            ClientRequest::UnsubscribeRequest(_) => {
-                Err(ErrorData::method_not_found::<UnsubscribeRequestMethod>())
-            }
-            ClientRequest::ListPromptsRequest(request) => {
-                let scope = self.bind_scope(&context.extensions)?;
-                Ok(ServerResult::ListPromptsResult(
-                    self.list_prompts_for_scope(&scope, &context.id, request.params)
-                        .await?,
-                ))
-            }
-            ClientRequest::GetPromptRequest(request) => {
-                let scope = self.bind_scope(&context.extensions)?;
-                Ok(ServerResult::GetPromptResult(
-                    self.get_prompt_for_scope(&scope, &context.id, request.params)
-                        .await?,
-                ))
-            }
-            ClientRequest::CustomRequest(request) => Err(ErrorData::new(
-                ErrorCode::METHOD_NOT_FOUND,
-                request.method,
-                None,
-            )),
-            ClientRequest::ListTasksRequest(_)
-            | ClientRequest::GetTaskRequest(_)
-            | ClientRequest::GetTaskPayloadRequest(_)
-            | ClientRequest::CancelTaskRequest(_) => {
-                Err(ErrorData::new(ErrorCode::METHOD_NOT_FOUND, "tasks", None))
-            }
+    ) -> Result<InitializeResult, ErrorData> {
+        if context.peer.peer_info().is_none() {
+            context.peer.set_peer_info(request.clone());
+        }
+        self.bind_scope(&context.extensions)?;
+        let mut info = server_info();
+        if self
+            .supported_protocol_versions()
+            .contains(&request.protocol_version)
+        {
+            info.protocol_version = request.protocol_version;
+        }
+        Ok(info)
+    }
+
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(&[ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25])
+    }
+
+    async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
+        if let Err(err) = self.bind_scope(&context.extensions) {
+            tracing::warn!(error = %err, "mcp session scope bind failed on initialized notification");
         }
     }
 
-    async fn handle_notification(
+    async fn list_tools(
         &self,
-        notification: ClientNotification,
-        context: NotificationContext<RoleServer>,
-    ) -> Result<(), ErrorData> {
-        if matches!(notification, ClientNotification::InitializedNotification(_)) {
-            self.bind_scope(&context.extensions)?;
-        }
-        Ok(())
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let scope = self.bind_scope(&context.extensions)?;
+        self.list_tools_for_scope(&scope, &context.id, request)
+            .await
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let scope = self.bind_scope(&context.extensions)?;
+        Ok(self
+            .call_tool_for_scope(&scope, &context.id, request)
+            .await?
+            .into())
+    }
+
+    async fn list_resources(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        let scope = self.bind_scope(&context.extensions)?;
+        self.list_resources_for_scope(&scope, &context.id, request)
+            .await
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        let scope = self.bind_scope(&context.extensions)?;
+        Ok(self
+            .read_resource_for_scope(&scope, &context.id, request)
+            .await?
+            .into())
+    }
+
+    async fn list_prompts(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        let scope = self.bind_scope(&context.extensions)?;
+        self.list_prompts_for_scope(&scope, &context.id, request)
+            .await
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        let scope = self.bind_scope(&context.extensions)?;
+        Ok(self
+            .get_prompt_for_scope(&scope, &context.id, request)
+            .await?
+            .into())
     }
 
     fn get_info(&self) -> ServerInfo {

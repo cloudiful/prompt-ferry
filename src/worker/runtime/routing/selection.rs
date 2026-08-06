@@ -298,14 +298,15 @@ pub(super) fn select_bound_api_key(
     target: &db::ModelRouteCandidateTarget,
     binding: &ResponseAffinityBinding,
 ) -> Option<db::EndpointApiKeySelection> {
-    let selected = if let Some(key_id) = binding.endpoint_key_id {
+    let by_key_id = binding.endpoint_key_id.and_then(|key_id| {
         target.api_keys.iter().find(|key| {
             key.endpoint_id == target.endpoint_id
                 && key.enabled
                 && !key.api_key.trim().is_empty()
                 && key.key_id == key_id
         })
-    } else {
+    });
+    let by_fingerprint = || {
         target.api_keys.iter().find(|key| {
             key.endpoint_id == target.endpoint_id
                 && key.enabled
@@ -313,6 +314,7 @@ pub(super) fn select_bound_api_key(
                 && api_key_fingerprint(&key.api_key) == binding.endpoint_key_fingerprint
         })
     };
+    let selected = by_key_id.or_else(by_fingerprint);
     selected
         .map(|key| db::EndpointApiKeySelection {
             key_id: (!key.key_id.is_nil()).then_some(key.key_id),

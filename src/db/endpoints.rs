@@ -267,23 +267,68 @@ async fn replace_endpoint_api_keys(
     endpoint_id: uuid::Uuid,
     api_keys: &[crate::db::types::EndpointApiKeyCreate],
 ) -> Result<()> {
-    sqlx::query_file!(
-        "src/sql/endpoints/delete_endpoint_api_keys.sql",
-        endpoint_id
-    )
-    .execute(pool)
-    .await?;
-    for api_key in api_keys {
+    let existing = list_endpoint_api_keys_by_endpoint_id(pool, &[endpoint_id])
+        .await?
+        .remove(&endpoint_id)
+        .unwrap_or_default();
+    let mut tx = pool.begin().await?;
+    if !existing.is_empty() {
         sqlx::query_file!(
-            "src/sql/endpoints/insert_endpoint_api_key.sql",
+            "src/sql/endpoints/renumber_endpoint_api_keys.sql",
             endpoint_id,
-            api_key.key_label.as_str(),
-            api_key.api_key.as_str(),
-            api_key.position,
-            api_key.enabled,
+            RENUMBER_OFFSET,
         )
-        .fetch_one(pool)
+        .execute(&mut *tx)
         .await?;
     }
+    let mut retained = Vec::<uuid::Uuid>::with_capacity(api_keys.len());
+    for api_key in api_keys {
+        let key_id = api_key.key_id.or_else(|| {
+            existing
+                .iter()
+                .find(|key| key.key_label == api_key.key_label)
+                .map(|key| key.key_id)
+        });
+        match key_id {
+            Some(key_id) => {
+                retained.push(key_id);
+                sqlx::query_file!(
+                    "src/sql/endpoints/update_endpoint_api_key.sql",
+                    endpoint_id,
+                    key_id,
+                    api_key.key_label.as_str(),
+                    api_key.api_key.as_str(),
+                    api_key.position,
+                    api_key.enabled,
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            None => {
+                sqlx::query_file!(
+                    "src/sql/endpoints/insert_endpoint_api_key.sql",
+                    endpoint_id,
+                    api_key.key_label.as_str(),
+                    api_key.api_key.as_str(),
+                    api_key.position,
+                    api_key.enabled,
+                )
+                .fetch_one(&mut *tx)
+                .await?;
+            }
+        }
+    }
+    if !retained.is_empty() {
+        sqlx::query_file!(
+            "src/sql/endpoints/delete_endpoint_api_keys_except.sql",
+            endpoint_id,
+            &retained,
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
     Ok(())
 }
+
+const RENUMBER_OFFSET: i32 = 1_000_000;

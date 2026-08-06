@@ -39,6 +39,7 @@ const selectedEndpointKeys = computed(() => [
 const emit = defineEmits<{
   saveOverride: []
   clearOverride: []
+  resetAffinity: []
 }>()
 
 function resetEndpointKey(): void {
@@ -142,6 +143,16 @@ function displayKey(
             @click="emit('clearOverride')"
           >
             {{ t('clearOverride') }}
+          </UButton>
+          <UButton
+            size="sm"
+            class="lg:shrink-0"
+            color="error"
+            variant="outline"
+            :loading="overrideSaving"
+            @click="emit('resetAffinity')"
+          >
+            {{ t('resetAffinity') }}
           </UButton>
         </div>
       </div>

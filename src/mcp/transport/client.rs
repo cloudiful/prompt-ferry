@@ -3,8 +3,11 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use http::{HeaderName, HeaderValue};
 use rmcp::{
-    ServiceExt,
-    model::{CallToolRequestParams, GetPromptRequestParams, ReadResourceRequestParams},
+    ClientServiceExt,
+    model::{
+        CallToolRequestParams, GetPromptRequestParams, ProtocolVersion, ReadResourceRequestParams,
+    },
+    service::ClientLifecycleMode,
     transport::{
         ConfigureCommandExt, StreamableHttpClientTransport, TokioChildProcess,
         streamable_http_client::StreamableHttpClientTransportConfig,
@@ -37,31 +40,81 @@ pub(super) async fn connect_with_selected(
 ) -> anyhow::Result<rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>> {
     match server.transport.as_str() {
         "http" => {
-            let transport = StreamableHttpClientTransport::from_config(http_transport_config(
-                server, selected,
-            )?);
-            Ok(client_info().serve(transport).await?)
+            let config = http_transport_config(server, selected)?;
+            connect_with_lifecycle_fallback(server, move |mode| {
+                let config = config.clone();
+                async move {
+                    let transport = StreamableHttpClientTransport::from_config(config);
+                    Ok(client_info().serve_with_lifecycle(transport, mode).await?)
+                }
+            })
+            .await
         }
         "stdio" => {
-            let transport = TokioChildProcess::new(
-                tokio::process::Command::new(
-                    server
-                        .command
-                        .as_deref()
-                        .ok_or_else(|| anyhow!("MCP stdio server missing command"))?,
-                )
-                .configure(|cmd| {
-                    cmd.args(json_string_vec(&server.args));
-                    for (key, value) in server.env_json.as_object().cloned().unwrap_or_default() {
-                        if let Some(value) = value.as_str() {
-                            cmd.env(key, value);
+            connect_with_lifecycle_fallback(server, move |mode| {
+                let server = server;
+                async move {
+                    let command = tokio::process::Command::new(
+                        server
+                            .command
+                            .as_deref()
+                            .ok_or_else(|| anyhow!("MCP stdio server missing command"))?,
+                    )
+                    .configure(|cmd| {
+                        cmd.args(json_string_vec(&server.args));
+                        for (key, value) in server.env_json.as_object().cloned().unwrap_or_default()
+                        {
+                            if let Some(value) = value.as_str() {
+                                cmd.env(key, value);
+                            }
                         }
-                    }
-                }),
-            )?;
-            Ok(client_info().serve(transport).await?)
+                    });
+                    let transport = TokioChildProcess::new(command)?;
+                    Ok(client_info().serve_with_lifecycle(transport, mode).await?)
+                }
+            })
+            .await
         }
         other => Err(anyhow!("unsupported MCP transport {other}")),
+    }
+}
+
+/// Connect with the modern `server/discover` lifecycle, falling back to the
+/// legacy `initialize` handshake when the upstream rejects the discover probe.
+///
+/// The rmcp `Auto` mode only falls back when the peer answers discover with a
+/// JSON-RPC `METHOD_NOT_FOUND` error. Servers built on older SDKs (e.g. rmcp
+/// <= 2.2.0) reject the `2026-07-28` probe at the HTTP layer with a 400
+/// "Unsupported MCP-Protocol-Version" response, which surfaces as a transport
+/// error and would otherwise never recover.
+async fn connect_with_lifecycle_fallback<F, Fut>(
+    server: &McpServer,
+    connect: F,
+) -> anyhow::Result<rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>>
+where
+    F: Fn(ClientLifecycleMode) -> Fut,
+    Fut: std::future::Future<
+            Output = anyhow::Result<
+                rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>,
+            >,
+        >,
+{
+    let auto_mode = ClientLifecycleMode::Auto {
+        preferred_versions: vec![ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25],
+        legacy_version: Some(ProtocolVersion::V_2025_11_25),
+    };
+    match connect(auto_mode).await {
+        Ok(service) => Ok(service),
+        Err(auto_err) => {
+            tracing::debug!(server_name = %server.name, error = %auto_err, "mcp auto lifecycle connect failed; retrying with legacy initialize");
+            match connect(ClientLifecycleMode::Initialize).await {
+                Ok(service) => Ok(service),
+                Err(fallback_err) => {
+                    tracing::debug!(server_name = %server.name, error = %fallback_err, "mcp legacy initialize fallback also failed");
+                    Err(auto_err)
+                }
+            }
+        }
     }
 }
 

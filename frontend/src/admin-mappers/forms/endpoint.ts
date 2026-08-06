@@ -17,6 +17,7 @@ export function createEmptyEndpointForm(): EndpointForm {
         api_key: '',
         has_saved_key: false,
         enabled: true,
+        key_id: '',
       },
     ],
     key_lb_enabled: false,
@@ -48,6 +49,7 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
       api_key: '',
       has_saved_key: true,
       enabled: key.enabled,
+      key_id: key.key_id,
     })),
     key_lb_enabled: endpoint.key_lb_enabled ?? false,
     protocol_mode:
@@ -69,6 +71,7 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
         key_label: key.key_label.trim(),
         api_key: key.api_key,
         enabled: key.enabled,
+        key_id: key.key_id || undefined,
       }))
       .filter((key) => key.key_label || key.api_key),
     key_lb_enabled: form.key_lb_enabled,

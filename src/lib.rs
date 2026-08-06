@@ -26,7 +26,7 @@ pub mod relay;
 pub(crate) mod relay_secrets;
 pub mod relay_tls;
 pub mod replay_cache;
-pub(crate) mod response_affinity;
+pub mod response_affinity;
 pub mod routing;
 pub mod runtime_env;
 pub mod serve;

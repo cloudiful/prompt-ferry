@@ -37,6 +37,7 @@ export type EndpointApiKeyForm = {
   api_key: string
   has_saved_key: boolean
   enabled: boolean
+  key_id: string
 }
 
 export type ModelRouteTargetForm = {

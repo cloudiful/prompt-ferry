@@ -1940,6 +1940,15 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, cctq_addr, &worker_database_url(&schema)?);
     config.upstream_native_api = prompt_ferry::config::NativeApi::Responses;
+    let Some(valkey_url) = std::env::var("PROMPT_FERRY_TEST_VALKEY_URL")
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+    else {
+        eprintln!("skipping session affinity bridge test: PROMPT_FERRY_TEST_VALKEY_URL is not set");
+        schema.cleanup().await?;
+        return Ok(());
+    };
+    config.valkey_url = valkey_url;
 
     let cctq = db::create_endpoint(
         &schema.pool,

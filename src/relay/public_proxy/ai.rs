@@ -38,7 +38,23 @@ use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use super::super::state::PendingRealtimeSession;
-use super::{responses_sse_error_event, sse_error_event};
+use super::{admin::is_hop_by_hop_request_header, responses_sse_error_event, sse_error_event};
+
+fn forwarded_ai_request_headers(headers: &HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .filter(|(name, _)| {
+            !is_hop_by_hop_request_header(name)
+                && !matches!(name.as_str(), "authorization" | "cookie")
+        })
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_string(), value.to_string()))
+        })
+        .collect()
+}
 
 pub(super) async fn proxy_models(
     State(state): State<AppState>,
@@ -343,7 +359,7 @@ async fn proxy_request(
         request_id: request_id.clone(),
         method: method.to_string(),
         path: path.to_string(),
-        headers: Vec::new(),
+        headers: forwarded_ai_request_headers(&headers),
         request_deadline_unix_ms: request_deadline_unix_ms(&state.config),
         user_id: route_user_id,
         route_id,

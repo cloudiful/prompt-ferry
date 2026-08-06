@@ -9,6 +9,8 @@ pub struct EndpointApiKeyRequest {
     pub key_label: String,
     pub api_key: String,
     pub enabled: Option<bool>,
+    #[serde(default)]
+    pub key_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM endpoint_api_keys\nWHERE endpoint_id = $1\n  AND NOT (key_id = ANY($2))\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "71c76fa72880b51ac05803ba8afd260ac6fc66dc8494bb26dcccca0372119349"
+}
