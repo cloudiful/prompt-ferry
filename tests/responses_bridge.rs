@@ -13,7 +13,11 @@ use prompt_ferry::{
     worker,
 };
 use serde_json::Value;
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
@@ -310,12 +314,93 @@ async fn wraps_native_responses_midstream_failure_as_sse_error_event() {
     assert!(body.contains("event: error\n"), "body={body}");
     assert!(body.contains("\"type\":\"error\""), "body={body}");
     assert!(body.contains("\"sequence_number\":0"), "body={body}");
-    assert!(body.contains("\"code\":\"upstream_error\""), "body={body}");
+    assert!(
+        body.contains("\"code\":\"upstream_stream_error\""),
+        "body={body}"
+    );
     assert!(
         body.contains("failed reading upstream response"),
         "body={body}"
     );
     assert!(body.contains("error decoding response body"), "body={body}");
+
+    worker_handle.abort();
+}
+
+#[tokio::test]
+async fn retries_when_upstream_closes_connection_before_headers() {
+    let (upstream_addr, upstream_count) = spawn_flaky_responses_upstream(1).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Responses);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "gpt-test",
+            "input": "hello",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
+    assert_eq!(
+        body["output"][0]["content"][0]["text"].as_str(),
+        Some("hello")
+    );
+    assert_eq!(
+        upstream_count.load(Ordering::SeqCst),
+        2,
+        "upstream should be requested twice after the first connection closed early"
+    );
+
+    worker_handle.abort();
+}
+
+#[tokio::test]
+async fn exhausts_retries_when_upstream_always_closes_before_headers() {
+    let (upstream_addr, upstream_count) = spawn_flaky_responses_upstream(3).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Responses);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "gpt-test",
+            "input": "hello",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("upstream_error"),
+        "body={body}"
+    );
+    assert_eq!(
+        upstream_count.load(Ordering::SeqCst),
+        3,
+        "all three attempts should reach the upstream"
+    );
 
     worker_handle.abort();
 }
@@ -1111,6 +1196,39 @@ async fn spawn_chat_only_upstream(log: Arc<ChatRequestLog>) -> SocketAddr {
         axum::serve(listener, app).await.unwrap();
     });
     addr
+}
+
+async fn spawn_flaky_responses_upstream(fail_attempts: usize) -> (SocketAddr, Arc<AtomicUsize>) {
+    let count = Arc::new(AtomicUsize::new(0));
+    let counter = count.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((sock, _)) = listener.accept().await else {
+                break;
+            };
+            let n = counter.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                let mut sock = sock;
+                let mut buf = [0u8; 8192];
+                let _ = sock.read(&mut buf).await;
+                if n < fail_attempts {
+                    let _ = sock.shutdown().await;
+                    return;
+                }
+                let body = r#"{"id":"resp_1","object":"response","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"total_tokens":5}}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = sock.write_all(response.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            });
+        }
+    });
+    (addr, count)
 }
 
 #[derive(Clone, Copy)]

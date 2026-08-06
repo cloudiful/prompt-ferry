@@ -114,6 +114,24 @@ impl WorkerRuntimeState {
         RequestLeaseGuard::spawn(admin_state, request_id, self.control.clone())
     }
 
+    async fn request_cancellation(&self, request_id: &str) -> Option<RequestCancellation> {
+        self.request_cancellations
+            .lock()
+            .await
+            .get(request_id)
+            .cloned()
+    }
+
+    #[cfg(test)]
+    async fn test_register_request_cancellation(&self, request_id: &str) -> RequestCancellation {
+        let cancellation = RequestCancellation::default();
+        self.request_cancellations
+            .lock()
+            .await
+            .insert(request_id.to_string(), cancellation.clone());
+        cancellation
+    }
+
     fn is_shutting_down(&self) -> bool {
         self.control.is_shutting_down()
     }

@@ -14,7 +14,7 @@ use crate::{
         AnthropicResponseStreamAdapter, ChatResponseStreamAdapter, CompatError,
         ResponsesChatResponseStreamAdapter,
     },
-    protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseStart},
+    protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseError, ResponseStart},
     upstream_adapter::ResponseAdapter,
     usage::UsageCapture,
     worker::stream_delta_batcher::StreamDeltaBatcher,
@@ -26,6 +26,7 @@ use tokio::time::{self, MissedTickBehavior};
 use tracing::{debug, error, info, warn};
 
 use super::forward::ResponseForwardContext;
+use super::request_attempts::{UpstreamAttemptFailure, UpstreamFailurePhase};
 use super::stream_restore::SseRestoreFilter;
 use super::streaming_terminal::{failure_details, finish_failure};
 use super::streaming_usage::observe_usage_chunk;
@@ -364,8 +365,8 @@ pub(super) async fn forward_streaming_response(
                 let chunk = match chunk {
                     Ok(chunk) => chunk,
                     Err(err) => {
-                        let err = anyhow!(err).context("failed reading upstream response");
-                        let safe_err = safe_error(&err, redact_content, request_ctx.user_id);
+                        let error = anyhow!(err).context("failed reading upstream response");
+                        let safe_err = safe_error(&error, redact_content, request_ctx.user_id);
                         let (response_prompt, response_raw_body) =
                             super::forward::response_logging_payload(
                                 &capture.response_text,
@@ -416,9 +417,23 @@ pub(super) async fn forward_streaming_response(
                                 ),
                         )
                         .await;
+                        let _ = services
+                            .out_tx
+                            .send(BridgeMessage::ResponseError(ResponseError {
+                                request_id: request.request_id.clone(),
+                                status: http::StatusCode::BAD_GATEWAY.as_u16(),
+                                code: "upstream_stream_error".to_string(),
+                                message: safe_err.clone(),
+                            }))
+                            .await;
                         stream_diag.mark_terminal("upstream_read_error", Some(safe_err));
                         stream_diag.finish();
-                        return Err(err);
+                        return Err(UpstreamAttemptFailure {
+                            phase: UpstreamFailurePhase::CommittedStream,
+                            error,
+                            retryable: false,
+                        }
+                        .into());
                     }
                 };
                 upstream_response_bytes = upstream_response_bytes
@@ -840,10 +855,15 @@ async fn forward_buffered_non_sse_response(
         let chunk = match chunk {
             Ok(chunk) => chunk,
             Err(err) => {
-                let err = anyhow!(err).context("failed reading upstream response");
-                stream_diag.mark_terminal("upstream_read_error", Some(err.to_string()));
+                let retryable = UpstreamFailurePhase::BufferedResponseBody.is_transient(&err);
+                let failure = UpstreamAttemptFailure {
+                    phase: UpstreamFailurePhase::BufferedResponseBody,
+                    error: anyhow!(err).context("failed reading upstream response"),
+                    retryable,
+                };
+                stream_diag.mark_terminal("upstream_read_error", Some(failure.error.to_string()));
                 stream_diag.finish();
-                return Err(err);
+                return Err(failure.into());
             }
         };
         upstream_response_bytes = upstream_response_bytes

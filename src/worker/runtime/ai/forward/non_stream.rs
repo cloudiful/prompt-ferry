@@ -2,6 +2,7 @@ use super::super::super::{context::RuntimeServices, error_handling::maybe_redact
 use super::super::{
     artifact::{persist_assistant_artifact, resolve_assistant_artifact},
     errors::respond_with_client_error,
+    request_attempts::{UpstreamAttemptFailure, UpstreamFailurePhase},
     request_support::ai_route_usage_log,
 };
 use crate::{
@@ -72,7 +73,8 @@ pub(super) async fn forward_non_stream_chat_response(
         response,
         services.response_limits.max_upstream_response_bytes,
     )
-    .await?;
+    .await
+    .map_err(map_body_read_error)?;
     if let Some(capture) = assistant_capture.as_mut() {
         capture.observe_chunk(&body);
         capture.finish();
@@ -215,7 +217,8 @@ pub(super) async fn forward_non_stream_responses_response(
         response,
         services.response_limits.max_upstream_response_bytes,
     )
-    .await?;
+    .await
+    .map_err(map_body_read_error)?;
     responses_capture.observe_chunk(&body);
     responses_capture.finish();
     let restored_body = if let Some(session) = upstream_restore_session.clone() {
@@ -331,7 +334,8 @@ pub(super) async fn forward_non_stream_anthropic_response(
         response,
         services.response_limits.max_upstream_response_bytes,
     )
-    .await?;
+    .await
+    .map_err(map_body_read_error)?;
     let transformed = anthropic_response_to_responses(&body)
         .map_err(|err| anyhow::anyhow!("failed translating anthropic response: {}", err.message))?;
     let restored_body = if let Some(session) = upstream_restore_session.clone() {
@@ -430,20 +434,40 @@ pub(super) async fn forward_non_stream_anthropic_response(
     Ok(())
 }
 
+pub(super) enum UpstreamBodyReadError {
+    Transport(reqwest::Error),
+    TooLarge,
+}
+
+pub(super) fn map_body_read_error(err: UpstreamBodyReadError) -> anyhow::Error {
+    match err {
+        UpstreamBodyReadError::Transport(err) => {
+            let retryable = UpstreamFailurePhase::BufferedResponseBody.is_transient(&err);
+            UpstreamAttemptFailure {
+                phase: UpstreamFailurePhase::BufferedResponseBody,
+                error: anyhow!(err).context("failed reading upstream response"),
+                retryable,
+            }
+            .into()
+        }
+        UpstreamBodyReadError::TooLarge => anyhow!("upstream_response_too_large"),
+    }
+}
+
 pub(super) async fn read_response_limited(
     response: reqwest::Response,
     max_bytes: usize,
-) -> anyhow::Result<Vec<u8>> {
+) -> Result<Vec<u8>, UpstreamBodyReadError> {
     let mut stream = response.bytes_stream();
     let mut body = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.context("failed reading upstream response")?;
+        let chunk = chunk.map_err(UpstreamBodyReadError::Transport)?;
         if body
             .len()
             .checked_add(chunk.len())
             .is_none_or(|bytes| bytes > max_bytes)
         {
-            return Err(anyhow!("upstream_response_too_large"));
+            return Err(UpstreamBodyReadError::TooLarge);
         }
         body.extend_from_slice(&chunk);
     }

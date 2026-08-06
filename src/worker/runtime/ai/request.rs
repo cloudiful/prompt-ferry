@@ -140,8 +140,14 @@ pub(in crate::worker::runtime) async fn process_request(
             )
             .await;
         }
-        ForwardOutcome::TransportError(err) => {
-            if err.to_string().contains("upstream_response_too_large") {
+        ForwardOutcome::TransportError {
+            error,
+            terminal_recorded,
+        } => {
+            if terminal_recorded {
+                return Ok(());
+            }
+            if error.to_string().contains("upstream_response_too_large") {
                 return respond_with_local_error(
                     services,
                     &request,
@@ -157,7 +163,7 @@ pub(in crate::worker::runtime) async fn process_request(
                 )
                 .await;
             }
-            err
+            error
         }
     };
     let error_code = if is_bridge_send_error(&err) {

@@ -4,7 +4,7 @@ use super::super::{
     request_support::ai_route_usage_log,
 };
 use super::ResponseForwardContext;
-use super::non_stream::{read_response_limited, send_json_response};
+use super::non_stream::{map_body_read_error, read_response_limited, send_json_response};
 use crate::{
     chat_replay::ResponsesArtifactCapture,
     db,
@@ -32,7 +32,8 @@ pub(super) async fn forward_non_stream_responses_to_chat_response(
         response,
         services.response_limits.max_upstream_response_bytes,
     )
-    .await?;
+    .await
+    .map_err(map_body_read_error)?;
     responses_capture.observe_chunk(&body);
     responses_capture.finish();
 

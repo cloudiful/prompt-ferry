@@ -4,6 +4,7 @@ use futures::StreamExt;
 use http::header;
 use reqwest::{Client, Method};
 
+#[cfg(test)]
 pub(super) async fn send_upstream_request(
     client: &Client,
     method: &Method,
@@ -11,6 +12,18 @@ pub(super) async fn send_upstream_request(
     route: &db::RouteConfig,
     body: &PreparedRequestBody,
 ) -> Result<reqwest::Response, reqwest::Error> {
+    build_upstream_request(client, method, url, route, body)
+        .send()
+        .await
+}
+
+pub(super) fn build_upstream_request(
+    client: &Client,
+    method: &Method,
+    url: &str,
+    route: &db::RouteConfig,
+    body: &PreparedRequestBody,
+) -> reqwest::RequestBuilder {
     let request_builder = client
         .request(method.clone(), url)
         .header(header::CONTENT_TYPE, "application/json");
@@ -21,12 +34,8 @@ pub(super) async fn send_upstream_request(
         _ => request_builder.bearer_auth(&route.api_key),
     };
     match body {
-        PreparedRequestBody::PassthroughStream(bytes) => {
-            request_builder.body(bytes.clone()).send().await
-        }
-        PreparedRequestBody::BufferedBytes(bytes) => {
-            request_builder.body(bytes.clone()).send().await
-        }
+        PreparedRequestBody::PassthroughStream(bytes) => request_builder.body(bytes.clone()),
+        PreparedRequestBody::BufferedBytes(bytes) => request_builder.body(bytes.clone()),
     }
 }
 
