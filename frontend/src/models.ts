@@ -22,8 +22,6 @@ export type EndpointForm = {
   owner_user_id: number | null
   name: string
   base_url: string
-  api_key: string
-  primary_api_key_saved: boolean
   api_keys: EndpointApiKeyForm[]
   key_lb_enabled: boolean
   protocol_mode: 'auto' | 'manual'

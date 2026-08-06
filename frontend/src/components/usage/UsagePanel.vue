@@ -161,13 +161,13 @@ function applyFilter(): void {
       </div>
     </div>
 
-    <div class="min-w-0 overflow-x-auto">
+    <div class="min-w-0 overflow-x-auto overflow-y-hidden">
       <UTable
         v-model:sorting="sorting"
         :data="workspace.records"
         :columns="columns"
         :loading="workspace.records_loading"
-        class="min-w-[76rem]"
+        class="min-w-[76rem] overflow-visible"
       >
         <template #empty>{{ t('noRequestRecords') }}</template>
         <template #details-cell="{ row }">
@@ -268,7 +268,9 @@ function applyFilter(): void {
         <template #error_message-cell="{ row }">
           <UButton
             v-if="row.original.error_message"
-            :color="row.original.request_state === 'aborted' ? 'neutral' : 'error'"
+            :color="
+              row.original.request_state === 'aborted' ? 'neutral' : 'error'
+            "
             variant="link"
             class="max-w-56 truncate"
             :label="`${row.original.error_code}: ${row.original.error_message}`"

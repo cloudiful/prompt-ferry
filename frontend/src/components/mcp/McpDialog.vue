@@ -77,7 +77,10 @@ defineEmits<{
   <UModal
     v-model:open="visible"
     :title="header"
-    :ui="{ content: 'sm:max-w-3xl', body: 'max-h-[80vh] overflow-y-auto' }"
+    :ui="{
+      content: 'sm:max-w-3xl',
+      body: 'min-h-0 max-h-[80vh] overflow-hidden',
+    }"
   >
     <template #body>
       <div
@@ -85,7 +88,7 @@ defineEmits<{
       >
         <form
           id="mcp-server-form"
-          class="grid min-h-0 gap-3 overflow-y-auto pr-1"
+          class="grid min-h-0 gap-3 overflow-x-hidden overflow-y-auto pr-1"
           @submit.prevent="$emit('save')"
         >
           <div
@@ -203,8 +206,8 @@ defineEmits<{
             :t="t"
           />
           <div :class="settingsSectionClass">
-            <div class="grid gap-3 md:grid-cols-3">
-              <div class="grid gap-2">
+            <div class="grid gap-3 md:grid-cols-[repeat(3,minmax(0,1fr))]">
+              <div class="grid min-w-0 gap-2">
                 <div class="text-muted">{{ t('toolFilterMode') }}</div>
                 <USelect
                   v-model="form.tool_filter_mode"
@@ -217,7 +220,7 @@ defineEmits<{
                   value-key="value"
                 />
               </div>
-              <div class="grid gap-2">
+              <div class="grid min-w-0 gap-2">
                 <div class="text-muted">{{ t(toolSelectionLabel) }}</div>
                 <div
                   v-if="catalogLoading"
@@ -238,10 +241,11 @@ defineEmits<{
                   multiple
                   :search-input="toolCatalogNeedsFilter"
                   :placeholder="t(toolSelectionPlaceholder)"
-                  class="w-full"
+                  class="w-52 max-w-full min-w-0"
+                  :ui="{ value: 'block max-w-full truncate' }"
                 />
               </div>
-              <div class="grid gap-2">
+              <div class="grid min-w-0 gap-2">
                 <div class="text-muted">{{ t('disabledResources') }}</div>
                 <USelectMenu
                   v-model="form.disabled_resources"
@@ -251,7 +255,8 @@ defineEmits<{
                   multiple
                   :search-input="resourceCatalogNeedsFilter"
                   :placeholder="t('disabledResourcesPlaceholder')"
-                  class="w-full"
+                  class="w-52 max-w-full min-w-0"
+                  :ui="{ value: 'block max-w-full truncate' }"
                 />
               </div>
             </div>

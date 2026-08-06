@@ -72,8 +72,6 @@ export const useEndpointsStore = defineStore('endpoints', () => {
         },
       },
       labels: {
-        active: t('active'),
-        disabled: t('disabled'),
         endpointTestIdle: t('endpointTestIdle'),
         endpointSourceAuto: t('endpointSourceAuto'),
         endpointSourceDetected: t('endpointSourceDetected'),
@@ -123,8 +121,7 @@ export const useEndpointsStore = defineStore('endpoints', () => {
       page.total > 0 &&
       page.first >= page.total
     ) {
-      const previousFirst =
-        Math.floor((page.total - 1) / page.rows) * page.rows
+      const previousFirst = Math.floor((page.total - 1) / page.rows) * page.rows
       await loadEndpoints(previousFirst, page.rows)
     }
   }
@@ -148,8 +145,7 @@ export const useEndpointsStore = defineStore('endpoints', () => {
       page.total > 0 &&
       page.first >= page.total
     ) {
-      const previousFirst =
-        Math.floor((page.total - 1) / page.rows) * page.rows
+      const previousFirst = Math.floor((page.total - 1) / page.rows) * page.rows
       await loadModelRoutes(previousFirst, page.rows)
     }
   }

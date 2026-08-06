@@ -38,10 +38,6 @@ const targetsLabel = computed(
           {{ item.routing_strategy_label }}
         </div>
       </div>
-      <UBadge
-        :label="item.enabled_label"
-        :color="item.enabled ? 'success' : 'warning'"
-      />
     </div>
 
     <div class="grid gap-1.5">
@@ -79,15 +75,15 @@ const targetsLabel = computed(
     </div>
 
     <div class="grid gap-1">
-      <label class="inline-flex flex-none items-center gap-2 whitespace-nowrap">
+      <label class="inline-flex flex-none items-center whitespace-nowrap">
         <USwitch
           :model-value="item.enabled"
+          :aria-label="t('status')"
           :disabled="busy || item.toggling"
           @update:model-value="
             $emit('toggleModelRouteEnabled', item.rule_id, $event)
           "
         />
-        <span class="text-xs text-muted">{{ item.enabled_label }}</span>
       </label>
     </div>
 

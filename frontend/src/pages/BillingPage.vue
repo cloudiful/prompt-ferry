@@ -216,7 +216,7 @@ onMounted(async () => {
       @period="applyPeriod"
     />
     <BillingSummaryPanel :summary="billing.summary" :t="t" />
-    <div class="grid gap-3 xl:grid-cols-2">
+    <div class="grid min-w-0 gap-3">
       <BillingBreakdownPanel
         :rows="billing.summary?.by_client_key ?? []"
         :title="t('billingClientKeys')"

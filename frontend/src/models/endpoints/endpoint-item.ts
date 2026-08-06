@@ -6,8 +6,6 @@ import type {
 import type { EndpointListItemView } from '../endpoints'
 
 export type EndpointViewItemLabels = {
-  activeLabel: string
-  disabledLabel: string
   endpointTestIdle: string
   endpointSourceAuto: string
   endpointSourceDetected: string
@@ -41,12 +39,12 @@ export function createEndpointListItemView(
       endpoint.native_api === 'auto'
         ? options.endpointSourceAuto
         : endpoint.native_api === 'chat'
-        ? options.nativeApiChat
-        : endpoint.native_api === 'anthropic_messages'
-          ? options.nativeApiAnthropicMessages
-          : endpoint.native_api === 'realtime'
-            ? options.nativeApiRealtime
-            : options.nativeApiResponses,
+          ? options.nativeApiChat
+          : endpoint.native_api === 'anthropic_messages'
+            ? options.nativeApiAnthropicMessages
+            : endpoint.native_api === 'realtime'
+              ? options.nativeApiRealtime
+              : options.nativeApiResponses,
     native_api_source: endpoint.native_api_source,
     native_api_source_label:
       endpoint.native_api_source === 'auto'
@@ -55,9 +53,6 @@ export function createEndpointListItemView(
           ? options.endpointSourceDetected
           : options.endpointSourceManual,
     enabled: endpoint.enabled,
-    enabled_label: endpoint.enabled
-      ? options.activeLabel
-      : options.disabledLabel,
     owner_label: endpoint.owner_user_id
       ? `${options.ownerLabel} ${endpoint.owner_user_id}`
       : '',

@@ -85,19 +85,15 @@ defineEmits<{
             color="neutral"
             variant="subtle"
           />
-          <label
-            class="inline-flex flex-none items-center gap-2 whitespace-nowrap"
-          >
+          <label class="inline-flex flex-none items-center whitespace-nowrap">
             <USwitch
               :model-value="row.original.enabled"
+              :aria-label="t('status')"
               :disabled="busy || row.original.toggling"
               @update:model-value="
                 $emit('toggleModelRouteEnabled', row.original.rule_id, $event)
               "
             />
-            <span class="text-xs text-muted">{{
-              row.original.enabled_label
-            }}</span>
           </label>
           <UBadge
             :label="row.original.routing_strategy_label"

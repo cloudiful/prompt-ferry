@@ -25,7 +25,6 @@ export type EndpointListItemView = {
   native_api_source: string
   native_api_source_label: string
   enabled: boolean
-  enabled_label: string
   owner_label: string
   testing: boolean
   toggling: boolean
@@ -46,7 +45,6 @@ export type ModelRouteListItemView = {
   scope: string
   scope_label: string
   enabled: boolean
-  enabled_label: string
   owner_label: string
   routing_strategy_label: string
   targets: ModelRouteTargetItemView[]
@@ -70,8 +68,6 @@ export type EndpointsWorkspaceView = {
 }
 
 type EndpointViewLabels = {
-  active: string
-  disabled: string
   endpointTestIdle: string
   endpointSourceAuto: string
   endpointSourceDetected: string
@@ -122,8 +118,6 @@ export function createEndpointsWorkspaceView(options: {
   }
 }): EndpointsWorkspaceView {
   const endpointLabels: EndpointViewItemLabels = {
-    activeLabel: options.labels.active,
-    disabledLabel: options.labels.disabled,
     endpointTestIdle: options.labels.endpointTestIdle,
     endpointSourceAuto: options.labels.endpointSourceAuto,
     endpointSourceDetected: options.labels.endpointSourceDetected,
@@ -137,8 +131,6 @@ export function createEndpointsWorkspaceView(options: {
     scopeUser: options.labels.scopeUser,
   }
   const modelRouteLabels: ModelRouteViewItemLabels = {
-    activeLabel: options.labels.active,
-    disabledLabel: options.labels.disabled,
     endpointTestIdle: options.labels.endpointTestIdle,
     ownerLabel: options.labels.owner,
     routingStrategyClientKey: options.labels.routingStrategyClientKey,

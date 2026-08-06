@@ -66,19 +66,15 @@ const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
           <UBadge :label="row.original.scope_label" color="neutral" />
           <UBadge :label="row.original.transport" color="info" />
           <UBadge :label="row.original.naming_mode_label" color="neutral" />
-          <label
-            class="inline-flex flex-none items-center gap-2 whitespace-nowrap"
-          >
+          <label class="inline-flex flex-none items-center whitespace-nowrap">
             <USwitch
               :model-value="row.original.enabled"
+              :aria-label="t('status')"
               :disabled="busy"
               @update:model-value="
                 $emit('toggleMcpServer', row.original.server)
               "
             />
-            <span class="text-xs text-muted">{{
-              row.original.enabled_label
-            }}</span>
           </label>
         </div>
       </template>

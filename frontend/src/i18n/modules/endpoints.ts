@@ -18,11 +18,10 @@ export const endpointMessages = {
     endpointDeleted: '上游节点已删除',
     endpointSaved: '上游节点已保存',
     endpointTestIdle: '未测试',
-    endpointApiKeysHint:
-      '首条为主 API key，其余用于转发；编辑时留空会保留已有密钥。',
+    endpointApiKeysHint: '可管理多个 API key；编辑时留空会保留已有密钥。',
     endpointKeyLbEnabled: '启用 endpoint key 分流',
     endpointKeyLbHint:
-      '开启后，模型转发会按会话/请求标识稳定选择 key；拿不到稳定标识时固定落到第一条 key。',
+      '开启后，模型转发会按会话/请求标识稳定选择 key；拿不到稳定标识时固定选择首个可用 key。',
     endpointSourceAuto: '按调用端自动',
     endpointSourceDetected: '历史兼容',
     endpointSourceManual: '手动',
@@ -69,7 +68,6 @@ export const endpointMessages = {
     passthroughOn: '透传',
     protocolModeAuto: '按调用端自动',
     protocolModeManual: '手工指定协议',
-    primaryApiKey: '主 API key',
     responsesApi: 'Responses API',
     scopeAdmin: '公共',
     scopeUser: '私有',
@@ -112,10 +110,10 @@ export const endpointMessages = {
     endpointSaved: 'Endpoint saved',
     endpointTestIdle: 'Not tested',
     endpointApiKeysHint:
-      'The first key is the primary API key. Additional keys are used for forwarding; leave a field blank while editing to keep the stored secret.',
+      'Manage multiple API keys. Leave a field blank while editing to keep the stored secret.',
     endpointKeyLbEnabled: 'Enable endpoint key balancing',
     endpointKeyLbHint:
-      'When enabled, model forwarding sticks to a stable key for the same session or request identity. If no stable identity is available, it falls back to the first key.',
+      'When enabled, model forwarding sticks to a stable key for the same session or request identity. If no stable identity is available, it selects the first available key.',
     endpointSourceAuto: 'Automatic by caller protocol',
     endpointSourceDetected: 'Legacy compatible',
     endpointSourceManual: 'Manual',
@@ -162,7 +160,6 @@ export const endpointMessages = {
     passthroughOn: 'Passthrough',
     protocolModeAuto: 'Automatic by caller protocol',
     protocolModeManual: 'Manual protocol',
-    primaryApiKey: 'Primary API key',
     responsesApi: 'Responses API',
     scopeAdmin: 'Public',
     scopeUser: 'Private',

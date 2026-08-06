@@ -33,12 +33,10 @@ defineEmits<{
           </h3>
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2">
-          <span class="text-xs text-dimmed">{{
-            llmReview.enabled ? t('active') : t('disabled')
-          }}</span>
           <USwitch
             v-model="llmReview.enabled"
             id="settings-llm-review-enabled"
+            :aria-label="t('llmReview')"
           />
           <UButton size="sm" :loading="busy" @click="$emit('saveLlmReview')">{{
             t('save')

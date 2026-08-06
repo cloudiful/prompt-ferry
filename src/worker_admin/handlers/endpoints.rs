@@ -35,7 +35,7 @@ pub(super) async fn create_endpoint(
             "base_url must be the provider base URL without /v1",
         );
     }
-    let input = match resolve_endpoint_input(&state, body, None, None).await {
+    let input = match resolve_endpoint_input(&state, body, None).await {
         Ok(input) => input,
         Err(response) => return response,
     };
@@ -69,14 +69,7 @@ pub(super) async fn update_endpoint(
             "base_url must be the provider base URL without /v1",
         );
     }
-    let input = match resolve_endpoint_input(
-        &state,
-        body,
-        Some(existing.api_key),
-        Some(existing.api_keys),
-    )
-    .await
-    {
+    let input = match resolve_endpoint_input(&state, body, Some(existing.api_keys)).await {
         Ok(input) => input,
         Err(response) => return response,
     };

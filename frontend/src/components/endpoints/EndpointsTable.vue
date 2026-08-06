@@ -34,7 +34,7 @@ defineEmits<{
   <div class="hidden min-w-0 md:block">
     <UTable :data="items" :columns="columns" :loading="busy" class="min-w-0">
       <template #name-cell="{ row }">
-        <div class="min-w-0">
+        <div class="w-56 max-w-56 min-w-0">
           <div class="truncate font-semibold text-highlighted">
             {{ row.original.name }}
           </div>
@@ -47,27 +47,21 @@ defineEmits<{
         <div
           class="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overflow-y-hidden whitespace-nowrap pb-px [&>*]:flex-none"
         >
-          <UBadge :label="row.original.scope_label" color="neutral" />
-          <UBadge :label="row.original.native_api_label" color="info" />
-          <UBadge
-            :label="row.original.native_api_source_label"
-            color="neutral"
-          />
-          <label
-            class="inline-flex flex-none items-center gap-2 whitespace-nowrap"
-          >
+          <label class="inline-flex flex-none items-center whitespace-nowrap">
             <USwitch
               :model-value="row.original.enabled"
+              :aria-label="t('status')"
               :disabled="busy || row.original.toggling"
               @update:model-value="
                 $emit('toggleEndpointEnabled', row.original.endpoint_id, $event)
               "
             />
-            <span class="text-xs text-muted">{{
-              row.original.enabled_label
-            }}</span>
           </label>
-          <UBadge :label="row.original.owner_label" color="neutral" />
+          <UBadge
+            v-if="row.original.owner_label"
+            :label="row.original.owner_label"
+            color="neutral"
+          />
         </div>
       </template>
       <template #test-cell="{ row }">

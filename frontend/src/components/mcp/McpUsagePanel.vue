@@ -149,13 +149,13 @@ function applyFilter(): void {
       </div>
     </div>
 
-    <div class="min-w-0 overflow-x-auto">
+    <div class="min-w-0 overflow-x-auto overflow-y-hidden">
       <UTable
         v-model:sorting="sorting"
         :data="workspace.records"
         :columns="columns"
         :loading="workspace.records_loading"
-        class="min-w-[72rem]"
+        class="min-w-[72rem] overflow-visible"
       >
         <template #empty>{{ t('noMcpCallRecords') }}</template>
         <template #details-cell="{ row }">

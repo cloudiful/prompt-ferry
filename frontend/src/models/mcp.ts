@@ -5,7 +5,6 @@ export type McpServerListItemView = {
   server_id: string
   name: string
   enabled: boolean
-  enabled_label: string
   transport: string
   endpoint_label: string
   scope_label: string
@@ -21,10 +20,8 @@ export type McpServerWorkspaceView = {
 }
 
 type McpViewLabels = {
-  active: string
   aggregateNamingModePassthroughPreferredShort: string
   aggregateNamingModeQualifiedOnlyShort: string
-  disabled: string
   privateScope: string
   publicScope: string
 }
@@ -41,9 +38,6 @@ export function createMcpServerListItemView(
     server_id: server.server_id,
     name: server.name,
     enabled: server.enabled,
-    enabled_label: server.enabled
-      ? options.labels.active
-      : options.labels.disabled,
     transport: server.transport,
     endpoint_label:
       server.transport === 'http'

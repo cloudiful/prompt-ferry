@@ -39,10 +39,6 @@ const workspace = computed(() =>
     keys: apiKeysStore.keys,
     selectedUser: apiKeysStore.selectedUser,
     visibleKeySecrets: visibleKeySecrets.value,
-    labels: {
-      active: t('active'),
-      disabled: t('disabled'),
-    },
   }),
 )
 
@@ -119,6 +115,15 @@ async function toggleKey(keyId: number): Promise<void> {
   }
 }
 
+async function renameKey(keyId: number, label: string): Promise<void> {
+  try {
+    await apiKeysStore.saveKey(keyId, { label })
+    notifySuccess(t('saved'))
+  } catch (cause) {
+    notifyApiError(cause)
+  }
+}
+
 async function deleteKey(keyId: number): Promise<void> {
   const key = apiKeysStore.keys.find((item) => item.key_id === keyId)
   if (!key) return
@@ -184,6 +189,7 @@ onMounted(async () => {
       @toggle-key-secret="toggleKeySecret"
       @copy-key-secret="copyKeySecret"
       @toggle-key="toggleKey"
+      @rename-key="renameKey"
       @delete-key="deleteKey"
       @page="onPage"
     />

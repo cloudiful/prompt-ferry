@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ApiKeyItemView, ApiKeysWorkspaceView } from '@/models'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
@@ -13,20 +13,39 @@ const props = defineProps<{
   workspace: ApiKeysWorkspaceView
 }>()
 
+const draftLabels = ref<Record<number, string>>({})
+
 const columns = computed<TableColumn<ApiKeyItemView>[]>(() => [
+  { accessorKey: 'key_prefix', header: props.t('keyPrefix') },
   { accessorKey: 'label', header: props.t('name') },
   { id: 'status', header: props.t('status') },
   { id: 'secret', header: props.t('apiKey') },
   { id: 'actions' },
 ])
 
-defineEmits<{
+const emit = defineEmits<{
   toggleKeySecret: [keyId: number]
   copyKeySecret: [keyId: number]
   toggleKey: [keyId: number]
+  renameKey: [keyId: number, label: string]
   deleteKey: [keyId: number]
   page: [event: TablePageChange]
 }>()
+
+function labelDraft(keyItem: ApiKeyItemView): string {
+  return draftLabels.value[keyItem.key_id] ?? keyItem.label
+}
+
+function updateLabel(keyId: number, value: unknown): void {
+  draftLabels.value[keyId] = String(value ?? '')
+}
+
+function commitLabel(keyItem: ApiKeyItemView): void {
+  const label = (draftLabels.value[keyItem.key_id] ?? keyItem.label).trim()
+  delete draftLabels.value[keyItem.key_id]
+  if (!label || label === keyItem.label) return
+  emit('renameKey', keyItem.key_id, label)
+}
 </script>
 
 <template>
@@ -46,14 +65,19 @@ defineEmits<{
       >
         <div class="flex items-center justify-between gap-2">
           <div class="min-w-0">
-            <div class="truncate text-[0.82rem] font-semibold text-highlighted">
-              {{ keyItem.label }}
+            <div class="truncate font-mono text-xs text-muted">
+              {{ keyItem.key_prefix }}
             </div>
+            <UInput
+              :model-value="labelDraft(keyItem)"
+              size="sm"
+              class="mt-1 w-full"
+              :aria-label="t('name')"
+              @update:model-value="updateLabel(keyItem.key_id, $event)"
+              @keydown.enter.prevent="commitLabel(keyItem)"
+              @blur="commitLabel(keyItem)"
+            />
           </div>
-          <UBadge
-            :label="keyItem.enabled_label"
-            :color="keyItem.enabled ? 'success' : 'warning'"
-          />
         </div>
 
         <div class="flex items-center justify-between gap-3">
@@ -62,12 +86,12 @@ defineEmits<{
           >
             {{ t('active') }}
           </div>
-          <label class="inline-flex items-center gap-2">
+          <label class="inline-flex items-center">
             <USwitch
               :model-value="keyItem.enabled"
+              :aria-label="t('status')"
               @update:model-value="$emit('toggleKey', keyItem.key_id)"
             />
-            <span class="text-xs text-dimmed">{{ keyItem.enabled_label }}</span>
           </label>
         </div>
 
@@ -126,19 +150,27 @@ defineEmits<{
       class="hidden min-w-0 md:block"
     >
       <template #label-cell="{ row }">
-        <div class="font-semibold text-highlighted">
-          {{ row.original.label }}
-        </div>
+        <UInput
+          :model-value="labelDraft(row.original)"
+          size="sm"
+          class="w-48 max-w-full"
+          :aria-label="t('name')"
+          @update:model-value="updateLabel(row.original.key_id, $event)"
+          @keydown.enter.prevent="commitLabel(row.original)"
+          @blur="commitLabel(row.original)"
+        />
+      </template>
+      <template #key_prefix-cell="{ row }">
+        <span class="font-mono text-xs text-muted">
+          {{ row.original.key_prefix }}
+        </span>
       </template>
       <template #status-cell="{ row }">
         <div class="flex items-center gap-3">
           <USwitch
             :model-value="row.original.enabled"
+            :aria-label="t('status')"
             @update:model-value="$emit('toggleKey', row.original.key_id)"
-          />
-          <UBadge
-            :label="row.original.enabled_label"
-            :color="row.original.enabled ? 'success' : 'warning'"
           />
         </div>
       </template>

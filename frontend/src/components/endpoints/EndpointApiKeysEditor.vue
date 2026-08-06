@@ -8,20 +8,15 @@ const props = defineProps<{
 }>()
 const form = defineModel<EndpointForm>('form', { required: true })
 
-type ApiKeyRow =
-  | { key: 'primary'; kind: 'primary' }
-  | { key: `extra-${number}`; kind: 'extra'; index: number }
+type ApiKeyRow = { key: string; index: number }
 
-const rows = computed<ApiKeyRow[]>(() => [
-  { key: 'primary', kind: 'primary' },
-  ...form.value.api_keys.map((_, index) => ({
-    key: `extra-${index}` as const,
-    kind: 'extra' as const,
+const rows = computed<ApiKeyRow[]>(() =>
+  form.value.api_keys.map((_, index) => ({
+    key: `key-${index}`,
     index,
   })),
-])
+)
 const columns = computed<TableColumn<ApiKeyRow>[]>(() => [
-  { id: 'kind', header: props.t('type') },
   { id: 'key', header: props.t('apiKey') },
   { id: 'status', header: props.t('status') },
   { id: 'actions' },
@@ -36,19 +31,36 @@ function addApiKey(): void {
   })
 }
 
+function canDeleteApiKey(index: number): boolean {
+  return (
+    form.value.api_keys.length > 1 &&
+    form.value.api_keys.some(
+      (apiKey, apiKeyIndex) => apiKeyIndex !== index && apiKey.enabled,
+    )
+  )
+}
+
+function canDisableApiKey(index: number): boolean {
+  const apiKey = form.value.api_keys[index]
+  return (
+    !apiKey?.enabled ||
+    form.value.api_keys.some(
+      (otherApiKey, otherIndex) => otherIndex !== index && otherApiKey.enabled,
+    )
+  )
+}
+
 function removeApiKey(index: number): void {
+  if (!canDeleteApiKey(index)) return
   form.value.api_keys.splice(index, 1)
 }
 
-function rowHasSavedKey(row: ApiKeyRow): boolean {
-  if (row.kind === 'primary') {
-    return form.value.primary_api_key_saved
-  }
-  return form.value.api_keys[row.index]?.has_saved_key ?? false
+function rowHasSavedKey(index: number): boolean {
+  return form.value.api_keys[index]?.has_saved_key ?? false
 }
 
-function rowPlaceholder(row: ApiKeyRow): string {
-  return rowHasSavedKey(row)
+function rowPlaceholder(index: number): string {
+  return rowHasSavedKey(index)
     ? props.t('apiKeyOptionalOnEdit')
     : props.t('apiKey')
 }
@@ -58,11 +70,20 @@ function rowPlaceholder(row: ApiKeyRow): string {
   <div class="grid gap-2">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="grid gap-1">
-        <label class="text-xs font-medium text-default">
-          {{ t('apiKeys') }}
-        </label>
-        <div class="text-xs leading-snug text-dimmed">
-          {{ t('endpointApiKeysHint') }}
+        <div class="flex items-center gap-1">
+          <label class="text-xs font-medium text-default">
+            {{ t('apiKeys') }}
+          </label>
+          <UTooltip :text="t('endpointApiKeysHint')">
+            <UButton
+              type="button"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              icon="i-lucide-info"
+              :aria-label="t('endpointApiKeysHint')"
+            />
+          </UTooltip>
         </div>
       </div>
       <div class="flex flex-wrap items-center justify-end gap-3">
@@ -78,54 +99,36 @@ function rowPlaceholder(row: ApiKeyRow): string {
       </div>
     </div>
     <UTable :data="rows" :columns="columns" class="min-w-0">
-      <template #kind-cell="{ row }">
-        <span class="text-xs font-medium text-default">
-          {{
-            row.original.kind === 'primary'
-              ? t('primaryApiKey')
-              : `#${row.original.index + 2}`
-          }}
-        </span>
-      </template>
       <template #key-cell="{ row }">
-        <div class="grid gap-1.5">
-          <div
-            v-if="rowHasSavedKey(row.original)"
-            class="flex items-center gap-2"
-          >
+        <div class="flex min-w-0 items-center gap-2">
+          <div v-if="rowHasSavedKey(row.original.index)" class="shrink-0">
             <UBadge :label="t('saved')" color="neutral" />
           </div>
           <UInput
-            v-if="row.original.kind === 'primary'"
-            v-model="form.api_key"
-            class="w-full"
-            :placeholder="rowPlaceholder(row.original)"
-          />
-          <UInput
-            v-else
             v-model="form.api_keys[row.original.index].api_key"
-            class="w-full"
-            :placeholder="rowPlaceholder(row.original)"
+            class="min-w-0 flex-1"
+            :placeholder="rowPlaceholder(row.original.index)"
           />
         </div>
       </template>
       <template #status-cell="{ row }">
-        <div v-if="row.original.kind === 'primary'" class="text-xs text-dimmed">
-          {{ t('active') }}
-        </div>
-        <div v-else class="flex justify-center">
-          <USwitch v-model="form.api_keys[row.original.index].enabled" />
+        <div class="flex justify-center">
+          <USwitch
+            v-model="form.api_keys[row.original.index].enabled"
+            :aria-label="t('status')"
+            :disabled="!canDisableApiKey(row.original.index)"
+          />
         </div>
       </template>
       <template #actions-cell="{ row }">
         <div class="flex justify-end">
           <UButton
-            v-if="row.original.kind === 'extra'"
             type="button"
             size="sm"
             color="error"
             variant="ghost"
             :aria-label="t('delete')"
+            :disabled="!canDeleteApiKey(row.original.index)"
             @click="removeApiKey(row.original.index)"
           >
             <UIcon name="i-lucide-trash-2" class="h-4 w-4" />

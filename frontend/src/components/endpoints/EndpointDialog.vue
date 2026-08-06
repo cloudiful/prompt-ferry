@@ -82,16 +82,34 @@ defineEmits<{
           :placeholder="t('ownerUser')"
           @update:model-value="form.owner_user_id = $event ?? null"
         />
-        <div class="grid gap-1">
+        <div
+          class="grid gap-1 md:grid-cols-[9rem_minmax(0,1fr)] md:items-center"
+        >
+          <div class="flex items-center gap-1">
+            <label class="text-xs text-muted" for="endpoint-base-url">
+              {{ t('baseUrl') }}
+            </label>
+            <UTooltip :text="t('baseUrlHint')">
+              <UButton
+                type="button"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-info"
+                :aria-label="t('baseUrlHint')"
+              />
+            </UTooltip>
+          </div>
           <UInput
+            id="endpoint-base-url"
             v-model="form.base_url"
             class="w-full"
             :placeholder="t('baseUrl')"
           />
-          <p class="text-xs leading-snug text-dimmed">
-            {{ t('baseUrlHint') }}
-          </p>
-          <p v-if="hasVersionPath" class="text-xs leading-snug text-warning">
+          <p
+            v-if="hasVersionPath"
+            class="text-xs leading-snug text-warning md:col-start-2"
+          >
             {{ t('baseUrlVersionWarning') }}
           </p>
         </div>

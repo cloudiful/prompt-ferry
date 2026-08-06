@@ -87,7 +87,9 @@ const requestContentLoggingModeOptions = computed(() =>
           </label>
 
           <label class="grid gap-1.5">
-            <span class="text-xs text-muted">{{ t('approvalRetentionDays') }}</span>
+            <span class="text-xs text-muted">{{
+              t('approvalRetentionDays')
+            }}</span>
             <UInputNumber
               v-model="usageRetention.approval_retention_days"
               size="sm"
@@ -113,10 +115,8 @@ const requestContentLoggingModeOptions = computed(() =>
               <USwitch
                 v-model="modelRouteWhitelist.enabled"
                 id="settings-model-route-whitelist-enabled"
+                :aria-label="t('modelRouteWhitelist')"
               />
-              <span class="text-xs text-dimmed">{{
-                modelRouteWhitelist.enabled ? t('active') : t('disabled')
-              }}</span>
             </label>
           </div>
         </template>
@@ -137,10 +137,8 @@ const requestContentLoggingModeOptions = computed(() =>
               <USwitch
                 v-model="streamDeltaBatching.enabled"
                 id="settings-stream-delta-batching-enabled"
+                :aria-label="t('streamDeltaBatching')"
               />
-              <span class="text-xs text-dimmed">{{
-                streamDeltaBatching.enabled ? t('active') : t('disabled')
-              }}</span>
             </label>
           </div>
         </template>

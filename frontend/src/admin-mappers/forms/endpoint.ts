@@ -11,9 +11,14 @@ export function createEmptyEndpointForm(): EndpointForm {
     owner_user_id: null,
     name: '',
     base_url: '',
-    api_key: '',
-    primary_api_key_saved: false,
-    api_keys: [],
+    api_keys: [
+      {
+        key_label: '',
+        api_key: '',
+        has_saved_key: false,
+        enabled: true,
+      },
+    ],
     key_lb_enabled: false,
     protocol_mode: 'auto',
     native_api_override: null,
@@ -38,9 +43,7 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
     owner_user_id: endpoint.owner_user_id ?? null,
     name: endpoint.name,
     base_url: endpoint.base_url,
-    api_key: '',
-    primary_api_key_saved: endpointApiKeys.length > 0,
-    api_keys: endpointApiKeys.slice(1).map((key) => ({
+    api_keys: endpointApiKeys.map((key) => ({
       key_label: key.key_label,
       api_key: '',
       has_saved_key: true,
@@ -60,7 +63,7 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
 
 export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
   return {
-    api_key: form.api_key,
+    api_key: form.api_keys[0]?.api_key ?? '',
     api_keys: form.api_keys
       .map((key) => ({
         key_label: key.key_label.trim(),

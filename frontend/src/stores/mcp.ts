@@ -39,14 +39,12 @@ export const useMcpStore = defineStore('mcp', () => {
   const selectedWorkspaceView = computed(() =>
     createMcpWorkspaceView(servers.value, {
       labels: {
-        active: t('active'),
         aggregateNamingModePassthroughPreferredShort: t(
           'aggregateNamingModePassthroughPreferredShort',
         ),
         aggregateNamingModeQualifiedOnlyShort: t(
           'aggregateNamingModeQualifiedOnlyShort',
         ),
-        disabled: t('disabled'),
         privateScope: t('privateScope'),
         publicScope: t('publicScope'),
       },

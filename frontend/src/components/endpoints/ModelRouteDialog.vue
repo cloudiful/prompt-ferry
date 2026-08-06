@@ -162,12 +162,9 @@ const targetColumns = computed<
             value-key="value"
           />
           <label
-            class="inline-flex min-h-8 items-center justify-end gap-2 self-end pb-1 text-[0.75rem] text-default"
+            class="inline-flex min-h-8 items-center justify-end self-end pb-1 text-[0.75rem] text-default"
           >
-            <span class="text-xs text-dimmed">{{
-              form.enabled ? t('active') : t('disabled')
-            }}</span>
-            <USwitch v-model="form.enabled" />
+            <USwitch v-model="form.enabled" :aria-label="t('status')" />
           </label>
         </div>
         <div class="grid gap-3 md:grid-cols-3">

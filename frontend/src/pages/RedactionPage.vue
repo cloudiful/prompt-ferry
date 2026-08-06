@@ -150,13 +150,11 @@ onMounted(async () => {
           @click="refresh"
           >{{ t('refresh') }}</UButton
         >
-        <label class="inline-flex min-h-8 items-center gap-2 whitespace-nowrap">
-          <span class="text-[0.68rem] leading-none text-dimmed">
-            {{ redactionStore.config.enabled ? t('active') : t('disabled') }}
-          </span>
+        <label class="inline-flex min-h-8 items-center whitespace-nowrap">
           <USwitch
             v-model="redactionStore.config.enabled"
             id="redaction-enabled-top"
+            :aria-label="t('redaction')"
           />
         </label>
       </template>

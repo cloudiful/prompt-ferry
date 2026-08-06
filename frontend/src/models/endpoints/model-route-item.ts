@@ -6,8 +6,6 @@ import type {
 import type { ModelRouteListItemView } from '../endpoints'
 
 export type ModelRouteViewItemLabels = {
-  activeLabel: string
-  disabledLabel: string
   endpointTestIdle: string
   ownerLabel: string
   routingStrategyClientKey: string
@@ -31,7 +29,6 @@ export function createModelRouteListItemView(
     scope_label:
       route.scope === 'user' ? options.scopeUser : options.scopeAdmin,
     enabled: route.enabled,
-    enabled_label: route.enabled ? options.activeLabel : options.disabledLabel,
     owner_label: route.owner_user_id
       ? `${options.ownerLabel} ${route.owner_user_id}`
       : '',

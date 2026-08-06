@@ -76,25 +76,12 @@ pub async fn set_bridge_sender(
 pub(super) async fn resolve_endpoint_input(
     state: &AdminState,
     body: EndpointRequest,
-    existing_api_key: Option<String>,
     existing_endpoint_api_keys: Option<Vec<db::EndpointApiKey>>,
 ) -> Result<EndpointCreate, Response> {
     validate_request_budget_limit(body.daily_max_requests, "daily_max_requests")
         .map_err(|response| *response)?;
     validate_request_budget_limit(body.monthly_max_requests, "monthly_max_requests")
         .map_err(|response| *response)?;
-    let api_key = if body.api_key.trim().is_empty() {
-        existing_api_key.unwrap_or_default()
-    } else {
-        body.api_key
-    };
-    if api_key.trim().is_empty() {
-        return Err(error(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            "api key is required",
-        ));
-    }
     if !matches!(body.scope.as_str(), "admin" | "user") {
         return Err(error(
             StatusCode::BAD_REQUEST,
@@ -157,31 +144,28 @@ pub(super) async fn resolve_endpoint_input(
             (NativeApi::Auto, NativeApiSource::Auto)
         }
     };
-    let primary_key_label = if body.name.trim().is_empty() {
-        "primary".to_string()
-    } else {
-        body.name.trim().to_string()
-    };
-    let mut api_keys = vec![db::EndpointApiKeyCreate {
-        key_label: primary_key_label,
-        api_key: api_key.clone(),
-        position: 0,
-        enabled: true,
-    }];
-    let mut existing_extra_keys = existing_endpoint_api_keys
-        .unwrap_or_default()
-        .into_iter()
-        .skip(1);
-    for submitted in body.api_keys {
+    let existing_api_keys = existing_endpoint_api_keys.unwrap_or_default();
+    let mut submitted_key_labels = std::collections::HashSet::<String>::new();
+    let mut api_keys = Vec::with_capacity(body.api_keys.len());
+    for (index, submitted) in body.api_keys.into_iter().enumerate() {
         let key_label = submitted.key_label.trim();
         let raw_api_key = submitted.api_key.trim();
-        let existing_key = existing_extra_keys.next();
-        if key_label.is_empty() && raw_api_key.is_empty() {
-            continue;
-        }
+        let existing_key = if key_label.is_empty() {
+            None
+        } else {
+            if !submitted_key_labels.insert(key_label.to_string()) {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    "endpoint api key labels must not contain duplicates",
+                ));
+            }
+            existing_api_keys
+                .iter()
+                .find(|key| key.key_label == key_label)
+        };
         let resolved_api_key = if raw_api_key.is_empty() {
             existing_key
-                .as_ref()
                 .map(|key| key.api_key.clone())
                 .filter(|value| !value.trim().is_empty())
                 .ok_or_else(|| {
@@ -194,30 +178,49 @@ pub(super) async fn resolve_endpoint_input(
         } else {
             raw_api_key.to_string()
         };
-        if resolved_api_key.trim().is_empty() {
-            return Err(error(
-                StatusCode::BAD_REQUEST,
-                "bad_request",
-                "endpoint api key value is required",
-            ));
-        }
         api_keys.push(db::EndpointApiKeyCreate {
             key_label: if key_label.is_empty() {
                 existing_key
-                    .as_ref()
                     .map(|key| key.key_label.clone())
                     .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| format!("key {}", api_keys.len() + 1))
+                    .unwrap_or_else(|| format!("key {}", index + 1))
             } else {
                 key_label.to_string()
             },
             api_key: resolved_api_key,
-            position: i32::try_from(api_keys.len()).unwrap_or(i32::MAX),
+            position: i32::try_from(index).unwrap_or(i32::MAX),
             enabled: submitted
                 .enabled
-                .unwrap_or_else(|| existing_key.as_ref().map(|key| key.enabled).unwrap_or(true)),
+                .unwrap_or_else(|| existing_key.map(|key| key.enabled).unwrap_or(true)),
         });
     }
+    if api_keys.is_empty() && !body.api_key.trim().is_empty() {
+        api_keys.push(db::EndpointApiKeyCreate {
+            key_label: if body.name.trim().is_empty() {
+                "key 1".to_string()
+            } else {
+                body.name.trim().to_string()
+            },
+            api_key: body.api_key.clone(),
+            position: 0,
+            enabled: true,
+        });
+    }
+    if api_keys.is_empty() {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "at least one endpoint api key is required",
+        ));
+    }
+    if !api_keys.iter().any(|key| key.enabled) {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "at least one endpoint api key must be enabled",
+        ));
+    }
+    let api_key = api_keys[0].api_key.clone();
     Ok(EndpointCreate {
         scope: body.scope,
         owner_user_id: body.owner_user_id,
