@@ -2217,27 +2217,6 @@ export type RequestRecordFullResponses = {
 
 export type RequestRecordFullResponse2 = RequestRecordFullResponses[keyof RequestRecordFullResponses];
 
-export type RequestRecordSessionRouteOptionsData = {
-    body?: never;
-    path: {
-        /**
-         * Request record ID
-         */
-        record_id: number;
-    };
-    query?: never;
-    url: '/api/v1/admin/request-records/{record_id}/session-route-options';
-};
-
-export type RequestRecordSessionRouteOptionsResponses = {
-    /**
-     * Session route options for request record
-     */
-    200: SessionRouteOptionsResponse;
-};
-
-export type RequestRecordSessionRouteOptionsResponse = RequestRecordSessionRouteOptionsResponses[keyof RequestRecordSessionRouteOptionsResponses];
-
 export type RequestRecordResetSessionAffinityData = {
     body?: never;
     path: {
@@ -2273,6 +2252,27 @@ export type RequestRecordResetSessionAffinityResponses = {
 };
 
 export type RequestRecordResetSessionAffinityResponse = RequestRecordResetSessionAffinityResponses[keyof RequestRecordResetSessionAffinityResponses];
+
+export type RequestRecordSessionRouteOptionsData = {
+    body?: never;
+    path: {
+        /**
+         * Request record ID
+         */
+        record_id: number;
+    };
+    query?: never;
+    url: '/api/v1/admin/request-records/{record_id}/session-route-options';
+};
+
+export type RequestRecordSessionRouteOptionsResponses = {
+    /**
+     * Session route options for request record
+     */
+    200: SessionRouteOptionsResponse;
+};
+
+export type RequestRecordSessionRouteOptionsResponse = RequestRecordSessionRouteOptionsResponses[keyof RequestRecordSessionRouteOptionsResponses];
 
 export type ListUsersData = {
     body?: never;

@@ -219,9 +219,9 @@ export const requestRecordDetail = <ThrowOnError extends boolean = false>(option
 
 export const requestRecordFull = <ThrowOnError extends boolean = false>(options: Options<RequestRecordFullData, ThrowOnError>): RequestResult<RequestRecordFullResponses, unknown, ThrowOnError> => (options.client ?? client).get<RequestRecordFullResponses, unknown, ThrowOnError>({ url: '/api/v1/admin/request-records/{record_id}/request-full', ...options });
 
-export const requestRecordSessionRouteOptions = <ThrowOnError extends boolean = false>(options: Options<RequestRecordSessionRouteOptionsData, ThrowOnError>): RequestResult<RequestRecordSessionRouteOptionsResponses, unknown, ThrowOnError> => (options.client ?? client).get<RequestRecordSessionRouteOptionsResponses, unknown, ThrowOnError>({ url: '/api/v1/admin/request-records/{record_id}/session-route-options', ...options });
-
 export const requestRecordResetSessionAffinity = <ThrowOnError extends boolean = false>(options: Options<RequestRecordResetSessionAffinityData, ThrowOnError>): RequestResult<RequestRecordResetSessionAffinityResponses, RequestRecordResetSessionAffinityErrors, ThrowOnError> => (options.client ?? client).post<RequestRecordResetSessionAffinityResponses, RequestRecordResetSessionAffinityErrors, ThrowOnError>({ url: '/api/v1/admin/request-records/{record_id}/reset-session-affinity', ...options });
+
+export const requestRecordSessionRouteOptions = <ThrowOnError extends boolean = false>(options: Options<RequestRecordSessionRouteOptionsData, ThrowOnError>): RequestResult<RequestRecordSessionRouteOptionsResponses, unknown, ThrowOnError> => (options.client ?? client).get<RequestRecordSessionRouteOptionsResponses, unknown, ThrowOnError>({ url: '/api/v1/admin/request-records/{record_id}/session-route-options', ...options });
 
 export const listUsers = <ThrowOnError extends boolean = false>(options?: Options<ListUsersData, ThrowOnError>): RequestResult<ListUsersResponses, ListUsersErrors, ThrowOnError> => (options?.client ?? client).get<ListUsersResponses, ListUsersErrors, ThrowOnError>({ url: '/api/v1/admin/users', ...options });
 

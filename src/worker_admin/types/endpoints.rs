@@ -10,6 +10,7 @@ pub struct EndpointApiKeyRequest {
     pub api_key: String,
     pub enabled: Option<bool>,
     #[serde(default)]
+    /// Stable key identity; when omitted or null the key is matched by key_label on update
     pub key_id: Option<Uuid>,
 }
 
