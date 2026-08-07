@@ -36,6 +36,7 @@ const {
   refresh,
   refreshRecords,
   requestRecordsStore,
+  resetSessionAffinity,
   saveConversationOverride,
   session,
   setActiveMode,
