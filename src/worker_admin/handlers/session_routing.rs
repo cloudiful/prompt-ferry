@@ -1,4 +1,6 @@
-use super::usage_support::{build_session_route_options_response, request_record_not_found};
+use super::usage_support::{
+    build_session_route_options_response, request_record_not_found, session_affinity_user_ids,
+};
 use super::*;
 use crate::response_affinity::ResponseAffinityStore;
 
@@ -41,7 +43,8 @@ pub(super) async fn usage_event_session_affinity_reset(
             "request record has no conversation_id",
         );
     };
-    let route_user_id = locator.user_id.unwrap_or(admin.user_id);
+    let route_user_id = locator.user_id.unwrap_or_default();
+    let route_user_ids = session_affinity_user_ids(locator.user_id, admin.user_id);
     let candidate = match db::resolve_model_route_with_fallback(
         &state.pool,
         route_user_id,
@@ -66,18 +69,21 @@ pub(super) async fn usage_event_session_affinity_reset(
     let stable_identity = format!("conversation:{conversation_id}");
     let store = state.replay_cache.response_affinity();
     let mut cleared_count = 0u32;
-    for rule_id in &rule_ids {
-        let cache_key = ResponseAffinityStore::cache_key(route_user_id, *rule_id, &stable_identity);
-        match store.delete(&cache_key).await {
-            Ok(true) => cleared_count += 1,
-            Ok(false) => {}
-            Err(err) => {
-                tracing::warn!(error = %err, "failed to reset session affinity binding");
-                return error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "responses_session_affinity_unavailable",
-                    "response affinity backend is unavailable",
-                );
+    for route_user_id in &route_user_ids {
+        for rule_id in &rule_ids {
+            let cache_key =
+                ResponseAffinityStore::cache_key(*route_user_id, *rule_id, &stable_identity);
+            match store.delete(&cache_key).await {
+                Ok(true) => cleared_count += 1,
+                Ok(false) => {}
+                Err(err) => {
+                    tracing::warn!(error = %err, "failed to reset session affinity binding");
+                    return error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "responses_session_affinity_unavailable",
+                        "response affinity backend is unavailable",
+                    );
+                }
             }
         }
     }

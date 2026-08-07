@@ -14,6 +14,7 @@ pub(in crate::worker_admin::handlers) async fn build_session_route_options_respo
         return Err(bad_request("request record has no conversation_id"));
     };
     let route_user_id = event.user_id.unwrap_or(fallback_user_id);
+    let affinity_user_ids = session_affinity_user_ids(event.user_id, fallback_user_id);
     let record_rule_id = db::get_request_record_route_locator(&state.pool, record_id)
         .await
         .map_err(|err| internal(state, err))?
@@ -62,7 +63,7 @@ pub(in crate::worker_admin::handlers) async fn build_session_route_options_respo
 
     let affinity = resolve_session_affinity_status(
         &state.replay_cache.response_affinity(),
-        route_user_id,
+        &affinity_user_ids,
         conversation_id,
         candidate.as_ref(),
         record_rule_id,
@@ -114,9 +115,26 @@ fn build_candidate_session_route_options(
         .collect()
 }
 
+pub(in crate::worker_admin::handlers) fn session_affinity_user_ids(
+    record_user_id: Option<i64>,
+    fallback_user_id: i64,
+) -> Vec<i64> {
+    match record_user_id {
+        Some(user_id) => vec![user_id],
+        None => {
+            // The runtime binds anonymous requests under user id 0, while the
+            // admin fallback covers any admin-scoped key for the same session.
+            let mut user_ids = vec![0, fallback_user_id];
+            user_ids.sort();
+            user_ids.dedup();
+            user_ids
+        }
+    }
+}
+
 async fn resolve_session_affinity_status(
     store: &ResponseAffinityStore,
-    route_user_id: i64,
+    route_user_ids: &[i64],
     conversation_id: uuid::Uuid,
     candidate: Option<&db::ModelRouteCandidate>,
     record_rule_id: Option<uuid::Uuid>,
@@ -125,15 +143,23 @@ async fn resolve_session_affinity_status(
     let resolved_rule_id = candidate.map(|candidate| candidate.rule_id);
 
     let (mut binding_rule_id, mut binding) = (None, None);
-    if let Some(candidate) = candidate {
-        binding_rule_id = Some(candidate.rule_id);
-        binding = peek_binding(store, route_user_id, candidate.rule_id, &stable_identity).await;
-        if binding.is_none()
-            && record_rule_id.is_some_and(|rule_id| rule_id != candidate.rule_id)
+    for route_user_id in route_user_ids {
+        if let Some(candidate) = candidate
+            && let Some(found) =
+                peek_binding(store, *route_user_id, candidate.rule_id, &stable_identity).await
+        {
+            binding_rule_id = Some(candidate.rule_id);
+            binding = Some(found);
+            break;
+        }
+        if record_rule_id.is_some_and(|rule_id| resolved_rule_id != Some(rule_id))
             && let Some(rule_id) = record_rule_id
+            && let Some(found) =
+                peek_binding(store, *route_user_id, rule_id, &stable_identity).await
         {
             binding_rule_id = Some(rule_id);
-            binding = peek_binding(store, route_user_id, rule_id, &stable_identity).await;
+            binding = Some(found);
+            break;
         }
     }
 
@@ -147,8 +173,7 @@ async fn resolve_session_affinity_status(
             key_label: None,
         };
     };
-    let status = affinity_status_for_binding(candidate, binding_rule_id, &binding);
-    status
+    affinity_status_for_binding(candidate, binding_rule_id, &binding)
 }
 
 fn affinity_status_for_binding(
