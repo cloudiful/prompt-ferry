@@ -15,10 +15,8 @@ use super::super::{
     RequestExecutionContext, context::RuntimeServices, prompt_log::RequestPromptLog,
     request_assembly::BufferedBridgeRequest,
 };
-use super::selection::{
-    candidate_target_by_endpoint, endpoint_key_stickiness_value, rendezvous_target,
-    select_bound_api_key, select_endpoint_api_key,
-};
+use super::selection::{endpoint_key_stickiness_value, rendezvous_target, select_endpoint_api_key};
+use crate::routing::{candidate_target_by_endpoint, select_bound_api_key};
 
 #[derive(Debug, Clone)]
 pub(in crate::worker::runtime) struct RouteAffinityError {

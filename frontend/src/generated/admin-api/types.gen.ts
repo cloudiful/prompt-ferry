@@ -1074,6 +1074,22 @@ export type ReviewFailurePolicy = 'fail_open' | 'fail_closed';
 
 export type RouteSelectionReason = 'default' | 'session_affinity' | 'session_load_balance' | 'conversation_override';
 
+export type SessionAffinityResetResponse = {
+    cleared: boolean;
+    cleared_count: number;
+};
+
+export type SessionAffinityState = 'unbound' | 'active' | 'stale_endpoint' | 'stale_key';
+
+export type SessionAffinityStatus = {
+    endpoint_id?: string | null;
+    endpoint_name?: string | null;
+    key_id?: string | null;
+    key_label?: string | null;
+    rule_id?: string | null;
+    state: SessionAffinityState;
+};
+
 export type SessionRouteKeyOption = {
     key_id: string;
     key_label: string;
@@ -1088,6 +1104,7 @@ export type SessionRouteOption = {
 };
 
 export type SessionRouteOptionsResponse = {
+    affinity: SessionAffinityStatus;
     conversation_id: string;
     current_endpoint_id?: string | null;
     current_endpoint_key_id?: string | null;
@@ -2231,7 +2248,7 @@ export type RequestRecordResetSessionAffinityData = {
 
 export type RequestRecordResetSessionAffinityErrors = {
     /**
-     * Request record has no conversation or no route resolved
+     * Request record has no conversation
      */
     400: ErrorEnvelope;
     403: ErrorEnvelope;
@@ -2246,9 +2263,9 @@ export type RequestRecordResetSessionAffinityError = RequestRecordResetSessionAf
 
 export type RequestRecordResetSessionAffinityResponses = {
     /**
-     * Session affinity binding cleared
+     * Session affinity reset result
      */
-    204: void;
+    200: SessionAffinityResetResponse;
 };
 
 export type RequestRecordResetSessionAffinityResponse = RequestRecordResetSessionAffinityResponses[keyof RequestRecordResetSessionAffinityResponses];

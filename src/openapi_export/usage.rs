@@ -4,7 +4,7 @@ use crate::{
         ConversationEndpointOverrideRequest, RequestRecordFullResponse, RequestRecordOverviewQuery,
         RequestRecordPruneResponse, RequestRecordSeriesQuery, RequestRecordSummaryQuery,
         RequestRecordsClearRequest, RequestRecordsClearResponse, RequestRecordsQuery,
-        SessionRouteOptionsResponse,
+        SessionAffinityResetResponse, SessionRouteOptionsResponse,
     },
 };
 
@@ -76,8 +76,8 @@ pub(super) fn request_record_session_route_options() {}
     path = "/api/v1/admin/request-records/{record_id}/reset-session-affinity",
     params(("record_id" = i64, Path, description = "Request record ID")),
     responses(
-        (status = 204, description = "Session affinity binding cleared"),
-        (status = 400, body = super::schemas::ErrorEnvelope, description = "Request record has no conversation or no route resolved"),
+        (status = 200, body = SessionAffinityResetResponse, description = "Session affinity reset result"),
+        (status = 400, body = super::schemas::ErrorEnvelope, description = "Request record has no conversation"),
         (status = 403, body = super::schemas::ErrorEnvelope),
         (status = 404, body = super::schemas::ErrorEnvelope),
         (status = 503, body = super::schemas::ErrorEnvelope, description = "Response affinity backend unavailable")

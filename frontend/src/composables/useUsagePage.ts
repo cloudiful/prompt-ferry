@@ -13,7 +13,7 @@ import { useUsersStore } from '@/stores/users'
 
 export function useUsagePage() {
   const { t } = useLocale()
-  const { notifyApiError, notifySuccess } = useNotifier()
+  const { notifyApiError, notifyInfo, notifySuccess } = useNotifier()
   const session = useSessionStore()
   const requestRecordsStore = useRequestRecordsStore()
   const usersStore = useUsersStore()
@@ -103,9 +103,14 @@ export function useUsagePage() {
   async function resetSessionAffinity(): Promise<void> {
     const recordId = requestRecordsStore.detailRecord?.record_id
     if (!recordId) return
+    if (!window.confirm(t('resetAffinityConfirm'))) return
     try {
-      await requestRecordsStore.resetSessionAffinity(recordId)
-      notifySuccess(t('affinityReset'))
+      const result = await requestRecordsStore.resetSessionAffinity(recordId)
+      if (result.cleared_count > 0) {
+        notifySuccess(t('affinityReset'))
+      } else {
+        notifyInfo(t('affinityNotBound'))
+      }
     } catch (cause) {
       notifyApiError(cause)
     }

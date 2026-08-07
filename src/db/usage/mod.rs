@@ -26,6 +26,7 @@ mod query;
 mod raw_partitions;
 mod redaction_sessions;
 mod replay_snapshots;
+mod route_locator;
 mod runtime;
 
 pub use artifacts::list_usage_events_missing_assistant_artifacts;
@@ -66,6 +67,7 @@ pub use redaction_sessions::{
 pub use replay_snapshots::{
     insert_replay_snapshot, latest_replay_snapshot, replay_snapshot_before_or_at_seq,
 };
+pub use route_locator::{RequestRecordRouteLocator, get_request_record_route_locator};
 pub use runtime::{
     abort_request_record, abort_request_records_by_ids, abort_stale_request_records,
     allocate_conversation_seq, delete_request_record_lease,

@@ -28,6 +28,7 @@ const emit = defineEmits<{
     },
   ]
   clearConversationOverride: []
+  resetSessionAffinity: []
   loadRequestFull: []
 }>()
 
@@ -164,6 +165,7 @@ function saveOverride(): void {
             :event="detail.record"
             :conversation-override="detail.conversation_override"
             :override-saving="detail.override_saving"
+            :affinity-resetting="detail.affinity_resetting"
             :options="routeOptionChoices"
             :session-route-options="detail.session_route_options"
             :session-route-options-loading="

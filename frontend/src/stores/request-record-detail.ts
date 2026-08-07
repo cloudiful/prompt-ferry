@@ -11,6 +11,7 @@ import type {
   ConversationEndpointOverride,
   RequestRecordDetail,
   RequestRecordFullResponse,
+  SessionAffinityResetResponse,
   SessionRouteOptionsResponse,
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
@@ -30,6 +31,7 @@ export function createRequestRecordDetailState() {
   const requestFullLoading = ref(false)
   const routeOptionsLoading = ref(false)
   const overrideSaving = ref(false)
+  const affinityResetting = ref(false)
   const requestFull = ref<RequestRecordFullResponse | null>(null)
   const detailRecord = ref<RequestRecordDetailView | null>(null)
   const sessionRouteOptions = ref<SessionRouteOptionsView | null>(null)
@@ -208,17 +210,22 @@ export function createRequestRecordDetailState() {
     }
   }
 
-  async function resetSessionAffinity(recordId: number): Promise<void> {
-    overrideSaving.value = true
+  async function resetSessionAffinity(
+    recordId: number,
+  ): Promise<SessionAffinityResetResponse> {
+    affinityResetting.value = true
     try {
-      await requestRecordResetSessionAffinity<true>(
-        withData({ path: { record_id: recordId } }),
+      const response: SessionAffinityResetResponse = expectData(
+        await requestRecordResetSessionAffinity<true>(
+          withData({ path: { record_id: recordId } }),
+        ),
       )
       if (detailRecord.value) {
         await loadSessionRouteOptions(detailRecord.value.record_id)
       }
+      return response
     } finally {
-      overrideSaving.value = false
+      affinityResetting.value = false
     }
   }
 
@@ -231,9 +238,11 @@ export function createRequestRecordDetailState() {
     sessionRouteOptions.value = null
     routeOptionsLoading.value = false
     conversationOverride.value = null
+    affinityResetting.value = false
   }
 
   return {
+    affinityResetting,
     clearConversationOverride,
     conversationOverride,
     detailLoading,

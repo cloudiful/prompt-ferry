@@ -2,12 +2,7 @@ use super::super::{
     RequestExecutionContext, context::RuntimeServices, prompt_log::RequestPromptLog,
     request_assembly::BufferedBridgeRequest,
 };
-use crate::{
-    db, endpoint_models,
-    response_affinity::{ResponseAffinityBinding, api_key_fingerprint},
-    routing::stable_candidate_order,
-    worker_admin::AdminState,
-};
+use crate::{db, endpoint_models, routing::stable_candidate_order, worker_admin::AdminState};
 use reqwest::Client;
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
@@ -179,16 +174,6 @@ fn preferred_target<'a>(
     })
 }
 
-pub(super) fn candidate_target_by_endpoint(
-    candidate: &db::ModelRouteCandidate,
-    endpoint_id: uuid::Uuid,
-) -> Option<&db::ModelRouteCandidateTarget> {
-    candidate
-        .targets
-        .iter()
-        .find(|target| target.endpoint_id == endpoint_id)
-}
-
 pub(in crate::worker::runtime) fn rendezvous_target<'a>(
     candidate: &'a db::ModelRouteCandidate,
     routing_key: Option<&str>,
@@ -292,44 +277,6 @@ pub(super) fn select_endpoint_api_key(
 pub(in crate::worker::runtime) struct EndpointApiKeySelectionResult {
     pub(in crate::worker::runtime) selection: db::EndpointApiKeySelection,
     pub(in crate::worker::runtime) invalid_conversation_override: bool,
-}
-
-pub(super) fn select_bound_api_key(
-    target: &db::ModelRouteCandidateTarget,
-    binding: &ResponseAffinityBinding,
-) -> Option<db::EndpointApiKeySelection> {
-    let by_key_id = binding.endpoint_key_id.and_then(|key_id| {
-        target.api_keys.iter().find(|key| {
-            key.endpoint_id == target.endpoint_id
-                && key.enabled
-                && !key.api_key.trim().is_empty()
-                && key.key_id == key_id
-        })
-    });
-    let by_fingerprint = || {
-        target.api_keys.iter().find(|key| {
-            key.endpoint_id == target.endpoint_id
-                && key.enabled
-                && !key.api_key.trim().is_empty()
-                && api_key_fingerprint(&key.api_key) == binding.endpoint_key_fingerprint
-        })
-    };
-    let selected = by_key_id.or_else(by_fingerprint);
-    selected
-        .map(|key| db::EndpointApiKeySelection {
-            key_id: (!key.key_id.is_nil()).then_some(key.key_id),
-            key_label: (!key.key_id.is_nil()).then(|| key.key_label.clone()),
-            secret: key.api_key.clone(),
-        })
-        .or_else(|| {
-            (binding.endpoint_key_id.is_none()
-                && api_key_fingerprint(&target.api_key) == binding.endpoint_key_fingerprint)
-                .then(|| db::EndpointApiKeySelection {
-                    key_id: None,
-                    key_label: None,
-                    secret: target.api_key.clone(),
-                })
-        })
 }
 
 fn select_api_key(

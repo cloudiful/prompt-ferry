@@ -202,6 +202,17 @@ impl ReplayCache {
         }
     }
 
+    pub fn for_tests_without_affinity() -> Self {
+        Self {
+            backend: ReplayCacheBackend::Local(Arc::new(LocalBackend::new(
+                7 * 24 * 60 * 60,
+                24 * 60 * 60,
+                10_000,
+            ))),
+            response_affinity: ResponseAffinityStore::unavailable(),
+        }
+    }
+
     pub async fn get_snapshot(&self, conversation_id: Uuid) -> Result<Option<ReplaySnapshotValue>> {
         match &self.backend {
             ReplayCacheBackend::Disabled => Ok(None),

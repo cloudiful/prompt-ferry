@@ -1341,10 +1341,14 @@ paths:
           type: integer
           format: int64
       responses:
-        '204':
-          description: Session affinity binding cleared
+        '200':
+          description: Session affinity reset result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionAffinityResetResponse'
         '400':
-          description: Request record has no conversation or no route resolved
+          description: Request record has no conversation
           content:
             application/json:
               schema:
@@ -5569,6 +5573,55 @@ components:
       - session_affinity
       - session_load_balance
       - conversation_override
+    SessionAffinityResetResponse:
+      type: object
+      required:
+      - cleared
+      - cleared_count
+      properties:
+        cleared:
+          type: boolean
+        cleared_count:
+          type: integer
+          format: int32
+          minimum: 0
+    SessionAffinityState:
+      type: string
+      enum:
+      - unbound
+      - active
+      - stale_endpoint
+      - stale_key
+    SessionAffinityStatus:
+      type: object
+      required:
+      - state
+      properties:
+        endpoint_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        endpoint_name:
+          type:
+          - string
+          - 'null'
+        key_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        key_label:
+          type:
+          - string
+          - 'null'
+        rule_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        state:
+          $ref: '#/components/schemas/SessionAffinityState'
     SessionRouteKeyOption:
       type: object
       required:
@@ -5607,7 +5660,10 @@ components:
       required:
       - conversation_id
       - options
+      - affinity
       properties:
+        affinity:
+          $ref: '#/components/schemas/SessionAffinityStatus'
         conversation_id:
           type: string
           format: uuid

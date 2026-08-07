@@ -847,11 +847,566 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
         ))
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    assert_eq!(body["cleared"], true);
+    assert_eq!(body["cleared_count"], 1);
     assert_eq!(
         store.get(&cache_key).await?,
         None,
         "binding should be cleared after reset"
+    );
+
+    let repeated = worker_admin::router(state.clone())
+        .oneshot(auth_request(
+            "POST",
+            format!("/api/v1/admin/request-records/{record_id}/reset-session-affinity"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(repeated.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(repeated.into_body(), usize::MAX).await?)?;
+    assert_eq!(
+        body["cleared"], false,
+        "repeated reset must stay idempotent"
+    );
+    assert_eq!(body["cleared_count"], 0);
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -> anyhow::Result<()>
+{
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-affinity-both", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    let endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "affinity-both-test".to_string(),
+            base_url: "http://affinity-both.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "affinity-key".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    let old_rule = db::create_model_endpoint_rule(
+        &schema.pool,
+        db::ModelEndpointRuleCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            model_pattern: "gpt-affinity-both".to_string(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            targets: vec![db::ModelRouteTargetCreate {
+                endpoint_id: endpoint.endpoint_id,
+                enabled: true,
+                upstream_model: None,
+                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
+            }],
+        },
+    )
+    .await?;
+    let current_rule = db::create_model_endpoint_rule(
+        &schema.pool,
+        db::ModelEndpointRuleCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            model_pattern: "gpt-affinity-both".to_string(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            targets: vec![db::ModelRouteTargetCreate {
+                endpoint_id: endpoint.endpoint_id,
+                enabled: true,
+                upstream_model: None,
+                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
+            }],
+        },
+    )
+    .await?;
+    let conversation_id = Uuid::new_v4();
+    let record_id = db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_route(Some(endpoint.endpoint_id), Some(old_rule.rule_id))
+            .with_model(Some("gpt-affinity-both".to_string()))
+            .with_request_context(db::RequestRecordContextInput {
+                conversation_id: Some(conversation_id),
+                parent_event_id: None,
+                conversation_seq: Some(1),
+                conversation_source: "session_header".to_string(),
+                client_installation_id: None,
+                normalized_item_count: None,
+                normalized_chain_hash: None,
+                normalized_first_ref_hash: None,
+                normalized_last_ref_hash: None,
+                base_checkpoint_event_id: None,
+            }),
+    )
+    .await?;
+
+    let store = state.replay_cache.response_affinity();
+    let binding = prompt_ferry::response_affinity::ResponseAffinityBinding {
+        endpoint_id: endpoint.endpoint_id,
+        endpoint_key_id: None,
+        endpoint_key_fingerprint: "fingerprint".to_string(),
+    };
+    let old_rule_key = prompt_ferry::response_affinity::ResponseAffinityStore::cache_key(
+        admin.user_id,
+        old_rule.rule_id,
+        &format!("conversation:{conversation_id}"),
+    );
+    let current_rule_key = prompt_ferry::response_affinity::ResponseAffinityStore::cache_key(
+        admin.user_id,
+        current_rule.rule_id,
+        &format!("conversation:{conversation_id}"),
+    );
+    store.get_or_create(&old_rule_key, &binding).await?;
+    store.get_or_create(&current_rule_key, &binding).await?;
+    assert_eq!(store.get(&old_rule_key).await?, Some(binding.clone()));
+    assert_eq!(store.get(&current_rule_key).await?, Some(binding.clone()));
+
+    let response = worker_admin::router(state.clone())
+        .oneshot(auth_request(
+            "POST",
+            format!("/api/v1/admin/request-records/{record_id}/reset-session-affinity"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    assert_eq!(body["cleared"], true);
+    assert_eq!(body["cleared_count"], 2);
+    assert_eq!(
+        store.get(&old_rule_key).await?,
+        None,
+        "binding recorded under the old rule must be cleared"
+    );
+    assert_eq!(
+        store.get(&current_rule_key).await?,
+        None,
+        "binding resolved under the current rule must be cleared"
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn reset_session_affinity_requires_conversation_id() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-affinity-noconv", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let record_id = insert_request_record(&schema.pool, admin.user_id, "gpt-test").await?;
+
+    let response = worker_admin::router(state)
+        .oneshot(auth_request(
+            "POST",
+            format!("/api/v1/admin/request-records/{record_id}/reset-session-affinity"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    assert_eq!(body["error"]["code"], "no_conversation_id");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn reset_session_affinity_requires_admin() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-affinity-403", true).await?;
+    let user = create_user(&schema.pool, "user-affinity-403", false).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    state
+        .replay_cache
+        .write_session(
+            "non-admin-session",
+            &SessionUser {
+                user_id: user.user_id,
+                login_name: user.login_name.clone(),
+                display_name: user.display_name.clone(),
+                is_admin: false,
+            },
+        )
+        .await
+        .unwrap();
+    let record_id = insert_request_record(&schema.pool, user.user_id, "gpt-test").await?;
+
+    let response = worker_admin::router(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/admin/request-records/{record_id}/reset-session-affinity"
+                ))
+                .header(header::COOKIE, "prompt_ferry_session=non-admin-session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-affinity-503", true).await?;
+    let replay_cache = ReplayCache::for_tests_without_affinity();
+    let state = AdminState::new(AdminStateInit {
+        pool: schema.pool.clone(),
+        lease_pool: schema.pool.clone(),
+        replay_cache: replay_cache.clone(),
+        configured_relays: vec!["ws://relay:8788/ws/worker".to_string()],
+        managed_mode: false,
+        relay_secret_manager: None,
+        redaction_enabled: false,
+        model_route_whitelist_enabled: true,
+        request_content_logging: RequestContentLoggingResponse {
+            mode: RequestContentLoggingMode::Off,
+            raw_retention_days: 3,
+        },
+        usage_retention: UsageRetentionSettings::default(),
+        raw_payload_store: None,
+        stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
+        llm_review_settings: LlmReviewSettings::default(),
+        mcp_catalog_cache: McpCatalogCache::new(),
+        mcp_catalog_service: McpCatalogService::new(schema.pool.clone(), McpCatalogCache::new()),
+        mcp_session_store: None,
+        endpoint_model_cache: prompt_ferry::endpoint_models::EndpointModelCache::new(
+            Duration::from_secs(300),
+        ),
+    });
+    replay_cache
+        .write_session(
+            "test-session",
+            &SessionUser {
+                user_id: admin.user_id,
+                login_name: admin.login_name.clone(),
+                display_name: admin.display_name.clone(),
+                is_admin: true,
+            },
+        )
+        .await
+        .unwrap();
+
+    let endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "affinity-503-test".to_string(),
+            base_url: "http://affinity-503.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "affinity-key".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    let rule = db::create_model_endpoint_rule(
+        &schema.pool,
+        db::ModelEndpointRuleCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            model_pattern: "gpt-affinity-503".to_string(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            targets: vec![db::ModelRouteTargetCreate {
+                endpoint_id: endpoint.endpoint_id,
+                enabled: true,
+                upstream_model: None,
+                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
+            }],
+        },
+    )
+    .await?;
+    let conversation_id = Uuid::new_v4();
+    let record_id = db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_route(Some(endpoint.endpoint_id), Some(rule.rule_id))
+            .with_model(Some("gpt-affinity-503".to_string()))
+            .with_request_context(db::RequestRecordContextInput {
+                conversation_id: Some(conversation_id),
+                parent_event_id: None,
+                conversation_seq: Some(1),
+                conversation_source: "session_header".to_string(),
+                client_installation_id: None,
+                normalized_item_count: None,
+                normalized_chain_hash: None,
+                normalized_first_ref_hash: None,
+                normalized_last_ref_hash: None,
+                base_checkpoint_event_id: None,
+            }),
+    )
+    .await?;
+
+    let response = worker_admin::router(state)
+        .oneshot(auth_request(
+            "POST",
+            format!("/api/v1/admin/request-records/{record_id}/reset-session-affinity"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    assert_eq!(
+        body["error"]["code"],
+        "responses_session_affinity_unavailable"
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+fn affinity_fingerprint(secret: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(secret.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+async fn session_affinity_options_fixture(
+    schema: &TestSchema,
+    admin: &db::User,
+) -> anyhow::Result<(
+    AdminState,
+    db::ProviderEndpoint,
+    db::ModelEndpointRule,
+    i64,
+    Uuid,
+)> {
+    let state = admin_state(schema.pool.clone(), admin).await;
+    let endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "affinity-options-test".to_string(),
+            base_url: "http://affinity-options.example.test".to_string(),
+            native_api: NativeApi::Chat,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "legacy-key".to_string(),
+            api_keys: vec![
+                db::EndpointApiKeyCreate {
+                    key_label: "primary".to_string(),
+                    api_key: "primary-secret".to_string(),
+                    position: 0,
+                    enabled: true,
+                    key_id: None,
+                },
+                db::EndpointApiKeyCreate {
+                    key_label: "rotated".to_string(),
+                    api_key: "rotated-secret".to_string(),
+                    position: 1,
+                    enabled: true,
+                    key_id: None,
+                },
+            ],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    let rule = db::create_model_endpoint_rule(
+        &schema.pool,
+        db::ModelEndpointRuleCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            model_pattern: "gpt-affinity-options".to_string(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            targets: vec![db::ModelRouteTargetCreate {
+                endpoint_id: endpoint.endpoint_id,
+                enabled: true,
+                upstream_model: None,
+                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
+            }],
+        },
+    )
+    .await?;
+    let conversation_id = Uuid::new_v4();
+    let record_id = db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_route(Some(endpoint.endpoint_id), Some(rule.rule_id))
+            .with_model(Some("gpt-affinity-options".to_string()))
+            .with_request_context(db::RequestRecordContextInput {
+                conversation_id: Some(conversation_id),
+                parent_event_id: None,
+                conversation_seq: Some(1),
+                conversation_source: "session_header".to_string(),
+                client_installation_id: None,
+                normalized_item_count: None,
+                normalized_chain_hash: None,
+                normalized_first_ref_hash: None,
+                normalized_last_ref_hash: None,
+                base_checkpoint_event_id: None,
+            }),
+    )
+    .await?;
+    Ok((state, endpoint, rule, record_id, conversation_id))
+}
+
+async fn session_route_options_affinity(
+    state: &AdminState,
+    record_id: i64,
+) -> anyhow::Result<Value> {
+    let response = worker_admin::router(state.clone())
+        .oneshot(auth_request(
+            "GET",
+            format!("/api/v1/admin/request-records/{record_id}/session-route-options"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    Ok(body["affinity"].clone())
+}
+
+#[tokio::test]
+async fn session_route_options_reports_live_affinity_states() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-affinity-options", true).await?;
+    let (state, endpoint, rule, record_id, conversation_id) =
+        session_affinity_options_fixture(&schema, &admin).await?;
+    let primary = endpoint
+        .api_keys
+        .iter()
+        .find(|key| key.key_label == "primary")
+        .expect("primary endpoint key");
+    let store = state.replay_cache.response_affinity();
+    let cache_key = prompt_ferry::response_affinity::ResponseAffinityStore::cache_key(
+        admin.user_id,
+        rule.rule_id,
+        &format!("conversation:{conversation_id}"),
+    );
+
+    let affinity = session_route_options_affinity(&state, record_id).await?;
+    assert_eq!(affinity["state"], "unbound");
+    assert_eq!(affinity["endpoint_id"], Value::Null);
+
+    let active_binding = prompt_ferry::response_affinity::ResponseAffinityBinding {
+        endpoint_id: endpoint.endpoint_id,
+        endpoint_key_id: Some(primary.key_id),
+        endpoint_key_fingerprint: affinity_fingerprint("primary-secret"),
+    };
+    store.get_or_create(&cache_key, &active_binding).await?;
+    let affinity = session_route_options_affinity(&state, record_id).await?;
+    assert_eq!(affinity["state"], "active");
+    assert_eq!(affinity["rule_id"], rule.rule_id.to_string());
+    assert_eq!(affinity["endpoint_id"], endpoint.endpoint_id.to_string());
+    assert_eq!(affinity["endpoint_name"], "affinity-options-test");
+    assert_eq!(affinity["key_id"], primary.key_id.to_string());
+    assert_eq!(affinity["key_label"], "primary");
+
+    let stale_key_binding = prompt_ferry::response_affinity::ResponseAffinityBinding {
+        endpoint_id: endpoint.endpoint_id,
+        endpoint_key_id: None,
+        endpoint_key_fingerprint: affinity_fingerprint("revoked-secret"),
+    };
+    store.delete(&cache_key).await?;
+    store.get_or_create(&cache_key, &stale_key_binding).await?;
+    let affinity = session_route_options_affinity(&state, record_id).await?;
+    assert_eq!(affinity["state"], "stale_key");
+    assert_eq!(affinity["endpoint_name"], "affinity-options-test");
+    assert_eq!(affinity["key_id"], Value::Null);
+
+    let stale_endpoint_binding = prompt_ferry::response_affinity::ResponseAffinityBinding {
+        endpoint_id: Uuid::new_v4(),
+        endpoint_key_id: None,
+        endpoint_key_fingerprint: affinity_fingerprint("revoked-secret"),
+    };
+    store.delete(&cache_key).await?;
+    store
+        .get_or_create(&cache_key, &stale_endpoint_binding)
+        .await?;
+    let affinity = session_route_options_affinity(&state, record_id).await?;
+    assert_eq!(affinity["state"], "stale_endpoint");
+    assert_eq!(
+        affinity["endpoint_id"],
+        stale_endpoint_binding.endpoint_id.to_string()
+    );
+
+    store.delete(&cache_key).await?;
+    let affinity = session_route_options_affinity(&state, record_id).await?;
+    assert_eq!(affinity["state"], "unbound");
+
+    store.get_or_create(&cache_key, &active_binding).await?;
+    let affinity = session_route_options_affinity(&state, record_id).await?;
+    assert_eq!(affinity["state"], "active");
+    let response = worker_admin::router(state.clone())
+        .oneshot(auth_request(
+            "POST",
+            format!("/api/v1/admin/request-records/{record_id}/reset-session-affinity"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    assert_eq!(body["cleared"], true);
+    let affinity = session_route_options_affinity(&state, record_id).await?;
+    assert_eq!(
+        affinity["state"], "unbound",
+        "live affinity must flip to unbound right after reset"
     );
 
     schema.cleanup().await?;

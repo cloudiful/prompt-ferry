@@ -28,6 +28,7 @@ export type UsageDetailWorkspaceView = {
   session_route_options_loading: boolean
   conversation_override: ConversationEndpointOverrideView | null
   override_saving: boolean
+  affinity_resetting: boolean
 }
 
 export type UsageWorkspaceView = {
@@ -54,6 +55,7 @@ type UsageWorkspaceRecordsInput = {
   total: number
 }
 type UsageWorkspaceDetailInput = {
+  affinityResetting: boolean
   conversationOverride: ConversationEndpointOverrideView | null
   detailLoading: boolean
   detailRecord: RequestRecordDetailView | null
@@ -119,6 +121,7 @@ export function createUsageWorkspaceView(options: {
     sort_order: options.records.sortOrder,
     facets: options.facets,
     detail: {
+      affinity_resetting: options.detail.affinityResetting,
       record: options.detail.detailRecord,
       detail_loading: options.detail.detailLoading,
       request_full: options.detail.requestFull,

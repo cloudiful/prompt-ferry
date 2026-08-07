@@ -91,10 +91,14 @@ impl ResponseAffinityStore {
     }
 
     pub(crate) fn for_tests() -> Self {
+        Self::for_tests_with_ttl(Duration::from_secs(7 * 24 * 60 * 60))
+    }
+
+    pub(crate) fn for_tests_with_ttl(ttl: Duration) -> Self {
         Self {
             backend: ResponseAffinityBackend::Local(Arc::new(LocalAffinityBackend {
                 bindings: Mutex::new(HashMap::new()),
-                ttl: Duration::from_secs(7 * 24 * 60 * 60),
+                ttl,
             })),
         }
     }
@@ -156,6 +160,37 @@ impl ResponseAffinityStore {
         }
     }
 
+    pub async fn peek(&self, key: &str) -> Result<Option<ResponseAffinityBinding>> {
+        match &self.backend {
+            ResponseAffinityBackend::Unavailable => {
+                Err(anyhow!("response affinity backend unavailable"))
+            }
+            ResponseAffinityBackend::Local(inner) => {
+                let bindings = inner.bindings.lock().await;
+                let Some(entry) = bindings.get(key) else {
+                    return Ok(None);
+                };
+                if entry.expires_at <= Instant::now() {
+                    return Ok(None);
+                }
+                Ok(Some(entry.binding.clone()))
+            }
+            ResponseAffinityBackend::Redis(inner) => {
+                let mut manager = inner.manager.clone();
+                let payload: Option<String> = manager
+                    .get(key)
+                    .await
+                    .context("failed to peek response affinity binding")?;
+                let Some(payload) = payload else {
+                    return Ok(None);
+                };
+                let binding =
+                    serde_json::from_str(&payload).context("invalid response affinity binding")?;
+                Ok(Some(binding))
+            }
+        }
+    }
+
     pub async fn get_or_create(
         &self,
         key: &str,
@@ -199,22 +234,21 @@ impl ResponseAffinityStore {
         }
     }
 
-    pub async fn delete(&self, key: &str) -> Result<()> {
+    pub async fn delete(&self, key: &str) -> Result<bool> {
         match &self.backend {
             ResponseAffinityBackend::Unavailable => {
                 Err(anyhow!("response affinity backend unavailable"))
             }
             ResponseAffinityBackend::Local(inner) => {
-                inner.bindings.lock().await.remove(key);
-                Ok(())
+                Ok(inner.bindings.lock().await.remove(key).is_some())
             }
             ResponseAffinityBackend::Redis(inner) => {
                 let mut manager = inner.manager.clone();
-                let _: usize = manager
+                let deleted: usize = manager
                     .del(key)
                     .await
                     .context("failed to delete response affinity binding")?;
-                Ok(())
+                Ok(deleted > 0)
             }
         }
     }

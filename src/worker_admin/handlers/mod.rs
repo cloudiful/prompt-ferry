@@ -10,6 +10,7 @@ mod relay_secrets;
 mod relay_validation;
 mod relays;
 mod server;
+mod session_routing;
 mod settings;
 mod support;
 mod usage;
@@ -60,7 +61,7 @@ use tower_http::cors::CorsLayer;
 
 use self::{
     approvals::*, auth::*, billing::*, endpoints::*, mcp::*, model_routes::*, relays::*,
-    settings::*, usage::*, users::*,
+    session_routing::*, settings::*, usage::*, users::*,
 };
 
 pub(super) use self::support::*;

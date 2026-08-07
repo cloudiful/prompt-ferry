@@ -50,6 +50,31 @@ pub struct ConversationEndpointOverrideRequest {
     pub endpoint_key_id: Option<Uuid>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAffinityState {
+    Unbound,
+    Active,
+    StaleEndpoint,
+    StaleKey,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SessionAffinityStatus {
+    pub state: SessionAffinityState,
+    pub rule_id: Option<Uuid>,
+    pub endpoint_id: Option<Uuid>,
+    pub endpoint_name: Option<String>,
+    pub key_id: Option<Uuid>,
+    pub key_label: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SessionAffinityResetResponse {
+    pub cleared: bool,
+    pub cleared_count: u32,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SessionRouteOptionsResponse {
     pub conversation_id: Uuid,
@@ -60,6 +85,7 @@ pub struct SessionRouteOptionsResponse {
     pub override_endpoint_key_id: Option<Uuid>,
     pub override_endpoint_key_label: Option<String>,
     pub options: Vec<db::SessionRouteOption>,
+    pub affinity: SessionAffinityStatus,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]

@@ -87,6 +87,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
       busy: loadingState.page.value,
       facets: facetOptionsView.value,
       detail: {
+        affinityResetting: detailState.affinityResetting.value,
         conversationOverride: detailState.conversationOverride.value,
         detailLoading: detailState.detailLoading.value,
         detailRecord: detailState.detailRecord.value,
@@ -213,6 +214,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
   }
 
   return {
+    affinityResetting: detailState.affinityResetting,
     clearConversationOverride: detailState.clearConversationOverride,
     clearHistory,
     conversationOverride: detailState.conversationOverride,
