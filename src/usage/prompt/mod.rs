@@ -167,6 +167,15 @@ mod tests {
     }
 
     #[test]
+    fn chat_session_namespace_isolates_from_responses() {
+        let chat = derive_conversation_id(7, "chat:thread-1");
+        let responses = derive_conversation_id(7, "thread-1");
+        assert_ne!(chat, responses);
+        let other_thread = derive_conversation_id(7, "chat:thread-2");
+        assert_ne!(chat, other_thread);
+    }
+
+    #[test]
     fn fingerprints_prompt_refs_stably() {
         let refs = vec![
             PromptMessageRef {

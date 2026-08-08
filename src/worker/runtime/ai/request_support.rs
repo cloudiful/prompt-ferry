@@ -124,6 +124,7 @@ pub(super) async fn prepare_upstream_request_with_replay(
 ) -> Result<PreparedUpstreamRequest, CompatError> {
     if replay_unavailable
         && route.responses_continuation_policy == db::ResponsesContinuationPolicy::ForceReplay
+        && (request.path == "/v1/responses" || previous_response_id(&request.body).is_some())
     {
         return Err(CompatError::new(
             StatusCode::BAD_REQUEST,

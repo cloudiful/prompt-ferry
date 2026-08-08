@@ -4,6 +4,41 @@ use anyhow::Result;
 
 use super::super::request_assembly::BufferedBridgeRequest;
 
+const CHAT_SESSION_NAMESPACE: &str = "chat:";
+
+async fn resolve_session_header_conversation(
+    state: &AdminState,
+    user_id: Option<i64>,
+    conversation_hint: &str,
+    source: &'static str,
+) -> Result<PromptConversationResolution> {
+    let conversation_id = derive_conversation_id(user_id.unwrap_or_default(), conversation_hint);
+    let latest =
+        db::latest_usage_event_locator_by_conversation(&state.pool, user_id, conversation_id)
+            .await?;
+    let replay_parent = db::latest_replayable_usage_event_locator_by_conversation(
+        &state.pool,
+        user_id,
+        conversation_id,
+    )
+    .await?;
+    let next_seq_seed = latest
+        .as_ref()
+        .and_then(|entry| entry.conversation_seq)
+        .unwrap_or(0)
+        + 1;
+    let conversation_seq =
+        db::allocate_conversation_seq(&state.pool, conversation_id, next_seq_seed).await?;
+    Ok(PromptConversationResolution {
+        conversation_id,
+        parent_event_id: replay_parent.as_ref().map(|entry| entry.event_id),
+        replay_unavailable: latest.is_some() && replay_parent.is_none(),
+        endpoint_id: replay_parent.as_ref().and_then(|entry| entry.endpoint_id),
+        conversation_seq,
+        source,
+    })
+}
+
 pub(super) async fn resolve_prompt_conversation(
     state: &AdminState,
     request: &BufferedBridgeRequest,
@@ -13,6 +48,28 @@ pub(super) async fn resolve_prompt_conversation(
     session_header_id: Option<&str>,
     codex_thread_key: Option<&str>,
 ) -> Result<Option<PromptConversationResolution>> {
+    if request.path == "/v1/chat/completions" {
+        if let Some(session_header_id) = session_header_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let resolution = resolve_session_header_conversation(
+                state,
+                user_id,
+                // Chat session ids are prefixed so the same X-Session-Id never
+                // collides with the raw session-header conversation of
+                // /v1/responses. The isolation relies on clients not sending
+                // values with a "chat:" prefix on the responses side.
+                &format!("{CHAT_SESSION_NAMESPACE}{session_header_id}"),
+                "chat_session_header",
+            )
+            .await?;
+            return Ok(Some(resolution));
+        }
+
+        return Ok(None);
+    }
+
     if request.path == "/v1/responses" {
         if let Some(codex_thread_key) = codex_thread_key
             .map(str::trim)
@@ -138,35 +195,14 @@ pub(super) async fn resolve_prompt_conversation(
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            let conversation_id =
-                derive_conversation_id(user_id.unwrap_or_default(), session_header_id);
-            let latest = db::latest_usage_event_locator_by_conversation(
-                &state.pool,
+            let resolution = resolve_session_header_conversation(
+                state,
                 user_id,
-                conversation_id,
+                session_header_id,
+                "session_header",
             )
             .await?;
-            let replay_parent = db::latest_replayable_usage_event_locator_by_conversation(
-                &state.pool,
-                user_id,
-                conversation_id,
-            )
-            .await?;
-            let next_seq_seed = latest
-                .as_ref()
-                .and_then(|entry| entry.conversation_seq)
-                .unwrap_or(0)
-                + 1;
-            let conversation_seq =
-                db::allocate_conversation_seq(&state.pool, conversation_id, next_seq_seed).await?;
-            return Ok(Some(PromptConversationResolution {
-                conversation_id,
-                parent_event_id: replay_parent.as_ref().map(|entry| entry.event_id),
-                replay_unavailable: latest.is_some() && replay_parent.is_none(),
-                endpoint_id: replay_parent.as_ref().and_then(|entry| entry.endpoint_id),
-                conversation_seq,
-                source: "session_header",
-            }));
+            return Ok(Some(resolution));
         }
 
         return Ok(None);

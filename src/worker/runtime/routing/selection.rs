@@ -82,7 +82,7 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
     routing_key: Option<&str>,
 ) -> anyhow::Result<Option<SelectedRoute>> {
     if candidate.routing_strategy == db::ModelRouteRoutingStrategy::ResponsesSessionAffinity
-        && request.path == "/v1/responses"
+        && (request.path == "/v1/responses" || request.path == "/v1/chat/completions")
     {
         let selected =
             super::session_affinity::select(services, request_ctx, candidate, request, user_id)

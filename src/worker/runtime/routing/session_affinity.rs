@@ -31,7 +31,7 @@ impl RouteAffinityError {
         Self {
             status: StatusCode::BAD_REQUEST,
             code: "responses_session_identity_required",
-            message: "responses session affinity requires a stable session identity",
+            message: "session affinity requires a stable session identity",
             audit: AffinityFailureAudit::default(),
         }
     }
@@ -40,7 +40,7 @@ impl RouteAffinityError {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
             code: "responses_session_affinity_unavailable",
-            message: "responses session affinity backend is unavailable",
+            message: "session affinity backend is unavailable",
             audit: AffinityFailureAudit::default(),
         }
     }
@@ -49,7 +49,7 @@ impl RouteAffinityError {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
             code: "responses_session_affinity_target_unavailable",
-            message: "the bound responses session endpoint or API key is unavailable",
+            message: "the bound session endpoint or API key is unavailable",
             audit,
         }
     }
@@ -58,7 +58,7 @@ impl RouteAffinityError {
         Self {
             status: StatusCode::CONFLICT,
             code: "responses_session_affinity_conflict",
-            message: "the requested endpoint or API key conflicts with the bound responses session",
+            message: "the requested endpoint or API key conflicts with the bound session",
             audit,
         }
     }
