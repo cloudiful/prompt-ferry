@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
-    llm_review::LlmReviewSettings,
     protocol::RelayIpPolicy,
     redact::{RedactionConfig, RedactionPreviewRequest, RedactionPreviewResponse},
 };
@@ -143,8 +142,6 @@ pub struct RelayIpPolicyResponse {
     pub allowed_cidrs: Vec<String>,
     pub trusted_proxy_cidrs: Vec<String>,
 }
-
-pub type LlmReviewSettingsResponse = LlmReviewSettings;
 
 impl From<RelayIpPolicy> for RelayIpPolicyResponse {
     fn from(value: RelayIpPolicy) -> Self {

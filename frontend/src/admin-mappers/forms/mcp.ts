@@ -47,7 +47,10 @@ export function mcpServerToForm(server: McpServer): McpForm {
     url: server.url ?? '',
     command: server.command ?? '',
     args_text: JSON.stringify(normalizeJsonArray(server.args), null, 2),
-    bearer_tokens: normalizeStringList(server.bearer_tokens),
+    bearer_tokens: server.bearer_tokens.map((value) => ({
+      token: value.token,
+      enabled: value.enabled,
+    })),
     http_headers_text: JSON.stringify(
       normalizeJsonRecord(server.http_headers_json),
       null,
@@ -73,8 +76,11 @@ export function mcpFormToRequest(form: McpForm): McpServerRequest {
     bearer_tokens:
       form.transport === 'http'
         ? form.bearer_tokens
-            .map((value) => value.trim())
-            .filter((value) => value !== '')
+            .map((value) => ({
+              token: value.token.trim(),
+              enabled: value.enabled,
+            }))
+            .filter((value) => value.token !== '')
         : null,
     command: form.transport === 'stdio' ? form.command.trim() : null,
     disabled_resources: form.disabled_resources,

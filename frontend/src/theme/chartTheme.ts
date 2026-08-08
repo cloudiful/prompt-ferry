@@ -1,4 +1,3 @@
-import { computed } from 'vue'
 import { themeMode } from '@/theme/appTheme'
 
 export type AppChartTheme = {
@@ -66,8 +65,4 @@ const lightTheme: AppChartTheme = {
 
 export function getChartTheme(): AppChartTheme {
   return themeMode.value === 'light' ? lightTheme : darkTheme
-}
-
-export function useChartTheme() {
-  return computed(() => getChartTheme())
 }

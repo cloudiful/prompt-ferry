@@ -120,6 +120,32 @@ pub(super) fn responses_sse_error_event(code: &str, message: &str) -> Vec<u8> {
     .into_bytes()
 }
 
+pub(super) fn chat_sse_error_event(code: &str, message: &str) -> Vec<u8> {
+    let payload = serde_json::json!({
+        "error": {
+            "type": code,
+            "code": code,
+            "message": message,
+            "param": null,
+        }
+    });
+    format!(
+        "data: {}\n\n",
+        serde_json::to_string(&payload).expect("Chat SSE error payload should serialize")
+    )
+    .into_bytes()
+}
+
+/// Map an internal error code to the outward-facing code for AI responses.
+/// Transport-level failures (HTTP status >= 500) are surfaced as `server_error`
+/// so OpenAI-compatible clients such as OpenCode classify the error as
+/// retryable; the internal code is kept in diagnostics and usage records.
+/// Applies to streaming SSE error events and non-stream JSON error bodies.
+/// Non-5xx codes are passed through unchanged.
+pub(super) fn retryable_outward_code(status: u16, code: &str) -> &str {
+    if status >= 500 { "server_error" } else { code }
+}
+
 struct DownstreamStreamDiag {
     kind: &'static str,
     request_id: String,

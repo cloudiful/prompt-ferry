@@ -75,26 +75,6 @@ async fn wait_for_assistant_artifact(schema: &TestSchema) -> anyhow::Result<(boo
     )
 }
 
-async fn wait_for_assistant_artifact_count(
-    schema: &TestSchema,
-    expected: i64,
-) -> anyhow::Result<()> {
-    for _ in 0..100 {
-        let count =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM request_record_assistant_artifacts")
-                .fetch_one(&schema.pool)
-                .await?;
-        if count >= expected {
-            return Ok(());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    anyhow::bail!(
-        "expected at least {expected} assistant artifacts in test schema {}",
-        schema.schema_name
-    );
-}
-
 #[tokio::test]
 async fn creates_responses_conversation_via_public_api() -> anyhow::Result<()> {
     let (relay_addr, _, _) = spawn_relay().await;
@@ -1159,6 +1139,7 @@ async fn replays_without_reasoning_for_non_deepseek_routes() -> anyhow::Result<(
         }))
         .send()
         .await?;
+    assert_eq!(turn2.status(), StatusCode::OK);
 
     let requests = upstream_log.bodies.lock().await;
     assert_eq!(requests.len(), 2);

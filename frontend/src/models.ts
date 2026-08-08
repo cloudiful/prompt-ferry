@@ -1,7 +1,6 @@
 import type {
   ApprovalStatusFilter,
   ConversationEndpointOverride,
-  RequestRecordCategory,
   RequestRecordDetail,
   RequestRecordListRow,
   RequestRecordState,
@@ -79,7 +78,7 @@ export type McpForm = {
   url: string
   command: string
   args_text: string
-  bearer_tokens: string[]
+  bearer_tokens: McpBearerTokenForm[]
   http_headers_text: string
   env_text: string
   tool_filter_mode: 'blacklist' | 'whitelist'
@@ -90,6 +89,11 @@ export type McpForm = {
   monthly_max_requests: number | null
   enabled: boolean
   timeout_ms: number
+}
+
+export type McpBearerTokenForm = {
+  token: string
+  enabled: boolean
 }
 
 export type RequestRecordClearForm = {
@@ -126,7 +130,6 @@ export type RequestRecordFilterModel = {
 }
 
 export type ApprovalFilter = ApprovalStatusFilter
-export type RequestRecordCategoryTab = RequestRecordCategory
 
 export type Option<T = string> = {
   label: string
@@ -188,8 +191,6 @@ export type {
 export type { UserListItemView, UsersWorkspaceView } from './models/users'
 
 export type { ApiKeyItemView, ApiKeysWorkspaceView } from './models/api-keys'
-
-export type { SettingsWorkspaceView } from './models/settings'
 
 export type {
   RedactionOptionView,

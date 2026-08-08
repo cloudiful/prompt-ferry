@@ -27,17 +27,6 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
   }
 }
 
-export function createDefaultStreamDeltaBatchingForm(): StreamDeltaBatchingForm {
-  return {
-    enabled: false,
-    flush_window_ms: 50,
-    max_buffer_chars: 160,
-    max_buffer_bytes: 1024,
-    flush_on_line_break: true,
-    flush_on_sentence_end: false,
-  }
-}
-
 export function streamDeltaBatchingToForm(
   settings: StreamDeltaBatchingSettings,
 ): StreamDeltaBatchingForm {

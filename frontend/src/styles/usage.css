@@ -2,10 +2,6 @@
   @apply overflow-auto rounded-md border border-accented bg-muted p-3 text-xs leading-relaxed text-default;
 }
 
-.ms-code-compact {
-  @apply px-2.5 py-2 text-xs;
-}
-
 .ms-code-flat {
   @apply rounded-none border-0 bg-transparent p-0;
 }

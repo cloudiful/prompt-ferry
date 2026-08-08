@@ -11,8 +11,6 @@ export const settingsMessages = {
     contentLoggingModeNormalizedAndRaw: '标准化 + 原始 JSON',
     contentLoggingModeNormalizedOnly: '仅标准化内容',
     contentLoggingModeOff: '关闭',
-    contentLoggingRetentionHint:
-      '标准化内容继续用于会话识别与 AI / MCP 详情展示；原始 JSON 保留 {days} 天。',
     flushOnLineBreak: '换行即 flush',
     flushOnSentenceEnd: '句末即 flush',
     flushWindowMs: '时间窗 ms',
@@ -79,8 +77,6 @@ export const settingsMessages = {
     contentLoggingModeNormalizedAndRaw: 'Normalized + raw JSON',
     contentLoggingModeNormalizedOnly: 'Normalized only',
     contentLoggingModeOff: 'Off',
-    contentLoggingRetentionHint:
-      'Normalized content remains available for session recognition and AI/MCP detail views; raw JSON is retained for {days} days.',
     flushOnLineBreak: 'Flush on line break',
     flushOnSentenceEnd: 'Flush on sentence end',
     flushWindowMs: 'Flush window ms',

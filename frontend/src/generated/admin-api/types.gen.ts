@@ -426,6 +426,11 @@ export type ManagedRelayStatus = {
     relay_url: string;
 };
 
+export type McpBearerToken = {
+    enabled: boolean;
+    token: string;
+};
+
 export type McpCatalogItem = {
     aggregate_names: Array<string>;
     description?: string | null;
@@ -443,7 +448,7 @@ export type McpServer = {
     aggregate_naming_mode: string;
     allowed_tools: unknown;
     args: unknown;
-    bearer_tokens: Array<string>;
+    bearer_tokens: Array<McpBearerToken>;
     command?: string | null;
     created_at: string;
     daily_max_requests?: number | null;
@@ -475,7 +480,7 @@ export type McpServerRequest = {
     aggregate_naming_mode?: string | null;
     allowed_tools?: unknown;
     args?: unknown;
-    bearer_tokens?: Array<string> | null;
+    bearer_tokens?: Array<McpBearerToken> | null;
     command?: string | null;
     daily_max_requests?: number | null;
     disabled_resources?: unknown;

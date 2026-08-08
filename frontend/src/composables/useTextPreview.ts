@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import type { Ref } from 'vue'
 
 export type TruncatedTextPreview = {
   hasMore: boolean
@@ -27,10 +27,6 @@ export function previewText(
     hasMore: cutIndex < normalized.length,
     text: normalized.slice(0, cutIndex).trimEnd(),
   }
-}
-
-export function createPreviewLevel(initial = 1): Ref<number> {
-  return ref(initial)
 }
 
 export function resetPreviewLevels(...targets: Ref<number>[]): void {

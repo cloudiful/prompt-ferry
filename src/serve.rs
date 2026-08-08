@@ -5,7 +5,6 @@ use crate::{
     relay, worker,
 };
 use anyhow::{Context, anyhow};
-use tokio::net::TcpListener;
 use tracing::info;
 
 pub async fn run(app_config: AppConfig, args: ServeArgs) -> anyhow::Result<()> {
@@ -78,14 +77,6 @@ fn validate_loopback_bind(bind: &str) -> anyhow::Result<()> {
             "serve internal worker bind must use a loopback address"
         ));
     }
-    Ok(())
-}
-
-pub async fn ensure_internal_worker_bind_available(bind: &str) -> anyhow::Result<()> {
-    let listener = TcpListener::bind(bind)
-        .await
-        .with_context(|| format!("failed to bind internal worker address `{bind}`"))?;
-    drop(listener);
     Ok(())
 }
 

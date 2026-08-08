@@ -1,6 +1,4 @@
 pub const PRODUCT_SLUG: &str = "prompt-ferry";
-pub const PRODUCT_NAME_EN: &str = "prompt-ferry";
-pub const PRODUCT_NAME_ZH: &str = "提词摆渡人";
 
 pub const CONFIG_APP_NAME: &str = PRODUCT_SLUG;
 pub const CONFIG_ENV_PREFIX: &str = "PROMPT_FERRY_";

@@ -3,7 +3,7 @@ import type {
   RelayIpPolicy,
   RelayIpPolicyResponse,
 } from '../../generated/admin-api'
-import type { Option, RequestRecordClearForm } from '../../models'
+import type { RequestRecordClearForm } from '../../models'
 
 import { splitLines } from '../utils'
 
@@ -67,13 +67,4 @@ export function ensureLlmReviewDefaults(
       extra_headers: settings.webhook?.extra_headers ?? {},
     },
   }
-}
-
-export function createUserOptions(
-  users: Array<{ user_id: number; login_name: string; display_name: string }>,
-): Option<number>[] {
-  return users.map((user) => ({
-    label: `${user.display_name} / ${user.login_name}`,
-    value: user.user_id,
-  }))
 }

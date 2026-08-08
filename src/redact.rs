@@ -271,16 +271,6 @@ pub fn has_any_enabled() -> bool {
         .has_any_enabled()
 }
 
-pub fn effective_config_for_user(user_id: Option<i64>) -> RedactionConfig {
-    let store = REDACTION_RUNTIME
-        .read()
-        .expect("redaction runtime lock poisoned");
-    match user_id.and_then(|id| store.user_configs.get(&id)) {
-        Some(user_config) => store.global_config.merge_normalized(user_config),
-        None => store.global_config.clone(),
-    }
-}
-
 pub fn redactor_snapshot_for_user(user_id: Option<i64>) -> Option<Redactor> {
     let store = REDACTION_RUNTIME
         .read()
@@ -399,10 +389,6 @@ impl From<RedactionResult> for RedactionPreviewResponse {
             stats: value.stats,
         }
     }
-}
-
-pub fn redact_error(err: &(dyn std::error::Error + 'static)) -> String {
-    redact_text(&err.to_string())
 }
 
 pub fn truncate(text: &str, max_chars: usize) -> String {

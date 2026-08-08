@@ -122,9 +122,6 @@ pub struct RequestRecordFullResponse {
     pub rendered_text: String,
 }
 
-pub type UsageContentLoggingMode = super::RequestContentLoggingMode;
-pub type UsageContentLoggingResponse = super::RequestContentLoggingResponse;
-pub type UsageContentLoggingRequest = super::RequestContentLoggingRequest;
 pub type UsageSummaryQuery = RequestRecordSummaryQuery;
 pub type UsageEventsQuery = RequestRecordsQuery;
 pub type UsageClearRequest = RequestRecordsClearRequest;

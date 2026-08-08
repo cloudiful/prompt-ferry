@@ -145,15 +145,6 @@ async fn relay_shutdown_signal() {
     }
 }
 
-pub fn public_app(config: RelayConfig) -> Router {
-    apps(config).0
-}
-
-pub fn public_app_with_handle(config: RelayConfig) -> (Router, RelayHandle) {
-    let (public_app, _, handle) = apps(config);
-    (public_app, handle)
-}
-
 pub fn apps(config: RelayConfig) -> (Router, Router, RelayHandle) {
     let inner = relay_state();
     let state = AppState {

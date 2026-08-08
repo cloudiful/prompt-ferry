@@ -29,7 +29,7 @@ pub struct McpServerRequest {
     pub command: Option<String>,
     pub args: Option<serde_json::Value>,
     pub env_json: Option<serde_json::Value>,
-    pub bearer_tokens: Option<Vec<String>>,
+    pub bearer_tokens: Option<Vec<db::McpBearerToken>>,
     pub http_headers_json: Option<serde_json::Value>,
     pub tool_filter_mode: Option<String>,
     pub allowed_tools: Option<serde_json::Value>,
@@ -90,9 +90,17 @@ impl McpServerRequest {
                     serde_json::Value::Array(
                         tokens
                             .into_iter()
-                            .map(|token| token.trim().to_string())
-                            .filter(|token| !token.is_empty())
-                            .map(serde_json::Value::String)
+                            .map(|mut value| {
+                                value.token = value.token.trim().to_string();
+                                value
+                            })
+                            .filter(|value| !value.token.is_empty())
+                            .map(|value| {
+                                serde_json::json!({
+                                    "token": value.token,
+                                    "enabled": value.enabled,
+                                })
+                            })
                             .collect(),
                     )
                 })
@@ -167,6 +175,22 @@ impl McpServerRequest {
                 "aggregate_naming_mode must be qualified_only or passthrough_preferred",
             ));
         }
+        if let Some(tokens) = &self.bearer_tokens {
+            if tokens.iter().any(|value| value.token.trim().is_empty()) {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_bearer_tokens",
+                    "bearer_tokens must not contain empty values",
+                ));
+            }
+            if !tokens.is_empty() && !tokens.iter().any(|value| value.enabled) {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_bearer_tokens",
+                    "at least one bearer token must be enabled",
+                ));
+            }
+        }
         let owner_user_id = if user.is_admin {
             self.owner_user_id
         } else {
@@ -206,15 +230,6 @@ impl McpServerRequest {
                 StatusCode::CONFLICT,
                 "duplicate_mcp_server",
                 "mcp server name already exists",
-            ));
-        }
-        if let Some(tokens) = &self.bearer_tokens
-            && tokens.iter().any(|token| token.trim().is_empty())
-        {
-            return Err(error(
-                StatusCode::BAD_REQUEST,
-                "invalid_bearer_tokens",
-                "bearer_tokens must not contain empty values",
             ));
         }
         Ok(())

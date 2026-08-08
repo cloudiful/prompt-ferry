@@ -1,9 +1,4 @@
-import type {
-  BillingChargeResponse,
-  BillingPriceRuleResponse,
-  BillingSummaryResponse,
-  EndpointPageResponse,
-} from '../generated/admin-api'
+import type { BillingPriceRuleResponse } from '../generated/admin-api'
 
 export type BillingChargeFilters = {
   user_id?: number
@@ -25,14 +20,6 @@ export type BillingPriceRuleForm = {
   cache_write_rate: string
   output_rate: string
   effective_from: string
-}
-
-export type BillingWorkspace = {
-  summary: BillingSummaryResponse | null
-  charges: BillingChargeResponse[]
-  total: number
-  price_rules: BillingPriceRuleResponse[]
-  endpoints: EndpointPageResponse['endpoints']
 }
 
 export const BILLING_PAGE_SIZE_OPTIONS = [10, 25, 50, 100]

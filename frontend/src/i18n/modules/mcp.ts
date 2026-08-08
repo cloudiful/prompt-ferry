@@ -21,6 +21,7 @@ export const mcpMessages = {
     endpoint: '端点',
     editMcpServer: '编辑 MCP',
     bearerToken: 'Bearer 令牌',
+    bearerTokenHint: '启用的令牌会按会话稳定分流；无会话标识时按最少使用分配。',
     bearerTokenPlaceholder: 'token',
     noSelectedServerHint: '当前还没有选中的服务。',
     stdioEnv: '进程环境变量',
@@ -77,6 +78,8 @@ export const mcpMessages = {
     endpoint: 'Endpoint',
     editMcpServer: 'Edit MCP',
     bearerToken: 'Bearer tokens',
+    bearerTokenHint:
+      'Enabled tokens are sticky per session; requests without a session identity use least-used balancing.',
     bearerTokenPlaceholder: 'token',
     noSelectedServerHint: 'No selected server yet.',
     stdioEnv: 'Process env',

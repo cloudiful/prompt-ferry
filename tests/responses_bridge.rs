@@ -203,7 +203,7 @@ async fn reports_native_responses_stream_without_terminal_event() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.matches("event: error").count(), 1, "body={body}");
     assert!(
-        body.contains("\"code\":\"responses_stream_incomplete\""),
+        body.contains("\"code\":\"server_error\""),
         "body={body}"
     );
 }
@@ -314,10 +314,7 @@ async fn wraps_native_responses_midstream_failure_as_sse_error_event() {
     assert!(body.contains("event: error\n"), "body={body}");
     assert!(body.contains("\"type\":\"error\""), "body={body}");
     assert!(body.contains("\"sequence_number\":0"), "body={body}");
-    assert!(
-        body.contains("\"code\":\"upstream_stream_error\""),
-        "body={body}"
-    );
+    assert!(body.contains("\"code\":\"server_error\""), "body={body}");
     assert!(
         body.contains("failed reading upstream response"),
         "body={body}"

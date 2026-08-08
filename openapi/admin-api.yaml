@@ -3475,6 +3475,16 @@ components:
           format: uuid
         relay_url:
           type: string
+    McpBearerToken:
+      type: object
+      required:
+      - token
+      - enabled
+      properties:
+        enabled:
+          type: boolean
+        token:
+          type: string
     McpCatalogItem:
       type: object
       required:
@@ -3543,7 +3553,7 @@ components:
         bearer_tokens:
           type: array
           items:
-            type: string
+            $ref: '#/components/schemas/McpBearerToken'
         command:
           type:
           - string
@@ -3631,7 +3641,7 @@ components:
           - array
           - 'null'
           items:
-            type: string
+            $ref: '#/components/schemas/McpBearerToken'
         command:
           type:
           - string

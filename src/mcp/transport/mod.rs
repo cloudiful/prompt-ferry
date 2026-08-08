@@ -26,6 +26,7 @@ pub(super) async fn call(
     let timeout = Duration::from_millis(server.timeout_ms.max(100) as u64);
     tokio::time::timeout(timeout, async {
         let tokens = server.bearer_tokens();
+        let enabled_token_count = tokens.iter().filter(|token| token.enabled).count();
         let mut attempted = Vec::new();
         let mut attempts = 0usize;
 
@@ -43,7 +44,10 @@ pub(super) async fn call(
                     if let Some(index) = selected.index {
                         attempted.push(index);
                     }
-                    if retry_status.is_some() && attempts == 1 && attempted.len() < tokens.len() {
+                    if retry_status.is_some()
+                        && attempts == 1
+                        && attempted.len() < enabled_token_count
+                    {
                         warn!(
                             server_name = %server.name,
                             attempts,

@@ -139,7 +139,7 @@ mod tests {
     async fn mcp_server_methods_cover_create_and_update_validation_paths() {
         let state = test_state();
         let user = admin_user();
-        let create = McpServerRequest {
+        let mut create = McpServerRequest {
             scope: Some("system".to_string()),
             owner_user_id: None,
             name: "catalog".to_string(),
@@ -149,7 +149,10 @@ mod tests {
             command: None,
             args: None,
             env_json: None,
-            bearer_tokens: Some(vec!["   ".to_string()]),
+            bearer_tokens: Some(vec![db::McpBearerToken {
+                token: "   ".to_string(),
+                enabled: true,
+            }]),
             http_headers_json: None,
             tool_filter_mode: None,
             allowed_tools: None,
@@ -160,6 +163,13 @@ mod tests {
             enabled: None,
             timeout_ms: None,
         };
+        assert!(create.validate_for_create(&state, &user).await.is_err());
+        create.scope = Some("admin".to_string());
+        assert!(create.validate_for_create(&state, &user).await.is_err());
+        create.bearer_tokens = Some(vec![db::McpBearerToken {
+            token: "token".to_string(),
+            enabled: false,
+        }]);
         assert!(create.validate_for_create(&state, &user).await.is_err());
 
         let update = McpServerRequest {
@@ -312,9 +322,18 @@ mod tests {
             args: None,
             env_json: None,
             bearer_tokens: Some(vec![
-                "  one ".to_string(),
-                "".to_string(),
-                "two".to_string(),
+                db::McpBearerToken {
+                    token: "  one ".to_string(),
+                    enabled: true,
+                },
+                db::McpBearerToken {
+                    token: "".to_string(),
+                    enabled: true,
+                },
+                db::McpBearerToken {
+                    token: "two".to_string(),
+                    enabled: false,
+                },
             ]),
             http_headers_json: None,
             tool_filter_mode: None,
@@ -331,7 +350,10 @@ mod tests {
         assert_eq!(cleared.bearer_tokens_json, serde_json::json!([]));
         assert_eq!(
             replaced.bearer_tokens_json,
-            serde_json::json!(["one", "two"])
+            serde_json::json!([
+                { "token": "one", "enabled": true },
+                { "token": "two", "enabled": false }
+            ])
         );
     }
 }

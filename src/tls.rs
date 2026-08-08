@@ -140,22 +140,6 @@ pub fn worker_server_config(config: &RelayConfig) -> anyhow::Result<Arc<ServerCo
     )?))
 }
 
-pub fn client_config(config: &WorkerConfig, relay_url: &str) -> anyhow::Result<Arc<ClientConfig>> {
-    let roots = worker_root_store(config)?;
-    let builder = ClientConfig::builder().with_root_certificates(roots);
-    let client = match worker_tls_mode(config, relay_url)? {
-        TlsMode::Off => return Err(anyhow!("tls client config requested when tls_mode=off")),
-        TlsMode::Server => builder.with_no_client_auth(),
-        TlsMode::Mtls => builder
-            .with_client_auth_cert(
-                load_certs(&config.client_cert)?,
-                load_key(&config.client_key)?,
-            )
-            .context("failed to build worker mTLS client config")?,
-    };
-    Ok(Arc::new(client))
-}
-
 pub fn validate_worker_relay_material(
     relay_url: &str,
     tls_mode: TlsMode,
@@ -236,13 +220,6 @@ pub fn worker_tls_mode(config: &WorkerConfig, relay_url: &str) -> anyhow::Result
         return Ok(TlsMode::Off);
     }
     Err(anyhow!("worker relay URL must use ws:// or wss://"))
-}
-
-fn worker_root_store(config: &WorkerConfig) -> anyhow::Result<RootCertStore> {
-    if config.relay_ca.trim().is_empty() {
-        return load_native_root_store();
-    }
-    load_root_store(&config.relay_ca)
 }
 
 fn worker_root_store_pem(relay_ca_pem: Option<&str>) -> anyhow::Result<RootCertStore> {

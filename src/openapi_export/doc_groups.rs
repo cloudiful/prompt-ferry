@@ -185,6 +185,7 @@ pub(super) struct IdentityApiDoc;
             EndpointSettingRequest,
             EndpointSettingResponse,
             EndpointTestResponse,
+            db::McpBearerToken,
             McpCatalogItem,
             McpCatalogResponse,
             McpServerPageResponse,

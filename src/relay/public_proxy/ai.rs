@@ -38,7 +38,10 @@ use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use super::super::state::PendingRealtimeSession;
-use super::{admin::is_hop_by_hop_request_header, responses_sse_error_event, sse_error_event};
+use super::{
+    admin::is_hop_by_hop_request_header, chat_sse_error_event, responses_sse_error_event,
+    retryable_outward_code, sse_error_event,
+};
 
 fn forwarded_ai_request_headers(headers: &HeaderMap) -> Vec<(String, String)> {
     headers
@@ -414,6 +417,7 @@ async fn proxy_request(
     });
     let is_event_stream = content_type.contains("text/event-stream");
     let is_responses_stream = path == "/v1/responses" && is_event_stream;
+    let is_chat_stream = path == "/v1/chat/completions" && is_event_stream;
 
     let stream_state = state.clone();
     let stream_request_id = request_id.clone();
@@ -438,16 +442,19 @@ async fn proxy_request(
                     yield Ok::<Bytes, std::io::Error>(Bytes::from(data));
                 }
                 Err(err) => {
+                    let outward_code = retryable_outward_code(err.status, &err.code);
                     let body = if is_event_stream {
                         if is_responses_stream {
-                            responses_sse_error_event(&err.code, &err.message)
+                            responses_sse_error_event(outward_code, &err.message)
+                        } else if is_chat_stream {
+                            chat_sse_error_event(outward_code, &err.message)
                         } else {
-                            sse_error_event(&err.code, &err.message)
+                            sse_error_event(outward_code, &err.message)
                         }
                     } else {
                         serde_json::json!({
                             "error": {
-                                "code": err.code,
+                                "code": outward_code,
                                 "message": err.message,
                             }
                         })
@@ -682,7 +689,7 @@ mod tests {
         let text = String::from_utf8_lossy(&body);
         assert_eq!(
             text,
-            "data: {\"type\":\"response.created\"}\n\nevent: error\ndata: {\"code\":\"upstream_stream_error\",\"message\":\"stream broke\",\"param\":null,\"sequence_number\":0,\"type\":\"error\"}\n\n"
+            "data: {\"type\":\"response.created\"}\n\nevent: error\ndata: {\"code\":\"server_error\",\"message\":\"stream broke\",\"param\":null,\"sequence_number\":0,\"type\":\"error\"}\n\n"
         );
         let error_json = text
             .split("event: error\ndata: ")
@@ -696,6 +703,158 @@ mod tests {
             error_event,
             async_openai::types::responses::ResponseStreamEvent::ResponseError(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn chat_stream_error_body_uses_ai_sdk_error_envelope() {
+        let mut state = test_state();
+        state.config.client_token = "test-token".to_string();
+
+        let (worker_tx, mut worker_rx) = mpsc::channel(8);
+        state.inner.workers.lock().await.insert(1, worker_tx);
+
+        let state_for_worker = state.clone();
+        tokio::spawn(async move {
+            let mut request_id = None;
+            while let Some(message) = worker_rx.recv().await {
+                match message {
+                    BridgeMessage::RequestStart(start) => request_id = Some(start.request_id),
+                    BridgeMessage::RequestEnd(end) => {
+                        let request_id = request_id.unwrap_or(end.request_id);
+                        handle_response_start(
+                            &state_for_worker,
+                            ResponseStart {
+                                request_id: request_id.clone(),
+                                status: StatusCode::OK.as_u16(),
+                                content_type: Some("text/event-stream".to_string()),
+                                headers: Vec::new(),
+                            },
+                        )
+                        .await;
+                        handle_response_chunk(
+                            &state_for_worker,
+                            ResponseChunk {
+                                request_id: request_id.clone(),
+                                data:
+                                    b"data: {\"choices\":[{\"delta\":{\"content\":\"part\"}}]}\n\n"
+                                        .to_vec(),
+                            },
+                        )
+                        .await;
+                        handle_response_error(
+                            &state_for_worker,
+                            ResponseError {
+                                request_id,
+                                status: StatusCode::BAD_GATEWAY.as_u16(),
+                                code: "upstream_stream_error".to_string(),
+                                message: "stream broke".to_string(),
+                            },
+                        )
+                        .await;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer test-token".parse().unwrap());
+
+        let response = proxy_request(
+            state,
+            "127.0.0.1".parse().unwrap(),
+            headers,
+            HttpRequestCompressionContext::default(),
+            Method::POST,
+            "/v1/chat/completions",
+            Body::empty(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert_eq!(
+            text,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"part\"}}]}\n\ndata: {\"error\":{\"code\":\"server_error\",\"message\":\"stream broke\",\"param\":null,\"type\":\"server_error\"}}\n\n"
+        );
+        let error_json = text
+            .split("data: ")
+            .nth(2)
+            .and_then(|value| value.strip_suffix("\n\n"))
+            .expect("Chat error event");
+        let error_event: serde_json::Value =
+            serde_json::from_str(error_json).expect("Chat error event JSON");
+        assert_eq!(error_event["error"]["type"], "server_error");
+        assert_eq!(error_event["error"]["code"], "server_error");
+        assert_eq!(error_event["error"]["message"], "stream broke");
+    }
+
+    #[tokio::test]
+    async fn non_server_error_code_is_preserved() {
+        let mut state = test_state();
+        state.config.client_token = "test-token".to_string();
+
+        let (worker_tx, mut worker_rx) = mpsc::channel(8);
+        state.inner.workers.lock().await.insert(1, worker_tx);
+
+        let state_for_worker = state.clone();
+        tokio::spawn(async move {
+            let mut request_id = None;
+            while let Some(message) = worker_rx.recv().await {
+                match message {
+                    BridgeMessage::RequestStart(start) => request_id = Some(start.request_id),
+                    BridgeMessage::RequestEnd(end) => {
+                        let request_id = request_id.unwrap_or(end.request_id);
+                        handle_response_start(
+                            &state_for_worker,
+                            ResponseStart {
+                                request_id: request_id.clone(),
+                                status: StatusCode::OK.as_u16(),
+                                content_type: Some("text/event-stream".to_string()),
+                                headers: Vec::new(),
+                            },
+                        )
+                        .await;
+                        handle_response_error(
+                            &state_for_worker,
+                            ResponseError {
+                                request_id,
+                                status: StatusCode::BAD_REQUEST.as_u16(),
+                                code: "invalid_request".to_string(),
+                                message: "stream broke".to_string(),
+                            },
+                        )
+                        .await;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer test-token".parse().unwrap());
+
+        let response = proxy_request(
+            state,
+            "127.0.0.1".parse().unwrap(),
+            headers,
+            HttpRequestCompressionContext::default(),
+            Method::POST,
+            "/v1/chat/completions",
+            Body::empty(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert_eq!(
+            text,
+            "data: {\"error\":{\"code\":\"invalid_request\",\"message\":\"stream broke\",\"param\":null,\"type\":\"invalid_request\"}}\n\n"
+        );
     }
 
     #[tokio::test]
