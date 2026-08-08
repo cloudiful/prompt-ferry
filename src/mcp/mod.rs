@@ -17,3 +17,7 @@ pub use entry::{
 };
 pub use service::{McpCatalogService, catalog_for_server};
 pub use session_store::McpSessionStore;
+
+/// Maximum size of an MCP request body (relay streaming, worker chunk
+/// assembly, and the rmcp server config all enforce this same bound).
+pub const MAX_MCP_REQUEST_BODY_BYTES: usize = 4 * 1024 * 1024;

@@ -250,6 +250,7 @@ mod tests {
             mcp_catalog_cache: McpCatalogCache::new(),
             mcp_catalog_service: McpCatalogService::new(pool.clone(), McpCatalogCache::new()),
             mcp_session_store: None,
+            mcp_allowed_origins: Vec::new(),
             endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
                 Duration::from_secs(60),
             ),

@@ -83,6 +83,7 @@ mod tests {
             mcp_catalog_cache: McpCatalogCache::new(),
             mcp_catalog_service: McpCatalogService::new(pool.clone(), McpCatalogCache::new()),
             mcp_session_store: None,
+            mcp_allowed_origins: Vec::new(),
             endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
                 Duration::from_secs(60),
             ),
@@ -355,5 +356,47 @@ mod tests {
                 { "token": "two", "enabled": false }
             ])
         );
+    }
+
+    #[tokio::test]
+    async fn mcp_server_rejects_reserved_http_headers() {
+        let state = test_state();
+        let user = admin_user();
+        for (name, value) in [
+            ("Authorization", "Bearer secret"),
+            ("Host", "evil.example.com"),
+            ("Content-Length", "0"),
+            ("Transfer-Encoding", "chunked"),
+            ("Connection", "keep-alive"),
+            ("Mcp-Session-Id", "stolen"),
+            ("Last-Event-Id", "0"),
+        ] {
+            let request = McpServerRequest {
+                scope: Some("admin".to_string()),
+                owner_user_id: None,
+                name: "reserved-header-server".to_string(),
+                aggregate_naming_mode: None,
+                transport: "http".to_string(),
+                url: Some("http://127.0.0.1:3000/mcp".to_string()),
+                command: None,
+                args: None,
+                env_json: None,
+                bearer_tokens: None,
+                http_headers_json: Some(serde_json::json!({ name.to_string(): value.to_string() })),
+                tool_filter_mode: None,
+                allowed_tools: None,
+                disabled_tools: None,
+                disabled_resources: None,
+                daily_max_requests: None,
+                monthly_max_requests: None,
+                enabled: Some(true),
+                timeout_ms: None,
+            };
+            let err = request
+                .validate_for_create(&state, &user)
+                .await
+                .unwrap_err();
+            assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        }
     }
 }

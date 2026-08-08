@@ -1,6 +1,10 @@
 use rmcp::{
     ErrorData,
-    model::{Implementation, InitializeResult, RequestId, ServerCapabilities, ServerInfo},
+    model::{
+        CallToolResponse, GetPromptResponse, Implementation, InitializeResult,
+        ReadResourceResponse, RequestId, RequestMetaObject, ServerCapabilities, ServerInfo,
+        ServerResult,
+    },
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -14,6 +18,7 @@ pub(super) fn server_info() -> ServerInfo {
         .enable_tools()
         .enable_resources()
         .enable_prompts()
+        .enable_completions()
         .build();
     InitializeResult::new(capabilities)
         .with_protocol_version(DEFAULT_PROTOCOL_VERSION)
@@ -51,7 +56,6 @@ pub(super) fn parse_result<T: DeserializeOwned>(response: Value) -> Result<T, Er
         .ok_or_else(|| ErrorData::internal_error("missing MCP result payload", None))?;
     serde_json::from_value(value).map_err(internal_error)
 }
-
 pub(super) fn parse_result_field<T: DeserializeOwned>(
     response: &Value,
     field: &str,
@@ -66,6 +70,75 @@ pub(super) fn parse_result_field<T: DeserializeOwned>(
 pub(super) fn internal_error(err: impl std::fmt::Display) -> ErrorData {
     ErrorData::internal_error(
         format!("mcp protocol {DEFAULT_PROTOCOL_VERSION_STR}: {err}"),
+        None,
+    )
+}
+
+/// Attach the downstream request's `_meta` to the outgoing typed params.
+/// Transport-level keys (`protocolVersion`, `clientInfo`, ...) are stripped by
+/// the outbound connection, which regenerates them from its own identity.
+pub(super) fn with_meta<P: rmcp::model::RequestParamsMeta>(
+    params: P,
+    meta: RequestMetaObject,
+) -> P {
+    let mut params = params;
+    if !meta.is_empty() {
+        params.set_meta(meta);
+    }
+    params
+}
+
+fn parse_server_result(response: Value) -> Result<ServerResult, ErrorData> {
+    let value = response
+        .get("result")
+        .cloned()
+        .ok_or_else(|| ErrorData::internal_error("missing MCP result payload", None))?;
+    serde_json::from_value(value).map_err(internal_error)
+}
+
+pub(super) fn parse_call_tool_response(response: Value) -> Result<CallToolResponse, ErrorData> {
+    match parse_server_result(response)? {
+        ServerResult::CallToolResult(result) => Ok(result.into()),
+        ServerResult::InputRequiredResult(result) => Ok(result.into()),
+        ServerResult::CreateTaskResult(_) => Err(unsupported_tasks_error("tools/call")),
+        _ => Err(unexpected_result_error("tools/call")),
+    }
+}
+
+pub(super) fn parse_get_prompt_response(response: Value) -> Result<GetPromptResponse, ErrorData> {
+    match parse_server_result(response)? {
+        ServerResult::GetPromptResult(result) => Ok(result.into()),
+        ServerResult::InputRequiredResult(result) => Ok(result.into()),
+        ServerResult::CreateTaskResult(_) => Err(unsupported_tasks_error("prompts/get")),
+        _ => Err(unexpected_result_error("prompts/get")),
+    }
+}
+
+pub(super) fn parse_read_resource_response(
+    response: Value,
+) -> Result<ReadResourceResponse, ErrorData> {
+    match parse_server_result(response)? {
+        ServerResult::ReadResourceResult(result) => Ok(result.into()),
+        ServerResult::InputRequiredResult(result) => Ok(result.into()),
+        ServerResult::CreateTaskResult(_) => Err(unsupported_tasks_error("resources/read")),
+        _ => Err(unexpected_result_error("resources/read")),
+    }
+}
+
+/// The proxy does not implement the SEP-2663 tasks extension; a task result
+/// must never degrade into an empty result or a generic deserialize error.
+fn unsupported_tasks_error(method: &str) -> ErrorData {
+    ErrorData::internal_error(
+        format!(
+            "upstream returned a task for {method}, but the prompt-ferry MCP proxy does not support the tasks extension"
+        ),
+        None,
+    )
+}
+
+fn unexpected_result_error(method: &str) -> ErrorData {
+    ErrorData::internal_error(
+        format!("upstream returned an unexpected result type for {method}"),
         None,
     )
 }

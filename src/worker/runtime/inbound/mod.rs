@@ -6,12 +6,17 @@ use super::{
     ai::realtime::start_realtime_session, collect_request_chunks, forward_request_chunk,
     safe_error, send_worker_shutdown_mcp_response, send_worker_shutdown_response,
 };
-use crate::protocol::{ApprovalPending, BridgeMessage, ResponseError};
+use crate::protocol::{
+    ApprovalPending, BridgeMessage, McpResponseChunk, McpResponseEnd, McpResponseStart,
+    ResponseError,
+};
 use reqwest::StatusCode;
 use tokio::sync::{mpsc, oneshot};
 
 use super::context::{RuntimeServices, is_bridge_send_error};
-use super::request_assembly::{BufferedBridgeRequest, PendingIncomingRequest, RequestCancellation};
+use super::request_assembly::{
+    BufferedBridgeRequest, ChunkCollection, PendingIncomingRequest, RequestCancellation,
+};
 
 pub(super) async fn handle_relay_bridge_message(
     message: BridgeMessage,
@@ -50,8 +55,19 @@ pub(super) async fn handle_relay_bridge_message(
                     &request.request_id,
                     chunk_rx,
                     end_rx,
+                    crate::bridge_wire::PUBLIC_API_BODY_LIMIT_BYTES,
                 )
                 .await;
+                let ChunkCollection::Complete(body) = body else {
+                    send_too_large_response(&services.out_tx, &request.request_id).await;
+                    services
+                        .runtime_state
+                        .request_cancellations
+                        .lock()
+                        .await
+                        .remove(&request.request_id);
+                    return;
+                };
                 if cancellation.is_cancelled() {
                     services
                         .runtime_state
@@ -163,8 +179,19 @@ pub(super) async fn handle_relay_bridge_message(
                     &request.request_id,
                     chunk_rx,
                     end_rx,
+                    crate::mcp::MAX_MCP_REQUEST_BODY_BYTES,
                 )
                 .await;
+                let ChunkCollection::Complete(body) = body else {
+                    send_mcp_too_large_response(&services.out_tx, &request.request_id).await;
+                    services
+                        .runtime_state
+                        .mcp_request_cancellations
+                        .lock()
+                        .await
+                        .remove(&request.request_id);
+                    return;
+                };
                 if cancellation.is_cancelled() {
                     services
                         .runtime_state
@@ -301,6 +328,46 @@ async fn finish_request_transfer(
     {
         let _ = end_tx.send(stats);
     }
+}
+
+async fn send_too_large_response(out_tx: &super::context::BridgeSender, request_id: &str) {
+    let _ = out_tx
+        .send(BridgeMessage::ResponseError(ResponseError {
+            request_id: request_id.to_string(),
+            status: StatusCode::PAYLOAD_TOO_LARGE.as_u16(),
+            code: "request_too_large".to_string(),
+            message: "request body exceeds the maximum allowed size".to_string(),
+        }))
+        .await;
+}
+
+async fn send_mcp_too_large_response(out_tx: &super::context::BridgeSender, request_id: &str) {
+    let body = serde_json::json!({
+        "error": {
+            "code": "request_too_large",
+            "message": "request body exceeds the maximum allowed size",
+        }
+    })
+    .to_string();
+    let _ = out_tx
+        .send(BridgeMessage::McpResponseStart(McpResponseStart {
+            request_id: request_id.to_string(),
+            status: StatusCode::PAYLOAD_TOO_LARGE.as_u16(),
+            content_type: Some("application/json".to_string()),
+            headers: Vec::new(),
+        }))
+        .await;
+    let _ = out_tx
+        .send(BridgeMessage::McpResponseChunk(McpResponseChunk {
+            request_id: request_id.to_string(),
+            data: body.into_bytes(),
+        }))
+        .await;
+    let _ = out_tx
+        .send(BridgeMessage::McpResponseEnd(McpResponseEnd {
+            request_id: request_id.to_string(),
+        }))
+        .await;
 }
 
 fn warn_unexpected() {

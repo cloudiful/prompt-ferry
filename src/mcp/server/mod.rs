@@ -3,10 +3,11 @@ use std::{borrow::Cow, sync::Mutex};
 use rmcp::{
     ErrorData, ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResponse, GetPromptRequestParams, GetPromptResponse,
-        InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourcesResult,
-        ListToolsResult, PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams,
-        ReadResourceResponse, ServerInfo,
+        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult,
+        GetPromptRequestParams, GetPromptResponse, InitializeRequestParams, InitializeResult,
+        ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
+        PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
+        ServerInfo,
     },
     service::{NotificationContext, RequestContext, RoleServer},
 };
@@ -20,24 +21,22 @@ mod value;
 
 use value::{internal_error, server_info};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub(super) struct RequestScope {
     pub(super) user_id: Option<i64>,
     pub(super) server_name: Option<String>,
     pub(super) conversation_id: Option<String>,
+    pub(super) pool: sqlx::PgPool,
+    pub(super) cache: McpCatalogCache,
 }
 
 pub(super) struct ProxyService {
-    pool: sqlx::PgPool,
-    cache: McpCatalogCache,
     session_scope: Mutex<Option<RequestScope>>,
 }
 
 impl ProxyService {
-    pub(super) fn new(pool: sqlx::PgPool, cache: McpCatalogCache) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            pool,
-            cache,
             session_scope: Mutex::new(None),
         }
     }
@@ -81,8 +80,8 @@ impl ProxyService {
     ) -> Result<serde_json::Value, ErrorData> {
         if scope.server_name.is_none() {
             return aggregate::aggregate(
-                &self.pool,
-                &self.cache,
+                &scope.pool,
+                &scope.cache,
                 scope.user_id,
                 scope.conversation_id.as_deref(),
                 request,
@@ -101,15 +100,17 @@ impl ProxyService {
         let Some(server_name) = scope.server_name.as_deref() else {
             return Err(ErrorData::internal_error("missing MCP server name", None));
         };
-        self.load_server_by_name(scope.user_id, server_name).await
+        self.load_server_by_name(scope.user_id, server_name, &scope.pool)
+            .await
     }
 
     async fn load_server_by_name(
         &self,
         user_id: Option<i64>,
         server_name: &str,
+        pool: &sqlx::PgPool,
     ) -> Result<McpServer, ErrorData> {
-        load_visible_server(&self.pool, user_id, server_name)
+        load_visible_server(pool, user_id, server_name)
             .await
             .map_err(internal_error)?
             .ok_or_else(|| ErrorData::invalid_params("mcp server not found or disabled", None))
@@ -162,10 +163,8 @@ impl ServerHandler for ProxyService {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let scope = self.bind_scope(&context.extensions)?;
-        Ok(self
-            .call_tool_for_scope(&scope, &context.id, request)
-            .await?
-            .into())
+        self.call_tool_for_scope(&scope, &context.id, request, context.meta)
+            .await
     }
 
     async fn list_resources(
@@ -178,16 +177,34 @@ impl ServerHandler for ProxyService {
             .await
     }
 
+    async fn list_resource_templates(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        let scope = self.bind_scope(&context.extensions)?;
+        self.list_resource_templates_for_scope(&scope, &context.id, request)
+            .await
+    }
+
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
         let scope = self.bind_scope(&context.extensions)?;
-        Ok(self
-            .read_resource_for_scope(&scope, &context.id, request)
-            .await?
-            .into())
+        self.read_resource_for_scope(&scope, &context.id, request, context.meta)
+            .await
+    }
+
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, ErrorData> {
+        let scope = self.bind_scope(&context.extensions)?;
+        self.complete_for_scope(&scope, &context.id, request, context.meta)
+            .await
     }
 
     async fn list_prompts(
@@ -206,10 +223,8 @@ impl ServerHandler for ProxyService {
         context: RequestContext<RoleServer>,
     ) -> Result<GetPromptResponse, ErrorData> {
         let scope = self.bind_scope(&context.extensions)?;
-        Ok(self
-            .get_prompt_for_scope(&scope, &context.id, request)
-            .await?
-            .into())
+        self.get_prompt_for_scope(&scope, &context.id, request, context.meta)
+            .await
     }
 
     fn get_info(&self) -> ServerInfo {

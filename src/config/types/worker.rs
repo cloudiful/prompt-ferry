@@ -39,6 +39,10 @@ pub struct WorkerConfig {
     pub raw_object_store_secret_key: String,
     pub raw_object_store_prefix: String,
     pub raw_object_store_allow_http: bool,
+    /// Browser origins allowed to call the MCP proxy. When non-empty, requests
+    /// carrying an `Origin` header must match one of these entries (RFC 6454);
+    /// missing `Origin` always passes. Empty keeps Origin validation disabled.
+    pub mcp_allowed_origins: Vec<String>,
 }
 
 impl Default for WorkerConfig {
@@ -76,6 +80,7 @@ impl Default for WorkerConfig {
             raw_object_store_secret_key: String::new(),
             raw_object_store_prefix: "prompt-ferry/raw".to_string(),
             raw_object_store_allow_http: false,
+            mcp_allowed_origins: Vec::new(),
         }
     }
 }
@@ -153,6 +158,9 @@ impl WorkerConfig {
         }
         if let Some(ttl) = args.endpoint_model_cache_ttl_seconds {
             self.endpoint_model_cache_ttl_seconds = ttl.max(1);
+        }
+        if !args.mcp_allowed_origins.is_empty() {
+            self.mcp_allowed_origins = args.mcp_allowed_origins;
         }
         self
     }

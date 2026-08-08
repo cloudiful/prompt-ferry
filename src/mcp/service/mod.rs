@@ -10,7 +10,7 @@ use crate::{
 
 use super::{
     cache::{McpCatalogCache, ServerCatalogSnapshot},
-    protocol::encode_resource_uri,
+    protocol::{encode_resource_template_uri, encode_resource_uri},
 };
 
 mod catalog;
@@ -28,6 +28,7 @@ enum AggregateKind {
     Tools,
     Prompts,
     Resources,
+    Templates,
 }
 
 impl AggregateKind {
@@ -35,6 +36,7 @@ impl AggregateKind {
         match self {
             Self::Tools | Self::Prompts => "name",
             Self::Resources => "uri",
+            Self::Templates => "uriTemplate",
         }
     }
 
@@ -42,6 +44,7 @@ impl AggregateKind {
         match self {
             Self::Tools | Self::Prompts => format!("{server_name}__{upstream_name}"),
             Self::Resources => encode_resource_uri(server_name, upstream_name),
+            Self::Templates => encode_resource_template_uri(server_name, upstream_name),
         }
     }
 
@@ -50,6 +53,7 @@ impl AggregateKind {
             Self::Tools => &snapshot.tools,
             Self::Prompts => &snapshot.prompts,
             Self::Resources => &snapshot.resources,
+            Self::Templates => &snapshot.resource_templates,
         }
     }
 }
@@ -102,6 +106,13 @@ pub async fn aggregate_resources(
     servers: &[McpServer],
 ) -> anyhow::Result<Vec<Value>> {
     aggregate_prefixed_items(cache, servers, AggregateKind::Resources).await
+}
+
+pub async fn aggregate_resource_templates(
+    cache: &McpCatalogCache,
+    servers: &[McpServer],
+) -> anyhow::Result<Vec<Value>> {
+    aggregate_prefixed_items(cache, servers, AggregateKind::Templates).await
 }
 
 pub async fn aggregate_prompts(

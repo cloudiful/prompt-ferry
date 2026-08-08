@@ -103,6 +103,7 @@ pub struct AdminState {
     pub mcp_catalog_cache: McpCatalogCache,
     pub mcp_catalog_service: McpCatalogService,
     pub mcp_session_store: Option<Arc<dyn SessionStore>>,
+    pub mcp_allowed_origins: Vec<String>,
     pub endpoint_model_cache: EndpointModelCache,
 }
 
@@ -123,6 +124,7 @@ pub struct AdminStateInit {
     pub mcp_catalog_cache: McpCatalogCache,
     pub mcp_catalog_service: McpCatalogService,
     pub mcp_session_store: Option<Arc<dyn SessionStore>>,
+    pub mcp_allowed_origins: Vec<String>,
     pub endpoint_model_cache: EndpointModelCache,
 }
 
@@ -152,6 +154,7 @@ impl AdminState {
             mcp_catalog_cache: init.mcp_catalog_cache,
             mcp_catalog_service: init.mcp_catalog_service,
             mcp_session_store: init.mcp_session_store,
+            mcp_allowed_origins: init.mcp_allowed_origins,
             endpoint_model_cache: init.endpoint_model_cache,
         }
     }

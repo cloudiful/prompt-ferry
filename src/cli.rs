@@ -126,6 +126,8 @@ pub struct WorkerArgs {
     pub max_response_text_capture_bytes: Option<usize>,
     #[arg(long)]
     pub endpoint_model_cache_ttl_seconds: Option<u64>,
+    #[arg(long)]
+    pub mcp_allowed_origins: Vec<String>,
 }
 
 #[derive(Debug, Args, Clone, Default)]

@@ -518,6 +518,7 @@ pub(super) fn session_affinity_services(
         mcp_catalog_cache: catalog_cache.clone(),
         mcp_catalog_service: McpCatalogService::new(pool.clone(), catalog_cache),
         mcp_session_store: None,
+        mcp_allowed_origins: Vec::new(),
         endpoint_model_cache: EndpointModelCache::new(Duration::from_secs(60)),
     });
     RuntimeServices::new(

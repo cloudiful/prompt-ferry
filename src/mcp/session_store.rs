@@ -52,7 +52,7 @@ impl SessionStore for McpSessionStore {
             Ok(value) => value,
             Err(err) => {
                 warn!(error = %err, session_id, "failed to load MCP session from valkey");
-                return Ok(None);
+                return Err(redis_session_error("load", err));
             }
         };
         let Some(value) = value else {
@@ -62,11 +62,13 @@ impl SessionStore for McpSessionStore {
             Ok(state) => state,
             Err(err) => {
                 warn!(error = %err, session_id, "invalid MCP session valkey payload");
-                return Ok(None);
+                return Err(redis_session_error("deserialize", err));
             }
         };
         let ttl = i64::try_from(self.ttl_seconds).unwrap_or(i64::MAX);
         if let Err(err) = manager.expire::<_, bool>(&key, ttl).await {
+            // The session data was already loaded successfully; a transient
+            // TTL-refresh failure must not turn a valid session into a 5xx.
             warn!(error = %err, session_id, "failed to refresh MCP session valkey ttl");
         }
         Ok(Some(state))
@@ -82,6 +84,7 @@ impl SessionStore for McpSessionStore {
             .await
         {
             warn!(error = %err, session_id, "failed to store MCP session in valkey");
+            return Err(redis_session_error("store", err));
         }
         Ok(())
     }
@@ -91,8 +94,44 @@ impl SessionStore for McpSessionStore {
         let mut manager = self.manager.clone();
         if let Err(err) = manager.del::<_, usize>(key).await {
             warn!(error = %err, session_id, "failed to delete MCP session from valkey");
+            return Err(redis_session_error("delete", err));
         }
         Ok(())
+    }
+}
+
+fn redis_session_error(
+    operation: &'static str,
+    err: impl std::error::Error + Send + Sync + 'static,
+) -> SessionStoreError {
+    // SessionStoreError is boxed; a concrete error type keeps the failure
+    // distinguishable from a plain session miss so callers can return 5xx
+    // instead of `session_not_found`.
+    Box::new(RedisSessionError {
+        operation,
+        source: Box::new(err),
+    })
+}
+
+#[derive(Debug)]
+struct RedisSessionError {
+    operation: &'static str,
+    source: Box<dyn std::error::Error + Send + Sync>,
+}
+
+impl std::fmt::Display for RedisSessionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "valkey MCP session {} failed: {}",
+            self.operation, self.source
+        )
+    }
+}
+
+impl std::error::Error for RedisSessionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
     }
 }
 

@@ -19,6 +19,8 @@ pub const MCP_CATALOG_VALKEY_KEY_PREFIX: &str = "pfy:mcp-catalog:";
 pub struct ServerCatalogSnapshot {
     pub tools: Vec<Value>,
     pub resources: Vec<Value>,
+    #[serde(default)]
+    pub resource_templates: Vec<Value>,
     pub prompts: Vec<Value>,
 }
 
@@ -230,6 +232,7 @@ mod tests {
         ServerCatalogSnapshot {
             tools: vec![json!({ "name": name })],
             resources: Vec::new(),
+            resource_templates: Vec::new(),
             prompts: Vec::new(),
         }
     }

@@ -43,6 +43,17 @@ pub async fn fetch_server_snapshot(server: &McpServer) -> anyhow::Result<ServerC
             } else {
                 Vec::new()
             };
+            let mut resource_templates = if probe_policy.resources {
+                read_peer_list(
+                    &transport::peer_list_or_empty(
+                        client.peer().list_all_resource_templates().await,
+                        "resourceTemplates",
+                    )?,
+                    "resourceTemplates",
+                )
+            } else {
+                Vec::new()
+            };
             let prompts = if probe_policy.prompts {
                 read_peer_list(
                     &transport::peer_list_or_empty(
@@ -65,10 +76,16 @@ pub async fn fetch_server_snapshot(server: &McpServer) -> anyhow::Result<ServerC
                     .and_then(Value::as_str)
                     .is_none_or(|uri| !is_disabled_item(server, "resources", uri))
             });
+            resource_templates.retain(|item| {
+                item.get("uriTemplate")
+                    .and_then(Value::as_str)
+                    .is_none_or(|uri| !is_disabled_item(server, "resources", uri))
+            });
 
             Ok(ServerCatalogSnapshot {
                 tools,
                 resources,
+                resource_templates,
                 prompts,
             })
         }
@@ -132,7 +149,6 @@ pub fn snapshot_to_test_values(snapshot: &ServerCatalogSnapshot) -> (Value, Valu
         json!({ "prompts": snapshot.prompts.clone() }),
     )
 }
-
 #[cfg(test)]
 mod tests {
     use chrono::Utc;

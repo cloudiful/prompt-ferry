@@ -1,10 +1,13 @@
-use axum::{Router, response::IntoResponse};
+use std::borrow::Cow;
+
+use axum::{Router, extract::State, response::IntoResponse};
 use chrono::Utc;
 use rmcp::{
     ErrorData, ServerHandler,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, InitializeResult,
-        ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+        InputRequiredResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
+        ServerCapabilities, ServerInfo, Tool,
     },
     service::RequestContext,
     service::RoleServer,
@@ -18,7 +21,32 @@ use crate::db::McpServer;
 
 use super::call;
 
-struct V2TestServer;
+const ECHO_SCHEMA: &str = r#"{
+  "type": "object",
+  "properties": {
+    "text":    { "type": "string",  "x-mcp-header": "X-Echo-Text" },
+    "count":   { "type": "integer", "x-mcp-header": "X-Echo-Count" },
+    "flag":    { "type": "boolean", "x-mcp-header": "X-Echo-Flag" },
+    "unicode": { "type": "string",  "x-mcp-header": "X-Echo-Unicode" }
+  }
+}"#;
+
+#[derive(Default)]
+struct V2TestServer {
+    /// Tool names whose next call is rejected with -32020 (one-shot),
+    /// simulating a server whose SEP-2243 schema cache was stale. Shared
+    /// across service instances: once the "stale" call was rejected and the
+    /// client retried, the server has refreshed its catalog.
+    flaky_first_call: Option<std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>>,
+}
+
+fn echo_tool() -> Tool {
+    Tool::new(
+        "echo",
+        "echoes the text argument",
+        serde_json::from_str::<serde_json::Map<String, Value>>(ECHO_SCHEMA).unwrap(),
+    )
+}
 
 impl ServerHandler for V2TestServer {
     async fn list_tools(
@@ -26,14 +54,40 @@ impl ServerHandler for V2TestServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(vec![Tool::new(
-            "echo",
-            "echoes the text argument",
-            json!({"type": "object", "properties": {"text": {"type": "string"}}})
-                .as_object()
-                .unwrap()
-                .clone(),
-        )]))
+        Ok(ListToolsResult::with_all_items(vec![
+            echo_tool(),
+            Tool::new(
+                "mrtr",
+                "requires input before completing",
+                json!({"type": "object", "properties": {}})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+            Tool::new(
+                "flaky-cache",
+                "rejects the first call with a header mismatch",
+                json!({"type": "object", "properties": {}})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        ]))
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        match name {
+            "echo" => Some(echo_tool()),
+            "mrtr" | "flaky-cache" => Some(Tool::new(
+                name.to_string(),
+                "mock tool",
+                json!({"type": "object", "properties": {}})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )),
+            _ => None,
+        }
     }
 
     async fn call_tool(
@@ -41,14 +95,30 @@ impl ServerHandler for V2TestServer {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let text = request
-            .arguments
-            .as_ref()
-            .and_then(|args| args.get("text"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]).into())
+        let name = request.name.as_ref();
+        if name == "flaky-cache"
+            && self
+                .flaky_first_call
+                .as_ref()
+                .is_some_and(|set| set.lock().unwrap().remove("flaky-cache"))
+        {
+            return Err(ErrorData::header_mismatch(
+                "Mcp-Param-* headers did not match the request body (stale cache)",
+                None,
+            ));
+        }
+        if name == "mrtr" {
+            if request.input_responses.is_none() && request.request_state.is_none() {
+                return Ok(InputRequiredResult::from_request_state("round-1-state").into());
+            }
+            return Ok(CallToolResult::success(vec![ContentBlock::text("mrtr-complete")]).into());
+        }
+        let mut echoed = request.arguments.clone().unwrap_or_default();
+        echoed.insert("name".to_string(), json!(request.name.as_ref().to_string()));
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            serde_json::to_string(&echoed).unwrap_or_default(),
+        )])
+        .into())
     }
 
     fn get_info(&self) -> ServerInfo {
@@ -58,9 +128,92 @@ impl ServerHandler for V2TestServer {
     }
 }
 
+/// Upstream that only speaks the legacy 2025-11-25 protocol and therefore
+/// never requires SEP-2243 standard headers.
+struct LegacyV2TestServer;
+
+impl ServerHandler for LegacyV2TestServer {
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(&[ProtocolVersion::V_2025_11_25])
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(ListToolsResult::with_all_items(vec![echo_tool()]))
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        (name == "echo").then(echo_tool)
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let mut echoed = request.arguments.clone().unwrap_or_default();
+        echoed.insert("name".to_string(), json!(request.name.as_ref().to_string()));
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            serde_json::to_string(&echoed).unwrap_or_default(),
+        )])
+        .into())
+    }
+
+    fn get_info(&self) -> ServerInfo {
+        let capabilities = ServerCapabilities::builder().enable_tools().build();
+        InitializeResult::new(capabilities)
+            .with_server_info(rmcp::model::Implementation::new("legacy-v2-test", "1.0"))
+    }
+}
+
 async fn spawn_v2_upstream() -> String {
     let service = StreamableHttpService::new(
-        || Ok(V2TestServer),
+        || Ok(V2TestServer::default()),
+        LocalSessionManager::default().into(),
+        StreamableHttpServerConfig::default().disable_allowed_hosts(),
+    );
+    let router = Router::new().nest_service("/mcp", service);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    format!("http://{addr}/mcp")
+}
+
+/// Upstream whose session service factory shares one flaky-state set, so the
+/// "reject once per tool" behavior survives per-session service instances.
+async fn spawn_v2_upstream_with_flaky_tool() -> String {
+    let flaky_first_call =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+    flaky_first_call
+        .lock()
+        .unwrap()
+        .insert("flaky-cache".to_string());
+    let service = StreamableHttpService::new(
+        move || {
+            Ok(V2TestServer {
+                flaky_first_call: Some(flaky_first_call.clone()),
+            })
+        },
+        LocalSessionManager::default().into(),
+        StreamableHttpServerConfig::default().disable_allowed_hosts(),
+    );
+    let router = Router::new().nest_service("/mcp", service);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    format!("http://{addr}/mcp")
+}
+
+async fn spawn_legacy_v2_upstream() -> String {
+    let service = StreamableHttpService::new(
+        || Ok(LegacyV2TestServer),
         LocalSessionManager::default().into(),
         StreamableHttpServerConfig::default().disable_allowed_hosts(),
     );
@@ -113,8 +266,8 @@ async fn client_negotiates_2026_07_28_and_lists_tools() {
     .unwrap();
 
     let tools = response["result"]["tools"].as_array().expect("tools list");
-    assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0]["name"].as_str(), Some("echo"));
+    assert_eq!(tools.len(), 3);
+    assert!(tools.iter().any(|tool| tool["name"] == "echo"));
 }
 
 #[tokio::test]
@@ -213,8 +366,321 @@ async fn client_calls_tool_on_2026_07_28_upstream() {
     .await
     .unwrap();
 
+    let echoed: Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(echoed["text"], "hello");
+}
+
+#[tokio::test]
+async fn tool_call_sends_all_annotated_param_headers() {
+    let url = spawn_v2_upstream().await;
+    let server = v2_server(&url);
+    let response = call(
+        &server,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "echo",
+                "arguments": {
+                    "text": "ascii",
+                    "count": 42,
+                    "flag": true,
+                    "unicode": "café"
+                }
+            }
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    // The upstream validates Mcp-Param-* against the body (missing or wrong
+    // values would be rejected with -32020 before the handler runs), so a
+    // successful echo proves every annotated argument travelled as a header:
+    // plain ASCII, Base64-wrapped Unicode, integer, and boolean forms.
+    let echoed: Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(echoed["text"], "ascii");
+    assert_eq!(echoed["count"], 42);
+    assert_eq!(echoed["flag"], true);
+    assert_eq!(echoed["unicode"], "café");
+}
+
+#[tokio::test]
+async fn tool_call_omits_headers_for_missing_annotated_params() {
+    let url = spawn_v2_upstream().await;
+    let server = v2_server(&url);
+    let response = call(
+        &server,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {"name": "echo", "arguments": {"text": "only-text"}}
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    // count/flag/unicode are absent from the body, so no Mcp-Param-* headers
+    // may be sent for them; the upstream would reject unexpected headers
+    // with -32020, so success proves the omission is correct.
+    let echoed: Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(echoed["text"], "only-text");
+    assert_eq!(echoed.get("count"), None);
+}
+
+#[tokio::test]
+async fn rewritten_aggregate_tool_name_regenerates_mcp_headers() {
+    let url = spawn_v2_upstream().await;
+    let server = v2_server(&url);
+    // The aggregate path rewrites `github__list_issues` to the upstream name
+    // before calling the outbound client; the client must regenerate
+    // Mcp-Name (list_issues) and Mcp-Param-* from the rewritten request
+    // instead of copying downstream headers. The upstream rejects stale
+    // Mcp-Name values with -32020, so success proves regeneration.
+    let response = call(
+        &server,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "list_issues",
+                "arguments": {"text": "rewritten", "count": 7, "flag": false}
+            }
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let echoed: Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(echoed["name"], "list_issues");
+    assert_eq!(echoed["text"], "rewritten");
+    assert_eq!(echoed["count"], 7);
+    assert_eq!(echoed["flag"], false);
+}
+
+#[tokio::test]
+async fn header_mismatch_relists_and_retries_once() {
+    let url = spawn_v2_upstream_with_flaky_tool().await;
+    let server = v2_server(&url);
+    let response = call(
+        &server,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {"name": "flaky-cache", "arguments": {}}
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
     assert_eq!(
         response["result"]["content"][0]["text"].as_str(),
-        Some("hello")
+        Some("{\"name\":\"flaky-cache\"}")
+    );
+}
+
+#[tokio::test]
+async fn input_required_result_round_trips_request_state() {
+    let url = spawn_v2_upstream().await;
+    let server = v2_server(&url);
+    let response = call(
+        &server,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {"name": "mrtr", "arguments": {}}
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        response["result"]["resultType"].as_str(),
+        Some("input_required")
+    );
+    assert_eq!(
+        response["result"]["requestState"].as_str(),
+        Some("round-1-state")
+    );
+}
+
+#[tokio::test]
+async fn input_responses_and_request_state_reach_upstream() {
+    let url = spawn_v2_upstream().await;
+    let server = v2_server(&url);
+    let response = call(
+        &server,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "mrtr",
+                "arguments": {},
+                "inputResponses": {"q1": {"action": "accept", "content": {"x": 1}}},
+                "requestState": "round-1-state"
+            }
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        response["result"]["content"][0]["text"].as_str(),
+        Some("mrtr-complete")
+    );
+}
+
+#[tokio::test]
+async fn legacy_2025_11_25_upstream_does_not_require_standard_headers() {
+    let url = spawn_legacy_v2_upstream().await;
+    let server = v2_server(&url);
+    let response = call(
+        &server,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "echo",
+                "arguments": {"text": "legacy", "count": 1, "flag": true, "unicode": "héllo"}
+            }
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let echoed: Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(echoed["text"], "legacy");
+    assert_eq!(echoed["unicode"], "héllo");
+}
+
+#[tokio::test]
+async fn resources_templates_list_is_forwarded() {
+    let url = spawn_v2_upstream().await;
+    let server = v2_server(&url);
+    let response = call(
+        &server,
+        json!({"jsonrpc": "2.0", "id": 10, "method": "resources/templates/list"}),
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        response["result"]["resourceTemplates"].is_array(),
+        "expected resourceTemplates array: {response}"
+    );
+}
+
+/// Upstream that rejects bearer tokens by order: the first token always gets
+/// 401, the second 429, and only the third is accepted — exercising token
+/// failover across the whole enabled set, including handshake-stage auth
+/// failures.
+async fn spawn_token_failover_upstream() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>)
+{
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let service = StreamableHttpService::new(
+        || Ok(V2TestServer::default()),
+        LocalSessionManager::default().into(),
+        StreamableHttpServerConfig::default().disable_allowed_hosts(),
+    );
+    async fn auth_middleware(
+        State(seen): State<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
+        request: axum::http::Request<axum::body::Body>,
+        next: axum::middleware::Next,
+    ) -> axum::response::Response {
+        let token = request
+            .headers()
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .unwrap_or("")
+            .to_string();
+        seen.lock().unwrap().push(token.clone());
+        match token.as_str() {
+            "first-token" => (
+                axum::http::StatusCode::UNAUTHORIZED,
+                "first token is rejected",
+            )
+                .into_response(),
+            "second-token" => (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                "second token is throttled",
+            )
+                .into_response(),
+            _ => next.run(request).await,
+        }
+    }
+    let router =
+        Router::new()
+            .nest_service("/mcp", service)
+            .layer(axum::middleware::from_fn_with_state(
+                seen.clone(),
+                auth_middleware,
+            ));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    (format!("http://{addr}/mcp"), seen)
+}
+
+#[tokio::test]
+async fn bearer_token_failover_tries_all_tokens_and_recovers_on_third() {
+    let (url, seen) = spawn_token_failover_upstream().await;
+    let mut server = v2_server(&url);
+    server.bearer_tokens_json = json!([
+        {"token": "first-token", "enabled": true},
+        {"token": "second-token", "enabled": true},
+        {"token": "third-token", "enabled": true},
+    ]);
+
+    let response = call(
+        &server,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {"name": "echo", "arguments": {"text": "failover"}}
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let echoed: Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(echoed["text"], "failover");
+
+    let seen = seen.lock().unwrap().clone();
+    assert!(
+        seen.iter().any(|token| token == "first-token"),
+        "first token must be attempted: {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|token| token == "second-token"),
+        "second token must be attempted: {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|token| token == "third-token"),
+        "third token must be attempted: {seen:?}"
     );
 }

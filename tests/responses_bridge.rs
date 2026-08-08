@@ -202,10 +202,7 @@ async fn reports_native_responses_stream_without_terminal_event() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.matches("event: error").count(), 1, "body={body}");
-    assert!(
-        body.contains("\"code\":\"server_error\""),
-        "body={body}"
-    );
+    assert!(body.contains("\"code\":\"server_error\""), "body={body}");
 }
 
 #[tokio::test]

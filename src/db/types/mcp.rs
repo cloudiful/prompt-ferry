@@ -106,6 +106,36 @@ mod tests {
     }
 
     #[test]
+    fn reserved_http_header_detects_reserved_names_case_insensitively() {
+        for name in [
+            "authorization",
+            "Authorization",
+            "AUTHORIZATION",
+            "host",
+            "content-length",
+            "transfer-encoding",
+            "connection",
+            "keep-alive",
+            "te",
+            "trailer",
+            "upgrade",
+            "proxy-authenticate",
+            "mcp-session-id",
+            "last-event-id",
+        ] {
+            assert!(
+                reserved_http_header(&serde_json::json!({ name: "x" })).is_some(),
+                "{name} must be reserved"
+            );
+        }
+        assert_eq!(
+            reserved_http_header(&serde_json::json!({ "x-custom": "v" })),
+            None
+        );
+        assert_eq!(reserved_http_header(&serde_json::json!([])), None);
+    }
+
+    #[test]
     fn bearer_tokens_defaults_missing_enabled_to_enabled() {
         let server = server_with_tokens(serde_json::json!([
             "legacy",
@@ -133,6 +163,37 @@ mod tests {
             ]
         );
     }
+}
+
+/// HTTP headers that `http_headers_json` must never set: credentials,
+/// hop-by-hop headers, and MCP/SSE transport-managed headers. They would
+/// conflict with the auth header, rmcp's session handling, or the wire
+/// protocol, and could otherwise be used to smuggle credentials upstream.
+pub const RESERVED_MCP_HTTP_HEADERS: [&str; 14] = [
+    "authorization",
+    "proxy-authorization",
+    "cookie",
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "keep-alive",
+    "te",
+    "trailer",
+    "upgrade",
+    "proxy-authenticate",
+    "mcp-session-id",
+    "last-event-id",
+];
+
+/// Returns the first reserved header name found in `http_headers_json`, if any.
+pub fn reserved_http_header(headers: &serde_json::Value) -> Option<String> {
+    headers.as_object()?.keys().find_map(|name| {
+        let lower = name.trim().to_ascii_lowercase();
+        RESERVED_MCP_HTTP_HEADERS
+            .contains(&lower.as_str())
+            .then(|| name.clone())
+    })
 }
 
 #[derive(Debug, Clone, Deserialize)]

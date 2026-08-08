@@ -41,6 +41,7 @@ async fn aggregate_reads_cached_servers_only() {
             ServerCatalogSnapshot {
                 tools: vec![json!({"name": "cached_tool"})],
                 resources: Vec::new(),
+                resource_templates: Vec::new(),
                 prompts: Vec::new(),
             },
         )
@@ -74,6 +75,7 @@ async fn server_catalog_keeps_aggregate_name_conflicts() {
     let snapshot = ServerCatalogSnapshot {
         tools: vec![json!({"name": "shared_tool"})],
         resources: Vec::new(),
+        resource_templates: Vec::new(),
         prompts: Vec::new(),
     };
     cache.put(&alpha, snapshot.clone()).await;

@@ -1,5 +1,6 @@
 mod client;
 mod token_selection;
+mod tool_headers;
 
 use std::{cell::RefCell, sync::LazyLock, time::Duration};
 
@@ -44,10 +45,7 @@ pub(super) async fn call(
                     if let Some(index) = selected.index {
                         attempted.push(index);
                     }
-                    if retry_status.is_some()
-                        && attempts == 1
-                        && attempted.len() < enabled_token_count
-                    {
+                    if retry_status.is_some() && attempted.len() < enabled_token_count {
                         warn!(
                             server_name = %server.name,
                             attempts,
@@ -106,13 +104,27 @@ pub(super) fn peer_list_or_empty<T: serde::Serialize>(
 }
 
 fn retryable_status(err: &anyhow::Error) -> Option<StatusCode> {
-    let service_err = err.downcast_ref::<rmcp::service::ServiceError>()?;
-    let rmcp::service::ServiceError::TransportSend(transport_err) = service_err else {
-        return None;
-    };
-    let stream_err = transport_err
-        .error
-        .downcast_ref::<StreamableHttpError<reqwest::Error>>()?;
+    if let Some(service_err) = err.downcast_ref::<rmcp::service::ServiceError>() {
+        return match service_err {
+            rmcp::service::ServiceError::TransportSend(transport_err) => transport_err
+                .error
+                .downcast_ref::<StreamableHttpError<reqwest::Error>>()
+                .and_then(request_time_status)
+                .filter(is_retryable_status),
+            _ => None,
+        };
+    }
+    handshake_status(err)
+}
+
+fn is_retryable_status(status: &StatusCode) -> bool {
+    matches!(
+        *status,
+        StatusCode::TOO_MANY_REQUESTS | StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+    )
+}
+
+fn request_time_status(stream_err: &StreamableHttpError<reqwest::Error>) -> Option<StatusCode> {
     match stream_err {
         StreamableHttpError::Client(reqwest_err) => reqwest_err.status(),
         StreamableHttpError::AuthRequired(_) => Some(StatusCode::UNAUTHORIZED),
@@ -122,16 +134,50 @@ fn retryable_status(err: &anyhow::Error) -> Option<StatusCode> {
         }
         _ => None,
     }
-    .filter(|status| {
-        matches!(
-            *status,
-            StatusCode::TOO_MANY_REQUESTS | StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
-        )
-    })
+}
+
+/// Auth/throttling failures during the connect/initialize handshake surface as
+/// `ClientInitializeError::TransportError` (before any request is dispatched);
+/// they are retryable with the next bearer token just like request-time
+/// 401/403/429s.
+fn handshake_status(err: &anyhow::Error) -> Option<StatusCode> {
+    let Some(rmcp::service::ClientInitializeError::TransportError { error, .. }) =
+        err.downcast_ref::<rmcp::service::ClientInitializeError>()
+    else {
+        return None;
+    };
+    let stream_err = error
+        .error
+        .downcast_ref::<StreamableHttpError<reqwest::Error>>()?;
+    match stream_err {
+        StreamableHttpError::Client(reqwest_err) => reqwest_err.status().filter(|status| {
+            matches!(
+                *status,
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS
+            )
+        }),
+        StreamableHttpError::AuthRequired(_) => Some(StatusCode::UNAUTHORIZED),
+        StreamableHttpError::InsufficientScope(_) => Some(StatusCode::FORBIDDEN),
+        StreamableHttpError::UnexpectedServerResponse(message) => {
+            parse_status_from_message(message.as_ref()).filter(|status| {
+                matches!(
+                    *status,
+                    StatusCode::UNAUTHORIZED
+                        | StatusCode::FORBIDDEN
+                        | StatusCode::TOO_MANY_REQUESTS
+                )
+            })
+        }
+        _ => None,
+    }
 }
 
 fn parse_status_from_message(message: &str) -> Option<StatusCode> {
-    let code = message.strip_prefix("HTTP ")?.split(':').next()?.trim();
+    let code = message
+        .strip_prefix("HTTP ")?
+        .split_whitespace()
+        .next()?
+        .trim_end_matches(':');
     code.parse::<u16>()
         .ok()
         .and_then(|value| StatusCode::from_u16(value).ok())

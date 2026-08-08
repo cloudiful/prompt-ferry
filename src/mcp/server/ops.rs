@@ -1,9 +1,10 @@
 use rmcp::{
     ErrorData,
     model::{
-        CallToolRequestParams, GetPromptRequestParams, GetPromptResult, ListPromptsResult,
+        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult,
+        GetPromptRequestParams, GetPromptResponse, ListPromptsResult, ListResourceTemplatesResult,
         ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-        ReadResourceResult, RequestId,
+        ReadResourceResponse, Reference, RequestId, RequestMetaObject,
     },
 };
 use serde::de::DeserializeOwned;
@@ -13,15 +14,21 @@ use crate::db::McpServer;
 
 use super::{
     ProxyService, RequestScope, filtering,
-    value::{json_request, optional_params, parse_result, parse_result_field, required_params},
+    value::{
+        json_request, optional_params, parse_call_tool_response, parse_get_prompt_response,
+        parse_read_resource_response, parse_result, parse_result_field, required_params, with_meta,
+    },
 };
-use crate::mcp::targeting::{PrefixedTarget, parse_prefixed_name, parse_resource_target};
+use crate::mcp::targeting::{
+    PrefixedTarget, parse_prefixed_name, parse_resource_target, parse_resource_template_target,
+};
 
 struct AggregateCallContext<'a> {
     user_id: Option<i64>,
     conversation_id: Option<&'a str>,
     request_id: &'a RequestId,
     method: &'a str,
+    pool: &'a sqlx::PgPool,
 }
 
 impl ProxyService {
@@ -47,6 +54,23 @@ impl ProxyService {
             .map(ListResourcesResult::with_all_items)
     }
 
+    pub(super) async fn list_resource_templates_for_scope(
+        &self,
+        scope: &RequestScope,
+        request_id: &RequestId,
+        params: Option<PaginatedRequestParams>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        self.list_result(
+            scope,
+            request_id,
+            "resources/templates/list",
+            "resourceTemplates",
+            params,
+        )
+        .await
+        .map(ListResourceTemplatesResult::with_all_items)
+    }
+
     pub(super) async fn list_prompts_for_scope(
         &self,
         scope: &RequestScope,
@@ -63,10 +87,17 @@ impl ProxyService {
         scope: &RequestScope,
         request_id: &RequestId,
         params: CallToolRequestParams,
-    ) -> Result<rmcp::model::CallToolResult, ErrorData> {
+        meta: RequestMetaObject,
+    ) -> Result<CallToolResponse, ErrorData> {
         if scope.server_name.is_some() {
             return self
-                .dispatch_result(scope, request_id, "tools/call", params)
+                .dispatch_result(
+                    scope,
+                    request_id,
+                    "tools/call",
+                    with_meta(params, meta),
+                    parse_call_tool_response,
+                )
                 .await;
         }
 
@@ -79,8 +110,9 @@ impl ProxyService {
                 conversation_id: scope.conversation_id.as_deref(),
                 request_id,
                 method: "tools/call",
+                pool: &scope.pool,
             },
-            params,
+            with_meta(params, meta),
             target,
             |params, upstream_name| params.name = upstream_name.into(),
             |server, upstream_name| {
@@ -89,6 +121,7 @@ impl ProxyService {
                 }
                 Ok(())
             },
+            parse_call_tool_response,
         )
         .await
     }
@@ -98,10 +131,17 @@ impl ProxyService {
         scope: &RequestScope,
         request_id: &RequestId,
         params: ReadResourceRequestParams,
-    ) -> Result<ReadResourceResult, ErrorData> {
+        meta: RequestMetaObject,
+    ) -> Result<ReadResourceResponse, ErrorData> {
         if scope.server_name.is_some() {
             return self
-                .dispatch_result(scope, request_id, "resources/read", params)
+                .dispatch_result(
+                    scope,
+                    request_id,
+                    "resources/read",
+                    with_meta(params, meta),
+                    parse_read_resource_response,
+                )
                 .await;
         }
 
@@ -118,8 +158,9 @@ impl ProxyService {
                 conversation_id: scope.conversation_id.as_deref(),
                 request_id,
                 method: "resources/read",
+                pool: &scope.pool,
             },
-            params,
+            with_meta(params, meta),
             target,
             |params, upstream_name| params.uri = upstream_name,
             |server, upstream_name| {
@@ -128,6 +169,7 @@ impl ProxyService {
                 }
                 Ok(())
             },
+            parse_read_resource_response,
         )
         .await
     }
@@ -137,10 +179,17 @@ impl ProxyService {
         scope: &RequestScope,
         request_id: &RequestId,
         params: GetPromptRequestParams,
-    ) -> Result<GetPromptResult, ErrorData> {
+        meta: RequestMetaObject,
+    ) -> Result<GetPromptResponse, ErrorData> {
         if scope.server_name.is_some() {
             return self
-                .dispatch_result(scope, request_id, "prompts/get", params)
+                .dispatch_result(
+                    scope,
+                    request_id,
+                    "prompts/get",
+                    with_meta(params, meta),
+                    parse_get_prompt_response,
+                )
                 .await;
         }
 
@@ -153,13 +202,87 @@ impl ProxyService {
                 conversation_id: scope.conversation_id.as_deref(),
                 request_id,
                 method: "prompts/get",
+                pool: &scope.pool,
             },
-            params,
+            with_meta(params, meta),
             target,
             |params, upstream_name| params.name = upstream_name,
             |_, _| Ok(()),
+            parse_get_prompt_response,
         )
         .await
+    }
+
+    pub(super) async fn complete_for_scope(
+        &self,
+        scope: &RequestScope,
+        request_id: &RequestId,
+        params: CompleteRequestParams,
+        meta: RequestMetaObject,
+    ) -> Result<CompleteResult, ErrorData> {
+        if scope.server_name.is_some() {
+            return self
+                .dispatch_result(
+                    scope,
+                    request_id,
+                    "completion/complete",
+                    with_meta(params, meta),
+                    parse_result,
+                )
+                .await;
+        }
+
+        let context = AggregateCallContext {
+            user_id: scope.user_id,
+            conversation_id: scope.conversation_id.as_deref(),
+            request_id,
+            method: "completion/complete",
+            pool: &scope.pool,
+        };
+        match params.r#ref {
+            Reference::Prompt(ref prompt) => {
+                let Some(target) = parse_prefixed_name(&prompt.name) else {
+                    return Err(ErrorData::invalid_params(
+                        "ref/prompt name must be server__name",
+                        None,
+                    ));
+                };
+                self.forward_aggregate_call(
+                    context,
+                    with_meta(params, meta),
+                    target,
+                    |params, upstream_name| params.r#ref = Reference::for_prompt(upstream_name),
+                    |_, _| Ok(()),
+                    parse_result,
+                )
+                .await
+            }
+            Reference::Resource(ref resource) => {
+                let Some(target) =
+                    parse_resource_template_target(&resource.uri).map_err(super::internal_error)?
+                else {
+                    return Err(ErrorData::invalid_params(
+                        "ref/resource uri must be a namespaced mcp:// template",
+                        None,
+                    ));
+                };
+                self.forward_aggregate_call(
+                    context,
+                    with_meta(params, meta),
+                    target,
+                    |params, upstream_name| {
+                        params.r#ref = Reference::for_resource(upstream_name);
+                    },
+                    |_, _| Ok(()),
+                    parse_result,
+                )
+                .await
+            }
+            _ => Err(ErrorData::invalid_params(
+                "unsupported completion ref type",
+                None,
+            )),
+        }
     }
 
     async fn list_result<T>(
@@ -192,7 +315,7 @@ impl ProxyService {
         field: &str,
     ) -> Result<Value, ErrorData> {
         let server = self.load_server(scope).await?;
-        let snapshot = self
+        let snapshot = scope
             .cache
             .get(&server)
             .await
@@ -200,6 +323,7 @@ impl ProxyService {
         let items = match field {
             "tools" => snapshot.tools,
             "resources" => snapshot.resources,
+            "resourceTemplates" => snapshot.resource_templates,
             "prompts" => snapshot.prompts,
             _ => return Err(ErrorData::internal_error("unknown MCP catalog field", None)),
         };
@@ -212,16 +336,17 @@ impl ProxyService {
         }))
     }
 
-    async fn dispatch_result<T, P>(
+    async fn dispatch_result<T, P, Parse>(
         &self,
         scope: &RequestScope,
         request_id: &RequestId,
         method: &str,
         params: P,
+        parse: Parse,
     ) -> Result<T, ErrorData>
     where
-        T: DeserializeOwned,
         P: serde::Serialize,
+        Parse: FnOnce(Value) -> Result<T, ErrorData>,
     {
         let response = self
             .dispatch(
@@ -229,25 +354,27 @@ impl ProxyService {
                 json_request(request_id, method, required_params(params)?),
             )
             .await?;
-        parse_result(response)
+        parse(response)
     }
 
-    async fn forward_aggregate_call<T, P, Rewrite, Validate>(
+    async fn forward_aggregate_call<T, P, Rewrite, Validate, Parse>(
         &self,
         context: AggregateCallContext<'_>,
         mut params: P,
         target: PrefixedTarget,
         rewrite: Rewrite,
         validate: Validate,
+        parse: Parse,
     ) -> Result<T, ErrorData>
     where
-        T: DeserializeOwned,
+        T: 'static,
         P: serde::Serialize,
         Rewrite: FnOnce(&mut P, String),
         Validate: FnOnce(&McpServer, &str) -> Result<(), ErrorData>,
+        Parse: FnOnce(Value) -> Result<T, ErrorData>,
     {
         let server = self
-            .load_server_by_name(context.user_id, &target.server_name)
+            .load_server_by_name(context.user_id, &target.server_name, context.pool)
             .await?;
         validate(&server, &target.upstream_name)?;
         rewrite(&mut params, target.upstream_name);
@@ -258,6 +385,6 @@ impl ProxyService {
         )
         .await
         .map_err(super::internal_error)?;
-        parse_result(response)
+        parse(response)
     }
 }

@@ -209,6 +209,7 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
             body: &effective_body,
         },
         state.mcp_session_store.clone(),
+        &state.mcp_allowed_origins,
     )
     .await;
     let mut response_context = McpResponseContext {

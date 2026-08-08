@@ -179,19 +179,32 @@ pub(super) async fn forward_request_chunk(
     }
 }
 
+/// Outcome of collecting a bridged request body.
+pub(super) enum ChunkCollection {
+    Complete(Vec<u8>),
+    /// The assembled body exceeded `limit`; the caller should respond 413.
+    TooLarge,
+}
+
 pub(super) async fn collect_request_chunks(
     pending: &Arc<Mutex<HashMap<String, PendingIncomingRequest>>>,
     request_id: &str,
     mut chunk_rx: mpsc::Receiver<Vec<u8>>,
     end_rx: oneshot::Receiver<RequestTransferStats>,
-) -> (Vec<u8>, RequestTransferStats) {
+    limit: usize,
+) -> (ChunkCollection, RequestTransferStats) {
     let mut body = Vec::new();
     while let Some(chunk) = chunk_rx.recv().await {
+        if body.len().saturating_add(chunk.len()) > limit {
+            pending.lock().await.remove(request_id);
+            let stats = end_rx.await.unwrap_or_default();
+            return (ChunkCollection::TooLarge, stats);
+        }
         body.extend_from_slice(&chunk);
     }
     pending.lock().await.remove(request_id);
     let stats = end_rx.await.unwrap_or_default();
-    (body, stats)
+    (ChunkCollection::Complete(body), stats)
 }
 
 pub(super) async fn send_worker_shutdown_response(
@@ -238,4 +251,40 @@ pub(super) async fn send_worker_shutdown_mcp_response(
             request_id: request_id.to_string(),
         }))
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn collect_request_chunks_stops_at_limit_without_buffering_more() {
+        let pending: Arc<Mutex<HashMap<String, PendingIncomingRequest>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let (chunk_tx, chunk_rx) = mpsc::channel(4);
+        let (end_tx, end_rx) = oneshot::channel();
+        pending.lock().await.insert(
+            "req-1".to_string(),
+            PendingIncomingRequest {
+                chunk_tx,
+                end_tx: Some(end_tx),
+                cancellation: RequestCancellation::default(),
+            },
+        );
+
+        let pending_for_collector = pending.clone();
+        let collector = tokio::spawn(async move {
+            collect_request_chunks(&pending_for_collector, "req-1", chunk_rx, end_rx, 1024).await
+        });
+        forward_request_chunk(&pending, "req-1".to_string(), vec![b'a'; 600]).await;
+        forward_request_chunk(&pending, "req-1".to_string(), vec![b'b'; 600]).await;
+
+        let (collection, stats) = collector.await.unwrap();
+        assert!(matches!(collection, ChunkCollection::TooLarge));
+        assert_eq!(stats.http_request_decompressed_bytes, None);
+        assert!(
+            pending.lock().await.get("req-1").is_none(),
+            "pending entry must be removed when the limit is hit"
+        );
+    }
 }

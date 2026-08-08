@@ -129,6 +129,7 @@ pub(super) async fn build_admin_state(
         mcp_catalog_cache,
         mcp_catalog_service,
         mcp_session_store: crate::mcp::McpSessionStore::from_config(config).await,
+        mcp_allowed_origins: config.mcp_allowed_origins.clone(),
         endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(Duration::from_secs(
             config.endpoint_model_cache_ttl_seconds.max(1),
         )),

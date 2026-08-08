@@ -119,6 +119,7 @@ async fn admin_state(pool: PgPool, admin: &db::User) -> AdminState {
         mcp_catalog_cache: McpCatalogCache::new(),
         mcp_catalog_service: McpCatalogService::new(pool.clone(), McpCatalogCache::new()),
         mcp_session_store: None,
+        mcp_allowed_origins: Vec::new(),
         endpoint_model_cache: prompt_ferry::endpoint_models::EndpointModelCache::new(
             Duration::from_secs(300),
         ),
@@ -283,6 +284,7 @@ async fn login_succeeds_with_local_session_fallback_when_session_backend_is_disa
         mcp_catalog_cache: McpCatalogCache::new(),
         mcp_catalog_service: McpCatalogService::new(schema.pool.clone(), McpCatalogCache::new()),
         mcp_session_store: None,
+        mcp_allowed_origins: Vec::new(),
         endpoint_model_cache: prompt_ferry::endpoint_models::EndpointModelCache::new(
             Duration::from_secs(300),
         ),
@@ -1113,6 +1115,7 @@ async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow
         mcp_catalog_cache: McpCatalogCache::new(),
         mcp_catalog_service: McpCatalogService::new(schema.pool.clone(), McpCatalogCache::new()),
         mcp_session_store: None,
+        mcp_allowed_origins: Vec::new(),
         endpoint_model_cache: prompt_ferry::endpoint_models::EndpointModelCache::new(
             Duration::from_secs(300),
         ),
@@ -1825,6 +1828,7 @@ async fn bridge_status_reports_multi_relay_connectivity() -> anyhow::Result<()> 
         mcp_catalog_cache: McpCatalogCache::new(),
         mcp_catalog_service: McpCatalogService::new(schema.pool.clone(), McpCatalogCache::new()),
         mcp_session_store: None,
+        mcp_allowed_origins: Vec::new(),
         endpoint_model_cache: prompt_ferry::endpoint_models::EndpointModelCache::new(
             Duration::from_secs(300),
         ),

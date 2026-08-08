@@ -191,6 +191,16 @@ impl McpServerRequest {
                 ));
             }
         }
+        if let Some(http_headers) = &self.http_headers_json
+            && let Some(name) = db::reserved_http_header(http_headers)
+        {
+            let message = format!("http_headers_json must not override reserved header `{name}`");
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_http_headers",
+                &message,
+            ));
+        }
         let owner_user_id = if user.is_admin {
             self.owner_user_id
         } else {

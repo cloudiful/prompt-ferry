@@ -4,7 +4,7 @@ use super::super::{
     request_compression::{HttpRequestCompressionContext, HttpRequestTransferStats},
     response_forward::{
         PendingCleanup, bridge_error_response, choose_worker, release_mcp_response_bytes,
-        remove_mcp_pending,
+        remove_mcp_pending, send_mcp_request_cancel,
     },
     response_pump::spawn_mcp_response_pump,
     router::drain_body_then,
@@ -156,15 +156,7 @@ async fn proxy_mcp_request(
         Duration::from_millis(state.config.response_stream_backpressure_timeout_ms),
     );
     let worker = selection.sender;
-    let request_headers = headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_string(), value.to_string()))
-        })
-        .collect();
+    let request_headers = forwardable_mcp_headers(&headers);
     let start = McpRequestStart {
         request_id: request_id.clone(),
         server_name: server_name.clone(),
@@ -348,12 +340,23 @@ async fn stream_mcp_body(
                 ));
             }
         };
+        let new_decompressed_bytes =
+            decompressed_bytes.saturating_add(i64::try_from(chunk.len()).unwrap_or(i64::MAX));
+        if new_decompressed_bytes > crate::mcp::MAX_MCP_REQUEST_BODY_BYTES as i64 {
+            if started {
+                send_mcp_request_cancel(worker, &request_id, "request_body_too_large", false);
+            }
+            return Err(crate::auth::error_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "request_too_large",
+                "request body exceeds the maximum allowed size",
+            ));
+        }
+        decompressed_bytes = new_decompressed_bytes;
         if !started {
             send_mcp_request_start(worker, start.clone()).await?;
             started = true;
         }
-        decompressed_bytes =
-            decompressed_bytes.saturating_add(i64::try_from(chunk.len()).unwrap_or(i64::MAX));
         if worker
             .send(BridgeMessage::McpRequestChunk(McpRequestChunk {
                 request_id: request_id.clone(),
@@ -379,6 +382,26 @@ async fn stream_mcp_body(
     )
     .await?;
     Ok(())
+}
+
+/// Headers forwarded to the worker for MCP requests.
+///
+/// Authorization credentials, cookies, and hop-by-hop headers must never
+/// reach the worker (or the usage/raw logs it produces). Everything else —
+/// including `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`, `Mcp-Param-*`,
+/// `Origin`, `User-Agent`, and `x-prompt-ferry-conversation-id` — passes
+/// through unchanged.
+fn forwardable_mcp_headers(headers: &HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .filter(|(name, _)| !crate::mcp::targeting::is_forward_blocked_mcp_header(name.as_str()))
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_string(), value.to_string()))
+        })
+        .collect()
 }
 
 async fn send_mcp_request_start(
@@ -588,5 +611,46 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let text = String::from_utf8_lossy(&body);
         assert_eq!(text, "data: {\"jsonrpc\":\"2.0\",\"method\":\"first\"}\n\n");
+    }
+
+    #[tokio::test]
+    async fn oversized_mcp_request_body_is_rejected_with_413_and_cancelled() {
+        let mut state = test_state();
+        state.config.client_token = "test-token".to_string();
+
+        let (worker_tx, mut worker_rx) = mpsc::channel(8);
+        state.inner.workers.lock().await.insert(1, worker_tx);
+
+        let worker = tokio::spawn(async move {
+            let mut saw_cancel = false;
+            while let Some(message) = worker_rx.recv().await {
+                if matches!(message, BridgeMessage::McpRequestCancel(_)) {
+                    saw_cancel = true;
+                    break;
+                }
+            }
+            saw_cancel
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer test-token".parse().unwrap());
+        headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+        let body = Body::from(vec![b'x'; crate::mcp::MAX_MCP_REQUEST_BODY_BYTES + 1]);
+        let response = proxy_mcp_request(
+            state,
+            "127.0.0.1".parse().unwrap(),
+            headers,
+            HttpRequestCompressionContext::default(),
+            Method::POST,
+            None,
+            body,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(
+            worker.await.unwrap(),
+            "the worker must be told to cancel the oversized request"
+        );
     }
 }
