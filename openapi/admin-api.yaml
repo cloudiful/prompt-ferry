@@ -907,7 +907,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/McpCredential'
+                $ref: '#/components/schemas/McpCredentialView'
   /api/v1/admin/mcp-servers/{server_id}/test:
     post:
       tags:
@@ -3096,7 +3096,7 @@ components:
         credentials:
           type: array
           items:
-            $ref: '#/components/schemas/McpCredential'
+            $ref: '#/components/schemas/McpCredentialView'
         total:
           type: integer
           format: int64
@@ -3690,12 +3690,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/McpCatalogItem'
-    McpCredential:
+    McpCredentialView:
       type: object
+      description: |-
+        Admin-API wire representation of a credential. The raw `secret` is
+        deliberately never serialized; only a masked preview is exposed.
       required:
       - credential_id
       - server_id
       - credential_label
+      - secret_preview
       - position
       - enabled
       - default_cost
@@ -3777,6 +3781,8 @@ components:
           - string
           - 'null'
           format: uuid
+        secret_preview:
+          type: string
         server_id:
           type: string
           format: uuid

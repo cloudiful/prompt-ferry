@@ -208,7 +208,7 @@ pub(super) struct IdentityApiDoc;
             CredentialQuotaBindingRequest,
             QuotaGroupRequest,
             QuotaGroupUsageResponse,
-            db::McpCredential,
+            db::McpCredentialView,
             db::McpQuotaAccountSnapshot,
             db::McpQuotaGroup,
             ManagedRelay,

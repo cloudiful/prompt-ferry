@@ -696,3 +696,561 @@ async fn bearer_token_failover_tries_all_tokens_and_recovers_on_third() {
         "third token must be attempted: {seen:?}"
     );
 }
+
+fn request_id_from_body(body: &[u8]) -> Value {
+    serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|request| request.get("id").cloned())
+        .unwrap_or(Value::Null)
+}
+
+fn legacy_probe_response(id: Value, method: &str) -> axum::response::Response {
+    match method {
+        "initialize" => axum::Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "serverInfo": {"name": "legacy-mock", "version": "1.0"}
+            }
+        }))
+        .into_response(),
+        "notifications/initialized" => axum::http::StatusCode::ACCEPTED.into_response(),
+        "tools/list" => axum::Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {"tools": [{
+                "name": "legacy-echo",
+                "description": "legacy tool",
+                "inputSchema": {"type": "object"}
+            }]}
+        }))
+        .into_response(),
+        _ => axum::Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {"code": -32601, "message": "Method not found"}
+        }))
+        .into_response(),
+    }
+}
+
+fn discover_success_response(id: Value, supported: &[String]) -> axum::response::Response {
+    axum::Json(json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": {
+            "resultType": "complete",
+            "supportedVersions": supported,
+            "capabilities": {},
+            "ttlMs": 0,
+            "cacheScope": "public"
+        }
+    }))
+    .into_response()
+}
+
+fn json_rpc_error_response(
+    id: Value,
+    status: axum::http::StatusCode,
+    code: i64,
+    message: &str,
+    data: Option<Value>,
+) -> axum::response::Response {
+    let mut error = json!({ "code": code, "message": message });
+    if let Some(data) = data {
+        error["data"] = data;
+    }
+    (
+        status,
+        [(http::header::CONTENT_TYPE, "application/json")],
+        json!({ "jsonrpc": "2.0", "id": id, "error": error }).to_string(),
+    )
+        .into_response()
+}
+
+/// The non-standard rejection some gateways/SDKs emit for the `2026-07-28`
+/// probe: a generic outer error (`-32000 Bad Request`) whose `data` carries
+/// the real unsupported-version message and supported-version list.
+fn nonstandard_rejection_body() -> Value {
+    json!({
+        "error": {
+            "code": -32000,
+            "message": "Bad Request",
+            "data": {
+                "message": "Unsupported protocol version: 2026-07-28",
+                "supported": ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
+            }
+        }
+    })
+}
+
+/// (JSON-RPC method, `mcp-protocol-version` header) pairs seen by a mock.
+/// Version is `-` when the request carried no protocol header.
+type SeenVersions = std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>;
+
+/// Mock of an upstream that rejects the `2026-07-28` discover probe with a
+/// non-standard nested JSON-RPC error (HTTP 400 + `-32000 Bad Request`) and
+/// otherwise only speaks the legacy `initialize` flow.
+async fn spawn_nonstandard_rejection_upstream() -> (String, SeenVersions) {
+    async fn handle(
+        seen: SeenVersions,
+        headers: http::HeaderMap,
+        body: axum::body::Body,
+    ) -> axum::response::Response {
+        let probe_version = headers
+            .get("mcp-protocol-version")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("-")
+            .to_string();
+        let body = axum::body::to_bytes(body, 1 << 20).await.unwrap();
+        let id = request_id_from_body(&body);
+        let request: Value = serde_json::from_slice(&body).unwrap_or_else(|_| json!({}));
+        let method = request["method"].as_str().unwrap_or_default().to_string();
+        seen.lock()
+            .unwrap()
+            .push((method.clone(), probe_version.clone()));
+        if probe_version == "2026-07-28" {
+            return json_rpc_error_response(
+                id,
+                axum::http::StatusCode::BAD_REQUEST,
+                -32000,
+                "Bad Request",
+                Some(nonstandard_rejection_body()),
+            );
+        }
+        legacy_probe_response(id, &method)
+    }
+
+    let seen: SeenVersions = Default::default();
+    let state = seen.clone();
+    let router = axum::Router::new().route(
+        "/mcp",
+        axum::routing::post(move |headers: http::HeaderMap, body: axum::body::Body| {
+            handle(state.clone(), headers, body)
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    (format!("http://{addr}/mcp"), seen)
+}
+
+#[tokio::test]
+async fn client_falls_back_when_discover_rejected_with_nonstandard_jsonrpc_error() {
+    let (url, seen) = spawn_nonstandard_rejection_upstream().await;
+    let server = v2_server(&url);
+
+    let response = call(
+        &server,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let tools = response["result"]["tools"].as_array().expect("tools list");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["name"].as_str(), Some("legacy-echo"));
+
+    // The second call reuses the learned legacy lifecycle and must not probe
+    // 2026-07-28 again.
+    let response = call(
+        &server,
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(response["result"]["tools"].is_array());
+
+    let seen = seen.lock().unwrap();
+    let probes_2026 = seen
+        .iter()
+        .filter(|(method, version)| method == "server/discover" && version == "2026-07-28")
+        .count();
+    assert_eq!(
+        probes_2026, 1,
+        "the rejected probe must not be replayed per request: {seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn lifecycle_cache_reprobes_after_server_config_update() {
+    let (url, seen) = spawn_nonstandard_rejection_upstream().await;
+    let mut server = v2_server(&url);
+
+    let response = call(
+        &server,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(response["result"]["tools"].is_array());
+
+    server.updated_at += chrono::Duration::seconds(1);
+    let response = call(
+        &server,
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(response["result"]["tools"].is_array());
+
+    let seen = seen.lock().unwrap();
+    let probes_2026 = seen
+        .iter()
+        .filter(|(method, version)| method == "server/discover" && version == "2026-07-28")
+        .count();
+    assert_eq!(
+        probes_2026, 2,
+        "a bumped updated_at must invalidate the learned lifecycle: {seen:?}"
+    );
+}
+
+/// Mock of an upstream that rejects the `2026-07-28` probe with a standard
+/// `-32022` error carrying its supported-version list, then serves a
+/// successful `server/discover` for any other requested version.
+async fn spawn_32022_discover_upstream(supported: Vec<String>) -> (String, SeenVersions) {
+    async fn handle(
+        seen: SeenVersions,
+        supported: std::sync::Arc<Vec<String>>,
+        headers: http::HeaderMap,
+        body: axum::body::Body,
+    ) -> axum::response::Response {
+        let probe_version = headers
+            .get("mcp-protocol-version")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("-")
+            .to_string();
+        let body = axum::body::to_bytes(body, 1 << 20).await.unwrap();
+        let id = request_id_from_body(&body);
+        let request: Value = serde_json::from_slice(&body).unwrap_or_else(|_| json!({}));
+        let method = request["method"].as_str().unwrap_or_default().to_string();
+        seen.lock()
+            .unwrap()
+            .push((method.clone(), probe_version.clone()));
+        if probe_version == "2026-07-28" {
+            return json_rpc_error_response(
+                id,
+                axum::http::StatusCode::OK,
+                -32022,
+                "Unsupported protocol version",
+                Some(json!({
+                    "requested": "2026-07-28",
+                    "supported": supported,
+                })),
+            );
+        }
+        match method.as_str() {
+            "server/discover" => discover_success_response(id, &supported),
+            "tools/list" => axum::Json(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {"tools": [{
+                    "name": "negotiated-echo",
+                    "description": "negotiated tool",
+                    "inputSchema": {"type": "object"}
+                }]}
+            }))
+            .into_response(),
+            _ => json_rpc_error_response(
+                id,
+                axum::http::StatusCode::OK,
+                -32601,
+                "Method not found",
+                None,
+            ),
+        }
+    }
+
+    let seen: SeenVersions = Default::default();
+    let supported = std::sync::Arc::new(supported);
+    let seen_state = seen.clone();
+    let supported_state = supported.clone();
+    let router = axum::Router::new().route(
+        "/mcp",
+        axum::routing::post(move |headers: http::HeaderMap, body: axum::body::Body| {
+            handle(seen_state.clone(), supported_state.clone(), headers, body)
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    (format!("http://{addr}/mcp"), seen)
+}
+
+#[tokio::test]
+async fn client_negotiates_newest_mutually_supported_version_from_32022() {
+    let (url, seen) = spawn_32022_discover_upstream(
+        ["2025-11-25", "2025-06-18"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    )
+    .await;
+    let server = v2_server(&url);
+
+    let response = call(
+        &server,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(response["result"]["tools"].is_array());
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        &seen[..],
+        &[
+            ("server/discover".to_string(), "2026-07-28".to_string()),
+            ("server/discover".to_string(), "2025-11-25".to_string()),
+            ("tools/list".to_string(), "2025-11-25".to_string()),
+        ],
+        "must reject the newest probe, then negotiate 2025-11-25: {seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn client_negotiates_older_protocol_when_it_is_the_only_overlap() {
+    let (url, seen) = spawn_32022_discover_upstream(vec!["2025-06-18".to_string()]).await;
+    let server = v2_server(&url);
+
+    let response = call(
+        &server,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(response["result"]["tools"].is_array());
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        &seen[..],
+        &[
+            ("server/discover".to_string(), "2026-07-28".to_string()),
+            ("server/discover".to_string(), "2025-06-18".to_string()),
+            ("tools/list".to_string(), "2025-06-18".to_string()),
+        ],
+        "must fall back to an older draft when it is the only overlap: {seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn client_does_not_fallback_on_unrelated_internal_error() {
+    async fn handle(
+        seen: SeenVersions,
+        headers: http::HeaderMap,
+        body: axum::body::Body,
+    ) -> axum::response::Response {
+        let probe_version = headers
+            .get("mcp-protocol-version")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("-")
+            .to_string();
+        let body = axum::body::to_bytes(body, 1 << 20).await.unwrap();
+        let id = request_id_from_body(&body);
+        let request: Value = serde_json::from_slice(&body).unwrap_or_else(|_| json!({}));
+        let method = request["method"].as_str().unwrap_or_default().to_string();
+        seen.lock()
+            .unwrap()
+            .push((method.clone(), probe_version.clone()));
+        json_rpc_error_response(
+            id,
+            axum::http::StatusCode::OK,
+            -32603,
+            "Internal server error",
+            Some(json!({ "err": "boom" })),
+        )
+    }
+
+    let seen: SeenVersions = Default::default();
+    let state = seen.clone();
+    let router = axum::Router::new().route(
+        "/mcp",
+        axum::routing::post(move |headers: http::HeaderMap, body: axum::body::Body| {
+            handle(state.clone(), headers, body)
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    let server = v2_server(&format!("http://{addr}/mcp"));
+
+    let err = call(
+        &server,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("Internal server error"));
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        &seen[..],
+        &[("server/discover".to_string(), "2026-07-28".to_string())],
+        "unrelated internal errors must not trigger the legacy fallback: {seen:?}"
+    );
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UpstreamPhase {
+    /// Legacy-only: non-standard rejection of the modern probe, legacy
+    /// `initialize` works.
+    LegacyOnly,
+    /// Modern-only: legacy `initialize` is rejected with a protocol error,
+    /// `server/discover` works.
+    ModernOnly,
+}
+
+/// Mock whose protocol behavior can be switched between calls, to prove the
+/// learned lifecycle cache self-heals when the upstream changes.
+async fn spawn_phase_switch_upstream() -> (
+    String,
+    std::sync::Arc<std::sync::Mutex<UpstreamPhase>>,
+    SeenVersions,
+) {
+    async fn handle(
+        seen: SeenVersions,
+        phase: std::sync::Arc<std::sync::Mutex<UpstreamPhase>>,
+        headers: http::HeaderMap,
+        body: axum::body::Body,
+    ) -> axum::response::Response {
+        let probe_version = headers
+            .get("mcp-protocol-version")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("-")
+            .to_string();
+        let body = axum::body::to_bytes(body, 1 << 20).await.unwrap();
+        let id = request_id_from_body(&body);
+        let request: Value = serde_json::from_slice(&body).unwrap_or_else(|_| json!({}));
+        let method = request["method"].as_str().unwrap_or_default().to_string();
+        seen.lock()
+            .unwrap()
+            .push((method.clone(), probe_version.clone()));
+        match *phase.lock().unwrap() {
+            UpstreamPhase::LegacyOnly => {
+                if probe_version == "2026-07-28" {
+                    return json_rpc_error_response(
+                        id,
+                        axum::http::StatusCode::BAD_REQUEST,
+                        -32000,
+                        "Bad Request",
+                        Some(nonstandard_rejection_body()),
+                    );
+                }
+                legacy_probe_response(id, &method)
+            }
+            UpstreamPhase::ModernOnly => match method.as_str() {
+                "server/discover" => discover_success_response(id, &["2026-07-28".to_string()]),
+                "initialize" => json_rpc_error_response(
+                    id,
+                    axum::http::StatusCode::OK,
+                    -32603,
+                    "Unsupported protocol version: 2025-11-25",
+                    None,
+                ),
+                "tools/list" => axum::Json(json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {"tools": [{
+                        "name": "modern-echo",
+                        "description": "modern tool",
+                        "inputSchema": {"type": "object"}
+                    }]}
+                }))
+                .into_response(),
+                _ => json_rpc_error_response(
+                    id,
+                    axum::http::StatusCode::OK,
+                    -32601,
+                    "Method not found",
+                    None,
+                ),
+            },
+        }
+    }
+
+    let seen: SeenVersions = Default::default();
+    let phase = std::sync::Arc::new(std::sync::Mutex::new(UpstreamPhase::LegacyOnly));
+    let seen_state = seen.clone();
+    let phase_state = phase.clone();
+    let router = axum::Router::new().route(
+        "/mcp",
+        axum::routing::post(move |headers: http::HeaderMap, body: axum::body::Body| {
+            handle(seen_state.clone(), phase_state.clone(), headers, body)
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    (format!("http://{addr}/mcp"), phase, seen)
+}
+
+#[tokio::test]
+async fn cached_legacy_lifecycle_self_heals_after_upstream_upgrade() {
+    let (url, phase, seen) = spawn_phase_switch_upstream().await;
+    let server = v2_server(&url);
+
+    // Phase 1: legacy-only server; the modern probe is rejected once, the
+    // legacy lifecycle is learned and reused.
+    let response = call(
+        &server,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        response["result"]["tools"][0]["name"].as_str(),
+        Some("legacy-echo")
+    );
+
+    // Phase 2: the server upgrades to modern-only. The cached legacy
+    // initialize is rejected with a protocol error; the client must probe
+    // discover again and relearn.
+    *phase.lock().unwrap() = UpstreamPhase::ModernOnly;
+    let response = call(
+        &server,
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        response["result"]["tools"][0]["name"].as_str(),
+        Some("modern-echo")
+    );
+
+    let seen = seen.lock().unwrap();
+    let probes_2026 = seen
+        .iter()
+        .filter(|(method, version)| method == "server/discover" && version == "2026-07-28")
+        .count();
+    assert_eq!(
+        probes_2026, 2,
+        "the upgraded server must be rediscovered after the legacy fallback is rejected: {seen:?}"
+    );
+}

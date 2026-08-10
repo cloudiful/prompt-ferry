@@ -133,6 +133,10 @@ pub(super) async fn list_server_credentials(
     match db::list_credentials_by_server(&state.pool, server_id).await {
         Ok(credentials) => {
             let total = credentials.len() as i64;
+            let credentials = credentials
+                .into_iter()
+                .map(db::McpCredentialView::from)
+                .collect();
             Json(CredentialPageResponse { credentials, total }).into_response()
         }
         Err(err) => internal(&state, err),
@@ -186,7 +190,7 @@ pub(super) async fn bind_credential_group(
             else {
                 return not_found(&state, "credential not found");
             };
-            Json(credential).into_response()
+            Json(db::McpCredentialView::from(credential)).into_response()
         }
         Err(err) => internal(&state, err),
     }

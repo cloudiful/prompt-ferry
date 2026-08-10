@@ -79,7 +79,7 @@ pub(super) fn list_server_credentials() {}
         ("credential_id" = uuid::Uuid, Path, description = "Credential ID"),
     ),
     request_body = CredentialQuotaBindingRequest,
-    responses((status = 200, body = db::McpCredential, description = "Updated credential")),
+    responses((status = 200, body = db::McpCredentialView, description = "Updated credential")),
     tag = "mcp"
 )]
 pub(super) fn bind_credential_group() {}

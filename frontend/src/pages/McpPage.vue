@@ -10,7 +10,14 @@ import { useLocale } from '../composables/useLocale'
 import { useNotifier } from '../composables/useNotifier'
 import McpDialog from '../components/mcp/McpDialog.vue'
 import McpPanel from '../components/mcp/McpPanel.vue'
-import type { McpCatalogResponse, McpServer } from '../generated/admin-api'
+import QuotaGroupsPanel from '../components/mcp/QuotaGroupsPanel.vue'
+import { listQuotaGroups } from '../generated/admin-api'
+import type {
+  McpCatalogResponse,
+  McpQuotaGroup,
+  McpServer,
+} from '../generated/admin-api'
+import { expectData, withData } from '../api'
 import type { McpForm } from '../models'
 import { useMcpStore } from '../stores/mcp'
 import { useSessionStore } from '../stores/session'
@@ -30,16 +37,28 @@ const dialogCatalog = ref<McpCatalogResponse>({
   prompts: [],
 })
 const dialogCatalogLoading = ref(false)
+const quotaGroups = ref<McpQuotaGroup[]>([])
+const quotaPanel = ref<InstanceType<typeof QuotaGroupsPanel> | null>(null)
 
 const busy = computed(() => mcpStore.loading)
 const dialogHeader = computed(() =>
   dialogForm.value.server_id ? t('edit') : t('newMcpServer'),
 )
 
+async function loadQuotaGroups(): Promise<void> {
+  if (!session.isAdmin) return
+  try {
+    quotaGroups.value = expectData(await listQuotaGroups<true>(withData({})))
+  } catch (cause) {
+    notifyApiError(cause)
+  }
+}
+
 async function refresh(): Promise<void> {
   try {
     await Promise.all([
       mcpStore.refresh(),
+      loadQuotaGroups(),
       session.isAdmin ? usersStore.loadUsers() : Promise.resolve(),
     ])
   } catch (cause) {
@@ -192,9 +211,12 @@ onMounted(async () => {
       :catalog-loading="dialogCatalogLoading"
       :header="dialogHeader"
       :is-admin="session.isAdmin"
+      :quota-groups="quotaGroups"
       :t="t"
       :users="usersStore.users"
       @save="saveMcpServer"
     />
+
+    <QuotaGroupsPanel v-if="session.isAdmin" ref="quotaPanel" :t="t" />
   </div>
 </template>

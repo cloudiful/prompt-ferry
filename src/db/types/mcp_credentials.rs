@@ -75,12 +75,11 @@ pub struct McpQuotaGroupInput {
     pub billing_period_end: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Serialize, FromRow, ToSchema)]
+#[derive(Debug, Clone, FromRow)]
 pub struct McpCredential {
     pub credential_id: uuid::Uuid,
     pub server_id: uuid::Uuid,
     pub credential_label: String,
-    #[serde(skip_serializing)]
     pub secret: String,
     pub position: i32,
     pub enabled: bool,
@@ -110,6 +109,73 @@ impl McpCredential {
 
     pub fn is_in_cooldown(&self, now: DateTime<Utc>) -> bool {
         self.cooldown_until.is_some_and(|until| until > now)
+    }
+
+    fn masked_secret_preview(&self) -> String {
+        const MASK: &str = "••••••••";
+        if self.secret.chars().count() <= 8 {
+            return MASK.to_string();
+        }
+        let tail: String = self.secret.chars().rev().take(4).collect();
+        format!("{MASK}{}", tail.chars().rev().collect::<String>())
+    }
+}
+
+/// Admin-API wire representation of a credential. The raw `secret` is
+/// deliberately never serialized; only a masked preview is exposed.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct McpCredentialView {
+    pub credential_id: uuid::Uuid,
+    pub server_id: uuid::Uuid,
+    pub credential_label: String,
+    pub secret_preview: String,
+    pub position: i32,
+    pub enabled: bool,
+    pub quota_group_id: Option<uuid::Uuid>,
+    pub provider_kind: Option<String>,
+    pub daily_limit: Option<f64>,
+    pub monthly_limit: Option<f64>,
+    pub default_cost: f64,
+    pub strict_mode: bool,
+    pub billing_period_start: Option<DateTime<Utc>>,
+    pub billing_period_end: Option<DateTime<Utc>>,
+    pub provider_remaining: Option<f64>,
+    pub provider_synced_at: Option<DateTime<Utc>>,
+    pub provider_reset_at: Option<DateTime<Utc>>,
+    pub cooldown_until: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub last_error_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<McpCredential> for McpCredentialView {
+    fn from(credential: McpCredential) -> Self {
+        let secret_preview = credential.masked_secret_preview();
+        Self {
+            credential_id: credential.credential_id,
+            server_id: credential.server_id,
+            credential_label: credential.credential_label,
+            secret_preview,
+            position: credential.position,
+            enabled: credential.enabled,
+            quota_group_id: credential.quota_group_id,
+            provider_kind: credential.provider_kind,
+            daily_limit: credential.daily_limit,
+            monthly_limit: credential.monthly_limit,
+            default_cost: credential.default_cost,
+            strict_mode: credential.strict_mode,
+            billing_period_start: credential.billing_period_start,
+            billing_period_end: credential.billing_period_end,
+            provider_remaining: credential.provider_remaining,
+            provider_synced_at: credential.provider_synced_at,
+            provider_reset_at: credential.provider_reset_at,
+            cooldown_until: credential.cooldown_until,
+            last_error: credential.last_error,
+            last_error_at: credential.last_error_at,
+            created_at: credential.created_at,
+            updated_at: credential.updated_at,
+        }
     }
 }
 

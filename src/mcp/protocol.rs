@@ -10,6 +10,18 @@ use crate::naming::{MCP_IMPLEMENTATION_NAME, MCP_SERVER_NAME};
 pub(super) const DEFAULT_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2025_11_25;
 pub(super) const DEFAULT_PROTOCOL_VERSION_STR: &str = "2025-11-25";
 
+/// Protocol versions offered to upstream servers when probing with
+/// `server/discover`, newest first. rmcp retries with the newest version the
+/// upstream lists as supported; servers that only speak older drafts still
+/// negotiate instead of being rejected outright.
+pub(super) const PREFERRED_PROTOCOL_VERSIONS: &[ProtocolVersion] = &[
+    ProtocolVersion::V_2026_07_28,
+    ProtocolVersion::V_2025_11_25,
+    ProtocolVersion::V_2025_06_18,
+    ProtocolVersion::V_2025_03_26,
+    ProtocolVersion::V_2024_11_05,
+];
+
 pub(super) fn json_response(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }

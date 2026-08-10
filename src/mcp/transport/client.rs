@@ -1,6 +1,11 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{LazyLock, Mutex},
+    time::{Duration, Instant},
+};
 
 use anyhow::anyhow;
+use chrono::{DateTime, Utc};
 use http::{HeaderName, HeaderValue};
 use rmcp::{
     ClientServiceExt,
@@ -15,10 +20,15 @@ use rmcp::{
     },
 };
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 use crate::db::McpServer;
 
-use super::{super::protocol::client_info, token_selection::SelectedToken, tool_headers};
+use super::{
+    super::protocol::{PREFERRED_PROTOCOL_VERSIONS, client_info},
+    token_selection::SelectedToken,
+    tool_headers,
+};
 
 pub(super) async fn call_once(
     server: &McpServer,
@@ -87,10 +97,18 @@ pub(super) async fn connect_with_selected(
 /// The rmcp `Auto` mode only falls back when the peer answers discover with a
 /// JSON-RPC `METHOD_NOT_FOUND` error. Servers built on older SDKs (e.g. rmcp
 /// <= 2.2.0) reject the `2026-07-28` probe at the HTTP layer with a 400
-/// "Unsupported MCP-Protocol-Version" response, which surfaces as a transport
-/// error and would otherwise never recover. Authentication, DNS, timeout and
-/// other transient failures are NOT retried as a full handshake here: they are
-/// left for the caller's token failover, which does not replay the lifecycle.
+/// "Unsupported MCP-Protocol-Version" response, and other non-standard
+/// servers wrap the rejection in arbitrary JSON-RPC errors; both surface as
+/// transport/JSON-RPC errors that would otherwise never recover, so they are
+/// classified by [`is_protocol_rejection`] and retried once with the legacy
+/// lifecycle. Authentication, DNS, timeout and other transient failures are
+/// NOT retried as a full handshake here: they are left for the caller's token
+/// failover, which does not replay the lifecycle.
+///
+/// The lifecycle that actually works is cached per server (keyed by
+/// `updated_at`) so subsequent requests skip the rejected probe instead of
+/// replaying it on every call. The cache self-heals: when a cached lifecycle
+/// starts being rejected, the other one is probed and the cache is relearned.
 async fn connect_with_lifecycle_fallback<F, Fut>(
     server: &McpServer,
     connect: F,
@@ -103,19 +121,55 @@ where
             >,
         >,
 {
-    let auto_mode = ClientLifecycleMode::Auto {
-        preferred_versions: vec![ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25],
-        legacy_version: Some(ProtocolVersion::V_2025_11_25),
+    let cache_key = (server.server_id, server.updated_at);
+    let cached = cached_lifecycle(cache_key);
+    let (first_mode, first_is_legacy) = match cached {
+        Some(UpstreamLifecycle::LegacyInitialize) => (ClientLifecycleMode::Initialize, true),
+        Some(UpstreamLifecycle::Auto) | None => (auto_lifecycle_mode(), false),
     };
-    match connect(auto_mode).await {
-        Ok(service) => Ok(service),
-        Err(auto_err) if is_protocol_rejection(&auto_err) => {
-            tracing::debug!(server_name = %server.name, error = %auto_err, "mcp auto lifecycle connect failed with protocol rejection; retrying with legacy initialize");
-            match connect(ClientLifecycleMode::Initialize).await {
-                Ok(service) => Ok(service),
-                Err(fallback_err) => {
-                    tracing::debug!(server_name = %server.name, error = %fallback_err, "mcp legacy initialize fallback also failed");
-                    Err(auto_err)
+    let first_label = lifecycle_mode_label(&first_mode);
+    match connect(first_mode).await {
+        Ok(service) => {
+            record_lifecycle(
+                cache_key,
+                if first_is_legacy {
+                    UpstreamLifecycle::LegacyInitialize
+                } else {
+                    UpstreamLifecycle::Auto
+                },
+            );
+            Ok(service)
+        }
+        Err(first_err) if is_protocol_rejection(&first_err) => {
+            tracing::debug!(
+                server_name = %server.name,
+                lifecycle = %first_label,
+                error = %first_err,
+                "mcp lifecycle connect rejected as protocol error; retrying with alternate lifecycle"
+            );
+            let (second_mode, second_is_legacy) = if first_is_legacy {
+                (auto_lifecycle_mode(), false)
+            } else {
+                (ClientLifecycleMode::Initialize, true)
+            };
+            let second_label = lifecycle_mode_label(&second_mode);
+            match connect(second_mode).await {
+                Ok(service) => {
+                    record_lifecycle(
+                        cache_key,
+                        if second_is_legacy {
+                            UpstreamLifecycle::LegacyInitialize
+                        } else {
+                            UpstreamLifecycle::Auto
+                        },
+                    );
+                    Ok(service)
+                }
+                Err(second_err) => {
+                    clear_lifecycle(cache_key);
+                    Err(second_err.context(format!(
+                        "mcp upstream rejected the {first_label} lifecycle ({first_err:#}); the {second_label} fallback also failed"
+                    )))
                 }
             }
         }
@@ -123,18 +177,130 @@ where
     }
 }
 
-/// True when the connect error means "this server cannot do the modern
-/// lifecycle": an HTTP-layer `Unsupported MCP-Protocol-Version` rejection or
-/// a JSON-RPC `METHOD_NOT_FOUND`/protocol-version error. Anything else
-/// (401/403, DNS, timeout, connection reset) is left untouched.
+fn auto_lifecycle_mode() -> ClientLifecycleMode {
+    ClientLifecycleMode::Auto {
+        preferred_versions: PREFERRED_PROTOCOL_VERSIONS.to_vec(),
+        legacy_version: Some(ProtocolVersion::V_2025_11_25),
+    }
+}
+
+fn lifecycle_mode_label(mode: &ClientLifecycleMode) -> &'static str {
+    match mode {
+        ClientLifecycleMode::Initialize => "legacy initialize",
+        ClientLifecycleMode::Auto { .. } | ClientLifecycleMode::Discover { .. } => {
+            "modern discover"
+        }
+        _ => "unknown lifecycle",
+    }
+}
+
+/// The upstream lifecycle that last succeeded for a server, so subsequent
+/// requests skip the rejected `server/discover` probe.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum UpstreamLifecycle {
+    Auto,
+    LegacyInitialize,
+}
+
+/// Freshness window for the learned lifecycle. Long enough that the rejected
+/// probe is not replayed on every request, short enough that an upstream
+/// upgrade is picked up automatically.
+const LIFECYCLE_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+const LIFECYCLE_CACHE_MAX_ENTRIES: usize = 512;
+
+#[derive(Clone, Copy)]
+struct LifecycleCacheEntry {
+    learned_at: Instant,
+    lifecycle: UpstreamLifecycle,
+}
+
+/// Keyed by `(server_id, updated_at)`: editing the server config invalidates
+/// the learned lifecycle immediately.
+type LifecycleCacheKey = (Uuid, DateTime<Utc>);
+
+#[derive(Default)]
+struct LifecycleCacheStore {
+    entries: HashMap<LifecycleCacheKey, LifecycleCacheEntry>,
+}
+
+impl LifecycleCacheStore {
+    fn cached_lifecycle(&mut self, key: LifecycleCacheKey) -> Option<UpstreamLifecycle> {
+        match self.entries.get(&key) {
+            Some(entry) if entry.learned_at.elapsed() < LIFECYCLE_CACHE_TTL => {
+                Some(entry.lifecycle)
+            }
+            Some(_) => {
+                self.entries.remove(&key);
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn record_lifecycle(&mut self, key: LifecycleCacheKey, lifecycle: UpstreamLifecycle) {
+        self.entries.insert(
+            key,
+            LifecycleCacheEntry {
+                learned_at: Instant::now(),
+                lifecycle,
+            },
+        );
+        if self.entries.len() > LIFECYCLE_CACHE_MAX_ENTRIES {
+            // Drop the oldest half; entries are cheap to relearn.
+            let mut by_age: Vec<_> = self.entries.drain().collect();
+            by_age.sort_by_key(|(_, entry)| entry.learned_at);
+            by_age.truncate(LIFECYCLE_CACHE_MAX_ENTRIES / 2);
+            self.entries.extend(by_age);
+        }
+    }
+
+    fn clear_lifecycle(&mut self, key: LifecycleCacheKey) {
+        self.entries.remove(&key);
+    }
+}
+
+static LIFECYCLE_CACHE: LazyLock<Mutex<LifecycleCacheStore>> =
+    LazyLock::new(|| Mutex::new(LifecycleCacheStore::default()));
+
+fn cached_lifecycle(key: LifecycleCacheKey) -> Option<UpstreamLifecycle> {
+    lock_lifecycle_cache().cached_lifecycle(key)
+}
+
+fn record_lifecycle(key: LifecycleCacheKey, lifecycle: UpstreamLifecycle) {
+    lock_lifecycle_cache().record_lifecycle(key, lifecycle);
+}
+
+fn clear_lifecycle(key: LifecycleCacheKey) {
+    lock_lifecycle_cache().clear_lifecycle(key);
+}
+
+fn lock_lifecycle_cache() -> std::sync::MutexGuard<'static, LifecycleCacheStore> {
+    LIFECYCLE_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// True when the connect error means "this server cannot do the lifecycle
+/// that was attempted": a protocol-version rejection (standard JSON-RPC code,
+/// message, nested `data`, or HTTP-layer `Unsupported MCP-Protocol-Version`)
+/// or a discover response whose supported-version list has no overlap.
+/// Anything else (401/403, DNS, timeout, connection reset, unrelated
+/// `-32603`) is left untouched.
 fn is_protocol_rejection(err: &anyhow::Error) -> bool {
-    if let Some(rmcp::service::ServiceError::McpError(rmcp::ErrorData { code, .. })) =
+    if let Some(rmcp::service::ServiceError::McpError(error_data)) =
         err.downcast_ref::<rmcp::service::ServiceError>()
     {
-        return matches!(
-            code.0,
-            -32601 /* METHOD_NOT_FOUND */ | -32022 /* UNSUPPORTED_PROTOCOL_VERSION */
-        );
+        return is_protocol_rejection_error(error_data);
+    }
+    if let Some(rmcp::service::ClientInitializeError::JsonRpcError(error_data)) =
+        err.downcast_ref::<rmcp::service::ClientInitializeError>()
+    {
+        return is_protocol_rejection_error(error_data);
+    }
+    if let Some(rmcp::service::ClientInitializeError::NoCompatibleProtocolVersion { .. }) =
+        err.downcast_ref::<rmcp::service::ClientInitializeError>()
+    {
+        return true;
     }
     if let Some(rmcp::service::ClientInitializeError::TransportError { error, .. }) =
         err.downcast_ref::<rmcp::service::ClientInitializeError>()
@@ -144,13 +310,66 @@ fn is_protocol_rejection(err: &anyhow::Error) -> bool {
             .downcast_ref::<rmcp::transport::streamable_http_client::StreamableHttpError<reqwest::Error>>()
             .is_some_and(is_unsupported_version_response);
     }
-    if let Some(rmcp::service::ClientInitializeError::JsonRpcError(rmcp::ErrorData {
-        code, ..
-    })) = err.downcast_ref::<rmcp::service::ClientInitializeError>()
-    {
-        return matches!(code.0, -32601 | -32022);
-    }
     false
+}
+
+fn is_protocol_rejection_error(error_data: &rmcp::ErrorData) -> bool {
+    if is_rejection_code(i64::from(error_data.code.0)) {
+        return true;
+    }
+    if message_mentions_unsupported_protocol(&error_data.message) {
+        return true;
+    }
+    error_data
+        .data
+        .as_ref()
+        .is_some_and(json_contains_protocol_rejection)
+}
+
+fn is_rejection_code(code: i64) -> bool {
+    matches!(
+        code,
+        -32601 /* METHOD_NOT_FOUND */ | -32022 /* UNSUPPORTED_PROTOCOL_VERSION */
+    )
+}
+
+/// Message check for rejections carried by non-standard JSON-RPC codes
+/// (e.g. `-32000 Bad Request` from a gateway) that still name the protocol.
+/// Matches both the participle ("not supported") and base form ("does not
+/// support") phrasing.
+fn message_mentions_unsupported_protocol(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("protocol version")
+        && (lower.contains("unsupported")
+            || lower.contains("not supported")
+            || lower.contains("does not support"))
+}
+
+/// Recursively searches a JSON-RPC `data` payload for a nested
+/// unsupported-protocol-version error: some servers/gateways wrap the real
+/// rejection inside a generic error (`-32603`/`-32000`) whose `data` carries
+/// the original message and supported-version list.
+fn json_contains_protocol_rejection(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            if let Some(message) = map.get("message").and_then(Value::as_str)
+                && message_mentions_unsupported_protocol(message)
+            {
+                return true;
+            }
+            if map
+                .get("code")
+                .and_then(Value::as_i64)
+                .is_some_and(is_rejection_code)
+            {
+                return true;
+            }
+            map.values().any(json_contains_protocol_rejection)
+        }
+        Value::Array(items) => items.iter().any(json_contains_protocol_rejection),
+        Value::String(text) => message_mentions_unsupported_protocol(text),
+        _ => false,
+    }
 }
 
 fn is_unsupported_version_response(
@@ -357,4 +576,182 @@ fn json_string_vec(value: &Value) -> Vec<String> {
         .into_iter()
         .filter_map(|value| value.as_str().map(str::to_string))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use rmcp::{ErrorData, model::ErrorCode, service::ClientInitializeError};
+
+    use super::*;
+
+    fn error_data(code: i32, message: &str, data: Option<Value>) -> ErrorData {
+        ErrorData::new(ErrorCode(code), message.to_string(), data)
+    }
+
+    fn json_rpc_error(code: i32, message: &str, data: Option<Value>) -> anyhow::Error {
+        anyhow::Error::new(ClientInitializeError::JsonRpcError(error_data(
+            code, message, data,
+        )))
+    }
+
+    fn mcp_error(code: i32, message: &str, data: Option<Value>) -> anyhow::Error {
+        anyhow::Error::new(rmcp::service::ServiceError::McpError(error_data(
+            code, message, data,
+        )))
+    }
+
+    #[test]
+    fn rejects_standard_protocol_error_codes() {
+        assert!(is_protocol_rejection(&json_rpc_error(
+            -32022,
+            "Unsupported protocol version",
+            None
+        )));
+        assert!(is_protocol_rejection(&json_rpc_error(
+            -32601,
+            "Method not found",
+            None
+        )));
+        assert!(is_protocol_rejection(&mcp_error(
+            -32022,
+            "Unsupported protocol version",
+            None
+        )));
+        assert!(is_protocol_rejection(&mcp_error(
+            -32601,
+            "Method not found",
+            None
+        )));
+    }
+
+    #[test]
+    fn rejects_nonstandard_error_with_protocol_message() {
+        assert!(is_protocol_rejection(&json_rpc_error(
+            -32000,
+            "Unsupported protocol version: 2026-07-28",
+            None,
+        )));
+        assert!(is_protocol_rejection(&json_rpc_error(
+            -32000,
+            "The requested protocol version (2026-07-28) is not supported",
+            None,
+        )));
+        assert!(is_protocol_rejection(&json_rpc_error(
+            -32000,
+            "The server does not support protocol version 2026-07-28",
+            None,
+        )));
+    }
+
+    #[test]
+    fn rejects_nested_error_wrapped_in_generic_internal_error() {
+        // The screenshot scenario: a generic -32603/-32000 outer error whose
+        // `data` carries the real unsupported-version message and list.
+        for outer in [-32603, -32000] {
+            let wrapped = json_rpc_error(
+                outer,
+                "Internal error",
+                Some(json!({
+                    "error": {
+                        "code": -32000,
+                        "message": "Bad Request",
+                        "data": {
+                            "message": "Unsupported protocol version: 2026-07-28",
+                            "supported": ["2025-11-25", "2025-06-18"],
+                        },
+                    }
+                })),
+            );
+            assert!(
+                is_protocol_rejection(&wrapped),
+                "outer code {outer} must be classified"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_no_compatible_protocol_version() {
+        let err = anyhow::Error::new(ClientInitializeError::NoCompatibleProtocolVersion {
+            client_supported: vec![ProtocolVersion::V_2026_07_28],
+            server_supported: vec![],
+        });
+        assert!(is_protocol_rejection(&err));
+    }
+
+    #[test]
+    fn ignores_unrelated_errors() {
+        assert!(!is_protocol_rejection(&json_rpc_error(
+            -32603,
+            "Internal server error",
+            Some(json!({ "err": "boom" })),
+        )));
+        assert!(!is_protocol_rejection(&json_rpc_error(
+            -32000,
+            "Bad Request",
+            Some(json!({ "detail": "invalid json body" })),
+        )));
+        assert!(!is_protocol_rejection(&json_rpc_error(
+            -32600,
+            "Invalid Request",
+            None
+        )));
+        assert!(!is_protocol_rejection(&anyhow::Error::new(
+            ClientInitializeError::ConnectionClosed("reset".to_string()),
+        )));
+        assert!(!is_protocol_rejection(&anyhow::Error::new(
+            ClientInitializeError::NoPreferredProtocolVersion,
+        )));
+    }
+
+    #[test]
+    fn lifecycle_cache_roundtrips_and_invalidates_on_server_update() {
+        let mut cache = LifecycleCacheStore::default();
+        let key = (Uuid::new_v4(), Utc::now());
+        let other_key = (key.0, key.1 + chrono::Duration::seconds(1));
+
+        assert_eq!(cache.cached_lifecycle(key), None);
+        cache.record_lifecycle(key, UpstreamLifecycle::LegacyInitialize);
+        assert_eq!(
+            cache.cached_lifecycle(key),
+            Some(UpstreamLifecycle::LegacyInitialize)
+        );
+
+        // A bumped updated_at (server edit) must invalidate the entry.
+        assert_eq!(cache.cached_lifecycle(other_key), None);
+        cache.record_lifecycle(other_key, UpstreamLifecycle::Auto);
+        assert_eq!(
+            cache.cached_lifecycle(key),
+            Some(UpstreamLifecycle::LegacyInitialize)
+        );
+        assert_eq!(
+            cache.cached_lifecycle(other_key),
+            Some(UpstreamLifecycle::Auto)
+        );
+
+        cache.clear_lifecycle(other_key);
+        assert_eq!(cache.cached_lifecycle(other_key), None);
+        assert_eq!(
+            cache.cached_lifecycle(key),
+            Some(UpstreamLifecycle::LegacyInitialize)
+        );
+    }
+
+    #[test]
+    fn lifecycle_cache_expires_entries() {
+        let mut cache = LifecycleCacheStore::default();
+        let key = (Uuid::new_v4(), Utc::now());
+        cache.record_lifecycle(key, UpstreamLifecycle::Auto);
+        cache.entries.get_mut(&key).unwrap().learned_at =
+            Instant::now() - LIFECYCLE_CACHE_TTL - Duration::from_secs(1);
+        assert_eq!(cache.cached_lifecycle(key), None);
+    }
+
+    #[test]
+    fn lifecycle_cache_evicts_oldest_when_over_capacity() {
+        let mut cache = LifecycleCacheStore::default();
+        for _ in 0..LIFECYCLE_CACHE_MAX_ENTRIES + 16 {
+            cache.record_lifecycle((Uuid::new_v4(), Utc::now()), UpstreamLifecycle::Auto);
+        }
+        assert!(cache.entries.len() <= LIFECYCLE_CACHE_MAX_ENTRIES);
+    }
 }

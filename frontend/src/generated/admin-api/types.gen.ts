@@ -239,6 +239,15 @@ export type CreateUserRequest = {
     password: string;
 };
 
+export type CredentialPageResponse = {
+    credentials: Array<McpCredentialView>;
+    total: number;
+};
+
+export type CredentialQuotaBindingRequest = {
+    quota_group_id?: string | null;
+};
+
 export type CustomStringMatchSchema = 'exact' | 'contains' | 'regex';
 
 export type CustomStringRuleSchema = {
@@ -442,6 +451,59 @@ export type McpCatalogResponse = {
     prompts: Array<McpCatalogItem>;
     resources: Array<McpCatalogItem>;
     tools: Array<McpCatalogItem>;
+};
+
+/**
+ * Admin-API wire representation of a credential. The raw `secret` is
+ * deliberately never serialized; only a masked preview is exposed.
+ */
+export type McpCredentialView = {
+    billing_period_end?: string | null;
+    billing_period_start?: string | null;
+    cooldown_until?: string | null;
+    created_at: string;
+    credential_id: string;
+    credential_label: string;
+    daily_limit?: number | null;
+    default_cost: number;
+    enabled: boolean;
+    last_error?: string | null;
+    last_error_at?: string | null;
+    monthly_limit?: number | null;
+    position: number;
+    provider_kind?: string | null;
+    provider_remaining?: number | null;
+    provider_reset_at?: string | null;
+    provider_synced_at?: string | null;
+    quota_group_id?: string | null;
+    secret_preview: string;
+    server_id: string;
+    strict_mode: boolean;
+    updated_at: string;
+};
+
+export type McpQuotaAccountSnapshot = {
+    account_id: number;
+    period: QuotaPeriod;
+    reserved_units: number;
+    used_units: number;
+};
+
+export type McpQuotaGroup = {
+    billing_period_end?: string | null;
+    billing_period_start?: string | null;
+    created_at: string;
+    daily_limit?: number | null;
+    default_cost: number;
+    group_id: string;
+    monthly_limit?: number | null;
+    name: string;
+    owner_user_id?: number | null;
+    provider_kind?: string | null;
+    scope: string;
+    strict_mode: boolean;
+    unit: string;
+    updated_at: string;
 };
 
 export type McpServer = {
@@ -709,6 +771,36 @@ export type ProviderEndpoint = {
     scope: string;
     updated_at: string;
 };
+
+export type QuotaGroupRequest = {
+    billing_period_end?: string | null;
+    billing_period_start?: string | null;
+    daily_limit?: number | null;
+    default_cost?: number | null;
+    monthly_limit?: number | null;
+    name: string;
+    owner_user_id?: number | null;
+    provider_kind?: string | null;
+    scope?: string | null;
+    strict_mode?: boolean | null;
+    unit?: null | QuotaUnit;
+};
+
+export type QuotaGroupUsageResponse = {
+    day?: null | McpQuotaAccountSnapshot;
+    group: McpQuotaGroup;
+    month?: null | McpQuotaAccountSnapshot;
+};
+
+export type QuotaPeriod = {
+    end: string;
+    kind: QuotaPeriodKind;
+    start: string;
+};
+
+export type QuotaPeriodKind = 'day' | 'month';
+
+export type QuotaUnit = 'requests' | 'credits';
 
 export type RedactionConfigSchema = {
     custom_strings: Array<CustomStringRuleSchema>;
@@ -1686,6 +1778,101 @@ export type TestEndpointResponses = {
 
 export type TestEndpointResponse = TestEndpointResponses[keyof TestEndpointResponses];
 
+export type ListQuotaGroupsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mcp-quota-groups';
+};
+
+export type ListQuotaGroupsResponses = {
+    /**
+     * Quota groups
+     */
+    200: Array<McpQuotaGroup>;
+};
+
+export type ListQuotaGroupsResponse = ListQuotaGroupsResponses[keyof ListQuotaGroupsResponses];
+
+export type CreateQuotaGroupData = {
+    body: QuotaGroupRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mcp-quota-groups';
+};
+
+export type CreateQuotaGroupResponses = {
+    /**
+     * Created quota group
+     */
+    200: McpQuotaGroup;
+};
+
+export type CreateQuotaGroupResponse = CreateQuotaGroupResponses[keyof CreateQuotaGroupResponses];
+
+export type DeleteQuotaGroupData = {
+    body?: never;
+    path: {
+        /**
+         * Quota group ID
+         */
+        group_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mcp-quota-groups/{group_id}';
+};
+
+export type DeleteQuotaGroupResponses = {
+    /**
+     * Deleted quota group
+     */
+    204: void;
+};
+
+export type DeleteQuotaGroupResponse = DeleteQuotaGroupResponses[keyof DeleteQuotaGroupResponses];
+
+export type UpdateQuotaGroupData = {
+    body: QuotaGroupRequest;
+    path: {
+        /**
+         * Quota group ID
+         */
+        group_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mcp-quota-groups/{group_id}';
+};
+
+export type UpdateQuotaGroupResponses = {
+    /**
+     * Updated quota group
+     */
+    200: McpQuotaGroup;
+};
+
+export type UpdateQuotaGroupResponse = UpdateQuotaGroupResponses[keyof UpdateQuotaGroupResponses];
+
+export type QuotaGroupUsageData = {
+    body?: never;
+    path: {
+        /**
+         * Quota group ID
+         */
+        group_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mcp-quota-groups/{group_id}/usage';
+};
+
+export type QuotaGroupUsageResponses = {
+    /**
+     * Quota group usage
+     */
+    200: QuotaGroupUsageResponse;
+};
+
+export type QuotaGroupUsageResponse2 = QuotaGroupUsageResponses[keyof QuotaGroupUsageResponses];
+
 export type ListMcpServersData = {
     body?: never;
     path?: never;
@@ -1783,6 +1970,52 @@ export type GetMcpCatalogResponses = {
 };
 
 export type GetMcpCatalogResponse = GetMcpCatalogResponses[keyof GetMcpCatalogResponses];
+
+export type ListServerCredentialsData = {
+    body?: never;
+    path: {
+        /**
+         * MCP server ID
+         */
+        server_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mcp-servers/{server_id}/credentials';
+};
+
+export type ListServerCredentialsResponses = {
+    /**
+     * Server credentials
+     */
+    200: CredentialPageResponse;
+};
+
+export type ListServerCredentialsResponse = ListServerCredentialsResponses[keyof ListServerCredentialsResponses];
+
+export type BindCredentialGroupData = {
+    body: CredentialQuotaBindingRequest;
+    path: {
+        /**
+         * MCP server ID
+         */
+        server_id: string;
+        /**
+         * Credential ID
+         */
+        credential_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mcp-servers/{server_id}/credentials/{credential_id}/quota-group';
+};
+
+export type BindCredentialGroupResponses = {
+    /**
+     * Updated credential
+     */
+    200: McpCredentialView;
+};
+
+export type BindCredentialGroupResponse = BindCredentialGroupResponses[keyof BindCredentialGroupResponses];
 
 export type TestMcpServerData = {
     body?: never;

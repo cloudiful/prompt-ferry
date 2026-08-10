@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::db::{McpCredential, McpQuotaAccountSnapshot, McpQuotaGroup, QuotaUnit};
+use crate::db::{McpCredentialView, McpQuotaAccountSnapshot, McpQuotaGroup, QuotaUnit};
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct QuotaGroupRequest {
@@ -45,7 +45,7 @@ pub struct CredentialQuotaBindingRequest {
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct CredentialPageResponse {
-    pub credentials: Vec<McpCredential>,
+    pub credentials: Vec<McpCredentialView>,
     pub total: i64,
 }
 

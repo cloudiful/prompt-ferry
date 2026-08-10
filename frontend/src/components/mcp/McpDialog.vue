@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { McpCatalogResponse, User } from '@/generated/admin-api'
+import type {
+  McpCatalogResponse,
+  McpQuotaGroup,
+  User,
+} from '@/generated/admin-api'
 import type { McpForm } from '@/models'
 import McpBearerTokensEditor from '@/components/mcp/McpBearerTokensEditor.vue'
+import McpCredentialQuotaEditor from '@/components/mcp/McpCredentialQuotaEditor.vue'
 import RequestLimitFields from '@/components/shared/RequestLimitFields.vue'
 
 const props = defineProps<{
@@ -13,6 +18,7 @@ const props = defineProps<{
   t: TranslateFn
   catalog: McpCatalogResponse
   users: User[]
+  quotaGroups: McpQuotaGroup[]
 }>()
 
 const visible = defineModel<boolean>('visible', { required: true })
@@ -177,6 +183,12 @@ defineEmits<{
           <McpBearerTokensEditor
             v-if="form.transport === 'http'"
             v-model:tokens="form.bearer_tokens"
+            :t="t"
+          />
+          <McpCredentialQuotaEditor
+            v-if="form.transport === 'http' && isAdmin"
+            :server-id="form.server_id"
+            :quota-groups="quotaGroups"
             :t="t"
           />
           <UTextarea
