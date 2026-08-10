@@ -222,7 +222,8 @@ pub(super) async fn forward_route_request(
                 });
             }
             Ok(response) => {
-                let outcome = handle_attempt_response(response, response_ctx.cloned()).await?;
+                let outcome =
+                    Box::pin(handle_attempt_response(response, response_ctx.cloned())).await?;
                 match outcome {
                     AttemptOutcome::Handled => {
                         if retried {
@@ -280,7 +281,7 @@ async fn handle_attempt_response(
     response: reqwest::Response,
     context: ResponseForwardContext<'_>,
 ) -> anyhow::Result<AttemptOutcome> {
-    match forward_upstream_response(response, context).await {
+    match Box::pin(forward_upstream_response(response, context)).await {
         Ok(()) => Ok(AttemptOutcome::Handled),
         Err(err) => match err.downcast::<UpstreamAttemptFailure>() {
             Ok(failure) => Ok(AttemptOutcome::Failure(failure)),

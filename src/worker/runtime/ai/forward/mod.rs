@@ -178,14 +178,14 @@ pub(super) async fn forward_upstream_response(
         return forward_non_stream_responses_response(response, context.cloned(), capture).await;
     }
 
-    forward_streaming_response(
+    Box::pin(forward_streaming_response(
         response,
         context.cloned(),
         assistant_capture.as_mut(),
         responses_capture.as_mut(),
         upstream_content_type,
         is_sse,
-    )
+    ))
     .await
 }
 

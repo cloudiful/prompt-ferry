@@ -94,7 +94,7 @@ async fn forward_test_request(
 ) -> anyhow::Result<ForwardOutcome> {
     let request = test_request();
     let request_ctx = test_request_ctx(&services.runtime_state);
-    forward_route_request(RouteForwardRequest {
+    Box::pin(forward_route_request(RouteForwardRequest {
         services,
         request: &request,
         request_ctx: &request_ctx,
@@ -103,7 +103,7 @@ async fn forward_test_request(
         redact_content: false,
         content_logging_enabled: false,
         raw_content_logging_enabled: false,
-    })
+    }))
     .await
 }
 

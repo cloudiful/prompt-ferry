@@ -100,7 +100,7 @@ pub(in crate::worker::runtime) async fn process_request(
         return respond_with_client_error(services, &request, &request_ctx, &route_ctx, err).await;
     }
 
-    let outcome = forward_route_request(RouteForwardRequest {
+    let outcome = Box::pin(forward_route_request(RouteForwardRequest {
         services,
         request: &request,
         request_ctx: &request_ctx,
@@ -109,7 +109,7 @@ pub(in crate::worker::runtime) async fn process_request(
         redact_content,
         content_logging_enabled,
         raw_content_logging_enabled,
-    })
+    }))
     .await?;
     let route_ctx = RouteExecutionContext::new(&route);
     let err = match outcome {

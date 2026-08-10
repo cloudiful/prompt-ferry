@@ -364,7 +364,7 @@ trait GrantOutcome {
 impl GrantOutcome for ReserveOutcome {
     fn granted(self, label: &str) -> anyhow::Result<prompt_ferry::db::QuotaGrant> {
         match self {
-            ReserveOutcome::Granted(grant) => Ok(grant),
+            ReserveOutcome::Granted(grant) => Ok(*grant),
             ReserveOutcome::BudgetExceeded => anyhow::bail!("{label}: budget exceeded"),
             ReserveOutcome::NoBudget => anyhow::bail!("{label}: no budget"),
         }

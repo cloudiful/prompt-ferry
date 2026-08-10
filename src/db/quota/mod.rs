@@ -57,7 +57,7 @@ pub async fn load_accounts_for_group(
 /// requests can never overspend a group.
 #[derive(Debug, Clone)]
 pub enum ReserveOutcome {
-    Granted(QuotaGrant),
+    Granted(Box<QuotaGrant>),
     /// No quota constraints configured; the request may proceed without a
     /// reservation.
     NoBudget,
@@ -123,12 +123,12 @@ pub async fn reserve_for_credential(
     )
     .await?;
     tx.commit().await?;
-    Ok(ReserveOutcome::Granted(QuotaGrant {
+    Ok(ReserveOutcome::Granted(Box::new(QuotaGrant {
         credential: credential.clone(),
         reservation,
         day_account,
         month_account,
-    }))
+    })))
 }
 
 async fn reserve_account(

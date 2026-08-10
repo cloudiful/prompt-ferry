@@ -12,7 +12,7 @@ const MAX_PICK_ATTEMPTS: usize = 3;
 /// Outcome of preparing quota for one MCP request.
 pub enum QuotaDecision {
     /// Quota reserved and a credential selected for the upstream call.
-    Granted { grant: QuotaGrant },
+    Granted { grant: Box<QuotaGrant> },
     /// No quota constraints configured; fall back to legacy token selection.
     Unconstrained,
     /// Every credential is exhausted, cooling down, or disabled.

@@ -11,6 +11,9 @@ readme = "README.md"
 description = "OpenAI-compatible relay and worker for upstream ferrying"
 default-run = "prompt-ferry"
 
+[lints.clippy]
+large_futures = "deny"
+
 [lib]
 name = "prompt_ferry"
 
