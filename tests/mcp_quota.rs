@@ -12,10 +12,6 @@ use prompt_ferry::db::{
     sync_credentials_from_tokens,
 };
 
-fn test_database_url() -> Option<String> {
-    std::env::var(TEST_DATABASE_URL_ENV).ok()
-}
-
 async fn insert_mcp_server(pool: &PgPool, name: &str) -> Uuid {
     let server_id = Uuid::new_v4();
     sqlx::query(

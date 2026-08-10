@@ -1,11 +1,11 @@
 #[path = "support/db_harness.rs"]
 mod db_harness;
-#[path = "support/prompt_logging_harness.rs"]
+#[path = "support/raw_prompt_logging_harness.rs"]
 mod prompt_logging_harness;
 #[path = "support/replay_harness.rs"]
 mod relay_harness;
-#[path = "support/replay_upstream_harness.rs"]
-mod replay_upstream_harness;
+#[path = "support/replay_responses_upstream_harness.rs"]
+mod replay_responses_upstream_harness;
 #[path = "support/worker_database_url_harness.rs"]
 mod worker_database_url_harness;
 #[path = "support/worker_spawn_harness.rs"]
@@ -26,8 +26,8 @@ use uuid::Uuid;
 use crate::db_harness::{TEST_DATABASE_URL_ENV, TestSchema, test_database_configured};
 use crate::prompt_logging_harness::{enable_prompt_logging, enable_raw_prompt_logging};
 use crate::relay_harness::{spawn_relay, wait_for_worker, worker_config};
-use crate::replay_upstream_harness::{
-    ChatRequestLog, spawn_replay_responses_upstream,
+use crate::replay_responses_upstream_harness::{
+    ChatRequestLog, ResponsesRequestLog, spawn_replay_responses_upstream,
     spawn_replay_responses_upstream_without_conversation, spawn_replay_upstream,
 };
 use crate::worker_database_url_harness::worker_database_url;
@@ -838,7 +838,7 @@ async fn falls_back_to_pg_snapshot_when_local_cache_snapshot_is_stale() -> anyho
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr = spawn_replay_responses_upstream(upstream_log).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let worker_db_url = worker_database_url(&schema)?;
@@ -1333,7 +1333,7 @@ async fn replays_previous_response_id_for_responses_native_upstream_without_forw
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
@@ -1404,7 +1404,7 @@ async fn passthrough_responses_native_tool_continuations_use_stored_replay() -> 
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
@@ -1515,7 +1515,7 @@ async fn restores_deepseek_responses_reasoning_without_conversation_identity() -
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
@@ -1636,7 +1636,7 @@ async fn force_replay_does_not_infer_session_from_tool_output_without_explicit_i
     let schema = TestSchema::new().await?;
     enable_raw_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
@@ -1754,7 +1754,7 @@ async fn codex_thread_identity_keeps_tool_output_replay_on_one_conversation() ->
     let schema = TestSchema::new().await?;
     enable_raw_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
@@ -1907,8 +1907,8 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let cctq_log = Arc::new(ChatRequestLog::default());
-    let right_code_log = Arc::new(ChatRequestLog::default());
+    let cctq_log = Arc::new(ResponsesRequestLog::default());
+    let right_code_log = Arc::new(ResponsesRequestLog::default());
     let cctq_addr = spawn_replay_responses_upstream(cctq_log.clone()).await;
     let right_code_addr = spawn_replay_responses_upstream(right_code_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -2051,7 +2051,7 @@ async fn raw_passthrough_keeps_previous_response_id_without_replay_state() -> an
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
@@ -2138,7 +2138,7 @@ async fn raw_passthrough_keeps_conversation_without_replay_state() -> anyhow::Re
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
@@ -2221,7 +2221,7 @@ async fn replays_conversation_for_responses_native_upstream() -> anyhow::Result<
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
@@ -2327,7 +2327,7 @@ async fn replays_conversation_for_chat_native_upstream() -> anyhow::Result<()> {
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
@@ -2393,7 +2393,7 @@ async fn starts_explicit_conversation_without_prior_history() -> anyhow::Result<
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
@@ -2455,7 +2455,7 @@ async fn local_conversation_replay_survives_upstream_without_conversation_id() -
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     let upstream_addr =
         spawn_replay_responses_upstream_without_conversation(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -2602,7 +2602,7 @@ async fn explicit_conversation_skips_failed_turn_when_selecting_parent() -> anyh
     let schema = TestSchema::new().await?;
     enable_prompt_logging(&schema).await?;
 
-    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
     {
         let mut fail_turns = upstream_log.fail_next_response_turns.lock().await;
         fail_turns.push(2);

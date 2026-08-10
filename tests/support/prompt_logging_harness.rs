@@ -9,11 +9,7 @@ pub async fn enable_prompt_logging(schema: &TestSchema) -> anyhow::Result<()> {
     set_prompt_logging(schema, RequestContentLoggingMode::NormalizedOnly).await
 }
 
-pub async fn enable_raw_prompt_logging(schema: &TestSchema) -> anyhow::Result<()> {
-    set_prompt_logging(schema, RequestContentLoggingMode::NormalizedAndRaw).await
-}
-
-async fn set_prompt_logging(
+pub async fn set_prompt_logging(
     schema: &TestSchema,
     mode: RequestContentLoggingMode,
 ) -> anyhow::Result<()> {
