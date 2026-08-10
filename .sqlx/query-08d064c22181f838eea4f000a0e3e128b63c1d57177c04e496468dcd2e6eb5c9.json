@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT request_conversation_key\nFROM request_records\nWHERE event_id = $1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "request_conversation_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_conversation_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "08d064c22181f838eea4f000a0e3e128b63c1d57177c04e496468dcd2e6eb5c9"
+}

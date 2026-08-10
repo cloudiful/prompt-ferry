@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_record_leases (\n    request_id,\n    owner_worker_id,\n    lease_expires_at,\n    last_heartbeat_at\n)\nVALUES ($1, NULL, $2, $3)\nON CONFLICT (request_id) DO UPDATE\nSET lease_expires_at = EXCLUDED.lease_expires_at,\n    last_heartbeat_at = EXCLUDED.last_heartbeat_at,\n    updated_at = NOW();\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ee07d44ab395f60c5675472b411b0905a7f44c68a8dc2e4e2ddb6687dc8d8b19"
+}

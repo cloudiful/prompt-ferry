@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    event_id,\n    parent_event_id,\n    conversation_seq AS \"conversation_seq!\",\n    request_state AS \"request_state!\"\nFROM request_records\nWHERE path = '/v1/responses'\n  AND request_conversation_key = $1\nORDER BY event_id ASC\nLIMIT 3\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "parent_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "parent_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "conversation_seq!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "conversation_seq"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "request_state!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "request_state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "a0c1983ab055ed2dac748525ca9b08511e62a69ba671ea08516c0b4a18076522"
+}

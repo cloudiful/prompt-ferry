@@ -1,0 +1,63 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    EXISTS(\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_name = 'request_records'\n          AND column_name = 'request_raw_json'\n    ) AS old_request_raw_column,\n    EXISTS(\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_name = 'request_records'\n          AND column_name = 'response_raw_body'\n    ) AS old_response_raw_column,\n    EXISTS(\n        SELECT 1\n        FROM pg_class\n        WHERE relname = 'request_record_raw_payloads'\n          AND relkind = 'p'\n    ) AS raw_parent_is_partitioned,\n    EXISTS(\n        SELECT 1\n        FROM pg_inherits inheritance\n        JOIN pg_class child ON child.oid = inheritance.inhrelid\n        WHERE child.relname = 'request_record_raw_payloads_default'\n    ) AS default_partition_exists,\n    EXISTS(\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_name = 'request_record_raw_payloads_overflow'\n          AND column_name = 'request_raw_json'\n    ) AS overflow_table_exists,\n    EXISTS(\n        SELECT 1\n        FROM pg_indexes\n        WHERE tablename = 'request_record_raw_payloads'\n          AND indexname = 'idx_request_record_raw_payloads_event_id'\n    ) AS event_id_index_exists,\n    EXISTS(\n        SELECT 1\n        FROM pg_indexes\n        WHERE tablename = 'request_record_raw_payloads'\n          AND indexname = 'idx_request_record_raw_payloads_created_at_event_id'\n    ) AS created_at_event_id_index_exists;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "old_request_raw_column",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "old_response_raw_column",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "raw_parent_is_partitioned",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "default_partition_exists",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "overflow_table_exists",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "event_id_index_exists",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at_event_id_index_exists",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "6f5c8f0f97819989e8b0227b3cd3f63201fa6ecd7eca04e2defbdd632dedc259"
+}

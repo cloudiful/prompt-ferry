@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT conversation_seq,\n       ref_count,\n       byte_size\nFROM request_record_replay_snapshots\nWHERE conversation_id = $1\nORDER BY conversation_seq DESC, event_id DESC\nLIMIT 1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "conversation_seq",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_record_replay_snapshots",
+            "name": "conversation_seq"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "ref_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_record_replay_snapshots",
+            "name": "ref_count"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "byte_size",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_record_replay_snapshots",
+            "name": "byte_size"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e475936b6e27e10fe3342e4152f090f1da8c28d8ca318aef5e7bfcf90c57f732"
+}
