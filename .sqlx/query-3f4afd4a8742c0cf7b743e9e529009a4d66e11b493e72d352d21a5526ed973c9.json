@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM mcp_credentials WHERE credential_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3f4afd4a8742c0cf7b743e9e529009a4d66e11b493e72d352d21a5526ed973c9"
+}

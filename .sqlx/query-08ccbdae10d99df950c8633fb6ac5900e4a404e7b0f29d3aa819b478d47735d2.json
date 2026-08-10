@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT group_id\nFROM mcp_quota_groups\nWHERE group_id = md5('group:' || $1::uuid::text)::uuid\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "group_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "group_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "08ccbdae10d99df950c8633fb6ac5900e4a404e7b0f29d3aa819b478d47735d2"
+}

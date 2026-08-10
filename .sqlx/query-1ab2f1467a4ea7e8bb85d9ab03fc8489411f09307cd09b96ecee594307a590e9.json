@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH pending AS (\n    SELECT reservation_id, day_account_id, month_account_id, units\n    FROM mcp_quota_reservations\n    WHERE status = 'reserved' AND expires_at < NOW()\n    ORDER BY expires_at ASC\n    LIMIT 500\n),\nmarked AS (\n    UPDATE mcp_quota_reservations r\n    SET status = 'released',\n        updated_at = NOW()\n    FROM pending p\n    WHERE r.reservation_id = p.reservation_id\n    RETURNING r.day_account_id, r.month_account_id, p.units\n)\nUPDATE mcp_quota_accounts a\nSET reserved_units = GREATEST(a.reserved_units - m.units, 0),\n    updated_at = NOW()\nFROM marked m\nWHERE a.account_id = m.day_account_id OR a.account_id = m.month_account_id\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "1ab2f1467a4ea7e8bb85d9ab03fc8489411f09307cd09b96ecee594307a590e9"
+}

@@ -1,0 +1,280 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT credential_id, server_id, credential_label, secret, position, enabled, quota_group_id,\n       provider_kind, daily_limit, monthly_limit, default_cost, strict_mode,\n       billing_period_start, billing_period_end, provider_remaining, provider_synced_at,\n       provider_reset_at, cooldown_until, last_error, last_error_at, created_at, updated_at\nFROM mcp_credentials\nWHERE server_id = $1\nORDER BY position ASC, credential_id ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "credential_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "credential_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "server_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "credential_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "credential_label"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "secret",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "secret"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "position",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "quota_group_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "quota_group_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "provider_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "provider_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "daily_limit",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "daily_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "monthly_limit",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "monthly_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "default_cost",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "default_cost"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "strict_mode",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "strict_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "billing_period_start",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "billing_period_start"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "billing_period_end",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "billing_period_end"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "provider_remaining",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "provider_remaining"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "provider_synced_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "provider_synced_at"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "provider_reset_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "provider_reset_at"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "cooldown_until",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "cooldown_until"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "last_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "last_error"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "last_error_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "last_error_at"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "2edc15963207ecf96949779a8092e273ad8f81c839304302e2e4caf1244f92c3"
+}

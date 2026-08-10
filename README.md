@@ -22,6 +22,9 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 - Configurable redaction for forwarded content, logs, and usage details.
 - Managed users, client API keys, upstream endpoints, model routes, and multiple relays.
 - MCP aggregation for HTTP and stdio servers, request usage and replay, retention, approval, and billing.
+- MCP credential quota: per-credential and shared quota-group budgets (requests or credits) with
+  atomic reservation, usage-ratio balancing across API keys, cooldown on auth/throttle failures,
+  and provider credit reconciliation (`creditsUsed`) for Firecrawl-style meters.
 - TLS, mutual TLS, and application-layer encryption for relay-worker traffic.
 - Native Responses passthrough, including DeepSeek v4 Flash; use `Responses` or
   `Auto` endpoints with `force_passthrough` model routes.

@@ -28,6 +28,7 @@ pub(super) struct RequestScope {
     pub(super) conversation_id: Option<String>,
     pub(super) pool: sqlx::PgPool,
     pub(super) cache: McpCatalogCache,
+    pub(super) selected_credential: Option<crate::db::McpCredential>,
 }
 
 pub(super) struct ProxyService {
@@ -91,9 +92,14 @@ impl ProxyService {
         }
 
         let server = self.load_server(scope).await?;
-        filtering::call_server_filtered(&server, request, scope.conversation_id.as_deref())
-            .await
-            .map_err(internal_error)
+        filtering::call_server_filtered(
+            &server,
+            request,
+            scope.conversation_id.as_deref(),
+            scope.selected_credential.as_ref(),
+        )
+        .await
+        .map_err(internal_error)
     }
 
     async fn load_server(&self, scope: &RequestScope) -> Result<McpServer, ErrorData> {

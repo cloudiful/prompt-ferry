@@ -25,6 +25,10 @@ use streaming::{handle_buffered_transport_response, handle_streaming_transport_r
 use crate::mcp::targeting::extract_mcp_request_metadata;
 
 pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &RuntimeServices) {
+    crate::mcp::with_tracked_credits(handle_mcp_request_inner(request, services)).await
+}
+
+async fn handle_mcp_request_inner(request: BufferedMcpRequest, services: &RuntimeServices) {
     let started = Instant::now();
     let request_content_logging = if let Some(state) = services.admin_state() {
         state.request_content_logging.read().await.clone()
@@ -137,6 +141,107 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case("x-prompt-ferry-conversation-id"))
         .and_then(|(_, value)| uuid::Uuid::parse_str(value).ok());
+    let budget_grant = match server.as_ref() {
+        Some(server) => {
+            match mcp::prepare_quota(
+                &state.pool,
+                server.server_id,
+                request_ctx.request_id,
+                chrono::Utc::now(),
+            )
+            .await
+            {
+                mcp::QuotaDecision::Granted { grant } => Some(grant),
+                mcp::QuotaDecision::Unconstrained => None,
+                mcp::QuotaDecision::Exhausted => {
+                    let body = serde_json::json!({
+                        "error": {
+                            "code": "budget_exceeded",
+                            "message": format!(
+                                "mcp server {} has no credentials with remaining budget",
+                                server.name
+                            ),
+                        }
+                    })
+                    .to_string();
+                    send_mcp_response(
+                        services,
+                        &request.request_id,
+                        StatusCode::TOO_MANY_REQUESTS.as_u16(),
+                        Some("application/json".to_string()),
+                        Vec::new(),
+                        body.clone().into_bytes(),
+                    )
+                    .await;
+                    record_mcp_request_event(
+                        &McpResponseContext {
+                            request: &request,
+                            request_ctx: &request_ctx,
+                            metadata: &metadata,
+                            request_content_logging: &request_content_logging,
+                            redact_content,
+                            upstream_redacted_request_json: None,
+                            upstream_restore_session: None,
+                            selected_token_slot: None,
+                            server: Some(server),
+                            services,
+                        },
+                        FailurePayload {
+                            status: StatusCode::TOO_MANY_REQUESTS,
+                            error_code: "budget_exceeded".to_string(),
+                            error_message: "no credential with remaining budget".to_string(),
+                            upstream_error_body: Some(body),
+                            response_body: None,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+                mcp::QuotaDecision::Unavailable { reason } => {
+                    let body = serde_json::json!({
+                        "error": {
+                            "code": "quota_unavailable",
+                            "message": format!("quota ledger unavailable: {reason}"),
+                        }
+                    })
+                    .to_string();
+                    send_mcp_response(
+                        services,
+                        &request.request_id,
+                        StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+                        Some("application/json".to_string()),
+                        Vec::new(),
+                        body.clone().into_bytes(),
+                    )
+                    .await;
+                    record_mcp_request_event(
+                        &McpResponseContext {
+                            request: &request,
+                            request_ctx: &request_ctx,
+                            metadata: &metadata,
+                            request_content_logging: &request_content_logging,
+                            redact_content,
+                            upstream_redacted_request_json: None,
+                            upstream_restore_session: None,
+                            selected_token_slot: None,
+                            server: Some(server),
+                            services,
+                        },
+                        FailurePayload {
+                            status: StatusCode::SERVICE_UNAVAILABLE,
+                            error_code: "quota_unavailable".to_string(),
+                            error_message: reason,
+                            upstream_error_body: Some(body),
+                            response_body: None,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+            }
+        }
+        None => None,
+    };
     let upstream_redaction_enabled =
         crate::redact::redaction_enabled_for_user(request.user_id.filter(|id| *id > 0));
     let prior_session = if upstream_redaction_enabled {
@@ -207,6 +312,7 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
             path: &request.path,
             headers: &request.headers,
             body: &effective_body,
+            selected_credential: budget_grant.as_ref().map(|grant| grant.credential.clone()),
         },
         state.mcp_session_store.clone(),
         &state.mcp_allowed_origins,
@@ -232,6 +338,13 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
             body,
             selected_token_slot,
         }) => {
+            settle_quota(
+                services,
+                budget_grant.as_ref(),
+                request_ctx.request_id,
+                status,
+            )
+            .await;
             response_context.selected_token_slot = selected_token_slot;
             handle_buffered_transport_response(
                 &response_context,
@@ -249,6 +362,13 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
             stream,
             selected_token_slot,
         }) => {
+            settle_quota(
+                services,
+                budget_grant.as_ref(),
+                request_ctx.request_id,
+                status,
+            )
+            .await;
             response_context.selected_token_slot = selected_token_slot;
             handle_streaming_transport_response(
                 &response_context,
@@ -260,6 +380,7 @@ pub(super) async fn handle_mcp_request(request: BufferedMcpRequest, services: &R
             .await;
         }
         Err(err) => {
+            settle_quota(services, budget_grant.as_ref(), request_ctx.request_id, 502).await;
             let body = serde_json::json!({
                 "error": {
                     "code": "mcp_error",
@@ -421,4 +542,63 @@ async fn send_mcp_response(
             request_id: request_id.to_string(),
         }))
         .await;
+}
+
+/// Settle a quota reservation after the upstream outcome is known: commit on
+/// 2xx, release otherwise. Auth/throttle failures additionally put the
+/// credential into cooldown so later requests skip it.
+async fn settle_quota(
+    services: &RuntimeServices,
+    grant: Option<&db::QuotaGrant>,
+    request_id: uuid::Uuid,
+    status: u16,
+) {
+    let Some(grant) = grant else {
+        return;
+    };
+    let Some(state) = services.admin_state() else {
+        return;
+    };
+    let commit = (200..300).contains(&status);
+    if let Err(err) = db::settle_reservation(&state.pool, request_id, commit).await {
+        tracing::warn!(
+            error = %err,
+            request_id = %request_id,
+            "failed to settle MCP quota reservation"
+        );
+        return;
+    }
+    if commit
+        && let Some(credits_used) = crate::mcp::tracked_credits_used()
+        && credits_used > grant.reservation.units
+    {
+        let extra = credits_used - grant.reservation.units;
+        for account in [grant.day_account.as_ref(), grant.month_account.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if let Err(err) = db::charge_extra_units(&state.pool, account.account_id, extra).await {
+                tracing::warn!(
+                    error = %err,
+                    request_id = %request_id,
+                    account_id = account.account_id,
+                    "failed to charge extra MCP quota units"
+                );
+            }
+        }
+    }
+    if let Some((slot, upstream_status)) = crate::mcp::tracked_upstream_failure()
+        && matches!(upstream_status, 401 | 403 | 429)
+        && slot == grant.credential.position as i16 + 1
+    {
+        let cooldown_seconds = if upstream_status == 429 { 60 } else { 600 };
+        mcp::record_credential_failure(
+            &state.pool,
+            &state.mcp_quota_valkey,
+            &grant.credential,
+            &format!("upstream http {upstream_status}"),
+            Some(cooldown_seconds),
+        )
+        .await;
+    }
 }

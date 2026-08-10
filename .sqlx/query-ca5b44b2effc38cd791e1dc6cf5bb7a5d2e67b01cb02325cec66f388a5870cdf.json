@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mcp_credentials\nSET provider_remaining = $2,\n    provider_synced_at = $3,\n    provider_reset_at = $4,\n    updated_at = NOW()\nWHERE credential_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float8",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ca5b44b2effc38cd791e1dc6cf5bb7a5d2e67b01cb02325cec66f388a5870cdf"
+}

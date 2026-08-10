@@ -1,0 +1,93 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO mcp_quota_reservations (\n    day_account_id, month_account_id, credential_id, request_id, units, expires_at\n)\nVALUES ($1, $2, $3, $4, $5, $6)\nRETURNING reservation_id, day_account_id, month_account_id, credential_id, request_id, units\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reservation_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_reservations",
+            "name": "reservation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "day_account_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_reservations",
+            "name": "day_account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "month_account_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_reservations",
+            "name": "month_account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "credential_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_reservations",
+            "name": "credential_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "request_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_reservations",
+            "name": "request_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "units",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_reservations",
+            "name": "units"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Uuid",
+        "Uuid",
+        "Float8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "c74cf9bbb8602788ac1d9dcae0bdb099501015064372ad800bdea228d168a6cb"
+}

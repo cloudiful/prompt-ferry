@@ -82,6 +82,10 @@ pub struct McpRequestContext<'a> {
     pub path: &'a str,
     pub headers: &'a [(String, String)],
     pub body: &'a [u8],
+    /// Credential selected and budgeted by the worker quota layer. When set,
+    /// the transport uses it first and only falls back to the legacy token
+    /// balancer on auth/throttle failures.
+    pub selected_credential: Option<crate::db::McpCredential>,
 }
 
 /// Buffered handler used by tests and admin tooling. Bypasses Origin
@@ -141,6 +145,7 @@ pub async fn handle_stream_with_session_store(
         path,
         headers,
         body,
+        selected_credential,
     } = request;
     super::transport::with_tracked_token_slot(async {
         if !matches!(
@@ -176,6 +181,7 @@ pub async fn handle_stream_with_session_store(
                 conversation_id: None,
                 pool: pool.clone(),
                 cache: cache.clone(),
+                selected_credential,
             },
         )?;
 

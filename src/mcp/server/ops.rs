@@ -29,6 +29,7 @@ struct AggregateCallContext<'a> {
     request_id: &'a RequestId,
     method: &'a str,
     pool: &'a sqlx::PgPool,
+    selected_credential: Option<crate::db::McpCredential>,
 }
 
 impl ProxyService {
@@ -111,6 +112,7 @@ impl ProxyService {
                 request_id,
                 method: "tools/call",
                 pool: &scope.pool,
+                selected_credential: scope.selected_credential.clone(),
             },
             with_meta(params, meta),
             target,
@@ -159,6 +161,7 @@ impl ProxyService {
                 request_id,
                 method: "resources/read",
                 pool: &scope.pool,
+                selected_credential: scope.selected_credential.clone(),
             },
             with_meta(params, meta),
             target,
@@ -203,6 +206,7 @@ impl ProxyService {
                 request_id,
                 method: "prompts/get",
                 pool: &scope.pool,
+                selected_credential: scope.selected_credential.clone(),
             },
             with_meta(params, meta),
             target,
@@ -238,6 +242,7 @@ impl ProxyService {
             request_id,
             method: "completion/complete",
             pool: &scope.pool,
+            selected_credential: scope.selected_credential.clone(),
         };
         match params.r#ref {
             Reference::Prompt(ref prompt) => {
@@ -382,6 +387,7 @@ impl ProxyService {
             &server,
             json_request(context.request_id, context.method, required_params(params)?),
             context.conversation_id,
+            context.selected_credential.as_ref(),
         )
         .await
         .map_err(super::internal_error)?;

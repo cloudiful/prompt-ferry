@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO mcp_quota_accounts (group_id, period_kind, period_start, period_end)\nVALUES ($1, $2, $3, $4)\nON CONFLICT (group_id, period_kind, period_start) DO NOTHING\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4fcba3c7f002e9f542753413404ba3d480e1ebe79690059d0ccd00aecd2ff958"
+}

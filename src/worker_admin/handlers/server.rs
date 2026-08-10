@@ -1,4 +1,5 @@
 use super::*;
+use axum::routing::put;
 use std::{env, path::PathBuf};
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -84,6 +85,26 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             get(get_mcp_catalog),
         )
         .route("/admin/mcp-servers/{server_id}/test", post(test_mcp_server))
+        .route(
+            "/admin/mcp-servers/{server_id}/credentials",
+            get(list_server_credentials),
+        )
+        .route(
+            "/admin/mcp-servers/{server_id}/credentials/{credential_id}/quota-group",
+            put(bind_credential_group),
+        )
+        .route(
+            "/admin/mcp-quota-groups",
+            get(list_quota_groups).post(create_quota_group),
+        )
+        .route(
+            "/admin/mcp-quota-groups/{group_id}",
+            patch(update_quota_group).delete(delete_quota_group),
+        )
+        .route(
+            "/admin/mcp-quota-groups/{group_id}/usage",
+            get(quota_group_usage),
+        )
         .route("/admin/request-records/summary", get(usage_summary))
         .route("/admin/request-records/overview", get(usage_overview))
         .route("/admin/request-records", get(usage_events))
@@ -251,6 +272,7 @@ mod tests {
             mcp_catalog_service: McpCatalogService::new(pool.clone(), McpCatalogCache::new()),
             mcp_session_store: None,
             mcp_allowed_origins: Vec::new(),
+            mcp_quota_valkey: crate::mcp::McpQuotaValkey::new(),
             endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
                 Duration::from_secs(60),
             ),

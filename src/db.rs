@@ -4,6 +4,8 @@ mod budgets;
 mod connection;
 mod endpoints;
 mod mcp;
+mod mcp_credentials;
+mod quota;
 mod relays;
 mod routes;
 mod routing_state;
@@ -29,6 +31,17 @@ pub use mcp::{
     create_mcp_server, delete_mcp_server, get_mcp_server, get_mcp_server_by_name,
     get_user_mcp_server, get_visible_mcp_server, list_mcp_servers, list_mcp_servers_page,
     list_user_mcp_servers, list_user_mcp_servers_page, list_visible_mcp_servers, update_mcp_server,
+};
+pub use mcp_credentials::{
+    create_quota_group, delete_credential, delete_quota_group, get_quota_group, insert_credential,
+    list_credentials_by_server, list_quota_groups, set_credential_quota_group,
+    sync_credentials_from_tokens, update_credential_token, update_quota_group,
+};
+pub use quota::period::{current_day_period, current_month_period};
+pub use quota::{
+    ReserveOutcome, charge_extra_units, group_usage_ratio, load_accounts_for_group,
+    mark_credential_failure, pick_credential, release_expired_reservations, reserve_for_credential,
+    settle_reservation, update_credential_provider_remaining,
 };
 pub use relays::{
     create_managed_relay, delete_managed_relay, get_managed_relay, list_enabled_managed_relays,

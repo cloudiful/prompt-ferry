@@ -9,14 +9,16 @@ pub(super) async fn call_server(
     server: &McpServer,
     request: Value,
     conversation_id: Option<&str>,
+    forced: Option<&crate::db::McpCredential>,
 ) -> anyhow::Result<Value> {
-    transport::call(server, request, conversation_id).await
+    transport::call(server, request, conversation_id, forced).await
 }
 
 pub(super) async fn call_server_filtered(
     server: &McpServer,
     request: Value,
     conversation_id: Option<&str>,
+    forced: Option<&crate::db::McpCredential>,
 ) -> anyhow::Result<Value> {
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     let method = request
@@ -36,7 +38,7 @@ pub(super) async fn call_server_filtered(
     {
         return Ok(json_error_value(id, -32602, "resource is disabled"));
     }
-    let mut response = call_server(server, request, conversation_id).await?;
+    let mut response = call_server(server, request, conversation_id, forced).await?;
     if method == "tools/list" {
         filter_tool_items(&mut response, server, "name");
     } else if method == "resources/list" {

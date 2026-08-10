@@ -67,6 +67,7 @@ fn request<'a>(
         path,
         headers,
         body,
+        selected_credential: None,
     }
 }
 

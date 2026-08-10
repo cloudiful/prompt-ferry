@@ -21,6 +21,8 @@
 - 支持对转发内容、日志和用量详情进行配置化脱敏。
 - 支持用户、客户端 API Key、上游端点、模型路由和多 relay 管理。
 - 支持 HTTP/stdio MCP 聚合、请求用量与重放、保留策略、审批和计费。
+- 支持 MCP 凭据配额：按凭据或共享配额组设置请求/credits 预算，原子预占、按使用率均衡多个 API key、
+  认证/限流失败自动冷却，并支持 Firecrawl 等按 credits 计费的 `creditsUsed` 校准。
 - 支持 relay-worker 之间的 TLS、双向 TLS 和应用层加密。
 - 支持原生 Responses 透传，包括 DeepSeek v4 flash；endpoint 使用 `Responses` 或
   `Auto`，模型路由使用 `force_passthrough`。

@@ -261,6 +261,7 @@ async fn client_negotiates_2026_07_28_and_lists_tools() {
         &server,
         json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
         None,
+        None,
     )
     .await
     .unwrap();
@@ -277,6 +278,7 @@ async fn client_falls_back_to_legacy_when_discover_probe_rejected() {
     let response = call(
         &server,
         json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        None,
         None,
     )
     .await
@@ -362,6 +364,7 @@ async fn client_calls_tool_on_2026_07_28_upstream() {
             "params": {"name": "echo", "arguments": {"text": "hello"}}
         }),
         None,
+        None,
     )
     .await
     .unwrap();
@@ -392,6 +395,7 @@ async fn tool_call_sends_all_annotated_param_headers() {
             }
         }),
         None,
+        None,
     )
     .await
     .unwrap();
@@ -420,6 +424,7 @@ async fn tool_call_omits_headers_for_missing_annotated_params() {
             "method": "tools/call",
             "params": {"name": "echo", "arguments": {"text": "only-text"}}
         }),
+        None,
         None,
     )
     .await
@@ -455,6 +460,7 @@ async fn rewritten_aggregate_tool_name_regenerates_mcp_headers() {
             }
         }),
         None,
+        None,
     )
     .await
     .unwrap();
@@ -480,6 +486,7 @@ async fn header_mismatch_relists_and_retries_once() {
             "params": {"name": "flaky-cache", "arguments": {}}
         }),
         None,
+        None,
     )
     .await
     .unwrap();
@@ -502,6 +509,7 @@ async fn input_required_result_round_trips_request_state() {
             "method": "tools/call",
             "params": {"name": "mrtr", "arguments": {}}
         }),
+        None,
         None,
     )
     .await
@@ -535,6 +543,7 @@ async fn input_responses_and_request_state_reach_upstream() {
             }
         }),
         None,
+        None,
     )
     .await
     .unwrap();
@@ -561,6 +570,7 @@ async fn legacy_2025_11_25_upstream_does_not_require_standard_headers() {
             }
         }),
         None,
+        None,
     )
     .await
     .unwrap();
@@ -578,6 +588,7 @@ async fn resources_templates_list_is_forwarded() {
     let response = call(
         &server,
         json!({"jsonrpc": "2.0", "id": 10, "method": "resources/templates/list"}),
+        None,
         None,
     )
     .await
@@ -661,6 +672,7 @@ async fn bearer_token_failover_tries_all_tokens_and_recovers_on_third() {
             "method": "tools/call",
             "params": {"name": "echo", "arguments": {"text": "failover"}}
         }),
+        None,
         None,
     )
     .await

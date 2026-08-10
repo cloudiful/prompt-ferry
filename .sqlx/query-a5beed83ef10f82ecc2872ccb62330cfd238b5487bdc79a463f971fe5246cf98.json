@@ -1,0 +1,104 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mcp_quota_accounts a\nSET reserved_units = a.reserved_units + $4,\n    updated_at = NOW()\nWHERE a.group_id = $1\n  AND a.period_kind = $2\n  AND a.period_start = $3\n  AND ($5::double precision IS NULL OR a.used_units + a.reserved_units + $4 <= $5)\nRETURNING a.account_id, a.group_id, a.period_kind, a.period_start, a.period_end,\n          a.used_units, a.reserved_units\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_accounts",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "group_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_accounts",
+            "name": "group_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "period_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_accounts",
+            "name": "period_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "period_start",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_accounts",
+            "name": "period_start"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "period_end",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_accounts",
+            "name": "period_end"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "used_units",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_accounts",
+            "name": "used_units"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "reserved_units",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_accounts",
+            "name": "reserved_units"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a5beed83ef10f82ecc2872ccb62330cfd238b5487bdc79a463f971fe5246cf98"
+}

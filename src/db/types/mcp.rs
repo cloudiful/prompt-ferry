@@ -38,9 +38,9 @@ pub struct McpServer {
     pub updated_at: DateTime<Utc>,
 }
 
-impl McpServer {
-    pub fn bearer_tokens(&self) -> Vec<McpBearerToken> {
-        self.bearer_tokens_json
+impl McpBearerToken {
+    pub fn parse_array(value: &Value) -> Vec<McpBearerToken> {
+        value
             .as_array()
             .into_iter()
             .flatten()
@@ -71,6 +71,12 @@ impl McpServer {
             })
             .filter(|value| !value.token.is_empty())
             .collect()
+    }
+}
+
+impl McpServer {
+    pub fn bearer_tokens(&self) -> Vec<McpBearerToken> {
+        McpBearerToken::parse_array(&self.bearer_tokens_json)
     }
 }
 

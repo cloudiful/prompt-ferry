@@ -3,6 +3,8 @@ use sqlx::PgPool;
 
 use crate::db::types::{McpServer, McpServerInput};
 
+use super::mcp_credentials::sync_credentials_from_tokens;
+
 pub async fn list_mcp_servers(pool: &PgPool) -> Result<Vec<McpServer>> {
     Ok(
         sqlx::query_file_as!(McpServer, "src/sql/mcp/list_mcp_servers.sql",)
@@ -125,7 +127,7 @@ pub async fn get_user_mcp_server(
 }
 
 pub async fn create_mcp_server(pool: &PgPool, input: McpServerInput) -> Result<McpServer> {
-    Ok(sqlx::query_file_as!(
+    let server = sqlx::query_file_as!(
         McpServer,
         "src/sql/mcp/create_mcp_server.sql",
         input.scope,
@@ -149,7 +151,9 @@ pub async fn create_mcp_server(pool: &PgPool, input: McpServerInput) -> Result<M
         input.timeout_ms,
     )
     .fetch_one(pool)
-    .await?)
+    .await?;
+    sync_credentials_from_tokens(pool, server.server_id, &server.bearer_tokens_json).await?;
+    Ok(server)
 }
 
 pub async fn update_mcp_server(
@@ -157,7 +161,7 @@ pub async fn update_mcp_server(
     server_id: uuid::Uuid,
     input: McpServerInput,
 ) -> Result<Option<McpServer>> {
-    Ok(sqlx::query_file_as!(
+    let server = sqlx::query_file_as!(
         McpServer,
         "src/sql/mcp/update_mcp_server.sql",
         server_id,
@@ -182,7 +186,11 @@ pub async fn update_mcp_server(
         input.timeout_ms,
     )
     .fetch_optional(pool)
-    .await?)
+    .await?;
+    if let Some(server) = server.as_ref() {
+        sync_credentials_from_tokens(pool, server.server_id, &server.bearer_tokens_json).await?;
+    }
+    Ok(server)
 }
 
 pub async fn delete_mcp_server(pool: &PgPool, server_id: uuid::Uuid) -> Result<bool> {

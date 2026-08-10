@@ -130,6 +130,7 @@ pub(super) async fn build_admin_state(
         mcp_catalog_service,
         mcp_session_store: crate::mcp::McpSessionStore::from_config(config).await,
         mcp_allowed_origins: config.mcp_allowed_origins.clone(),
+        mcp_quota_valkey: crate::mcp::McpQuotaValkey::from_config(config).await,
         endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(Duration::from_secs(
             config.endpoint_model_cache_ttl_seconds.max(1),
         )),
@@ -148,6 +149,18 @@ pub(super) async fn build_admin_state(
         let mcp_catalog_service = state.mcp_catalog_service.clone();
         tokio::spawn(async move {
             mcp_catalog_service.warm_enabled_servers().await;
+        });
+
+        let quota_pool = state.pool.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                interval.tick().await;
+                if let Err(err) = crate::db::release_expired_reservations(&quota_pool).await {
+                    warn!(error = %err, "MCP quota reservation cleanup failed");
+                }
+            }
         });
     }
     Ok(Some(state))

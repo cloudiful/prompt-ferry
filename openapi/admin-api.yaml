@@ -660,6 +660,98 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EndpointTestResponse'
+  /api/v1/admin/mcp-quota-groups:
+    get:
+      tags:
+      - mcp
+      operationId: list_quota_groups
+      responses:
+        '200':
+          description: Quota groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/McpQuotaGroup'
+    post:
+      tags:
+      - mcp
+      operationId: create_quota_group
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuotaGroupRequest'
+        required: true
+      responses:
+        '200':
+          description: Created quota group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpQuotaGroup'
+  /api/v1/admin/mcp-quota-groups/{group_id}:
+    delete:
+      tags:
+      - mcp
+      operationId: delete_quota_group
+      parameters:
+      - name: group_id
+        in: path
+        description: Quota group ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Deleted quota group
+    patch:
+      tags:
+      - mcp
+      operationId: update_quota_group
+      parameters:
+      - name: group_id
+        in: path
+        description: Quota group ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuotaGroupRequest'
+        required: true
+      responses:
+        '200':
+          description: Updated quota group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpQuotaGroup'
+  /api/v1/admin/mcp-quota-groups/{group_id}/usage:
+    get:
+      tags:
+      - mcp
+      operationId: quota_group_usage
+      parameters:
+      - name: group_id
+        in: path
+        description: Quota group ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Quota group usage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaGroupUsageResponse'
   /api/v1/admin/mcp-servers:
     get:
       tags:
@@ -763,6 +855,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/McpCatalogResponse'
+  /api/v1/admin/mcp-servers/{server_id}/credentials:
+    get:
+      tags:
+      - mcp
+      operationId: list_server_credentials
+      parameters:
+      - name: server_id
+        in: path
+        description: MCP server ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Server credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialPageResponse'
+  /api/v1/admin/mcp-servers/{server_id}/credentials/{credential_id}/quota-group:
+    put:
+      tags:
+      - mcp
+      operationId: bind_credential_group
+      parameters:
+      - name: server_id
+        in: path
+        description: MCP server ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: credential_id
+        in: path
+        description: Credential ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialQuotaBindingRequest'
+        required: true
+      responses:
+        '200':
+          description: Updated credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpCredential'
   /api/v1/admin/mcp-servers/{server_id}/test:
     post:
       tags:
@@ -2942,6 +3087,27 @@ components:
           type: string
         password:
           type: string
+    CredentialPageResponse:
+      type: object
+      required:
+      - credentials
+      - total
+      properties:
+        credentials:
+          type: array
+          items:
+            $ref: '#/components/schemas/McpCredential'
+        total:
+          type: integer
+          format: int64
+    CredentialQuotaBindingRequest:
+      type: object
+      properties:
+        quota_group_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
     CustomStringMatchSchema:
       type: string
       enum:
@@ -3524,6 +3690,181 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/McpCatalogItem'
+    McpCredential:
+      type: object
+      required:
+      - credential_id
+      - server_id
+      - credential_label
+      - position
+      - enabled
+      - default_cost
+      - strict_mode
+      - created_at
+      - updated_at
+      properties:
+        billing_period_end:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        billing_period_start:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        cooldown_until:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        credential_id:
+          type: string
+          format: uuid
+        credential_label:
+          type: string
+        daily_limit:
+          type:
+          - number
+          - 'null'
+          format: double
+        default_cost:
+          type: number
+          format: double
+        enabled:
+          type: boolean
+        last_error:
+          type:
+          - string
+          - 'null'
+        last_error_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        monthly_limit:
+          type:
+          - number
+          - 'null'
+          format: double
+        position:
+          type: integer
+          format: int32
+        provider_kind:
+          type:
+          - string
+          - 'null'
+        provider_remaining:
+          type:
+          - number
+          - 'null'
+          format: double
+        provider_reset_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        provider_synced_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        quota_group_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        server_id:
+          type: string
+          format: uuid
+        strict_mode:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    McpQuotaAccountSnapshot:
+      type: object
+      required:
+      - account_id
+      - period
+      - used_units
+      - reserved_units
+      properties:
+        account_id:
+          type: integer
+          format: int64
+        period:
+          $ref: '#/components/schemas/QuotaPeriod'
+        reserved_units:
+          type: number
+          format: double
+        used_units:
+          type: number
+          format: double
+    McpQuotaGroup:
+      type: object
+      required:
+      - group_id
+      - name
+      - scope
+      - unit
+      - default_cost
+      - strict_mode
+      - created_at
+      - updated_at
+      properties:
+        billing_period_end:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        billing_period_start:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        daily_limit:
+          type:
+          - number
+          - 'null'
+          format: double
+        default_cost:
+          type: number
+          format: double
+        group_id:
+          type: string
+          format: uuid
+        monthly_limit:
+          type:
+          - number
+          - 'null'
+          format: double
+        name:
+          type: string
+        owner_user_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        provider_kind:
+          type:
+          - string
+          - 'null'
+        scope:
+          type: string
+        strict_mode:
+          type: boolean
+        unit:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
     McpServer:
       type: object
       required:
@@ -4368,6 +4709,99 @@ components:
         updated_at:
           type: string
           format: date-time
+    QuotaGroupRequest:
+      type: object
+      required:
+      - name
+      properties:
+        billing_period_end:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        billing_period_start:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        daily_limit:
+          type:
+          - number
+          - 'null'
+          format: double
+        default_cost:
+          type:
+          - number
+          - 'null'
+          format: double
+        monthly_limit:
+          type:
+          - number
+          - 'null'
+          format: double
+        name:
+          type: string
+        owner_user_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        provider_kind:
+          type:
+          - string
+          - 'null'
+        scope:
+          type:
+          - string
+          - 'null'
+        strict_mode:
+          type:
+          - boolean
+          - 'null'
+        unit:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/QuotaUnit'
+    QuotaGroupUsageResponse:
+      type: object
+      required:
+      - group
+      properties:
+        day:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/McpQuotaAccountSnapshot'
+        group:
+          $ref: '#/components/schemas/McpQuotaGroup'
+        month:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/McpQuotaAccountSnapshot'
+    QuotaPeriod:
+      type: object
+      required:
+      - kind
+      - start
+      - end
+      properties:
+        end:
+          type: string
+          format: date-time
+        kind:
+          $ref: '#/components/schemas/QuotaPeriodKind'
+        start:
+          type: string
+          format: date-time
+    QuotaPeriodKind:
+      type: string
+      enum:
+      - day
+      - month
+    QuotaUnit:
+      type: string
+      enum:
+      - requests
+      - credits
     RedactionConfigSchema:
       type: object
       required:

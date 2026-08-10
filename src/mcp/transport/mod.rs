@@ -17,12 +17,88 @@ static TOKEN_BALANCER: LazyLock<McpBearerTokenBalancer> =
     LazyLock::new(McpBearerTokenBalancer::new);
 tokio::task_local! {
     static TOKEN_SLOT_TRACKER: RefCell<Option<i16>>;
+    static CREDITS_USED_TRACKER: RefCell<Option<f64>>;
+    static UPSTREAM_FAILURE_TRACKER: RefCell<Option<(i16, u16)>>;
+}
+
+/// Run `future` inside the token slot and credits-used tracking scopes. The
+/// worker reads the tracked values after the MCP request completes.
+pub(crate) async fn with_tracked_credits<F, T>(future: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    with_tracked_token_slot(async {
+        UPSTREAM_FAILURE_TRACKER
+            .scope(RefCell::new(None), async {
+                CREDITS_USED_TRACKER.scope(RefCell::new(None), future).await
+            })
+            .await
+    })
+    .await
+}
+
+pub(crate) fn tracked_credits_used() -> Option<f64> {
+    CREDITS_USED_TRACKER
+        .try_with(|tracker| *tracker.borrow())
+        .ok()
+        .flatten()
+}
+
+/// The (one-based token slot, HTTP status) of the last retryable upstream
+/// failure, when the upstream itself rejected the request. `None` when the
+/// upstream call succeeded or failed for non-retryable reasons.
+pub(crate) fn tracked_upstream_failure() -> Option<(i16, u16)> {
+    UPSTREAM_FAILURE_TRACKER
+        .try_with(|tracker| *tracker.borrow())
+        .ok()
+        .flatten()
+}
+
+fn record_credits_used(credits: f64) {
+    let _ = CREDITS_USED_TRACKER.try_with(|tracker| {
+        let current = tracker.borrow().unwrap_or(0.0);
+        *tracker.borrow_mut() = Some(current.max(credits));
+    });
+}
+
+fn record_upstream_failure(slot: Option<i16>, status: u16) {
+    let Some(slot) = slot else {
+        return;
+    };
+    let _ = UPSTREAM_FAILURE_TRACKER.try_with(|tracker| {
+        *tracker.borrow_mut() = Some((slot, status));
+    });
+}
+
+/// Recursively find a positive `creditsUsed` number in an upstream MCP
+/// response. Firecrawl includes the real credit cost on search-style results.
+/// Only the `creditsUsed` key is accepted; arbitrary numbers elsewhere in the
+/// response (ids, counts, sizes) must never be treated as credit costs.
+fn scan_credits_used(value: &Value) -> Option<f64> {
+    match value {
+        Value::Object(object) => object
+            .get("creditsUsed")
+            .and_then(Value::as_f64)
+            .filter(|value| *value > 0.0)
+            .or_else(|| {
+                object
+                    .values()
+                    .filter_map(scan_credits_used)
+                    .max_by(|left, right| left.total_cmp(right))
+            }),
+        Value::Array(items) => items
+            .iter()
+            .filter_map(scan_credits_used)
+            .max_by(|left, right| left.total_cmp(right)),
+        _ => None,
+    }
 }
 
 pub(super) async fn call(
     server: &McpServer,
     request: Value,
     conversation_id: Option<&str>,
+    forced: Option<&crate::db::McpCredential>,
 ) -> anyhow::Result<Value> {
     let timeout = Duration::from_millis(server.timeout_ms.max(100) as u64);
     tokio::time::timeout(timeout, async {
@@ -30,18 +106,38 @@ pub(super) async fn call(
         let enabled_token_count = tokens.iter().filter(|token| token.enabled).count();
         let mut attempted = Vec::new();
         let mut attempts = 0usize;
+        let mut forced_pending = forced.map(|credential| SelectedToken {
+            value: Some(credential.secret.clone()),
+            index: Some(credential.position as usize),
+        });
 
         loop {
-            let selected = TOKEN_BALANCER
-                .select_token(server.server_id, &tokens, &attempted, conversation_id)
-                .await;
+            let selected = match forced_pending.take() {
+                Some(selected) => selected,
+                None => {
+                    TOKEN_BALANCER
+                        .select_token(server.server_id, &tokens, &attempted, conversation_id)
+                        .await
+                }
+            };
             record_token_slot(&selected);
             attempts += 1;
             let result = client::call_once(server, selected.clone(), request.clone()).await;
             match result {
-                Ok(value) => return Ok(value),
+                Ok(value) => {
+                    if let Some(credits) = scan_credits_used(&value) {
+                        record_credits_used(credits);
+                    }
+                    return Ok(value);
+                }
                 Err(err) => {
                     let retry_status = retryable_status(&err);
+                    if let Some(status) = retry_status {
+                        let slot = selected
+                            .index
+                            .and_then(|index| i16::try_from(index + 1).ok());
+                        record_upstream_failure(slot, status.as_u16());
+                    }
                     if let Some(index) = selected.index {
                         attempted.push(index);
                     }
@@ -217,6 +313,74 @@ mod tests {
             Some(StatusCode::TOO_MANY_REQUESTS)
         );
         assert_eq!(parse_status_from_message("boom"), None);
+    }
+
+    #[test]
+    fn scans_credits_used_from_firecrawl_envelope() {
+        let value = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "result": {
+                "success": true,
+                "data": { "web": [{ "url": "https://example.com", "title": "t" }] },
+                "creditsUsed": 2
+            }
+        });
+        assert_eq!(scan_credits_used(&value), Some(2.0));
+    }
+
+    #[test]
+    fn scans_credits_used_nested_inside_arrays() {
+        let value = serde_json::json!({ "result": { "items": [{ "creditsUsed": 5 }] } });
+        assert_eq!(scan_credits_used(&value), Some(5.0));
+    }
+
+    #[test]
+    fn scan_ignores_unrelated_numbers_and_zeros() {
+        assert_eq!(
+            scan_credits_used(&serde_json::json!({
+                "id": 99,
+                "result": { "count": 42, "duration_ms": 123 }
+            })),
+            None
+        );
+        assert_eq!(
+            scan_credits_used(&serde_json::json!({ "creditsUsed": 0 })),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn tracked_credits_uses_max_of_records_in_scope() {
+        let value = with_tracked_credits(async {
+            record_credits_used(3.0);
+            record_credits_used(1.0);
+            tracked_credits_used()
+        })
+        .await;
+        assert_eq!(value, Some(3.0));
+        assert_eq!(tracked_credits_used(), None);
+    }
+
+    #[tokio::test]
+    async fn tracked_upstream_failure_is_scoped_and_keeps_slot() {
+        let failure = with_tracked_credits(async {
+            record_upstream_failure(Some(2), 429);
+            tracked_upstream_failure()
+        })
+        .await;
+        assert_eq!(failure, Some((2, 429)));
+        assert_eq!(tracked_upstream_failure(), None);
+    }
+
+    #[tokio::test]
+    async fn tracked_upstream_failure_ignores_missing_slot() {
+        let failure = with_tracked_credits(async {
+            record_upstream_failure(None, 429);
+            tracked_upstream_failure()
+        })
+        .await;
+        assert_eq!(failure, None);
     }
 }
 

@@ -1,0 +1,184 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT group_id, name, scope, owner_user_id, provider_kind, unit, daily_limit, monthly_limit,\n       default_cost, strict_mode, billing_period_start, billing_period_end, created_at, updated_at\nFROM mcp_quota_groups\nWHERE group_id = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "group_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "group_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "owner_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "provider_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "provider_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "unit",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "unit"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "daily_limit",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "daily_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "monthly_limit",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "monthly_limit"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "default_cost",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "default_cost"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "strict_mode",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "strict_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "billing_period_start",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "billing_period_start"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "billing_period_end",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "billing_period_end"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_quota_groups",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "97742671c3b304821e6a323a92e28a871641260992a6b34f7fc51f49e2efd33a"
+}
