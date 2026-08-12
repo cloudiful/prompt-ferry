@@ -103,7 +103,7 @@ fn restores_chat_delta_and_reserializes_special_characters() {
 }
 
 #[test]
-fn rejects_truncated_token_at_done_event() {
+fn passes_through_truncated_token_at_done_event() {
     let (session, token) = session("a.example.com");
     let mut filter = SseRestoreFilter::new(&session);
     let partial = &token[..token.len() - 2];
@@ -113,10 +113,73 @@ fn rejects_truncated_token_at_done_event() {
     );
     filter.push_chunk(chunk.as_bytes()).expect("partial");
 
-    let err = filter
+    let output = filter
         .push_chunk(b"data: [DONE]\n\n")
-        .expect_err("truncated");
-    assert!(err.to_string().contains("truncated token"));
+        .expect("truncated token is pass-through");
+    assert_eq!(output.len(), 2);
+    assert_eq!(data_json(&output[0])["delta"], partial);
+    assert_eq!(output[1], b"data: [DONE]\n\n");
+}
+
+#[test]
+fn passes_through_malformed_tokens_without_aborting_stream() {
+    let (session, _) = session("a.example.com");
+    let malformed = "before [[RDX:v2:...]] after";
+    let mut filter = SseRestoreFilter::new(&session);
+    let event = serde_json::json!({
+        "choices": [{"index": 0, "delta": {"content": malformed}}]
+    });
+
+    let output = filter
+        .push_chunk(format!("data: {event}\n\n").as_bytes())
+        .expect("malformed token is pass-through");
+
+    assert_eq!(
+        data_json(&output[0])["choices"][0]["delta"]["content"],
+        malformed
+    );
+}
+
+#[test]
+fn preserves_valid_token_when_invalid_tokens_are_mixed_in_stream() {
+    let (session, token) = session("a.example.com");
+    let mut invalid_checksum = token.clone();
+    let checksum_index = invalid_checksum.len() - 3;
+    let replacement = if invalid_checksum.as_bytes()[checksum_index] == b'0' {
+        '1'
+    } else {
+        '0'
+    };
+    invalid_checksum.replace_range(checksum_index..checksum_index + 1, &replacement.to_string());
+    let content = format!(
+        "valid {token} checksum {invalid_checksum} unknown [[RDX:v2:scope:unknown:001:deadbeef]]"
+    );
+    let event = serde_json::json!({
+        "choices": [{"index": 0, "delta": {"content": content}}]
+    });
+    let mut filter = SseRestoreFilter::new(&session);
+
+    let output = filter
+        .push_chunk(format!("data: {event}\n\n").as_bytes())
+        .expect("mixed token restore");
+
+    assert_eq!(
+        data_json(&output[0])["choices"][0]["delta"]["content"],
+        format!(
+            "valid a.example.com checksum {invalid_checksum} unknown [[RDX:v2:scope:unknown:001:deadbeef]]"
+        )
+    );
+}
+
+#[test]
+fn invalid_sse_json_still_fails() {
+    let (session, _) = session("a.example.com");
+    let mut filter = SseRestoreFilter::new(&session);
+
+    let err = filter
+        .push_chunk(b"data: {not-json}\n\n")
+        .expect_err("invalid SSE JSON");
+    assert!(err.to_string().contains("invalid SSE data JSON"));
 }
 
 #[test]

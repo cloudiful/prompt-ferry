@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use redactor::StreamingRestoreContext;
 use serde_json::Value;
-use tracing::warn;
 
 use crate::{
     redact_upstream::UpstreamRedactionSession,
@@ -11,6 +10,7 @@ use crate::{
 };
 
 use self::sse::DataLine;
+use super::upstream_restore::log_restore_diagnostics;
 
 mod pending;
 mod sse;
@@ -258,7 +258,7 @@ impl<'a> SseRestoreFilter<'a> {
         stream.pointer.clear();
         stream.pointer.push_str(pointer);
         let result = stream.context.push_str(&text);
-        validate_result(&result)?;
+        log_restore_diagnostics(&result, "ai_sse");
         let target = value.pointer_mut(pointer).expect("existing string pointer");
         *target = Value::String(result.restored_text);
         Ok(())
@@ -269,7 +269,7 @@ impl<'a> SseRestoreFilter<'a> {
             return Ok(());
         };
         let result = self.session.restore_state.restore_text(text)?;
-        validate_result(&result)?;
+        log_restore_diagnostics(&result, "ai_sse");
         *value.pointer_mut(pointer).expect("existing string pointer") =
             Value::String(result.restored_text);
         Ok(())
@@ -279,7 +279,7 @@ impl<'a> SseRestoreFilter<'a> {
         let mut output = Vec::new();
         for (_, stream) in self.streams.drain() {
             let result = stream.context.finish();
-            validate_result(&result)?;
+            log_restore_diagnostics(&result, "ai_sse");
             if !result.restored_text.is_empty() {
                 output.push(pending::synthetic_delta(
                     stream.template,
@@ -301,20 +301,6 @@ fn is_terminal_event(value: &Value) -> bool {
             | Some("error")
             | Some("message_stop")
     )
-}
-
-fn validate_result(result: &redactor::RestoreResult) -> Result<()> {
-    if !result.skipped_tokens.is_empty() {
-        warn!(
-            skipped_token_count = result.skipped_tokens.len(),
-            "preserved unauthorized upstream redaction tokens"
-        );
-    }
-    if result.is_valid() {
-        Ok(())
-    } else {
-        Err(anyhow!(result.validation_errors.join("; ")))
-    }
 }
 
 #[cfg(test)]
