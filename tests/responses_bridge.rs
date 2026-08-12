@@ -235,6 +235,39 @@ async fn preserves_native_responses_failure_terminals_without_synthetic_error() 
 }
 
 #[tokio::test]
+async fn enriches_bare_native_responses_failed_terminal_for_retry_classification() {
+    let (status, body) = fetch_native_responses(ResponsesUpstreamMode::FailedTerminal).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("\"type\":\"response.failed\""), "body={body}");
+    assert!(!body.contains("event: error"), "body={body}");
+    assert!(
+        body.contains("\"code\":\"server_error\""),
+        "bare response.failed should be enriched with a retryable code, body={body}"
+    );
+    assert!(
+        body.contains("\"message\":\"upstream Responses response failed\""),
+        "body={body}"
+    );
+}
+
+#[tokio::test]
+async fn preserves_native_responses_failed_terminal_with_upstream_error_details() {
+    let (status, body) =
+        fetch_native_responses(ResponsesUpstreamMode::FailedTerminalWithError).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("\"type\":\"response.failed\""), "body={body}");
+    assert!(
+        body.contains("\"code\":\"rate_limit_exceeded\""),
+        "body={body}"
+    );
+    assert!(body.contains("\"message\":\"Slow down\""), "body={body}");
+    assert!(!body.contains("\"code\":\"server_error\""), "body={body}");
+    assert!(!body.contains("event: error"), "body={body}");
+}
+
+#[tokio::test]
 async fn streams_many_sse_events_from_single_upstream_chunk_without_bridge_backpressure() {
     let upstream_addr = spawn_native_responses_upstream(ResponsesUpstreamMode::ManyEvents).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -1231,6 +1264,7 @@ enum ResponsesUpstreamMode {
     OfficialCompleted,
     MissingTerminal,
     FailedTerminal,
+    FailedTerminalWithError,
     IncompleteTerminal,
     ErrorTerminal,
     MidstreamError,
@@ -1367,6 +1401,11 @@ async fn fake_native_responses_stream(
         ResponsesUpstreamMode::FailedTerminal => {
             vec![Ok::<Bytes, std::io::Error>(Bytes::from(
                 native_responses_terminal_sse("response.failed"),
+            ))]
+        }
+        ResponsesUpstreamMode::FailedTerminalWithError => {
+            vec![Ok::<Bytes, std::io::Error>(Bytes::from(
+                native_responses_failed_with_error_sse(),
             ))]
         }
         ResponsesUpstreamMode::IncompleteTerminal => {
@@ -1540,6 +1579,16 @@ fn native_responses_terminal_sse(event_type: &str) -> String {
          event: {event_type}\n\
          data: {data}\n\n"
     )
+}
+
+fn native_responses_failed_with_error_sse() -> String {
+    concat!(
+        "event: response.created\n",
+        "data: {\"type\":\"response.created\"}\n\n",
+        "event: response.failed\n",
+        "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed_1\",\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"Slow down\"}}}\n\n",
+    )
+    .to_string()
 }
 
 fn deepseek_v4_flash_responses_sse() -> String {

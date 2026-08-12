@@ -18,6 +18,10 @@ pub(super) enum ResponsesSseTerminal {
     Error,
 }
 
+/// Fallback message used when a bare `response.failed` event carries no
+/// usable upstream error details; also surfaced to retry-classifying clients.
+pub(super) const RESPONSES_FAILED_FALLBACK_MESSAGE: &str = "upstream Responses response failed";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PassthroughSseTerminal {
     LegacyDone,
@@ -103,12 +107,18 @@ impl PassthroughSseFilter {
                 {
                     self.terminal = Some(terminal);
                     self.responses_error_body = error_body;
-                }
-                output.push(event);
-                if self.terminal.is_some() {
+                    if matches!(
+                        terminal,
+                        PassthroughSseTerminal::Responses(ResponsesSseTerminal::Failed)
+                    ) {
+                        output.push(normalize_bare_responses_failed(&event));
+                    } else {
+                        output.push(event);
+                    }
                     self.pending.clear();
                     break;
                 }
+                output.push(event);
             }
         }
         output
@@ -192,8 +202,11 @@ fn event_contains_terminal(
                 _ => None,
             };
             if let Some(terminal) = terminal {
-                let error_body =
-                    (terminal == ResponsesSseTerminal::Error).then(|| format_json_value(&value));
+                let error_body = matches!(
+                    terminal,
+                    ResponsesSseTerminal::Error | ResponsesSseTerminal::Failed
+                )
+                .then(|| format_json_value(&value));
                 return Some((PassthroughSseTerminal::Responses(terminal), error_body));
             }
             if event_name_is_error {
@@ -217,6 +230,99 @@ fn event_contains_terminal(
 pub(super) fn format_json_value(value: &Value) -> String {
     serde_json::to_string_pretty(value)
         .unwrap_or_else(|_| String::from_utf8_lossy(value.to_string().as_bytes()).to_string())
+}
+
+/// Rewrite a bare `response.failed` event into the documented shape when the
+/// upstream event carries no usable error details. Retry-classifying
+/// clients such as OpenCode treat a `response.failed` without a recognizable
+/// code or message as a permanent failure and do not retry; supplying the
+/// standard `server_error` code lets them classify the failure as transient.
+/// Events carrying any non-empty `code` or `message` — nested under
+/// `response.error` or at the top level — pass through unchanged so
+/// provider-specific failure modes stay intact.
+fn normalize_bare_responses_failed(event: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(event);
+    let mut output = String::with_capacity(text.len() + 128);
+    let mut changed = false;
+    for line in text.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\r', '\n']);
+        let Some(payload) = content.strip_prefix("data:") else {
+            output.push_str(line);
+            continue;
+        };
+        let Ok(mut value) = serde_json::from_str::<Value>(payload.trim_start()) else {
+            output.push_str(line);
+            continue;
+        };
+        if !enrich_bare_responses_failed(&mut value) {
+            output.push_str(line);
+            continue;
+        }
+        output.push_str("data: ");
+        output.push_str(
+            &serde_json::to_string(&value).expect("normalized responses failure serializes"),
+        );
+        if line.ends_with("\r\n") {
+            output.push_str("\r\n");
+        } else if line.ends_with('\n') {
+            output.push('\n');
+        }
+        changed = true;
+    }
+    if changed {
+        output.into_bytes()
+    } else {
+        event.to_vec()
+    }
+}
+
+/// A non-null, non-empty-string `code`/`message` counts as usable failure
+/// detail even when it is not a string (e.g. a numeric HTTP code); only
+/// absent, null, or empty values leave the event bare.
+fn field_has_details(error: &Value, field: &str) -> bool {
+    error
+        .get(field)
+        .is_some_and(|value| !value.is_null() && value.as_str().is_none_or(|text| !text.is_empty()))
+}
+
+fn enrich_bare_responses_failed(value: &mut Value) -> bool {
+    let Some(root) = value.as_object_mut() else {
+        return false;
+    };
+    if root.get("type").and_then(Value::as_str) != Some("response.failed") {
+        return false;
+    }
+    let error = root
+        .get("response")
+        .and_then(|response| response.get("error"))
+        .or_else(|| root.get("error"));
+    if error.is_some_and(|error| {
+        field_has_details(error, "code") || field_has_details(error, "message")
+    }) {
+        return false;
+    }
+    let error_object = serde_json::json!({
+        "code": "server_error",
+        "message": RESPONSES_FAILED_FALLBACK_MESSAGE,
+    });
+    match root.get_mut("response") {
+        Some(Value::Object(response)) => {
+            response.insert("error".to_string(), error_object);
+        }
+        Some(_) => {
+            root.insert(
+                "response".to_string(),
+                serde_json::json!({ "error": error_object }),
+            );
+        }
+        None => {
+            root.insert(
+                "response".to_string(),
+                serde_json::json!({ "error": error_object }),
+            );
+        }
+    }
+    true
 }
 
 pub(super) fn format_mcp_response_body(body: &[u8]) -> Option<String> {

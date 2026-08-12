@@ -1,4 +1,6 @@
-use super::super::error_handling::{ResponsesSseTerminal, maybe_redact_text};
+use super::super::error_handling::{
+    RESPONSES_FAILED_FALLBACK_MESSAGE, ResponsesSseTerminal, maybe_redact_text,
+};
 use super::forward::ResponseForwardContext;
 use super::request_support::ai_route_usage_log;
 use crate::{
@@ -15,7 +17,7 @@ pub(super) fn failure_details(
     match terminal {
         Some(ResponsesSseTerminal::Failed) => (
             "responses_response_failed",
-            "upstream Responses response failed",
+            RESPONSES_FAILED_FALLBACK_MESSAGE,
         ),
         Some(ResponsesSseTerminal::Incomplete) => (
             "responses_response_incomplete",
