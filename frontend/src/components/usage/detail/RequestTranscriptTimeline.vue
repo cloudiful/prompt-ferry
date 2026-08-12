@@ -39,13 +39,18 @@ const items = computed<TimelineItem[]>(() => {
     })
   })
 
-  if (!messages.length && props.requestFull?.request_raw_json != null) {
+  const rawJson =
+    props.requestFull?.request_raw_json ?? props.detail?.request_raw_json
+  if (!messages.length && rawJson != null) {
     merged.push({
       id: 'request-raw-json',
       kind: 'request',
       label: props.t('requestRawJson'),
-      timestampLabel: props.requestFull.request_storage_mode || 'request',
-      value: props.requestFull.request_raw_json,
+      timestampLabel:
+        props.requestFull?.request_storage_mode ||
+        props.detail?.request_storage_mode ||
+        'request',
+      value: rawJson,
     })
   }
 
