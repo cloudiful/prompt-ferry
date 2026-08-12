@@ -78,26 +78,18 @@ export function formatRequestRecordOutputTokensPerSecond(
   ) {
     return '-'
   }
-  return formatRate(
-    record.output_tokens,
-    requestRecordStreamMs(record) ?? record.duration_ms,
-  )
+  return formatRate(record.output_tokens, record.duration_ms)
 }
 
-export function formatRequestRecordOutputRateMode(
-  record: RequestRecordTiming,
-): 'generation' | 'e2e' | null {
-  if (
-    record.request_category !== 'ai' ||
-    record.request_state !== 'completed' ||
-    record.output_tokens == null ||
-    record.output_tokens <= 0
-  ) {
-    return null
-  }
-  if (record.ttft_ms != null) return 'generation'
-  if (record.duration_ms != null && record.duration_ms > 0) return 'e2e'
-  return null
+export function hasOutputRate(record: RequestRecordTiming): boolean {
+  return (
+    record.request_category === 'ai' &&
+    record.request_state === 'completed' &&
+    record.output_tokens != null &&
+    record.output_tokens > 0 &&
+    record.duration_ms != null &&
+    record.duration_ms > 0
+  )
 }
 
 export function formatRequestRecordInputTokensPerSecond(
@@ -114,7 +106,7 @@ export function createRequestRecordFormatting(
     formatMs: formatRequestRecordMs,
     formatPercent: formatRequestRecordPercent,
     formatOutputTokensPerSecond: formatRequestRecordOutputTokensPerSecond,
-    formatOutputRateMode: formatRequestRecordOutputRateMode,
+    hasOutputRate,
     formatInputTokensPerSecond: formatRequestRecordInputTokensPerSecond,
     formatRequestStateLabel: (state) =>
       labels(requestRecordStateLabelKey(state)),

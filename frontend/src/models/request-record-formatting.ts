@@ -16,9 +16,7 @@ export type RequestRecordFormatting = {
   formatMs: (value?: number | null) => string
   formatPercent: (value?: number | null) => string
   formatOutputTokensPerSecond: (record: RequestRecordTiming) => string
-  formatOutputRateMode: (
-    record: RequestRecordTiming,
-  ) => 'generation' | 'e2e' | null
+  hasOutputRate: (record: RequestRecordTiming) => boolean
   formatInputTokensPerSecond: (record: RequestRecordTiming) => string
   formatRequestStateLabel: (state: RequestRecordState) => string
   formatTime: (value: string) => string

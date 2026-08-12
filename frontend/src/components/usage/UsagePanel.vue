@@ -75,7 +75,7 @@ const columns = computed<TableColumn<RequestRecordRowView>[]>(() => [
     header: props.t('tokenCacheSummary'),
     enableSorting: true,
   },
-  { id: 'throughput', header: `${props.t('outputRate')} token/s` },
+  { id: 'throughput', header: `${props.t('e2eOutputRate')} token/s` },
   { accessorKey: 'error_message', header: props.t('error') },
 ])
 
@@ -253,12 +253,8 @@ function applyFilter(): void {
         </template>
         <template #throughput-cell="{ row }">
           <UTooltip
-            v-if="formatting.formatOutputRateMode(row.original)"
-            :text="
-              formatting.formatOutputRateMode(row.original) === 'generation'
-                ? t('generationTps')
-                : t('e2eOutputRate')
-            "
+            v-if="formatting.hasOutputRate(row.original)"
+            :text="t('e2eOutputRate')"
           >
             <span>{{
               formatting.formatOutputTokensPerSecond(row.original)
