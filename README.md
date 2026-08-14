@@ -19,6 +19,7 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 ## Features
 
 - OpenAI Chat Completions and Responses compatibility, with Anthropic Messages upstream support through Responses.
+- Per-request reasoning controls: Chat `reasoning_effort` and Responses `reasoning.effort`, including DeepSeek `max`; Chat compatibility maps unsupported `developer` roles to `system` and preserves reasoning for tool-call history.
 - Configurable redaction for forwarded content, logs, and usage details.
 - Managed users, client API keys, upstream endpoints, model routes, and multiple relays.
 - MCP aggregation for HTTP and stdio servers, request usage and replay, retention, approval, and billing.

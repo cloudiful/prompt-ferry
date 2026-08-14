@@ -12,6 +12,7 @@ enum ToolCallItemKind {
 pub(super) struct ToolCallTurn {
     function_calls: Vec<Value>,
     outputs: Vec<Value>,
+    reasoning_content: String,
 }
 
 impl ToolCallTurn {
@@ -19,7 +20,12 @@ impl ToolCallTurn {
         Self {
             function_calls: Vec::new(),
             outputs: Vec::new(),
+            reasoning_content: String::new(),
         }
+    }
+
+    fn push_reasoning(&mut self, text: &str) {
+        self.reasoning_content.push_str(text);
     }
 
     fn push(&mut self, item: &Value) -> Result<(), CompatError> {
@@ -44,23 +50,34 @@ impl ToolCallTurn {
         let mut messages =
             Vec::with_capacity(usize::from(!self.function_calls.is_empty()) + self.outputs.len());
         if !self.function_calls.is_empty() {
-            messages.push(json!({
+            let mut assistant = json!({
                 "role": "assistant",
                 "content": Value::Null,
                 "tool_calls": self.function_calls,
-            }));
+            });
+            if !self.reasoning_content.trim().is_empty()
+                && let Some(object) = assistant.as_object_mut()
+            {
+                object.insert(
+                    "reasoning_content".to_string(),
+                    Value::String(self.reasoning_content),
+                );
+            }
+            messages.push(assistant);
         }
         messages.extend(self.outputs);
         messages
     }
 }
 
-pub(super) fn translate_items<F>(
+pub(super) fn translate_items<F, R>(
     items: &[Value],
     mut translate_regular_item: F,
+    mut translate_reasoning_item: R,
 ) -> Result<Vec<Value>, CompatError>
 where
     F: FnMut(&Value) -> Result<Option<Value>, CompatError>,
+    R: FnMut(&Value) -> Result<Option<String>, CompatError>,
 {
     let mut messages = Vec::new();
     let mut turn = ToolCallTurn::new();
@@ -75,6 +92,19 @@ where
                 turn = ToolCallTurn::new();
             }
             turn.push(item)?;
+            continue;
+        }
+        if item.as_object().is_some_and(|object| {
+            object.get("role").is_none()
+                && object.get("type").and_then(Value::as_str) == Some("reasoning")
+        }) {
+            if turn.has_outputs() {
+                messages.extend(turn.finish());
+                turn = ToolCallTurn::new();
+            }
+            if let Some(reasoning) = translate_reasoning_item(item)? {
+                turn.push_reasoning(&reasoning);
+            }
             continue;
         }
         messages.extend(turn.finish());

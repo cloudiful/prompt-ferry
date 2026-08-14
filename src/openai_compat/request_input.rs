@@ -18,10 +18,14 @@ pub(crate) fn translate_input(input: &Value) -> Result<Vec<Value>, CompatError> 
             "role": "user",
             "content": text,
         })]),
-        Value::Array(items) => tool_calls::translate_items(items, translate_message),
-        value if is_tool_call_item(value) => {
-            tool_calls::translate_items(std::slice::from_ref(value), translate_message)
+        Value::Array(items) => {
+            tool_calls::translate_items(items, translate_message, translate_reasoning_item)
         }
+        value if is_tool_call_item(value) => tool_calls::translate_items(
+            std::slice::from_ref(value),
+            translate_message,
+            translate_reasoning_item,
+        ),
         value => translate_message(value).map(|message| message.into_iter().collect()),
     }
 }
@@ -51,6 +55,7 @@ fn translate_object_message(
             "function_call_output" => {
                 return Ok(Some(translate_function_call_output(object)?));
             }
+            "reasoning" => return Ok(None),
             _ => {}
         }
     }
@@ -72,6 +77,16 @@ fn translate_object_message(
         "unsupported_feature",
         "responses input item must be a role message, function call item, function result item, or supported text/image part",
     ))
+}
+
+fn translate_reasoning_item(item: &Value) -> Result<Option<String>, CompatError> {
+    let Some(object) = item.as_object() else {
+        return Ok(None);
+    };
+    if object.get("content").is_none() {
+        return Ok(None);
+    }
+    Ok(translate_assistant_content(item)?.reasoning_content)
 }
 
 fn translate_role_message(

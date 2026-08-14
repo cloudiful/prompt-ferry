@@ -5,7 +5,8 @@ use crate::{
     config::NativeApi,
     openai_compat::{
         CompatError, NormalizedResponsesRequest, chat_request_to_responses,
-        responses_request_to_chat, validate_raw_responses_request_body,
+        normalize_chat_request_for_native, responses_request_to_chat,
+        validate_raw_responses_request_body,
     },
     redact_upstream::UpstreamRedactionSession,
     usage::upstream_body,
@@ -91,7 +92,10 @@ pub fn prepare_upstream_request(
         }
         ("/v1/chat/completions", NativeApi::Chat) => Ok(PreparedUpstreamRequest {
             path: request_path.to_string(),
-            body: PreparedRequestBody::BufferedBytes(upstream_body(request_path, request_body)),
+            body: PreparedRequestBody::BufferedBytes(upstream_body(
+                request_path,
+                &normalize_chat_request_for_native(request_body),
+            )),
             response_adapter: ResponseAdapter::Passthrough,
             upstream_redacted_request_json: None,
             upstream_restore_session: None,
@@ -160,5 +164,32 @@ mod tests {
             "data:image/png;base64,AA=="
         );
         assert_eq!(body["input"][0]["content"][1]["detail"], "high");
+    }
+
+    #[test]
+    fn normalizes_developer_role_for_chat_native_upstreams() {
+        let prepared = prepare_upstream_request(
+            "/v1/chat/completions",
+            br#"{
+                "model":"deepseek-v4-pro",
+                "messages":[
+                    {"role":"developer","content":"be concise"},
+                    {"role":"user","content":"hello"}
+                ],
+                "reasoning_effort":"max"
+            }"#,
+            NativeApi::Chat,
+            false,
+        )
+        .unwrap();
+
+        let PreparedRequestBody::BufferedBytes(body) = prepared.body else {
+            panic!("chat-native requests should be buffered");
+        };
+        let body: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["messages"][0]["role"].as_str(), Some("system"));
+        assert_eq!(body["messages"][1]["role"].as_str(), Some("user"));
+        assert_eq!(body["reasoning_effort"].as_str(), Some("max"));
     }
 }

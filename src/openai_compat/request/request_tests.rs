@@ -483,6 +483,120 @@ mod tests {
     }
 
     #[test]
+    fn translates_max_reasoning_effort_to_chat_native_field() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_request_to_chat(
+                br#"{
+                    "input":"hi",
+                    "reasoning":{"effort":"max"}
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(value["reasoning_effort"].as_str(), Some("max"));
+    }
+
+    #[test]
+    fn translates_chat_reasoning_effort_to_responses_config() {
+        let value = serde_json::from_slice::<Value>(
+            &super::super::chat_request_to_responses(
+                br#"{
+                    "model":"deepseek-v4-pro",
+                    "messages":[{"role":"user","content":"hi"}],
+                    "reasoning_effort":"max"
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(value["reasoning"]["effort"].as_str(), Some("max"));
+    }
+
+    #[test]
+    fn translates_bare_reasoning_before_tool_calls_to_chat_reasoning_content() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_request_to_chat(
+                br#"{
+                    "model":"deepseek-v4-pro",
+                    "input":[
+                        {"type":"reasoning","content":[{"type":"reasoning_text","text":"check first"}]},
+                        {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},
+                        {"type":"function_call_output","call_id":"call_1","output":"ok"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(value["messages"].as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            value["messages"][0]["reasoning_content"].as_str(),
+            Some("check first")
+        );
+        assert_eq!(
+            value["messages"][0]["tool_calls"][0]["id"].as_str(),
+            Some("call_1")
+        );
+        assert_eq!(value["messages"][1]["role"].as_str(), Some("tool"));
+    }
+
+    #[test]
+    fn keeps_bare_reasoning_with_their_tool_call_round() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_request_to_chat(
+                br#"{
+                    "input":[
+                        {"type":"reasoning","content":[{"type":"reasoning_text","text":"first"}]},
+                        {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},
+                        {"type":"function_call_output","call_id":"call_1","output":"one"},
+                        {"type":"reasoning","content":[{"type":"reasoning_text","text":"second"}]},
+                        {"type":"function_call","call_id":"call_2","name":"lookup","arguments":"{}"},
+                        {"type":"function_call_output","call_id":"call_2","output":"two"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(value["messages"].as_array().map(Vec::len), Some(4));
+        assert_eq!(
+            value["messages"][0]["reasoning_content"].as_str(),
+            Some("first")
+        );
+        assert_eq!(value["messages"][0]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(
+            value["messages"][2]["reasoning_content"].as_str(),
+            Some("second")
+        );
+        assert_eq!(value["messages"][2]["tool_calls"][0]["id"], "call_2");
+    }
+
+    #[test]
+    fn ignores_bare_reasoning_without_tool_calls_for_chat_compat() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_request_to_chat(
+                br#"{
+                    "input":[
+                        {"type":"reasoning","content":[{"type":"reasoning_text","text":"ignored"}]},
+                        {"role":"user","content":"continue"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(value["messages"].as_array().map(Vec::len), Some(1));
+        assert_eq!(value["messages"][0]["role"].as_str(), Some("user"));
+        assert_eq!(value["messages"][0]["content"].as_str(), Some("continue"));
+    }
+
+    #[test]
     fn rejects_conversation_with_previous_response_id() {
         let err = responses_request_to_chat(
             br#"{"conversation":"conv_123","previous_response_id":"resp_123","input":"hi"}"#,

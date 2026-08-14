@@ -196,6 +196,10 @@ fn translate_part(value: &Value) -> Result<Option<Value>, CompatError> {
             })))
         }
         "item_reference" => Ok(None),
+        // Responses reasoning items are metadata, not Chat content. Bare
+        // items are handled by the tool-call translator when they precede a
+        // function call; other occurrences are ignored for Chat upstreams.
+        "reasoning" => Ok(None),
         "input_file" => Err(CompatError::new(
             StatusCode::BAD_REQUEST,
             "unsupported_feature",

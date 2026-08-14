@@ -223,7 +223,7 @@ fn reject_reasoning_config(object: &Map<String, Value>) -> Result<(), CompatErro
         )
     })?;
 
-    let allowed_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"];
+    let allowed_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
     if let Some(effort) = reasoning_object
         .get("effort")
         .filter(|value| has_meaningful_value(value))
