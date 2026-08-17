@@ -248,6 +248,12 @@ fn v2_server(url: &str) -> McpServer {
         monthly_max_requests: None,
         enabled: true,
         timeout_ms: 30_000,
+        lifecycle_policy: "auto".to_string(),
+        lifecycle_manual_protocol_version: None,
+        lifecycle_learned_mode: None,
+        lifecycle_learned_protocol_version: None,
+        lifecycle_learned_for_updated_at: None,
+        lifecycle_learned_at: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }
@@ -349,6 +355,125 @@ async fn spawn_legacy_upstream() -> String {
         let _ = axum::serve(listener, router).await;
     });
     format!("http://{addr}/mcp")
+}
+
+/// A mock of https://mcp.grep.app (gh-grep), which rejects `server/discover`
+/// probes for protocol versions it does not declare with an HTTP 400 that has
+/// NO `Content-Type` header and a JSON-RPC `-32000` body whose message names
+/// the supported versions (e.g. `2025-06-18`). It answers `server/discover`
+/// with `-32601 Method not found` for supported versions and only serves the
+/// legacy `initialize` flow.
+async fn spawn_gh_grep_upstream() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    let initialize_versions = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = initialize_versions.clone();
+
+    async fn handle(
+        headers: http::HeaderMap,
+        body: axum::body::Body,
+        observed: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    ) -> axum::response::Response {
+        let supported = ["2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
+        let probe_version = headers
+            .get("mcp-protocol-version")
+            .and_then(|value| value.to_str().ok());
+        if probe_version.is_some_and(|version| !supported.contains(&version)) {
+            observed
+                .lock()
+                .unwrap()
+                .push(format!("rejected:{probe_version:?}"));
+            // gh-grep answers without any Content-Type header; axum adds one
+            // for `String` bodies, so build the response manually.
+            return axum::response::Response::builder()
+                .status(axum::http::StatusCode::BAD_REQUEST)
+                .body(axum::body::Body::from(
+                    r#"{"jsonrpc":"2.0","error":{"code":-32000,"message":"Bad Request: Unsupported protocol version (supported versions: 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)"},"id":null}"#,
+                ))
+                .unwrap();
+        }
+        let body = axum::body::to_bytes(body, 1 << 20).await.unwrap();
+        let request: Value = serde_json::from_slice(&body).unwrap();
+        let id = request["id"].clone();
+        let method = request["method"].as_str().unwrap_or_default().to_string();
+        let data = match method.as_str() {
+            "server/discover" => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {"code": -32601, "message": "Method not found"}
+            }),
+            "initialize" => {
+                let requested = request["params"]["protocolVersion"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                observed.lock().unwrap().push(requested);
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {"tools": {"listChanged": true}},
+                        "serverInfo": {"name": "mcp-typescript server on vercel", "version": "0.1.0"}
+                    }
+                })
+            }
+            "tools/list" => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "tools": [{
+                        "name": "grep-echo",
+                        "description": "legacy grep tool",
+                        "inputSchema": {"type": "object"}
+                    }]
+                }
+            }),
+            _ => {
+                return axum::http::StatusCode::ACCEPTED.into_response();
+            }
+        };
+        (
+            [("content-type", "text/event-stream")],
+            format!("event: message\ndata: {data}\n\n"),
+        )
+            .into_response()
+    }
+
+    let router = axum::Router::new().route(
+        "/mcp",
+        axum::routing::post(move |headers, body| {
+            let observed = observed.clone();
+            async move { handle(headers, body, observed).await }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    (format!("http://{addr}/mcp"), initialize_versions)
+}
+
+#[tokio::test]
+async fn client_falls_back_to_legacy_with_negotiated_version_for_grep_style_http_400() {
+    let (url, initialize_versions) = spawn_gh_grep_upstream().await;
+    let server = v2_server(&url);
+    let response = call(
+        &server,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let tools = response["result"]["tools"].as_array().expect("tools list");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["name"].as_str(), Some("grep-echo"));
+    let versions = initialize_versions.lock().unwrap();
+    assert!(
+        versions.iter().any(|version| version == "2025-06-18"),
+        "legacy initialize must negotiate the highest version the upstream supports, got {versions:?}"
+    );
 }
 
 #[tokio::test]

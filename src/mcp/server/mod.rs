@@ -93,6 +93,7 @@ impl ProxyService {
 
         let server = self.load_server(scope).await?;
         filtering::call_server_filtered(
+            Some(&scope.pool),
             &server,
             request,
             scope.conversation_id.as_deref(),

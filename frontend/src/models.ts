@@ -89,6 +89,8 @@ export type McpForm = {
   monthly_max_requests: number | null
   enabled: boolean
   timeout_ms: number
+  lifecycle_policy: 'auto' | 'legacy_initialize'
+  lifecycle_manual_protocol_version: string | null
 }
 
 export type McpBearerTokenForm = {

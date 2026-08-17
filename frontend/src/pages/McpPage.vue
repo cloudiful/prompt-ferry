@@ -31,6 +31,11 @@ const usersStore = useUsersStore()
 
 const dialogVisible = ref(false)
 const dialogForm = ref<McpForm>(createEmptyMcpForm())
+const dialogLearned = ref<{
+  mode: string | null
+  protocolVersion: string | null
+  learnedAt: string | null
+} | null>(null)
 const dialogCatalog = ref<McpCatalogResponse>({
   tools: [],
   resources: [],
@@ -68,6 +73,7 @@ async function refresh(): Promise<void> {
 
 function openMcpDialog(): void {
   dialogForm.value = createEmptyMcpForm()
+  dialogLearned.value = null
   dialogCatalog.value = { tools: [], resources: [], prompts: [] }
   dialogCatalogLoading.value = false
   dialogVisible.value = true
@@ -75,6 +81,11 @@ function openMcpDialog(): void {
 
 async function editMcpServer(server: McpServer): Promise<void> {
   dialogForm.value = mcpServerToForm(server)
+  dialogLearned.value = {
+    mode: server.lifecycle_learned_mode ?? null,
+    protocolVersion: server.lifecycle_learned_protocol_version ?? null,
+    learnedAt: server.lifecycle_learned_at ?? null,
+  }
   dialogCatalog.value = mcpStore.getCachedCatalog(server.server_id) ?? {
     tools: [],
     resources: [],
@@ -211,6 +222,7 @@ onMounted(async () => {
       :catalog-loading="dialogCatalogLoading"
       :header="dialogHeader"
       :is-admin="session.isAdmin"
+      :learned="dialogLearned"
       :quota-groups="quotaGroups"
       :t="t"
       :users="usersStore.users"

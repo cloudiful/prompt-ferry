@@ -464,6 +464,8 @@ async fn visible_mcp_servers_are_scoped_by_owner() -> anyhow::Result<()> {
             monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
         },
     )
     .await?;
@@ -490,6 +492,8 @@ async fn visible_mcp_servers_are_scoped_by_owner() -> anyhow::Result<()> {
             monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
         },
     )
     .await?;
@@ -516,6 +520,8 @@ async fn visible_mcp_servers_are_scoped_by_owner() -> anyhow::Result<()> {
             monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
         },
     )
     .await?;
@@ -685,6 +691,116 @@ async fn raw_payloads_are_written_and_pruned_without_losing_normalized_only_meta
         Some("normalized-only")
     );
 
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mcp_lifecycle_learning_is_persisted_and_tied_to_updated_at() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    db::migrate(&schema.pool).await?;
+
+    let server = db::create_mcp_server(
+        &schema.pool,
+        db::McpServerInput {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "lifecycle-learn".to_string(),
+            aggregate_naming_mode: "passthrough_preferred".to_string(),
+            transport: "http".to_string(),
+            url: Some("https://example.com/mcp".to_string()),
+            command: None,
+            args: serde_json::json!([]),
+            env_json: serde_json::json!({}),
+            bearer_tokens_json: serde_json::json!([]),
+            http_headers_json: serde_json::json!({}),
+            tool_filter_mode: "blacklist".to_string(),
+            allowed_tools: serde_json::json!([]),
+            disabled_tools: serde_json::json!([]),
+            disabled_resources: serde_json::json!([]),
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+        },
+    )
+    .await?;
+    assert_eq!(server.lifecycle_policy, "auto");
+    assert_eq!(server.lifecycle_learned_mode, None);
+
+    let persisted =
+        db::mark_mcp_lifecycle_learned(&schema.pool, &server, "legacy_initialize", "2025-06-18")
+            .await?;
+    assert!(persisted);
+
+    let reloaded = db::get_mcp_server(&schema.pool, server.server_id)
+        .await?
+        .expect("server reloaded");
+    assert_eq!(
+        reloaded.lifecycle_learned_mode.as_deref(),
+        Some("legacy_initialize")
+    );
+    assert_eq!(
+        reloaded.lifecycle_learned_protocol_version.as_deref(),
+        Some("2025-06-18")
+    );
+    assert_eq!(
+        reloaded.lifecycle_learned_for_updated_at,
+        Some(reloaded.updated_at)
+    );
+    assert!(reloaded.lifecycle_learned_at.is_some());
+
+    let server_edited = db::update_mcp_server(
+        &schema.pool,
+        server.server_id,
+        db::McpServerInput {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "lifecycle-learn".to_string(),
+            aggregate_naming_mode: "passthrough_preferred".to_string(),
+            transport: "http".to_string(),
+            url: Some("https://example.com/mcp".to_string()),
+            command: None,
+            args: serde_json::json!([]),
+            env_json: serde_json::json!({}),
+            bearer_tokens_json: serde_json::json!([]),
+            http_headers_json: serde_json::json!({}),
+            tool_filter_mode: "blacklist".to_string(),
+            allowed_tools: serde_json::json!([]),
+            disabled_tools: serde_json::json!([]),
+            disabled_resources: serde_json::json!([]),
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+        },
+    )
+    .await?
+    .expect("server updated");
+
+    // The learned state survives an edit but is tied to the old updated_at,
+    // so the runtime treats it as stale and reprobes.
+    let stale = db::get_mcp_server(&schema.pool, server.server_id)
+        .await?
+        .expect("server reloaded");
+    assert_eq!(
+        stale.lifecycle_learned_protocol_version.as_deref(),
+        Some("2025-06-18")
+    );
+    assert_ne!(
+        stale.lifecycle_learned_for_updated_at,
+        Some(stale.updated_at)
+    );
+
+    let _ = server_edited;
     schema.cleanup().await?;
     Ok(())
 }

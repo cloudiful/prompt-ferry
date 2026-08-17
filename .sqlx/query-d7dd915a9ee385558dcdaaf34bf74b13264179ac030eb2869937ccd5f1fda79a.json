@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mcp_servers\nSET lifecycle_learned_mode = $2,\n    lifecycle_learned_protocol_version = $3,\n    lifecycle_learned_for_updated_at = updated_at,\n    lifecycle_learned_at = NOW()\nWHERE server_id = $1\n  AND updated_at = $4\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d7dd915a9ee385558dcdaaf34bf74b13264179ac030eb2869937ccd5f1fda79a"
+}

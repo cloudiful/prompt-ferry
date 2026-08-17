@@ -3889,6 +3889,7 @@ components:
       - disabled_resources
       - enabled
       - timeout_ms
+      - lifecycle_policy
       - created_at
       - updated_at
       properties:
@@ -3919,6 +3920,30 @@ components:
           type: boolean
         env_json: {}
         http_headers_json: {}
+        lifecycle_learned_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        lifecycle_learned_for_updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        lifecycle_learned_mode:
+          type:
+          - string
+          - 'null'
+        lifecycle_learned_protocol_version:
+          type:
+          - string
+          - 'null'
+        lifecycle_manual_protocol_version:
+          type:
+          - string
+          - 'null'
+        lifecycle_policy:
+          type: string
         monthly_max_requests:
           type:
           - integer
@@ -4006,6 +4031,14 @@ components:
           - 'null'
         env_json: {}
         http_headers_json: {}
+        lifecycle_manual_protocol_version:
+          type:
+          - string
+          - 'null'
+        lifecycle_policy:
+          type:
+          - string
+          - 'null'
         monthly_max_requests:
           type:
           - integer

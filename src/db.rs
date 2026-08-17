@@ -30,7 +30,8 @@ pub use endpoints::{
 pub use mcp::{
     create_mcp_server, delete_mcp_server, get_mcp_server, get_mcp_server_by_name,
     get_user_mcp_server, get_visible_mcp_server, list_mcp_servers, list_mcp_servers_page,
-    list_user_mcp_servers, list_user_mcp_servers_page, list_visible_mcp_servers, update_mcp_server,
+    list_user_mcp_servers, list_user_mcp_servers_page, list_visible_mcp_servers,
+    mark_mcp_lifecycle_learned, update_mcp_server,
 };
 pub use mcp_credentials::{
     create_quota_group, delete_credential, delete_quota_group, get_quota_group, insert_credential,

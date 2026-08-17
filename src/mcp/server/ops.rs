@@ -384,6 +384,7 @@ impl ProxyService {
         validate(&server, &target.upstream_name)?;
         rewrite(&mut params, target.upstream_name);
         let response = filtering::call_server_filtered(
+            Some(context.pool),
             &server,
             json_request(context.request_id, context.method, required_params(params)?),
             context.conversation_id,

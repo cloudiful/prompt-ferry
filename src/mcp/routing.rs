@@ -36,7 +36,7 @@ pub(super) async fn route_prefixed(
     if method == "tools/call" && is_disabled_item(&server, "tools", &target.upstream_name) {
         return Ok(json_error_value(id, -32602, "tool is disabled"));
     }
-    call_server(&server, request, conversation_id, None).await
+    call_server(Some(pool), &server, request, conversation_id, None).await
 }
 
 pub(super) async fn route_resource(
@@ -63,7 +63,7 @@ pub(super) async fn route_resource(
     if is_disabled_item(&server, "resources", &target.upstream_name) {
         return Ok(json_error_value(id, -32602, "resource is disabled"));
     }
-    call_server(&server, request, conversation_id, None).await
+    call_server(Some(pool), &server, request, conversation_id, None).await
 }
 
 pub(super) async fn route_completion(
@@ -117,5 +117,5 @@ pub(super) async fn route_completion(
     let server = load_visible_server(pool, user_id, &target.server_name)
         .await?
         .ok_or_else(|| anyhow!("mcp server not found or disabled"))?;
-    call_server(&server, request, conversation_id, None).await
+    call_server(Some(pool), &server, request, conversation_id, None).await
 }

@@ -1043,6 +1043,8 @@ async fn insert_test_mcp_server(
             monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
         },
     )
     .await
@@ -1269,7 +1271,7 @@ async fn named_server_resource_templates_are_namespaced_and_reversible() {
     cache
         .put(
             &server_row,
-            crate::mcp::service::fetch_server_snapshot(&server_row)
+            crate::mcp::service::fetch_server_snapshot(Some(&pool), &server_row)
                 .await
                 .expect("snapshot upstream"),
         )

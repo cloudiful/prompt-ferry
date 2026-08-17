@@ -39,6 +39,8 @@ pub struct McpServerRequest {
     pub monthly_max_requests: Option<i32>,
     pub enabled: Option<bool>,
     pub timeout_ms: Option<i32>,
+    pub lifecycle_policy: Option<String>,
+    pub lifecycle_manual_protocol_version: Option<String>,
 }
 
 impl McpServerRequest {
@@ -121,6 +123,19 @@ impl McpServerRequest {
             monthly_max_requests: self.monthly_max_requests,
             enabled: self.enabled.unwrap_or(true),
             timeout_ms: self.timeout_ms.unwrap_or(30_000).clamp(100, 300_000),
+            lifecycle_policy: self.lifecycle_policy.unwrap_or_else(|| {
+                existing_server
+                    .map(|server| server.lifecycle_policy.clone())
+                    .unwrap_or_else(|| "auto".to_string())
+            }),
+            lifecycle_manual_protocol_version: match self.lifecycle_manual_protocol_version {
+                Some(value) => {
+                    let value = value.trim().to_string();
+                    if value.is_empty() { None } else { Some(value) }
+                }
+                None => existing_server
+                    .and_then(|server| server.lifecycle_manual_protocol_version.clone()),
+            },
         }
     }
 
@@ -161,6 +176,25 @@ impl McpServerRequest {
                 StatusCode::BAD_REQUEST,
                 "invalid_tool_filter_mode",
                 "tool_filter_mode must be blacklist or whitelist",
+            ));
+        }
+        if let Some(lifecycle_policy) = self.lifecycle_policy.as_deref()
+            && !matches!(lifecycle_policy, "auto" | "legacy_initialize")
+        {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_lifecycle_policy",
+                "lifecycle_policy must be auto or legacy_initialize",
+            ));
+        }
+        if let Some(version) = self.lifecycle_manual_protocol_version.as_deref()
+            && !version.trim().is_empty()
+            && !is_valid_protocol_version(version.trim())
+        {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_lifecycle_protocol_version",
+                "lifecycle_manual_protocol_version must be a protocol version date such as 2025-06-18",
             ));
         }
         if let Some(aggregate_naming_mode) = self.aggregate_naming_mode.as_deref()
@@ -243,6 +277,46 @@ impl McpServerRequest {
             ));
         }
         Ok(())
+    }
+}
+
+/// A plausible MCP protocol-version date (`YYYY-MM-DD`). Month and day ranges
+/// are validated so an operator typo is rejected at save time instead of being
+/// silently ignored at connect time.
+fn is_valid_protocol_version(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return false;
+    }
+    if !value[0..4].chars().all(|c| c.is_ascii_digit())
+        || !value[5..7].chars().all(|c| c.is_ascii_digit())
+        || !value[8..10].chars().all(|c| c.is_ascii_digit())
+    {
+        return false;
+    }
+    let month = value[5..7].parse::<u32>().unwrap_or(0);
+    let day = value[8..10].parse::<u32>().unwrap_or(0);
+    (1..=12).contains(&month) && (1..=31).contains(&day)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_protocol_version;
+
+    #[test]
+    fn protocol_version_validation_accepts_known_dates() {
+        assert!(is_valid_protocol_version("2026-07-28"));
+        assert!(is_valid_protocol_version("2025-06-18"));
+        assert!(is_valid_protocol_version("2024-10-07"));
+    }
+
+    #[test]
+    fn protocol_version_validation_rejects_garbage() {
+        assert!(!is_valid_protocol_version("2025-13-01"));
+        assert!(!is_valid_protocol_version("2025-06-32"));
+        assert!(!is_valid_protocol_version("06-18"));
+        assert!(!is_valid_protocol_version("latest"));
+        assert!(!is_valid_protocol_version(""));
     }
 }
 

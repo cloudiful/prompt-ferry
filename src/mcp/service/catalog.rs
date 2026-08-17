@@ -73,9 +73,11 @@ impl McpCatalogService {
         &self,
         server: &db::McpServer,
     ) -> anyhow::Result<super::ServerCatalogSnapshot> {
-        let snapshot = fetch_server_snapshot(server).await.map_err(|err| {
-            anyhow::anyhow!("failed to refresh mcp catalog for '{}': {err}", server.name)
-        })?;
+        let snapshot = fetch_server_snapshot(Some(&self.inner.pool), server)
+            .await
+            .map_err(|err| {
+                anyhow::anyhow!("failed to refresh mcp catalog for '{}': {err}", server.name)
+            })?;
         self.inner.cache.put(server, snapshot.clone()).await;
         info!(
             category = "mcp_catalog_cache",

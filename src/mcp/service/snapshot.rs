@@ -12,10 +12,13 @@ use crate::mcp::{
     transport,
 };
 
-pub async fn fetch_server_snapshot(server: &McpServer) -> anyhow::Result<ServerCatalogSnapshot> {
+pub async fn fetch_server_snapshot(
+    pool: Option<&sqlx::PgPool>,
+    server: &McpServer,
+) -> anyhow::Result<ServerCatalogSnapshot> {
     let timeout = Duration::from_millis(server.timeout_ms.max(100) as u64);
     tokio::time::timeout(timeout, async {
-        let client = transport::connect(server, None).await?;
+        let client = transport::connect(pool, server, None).await?;
         let result = async {
             let capabilities = client
                 .peer()
@@ -178,6 +181,12 @@ mod tests {
             monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+            lifecycle_learned_mode: None,
+            lifecycle_learned_protocol_version: None,
+            lifecycle_learned_for_updated_at: None,
+            lifecycle_learned_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

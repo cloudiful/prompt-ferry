@@ -34,6 +34,12 @@ pub struct McpServer {
     pub monthly_max_requests: Option<i32>,
     pub enabled: bool,
     pub timeout_ms: i32,
+    pub lifecycle_policy: String,
+    pub lifecycle_manual_protocol_version: Option<String>,
+    pub lifecycle_learned_mode: Option<String>,
+    pub lifecycle_learned_protocol_version: Option<String>,
+    pub lifecycle_learned_for_updated_at: Option<DateTime<Utc>>,
+    pub lifecycle_learned_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -106,6 +112,12 @@ mod tests {
             monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+            lifecycle_learned_mode: None,
+            lifecycle_learned_protocol_version: None,
+            lifecycle_learned_for_updated_at: None,
+            lifecycle_learned_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }
@@ -223,4 +235,6 @@ pub struct McpServerInput {
     pub monthly_max_requests: Option<i32>,
     pub enabled: bool,
     pub timeout_ms: i32,
+    pub lifecycle_policy: String,
+    pub lifecycle_manual_protocol_version: Option<String>,
 }

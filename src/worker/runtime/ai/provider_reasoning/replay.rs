@@ -233,7 +233,8 @@ pub(super) fn responses_reasoning_replay_enabled(
         db::ChatReasoningReplayPolicy::ForcePassthrough => false,
         db::ChatReasoningReplayPolicy::ForceReplay => true,
         db::ChatReasoningReplayPolicy::Auto => {
-            direct_deepseek_endpoint(route) && deepseek_reasoning_model(model)
+            (direct_deepseek_endpoint(route) && deepseek_reasoning_model(model))
+                || (direct_minimax_endpoint(route) && minimax_reasoning_model(model))
         }
     }
 }

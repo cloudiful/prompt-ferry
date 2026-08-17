@@ -19,6 +19,11 @@ const props = defineProps<{
   catalog: McpCatalogResponse
   users: User[]
   quotaGroups: McpQuotaGroup[]
+  learned?: {
+    mode: string | null
+    protocolVersion: string | null
+    learnedAt: string | null
+  } | null
 }>()
 
 const visible = defineModel<boolean>('visible', { required: true })
@@ -61,6 +66,22 @@ const toolCatalogNeedsFilter = computed(() => props.catalog.tools.length > 8)
 const resourceCatalogNeedsFilter = computed(
   () => props.catalog.resources.length > 8,
 )
+const learnedLabel = computed(() => {
+  if (!props.learned) return props.t('lifecycleLearnedNone')
+  if (props.learned.mode === 'modern_discover')
+    return props.t('lifecycleLearnedModern')
+  if (props.learned.mode === 'legacy_initialize')
+    return props.t('lifecycleLearnedLegacy')
+  return props.t('lifecycleLearnedNone')
+})
+const learnedVersionLabel = computed(() => {
+  if (!props.learned?.protocolVersion) return '-'
+  return props.learned.protocolVersion
+})
+const learnedAtLabel = computed(() => {
+  if (!props.learned?.learnedAt) return '-'
+  return new Date(props.learned.learnedAt).toLocaleString()
+})
 const toolOptions = computed(() =>
   props.catalog.tools.map((item) => ({
     ...item,
@@ -232,6 +253,58 @@ defineEmits<{
                   value-key="value"
                 />
               </div>
+              <div class="grid min-w-0 gap-2">
+                <div class="text-muted">{{ t('lifecyclePolicy') }}</div>
+                <USelect
+                  v-model="form.lifecycle_policy"
+                  class="w-full"
+                  :items="[
+                    { label: t('lifecyclePolicyAuto'), value: 'auto' },
+                    {
+                      label: t('lifecyclePolicyLegacy'),
+                      value: 'legacy_initialize',
+                    },
+                  ]"
+                  label-key="label"
+                  value-key="value"
+                />
+              </div>
+              <div class="grid min-w-0 gap-2">
+                <div class="text-muted">
+                  {{ t('lifecycleManualProtocolVersion') }}
+                </div>
+                <UInput
+                  v-model="form.lifecycle_manual_protocol_version"
+                  class="w-full font-mono"
+                  placeholder="2025-06-18"
+                />
+              </div>
+            </div>
+            <div class="text-xs text-dimmed">
+              {{ t('lifecyclePolicyHint') }}
+            </div>
+            <div class="text-xs text-dimmed">
+              {{ t('lifecycleManualProtocolVersionHint') }}
+            </div>
+            <div
+              v-if="form.server_id && learned"
+              class="grid gap-1 p-3 text-xs"
+            >
+              <div
+                class="grid gap-1 rounded border border-default bg-default p-3 md:grid-cols-3"
+              >
+                <div class="text-dimmed">
+                  {{ t('lifecycleLearned') }}: {{ learnedLabel }}
+                </div>
+                <div class="text-dimmed">
+                  {{ t('lifecycleLearnedVersion') }}: {{ learnedVersionLabel }}
+                </div>
+                <div class="text-dimmed">
+                  {{ t('lifecycleLearnedAt') }}: {{ learnedAtLabel }}
+                </div>
+              </div>
+            </div>
+            <div class="grid gap-3 md:grid-cols-[repeat(3,minmax(0,1fr))]">
               <div class="grid min-w-0 gap-2">
                 <div class="text-muted">{{ t(toolSelectionLabel) }}</div>
                 <div

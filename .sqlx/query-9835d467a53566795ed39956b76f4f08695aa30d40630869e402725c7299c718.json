@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT server_id, scope, owner_user_id, name, aggregate_naming_mode, transport, url, command, args, env_json, bearer_tokens_json, http_headers_json, tool_filter_mode, allowed_tools, disabled_tools, disabled_resources, daily_max_requests, monthly_max_requests, enabled, timeout_ms, created_at, updated_at\nFROM mcp_servers\nORDER BY scope DESC, owner_user_id NULLS FIRST, name ASC, server_id ASC\nLIMIT $2 OFFSET $1\n",
+  "query": "SELECT server_id, scope, owner_user_id, name, aggregate_naming_mode, transport, url, command, args, env_json, bearer_tokens_json, http_headers_json, tool_filter_mode, allowed_tools, disabled_tools, disabled_resources, daily_max_requests, monthly_max_requests, enabled, timeout_ms, lifecycle_policy, lifecycle_manual_protocol_version, lifecycle_learned_mode, lifecycle_learned_protocol_version, lifecycle_learned_for_updated_at, lifecycle_learned_at, created_at, updated_at\nFROM mcp_servers\nORDER BY scope DESC, owner_user_id NULLS FIRST, name ASC\n",
   "describe": {
     "columns": [
       {
@@ -225,6 +225,72 @@
       },
       {
         "ordinal": 20,
+        "name": "lifecycle_policy",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "lifecycle_policy"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "lifecycle_manual_protocol_version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "lifecycle_manual_protocol_version"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "lifecycle_learned_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "lifecycle_learned_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "lifecycle_learned_protocol_version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "lifecycle_learned_protocol_version"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "lifecycle_learned_for_updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "lifecycle_learned_for_updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 25,
+        "name": "lifecycle_learned_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "lifecycle_learned_at"
+          }
+        }
+      },
+      {
+        "ordinal": 26,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -235,7 +301,7 @@
         }
       },
       {
-        "ordinal": 21,
+        "ordinal": 27,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -247,10 +313,7 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Int8",
-        "Int8"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -274,8 +337,14 @@
       false,
       false,
       false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
       false
     ]
   },
-  "hash": "3404cd19b2a3b618a24aae2498ee7fc5de99d60458931483543c0dade2ca097e"
+  "hash": "9835d467a53566795ed39956b76f4f08695aa30d40630869e402725c7299c718"
 }

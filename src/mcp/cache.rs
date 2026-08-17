@@ -223,6 +223,12 @@ mod tests {
             monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+            lifecycle_learned_mode: None,
+            lifecycle_learned_protocol_version: None,
+            lifecycle_learned_for_updated_at: None,
+            lifecycle_learned_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

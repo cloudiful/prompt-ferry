@@ -83,6 +83,20 @@ export const mcpMessages = {
     billingPeriodStart: '结算周期开始',
     billingPeriodEnd: '结算周期结束',
     billingPeriodHint: '设置后按该窗口重复结算；留空按 UTC 自然月。',
+    lifecyclePolicy: '连接模式',
+    lifecyclePolicyAuto: '自动',
+    lifecyclePolicyLegacy: '仅旧版初始化',
+    lifecyclePolicyHint:
+      '服务端拒绝 server/discover 时自动回退旧版 initialize 并记住结果；选“仅旧版初始化”可强制跳过发现流程。',
+    lifecycleManualProtocolVersion: '固定协议版本（可选）',
+    lifecycleManualProtocolVersionHint:
+      '留空则使用服务端声明的最高兼容版本；例如 2025-06-18。',
+    lifecycleLearned: '当前连接方式',
+    lifecycleLearnedNone: '尚未探测',
+    lifecycleLearnedModern: '现代 discover',
+    lifecycleLearnedLegacy: '旧版 initialize',
+    lifecycleLearnedVersion: '协商版本',
+    lifecycleLearnedAt: '探测时间',
   },
   'en-US': {
     allowedTools: 'Allowed tools',
@@ -173,6 +187,20 @@ export const mcpMessages = {
     billingPeriodStart: 'Billing period start',
     billingPeriodEnd: 'Billing period end',
     billingPeriodHint:
-      'Repeating billing window; leave empty for UTC calendar months.',
+      'Recurs on this window; leave empty for UTC calendar months.',
+    lifecyclePolicy: 'Connection mode',
+    lifecyclePolicyAuto: 'Auto',
+    lifecyclePolicyLegacy: 'Legacy initialize only',
+    lifecyclePolicyHint:
+      'Falls back to the legacy initialize flow and remembers the result when the server rejects server/discover. Choose "Legacy initialize only" to skip discovery.',
+    lifecycleManualProtocolVersion: 'Pinned protocol version (optional)',
+    lifecycleManualProtocolVersionHint:
+      'Leave empty to use the highest version the server declares; e.g. 2025-06-18.',
+    lifecycleLearned: 'Current mode',
+    lifecycleLearnedNone: 'Not probed yet',
+    lifecycleLearnedModern: 'Modern discover',
+    lifecycleLearnedLegacy: 'Legacy initialize',
+    lifecycleLearnedVersion: 'Negotiated version',
+    lifecycleLearnedAt: 'Probed at',
   },
 } as const

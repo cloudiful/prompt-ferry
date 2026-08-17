@@ -345,6 +345,32 @@ async fn auto_triggers_for_direct_minimax_endpoint_and_reasoning_model() {
 }
 
 #[tokio::test]
+async fn responses_auto_triggers_for_direct_minimax_endpoint_and_reasoning_model() {
+    let route = sample_route(
+        "https://api.minimax.io",
+        db::ChatReasoningReplayPolicy::Auto,
+    );
+    let body = serde_json::to_vec(&json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"function_call",
+            "call_id":"call_1",
+            "name":"one",
+            "arguments":"{}"
+        }]
+    }))
+    .unwrap();
+
+    let error =
+        super::responses::restore_responses_reasoning(None, Some(1), &route, None, None, &body)
+            .await
+            .unwrap_err();
+
+    assert_eq!(error.code, "replay_unavailable");
+    assert!(error.message.contains("missing_artifact"));
+}
+
+#[tokio::test]
 async fn auto_skips_direct_deepseek_endpoint_with_non_reasoning_model() {
     let route = sample_route(
         "https://api.deepseek.com",

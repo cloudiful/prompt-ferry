@@ -1627,6 +1627,122 @@ async fn restores_deepseek_responses_reasoning_without_conversation_identity() -
 }
 
 #[tokio::test]
+async fn restores_minimax_m3_responses_reasoning_without_conversation_identity()
+-> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    enable_prompt_logging(&schema).await?;
+
+    let upstream_log = Arc::new(ResponsesRequestLog::default());
+    let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
+    config.upstream_native_api = prompt_ferry::config::NativeApi::Responses;
+    let endpoint = db::create_endpoint(
+        &schema.pool,
+        db::EndpointCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "minimax-responses-upstream".to_string(),
+            base_url: format!("http://{upstream_addr}/minimax"),
+            native_api: prompt_ferry::config::NativeApi::Responses,
+            native_api_source: NativeApiSource::Manual,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            api_key: "upstream-key".to_string(),
+            api_keys: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+        },
+    )
+    .await?;
+    db::create_model_endpoint_rule(
+        &schema.pool,
+        db::ModelEndpointRuleCreate {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            model_pattern: "MiniMax-M3".to_string(),
+            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            targets: vec![db::ModelRouteTargetCreate {
+                endpoint_id: endpoint.endpoint_id,
+                enabled: true,
+                upstream_model: None,
+                responses_continuation_policy: db::ResponsesContinuationPolicy::ForcePassthrough,
+                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
+            }],
+        },
+    )
+    .await?;
+    let mut worker_handle = tokio::spawn(async move {
+        prompt_ferry::worker::connect_for_test_with_admin(config, reqwest::Client::new()).await
+    });
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let client = reqwest::Client::new();
+    let first = client
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "MiniMax-M3",
+            "input": "need weather",
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(first.status(), StatusCode::OK);
+    assert_eq!(wait_for_assistant_artifact(&schema).await?, (true, true));
+
+    let second = client
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "MiniMax-M3",
+            "input": [{
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "get_weather",
+                "arguments": "{\"city\":\"Boston\"}"
+            }, {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "72F"
+            }],
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(second.status(), StatusCode::OK);
+
+    let requests = upstream_log.bodies.lock().await;
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["reasoning"]["effort"].as_str(), Some("minimal"));
+    assert_eq!(requests[1]["input"][0]["type"].as_str(), Some("reasoning"));
+    assert_eq!(
+        requests[1]["input"][0]["content"][0]["text"].as_str(),
+        Some("internal steps")
+    );
+    assert_eq!(
+        requests[1]["input"][1]["type"].as_str(),
+        Some("function_call")
+    );
+    assert_eq!(
+        requests[1]["input"][2]["type"].as_str(),
+        Some("function_call_output")
+    );
+    drop(requests);
+
+    worker_handle.abort();
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn force_replay_does_not_infer_session_from_tool_output_without_explicit_identity()
 -> anyhow::Result<()> {
     if !test_database_configured() {

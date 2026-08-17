@@ -6,15 +6,17 @@ use crate::db::McpServer;
 use super::{protocol::json_error_value, transport};
 
 pub(super) async fn call_server(
+    pool: Option<&sqlx::PgPool>,
     server: &McpServer,
     request: Value,
     conversation_id: Option<&str>,
     forced: Option<&crate::db::McpCredential>,
 ) -> anyhow::Result<Value> {
-    transport::call(server, request, conversation_id, forced).await
+    transport::call_with_pool(pool, server, request, conversation_id, forced).await
 }
 
 pub(super) async fn call_server_filtered(
+    pool: Option<&sqlx::PgPool>,
     server: &McpServer,
     request: Value,
     conversation_id: Option<&str>,
@@ -38,7 +40,7 @@ pub(super) async fn call_server_filtered(
     {
         return Ok(json_error_value(id, -32602, "resource is disabled"));
     }
-    let mut response = call_server(server, request, conversation_id, forced).await?;
+    let mut response = call_server(pool, server, request, conversation_id, forced).await?;
     if method == "tools/list" {
         filter_tool_items(&mut response, server, "name");
     } else if method == "resources/list" {
@@ -127,6 +129,12 @@ mod tests {
             monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+            lifecycle_learned_mode: None,
+            lifecycle_learned_protocol_version: None,
+            lifecycle_learned_for_updated_at: None,
+            lifecycle_learned_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }

@@ -279,7 +279,7 @@ fn response_status(response: &McpTransportResponse) -> u16 {
 }
 
 pub async fn inspect_server(server: &McpServer) -> anyhow::Result<(Value, Value, Value)> {
-    let snapshot = service::fetch_server_snapshot(server).await?;
+    let snapshot = service::fetch_server_snapshot(None, server).await?;
     let (tools, resources, prompts) = service::snapshot_to_test_values(&snapshot);
     Ok((
         json_response(json!("admin-test-tools"), tools),

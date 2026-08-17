@@ -378,7 +378,7 @@ async fn apply_provider_request_defaults(
     } else {
         original_body
     };
-    if let Some(updated) = with_minimax_chat_request_defaults(route, &body) {
+    if let Some(updated) = with_minimax_request_defaults(route, &prepared.path, &body) {
         body = updated;
     }
     match &mut prepared.body {
@@ -390,8 +390,9 @@ async fn apply_provider_request_defaults(
     Ok(())
 }
 
-fn with_minimax_chat_request_defaults(
+fn with_minimax_request_defaults(
     route: &db::RouteConfig,
+    path: &str,
     request_body: &[u8],
 ) -> Option<Vec<u8>> {
     let mut value = serde_json::from_slice::<Value>(request_body).ok()?;
@@ -400,11 +401,23 @@ fn with_minimax_chat_request_defaults(
         return None;
     }
     let mut changed = false;
-    if !object.contains_key("reasoning_split") {
+    if path == crate::config::NativeApi::Chat.path() && !object.contains_key("reasoning_split") {
         object.insert("reasoning_split".to_string(), Value::Bool(true));
         changed = true;
     }
-    if let Some(messages) = object.get_mut("messages").and_then(Value::as_array_mut) {
+    if path == crate::config::NativeApi::Responses.path()
+        && minimax_m3_model(object.get("model").and_then(Value::as_str))
+        && !object.contains_key("reasoning")
+    {
+        object.insert(
+            "reasoning".to_string(),
+            serde_json::json!({"effort": "minimal"}),
+        );
+        changed = true;
+    }
+    if path == crate::config::NativeApi::Chat.path()
+        && let Some(messages) = object.get_mut("messages").and_then(Value::as_array_mut)
+    {
         for message in messages {
             let Some(message_object) = message.as_object_mut() else {
                 continue;
@@ -441,6 +454,10 @@ fn with_minimax_chat_request_defaults(
 
 fn targets_minimax(route: &db::RouteConfig, model: Option<&str>) -> bool {
     super::provider_reasoning::targets_minimax(route, model)
+}
+
+fn minimax_m3_model(model: Option<&str>) -> bool {
+    model.is_some_and(|model| model.trim().to_ascii_lowercase().starts_with("minimax-m3"))
 }
 
 fn should_passthrough_responses(route: &db::RouteConfig) -> bool {
@@ -522,10 +539,36 @@ mod tests {
         let body = br#"{"model":"MiniMax-M3","messages":[{"role":"user","content":"ping"}]}"#;
 
         let patched =
-            with_minimax_chat_request_defaults(&route, body).expect("body should be patched");
+            with_minimax_request_defaults(&route, crate::config::NativeApi::Chat.path(), body)
+                .expect("body should be patched");
         let json: Value = serde_json::from_slice(&patched).expect("patched body should be json");
 
         assert_eq!(json["reasoning_split"], Value::Bool(true));
+    }
+
+    #[test]
+    fn enables_reasoning_for_minimax_m3_responses_requests() {
+        let route = sample_route("https://api.minimax.io");
+        let body = br#"{"model":"MiniMax-M3","input":"ping"}"#;
+
+        let patched =
+            with_minimax_request_defaults(&route, crate::config::NativeApi::Responses.path(), body)
+                .expect("body should be patched");
+        let json: Value = serde_json::from_slice(&patched).expect("patched body should be json");
+
+        assert_eq!(json["reasoning"]["effort"].as_str(), Some("minimal"));
+        assert!(json.get("reasoning_split").is_none());
+    }
+
+    #[test]
+    fn preserves_explicit_reasoning_for_minimax_m3_responses_requests() {
+        let route = sample_route("https://api.minimax.io");
+        let body = br#"{"model":"MiniMax-M3","reasoning":{"effort":"none"},"input":"ping"}"#;
+
+        assert!(
+            with_minimax_request_defaults(&route, crate::config::NativeApi::Responses.path(), body)
+                .is_none()
+        );
     }
 
     #[test]
@@ -533,7 +576,10 @@ mod tests {
         let route = sample_route("https://gateway.example.com");
         let body = br#"{"model":"MiniMax-M2.5","messages":[{"role":"user","content":"ping"}]}"#;
 
-        assert!(with_minimax_chat_request_defaults(&route, body).is_none());
+        assert!(
+            with_minimax_request_defaults(&route, crate::config::NativeApi::Chat.path(), body)
+                .is_none()
+        );
     }
 
     #[test]
@@ -542,7 +588,10 @@ mod tests {
         let body =
             br#"{"model":"MiniMax-M3","reasoning_split":false,"messages":[{"role":"user","content":"ping"}]}"#;
 
-        assert!(with_minimax_chat_request_defaults(&route, body).is_none());
+        assert!(
+            with_minimax_request_defaults(&route, crate::config::NativeApi::Chat.path(), body)
+                .is_none()
+        );
     }
 
     #[test]
@@ -554,7 +603,8 @@ mod tests {
         let body = br#"{"model":"MiniMax-M2.5","messages":[{"role":"user","content":"ping"}]}"#;
 
         let patched =
-            with_minimax_chat_request_defaults(&route, body).expect("body should be patched");
+            with_minimax_request_defaults(&route, crate::config::NativeApi::Chat.path(), body)
+                .expect("body should be patched");
         let json: Value = serde_json::from_slice(&patched).expect("patched body should be json");
 
         assert_eq!(json["reasoning_split"], Value::Bool(true));
@@ -568,7 +618,10 @@ mod tests {
         };
         let body = br#"{"model":"MiniMax-M3","messages":[{"role":"user","content":"ping"}]}"#;
 
-        assert!(with_minimax_chat_request_defaults(&route, body).is_none());
+        assert!(
+            with_minimax_request_defaults(&route, crate::config::NativeApi::Chat.path(), body)
+                .is_none()
+        );
     }
 
     #[test]
@@ -577,7 +630,8 @@ mod tests {
         let body = br#"{"model":"MiniMax-M3","messages":[{"role":"assistant","content":null,"reasoning_content":"hidden plan","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_1","content":"ok"}]}"#;
 
         let patched =
-            with_minimax_chat_request_defaults(&route, body).expect("body should be patched");
+            with_minimax_request_defaults(&route, crate::config::NativeApi::Chat.path(), body)
+                .expect("body should be patched");
         let json: Value = serde_json::from_slice(&patched).expect("patched body should be json");
 
         assert!(json["messages"][0].get("reasoning_content").is_none());
@@ -592,7 +646,10 @@ mod tests {
         let route = sample_route("https://api.openai.com");
         let body = br#"{"model":"gpt-5","messages":[{"role":"user","content":"ping"}]}"#;
 
-        assert!(with_minimax_chat_request_defaults(&route, body).is_none());
+        assert!(
+            with_minimax_request_defaults(&route, crate::config::NativeApi::Chat.path(), body)
+                .is_none()
+        );
     }
 
     #[test]
@@ -601,7 +658,10 @@ mod tests {
         let body =
             br#"{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"ping"}]}"#;
 
-        assert!(with_minimax_chat_request_defaults(&route, body).is_none());
+        assert!(
+            with_minimax_request_defaults(&route, crate::config::NativeApi::Chat.path(), body)
+                .is_none()
+        );
     }
 
     fn sample_route(base_url: &str) -> db::RouteConfig {

@@ -29,6 +29,7 @@ pub async fn spawn_replay_responses_upstream(
     let addr = listener.local_addr().unwrap();
     let app = Router::new()
         .route("/v1/responses", post(fake_responses_completion))
+        .route("/minimax/v1/responses", post(fake_responses_completion))
         .route("/v1/models", get(chat::fake_models))
         .with_state(log);
     tokio::spawn(async move {

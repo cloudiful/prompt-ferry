@@ -31,11 +31,12 @@ use super::{
 };
 
 pub(super) async fn call_once(
+    pool: Option<&sqlx::PgPool>,
     server: &McpServer,
     selected: SelectedToken,
     request: Value,
 ) -> anyhow::Result<Value> {
-    let client = connect_with_selected(server, selected).await?;
+    let client = connect_with_selected(pool, server, selected).await?;
     let result = dispatch(client.peer(), server, request).await;
     let cancel_result = client.cancel().await;
     match (result, cancel_result) {
@@ -46,23 +47,27 @@ pub(super) async fn call_once(
 }
 
 pub(super) async fn connect_with_selected(
+    pool: Option<&sqlx::PgPool>,
     server: &McpServer,
     selected: SelectedToken,
 ) -> anyhow::Result<rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>> {
     match server.transport.as_str() {
         "http" => {
             let config = http_transport_config(server, selected)?;
-            connect_with_lifecycle_fallback(server, move |mode| {
+            connect_with_lifecycle_fallback(pool, server, move |mode, protocol_version| {
                 let config = config.clone();
                 async move {
                     let transport = StreamableHttpClientTransport::from_config(config);
-                    Ok(client_info().serve_with_lifecycle(transport, mode).await?)
+                    Ok(client_info()
+                        .with_protocol_version(protocol_version)
+                        .serve_with_lifecycle(transport, mode)
+                        .await?)
                 }
             })
             .await
         }
         "stdio" => {
-            connect_with_lifecycle_fallback(server, move |mode| {
+            connect_with_lifecycle_fallback(pool, server, move |mode, protocol_version| {
                 let server = server;
                 async move {
                     let command = tokio::process::Command::new(
@@ -81,7 +86,10 @@ pub(super) async fn connect_with_selected(
                         }
                     });
                     let transport = TokioChildProcess::new(command)?;
-                    Ok(client_info().serve_with_lifecycle(transport, mode).await?)
+                    Ok(client_info()
+                        .with_protocol_version(protocol_version)
+                        .serve_with_lifecycle(transport, mode)
+                        .await?)
                 }
             })
             .await
@@ -110,11 +118,12 @@ pub(super) async fn connect_with_selected(
 /// replaying it on every call. The cache self-heals: when a cached lifecycle
 /// starts being rejected, the other one is probed and the cache is relearned.
 async fn connect_with_lifecycle_fallback<F, Fut>(
+    pool: Option<&sqlx::PgPool>,
     server: &McpServer,
     connect: F,
 ) -> anyhow::Result<rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>>
 where
-    F: Fn(ClientLifecycleMode) -> Fut,
+    F: Fn(ClientLifecycleMode, ProtocolVersion) -> Fut,
     Fut: std::future::Future<
             Output = anyhow::Result<
                 rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>,
@@ -123,21 +132,24 @@ where
 {
     let cache_key = (server.server_id, server.updated_at);
     let cached = cached_lifecycle(cache_key);
-    let (first_mode, first_is_legacy) = match cached {
-        Some(UpstreamLifecycle::LegacyInitialize) => (ClientLifecycleMode::Initialize, true),
-        Some(UpstreamLifecycle::Auto) | None => (auto_lifecycle_mode(), false),
+    let (first_mode, first_is_legacy, first_version) = match lifecycle_preference(server, cached) {
+        LifecyclePreference {
+            mode: UpstreamLifecycle::LegacyInitialize,
+            protocol_version,
+        } => (
+            ClientLifecycleMode::Initialize,
+            true,
+            protocol_version.unwrap_or(ProtocolVersion::V_2025_11_25),
+        ),
+        LifecyclePreference {
+            mode: UpstreamLifecycle::Auto,
+            ..
+        } => (auto_lifecycle_mode(), false, ProtocolVersion::V_2025_11_25),
     };
     let first_label = lifecycle_mode_label(&first_mode);
-    match connect(first_mode).await {
+    match connect(first_mode, first_version).await {
         Ok(service) => {
-            record_lifecycle(
-                cache_key,
-                if first_is_legacy {
-                    UpstreamLifecycle::LegacyInitialize
-                } else {
-                    UpstreamLifecycle::Auto
-                },
-            );
+            remember_lifecycle(pool, server, cache_key, first_is_legacy, &service).await;
             Ok(service)
         }
         Err(first_err) if is_protocol_rejection(&first_err) => {
@@ -147,22 +159,17 @@ where
                 error = %first_err,
                 "mcp lifecycle connect rejected as protocol error; retrying with alternate lifecycle"
             );
-            let (second_mode, second_is_legacy) = if first_is_legacy {
-                (auto_lifecycle_mode(), false)
+            let rejection = protocol_rejection(&first_err).unwrap_or_default();
+            let fallback_version = select_fallback_protocol_version(server, &rejection);
+            let (second_mode, second_is_legacy, second_version) = if first_is_legacy {
+                (auto_lifecycle_mode(), false, ProtocolVersion::V_2025_11_25)
             } else {
-                (ClientLifecycleMode::Initialize, true)
+                (ClientLifecycleMode::Initialize, true, fallback_version)
             };
             let second_label = lifecycle_mode_label(&second_mode);
-            match connect(second_mode).await {
+            match connect(second_mode, second_version).await {
                 Ok(service) => {
-                    record_lifecycle(
-                        cache_key,
-                        if second_is_legacy {
-                            UpstreamLifecycle::LegacyInitialize
-                        } else {
-                            UpstreamLifecycle::Auto
-                        },
-                    );
+                    remember_lifecycle(pool, server, cache_key, second_is_legacy, &service).await;
                     Ok(service)
                 }
                 Err(second_err) => {
@@ -184,6 +191,107 @@ fn auto_lifecycle_mode() -> ClientLifecycleMode {
     }
 }
 
+#[derive(Clone, Debug)]
+struct LifecyclePreference {
+    mode: UpstreamLifecycle,
+    protocol_version: Option<ProtocolVersion>,
+}
+
+fn lifecycle_preference(
+    server: &McpServer,
+    cached: Option<CachedLifecycle>,
+) -> LifecyclePreference {
+    if server.lifecycle_policy == "legacy_initialize" {
+        return LifecyclePreference {
+            mode: UpstreamLifecycle::LegacyInitialize,
+            protocol_version: parse_protocol_version(
+                server.lifecycle_manual_protocol_version.as_deref(),
+            )
+            .or_else(|| {
+                parse_protocol_version(server.lifecycle_learned_protocol_version.as_deref())
+            })
+            .or(Some(ProtocolVersion::V_2025_11_25)),
+        };
+    }
+
+    let learned_is_current = server.lifecycle_learned_for_updated_at == Some(server.updated_at);
+    if learned_is_current {
+        if server.lifecycle_learned_mode.as_deref() == Some("legacy_initialize") {
+            return LifecyclePreference {
+                mode: UpstreamLifecycle::LegacyInitialize,
+                protocol_version: parse_protocol_version(
+                    server.lifecycle_learned_protocol_version.as_deref(),
+                ),
+            };
+        }
+        if server.lifecycle_learned_mode.as_deref() == Some("modern_discover") {
+            return LifecyclePreference {
+                mode: UpstreamLifecycle::Auto,
+                protocol_version: None,
+            };
+        }
+    }
+
+    match cached {
+        Some(CachedLifecycle {
+            lifecycle: UpstreamLifecycle::LegacyInitialize,
+            protocol_version,
+        }) => LifecyclePreference {
+            mode: UpstreamLifecycle::LegacyInitialize,
+            protocol_version,
+        },
+        Some(CachedLifecycle {
+            lifecycle: UpstreamLifecycle::Auto,
+            ..
+        })
+        | None => LifecyclePreference {
+            mode: UpstreamLifecycle::Auto,
+            protocol_version: None,
+        },
+    }
+}
+
+fn parse_protocol_version(value: Option<&str>) -> Option<ProtocolVersion> {
+    value.and_then(|value| serde_json::from_value(Value::String(value.to_string())).ok())
+}
+
+async fn remember_lifecycle(
+    pool: Option<&sqlx::PgPool>,
+    server: &McpServer,
+    cache_key: LifecycleCacheKey,
+    is_legacy: bool,
+    service: &rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>,
+) {
+    let mode = if is_legacy {
+        UpstreamLifecycle::LegacyInitialize
+    } else {
+        UpstreamLifecycle::Auto
+    };
+    let protocol_version = service
+        .peer()
+        .peer_info()
+        .map(|info| info.protocol_version.clone())
+        .unwrap_or(ProtocolVersion::V_2025_11_25);
+    record_lifecycle(cache_key, mode, Some(protocol_version.clone()));
+
+    let Some(pool) = pool else {
+        return;
+    };
+    let mode = match mode {
+        UpstreamLifecycle::Auto => "modern_discover",
+        UpstreamLifecycle::LegacyInitialize => "legacy_initialize",
+    };
+    if let Err(err) =
+        crate::db::mark_mcp_lifecycle_learned(pool, server, mode, protocol_version.as_str()).await
+    {
+        tracing::warn!(
+            server_id = %server.server_id,
+            error = %err,
+            "failed to persist MCP lifecycle compatibility"
+        );
+    }
+}
+
 fn lifecycle_mode_label(mode: &ClientLifecycleMode) -> &'static str {
     match mode {
         ClientLifecycleMode::Initialize => "legacy initialize",
@@ -202,16 +310,26 @@ enum UpstreamLifecycle {
     LegacyInitialize,
 }
 
+/// A cached lifecycle plus the protocol version the successful connection
+/// negotiated, so a later recall can replay exactly what worked instead of
+/// guessing at an older version that the upstream may reject.
+#[derive(Clone, Debug, PartialEq)]
+struct CachedLifecycle {
+    lifecycle: UpstreamLifecycle,
+    protocol_version: Option<ProtocolVersion>,
+}
+
 /// Freshness window for the learned lifecycle. Long enough that the rejected
 /// probe is not replayed on every request, short enough that an upstream
 /// upgrade is picked up automatically.
 const LIFECYCLE_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const LIFECYCLE_CACHE_MAX_ENTRIES: usize = 512;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct LifecycleCacheEntry {
     learned_at: Instant,
     lifecycle: UpstreamLifecycle,
+    protocol_version: Option<ProtocolVersion>,
 }
 
 /// Keyed by `(server_id, updated_at)`: editing the server config invalidates
@@ -224,10 +342,13 @@ struct LifecycleCacheStore {
 }
 
 impl LifecycleCacheStore {
-    fn cached_lifecycle(&mut self, key: LifecycleCacheKey) -> Option<UpstreamLifecycle> {
+    fn cached_lifecycle(&mut self, key: LifecycleCacheKey) -> Option<CachedLifecycle> {
         match self.entries.get(&key) {
             Some(entry) if entry.learned_at.elapsed() < LIFECYCLE_CACHE_TTL => {
-                Some(entry.lifecycle)
+                Some(CachedLifecycle {
+                    lifecycle: entry.lifecycle,
+                    protocol_version: entry.protocol_version.clone(),
+                })
             }
             Some(_) => {
                 self.entries.remove(&key);
@@ -237,12 +358,18 @@ impl LifecycleCacheStore {
         }
     }
 
-    fn record_lifecycle(&mut self, key: LifecycleCacheKey, lifecycle: UpstreamLifecycle) {
+    fn record_lifecycle(
+        &mut self,
+        key: LifecycleCacheKey,
+        lifecycle: UpstreamLifecycle,
+        protocol_version: Option<ProtocolVersion>,
+    ) {
         self.entries.insert(
             key,
             LifecycleCacheEntry {
                 learned_at: Instant::now(),
                 lifecycle,
+                protocol_version,
             },
         );
         if self.entries.len() > LIFECYCLE_CACHE_MAX_ENTRIES {
@@ -262,12 +389,16 @@ impl LifecycleCacheStore {
 static LIFECYCLE_CACHE: LazyLock<Mutex<LifecycleCacheStore>> =
     LazyLock::new(|| Mutex::new(LifecycleCacheStore::default()));
 
-fn cached_lifecycle(key: LifecycleCacheKey) -> Option<UpstreamLifecycle> {
+fn cached_lifecycle(key: LifecycleCacheKey) -> Option<CachedLifecycle> {
     lock_lifecycle_cache().cached_lifecycle(key)
 }
 
-fn record_lifecycle(key: LifecycleCacheKey, lifecycle: UpstreamLifecycle) {
-    lock_lifecycle_cache().record_lifecycle(key, lifecycle);
+fn record_lifecycle(
+    key: LifecycleCacheKey,
+    lifecycle: UpstreamLifecycle,
+    protocol_version: Option<ProtocolVersion>,
+) {
+    lock_lifecycle_cache().record_lifecycle(key, lifecycle, protocol_version);
 }
 
 fn clear_lifecycle(key: LifecycleCacheKey) {
@@ -287,30 +418,48 @@ fn lock_lifecycle_cache() -> std::sync::MutexGuard<'static, LifecycleCacheStore>
 /// Anything else (401/403, DNS, timeout, connection reset, unrelated
 /// `-32603`) is left untouched.
 fn is_protocol_rejection(err: &anyhow::Error) -> bool {
+    protocol_rejection(err).is_some()
+}
+
+#[derive(Default)]
+struct ProtocolRejection {
+    supported_versions: Vec<ProtocolVersion>,
+}
+
+fn protocol_rejection(err: &anyhow::Error) -> Option<ProtocolRejection> {
     if let Some(rmcp::service::ServiceError::McpError(error_data)) =
         err.downcast_ref::<rmcp::service::ServiceError>()
     {
-        return is_protocol_rejection_error(error_data);
+        return is_protocol_rejection_error(error_data).then(|| ProtocolRejection {
+            supported_versions: supported_versions_from_error_data(error_data),
+        });
     }
     if let Some(rmcp::service::ClientInitializeError::JsonRpcError(error_data)) =
         err.downcast_ref::<rmcp::service::ClientInitializeError>()
     {
-        return is_protocol_rejection_error(error_data);
+        return is_protocol_rejection_error(error_data).then(|| ProtocolRejection {
+            supported_versions: supported_versions_from_error_data(error_data),
+        });
     }
     if let Some(rmcp::service::ClientInitializeError::NoCompatibleProtocolVersion { .. }) =
         err.downcast_ref::<rmcp::service::ClientInitializeError>()
     {
-        return true;
+        return Some(ProtocolRejection::default());
     }
     if let Some(rmcp::service::ClientInitializeError::TransportError { error, .. }) =
         err.downcast_ref::<rmcp::service::ClientInitializeError>()
     {
-        return error
+        let error = error
             .error
-            .downcast_ref::<rmcp::transport::streamable_http_client::StreamableHttpError<reqwest::Error>>()
-            .is_some_and(is_unsupported_version_response);
+            .downcast_ref::<rmcp::transport::streamable_http_client::StreamableHttpError<reqwest::Error>>()?;
+        if !is_unsupported_version_response(error) {
+            return None;
+        }
+        return Some(ProtocolRejection {
+            supported_versions: supported_versions_from_transport_error(error),
+        });
     }
-    false
+    None
 }
 
 fn is_protocol_rejection_error(error_data: &rmcp::ErrorData) -> bool {
@@ -379,11 +528,89 @@ fn is_unsupported_version_response(
         rmcp::transport::streamable_http_client::StreamableHttpError::UnexpectedServerResponse(
             message,
         ) => {
-            message.contains("Unsupported MCP-Protocol-Version")
-                || message.contains("MCP-Protocol-Version")
+            let lower = message.to_ascii_lowercase();
+            lower.contains("unsupported mcp-protocol-version")
+                || lower.contains("mcp-protocol-version")
+                || message_mentions_unsupported_protocol(message)
         }
         _ => false,
     }
+}
+
+fn supported_versions_from_error_data(error_data: &rmcp::ErrorData) -> Vec<ProtocolVersion> {
+    error_data
+        .data
+        .as_ref()
+        .and_then(|data| data.get("supported"))
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .unwrap_or_default()
+}
+
+fn supported_versions_from_transport_error(
+    error: &rmcp::transport::streamable_http_client::StreamableHttpError<reqwest::Error>,
+) -> Vec<ProtocolVersion> {
+    let rmcp::transport::streamable_http_client::StreamableHttpError::UnexpectedServerResponse(
+        message,
+    ) = error
+    else {
+        return Vec::new();
+    };
+    let Some((_, body)) = message.split_once(": ") else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(body) else {
+        return Vec::new();
+    };
+    value
+        .pointer("/error/data/supported")
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .or_else(|| {
+            value
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .and_then(parse_supported_versions_from_message)
+        })
+        .unwrap_or_default()
+}
+
+fn parse_supported_versions_from_message(message: &str) -> Option<Vec<ProtocolVersion>> {
+    let values = message
+        .split_once("supported versions:")?
+        .1
+        .trim()
+        .trim_matches(|character| character == ')' || character == ']');
+    let versions = values
+        .split(',')
+        .filter_map(|value| parse_protocol_version(Some(value.trim())))
+        .collect::<Vec<_>>();
+    (!versions.is_empty()).then_some(versions)
+}
+
+fn select_fallback_protocol_version(
+    server: &McpServer,
+    rejection: &ProtocolRejection,
+) -> ProtocolVersion {
+    if server.lifecycle_policy == "legacy_initialize" {
+        return parse_protocol_version(server.lifecycle_manual_protocol_version.as_deref())
+            .or_else(|| {
+                parse_protocol_version(server.lifecycle_learned_protocol_version.as_deref())
+            })
+            .unwrap_or(ProtocolVersion::V_2025_11_25);
+    }
+    // The spec does not guarantee the server lists its `supported` versions in
+    // any order, so prefer the NEWEST version the server declares that the
+    // client can speak, excluding the version that just failed the probe.
+    let fallback = rejection
+        .supported_versions
+        .iter()
+        .filter(|version| **version != ProtocolVersion::V_2026_07_28)
+        .max_by(|a, b| a.as_str().cmp(b.as_str()))
+        .cloned();
+    if let Some(version) = fallback {
+        return version;
+    }
+    parse_protocol_version(server.lifecycle_learned_protocol_version.as_deref())
+        .unwrap_or(ProtocolVersion::V_2025_11_25)
 }
 
 pub(super) fn peer_list_or_empty<T: serde::Serialize>(
@@ -710,28 +937,36 @@ mod tests {
         let other_key = (key.0, key.1 + chrono::Duration::seconds(1));
 
         assert_eq!(cache.cached_lifecycle(key), None);
-        cache.record_lifecycle(key, UpstreamLifecycle::LegacyInitialize);
+        cache.record_lifecycle(
+            key,
+            UpstreamLifecycle::LegacyInitialize,
+            Some(ProtocolVersion::V_2025_06_18),
+        );
         assert_eq!(
-            cache.cached_lifecycle(key),
+            cache.cached_lifecycle(key).map(|c| c.lifecycle),
             Some(UpstreamLifecycle::LegacyInitialize)
+        );
+        assert_eq!(
+            cache.cached_lifecycle(key).and_then(|c| c.protocol_version),
+            Some(ProtocolVersion::V_2025_06_18)
         );
 
         // A bumped updated_at (server edit) must invalidate the entry.
         assert_eq!(cache.cached_lifecycle(other_key), None);
-        cache.record_lifecycle(other_key, UpstreamLifecycle::Auto);
+        cache.record_lifecycle(other_key, UpstreamLifecycle::Auto, None);
         assert_eq!(
-            cache.cached_lifecycle(key),
+            cache.cached_lifecycle(key).map(|c| c.lifecycle),
             Some(UpstreamLifecycle::LegacyInitialize)
         );
         assert_eq!(
-            cache.cached_lifecycle(other_key),
+            cache.cached_lifecycle(other_key).map(|c| c.lifecycle),
             Some(UpstreamLifecycle::Auto)
         );
 
         cache.clear_lifecycle(other_key);
         assert_eq!(cache.cached_lifecycle(other_key), None);
         assert_eq!(
-            cache.cached_lifecycle(key),
+            cache.cached_lifecycle(key).map(|c| c.lifecycle),
             Some(UpstreamLifecycle::LegacyInitialize)
         );
     }
@@ -740,7 +975,7 @@ mod tests {
     fn lifecycle_cache_expires_entries() {
         let mut cache = LifecycleCacheStore::default();
         let key = (Uuid::new_v4(), Utc::now());
-        cache.record_lifecycle(key, UpstreamLifecycle::Auto);
+        cache.record_lifecycle(key, UpstreamLifecycle::Auto, None);
         cache.entries.get_mut(&key).unwrap().learned_at =
             Instant::now() - LIFECYCLE_CACHE_TTL - Duration::from_secs(1);
         assert_eq!(cache.cached_lifecycle(key), None);
@@ -750,8 +985,164 @@ mod tests {
     fn lifecycle_cache_evicts_oldest_when_over_capacity() {
         let mut cache = LifecycleCacheStore::default();
         for _ in 0..LIFECYCLE_CACHE_MAX_ENTRIES + 16 {
-            cache.record_lifecycle((Uuid::new_v4(), Utc::now()), UpstreamLifecycle::Auto);
+            cache.record_lifecycle((Uuid::new_v4(), Utc::now()), UpstreamLifecycle::Auto, None);
         }
         assert!(cache.entries.len() <= LIFECYCLE_CACHE_MAX_ENTRIES);
+    }
+
+    #[test]
+    fn parses_supported_versions_from_grep_style_message() {
+        let versions = parse_supported_versions_from_message(
+            "Bad Request: Unsupported protocol version (supported versions: 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)",
+        )
+        .expect("versions parsed");
+        let rendered: Vec<String> = versions
+            .iter()
+            .map(|version| version.as_str().to_string())
+            .collect();
+        assert_eq!(
+            rendered,
+            vec![
+                "2025-06-18".to_string(),
+                "2025-03-26".to_string(),
+                "2024-11-05".to_string(),
+                "2024-10-07".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_supported_versions_from_transport_http_400_without_content_type() {
+        let error = rmcp::transport::streamable_http_client::StreamableHttpError::<reqwest::Error>::UnexpectedServerResponse(
+            std::borrow::Cow::Owned(
+                "HTTP 400: {\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version (supported versions: 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}".to_string(),
+            ),
+        );
+        assert!(is_unsupported_version_response(&error));
+        let versions = supported_versions_from_transport_error(&error);
+        assert_eq!(versions.len(), 4);
+        assert_eq!(versions[0].as_str(), "2025-06-18");
+    }
+
+    #[test]
+    fn selects_highest_supported_version_for_legacy_fallback() {
+        let server = test_server();
+        let rejection = ProtocolRejection {
+            supported_versions: vec![
+                ProtocolVersion::V_2026_07_28,
+                ProtocolVersion::V_2025_11_25,
+                ProtocolVersion::V_2025_06_18,
+            ],
+        };
+        let version = select_fallback_protocol_version(&server, &rejection);
+        assert_eq!(version, ProtocolVersion::V_2025_11_25);
+    }
+
+    #[test]
+    fn selects_newest_version_even_when_server_lists_ascending() {
+        // The spec does not order `supported`; a server may list versions
+        // oldest-first. We must still negotiate the newest compatible one.
+        let server = test_server();
+        let rejection = ProtocolRejection {
+            supported_versions: vec![
+                ProtocolVersion::V_2024_11_05,
+                ProtocolVersion::V_2025_03_26,
+                ProtocolVersion::V_2025_06_18,
+            ],
+        };
+        let version = select_fallback_protocol_version(&server, &rejection);
+        assert_eq!(version, ProtocolVersion::V_2025_06_18);
+    }
+
+    #[test]
+    fn fallback_skips_versions_the_client_cannot_parse() {
+        let server = test_server();
+        let rejection = ProtocolRejection {
+            supported_versions: vec![ProtocolVersion::V_2026_07_28],
+        };
+        let version = select_fallback_protocol_version(&server, &rejection);
+        assert_eq!(version, ProtocolVersion::V_2025_11_25);
+    }
+
+    #[test]
+    fn manual_legacy_policy_pins_the_protocol_version() {
+        let mut server = test_server();
+        server.lifecycle_policy = "legacy_initialize".to_string();
+        server.lifecycle_manual_protocol_version = Some("2025-03-26".to_string());
+        let version = select_fallback_protocol_version(&server, &ProtocolRejection::default());
+        assert_eq!(version.as_str(), "2025-03-26");
+    }
+
+    #[test]
+    fn learned_legacy_mode_is_preferred_for_current_config() {
+        let mut server = test_server();
+        server.lifecycle_learned_mode = Some("legacy_initialize".to_string());
+        server.lifecycle_learned_protocol_version = Some("2025-06-18".to_string());
+        server.lifecycle_learned_for_updated_at = Some(server.updated_at);
+        let preference = lifecycle_preference(&server, None);
+        assert!(matches!(
+            preference.mode,
+            UpstreamLifecycle::LegacyInitialize
+        ));
+        assert_eq!(preference.protocol_version.unwrap().as_str(), "2025-06-18");
+    }
+
+    #[test]
+    fn stale_learned_legacy_mode_falls_back_to_auto_probe() {
+        let mut server = test_server();
+        server.lifecycle_learned_mode = Some("legacy_initialize".to_string());
+        server.lifecycle_learned_protocol_version = Some("2025-06-18".to_string());
+        server.lifecycle_learned_for_updated_at =
+            Some(server.updated_at - chrono::Duration::days(1));
+        let preference = lifecycle_preference(&server, None);
+        assert!(matches!(preference.mode, UpstreamLifecycle::Auto));
+    }
+
+    #[test]
+    fn cached_legacy_recall_replays_the_negotiated_version() {
+        let server = test_server();
+        let cached = Some(CachedLifecycle {
+            lifecycle: UpstreamLifecycle::LegacyInitialize,
+            protocol_version: Some(ProtocolVersion::V_2025_06_18),
+        });
+        let preference = lifecycle_preference(&server, cached);
+        assert!(matches!(
+            preference.mode,
+            UpstreamLifecycle::LegacyInitialize
+        ));
+        assert_eq!(preference.protocol_version.unwrap().as_str(), "2025-06-18");
+    }
+
+    fn test_server() -> McpServer {
+        McpServer {
+            server_id: Uuid::new_v4(),
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "test".to_string(),
+            aggregate_naming_mode: "qualified_only".to_string(),
+            transport: "http".to_string(),
+            url: Some("http://127.0.0.1:3000/mcp".to_string()),
+            command: None,
+            args: json!([]),
+            env_json: json!({}),
+            bearer_tokens_json: json!([]),
+            http_headers_json: json!({}),
+            tool_filter_mode: "blacklist".to_string(),
+            allowed_tools: json!([]),
+            disabled_tools: json!([]),
+            disabled_resources: json!([]),
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+            lifecycle_learned_mode: None,
+            lifecycle_learned_protocol_version: None,
+            lifecycle_learned_for_updated_at: None,
+            lifecycle_learned_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
     }
 }

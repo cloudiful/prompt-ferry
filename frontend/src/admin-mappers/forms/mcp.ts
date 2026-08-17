@@ -30,6 +30,8 @@ export function createEmptyMcpForm(): McpForm {
     monthly_max_requests: null,
     enabled: true,
     timeout_ms: 30000,
+    lifecycle_policy: 'auto',
+    lifecycle_manual_protocol_version: null,
   }
 }
 
@@ -66,6 +68,12 @@ export function mcpServerToForm(server: McpServer): McpForm {
     monthly_max_requests: server.monthly_max_requests ?? null,
     enabled: server.enabled,
     timeout_ms: server.timeout_ms,
+    lifecycle_policy:
+      server.lifecycle_policy === 'legacy_initialize'
+        ? 'legacy_initialize'
+        : 'auto',
+    lifecycle_manual_protocol_version:
+      server.lifecycle_manual_protocol_version ?? null,
   }
 }
 
@@ -108,5 +116,8 @@ export function mcpFormToRequest(form: McpForm): McpServerRequest {
     tool_filter_mode: form.tool_filter_mode,
     transport: form.transport,
     url: form.transport === 'http' ? form.url.trim() : null,
+    lifecycle_policy: form.lifecycle_policy,
+    lifecycle_manual_protocol_version:
+      form.lifecycle_manual_protocol_version?.trim() || '',
   }
 }

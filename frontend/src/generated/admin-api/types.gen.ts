@@ -519,6 +519,12 @@ export type McpServer = {
     enabled: boolean;
     env_json: unknown;
     http_headers_json: unknown;
+    lifecycle_learned_at?: string | null;
+    lifecycle_learned_for_updated_at?: string | null;
+    lifecycle_learned_mode?: string | null;
+    lifecycle_learned_protocol_version?: string | null;
+    lifecycle_manual_protocol_version?: string | null;
+    lifecycle_policy: string;
     monthly_max_requests?: number | null;
     name: string;
     owner_user_id?: number | null;
@@ -550,6 +556,8 @@ export type McpServerRequest = {
     enabled?: boolean | null;
     env_json?: unknown;
     http_headers_json?: unknown;
+    lifecycle_manual_protocol_version?: string | null;
+    lifecycle_policy?: string | null;
     monthly_max_requests?: number | null;
     name: string;
     owner_user_id?: number | null;

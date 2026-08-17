@@ -149,6 +149,8 @@ pub async fn create_mcp_server(pool: &PgPool, input: McpServerInput) -> Result<M
         input.monthly_max_requests,
         input.enabled,
         input.timeout_ms,
+        input.lifecycle_policy,
+        input.lifecycle_manual_protocol_version,
     )
     .fetch_one(pool)
     .await?;
@@ -184,6 +186,8 @@ pub async fn update_mcp_server(
         input.monthly_max_requests,
         input.enabled,
         input.timeout_ms,
+        input.lifecycle_policy,
+        input.lifecycle_manual_protocol_version,
     )
     .fetch_optional(pool)
     .await?;
@@ -197,5 +201,23 @@ pub async fn delete_mcp_server(pool: &PgPool, server_id: uuid::Uuid) -> Result<b
     let result = sqlx::query_file!("src/sql/mcp/delete_mcp_server.sql", server_id)
         .execute(pool)
         .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn mark_mcp_lifecycle_learned(
+    pool: &PgPool,
+    server: &McpServer,
+    mode: &str,
+    protocol_version: &str,
+) -> Result<bool> {
+    let result = sqlx::query_file!(
+        "src/sql/mcp/mark_lifecycle_learned.sql",
+        server.server_id,
+        mode,
+        protocol_version,
+        server.updated_at,
+    )
+    .execute(pool)
+    .await?;
     Ok(result.rows_affected() > 0)
 }

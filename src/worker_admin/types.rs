@@ -166,6 +166,8 @@ mod tests {
             monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
+            lifecycle_policy: None,
+            lifecycle_manual_protocol_version: None,
         };
         assert!(create.validate_for_create(&state, &user).await.is_err());
         create.scope = Some("admin".to_string());
@@ -196,6 +198,8 @@ mod tests {
             monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
+            lifecycle_policy: None,
+            lifecycle_manual_protocol_version: None,
         };
         assert!(
             update
@@ -227,6 +231,8 @@ mod tests {
             monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
+            lifecycle_policy: None,
+            lifecycle_manual_protocol_version: None,
         }
         .into_input(&admin_user(), None);
 
@@ -260,6 +266,12 @@ mod tests {
             monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+            lifecycle_learned_mode: None,
+            lifecycle_learned_protocol_version: None,
+            lifecycle_learned_for_updated_at: None,
+            lifecycle_learned_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -284,6 +296,8 @@ mod tests {
             monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
+            lifecycle_policy: None,
+            lifecycle_manual_protocol_version: None,
         }
         .into_input(&admin_user(), Some(&existing));
 
@@ -312,6 +326,8 @@ mod tests {
             monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
+            lifecycle_policy: None,
+            lifecycle_manual_protocol_version: None,
         }
         .into_input(&admin_user(), None);
 
@@ -348,6 +364,8 @@ mod tests {
             monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
+            lifecycle_policy: None,
+            lifecycle_manual_protocol_version: None,
         }
         .into_input(&admin_user(), None);
 
@@ -394,6 +412,8 @@ mod tests {
                 monthly_max_requests: None,
                 enabled: Some(true),
                 timeout_ms: None,
+                lifecycle_policy: None,
+                lifecycle_manual_protocol_version: None,
             };
             let err = request
                 .validate_for_create(&state, &user)
@@ -401,5 +421,96 @@ mod tests {
                 .unwrap_err();
             assert_eq!(err.status(), StatusCode::BAD_REQUEST);
         }
+    }
+
+    #[test]
+    fn lifecycle_manual_protocol_version_none_preserves_existing_and_empty_clears() {
+        let existing = db::McpServer {
+            server_id: Uuid::new_v4(),
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "catalog".to_string(),
+            aggregate_naming_mode: "passthrough_preferred".to_string(),
+            transport: "http".to_string(),
+            url: Some("http://127.0.0.1:3000/mcp".to_string()),
+            command: None,
+            args: serde_json::json!([]),
+            env_json: serde_json::json!({}),
+            bearer_tokens_json: serde_json::json!([]),
+            http_headers_json: serde_json::json!({}),
+            tool_filter_mode: "blacklist".to_string(),
+            allowed_tools: serde_json::json!([]),
+            disabled_tools: serde_json::json!([]),
+            disabled_resources: serde_json::json!([]),
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: Some("2025-06-18".to_string()),
+            lifecycle_learned_mode: None,
+            lifecycle_learned_protocol_version: None,
+            lifecycle_learned_for_updated_at: None,
+            lifecycle_learned_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        // None (field omitted) keeps the existing pinned version.
+        let preserved = McpServerRequest {
+            scope: Some("admin".to_string()),
+            owner_user_id: None,
+            name: "catalog".to_string(),
+            aggregate_naming_mode: None,
+            transport: "http".to_string(),
+            url: Some("http://127.0.0.1:3000/mcp".to_string()),
+            command: None,
+            args: None,
+            env_json: None,
+            bearer_tokens: None,
+            http_headers_json: None,
+            tool_filter_mode: None,
+            allowed_tools: None,
+            disabled_tools: None,
+            disabled_resources: None,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: None,
+            timeout_ms: None,
+            lifecycle_policy: None,
+            lifecycle_manual_protocol_version: None,
+        }
+        .into_input(&admin_user(), Some(&existing));
+        assert_eq!(
+            preserved.lifecycle_manual_protocol_version.as_deref(),
+            Some("2025-06-18")
+        );
+
+        // Empty string (frontend clearing the field) removes the pinned version.
+        let cleared = McpServerRequest {
+            scope: Some("admin".to_string()),
+            owner_user_id: None,
+            name: "catalog".to_string(),
+            aggregate_naming_mode: None,
+            transport: "http".to_string(),
+            url: Some("http://127.0.0.1:3000/mcp".to_string()),
+            command: None,
+            args: None,
+            env_json: None,
+            bearer_tokens: None,
+            http_headers_json: None,
+            tool_filter_mode: None,
+            allowed_tools: None,
+            disabled_tools: None,
+            disabled_resources: None,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: None,
+            timeout_ms: None,
+            lifecycle_policy: None,
+            lifecycle_manual_protocol_version: Some("  ".to_string()),
+        }
+        .into_input(&admin_user(), Some(&existing));
+        assert_eq!(cleared.lifecycle_manual_protocol_version, None);
     }
 }
