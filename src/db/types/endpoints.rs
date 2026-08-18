@@ -5,6 +5,59 @@ use utoipa::ToSchema;
 
 use crate::config::{NativeApi, NativeApiSource};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointProvider {
+    Generic,
+    Minimax,
+}
+
+impl Default for EndpointProvider {
+    fn default() -> Self {
+        Self::Generic
+    }
+}
+
+impl EndpointProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Generic => "generic",
+            Self::Minimax => "minimax",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "minimax" => Self::Minimax,
+            _ => Self::Generic,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointRegion {
+    Cn,
+    Global,
+}
+
+impl EndpointRegion {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cn => "cn",
+            Self::Global => "global",
+        }
+    }
+
+    fn from_str(value: Option<&str>) -> Option<Self> {
+        match value {
+            Some("cn") => Some(Self::Cn),
+            Some("global") => Some(Self::Global),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct EndpointApiKey {
     pub key_id: uuid::Uuid,
@@ -31,6 +84,8 @@ pub struct ProviderEndpointRow {
     pub scope: String,
     pub owner_user_id: Option<i64>,
     pub name: String,
+    pub provider: String,
+    pub provider_region: Option<String>,
     pub base_url: String,
     pub native_api: String,
     pub native_api_source: String,
@@ -50,6 +105,8 @@ pub struct ProviderEndpoint {
     pub scope: String,
     pub owner_user_id: Option<i64>,
     pub name: String,
+    pub provider: EndpointProvider,
+    pub provider_region: Option<EndpointRegion>,
     pub base_url: String,
     pub native_api: String,
     pub native_api_source: String,
@@ -72,6 +129,8 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             scope: value.scope,
             owner_user_id: value.owner_user_id,
             name: value.name,
+            provider: EndpointProvider::from_str(&value.provider),
+            provider_region: EndpointRegion::from_str(value.provider_region.as_deref()),
             base_url: value.base_url,
             native_api: value.native_api,
             native_api_source: value.native_api_source,
@@ -92,6 +151,8 @@ pub struct EndpointCreate {
     pub scope: String,
     pub owner_user_id: Option<i64>,
     pub name: String,
+    pub provider: EndpointProvider,
+    pub provider_region: Option<EndpointRegion>,
     pub base_url: String,
     pub native_api: NativeApi,
     pub native_api_source: NativeApiSource,

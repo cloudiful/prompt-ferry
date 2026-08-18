@@ -294,6 +294,10 @@ export type EndpointPageResponse = {
 
 export type EndpointProtocolMode = 'auto' | 'manual';
 
+export type EndpointProvider = 'generic' | 'minimax';
+
+export type EndpointRegion = 'cn' | 'global';
+
 export type EndpointRequest = {
     api_key: string;
     api_keys?: Array<EndpointApiKeyRequest>;
@@ -306,6 +310,8 @@ export type EndpointRequest = {
     native_api_override?: null | NativeApi;
     owner_user_id?: number | null;
     protocol_mode: EndpointProtocolMode;
+    provider?: EndpointProvider;
+    provider_region?: null | EndpointRegion;
     scope: string;
 };
 
@@ -776,6 +782,8 @@ export type ProviderEndpoint = {
     native_api: string;
     native_api_source: string;
     owner_user_id?: number | null;
+    provider: EndpointProvider;
+    provider_region?: null | EndpointRegion;
     scope: string;
     updated_at: string;
 };
@@ -1230,6 +1238,39 @@ export type StreamDeltaBatchingSettings = {
 };
 
 export type TlsMode = 'off' | 'server' | 'mtls';
+
+export type TokenPlanKeyUsage = {
+    error_code?: string | null;
+    error_message?: string | null;
+    key_id: string;
+    key_label: string;
+    model_remains: Array<TokenPlanModelUsage>;
+    ok: boolean;
+    status?: number | null;
+};
+
+export type TokenPlanModelUsage = {
+    interval?: null | TokenPlanWindowUsage;
+    model_name: string;
+    weekly?: null | TokenPlanWindowUsage;
+};
+
+export type TokenPlanUsageResponse = {
+    keys: Array<TokenPlanKeyUsage>;
+    provider: EndpointProvider;
+    provider_region: EndpointRegion;
+};
+
+export type TokenPlanWindowUsage = {
+    boost_permille?: number | null;
+    end_at?: string | null;
+    remaining_percent?: number | null;
+    remains_time_ms?: number | null;
+    start_at?: string | null;
+    status?: number | null;
+    total_count?: number | null;
+    usage_count?: number | null;
+};
 
 export type UpdateClientKeyRequest = {
     enabled?: boolean | null;
@@ -1785,6 +1826,27 @@ export type TestEndpointResponses = {
 };
 
 export type TestEndpointResponse = TestEndpointResponses[keyof TestEndpointResponses];
+
+export type TokenPlanUsageData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/endpoints/{endpoint_id}/token-plan-usage';
+};
+
+export type TokenPlanUsageResponses = {
+    /**
+     * Token plan usage
+     */
+    200: TokenPlanUsageResponse;
+};
+
+export type TokenPlanUsageResponse2 = TokenPlanUsageResponses[keyof TokenPlanUsageResponses];
 
 export type ListQuotaGroupsData = {
     body?: never;

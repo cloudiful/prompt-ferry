@@ -17,6 +17,8 @@ import {
 export type EndpointListItemView = {
   endpoint_id: string
   name: string
+  provider: ProviderEndpoint['provider']
+  provider_region: ProviderEndpoint['provider_region']
   base_url: string
   scope: string
   scope_label: string

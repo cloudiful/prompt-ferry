@@ -1,8 +1,12 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use crate::{config::NativeApi, db};
+use crate::{
+    config::NativeApi,
+    db::{self, EndpointProvider, EndpointRegion},
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct EndpointApiKeyRequest {
@@ -19,6 +23,10 @@ pub struct EndpointRequest {
     pub scope: String,
     pub owner_user_id: Option<i64>,
     pub name: String,
+    #[serde(default)]
+    pub provider: EndpointProvider,
+    #[serde(default)]
+    pub provider_region: Option<EndpointRegion>,
     pub base_url: String,
     pub api_key: String,
     #[serde(default)]
@@ -124,6 +132,43 @@ pub struct EndpointTestResponse {
     pub native_api: Option<String>,
     pub native_api_source: Option<String>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TokenPlanUsageResponse {
+    pub provider: EndpointProvider,
+    pub provider_region: EndpointRegion,
+    pub keys: Vec<TokenPlanKeyUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TokenPlanKeyUsage {
+    pub key_id: Uuid,
+    pub key_label: String,
+    pub ok: bool,
+    pub status: Option<u16>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub model_remains: Vec<TokenPlanModelUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TokenPlanModelUsage {
+    pub model_name: String,
+    pub interval: Option<TokenPlanWindowUsage>,
+    pub weekly: Option<TokenPlanWindowUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TokenPlanWindowUsage {
+    pub status: Option<i32>,
+    pub remaining_percent: Option<f64>,
+    pub total_count: Option<i64>,
+    pub usage_count: Option<i64>,
+    pub boost_permille: Option<i64>,
+    pub start_at: Option<DateTime<Utc>>,
+    pub end_at: Option<DateTime<Utc>>,
+    pub remains_time_ms: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]

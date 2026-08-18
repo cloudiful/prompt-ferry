@@ -30,6 +30,8 @@ export function createEndpointListItemView(
   return {
     endpoint_id: endpoint.endpoint_id,
     name: endpoint.name,
+    provider: endpoint.provider,
+    provider_region: endpoint.provider_region ?? null,
     base_url: endpoint.base_url,
     scope: endpoint.scope,
     scope_label:

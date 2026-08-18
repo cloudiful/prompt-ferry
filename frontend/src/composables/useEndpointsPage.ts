@@ -10,6 +10,7 @@ import {
 } from '@/admin-mappers'
 import { useLocale } from '@/composables/useLocale'
 import { useNotifier } from '@/composables/useNotifier'
+import { useEndpointTokenPlanUsage } from '@/composables/useEndpointTokenPlanUsage'
 import type { EndpointForm, ModelRouteForm } from '@/models'
 import { useEndpointsStore } from '@/stores/endpoints'
 import { useUsersStore } from '@/stores/users'
@@ -25,6 +26,10 @@ export function useEndpointsPage() {
   const modelRouteDialogVisible = ref(false)
   const endpointForm = ref<EndpointForm>(createEmptyEndpointForm())
   const modelRouteForm = ref<ModelRouteForm>(createEmptyModelRouteForm())
+  const tokenPlanUsage = useEndpointTokenPlanUsage(
+    endpointsStore.findEndpointById,
+    notifyApiError,
+  )
   const endpointDialogHeader = computed(() =>
     endpointForm.value.endpoint_id ? t('editEndpoint') : t('newEndpoint'),
   )
@@ -188,6 +193,7 @@ export function useEndpointsPage() {
     saveModelRoute,
     t,
     testEndpoint,
+    ...tokenPlanUsage,
     testModelRoute,
     toggleEndpointEnabled,
     toggleModelRouteEnabled,

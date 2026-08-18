@@ -26,6 +26,7 @@ defineEmits<{
   editEndpoint: [endpointId: string]
   endpointPage: [event: TablePageChange]
   testEndpoint: [endpointId: string]
+  tokenPlanUsage: [endpointId: string]
   toggleEndpointEnabled: [endpointId: string, enabled: boolean]
 }>()
 </script>
@@ -75,6 +76,20 @@ defineEmits<{
       </template>
       <template #actions-cell="{ row }">
         <div class="flex justify-end gap-2">
+          <UTooltip
+            v-if="row.original.provider === 'minimax'"
+            :text="t('tokenPlanUsage')"
+          >
+            <UButton
+              size="sm"
+              color="neutral"
+              variant="ghost"
+              :aria-label="t('tokenPlanUsage')"
+              @click="$emit('tokenPlanUsage', row.original.endpoint_id)"
+            >
+              <UIcon name="i-lucide-gauge" class="h-4 w-4" />
+            </UButton>
+          </UTooltip>
           <UButton
             size="sm"
             color="neutral"

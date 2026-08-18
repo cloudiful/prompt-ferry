@@ -103,6 +103,23 @@ pub(super) async fn resolve_endpoint_input(
             "user endpoint requires owner",
         ));
     }
+    match (body.provider, body.provider_region) {
+        (db::EndpointProvider::Generic, Some(_)) => {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_provider_region",
+                "provider_region is only valid for MiniMax endpoints",
+            ));
+        }
+        (db::EndpointProvider::Minimax, None) => {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_provider_region",
+                "MiniMax endpoints require provider_region",
+            ));
+        }
+        _ => {}
+    }
     if let Some(owner_user_id) = body.owner_user_id {
         let owner = db::get_active_user(&state.pool, owner_user_id)
             .await
@@ -237,6 +254,8 @@ pub(super) async fn resolve_endpoint_input(
         scope: body.scope,
         owner_user_id: body.owner_user_id,
         name: body.name,
+        provider: body.provider,
+        provider_region: body.provider_region,
         base_url: body.base_url,
         native_api,
         native_api_source,

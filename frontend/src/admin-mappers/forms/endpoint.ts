@@ -10,6 +10,8 @@ export function createEmptyEndpointForm(): EndpointForm {
     scope: 'admin',
     owner_user_id: null,
     name: '',
+    provider: 'generic',
+    provider_region: null,
     base_url: '',
     api_keys: [
       {
@@ -43,6 +45,8 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
     scope: endpoint.scope === 'user' ? 'user' : 'admin',
     owner_user_id: endpoint.owner_user_id ?? null,
     name: endpoint.name,
+    provider: endpoint.provider ?? 'generic',
+    provider_region: endpoint.provider_region ?? null,
     base_url: endpoint.base_url,
     api_keys: endpointApiKeys.map((key) => ({
       key_label: key.key_label,
@@ -78,6 +82,8 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
     base_url: form.base_url.trim(),
     enabled: form.enabled,
     name: form.name.trim(),
+    provider: form.provider,
+    provider_region: form.provider_region,
     native_api_override:
       form.protocol_mode === 'manual' ? form.native_api_override : null,
     owner_user_id: form.scope === 'user' ? form.owner_user_id : null,

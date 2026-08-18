@@ -12,8 +12,8 @@ use super::{
     bridge::{__path_bridge_status, bridge_status},
     endpoints::{
         __path_create_endpoint, __path_delete_endpoint, __path_list_endpoints,
-        __path_test_endpoint, __path_update_endpoint, create_endpoint, delete_endpoint,
-        list_endpoints, test_endpoint, update_endpoint,
+        __path_test_endpoint, __path_token_plan_usage, __path_update_endpoint, create_endpoint,
+        delete_endpoint, list_endpoints, test_endpoint, token_plan_usage, update_endpoint,
     },
     mcp::{
         __path_bind_credential_group, __path_create_mcp_server, __path_create_quota_group,
@@ -100,7 +100,7 @@ use crate::{
         RequestRecordOverviewRange, RequestRecordPruneResponse, RequestRecordsClearRequest,
         RequestRecordsClearResponse, ResetPasswordRequest, SessionAffinityResetResponse,
         SessionAffinityState, SessionAffinityStatus, SessionRouteOptionsResponse,
-        UpdateClientKeyRequest, UserOptionsResponse, UserPageResponse,
+        TokenPlanUsageResponse, UpdateClientKeyRequest, UserOptionsResponse, UserPageResponse,
     },
 };
 
@@ -160,6 +160,7 @@ pub(super) struct IdentityApiDoc;
         update_endpoint,
         delete_endpoint,
         test_endpoint,
+        token_plan_usage,
         list_model_routes,
         create_model_route,
         update_model_route,
@@ -198,6 +199,7 @@ pub(super) struct IdentityApiDoc;
             EndpointSettingRequest,
             EndpointSettingResponse,
             EndpointTestResponse,
+            TokenPlanUsageResponse,
             db::McpBearerToken,
             McpCatalogItem,
             McpCatalogResponse,

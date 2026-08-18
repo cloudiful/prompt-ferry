@@ -5,6 +5,8 @@ import type {
   RequestRecordListRow,
   RequestRecordState,
   SessionRouteOptionsResponse,
+  EndpointProvider,
+  EndpointRegion,
   UsageClearScope,
 } from './generated/admin-api'
 
@@ -20,6 +22,8 @@ export type EndpointForm = {
   scope: 'admin' | 'user'
   owner_user_id: number | null
   name: string
+  provider: EndpointProvider
+  provider_region: EndpointRegion | null
   base_url: string
   api_keys: EndpointApiKeyForm[]
   key_lb_enabled: boolean

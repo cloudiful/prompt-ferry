@@ -6,6 +6,7 @@ import {
   listEndpoints,
   listModelRoutes,
   testEndpoint,
+  tokenPlanUsage,
   testModelRoute,
   updateEndpoint,
   updateModelRoute,
@@ -19,6 +20,7 @@ import type {
   ModelRouteRequest,
   ModelRouteTestResponse,
   ProviderEndpoint,
+  TokenPlanUsageResponse,
 } from '../generated/admin-api'
 import {
   endpointFormToRequest,
@@ -80,6 +82,14 @@ export async function runEndpointTest(
 ): Promise<EndpointTestResponse> {
   return expectData(
     await testEndpoint<true>(withData({ path: { endpoint_id: endpointId } })),
+  )
+}
+
+export async function fetchTokenPlanUsage(
+  endpointId: string,
+): Promise<TokenPlanUsageResponse> {
+  return expectData(
+    await tokenPlanUsage<true>(withData({ path: { endpoint_id: endpointId } })),
   )
 }
 

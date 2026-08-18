@@ -5,6 +5,7 @@ import PageIntro from '../components/PageIntro.vue'
 import EndpointDialog from '../components/endpoints/EndpointDialog.vue'
 import EndpointsEndpointsTab from '../components/endpoints/EndpointsEndpointsTab.vue'
 import EndpointsRoutesTab from '../components/endpoints/EndpointsRoutesTab.vue'
+import TokenPlanUsageDialog from '../components/endpoints/TokenPlanUsageDialog.vue'
 import ModelRouteDialog from '../components/endpoints/ModelRouteDialog.vue'
 import { useEndpointsPage } from '../composables/useEndpointsPage'
 
@@ -23,6 +24,7 @@ const {
   modelRouteDialogHeader,
   modelRouteDialogVisible,
   modelRouteForm,
+  openTokenPlanUsage,
   onEndpointPage,
   onModelRoutePage,
   openEndpointDialog,
@@ -36,6 +38,10 @@ const {
   toggleEndpointEnabled,
   toggleModelRouteEnabled,
   usersStore,
+  tokenPlanUsage,
+  tokenPlanUsageEndpointId,
+  tokenPlanUsageLoading,
+  tokenPlanUsageVisible,
 } = useEndpointsPage()
 
 const route = useRoute()
@@ -104,6 +110,7 @@ const showNewModelRouteButton = computed(() => activeSection.value === 'routes')
       @edit-endpoint="editEndpoint"
       @endpoint-page="onEndpointPage"
       @test-endpoint="testEndpoint"
+      @token-plan-usage="openTokenPlanUsage"
       @toggle-endpoint-enabled="toggleEndpointEnabled"
     />
 
@@ -138,6 +145,16 @@ const showNewModelRouteButton = computed(() => activeSection.value === 'routes')
       :t="t"
       :users="usersStore.users"
       @save="saveModelRoute"
+    />
+
+    <TokenPlanUsageDialog
+      v-model:visible="tokenPlanUsageVisible"
+      :endpoint-name="
+        endpointsStore.findEndpointById(tokenPlanUsageEndpointId)?.name ?? ''
+      "
+      :loading="tokenPlanUsageLoading"
+      :t="t"
+      :usage="tokenPlanUsage"
     />
   </div>
 </template>

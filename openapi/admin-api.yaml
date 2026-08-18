@@ -660,6 +660,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EndpointTestResponse'
+  /api/v1/admin/endpoints/{endpoint_id}/token-plan-usage:
+    get:
+      tags:
+      - endpoints
+      operationId: token_plan_usage
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Token plan usage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPlanUsageResponse'
   /api/v1/admin/mcp-quota-groups:
     get:
       tags:
@@ -3229,6 +3249,16 @@ components:
       enum:
       - auto
       - manual
+    EndpointProvider:
+      type: string
+      enum:
+      - generic
+      - minimax
+    EndpointRegion:
+      type: string
+      enum:
+      - cn
+      - global
     EndpointRequest:
       type: object
       required:
@@ -3275,6 +3305,12 @@ components:
           format: int64
         protocol_mode:
           $ref: '#/components/schemas/EndpointProtocolMode'
+        provider:
+          $ref: '#/components/schemas/EndpointProvider'
+        provider_region:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/EndpointRegion'
         scope:
           type: string
     EndpointSettingRequest:
@@ -4698,6 +4734,7 @@ components:
       - endpoint_id
       - scope
       - name
+      - provider
       - base_url
       - native_api
       - native_api_source
@@ -4743,6 +4780,12 @@ components:
           - integer
           - 'null'
           format: int64
+        provider:
+          $ref: '#/components/schemas/EndpointProvider'
+        provider_region:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/EndpointRegion'
         scope:
           type: string
         updated_at:
@@ -6214,6 +6257,112 @@ components:
       - off
       - server
       - mtls
+    TokenPlanKeyUsage:
+      type: object
+      required:
+      - key_id
+      - key_label
+      - ok
+      - model_remains
+      properties:
+        error_code:
+          type:
+          - string
+          - 'null'
+        error_message:
+          type:
+          - string
+          - 'null'
+        key_id:
+          type: string
+          format: uuid
+        key_label:
+          type: string
+        model_remains:
+          type: array
+          items:
+            $ref: '#/components/schemas/TokenPlanModelUsage'
+        ok:
+          type: boolean
+        status:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+    TokenPlanModelUsage:
+      type: object
+      required:
+      - model_name
+      properties:
+        interval:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TokenPlanWindowUsage'
+        model_name:
+          type: string
+        weekly:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TokenPlanWindowUsage'
+    TokenPlanUsageResponse:
+      type: object
+      required:
+      - provider
+      - provider_region
+      - keys
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/TokenPlanKeyUsage'
+        provider:
+          $ref: '#/components/schemas/EndpointProvider'
+        provider_region:
+          $ref: '#/components/schemas/EndpointRegion'
+    TokenPlanWindowUsage:
+      type: object
+      properties:
+        boost_permille:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        end_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        remaining_percent:
+          type:
+          - number
+          - 'null'
+          format: double
+        remains_time_ms:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        start_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        status:
+          type:
+          - integer
+          - 'null'
+          format: int32
+        total_count:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        usage_count:
+          type:
+          - integer
+          - 'null'
+          format: int64
     UpdateClientKeyRequest:
       type: object
       properties:

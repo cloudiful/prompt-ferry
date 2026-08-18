@@ -90,6 +90,7 @@ async fn migrate_adds_provider_endpoint_protocol_columns() -> anyhow::Result<()>
 
     assert!(row.native_api_default.contains("'chat'"));
     assert!(row.native_api_source_default.contains("'manual'"));
+    assert!(row.provider_default.contains("'generic'"));
     schema.cleanup().await?;
     Ok(())
 }

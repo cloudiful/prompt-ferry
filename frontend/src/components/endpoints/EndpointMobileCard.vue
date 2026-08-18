@@ -11,6 +11,7 @@ defineEmits<{
   deleteEndpoint: [endpointId: string]
   editEndpoint: [endpointId: string]
   testEndpoint: [endpointId: string]
+  tokenPlanUsage: [endpointId: string]
   toggleEndpointEnabled: [endpointId: string, enabled: boolean]
 }>()
 </script>
@@ -78,6 +79,16 @@ defineEmits<{
     <div
       class="grid gap-2 md:grid-cols-2 [&>button]:w-full [&>button]:justify-center"
     >
+      <UButton
+        v-if="item.provider === 'minimax'"
+        size="sm"
+        color="neutral"
+        variant="outline"
+        @click="$emit('tokenPlanUsage', item.endpoint_id)"
+      >
+        <UIcon name="i-lucide-gauge" class="h-4 w-4" />
+        {{ t('tokenPlanUsage') }}
+      </UButton>
       <UButton
         size="sm"
         color="neutral"

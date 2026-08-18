@@ -3,6 +3,7 @@ use crate::{
     db,
     worker_admin_types::{
         EndpointPageResponse, EndpointRequest, EndpointTestResponse, TablePageQuery,
+        TokenPlanUsageResponse,
     },
 };
 
@@ -62,3 +63,12 @@ pub(super) fn delete_endpoint() {}
     tag = "endpoints"
 )]
 pub(super) fn test_endpoint() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/token-plan-usage",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses((status = 200, body = TokenPlanUsageResponse, description = "Token plan usage")),
+    tag = "endpoints"
+)]
+pub(super) fn token_plan_usage() {}

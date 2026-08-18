@@ -58,6 +58,10 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
         )
         .route("/admin/endpoints/{endpoint_id}/test", post(test_endpoint))
         .route(
+            "/admin/endpoints/{endpoint_id}/token-plan-usage",
+            get(token_plan_usage),
+        )
+        .route(
             "/admin/model-routes",
             get(list_model_routes).post(create_model_route),
         )

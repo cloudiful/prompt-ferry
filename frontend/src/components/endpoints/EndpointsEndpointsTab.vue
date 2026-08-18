@@ -14,6 +14,7 @@ const emit = defineEmits<{
   editEndpoint: [endpointId: string]
   deleteEndpoint: [endpointId: string]
   testEndpoint: [endpointId: string]
+  tokenPlanUsage: [endpointId: string]
   endpointPage: [event: TablePageChange]
   toggleEndpointEnabled: [endpointId: string, enabled: boolean]
 }>()
@@ -75,6 +76,7 @@ function forwardToggleEndpointEnabled(
         @delete-endpoint="$emit('deleteEndpoint', $event)"
         @edit-endpoint="$emit('editEndpoint', $event)"
         @test-endpoint="$emit('testEndpoint', $event)"
+        @token-plan-usage="$emit('tokenPlanUsage', $event)"
         @toggle-endpoint-enabled="forwardToggleEndpointEnabled"
       />
 
@@ -101,6 +103,7 @@ function forwardToggleEndpointEnabled(
       @edit-endpoint="$emit('editEndpoint', $event)"
       @endpoint-page="$emit('endpointPage', $event)"
       @test-endpoint="$emit('testEndpoint', $event)"
+      @token-plan-usage="$emit('tokenPlanUsage', $event)"
       @toggle-endpoint-enabled="forwardToggleEndpointEnabled"
     />
   </div>

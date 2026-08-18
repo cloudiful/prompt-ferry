@@ -14,6 +14,8 @@ pub async fn spawn_worker(
             scope: "admin".to_string(),
             owner_user_id: None,
             name: "replay-default-upstream".to_string(),
+            provider: db::EndpointProvider::Generic,
+            provider_region: None,
             base_url: format!("http://{upstream_addr}"),
             native_api: prompt_ferry::config::NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
