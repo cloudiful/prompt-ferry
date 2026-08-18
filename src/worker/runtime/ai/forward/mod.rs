@@ -102,6 +102,11 @@ pub(super) async fn forward_upstream_response(
     if !status.is_success() {
         let body = read_response_sample(response, ERROR_BODY_SAMPLE_BYTES).await;
         let body_text = String::from_utf8_lossy(&body).to_string();
+        if is_quota_exhaustion(&body_text)
+            && let Some(state) = services.admin_state()
+        {
+            state.token_plan_quota.invalidate(route.route_id).await;
+        }
         let client_status = client_status_for_upstream_error(status, &body_text);
         let error_body = (!body_text.trim().is_empty())
             .then(|| maybe_redact_text(&body_text, redact_content, request_ctx.user_id));

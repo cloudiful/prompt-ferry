@@ -2,7 +2,7 @@ use super::*;
 use serde_json::json;
 
 #[test]
-fn groups_adjacent_responses_function_calls_into_one_assistant_turn() {
+fn parses_adjacent_responses_function_calls_without_losing_indexes() {
     let input = vec![
         json!({"role":"user","content":"check"}),
         json!({
@@ -24,15 +24,12 @@ fn groups_adjacent_responses_function_calls_into_one_assistant_turn() {
         }),
     ];
 
-    let groups = response_tool_call_groups(&input).unwrap();
+    let calls = response_tool_calls(&input).unwrap();
 
-    assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0].first_index, 1);
-    assert_eq!(groups[0].call_ids, ["call_1", "call_2"]);
-    assert_eq!(
-        groups[0].message["tool_calls"][1]["function"]["name"],
-        "two"
-    );
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].input_index, 1);
+    assert_eq!(calls[1].input_index, 2);
+    assert_eq!(calls[1].tool_call["function"]["name"], "two");
 }
 
 #[test]
@@ -50,10 +47,17 @@ fn recognizes_complete_reasoning_before_a_function_call_turn() {
             "name":"one",
             "arguments":"{}"
         }),
+        json!({
+            "type":"function_call",
+            "call_id":"call_2",
+            "name":"two",
+            "arguments":"{}"
+        }),
     ];
-    let group = &response_tool_call_groups(&input).unwrap()[0];
+    let calls = response_tool_calls(&input).unwrap();
 
-    assert!(has_reasoning_for_group(&input, group.first_index));
+    assert!(!call_needs_reasoning(&input, calls[0].input_index));
+    assert!(!call_needs_reasoning(&input, calls[1].input_index));
 }
 
 #[test]

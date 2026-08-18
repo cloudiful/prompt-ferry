@@ -40,8 +40,17 @@ pub(super) async fn token_plan_usage(
         );
     }
 
-    match super::super::token_plan::fetch_endpoint_usage(&endpoint).await {
-        Ok(usage) => Json(usage).into_response(),
+    match state
+        .token_plan_quota
+        .refresh_if_due(&state.pool, endpoint_id)
+        .await
+    {
+        Ok(Some(usage)) => Json(usage).into_response(),
+        Ok(None) => error(
+            StatusCode::BAD_REQUEST,
+            "unsupported_provider",
+            "token plan usage is only available for MiniMax endpoints",
+        ),
         Err(err) => internal(&state, err),
     }
 }

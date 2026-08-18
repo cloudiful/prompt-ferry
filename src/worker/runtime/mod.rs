@@ -49,8 +49,8 @@ use self::request_assembly::{
     send_worker_shutdown_mcp_response, send_worker_shutdown_response,
 };
 use self::routing::{
-    discover_dynamic_model_route, materialize_route_api_key_selection, select_route_for_candidate,
-    upstream_url,
+    discover_dynamic_model_route, materialize_route_api_key_selection_with_quota,
+    select_route_for_candidate, upstream_url,
 };
 
 const RELAY_RECONNECT_DELAY_SECONDS: u64 = 1;

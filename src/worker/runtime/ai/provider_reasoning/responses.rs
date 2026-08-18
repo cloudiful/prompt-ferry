@@ -1,7 +1,7 @@
 use super::replay::{
-    ReplayFailureKind, direct_minimax_endpoint, load_tool_call_replay_state,
-    minimax_reasoning_model, replay_recognition_basis, replay_unavailable, resolve_replay_parents,
-    responses_reasoning_replay_enabled,
+    ReplayFailureKind, ResponsesReplayToolCall, direct_minimax_endpoint,
+    load_tool_call_replay_state, minimax_reasoning_model, replay_recognition_basis,
+    replay_unavailable, resolve_responses_replay_groups, responses_reasoning_replay_enabled,
 };
 use super::responses_plain::load_latest_assistant_artifact;
 use crate::{
@@ -66,16 +66,17 @@ async fn restore_responses_reasoning_with_replay(
         return Ok(None);
     };
 
-    let all_groups = response_tool_call_groups(input)?;
-    let groups = all_groups
+    let all_calls = response_tool_calls(input)?;
+    let missing_reasoning_calls = all_calls
         .iter()
-        .filter(|group| !has_reasoning_for_group(input, group.first_index))
+        .filter(|call| call_needs_reasoning(input, call.input_index))
+        .cloned()
         .collect::<Vec<_>>();
     let tolerate_missing_reasoning = tolerates_missing_reasoning(route, model);
     let allow_minimax_reasoning_details =
         direct_minimax_endpoint(route) && minimax_reasoning_model(model);
-    if groups.is_empty() {
-        if !all_groups.is_empty() || !tolerate_missing_reasoning {
+    if missing_reasoning_calls.is_empty() {
+        if !all_calls.is_empty() || !tolerate_missing_reasoning {
             return Ok(None);
         }
         if let Some((assistant_index, artifact)) =
@@ -102,13 +103,9 @@ async fn restore_responses_reasoning_with_replay(
         return Ok(None);
     }
 
-    let messages = groups
+    let requested_call_ids = missing_reasoning_calls
         .iter()
-        .map(|group| group.message.clone())
-        .collect::<Vec<_>>();
-    let requested_call_ids = groups
-        .iter()
-        .flat_map(|group| group.call_ids.iter().cloned())
+        .map(|call| call.call_id.clone())
         .collect::<Vec<_>>();
     let state = admin_state.ok_or_else(|| {
         replay_unavailable(
@@ -126,26 +123,22 @@ async fn restore_responses_reasoning_with_replay(
         parent_event_id,
     )
     .await?;
-    let parents = resolve_replay_parents(
-        &messages,
+    let groups = resolve_responses_replay_groups(
+        &missing_reasoning_calls,
         &candidates_by_call_id,
         &artifacts_by_event_id,
         conversation_id.is_some() || parent_event_id.is_some(),
     )?;
     let mut restored = Vec::with_capacity(groups.len());
-    for (index, group) in groups.iter().enumerate() {
-        let parent_event_id = parents.get(&index).copied().ok_or_else(|| {
-            replay_unavailable(
-                ReplayFailureKind::AmbiguousParent,
-                "Responses tool-call history has no safely resolved replay parent",
-            )
-        })?;
-        let artifact = artifacts_by_event_id.get(&parent_event_id).ok_or_else(|| {
-            replay_unavailable(
-                ReplayFailureKind::MissingArtifact,
-                "stored replay state is missing a Responses assistant tool-call artifact",
-            )
-        })?;
+    for group in &groups {
+        let artifact = artifacts_by_event_id
+            .get(&group.parent_event_id)
+            .ok_or_else(|| {
+                replay_unavailable(
+                    ReplayFailureKind::MissingArtifact,
+                    "stored replay state is missing a Responses assistant tool-call artifact",
+                )
+            })?;
         let reasoning = if tolerate_missing_reasoning {
             reasoning_input_item_optional(artifact, allow_minimax_reasoning_details)?
         } else {
@@ -160,8 +153,7 @@ async fn restore_responses_reasoning_with_replay(
             warn!(
                 failure_kind = ReplayFailureKind::MissingReasoning.as_str(),
                 model = model.unwrap_or_default(),
-                parent_event_id,
-                call_ids = ?group.call_ids,
+                parent_event_id = group.parent_event_id,
                 "provider Responses reasoning replay artifact has no reasoning text; forwarding the MiniMax tool-call turn without injected reasoning"
             );
         }
@@ -178,37 +170,42 @@ async fn restore_responses_reasoning_with_replay(
     })
 }
 
-struct ResponseToolCallGroup {
-    first_index: usize,
-    call_ids: Vec<String>,
-    message: Value,
-}
-
-fn response_tool_call_groups(
+fn response_tool_calls(
     input: &[Value],
-) -> Result<Vec<ResponseToolCallGroup>, crate::openai_compat::CompatError> {
-    let mut groups = Vec::new();
-    let mut current = Vec::new();
-    let mut first_index = None;
-    for (index, item) in input.iter().enumerate() {
-        if item.get("type").and_then(Value::as_str) == Some("function_call") {
-            if first_index.is_none() {
-                first_index = Some(index);
-            }
-            current.push(response_tool_call(item)?);
+) -> Result<Vec<ResponsesReplayToolCall>, crate::openai_compat::CompatError> {
+    let mut calls = Vec::new();
+    for (input_index, item) in input.iter().enumerate() {
+        if item.get("type").and_then(Value::as_str) != Some("function_call") {
             continue;
         }
-        if let Some(first_index) = first_index.take() {
-            groups.push(build_group(first_index, std::mem::take(&mut current)));
-        }
+        let call_id = response_tool_call_id(item)?;
+        let name = item.get("name").and_then(Value::as_str).ok_or_else(|| {
+            replay_unavailable(
+                ReplayFailureKind::InvalidHistory,
+                "Responses function_call item has no function name",
+            )
+        })?;
+        let arguments = item
+            .get("arguments")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        calls.push(ResponsesReplayToolCall {
+            input_index,
+            call_id: call_id.clone(),
+            tool_call: json!({
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": arguments,
+                }
+            }),
+        });
     }
-    if let Some(first_index) = first_index {
-        groups.push(build_group(first_index, current));
-    }
-    Ok(groups)
+    Ok(calls)
 }
 
-fn response_tool_call(item: &Value) -> Result<(String, Value), crate::openai_compat::CompatError> {
+fn response_tool_call_id(item: &Value) -> Result<String, crate::openai_compat::CompatError> {
     let object = item.as_object().ok_or_else(|| {
         replay_unavailable(
             ReplayFailureKind::InvalidHistory,
@@ -227,47 +224,17 @@ fn response_tool_call(item: &Value) -> Result<(String, Value), crate::openai_com
             )
         })?
         .to_string();
-    let name = object.get("name").and_then(Value::as_str).ok_or_else(|| {
-        replay_unavailable(
-            ReplayFailureKind::InvalidHistory,
-            "Responses function_call item has no function name",
-        )
-    })?;
-    let arguments = object
-        .get("arguments")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    Ok((
-        call_id.clone(),
-        json!({
-            "id": call_id,
-            "type": "function",
-            "function": {
-                "name": name,
-                "arguments": arguments,
-            }
-        }),
-    ))
+    Ok(call_id)
 }
 
-fn build_group(first_index: usize, tool_calls: Vec<(String, Value)>) -> ResponseToolCallGroup {
-    let call_ids = tool_calls
-        .iter()
-        .map(|(call_id, _)| call_id.clone())
-        .collect();
-    let tool_calls: Vec<Value> = tool_calls
-        .into_iter()
-        .map(|(_, tool_call)| tool_call)
-        .collect();
-    ResponseToolCallGroup {
-        first_index,
-        call_ids,
-        message: json!({
-            "role": "assistant",
-            "content": null,
-            "tool_calls": tool_calls,
-        }),
+fn call_needs_reasoning(input: &[Value], input_index: usize) -> bool {
+    let mut first_index = input_index;
+    while first_index > 0
+        && input[first_index - 1].get("type").and_then(Value::as_str) == Some("function_call")
+    {
+        first_index -= 1;
     }
+    !has_reasoning_for_group(input, first_index)
 }
 
 fn has_reasoning_for_group(input: &[Value], first_index: usize) -> bool {

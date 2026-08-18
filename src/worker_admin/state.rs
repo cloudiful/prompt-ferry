@@ -18,6 +18,7 @@ use sqlx::PgPool;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 use uuid::Uuid;
 
+use super::token_plan_cache::TokenPlanQuotaCache;
 use crate::{
     db::{ManagedRelayRuntimeStatus, StreamDeltaBatchingSettings},
     endpoint_models::EndpointModelCache,
@@ -106,6 +107,7 @@ pub struct AdminState {
     pub mcp_allowed_origins: Vec<String>,
     pub mcp_quota_valkey: crate::mcp::McpQuotaValkey,
     pub endpoint_model_cache: EndpointModelCache,
+    pub(crate) token_plan_quota: TokenPlanQuotaCache,
 }
 
 pub struct AdminStateInit {
@@ -159,6 +161,7 @@ impl AdminState {
             mcp_allowed_origins: init.mcp_allowed_origins,
             mcp_quota_valkey: init.mcp_quota_valkey,
             endpoint_model_cache: init.endpoint_model_cache,
+            token_plan_quota: TokenPlanQuotaCache::default(),
         }
     }
 

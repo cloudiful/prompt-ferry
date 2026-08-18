@@ -5,7 +5,7 @@ use crate::{config::WorkerConfig, db};
 use super::super::{
     RequestExecutionContext, check_named_request_budget,
     context::{RouteExecutionContext, RuntimeServices},
-    discover_dynamic_model_route, materialize_route_api_key_selection,
+    discover_dynamic_model_route, materialize_route_api_key_selection_with_quota,
     request_assembly::BufferedBridgeRequest,
     routing::clear_invalid_conversation_endpoint_key_override,
     select_route_for_candidate,
@@ -115,8 +115,23 @@ pub(super) async fn resolve_route(
     let mut route = dynamic_route
         .or(fallback_route)
         .ok_or_else(|| anyhow!("route not found"))?;
-    let key_selection =
-        materialize_route_api_key_selection(&route, request, &request_ctx.request_prompt_log);
+    if let Err(err) = state
+        .token_plan_quota
+        .refresh_if_due(&state.pool, route.route_id)
+        .await
+    {
+        tracing::warn!(
+            endpoint_id = %route.route_id,
+            error = %err,
+            "MiniMax quota refresh failed for fallback route; retaining the previous snapshot"
+        );
+    }
+    let key_selection = materialize_route_api_key_selection_with_quota(
+        &route,
+        request,
+        &request_ctx.request_prompt_log,
+        Some(&state.token_plan_quota),
+    );
     clear_invalid_conversation_endpoint_key_override(
         services,
         &request_ctx.request_prompt_log,

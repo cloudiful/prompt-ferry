@@ -5,10 +5,12 @@ use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 mod resolution;
+mod responses_resolution;
 mod signatures;
 mod storage;
 
 pub(super) use resolution::resolve_replay_parents;
+pub(super) use responses_resolution::{ResponsesReplayToolCall, resolve_responses_replay_groups};
 use signatures::signature_hash;
 pub(super) use signatures::tool_calls_match;
 pub(super) use storage::load_tool_call_replay_state;

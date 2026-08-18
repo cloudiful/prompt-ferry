@@ -2,9 +2,15 @@ use super::super::{
     RequestExecutionContext, context::RuntimeServices, prompt_log::RequestPromptLog,
     request_assembly::BufferedBridgeRequest,
 };
-use crate::{db, endpoint_models, routing::stable_candidate_order, worker_admin::AdminState};
+use super::quota_selection::{
+    refresh_quota_if_due, request_model, select_quota_key, stable_endpoint_api_key_score,
+};
+use crate::{
+    db, endpoint_models,
+    routing::stable_candidate_order,
+    worker_admin::{AdminState, token_plan_cache::TokenPlanQuotaCache},
+};
 use reqwest::Client;
-use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,7 +115,13 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
         PreferredRouteReason::Rendezvous => db::RouteSelectionReason::Default,
     };
     let target = preferred.target;
-    let key_selection = select_endpoint_api_key(target, request, &request_ctx.request_prompt_log);
+    refresh_quota_if_due(services, target.endpoint_id).await;
+    let key_selection = select_endpoint_api_key(
+        target,
+        request,
+        &request_ctx.request_prompt_log,
+        services.admin_state().map(|state| &state.token_plan_quota),
+    );
     clear_invalid_conversation_endpoint_key_override(
         services,
         &request_ctx.request_prompt_log,
@@ -220,10 +232,20 @@ pub(super) fn endpoint_key_stickiness_value(
         .map(|value| format!("client_key:{value}"))
 }
 
+#[cfg(test)]
 pub(in crate::worker::runtime) fn materialize_route_api_key_selection(
     route: &db::RouteConfig,
     request: &BufferedBridgeRequest,
     request_prompt_log: &RequestPromptLog,
+) -> EndpointApiKeySelectionResult {
+    materialize_route_api_key_selection_with_quota(route, request, request_prompt_log, None)
+}
+
+pub(in crate::worker::runtime) fn materialize_route_api_key_selection_with_quota(
+    route: &db::RouteConfig,
+    request: &BufferedBridgeRequest,
+    request_prompt_log: &RequestPromptLog,
+    quota_cache: Option<&TokenPlanQuotaCache>,
 ) -> EndpointApiKeySelectionResult {
     select_api_key(
         route.route_id,
@@ -232,6 +254,7 @@ pub(in crate::worker::runtime) fn materialize_route_api_key_selection(
         route.key_lb_enabled,
         request,
         request_prompt_log,
+        quota_cache,
     )
 }
 
@@ -263,6 +286,7 @@ pub(super) fn select_endpoint_api_key(
     target: &db::ModelRouteCandidateTarget,
     request: &BufferedBridgeRequest,
     request_prompt_log: &RequestPromptLog,
+    quota_cache: Option<&TokenPlanQuotaCache>,
 ) -> EndpointApiKeySelectionResult {
     select_api_key(
         target.endpoint_id,
@@ -271,6 +295,7 @@ pub(super) fn select_endpoint_api_key(
         target.key_lb_enabled,
         request,
         request_prompt_log,
+        quota_cache,
     )
 }
 
@@ -286,6 +311,7 @@ fn select_api_key(
     key_lb_enabled: bool,
     request: &BufferedBridgeRequest,
     request_prompt_log: &RequestPromptLog,
+    quota_cache: Option<&TokenPlanQuotaCache>,
 ) -> EndpointApiKeySelectionResult {
     let mut available_keys = api_keys
         .iter()
@@ -313,22 +339,39 @@ fn select_api_key(
             .then_with(|| left.key_label.cmp(&right.key_label))
             .then_with(|| left.key_id.cmp(&right.key_id))
     });
+    let request_model = request_model(request);
+    let stable_key = endpoint_key_stickiness_value(request, request_prompt_log);
     let selected = if key_lb_enabled {
-        endpoint_key_stickiness_value(request, request_prompt_log).and_then(|stable_key| {
-            stable_candidate_order(
-                &available_keys,
-                |_, key| stable_endpoint_api_key_score(&stable_key, key),
-                |left_index, left, right_index, right| {
-                    left.position
-                        .cmp(&right.position)
-                        .then_with(|| left.key_label.cmp(&right.key_label))
-                        .then_with(|| left_index.cmp(&right_index))
-                },
-            )
-            .into_iter()
-            .next()
-            .and_then(|index| available_keys.get(index).copied())
-        })
+        quota_cache
+            .and_then(|cache| {
+                select_quota_key(
+                    cache,
+                    endpoint_id,
+                    &available_keys,
+                    request_model.as_deref(),
+                    stable_key
+                        .clone()
+                        .unwrap_or_else(|| format!("request:{}", request.request_id)),
+                    crate::worker_admin::token_plan_cache::estimate_input_tokens(&request.body),
+                )
+            })
+            .or_else(|| {
+                stable_key.as_deref().and_then(|stable_key| {
+                    stable_candidate_order(
+                        &available_keys,
+                        |_, key| stable_endpoint_api_key_score(&stable_key, key),
+                        |left_index, left, right_index, right| {
+                            left.position
+                                .cmp(&right.position)
+                                .then_with(|| left.key_label.cmp(&right.key_label))
+                                .then_with(|| left_index.cmp(&right_index))
+                        },
+                    )
+                    .into_iter()
+                    .next()
+                    .and_then(|index| available_keys.get(index).copied())
+                })
+            })
     } else {
         None
     }
@@ -350,15 +393,4 @@ fn select_api_key(
             .conversation_override_endpoint_key_id
             .is_some(),
     }
-}
-
-fn stable_endpoint_api_key_score(stable_key: &str, key: &db::EndpointApiKey) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(stable_key.as_bytes());
-    hasher.update(key.endpoint_id.as_bytes());
-    hasher.update(key.key_id.as_bytes());
-    if key.key_id.is_nil() {
-        hasher.update(key.key_label.as_bytes());
-    }
-    hasher.finalize().into()
 }
