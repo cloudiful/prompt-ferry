@@ -1647,6 +1647,11 @@ async fn restores_minimax_m3_responses_reasoning_without_conversation_identity()
     enable_prompt_logging(&schema).await?;
 
     let upstream_log = Arc::new(ResponsesRequestLog::default());
+    upstream_log
+        .tool_call_turns_without_reasoning
+        .lock()
+        .await
+        .push(2);
     let upstream_addr = spawn_replay_responses_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let mut config = worker_config(worker_addr, upstream_addr, &worker_database_url(&schema)?);
@@ -1730,9 +1735,31 @@ async fn restores_minimax_m3_responses_reasoning_without_conversation_identity()
         .send()
         .await?;
     assert_eq!(second.status(), StatusCode::OK);
+    assert_eq!(wait_for_assistant_artifact(&schema).await?, (false, true));
+
+    let third = client
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "MiniMax-M3",
+            "input": [{
+                "type": "function_call",
+                "call_id": "call_2",
+                "name": "bash",
+                "arguments": "{\"command\":\"git diff\"}"
+            }, {
+                "type": "function_call_output",
+                "call_id": "call_2",
+                "output": "diff --git a/file b/file"
+            }],
+            "stream": false
+        }))
+        .send()
+        .await?;
+    assert_eq!(third.status(), StatusCode::OK);
 
     let requests = upstream_log.bodies.lock().await;
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     assert_eq!(requests[0]["reasoning"]["effort"].as_str(), Some("minimal"));
     assert_eq!(requests[1]["input"][0]["type"].as_str(), Some("reasoning"));
     assert_eq!(
@@ -1745,6 +1772,14 @@ async fn restores_minimax_m3_responses_reasoning_without_conversation_identity()
     );
     assert_eq!(
         requests[1]["input"][2]["type"].as_str(),
+        Some("function_call_output")
+    );
+    assert_eq!(
+        requests[2]["input"][0]["type"].as_str(),
+        Some("function_call")
+    );
+    assert_eq!(
+        requests[2]["input"][1]["type"].as_str(),
         Some("function_call_output")
     );
     drop(requests);

@@ -106,3 +106,27 @@ fn rejects_artifact_without_reasoning_text() {
     assert_eq!(error.code, "replay_unavailable");
     assert!(error.message.contains("missing reasoning_text"));
 }
+
+#[test]
+fn optional_reasoning_item_allows_an_artifact_without_reasoning_text() {
+    let artifact = json!({
+        "version": 1,
+        "assistant_message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"}
+            }]
+        },
+        "output_items": [{
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "lookup",
+            "arguments": "{}"
+        }]
+    });
+
+    assert_eq!(reasoning_input_item_optional(&artifact).unwrap(), None);
+}

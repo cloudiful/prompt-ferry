@@ -8,7 +8,7 @@ use crate::{
     worker_admin::AdminState,
 };
 use serde_json::{Value, json};
-use tracing::Instrument;
+use tracing::{Instrument, warn};
 
 pub(crate) async fn restore_responses_reasoning(
     admin_state: Option<&AdminState>,
@@ -41,6 +41,7 @@ pub(crate) async fn restore_responses_reasoning(
         admin_state,
         user_id,
         route,
+        model.as_deref(),
         conversation_id,
         parent_event_id,
         value,
@@ -53,6 +54,7 @@ async fn restore_responses_reasoning_with_replay(
     admin_state: Option<&AdminState>,
     user_id: Option<i64>,
     route: &db::RouteConfig,
+    model: Option<&str>,
     conversation_id: Option<uuid::Uuid>,
     parent_event_id: Option<i64>,
     mut value: Value,
@@ -101,6 +103,7 @@ async fn restore_responses_reasoning_with_replay(
         &artifacts_by_event_id,
         conversation_id.is_some() || parent_event_id.is_some(),
     )?;
+    let tolerate_missing_reasoning = tolerates_missing_reasoning(route, model);
 
     let mut restored = Vec::with_capacity(groups.len());
     for (index, group) in groups.iter().enumerate() {
@@ -116,7 +119,22 @@ async fn restore_responses_reasoning_with_replay(
                 "stored replay state is missing a Responses assistant tool-call artifact",
             )
         })?;
-        restored.push((group.first_index, reasoning_input_item(artifact)?));
+        let reasoning = if tolerate_missing_reasoning {
+            reasoning_input_item_optional(artifact)?
+        } else {
+            Some(reasoning_input_item(artifact)?)
+        };
+        if let Some(reasoning) = reasoning {
+            restored.push((group.first_index, reasoning));
+        } else {
+            warn!(
+                failure_kind = ReplayFailureKind::MissingReasoning.as_str(),
+                model = model.unwrap_or_default(),
+                parent_event_id,
+                call_ids = ?group.call_ids,
+                "provider Responses reasoning replay artifact has no reasoning text; forwarding the MiniMax tool-call turn without injected reasoning"
+            );
+        }
     }
 
     for (index, reasoning) in restored.into_iter().rev() {
@@ -238,6 +256,35 @@ fn has_reasoning_for_group(input: &[Value], first_index: usize) -> bool {
 }
 
 fn reasoning_input_item(artifact: &Value) -> Result<Value, crate::openai_compat::CompatError> {
+    let content = reasoning_content_from_artifact(artifact)?;
+    if content.is_empty() {
+        return Err(replay_unavailable(
+            ReplayFailureKind::MissingReasoning,
+            "stored Responses assistant tool-call turn is missing reasoning_text",
+        ));
+    }
+    Ok(json!({
+        "type": "reasoning",
+        "content": content,
+    }))
+}
+
+fn reasoning_input_item_optional(
+    artifact: &Value,
+) -> Result<Option<Value>, crate::openai_compat::CompatError> {
+    let content = reasoning_content_from_artifact(artifact)?;
+    if content.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(json!({
+        "type": "reasoning",
+        "content": content,
+    })))
+}
+
+fn reasoning_content_from_artifact(
+    artifact: &Value,
+) -> Result<Vec<Value>, crate::openai_compat::CompatError> {
     let mut content = Vec::new();
     for item in persisted_output_items(artifact).map_err(|_| {
         replay_unavailable(
@@ -272,15 +319,17 @@ fn reasoning_input_item(artifact: &Value) -> Result<Value, crate::openai_compat:
         }
     }
     if content.is_empty() {
-        return Err(replay_unavailable(
-            ReplayFailureKind::MissingReasoning,
-            "stored Responses assistant tool-call turn is missing reasoning_text",
-        ));
+        return Ok(Vec::new());
     }
-    Ok(json!({
-        "type": "reasoning",
-        "content": content,
-    }))
+    Ok(content)
+}
+
+fn tolerates_missing_reasoning(route: &db::RouteConfig, model: Option<&str>) -> bool {
+    // MiniMax-M3 can return a tool call without a reasoning item even when
+    // reasoning is enabled. Replay available reasoning, but do not block the
+    // next tool turn when the provider did not return any to persist.
+    route.base_url.to_ascii_lowercase().contains("minimax")
+        && model.is_some_and(|model| model.trim().to_ascii_lowercase().starts_with("minimax-m3"))
 }
 
 fn reasoning_content(item: &Value) -> Option<&Value> {

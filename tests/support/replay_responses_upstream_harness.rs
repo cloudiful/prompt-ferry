@@ -20,6 +20,7 @@ pub use chat::{ChatRequestLog, spawn_replay_upstream};
 pub struct ResponsesRequestLog {
     pub bodies: Mutex<Vec<Value>>,
     pub fail_next_response_turns: Mutex<Vec<usize>>,
+    pub tool_call_turns_without_reasoning: Mutex<Vec<usize>>,
 }
 
 pub async fn spawn_replay_responses_upstream(
@@ -83,6 +84,18 @@ async fn fake_responses_completion(
     }
     drop(fail_turns);
 
+    let mut tool_call_turns = log.tool_call_turns_without_reasoning.lock().await;
+    let returns_tool_call_without_reasoning = if let Some(index) = tool_call_turns
+        .iter()
+        .position(|queued_turn| *queued_turn == turn)
+    {
+        tool_call_turns.remove(index);
+        true
+    } else {
+        false
+    };
+    drop(tool_call_turns);
+
     let model = value
         .get("model")
         .and_then(Value::as_str)
@@ -116,6 +129,39 @@ async fn fake_responses_completion(
                 "input_tokens": 2,
                 "output_tokens": 3,
                 "total_tokens": 5,
+                "input_tokens_details": { "cached_tokens": 0 },
+                "output_tokens_details": { "reasoning_tokens": 0 }
+            },
+            "text": { "format": { "type": "text" } },
+            "truncation": "disabled",
+            "tool_choice": "auto",
+            "parallel_tool_calls": false,
+            "store": false,
+            "error": null,
+            "incomplete_details": null,
+            "metadata": {}
+        })
+    } else if returns_tool_call_without_reasoning {
+        serde_json::json!({
+            "id": format!("resp_turn{turn}"),
+            "conversation": "conv_replay",
+            "object": "response",
+            "created_at": 124,
+            "status": "completed",
+            "model": model,
+            "output": [{
+                "id": "fc_2",
+                "type": "function_call",
+                "status": "completed",
+                "call_id": "call_2",
+                "name": "bash",
+                "arguments": "{\"command\":\"git diff\"}"
+            }],
+            "output_text": "",
+            "usage": {
+                "input_tokens": 4,
+                "output_tokens": 2,
+                "total_tokens": 6,
                 "input_tokens_details": { "cached_tokens": 0 },
                 "output_tokens_details": { "reasoning_tokens": 0 }
             },
