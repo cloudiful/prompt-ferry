@@ -3,6 +3,7 @@ use super::replay::{
     minimax_reasoning_model, replay_recognition_basis, replay_unavailable, resolve_replay_parents,
     responses_reasoning_replay_enabled,
 };
+use super::responses_plain::load_latest_assistant_artifact;
 use crate::{
     db,
     openai_compat::{persisted_assistant_message, persisted_output_items},
@@ -65,12 +66,39 @@ async fn restore_responses_reasoning_with_replay(
         return Ok(None);
     };
 
-    let groups = response_tool_call_groups(input)?;
-    let groups = groups
-        .into_iter()
+    let all_groups = response_tool_call_groups(input)?;
+    let groups = all_groups
+        .iter()
         .filter(|group| !has_reasoning_for_group(input, group.first_index))
         .collect::<Vec<_>>();
+    let tolerate_missing_reasoning = tolerates_missing_reasoning(route, model);
+    let allow_minimax_reasoning_details =
+        direct_minimax_endpoint(route) && minimax_reasoning_model(model);
     if groups.is_empty() {
+        if !all_groups.is_empty() || !tolerate_missing_reasoning {
+            return Ok(None);
+        }
+        if let Some((assistant_index, artifact)) =
+            load_latest_assistant_artifact(admin_state, parent_event_id, input).await
+        {
+            if let Some(reasoning) =
+                reasoning_input_item_optional(&artifact, allow_minimax_reasoning_details)?
+            {
+                input.insert(assistant_index, reasoning);
+                return serde_json::to_vec(&value).map(Some).map_err(|_| {
+                    replay_unavailable(
+                        ReplayFailureKind::InvalidHistory,
+                        "failed to encode the restored Responses request",
+                    )
+                });
+            }
+            warn!(
+                failure_kind = ReplayFailureKind::MissingReasoning.as_str(),
+                model = model.unwrap_or_default(),
+                parent_event_id,
+                "provider Responses plain assistant artifact has no reasoning text; forwarding the MiniMax turn without injected reasoning"
+            );
+        }
         return Ok(None);
     }
 
@@ -104,10 +132,6 @@ async fn restore_responses_reasoning_with_replay(
         &artifacts_by_event_id,
         conversation_id.is_some() || parent_event_id.is_some(),
     )?;
-    let tolerate_missing_reasoning = tolerates_missing_reasoning(route, model);
-    let allow_minimax_reasoning_details =
-        direct_minimax_endpoint(route) && minimax_reasoning_model(model);
-
     let mut restored = Vec::with_capacity(groups.len());
     for (index, group) in groups.iter().enumerate() {
         let parent_event_id = parents.get(&index).copied().ok_or_else(|| {

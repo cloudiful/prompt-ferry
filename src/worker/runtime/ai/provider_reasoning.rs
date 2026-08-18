@@ -4,6 +4,7 @@ use tracing::Instrument;
 
 mod replay;
 mod responses;
+mod responses_plain;
 
 use replay::{
     ReplayFailureKind, assistant_tool_call_ids, chat_reasoning_replay_enabled,
