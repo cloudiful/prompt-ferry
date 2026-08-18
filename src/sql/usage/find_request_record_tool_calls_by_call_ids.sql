@@ -42,6 +42,14 @@ WHERE tool_call.call_id = ANY($1)
   AND (
       $5::BIGINT IS NULL
       OR parent.event_id IN (SELECT event_id FROM replay_chain)
+      -- A fast follow-up can arrive before prompt-log parent resolution sees
+      -- the just-completed response. The exact call_id and conversation
+      -- filters remain in force; replay resolution validates the artifact
+      -- signature before accepting this fallback candidate.
+      OR (
+          $4::UUID IS NOT NULL
+          AND parent.conversation_id IS NOT DISTINCT FROM $4::UUID
+      )
   )
 ORDER BY tool_call.call_id ASC, tool_call.parent_event_id ASC,
          tool_call.sequence_in_turn ASC NULLS LAST,
