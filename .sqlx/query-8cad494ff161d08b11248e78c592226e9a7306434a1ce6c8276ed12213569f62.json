@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    (SELECT column_default::TEXT\n       FROM information_schema.columns\n      WHERE table_schema = current_schema()\n        AND table_name = 'provider_endpoints'\n        AND column_name = 'native_api') AS \"native_api_default!\",\n    (SELECT column_default::TEXT\n       FROM information_schema.columns\n      WHERE table_schema = current_schema()\n         AND table_name = 'provider_endpoints'\n         AND column_name = 'native_api_source') AS \"native_api_source_default!\"\n    ,(SELECT column_default::TEXT\n        FROM information_schema.columns\n       WHERE table_schema = current_schema()\n         AND table_name = 'provider_endpoints'\n         AND column_name = 'provider') AS \"provider_default!\"\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "native_api_default!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "native_api_source_default!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "provider_default!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "8cad494ff161d08b11248e78c592226e9a7306434a1ce6c8276ed12213569f62"
+}
