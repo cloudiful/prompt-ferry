@@ -75,7 +75,7 @@ fn normalizes_artifact_reasoning_to_deepseek_input_shape() {
         }]
     });
 
-    let item = reasoning_input_item(&artifact).unwrap();
+    let item = reasoning_input_item(&artifact, false).unwrap();
 
     assert_eq!(
         item,
@@ -101,7 +101,62 @@ fn rejects_artifact_without_reasoning_text() {
         }]
     });
 
-    let error = reasoning_input_item(&artifact).unwrap_err();
+    let error = reasoning_input_item(&artifact, false).unwrap_err();
+
+    assert_eq!(error.code, "replay_unavailable");
+    assert!(error.message.contains("missing reasoning_text"));
+}
+
+#[test]
+fn uses_reasoning_details_as_a_responses_replay_fallback() {
+    let artifact = json!({
+        "version": 1,
+        "assistant_message": {
+            "role": "assistant",
+            "content": null,
+            "reasoning_details": [{
+                "type": "reasoning.text",
+                "id": "reasoning-text-1",
+                "format": "MiniMax-response-v1",
+                "index": 0,
+                "text": "preserve this reasoning"
+            }]
+        },
+        "output_items": [{
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "lookup",
+            "arguments": "{}"
+        }]
+    });
+
+    assert_eq!(
+        reasoning_input_item(&artifact, true).unwrap(),
+        json!({
+            "type": "reasoning",
+            "content": [{"type": "reasoning_text", "text": "preserve this reasoning"}]
+        })
+    );
+}
+
+#[test]
+fn does_not_use_reasoning_details_for_non_minimax_responses_replay() {
+    let artifact = json!({
+        "version": 1,
+        "assistant_message": {
+            "role": "assistant",
+            "content": null,
+            "reasoning_details": [{"text": "must not be used"}]
+        },
+        "output_items": [{
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "lookup",
+            "arguments": "{}"
+        }]
+    });
+
+    let error = reasoning_input_item(&artifact, false).unwrap_err();
 
     assert_eq!(error.code, "replay_unavailable");
     assert!(error.message.contains("missing reasoning_text"));
@@ -128,5 +183,8 @@ fn optional_reasoning_item_allows_an_artifact_without_reasoning_text() {
         }]
     });
 
-    assert_eq!(reasoning_input_item_optional(&artifact).unwrap(), None);
+    assert_eq!(
+        reasoning_input_item_optional(&artifact, false).unwrap(),
+        None
+    );
 }

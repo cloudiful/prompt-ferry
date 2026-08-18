@@ -1,6 +1,7 @@
 use super::replay::{
-    ReplayFailureKind, load_tool_call_replay_state, replay_recognition_basis, replay_unavailable,
-    resolve_replay_parents, responses_reasoning_replay_enabled,
+    ReplayFailureKind, direct_minimax_endpoint, load_tool_call_replay_state,
+    minimax_reasoning_model, replay_recognition_basis, replay_unavailable, resolve_replay_parents,
+    responses_reasoning_replay_enabled,
 };
 use crate::{
     db,
@@ -104,6 +105,8 @@ async fn restore_responses_reasoning_with_replay(
         conversation_id.is_some() || parent_event_id.is_some(),
     )?;
     let tolerate_missing_reasoning = tolerates_missing_reasoning(route, model);
+    let allow_minimax_reasoning_details =
+        direct_minimax_endpoint(route) && minimax_reasoning_model(model);
 
     let mut restored = Vec::with_capacity(groups.len());
     for (index, group) in groups.iter().enumerate() {
@@ -120,9 +123,12 @@ async fn restore_responses_reasoning_with_replay(
             )
         })?;
         let reasoning = if tolerate_missing_reasoning {
-            reasoning_input_item_optional(artifact)?
+            reasoning_input_item_optional(artifact, allow_minimax_reasoning_details)?
         } else {
-            Some(reasoning_input_item(artifact)?)
+            Some(reasoning_input_item(
+                artifact,
+                allow_minimax_reasoning_details,
+            )?)
         };
         if let Some(reasoning) = reasoning {
             restored.push((group.first_index, reasoning));
@@ -255,8 +261,11 @@ fn has_reasoning_for_group(input: &[Value], first_index: usize) -> bool {
     false
 }
 
-fn reasoning_input_item(artifact: &Value) -> Result<Value, crate::openai_compat::CompatError> {
-    let content = reasoning_content_from_artifact(artifact)?;
+fn reasoning_input_item(
+    artifact: &Value,
+    allow_reasoning_details: bool,
+) -> Result<Value, crate::openai_compat::CompatError> {
+    let content = reasoning_content_from_artifact(artifact, allow_reasoning_details)?;
     if content.is_empty() {
         return Err(replay_unavailable(
             ReplayFailureKind::MissingReasoning,
@@ -271,8 +280,9 @@ fn reasoning_input_item(artifact: &Value) -> Result<Value, crate::openai_compat:
 
 fn reasoning_input_item_optional(
     artifact: &Value,
+    allow_reasoning_details: bool,
 ) -> Result<Option<Value>, crate::openai_compat::CompatError> {
-    let content = reasoning_content_from_artifact(artifact)?;
+    let content = reasoning_content_from_artifact(artifact, allow_reasoning_details)?;
     if content.is_empty() {
         return Ok(None);
     }
@@ -284,6 +294,7 @@ fn reasoning_input_item_optional(
 
 fn reasoning_content_from_artifact(
     artifact: &Value,
+    allow_reasoning_details: bool,
 ) -> Result<Vec<Value>, crate::openai_compat::CompatError> {
     let mut content = Vec::new();
     for item in persisted_output_items(artifact).map_err(|_| {
@@ -311,11 +322,19 @@ fn reasoning_content_from_artifact(
     }
     if content.is_empty()
         && let Ok(message) = persisted_assistant_message(artifact)
-        && let Some(reasoning) = message.get("reasoning_content")
     {
-        let text = crate::openai_compat::extract_text(reasoning);
-        if !text.trim().is_empty() {
-            content.push(json!({"type": "reasoning_text", "text": text}));
+        for field in ["reasoning_content", "reasoning_details"] {
+            if field == "reasoning_details" && !allow_reasoning_details {
+                continue;
+            }
+            let Some(reasoning) = message.get(field) else {
+                continue;
+            };
+            let text = crate::openai_compat::extract_text(reasoning);
+            if !text.trim().is_empty() {
+                content.push(json!({"type": "reasoning_text", "text": text}));
+                break;
+            }
         }
     }
     if content.is_empty() {
