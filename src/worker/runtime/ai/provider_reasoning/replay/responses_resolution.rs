@@ -1,4 +1,4 @@
-use super::{ReplayFailureKind, replay_unavailable, tool_calls_match};
+use super::{ReplayFailureKind, replay_unavailable, signature_hash, tool_calls_match};
 use crate::openai_compat::persisted_assistant_message;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
@@ -126,10 +126,9 @@ pub(crate) fn resolve_responses_replay_groups(
 
     let mut groups = Vec::<GroupState>::new();
     for (call, parent_event_id) in assignments {
-        let append = groups.last().is_some_and(|group| {
-            group.parent_event_id == parent_event_id
-                && group.last_index.saturating_add(1) == call.input_index
-        });
+        let append = groups
+            .last()
+            .is_some_and(|group| group.parent_event_id == parent_event_id);
         if append {
             let group = groups.last_mut().expect("group exists after append check");
             group.last_index = call.input_index;
@@ -165,6 +164,18 @@ pub(crate) fn resolve_responses_replay_groups(
                 "tool_calls": group.tool_calls,
             });
             if !tool_calls_match(&message, &artifact_message) {
+                warn!(
+                    failure_kind = ReplayFailureKind::SignatureMismatch.as_str(),
+                    parent_event_id = group.parent_event_id,
+                    group_call_ids = ?group_call_ids(&group.tool_calls),
+                    artifact_call_ids = ?artifact_call_ids(artifact),
+                    group_signature_hash = ?signature_hash(&message),
+                    artifact_signature_hash = ?signature_hash(&artifact_message),
+                    first_input_index = group.first_index,
+                    last_input_index = group.last_index,
+                    artifact_source = artifact_source_label(artifact),
+                    "provider Responses replay group tool-call signature does not match stored artifact"
+                );
                 return Err(replay_unavailable(
                     ReplayFailureKind::SignatureMismatch,
                     "stored assistant tool-call artifact does not match one resolved Responses turn",
@@ -176,6 +187,40 @@ pub(crate) fn resolve_responses_replay_groups(
             })
         })
         .collect()
+}
+
+fn artifact_call_ids(artifact: &Value) -> Vec<String> {
+    artifact
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|tool_call| tool_call.get("id").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn group_call_ids(tool_calls: &[Value]) -> Vec<String> {
+    tool_calls
+        .iter()
+        .filter_map(|tool_call| tool_call.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+fn artifact_source_label(artifact: &Value) -> &'static str {
+    if artifact
+        .get("assistant_message")
+        .and_then(Value::as_object)
+        .is_some()
+    {
+        "assistant_message"
+    } else {
+        "output_items"
+    }
 }
 
 fn artifact_contains_tool_call(

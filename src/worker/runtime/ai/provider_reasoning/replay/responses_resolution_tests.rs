@@ -123,6 +123,94 @@ fn rejects_a_tool_call_that_does_not_match_its_artifact() {
     assert_replay_failure(&error, "signature_mismatch");
 }
 
+#[test]
+fn groups_calls_with_interleaved_output_items_by_parent_only() {
+    let calls = vec![
+        call(12, "call_read_1", "read"),
+        call(14, "call_glob", "glob"),
+        call(16, "call_read_2", "read"),
+    ];
+    let candidates = HashMap::from([
+        ("call_read_1".to_string(), vec![(682551, true)]),
+        ("call_glob".to_string(), vec![(682551, true)]),
+        ("call_read_2".to_string(), vec![(682551, true)]),
+    ]);
+    let artifacts = HashMap::from([(
+        682551,
+        artifact(json!([
+            calls[0].tool_call.clone(),
+            calls[1].tool_call.clone(),
+            calls[2].tool_call.clone(),
+        ])),
+    )]);
+
+    let groups = resolve_responses_replay_groups(&calls, &candidates, &artifacts, true)
+        .expect("calls under one parent should merge despite interleaved output items");
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].first_index, 12);
+    assert_eq!(groups[0].parent_event_id, 682551);
+}
+
+#[test]
+fn matches_a_three_call_artifact_from_a_single_parent() {
+    let calls = vec![
+        call(12, "call_read_a", "read"),
+        call(14, "call_glob", "glob"),
+        call(16, "call_read_b", "read"),
+    ];
+    let candidates = HashMap::from([
+        ("call_read_a".to_string(), vec![(682551, true)]),
+        ("call_glob".to_string(), vec![(682551, true)]),
+        ("call_read_b".to_string(), vec![(682551, true)]),
+    ]);
+    let artifacts = HashMap::from([(
+        682551,
+        artifact(json!([
+            calls[0].tool_call.clone(),
+            calls[1].tool_call.clone(),
+            calls[2].tool_call.clone(),
+        ])),
+    )]);
+
+    let groups = resolve_responses_replay_groups(&calls, &candidates, &artifacts, true)
+        .expect("three calls under one parent should match the stored three-call artifact");
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].first_index, 12);
+    assert_eq!(groups[0].parent_event_id, 682551);
+}
+
+#[test]
+fn splits_calls_with_different_parents_even_when_input_indices_are_contiguous() {
+    let calls = vec![
+        call(12, "call_a", "one"),
+        call(13, "call_b", "two"),
+        call(14, "call_c", "three"),
+    ];
+    let candidates = HashMap::from([
+        ("call_a".to_string(), vec![(10, true)]),
+        ("call_b".to_string(), vec![(11, true)]),
+        ("call_c".to_string(), vec![(12, true)]),
+    ]);
+    let artifacts = HashMap::from([
+        (10, artifact(json!([calls[0].tool_call.clone()]))),
+        (11, artifact(json!([calls[1].tool_call.clone()]))),
+        (12, artifact(json!([calls[2].tool_call.clone()]))),
+    ]);
+
+    let groups = resolve_responses_replay_groups(&calls, &candidates, &artifacts, true)
+        .expect("different parents must split into separate groups");
+
+    assert_eq!(
+        groups
+            .iter()
+            .map(|group| (group.first_index, group.parent_event_id))
+            .collect::<Vec<_>>(),
+        [(12, 10), (13, 11), (14, 12)]
+    );
+}
+
 fn assert_replay_failure(error: &crate::openai_compat::CompatError, kind: &str) {
     assert_eq!(error.code, "replay_unavailable");
     assert!(
