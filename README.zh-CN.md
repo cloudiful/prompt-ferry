@@ -65,6 +65,11 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:8787
 ANTHROPIC_API_KEY=<生成的客户端密钥>
 ```
 
+对于 OpenCode 或其他 `@ai-sdk/anthropic` 客户端，provider 基础地址应使用
+relay 的 `/v1` 前缀，这样 SDK 会请求 `/v1/messages`。MiniMax 的 Anthropic
+上游应配置为 `https://api.minimaxi.com/anthropic` 或
+`https://api.minimax.io/anthropic`，协议选择 `AnthropicMessages`。
+
 首期 Anthropic 兼容接口只支持 Messages 和 Models，不会将 Anthropic Messages 请求转换到
 OpenAI Chat 或 Responses 上游，也暂不提供 Anthropic Files、Batches 和 Token Counting 接口。
 

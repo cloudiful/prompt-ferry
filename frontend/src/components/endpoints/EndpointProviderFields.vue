@@ -8,9 +8,16 @@ defineProps<{
 
 const form = defineModel<EndpointForm>('form', { required: true })
 const minimaxBaseUrls = {
-  cn: 'https://api.minimaxi.com',
-  global: 'https://api.minimax.io',
+  cn: {
+    openai: 'https://api.minimaxi.com',
+    anthropic: 'https://api.minimaxi.com/anthropic',
+  },
+  global: {
+    openai: 'https://api.minimax.io',
+    anthropic: 'https://api.minimax.io/anthropic',
+  },
 } as const
+type MinimaxProtocol = 'openai' | 'anthropic'
 const hasVersionPath = computed(() =>
   /\/v1\/?$/.test(form.value.base_url.trim()),
 )
@@ -24,21 +31,26 @@ const providerSelection = computed({
     }
     const region = form.value.provider_region ?? 'cn'
     form.value.provider_region = region
-    setMinimaxBaseUrl(region)
+    if (form.value.protocol_mode === 'auto') {
+      form.value.protocol_mode = 'manual'
+      form.value.native_api_override = 'anthropic_messages'
+    }
+    setMinimaxBaseUrl(region, activeMinimaxProtocol())
   },
 })
 const providerRegionSelection = computed({
   get: () => form.value.provider_region ?? 'cn',
   set(value: 'cn' | 'global') {
     form.value.provider_region = value
-    setMinimaxBaseUrl(value)
+    setMinimaxBaseUrl(value, activeMinimaxProtocol())
   },
 })
 const isMinimax = computed(() => form.value.provider === 'minimax')
 const usesCustomMinimaxBaseUrl = computed(() => {
   if (!isMinimax.value) return false
   const current = form.value.base_url.trim().replace(/\/+$/, '')
-  return Boolean(current) && !Object.values(minimaxBaseUrls).includes(current)
+  const known = Object.values(minimaxBaseUrls).flatMap((urls) => Object.values(urls))
+  return Boolean(current) && !known.includes(current as (typeof known)[number])
 })
 const protocolSelection = computed({
   get(): 'auto' | 'anthropic_messages' | 'responses' | 'chat' | 'realtime' {
@@ -51,17 +63,37 @@ const protocolSelection = computed({
     if (value === 'auto') {
       form.value.protocol_mode = 'auto'
       form.value.native_api_override = null
+      if (isMinimax.value) {
+        setMinimaxBaseUrl(form.value.provider_region ?? 'cn', 'openai')
+      }
       return
     }
     form.value.protocol_mode = 'manual'
     form.value.native_api_override = value
+    if (isMinimax.value) {
+      setMinimaxBaseUrl(
+        form.value.provider_region ?? 'cn',
+        value === 'anthropic_messages' ? 'anthropic' : 'openai',
+      )
+    }
   },
 })
 
-function setMinimaxBaseUrl(region: 'cn' | 'global'): void {
+function activeMinimaxProtocol(): MinimaxProtocol {
+  return form.value.protocol_mode === 'manual' &&
+    form.value.native_api_override === 'anthropic_messages'
+    ? 'anthropic'
+    : 'openai'
+}
+
+function setMinimaxBaseUrl(
+  region: 'cn' | 'global',
+  protocol: MinimaxProtocol,
+): void {
   const current = form.value.base_url.trim().replace(/\/+$/, '')
-  if (!current || Object.values(minimaxBaseUrls).includes(current)) {
-    form.value.base_url = minimaxBaseUrls[region]
+  const known = Object.values(minimaxBaseUrls).flatMap((urls) => Object.values(urls))
+  if (!current || known.includes(current as (typeof known)[number])) {
+    form.value.base_url = minimaxBaseUrls[region][protocol]
   }
 }
 </script>
@@ -134,6 +166,12 @@ function setMinimaxBaseUrl(region: 'cn' | 'global'): void {
       class="w-full"
       :placeholder="t('baseUrl')"
     />
+    <p
+      v-if="isMinimax && protocolSelection === 'anthropic_messages'"
+      class="text-xs leading-snug text-muted md:col-start-2"
+    >
+      {{ t('providerMinimaxAnthropicBaseUrlHint') }}
+    </p>
     <p
       v-if="hasVersionPath"
       class="text-xs leading-snug text-warning md:col-start-2"

@@ -69,6 +69,12 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:8787
 ANTHROPIC_API_KEY=<generated-client-key>
 ```
 
+For OpenCode or other `@ai-sdk/anthropic` clients, use the relay `/v1` prefix
+as the provider base URL so the SDK requests `/v1/messages`. Configure a
+MiniMax Anthropic endpoint with `https://api.minimaxi.com/anthropic` or
+`https://api.minimax.io/anthropic` as its upstream base URL and use the
+`AnthropicMessages` protocol.
+
 The first Anthropic-compatible release supports Messages and Models only. It does not translate
 Anthropic Messages requests to OpenAI Chat or Responses endpoints, and does not expose Anthropic
 Files, Batches, or Token Counting APIs.

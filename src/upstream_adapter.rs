@@ -210,19 +210,29 @@ mod tests {
 
     #[test]
     fn passes_anthropic_messages_to_anthropic_native_upstreams() {
-        let prepared = prepare_upstream_request(
-            "/v1/messages",
-            br#"{"model":"claude-sonnet","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}"#,
-            NativeApi::AnthropicMessages,
-            false,
-        )
-        .unwrap();
+        let body = br#"{
+            "model":"MiniMax-M3",
+            "max_tokens":32,
+            "thinking":{"type":"adaptive"},
+            "messages":[
+                {"role":"assistant","content":[
+                    {"type":"thinking","thinking":"inspect the repository","signature":"sig-1"},
+                    {"type":"tool_use","id":"toolu_1","name":"read","input":{"path":"Cargo.toml"}}
+                ]},
+                {"role":"user","content":[
+                    {"type":"tool_result","tool_use_id":"toolu_1","content":"workspace"}
+                ]}
+            ]
+        }"#;
+        let prepared =
+            prepare_upstream_request("/v1/messages", body, NativeApi::AnthropicMessages, false)
+                .unwrap();
         assert_eq!(prepared.path, "/v1/messages");
         assert_eq!(prepared.response_adapter, ResponseAdapter::Passthrough);
-        assert!(matches!(
-            prepared.body,
-            PreparedRequestBody::PassthroughStream(_)
-        ));
+        let PreparedRequestBody::PassthroughStream(forwarded) = prepared.body else {
+            panic!("Anthropic Messages requests should be forwarded unchanged");
+        };
+        assert_eq!(forwarded, body);
     }
 
     #[test]

@@ -16,6 +16,8 @@ export const endpointMessages = {
     providerRegionGlobal: '国际区',
     providerCustomBaseUrlHint:
       '模型请求使用此自定义地址；套餐用量仍查询所选区域的 MiniMax 官方地址。',
+    providerMinimaxAnthropicBaseUrlHint:
+      'Anthropic Messages 使用 MiniMax 的 /anthropic 地址；系统会自动追加 /v1/messages。',
     chatApi: 'Chat Completions',
     deleteEndpointFailed: '删除上游节点失败',
     dailyRequestLimit: '每日请求上限',
@@ -119,6 +121,8 @@ export const endpointMessages = {
     providerRegionGlobal: 'Global',
     providerCustomBaseUrlHint:
       'Model requests use this custom URL; token plan usage still uses the official MiniMax URL for the selected region.',
+    providerMinimaxAnthropicBaseUrlHint:
+      'Anthropic Messages uses MiniMax\'s /anthropic base URL; /v1/messages is appended automatically.',
     chatApi: 'Chat Completions API',
     deleteEndpointFailed: 'Failed to delete endpoint',
     dailyRequestLimit: 'Daily request limit',
