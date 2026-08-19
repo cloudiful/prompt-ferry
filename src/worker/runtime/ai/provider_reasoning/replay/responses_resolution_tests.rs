@@ -6,6 +6,7 @@ fn call(input_index: usize, call_id: &str, name: &str) -> ResponsesReplayToolCal
     ResponsesReplayToolCall {
         input_index,
         call_id: call_id.to_string(),
+        client_executed: false,
         tool_call: json!({
             "id": call_id,
             "type": "function",

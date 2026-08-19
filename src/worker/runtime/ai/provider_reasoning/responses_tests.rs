@@ -33,6 +33,159 @@ fn parses_adjacent_responses_function_calls_without_losing_indexes() {
 }
 
 #[test]
+fn identifies_an_opencode_client_executed_tool_call_without_replay_artifact() {
+    let input = vec![
+        json!({
+            "role": "user",
+            "content": "The following tool was executed by the user"
+        }),
+        json!({
+            "type": "function_call",
+            "call_id": "01M0AXQQRNGD32SBTA97RVXJTR",
+            "name": "task",
+            "arguments": "{}"
+        }),
+        json!({
+            "type": "function_call_output",
+            "call_id": "01M0AXQQRNGD32SBTA97RVXJTR",
+            "output": "subagent result"
+        }),
+    ];
+
+    let calls = response_tool_calls(&input).unwrap();
+
+    assert!(calls[0].client_executed);
+    assert!(replayable_tool_calls(&input, &calls).is_empty());
+}
+
+#[test]
+fn replays_provider_calls_but_keeps_client_calls_out_of_artifact_lookup() {
+    let input = vec![
+        json!({
+            "role": "user",
+            "content": "The following tool was executed by the user"
+        }),
+        json!({
+            "type": "function_call",
+            "call_id": "01M0AXQQRNGD32SBTA97RVXJTR",
+            "name": "task",
+            "arguments": "{}"
+        }),
+        json!({
+            "type": "function_call_output",
+            "call_id": "01M0AXQQRNGD32SBTA97RVXJTR",
+            "output": "subagent result"
+        }),
+        json!({"role": "user", "content": "continue"}),
+        json!({
+            "type": "function_call",
+            "call_id": "call_provider",
+            "name": "read",
+            "arguments": "{}"
+        }),
+    ];
+
+    let calls = response_tool_calls(&input).unwrap();
+    let replayable = replayable_tool_calls(&input, &calls);
+
+    assert_eq!(replayable.len(), 1);
+    assert_eq!(replayable[0].call_id, "call_provider");
+    assert!(!replayable[0].client_executed);
+}
+
+#[test]
+fn does_not_classify_a_marked_call_without_matching_output_as_client_executed() {
+    let input = vec![
+        json!({
+            "role": "user",
+            "content": "The following tool was executed by the user"
+        }),
+        json!({
+            "type": "function_call",
+            "call_id": "01M0AXQQRNGD32SBTA97RVXJTR",
+            "name": "task",
+            "arguments": "{}"
+        }),
+        json!({
+            "type": "function_call_output",
+            "call_id": "different-call",
+            "output": "subagent result"
+        }),
+    ];
+
+    let calls = response_tool_calls(&input).unwrap();
+
+    assert!(!calls[0].client_executed);
+    assert_eq!(replayable_tool_calls(&input, &calls).len(), 1);
+}
+
+#[test]
+fn recognizes_consecutive_client_tool_calls_after_one_marker() {
+    let input = vec![
+        json!({
+            "role": "user",
+            "content": "The following tool was executed by the user"
+        }),
+        json!({
+            "type": "function_call",
+            "call_id": "01M0CLIENTA",
+            "name": "task",
+            "arguments": "{}"
+        }),
+        json!({
+            "type": "function_call_output",
+            "call_id": "01M0CLIENTA",
+            "output": "first result"
+        }),
+        json!({
+            "type": "function_call",
+            "call_id": "01M0CLIENTB",
+            "name": "task",
+            "arguments": "{}"
+        }),
+        json!({
+            "type": "function_call_output",
+            "call_id": "01M0CLIENTB",
+            "output": "second result"
+        }),
+    ];
+
+    let calls = response_tool_calls(&input).unwrap();
+
+    assert_eq!(calls.len(), 2);
+    assert!(calls.iter().all(|call| call.client_executed));
+    assert!(replayable_tool_calls(&input, &calls).is_empty());
+}
+
+#[test]
+fn recognizes_a_marker_in_multiline_and_structured_user_content() {
+    let input = vec![
+        json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "context"},
+                {"type": "text", "text": "The following tool was executed by the user\n"}
+            ]
+        }),
+        json!({
+            "type": "function_call",
+            "call_id": "01M0CLIENTC",
+            "name": "task",
+            "arguments": "{}"
+        }),
+        json!({
+            "type": "function_call_output",
+            "call_id": " 01M0CLIENTC ",
+            "output": "result"
+        }),
+    ];
+
+    let calls = response_tool_calls(&input).unwrap();
+
+    assert!(calls[0].client_executed);
+}
+
+#[test]
 fn recognizes_complete_reasoning_before_a_function_call_turn() {
     let input = vec![
         json!({"role":"user","content":"check"}),

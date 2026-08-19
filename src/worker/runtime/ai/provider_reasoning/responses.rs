@@ -1,14 +1,19 @@
 use super::replay::{
-    ReplayFailureKind, ResponsesReplayToolCall, direct_minimax_endpoint,
-    load_tool_call_replay_state, minimax_reasoning_model, replay_recognition_basis,
-    replay_unavailable, resolve_responses_replay_groups, responses_reasoning_replay_enabled,
+    ReplayFailureKind, direct_minimax_endpoint, load_tool_call_replay_state,
+    minimax_reasoning_model, replay_recognition_basis, replay_unavailable,
+    resolve_responses_replay_groups, responses_reasoning_replay_enabled,
 };
 use super::responses_plain::load_latest_assistant_artifact;
+#[path = "responses_tool_calls.rs"]
+mod responses_tool_calls;
 use crate::{
     db,
     openai_compat::{persisted_assistant_message, persisted_output_items},
     worker_admin::AdminState,
 };
+#[cfg(test)]
+use responses_tool_calls::call_needs_reasoning;
+use responses_tool_calls::{replayable_tool_calls, response_tool_calls};
 use serde_json::{Value, json};
 use tracing::{Instrument, warn};
 
@@ -67,11 +72,7 @@ async fn restore_responses_reasoning_with_replay(
     };
 
     let all_calls = response_tool_calls(input)?;
-    let missing_reasoning_calls = all_calls
-        .iter()
-        .filter(|call| call_needs_reasoning(input, call.input_index))
-        .cloned()
-        .collect::<Vec<_>>();
+    let missing_reasoning_calls = replayable_tool_calls(input, &all_calls);
     let tolerate_missing_reasoning = tolerates_missing_reasoning(route, model);
     let allow_minimax_reasoning_details =
         direct_minimax_endpoint(route) && minimax_reasoning_model(model);
@@ -170,88 +171,6 @@ async fn restore_responses_reasoning_with_replay(
     })
 }
 
-fn response_tool_calls(
-    input: &[Value],
-) -> Result<Vec<ResponsesReplayToolCall>, crate::openai_compat::CompatError> {
-    let mut calls = Vec::new();
-    for (input_index, item) in input.iter().enumerate() {
-        if item.get("type").and_then(Value::as_str) != Some("function_call") {
-            continue;
-        }
-        let call_id = response_tool_call_id(item)?;
-        let name = item.get("name").and_then(Value::as_str).ok_or_else(|| {
-            replay_unavailable(
-                ReplayFailureKind::InvalidHistory,
-                "Responses function_call item has no function name",
-            )
-        })?;
-        let arguments = item
-            .get("arguments")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        calls.push(ResponsesReplayToolCall {
-            input_index,
-            call_id: call_id.clone(),
-            tool_call: json!({
-                "id": call_id,
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "arguments": arguments,
-                }
-            }),
-        });
-    }
-    Ok(calls)
-}
-
-fn response_tool_call_id(item: &Value) -> Result<String, crate::openai_compat::CompatError> {
-    let object = item.as_object().ok_or_else(|| {
-        replay_unavailable(
-            ReplayFailureKind::InvalidHistory,
-            "Responses function_call item must be a JSON object",
-        )
-    })?;
-    let call_id = object
-        .get("call_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|call_id| !call_id.is_empty())
-        .ok_or_else(|| {
-            replay_unavailable(
-                ReplayFailureKind::InvalidHistory,
-                "Responses function_call item has no call_id",
-            )
-        })?
-        .to_string();
-    Ok(call_id)
-}
-
-fn call_needs_reasoning(input: &[Value], input_index: usize) -> bool {
-    let mut first_index = input_index;
-    while first_index > 0
-        && input[first_index - 1].get("type").and_then(Value::as_str) == Some("function_call")
-    {
-        first_index -= 1;
-    }
-    !has_reasoning_for_group(input, first_index)
-}
-
-fn has_reasoning_for_group(input: &[Value], first_index: usize) -> bool {
-    let mut index = first_index;
-    while index > 0 {
-        let item = &input[index - 1];
-        if item.get("type").and_then(Value::as_str) != Some("reasoning") {
-            break;
-        }
-        if reasoning_content(item).is_some() {
-            return true;
-        }
-        index -= 1;
-    }
-    false
-}
-
 fn reasoning_input_item(
     artifact: &Value,
     allow_reasoning_details: bool,
@@ -340,20 +259,6 @@ fn tolerates_missing_reasoning(route: &db::RouteConfig, model: Option<&str>) -> 
     // next tool turn when the provider did not return any to persist.
     route.base_url.to_ascii_lowercase().contains("minimax")
         && model.is_some_and(|model| model.trim().to_ascii_lowercase().starts_with("minimax-m3"))
-}
-
-fn reasoning_content(item: &Value) -> Option<&Value> {
-    item.get("content")
-        .and_then(Value::as_array)
-        .and_then(|parts| {
-            parts.iter().find(|part| {
-                part.get("type").and_then(Value::as_str) == Some("reasoning_text")
-                    && part
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .is_some_and(|text| !text.trim().is_empty())
-            })
-        })
 }
 
 #[cfg(test)]

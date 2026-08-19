@@ -8,6 +8,7 @@ use tracing::warn;
 pub(crate) struct ResponsesReplayToolCall {
     pub(crate) input_index: usize,
     pub(crate) call_id: String,
+    pub(crate) client_executed: bool,
     pub(crate) tool_call: Value,
 }
 
