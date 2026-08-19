@@ -813,7 +813,6 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -940,7 +939,6 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -960,7 +958,6 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -1187,7 +1184,6 @@ async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -1299,7 +1295,6 @@ async fn session_affinity_options_fixture(
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -1485,7 +1480,6 @@ async fn reset_session_affinity_clears_anonymous_record_binding_under_user_zero(
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -1595,7 +1589,6 @@ async fn session_route_options_surfaces_binding_when_rule_no_longer_resolves() -
                     enabled: true,
                     upstream_model: None,
                     responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-                    chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
                 }],
             },
         )
@@ -1691,7 +1684,6 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )
@@ -1783,7 +1775,6 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::Auto,
             }],
         },
     )

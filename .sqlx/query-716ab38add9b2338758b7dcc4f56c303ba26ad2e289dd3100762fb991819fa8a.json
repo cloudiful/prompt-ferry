@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy,\n       r.daily_max_requests, r.monthly_max_requests, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.key_lb_enabled, e.native_api,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.responses_continuation_policy,\n       t.chat_reasoning_replay_policy\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\n  AND (\n      (r.scope = 'user' AND r.owner_user_id = $1)\n      OR (r.scope = 'admin' AND r.owner_user_id IS NULL)\n  )\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
+  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy,\n       r.daily_max_requests, r.monthly_max_requests, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.key_lb_enabled, e.native_api,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.responses_continuation_policy\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.rule_id = $1\n  AND r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
   "describe": {
     "columns": [
       {
@@ -211,22 +211,11 @@
             "name": "responses_continuation_policy"
           }
         }
-      },
-      {
-        "ordinal": 19,
-        "name": "chat_reasoning_replay_policy",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "model_route_targets",
-            "name": "chat_reasoning_replay_policy"
-          }
-        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -248,9 +237,8 @@
       false,
       false,
       true,
-      false,
       false
     ]
   },
-  "hash": "645f8ebea0d4b2f344bff45d2c75c7543b3c6a7a483b7ba8dade6923bee3b059"
+  "hash": "716ab38add9b2338758b7dcc4f56c303ba26ad2e289dd3100762fb991819fa8a"
 }

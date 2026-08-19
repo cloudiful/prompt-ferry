@@ -182,8 +182,6 @@ export type BridgeStatus = {
     snapshot_version: number;
 };
 
-export type ChatReasoningReplayPolicy = 'auto' | 'force_replay' | 'force_passthrough';
-
 export type ClientKey = {
     created_at: string;
     enabled: boolean;
@@ -637,7 +635,6 @@ export type ModelRouteRequest = {
 export type ModelRouteRoutingStrategy = 'client_key_rendezvous' | 'responses_session_affinity';
 
 export type ModelRouteTarget = {
-    chat_reasoning_replay_policy: ChatReasoningReplayPolicy;
     created_at: string;
     enabled: boolean;
     endpoint_enabled: boolean;
@@ -652,7 +649,6 @@ export type ModelRouteTarget = {
 };
 
 export type ModelRouteTargetRequest = {
-    chat_reasoning_replay_policy?: null | ChatReasoningReplayPolicy;
     enabled?: boolean | null;
     endpoint_id: string;
     responses_continuation_policy?: null | ResponsesContinuationPolicy;

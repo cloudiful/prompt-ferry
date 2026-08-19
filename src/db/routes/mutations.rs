@@ -85,7 +85,6 @@ async fn sync_model_route_targets(
             target.enabled,
             target.upstream_model,
             target.responses_continuation_policy.as_str(),
-            target.chat_reasoning_replay_policy.as_str(),
         )
         .execute(&mut **tx)
         .await?;

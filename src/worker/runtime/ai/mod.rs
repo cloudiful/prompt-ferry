@@ -2,7 +2,6 @@ pub(super) mod artifact;
 pub(super) mod errors;
 pub(super) mod forward;
 pub(super) mod models;
-pub(super) mod provider_reasoning;
 pub(super) mod realtime;
 pub(super) mod request;
 pub(super) mod request_attempts;

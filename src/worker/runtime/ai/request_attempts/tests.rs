@@ -70,7 +70,6 @@ fn test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
         native_api,
         upstream_model: None,
         responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForcePassthrough,
-        chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
         route_selection_reason: crate::db::RouteSelectionReason::Default,
     }
 }

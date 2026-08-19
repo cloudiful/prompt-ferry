@@ -180,10 +180,10 @@ data: [DONE]
 }
 
 #[test]
-fn translates_minimax_reasoning_details_stream_to_responses_events() {
+fn translates_reasoning_details_stream_to_responses_events() {
     let mut adapter = ChatResponseStreamAdapter::new();
     let output = adapter
-        .push_chunk(br#"data: {"id":"chatcmpl_123","created":123,"model":"MiniMax-M3","choices":[{"delta":{"reasoning_details":[{"text":"plan "}]}}]}
+        .push_chunk(br#"data: {"id":"chatcmpl_123","created":123,"model":"reasoning-test","choices":[{"delta":{"reasoning_details":[{"text":"plan "}]}}]}
 data: {"choices":[{"delta":{"reasoning_details":[{"text":"steps"}],"content":"answer"}}]}
 data: [DONE]
 

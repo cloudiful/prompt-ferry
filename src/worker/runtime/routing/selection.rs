@@ -159,7 +159,6 @@ fn route_from_target(
         native_api: target.native_api,
         upstream_model: target.upstream_model.clone(),
         responses_continuation_policy: target.responses_continuation_policy,
-        chat_reasoning_replay_policy: target.chat_reasoning_replay_policy,
         route_selection_reason,
     }
 }

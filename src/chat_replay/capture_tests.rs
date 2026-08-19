@@ -22,7 +22,7 @@ fn captures_non_stream_reasoning_content() {
 }
 
 #[test]
-fn captures_non_stream_minimax_reasoning_details() {
+fn captures_non_stream_reasoning_details() {
     let mut capture = AssistantArtifactCapture::new(false);
     capture.observe_chunk(
         br#"{"choices":[{"message":{"content":"hello","reasoning_details":[{"text":"hidden"}]}}]}"#,
@@ -64,7 +64,7 @@ data: {"choices":[{"delta":{"content":"done"}}]}
 }
 
 #[test]
-fn captures_streaming_minimax_reasoning_details() {
+fn captures_streaming_reasoning_details() {
     let mut capture = AssistantArtifactCapture::new(true);
     capture.observe_chunk(
         br#"data: {"choices":[{"delta":{"reasoning_details":[{"text":"rea"}]}}]}

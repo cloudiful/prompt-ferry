@@ -18,7 +18,7 @@
 ## 核心功能
 
 - 兼容 OpenAI Chat Completions 和 Responses，并支持通过 Responses 转发到 Anthropic Messages 上游。
-- 支持按请求调整思考强度：Chat 使用 `reasoning_effort`，Responses 使用 `reasoning.effort`，包括 DeepSeek 的 `max`；Chat 兼容层会将上游不接受的 `developer` 角色转换为 `system`，并保留工具调用历史中的思考内容。
+- 支持按请求调整思考强度：Chat 使用 `reasoning_effort`，Responses 使用 `reasoning.effort`，包括 DeepSeek 的 `max`；Chat 兼容层会将上游不接受的 `developer` 角色转换为 `system`。
 - 支持对转发内容、日志和用量详情进行配置化脱敏。
 - 支持用户、客户端 API Key、上游端点、模型路由和多 relay 管理。
 - 支持 HTTP/stdio MCP 聚合、请求用量与重放、保留策略、审批和计费。

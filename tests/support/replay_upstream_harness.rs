@@ -15,7 +15,6 @@ use tokio::sync::Mutex;
 pub struct ChatRequestLog {
     pub bodies: Mutex<Vec<Value>>,
     pub fail_next_chat_turns: Mutex<Vec<usize>>,
-    pub omit_reasoning: bool,
     pub multi_tool_turns: bool,
 }
 
@@ -24,9 +23,7 @@ pub async fn spawn_replay_upstream(log: Arc<ChatRequestLog>) -> std::net::Socket
     let addr = listener.local_addr().unwrap();
     let app = Router::new()
         .route("/v1/chat/completions", post(fake_chat_completion))
-        .route("/deepseek/v1/chat/completions", post(fake_chat_completion))
         .route("/v1/models", get(fake_models))
-        .route("/deepseek/v1/models", get(fake_models))
         .with_state(log);
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -36,7 +33,6 @@ pub async fn spawn_replay_upstream(log: Arc<ChatRequestLog>) -> std::net::Socket
 
 async fn fake_chat_completion(State(log): State<Arc<ChatRequestLog>>, body: Bytes) -> Response {
     let value = serde_json::from_slice::<Value>(&body).unwrap();
-    let omit_reasoning = log.omit_reasoning;
     let multi_tool_turns = log.multi_tool_turns;
     let mut requests = log.bodies.lock().await;
     requests.push(value.clone());
@@ -91,11 +87,7 @@ async fn fake_chat_completion(State(log): State<Arc<ChatRequestLog>>, body: Byte
                             "arguments": "{\"city\":\"Boston\"}"
                         }
                     }],
-                    "reasoning_content": if omit_reasoning {
-                        Value::Null
-                    } else {
-                        Value::String(reasoning)
-                    }
+                    "reasoning_content": reasoning
                 },
                 "finish_reason": "tool_calls"
             }],
@@ -133,6 +125,6 @@ async fn fake_chat_completion(State(log): State<Arc<ChatRequestLog>>, body: Byte
 
 pub async fn fake_models() -> Response {
     Response::new(Body::from(
-        r#"{"object":"list","data":[{"id":"deepseek-chat"},{"id":"gpt-test"}]}"#,
+        r#"{"object":"list","data":[{"id":"gpt-test"}]}"#,
     ))
 }

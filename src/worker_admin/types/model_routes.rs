@@ -52,7 +52,6 @@ impl ModelRouteRequest {
                         enabled: Some(true),
                         upstream_model: None,
                         responses_continuation_policy: None,
-                        chat_reasoning_replay_policy: None,
                     })
                     .collect()
             })
@@ -97,9 +96,6 @@ impl ModelRouteRequest {
                         .filter(|value| !value.is_empty())
                         .map(str::to_string),
                     responses_continuation_policy,
-                    chat_reasoning_replay_policy: target
-                        .chat_reasoning_replay_policy
-                        .unwrap_or(db::ChatReasoningReplayPolicy::Auto),
                 })
             });
         let targets = futures::future::try_join_all(targets).await?;
@@ -231,7 +227,6 @@ pub struct ModelRouteTargetRequest {
     pub enabled: Option<bool>,
     pub upstream_model: Option<String>,
     pub responses_continuation_policy: Option<db::ResponsesContinuationPolicy>,
-    pub chat_reasoning_replay_policy: Option<db::ChatReasoningReplayPolicy>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

@@ -2943,12 +2943,6 @@ components:
         snapshot_version:
           type: integer
           format: int64
-    ChatReasoningReplayPolicy:
-      type: string
-      enum:
-      - auto
-      - force_replay
-      - force_passthrough
     ClientKey:
       type: object
       required:
@@ -4319,12 +4313,9 @@ components:
       - position
       - enabled
       - responses_continuation_policy
-      - chat_reasoning_replay_policy
       - created_at
       - updated_at
       properties:
-        chat_reasoning_replay_policy:
-          $ref: '#/components/schemas/ChatReasoningReplayPolicy'
         created_at:
           type: string
           format: date-time
@@ -4362,10 +4353,6 @@ components:
       required:
       - endpoint_id
       properties:
-        chat_reasoning_replay_policy:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ChatReasoningReplayPolicy'
         enabled:
           type:
           - boolean

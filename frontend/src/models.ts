@@ -48,7 +48,6 @@ export type ModelRouteTargetForm = {
   enabled: boolean
   upstream_model: string
   responses_continuation_policy: 'force_passthrough' | 'force_replay'
-  chat_reasoning_replay_policy: 'auto' | 'force_replay' | 'force_passthrough'
 }
 
 export type StreamDeltaBatchingForm = {

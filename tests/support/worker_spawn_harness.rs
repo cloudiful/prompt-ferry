@@ -44,7 +44,6 @@ pub async fn spawn_worker(
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-                chat_reasoning_replay_policy: db::ChatReasoningReplayPolicy::ForceReplay,
             }],
         },
     )

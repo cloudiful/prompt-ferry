@@ -214,6 +214,25 @@ async fn migrate_drops_model_route_stream_output_coalescing_override_column() ->
 }
 
 #[tokio::test]
+async fn migrate_drops_chat_reasoning_replay_policy_column() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+
+    db::migrate(&schema.pool).await?;
+
+    let row = sqlx::query_file!("tests/sql/db_migrations/chat_reasoning_replay_policy_removed.sql")
+        .fetch_one(&schema.pool)
+        .await?;
+
+    assert_eq!(row.removed, Some(true));
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn migrate_upgrades_legacy_usage_events_table() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");

@@ -21,7 +21,6 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         enabled: true,
         upstream_model: '',
         responses_continuation_policy: 'force_replay',
-        chat_reasoning_replay_policy: 'auto',
       },
     ],
   }
@@ -68,7 +67,6 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
       enabled: target.enabled,
       upstream_model: target.upstream_model ?? '',
       responses_continuation_policy: target.responses_continuation_policy,
-      chat_reasoning_replay_policy: target.chat_reasoning_replay_policy,
     })),
   }
 }
@@ -91,7 +89,6 @@ export function modelRouteFormToRequest(
         enabled: target.enabled,
         upstream_model: target.upstream_model.trim() || undefined,
         responses_continuation_policy: target.responses_continuation_policy,
-        chat_reasoning_replay_policy: target.chat_reasoning_replay_policy,
       })),
   }
 }

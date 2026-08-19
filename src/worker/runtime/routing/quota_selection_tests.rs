@@ -31,7 +31,6 @@ async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
         native_api: crate::config::NativeApi::Responses,
         upstream_model: None,
         responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
-        chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
         route_selection_reason: db::RouteSelectionReason::Default,
     };
     let cache = TokenPlanQuotaCache::default();

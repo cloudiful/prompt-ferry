@@ -72,7 +72,6 @@ pub(super) async fn resolve_route(
                         native_api: config.upstream_native_api,
                         upstream_model: None,
                         responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-                        chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
                         route_selection_reason: db::RouteSelectionReason::Default,
                     },
                     endpoint_id: None,
@@ -160,7 +159,6 @@ fn default_route(config: &WorkerConfig, request: &BufferedBridgeRequest) -> db::
         native_api: config.upstream_native_api,
         upstream_model: None,
         responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
-        chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
         route_selection_reason: db::RouteSelectionReason::Default,
     }
 }

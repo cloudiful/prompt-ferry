@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,\n       COALESCE(e.enabled, FALSE) AS \"endpoint_enabled!\",\n       t.position, t.enabled, t.upstream_model, t.responses_continuation_policy,\n       t.chat_reasoning_replay_policy, t.created_at, t.updated_at\nFROM model_route_targets t\nLEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE t.rule_id = ANY($1)\nORDER BY t.rule_id ASC, t.position ASC, t.created_at ASC\n",
+  "query": "SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,\n       COALESCE(e.enabled, FALSE) AS \"endpoint_enabled!\",\n       t.position, t.enabled, t.upstream_model, t.responses_continuation_policy,\n       t.created_at, t.updated_at\nFROM model_route_targets t\nLEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE t.rule_id = ANY($1)\nORDER BY t.rule_id ASC, t.position ASC, t.created_at ASC\n",
   "describe": {
     "columns": [
       {
@@ -99,17 +99,6 @@
       },
       {
         "ordinal": 9,
-        "name": "chat_reasoning_replay_policy",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "model_route_targets",
-            "name": "chat_reasoning_replay_policy"
-          }
-        }
-      },
-      {
-        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -120,7 +109,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -147,9 +136,8 @@
       true,
       false,
       false,
-      false,
       false
     ]
   },
-  "hash": "3b5622e8da11eda6a50fa5ab1704f0f1d175048081a96e3843c0a62b4816ef71"
+  "hash": "8c4524c181f9f99f4ab1974a596bd42d374bdba7bb3005a59f6603259394646f"
 }

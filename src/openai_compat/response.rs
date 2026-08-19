@@ -286,11 +286,11 @@ mod tests {
     }
 
     #[test]
-    fn translates_chat_json_response_with_minimax_reasoning_details() {
+    fn translates_chat_json_response_with_reasoning_details() {
         let body = br#"{
             "id":"chatcmpl_123",
             "created":123,
-            "model":"MiniMax-M3",
+            "model":"reasoning-test",
             "choices":[{"message":{"reasoning_details":[{"text":"internal steps"}],"content":"hello"}}]
         }"#;
         let value =

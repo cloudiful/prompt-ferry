@@ -501,53 +501,6 @@ async fn translates_reasoning_stream_for_chat_native_upstream() {
 }
 
 #[tokio::test]
-async fn does_not_restore_deepseek_reasoning_for_chat_to_responses() {
-    let upstream_log = Arc::new(ChatRequestLog::default());
-    let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
-    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
-    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
-    let mut worker_handle = tokio::spawn(async move {
-        worker::connect_for_test(worker_config, reqwest::Client::new()).await
-    });
-
-    wait_for_worker(&relay_handle, &mut worker_handle).await;
-
-    let response = reqwest::Client::new()
-        .post(format!("http://{relay_addr}/v1/responses"))
-        .bearer_auth("client-token")
-        .json(&serde_json::json!({
-            "model": "deepseek-v4-flash",
-            "input": [
-                {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},
-                {"type":"function_call_output","call_id":"call_1","output":"ok"}
-            ],
-            "stream": false
-        }))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let requests = upstream_log.bodies.lock().await;
-    assert_eq!(requests.len(), 1);
-    assert_eq!(
-        requests[0]["messages"][0]["role"].as_str(),
-        Some("assistant")
-    );
-    assert!(
-        requests[0]["messages"][0]
-            .get("reasoning_content")
-            .is_none()
-    );
-    assert_eq!(
-        requests[0]["messages"][0]["tool_calls"][0]["id"].as_str(),
-        Some("call_1")
-    );
-
-    worker_handle.abort();
-}
-
-#[tokio::test]
 async fn sdk_style_consumer_reads_responses_stream_text_and_completion() {
     let upstream_addr = spawn_chat_only_upstream(Arc::new(ChatRequestLog::default())).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;

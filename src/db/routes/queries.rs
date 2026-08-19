@@ -110,7 +110,6 @@ pub async fn list_visible_model_route_endpoints_strict(
             native_api: parse_native_api(&row.native_api),
             upstream_model: None,
             responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
-            chat_reasoning_replay_policy: crate::db::ChatReasoningReplayPolicy::Auto,
             route_selection_reason: crate::db::RouteSelectionReason::Default,
         })
         .collect::<Vec<_>>();

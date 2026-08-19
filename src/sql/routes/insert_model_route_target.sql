@@ -4,7 +4,6 @@ INSERT INTO model_route_targets(
     position,
     enabled,
     upstream_model,
-    responses_continuation_policy,
-    chat_reasoning_replay_policy
+    responses_continuation_policy
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+VALUES ($1, $2, $3, $4, $5, $6)
