@@ -24,6 +24,8 @@ pub(super) struct ModelsRequestContext<'a> {
     pub(super) started: Instant,
     pub(super) user_id: i64,
     pub(super) owner_worker_id: uuid::Uuid,
+    pub(super) anthropic: bool,
+    pub(super) request_headers: &'a [(String, String)],
 }
 
 pub(super) async fn process_models_request(
@@ -38,8 +40,16 @@ pub(super) async fn process_models_request(
         started,
         user_id,
         owner_worker_id,
+        anthropic,
+        request_headers,
     } = context;
-    let routes = db::list_visible_endpoints(&state.pool, user_id).await?;
+    let routes = db::list_visible_endpoints(&state.pool, user_id)
+        .await?
+        .into_iter()
+        .filter(|route| {
+            !anthropic || route.native_api == crate::config::NativeApi::AnthropicMessages
+        })
+        .collect::<Vec<_>>();
     if routes.is_empty() {
         return Err(anyhow!("route not found"));
     }
@@ -55,9 +65,12 @@ pub(super) async fn process_models_request(
         async move {
             let request = client.get(upstream_url(&route.base_url, "/v1/models"));
             let request = match route.native_api {
-                crate::config::NativeApi::AnthropicMessages => request
-                    .header("x-api-key", &route.api_key)
-                    .header("anthropic-version", "2023-06-01"),
+                crate::config::NativeApi::AnthropicMessages => {
+                    super::upstream::with_anthropic_headers(
+                        request.header("x-api-key", &route.api_key),
+                        request_headers,
+                    )
+                }
                 _ => request.bearer_auth(&route.api_key),
             };
             let response = request.send().await;
@@ -101,7 +114,20 @@ pub(super) async fn process_models_request(
     }
 
     if !success {
-        let body = if last_error_body.trim().is_empty() {
+        let body = if anthropic {
+            serde_json::json!({
+                "type": "error",
+                "error": {
+                    "type": "api_error",
+                    "message": if last_error_body.trim().is_empty() {
+                        "failed to fetch models from every visible Anthropic endpoint"
+                    } else {
+                        last_error_body.trim()
+                    }
+                }
+            })
+            .to_string()
+        } else if last_error_body.trim().is_empty() {
             serde_json::json!({
                 "error": {
                     "code": "models_unavailable",
@@ -176,10 +202,23 @@ pub(super) async fn process_models_request(
             .and_then(serde_json::Value::as_str)
             .cmp(&right.get("id").and_then(serde_json::Value::as_str))
     });
-    let body = serde_json::json!({
-        "object": "list",
-        "data": merged,
-    })
+    let body = if anthropic {
+        let data = merged
+            .into_iter()
+            .map(anthropic_model_item)
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "data": data,
+            "first_id": data.first().and_then(|item| item.get("id")),
+            "has_more": false,
+            "last_id": data.last().and_then(|item| item.get("id")),
+        })
+    } else {
+        serde_json::json!({
+            "object": "list",
+            "data": merged,
+        })
+    }
     .to_string();
     out_tx
         .send(BridgeMessage::ResponseStart(ResponseStart {
@@ -233,4 +272,25 @@ pub(super) async fn process_models_request(
     )
     .await;
     Ok(())
+}
+
+fn anthropic_model_item(item: serde_json::Value) -> serde_json::Value {
+    let id = item
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let created_at = item
+        .get("created_at")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("1970-01-01T00:00:00Z");
+    serde_json::json!({
+        "type": "model",
+        "id": id,
+        "display_name": item
+            .get("display_name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| item.get("id").and_then(serde_json::Value::as_str).unwrap_or("unknown")),
+        "created_at": created_at,
+    })
 }

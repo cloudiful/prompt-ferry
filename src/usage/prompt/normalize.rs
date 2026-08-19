@@ -12,6 +12,7 @@ pub fn normalize_prompt_request(path: &str, body: &[u8]) -> Option<NormalizedPro
     match path {
         "/v1/chat/completions" => normalize_chat_request(&value),
         "/v1/responses" => normalize_responses_request(&value),
+        "/v1/messages" => normalize_anthropic_request(&value),
         _ => None,
     }
 }
@@ -97,6 +98,40 @@ fn normalize_responses_request(value: &Value) -> Option<NormalizedPromptRequest>
             .and_then(Value::as_str)
             .map(str::to_string),
     )
+}
+
+fn normalize_anthropic_request(value: &Value) -> Option<NormalizedPromptRequest> {
+    let mut items = Vec::new();
+    if let Some(system) = value.get("system") {
+        let content_json = canonicalize_value(system);
+        let preview_text = prompt_preview_text("system", &content_json);
+        items.push(PromptBlockSeed {
+            role: "system".to_string(),
+            content_json,
+            preview_text,
+        });
+    }
+    for message in value.get("messages")?.as_array()? {
+        let Value::Object(object) = message else {
+            continue;
+        };
+        let role = object
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("message")
+            .to_string();
+        let content_json =
+            canonicalize_value(&object.get("content").cloned().unwrap_or(Value::Null));
+        let preview_text = prompt_preview_text(&role, &content_json);
+        items.push(PromptBlockSeed {
+            role,
+            content_json,
+            preview_text,
+        });
+    }
+    (!items.is_empty())
+        .then(|| normalized_request(items, None, None))
+        .flatten()
 }
 
 fn normalized_request(

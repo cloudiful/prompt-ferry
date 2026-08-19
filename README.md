@@ -18,7 +18,9 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 
 ## Features
 
-- OpenAI Chat Completions and Responses compatibility, with Anthropic Messages upstream support through Responses.
+- OpenAI Chat Completions and Responses compatibility, plus native Anthropic Messages and Models endpoints.
+- Anthropic SDK clients can use `POST /v1/messages` and `GET /v1/models` with `x-api-key`; native Messages
+  requests are transparently forwarded only to endpoints configured as `AnthropicMessages`.
 - Per-request reasoning controls: Chat `reasoning_effort` and Responses `reasoning.effort`, including DeepSeek `max`; Chat compatibility maps unsupported `developer` roles to `system`.
 - Configurable redaction for forwarded content, logs, and usage details.
 - Managed users, client API keys, upstream endpoints, model routes, and multiple relays.
@@ -59,6 +61,17 @@ OpenAI-compatible client at the relay:
 OPENAI_BASE_URL=http://127.0.0.1:8787/v1
 OPENAI_API_KEY=<generated-client-key>
 ```
+
+Anthropic SDK clients can use the same relay URL and generated client key:
+
+```dotenv
+ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+ANTHROPIC_API_KEY=<generated-client-key>
+```
+
+The first Anthropic-compatible release supports Messages and Models only. It does not translate
+Anthropic Messages requests to OpenAI Chat or Responses endpoints, and does not expose Anthropic
+Files, Batches, or Token Counting APIs.
 
 For deployments that keep raw payloads outside PostgreSQL, set the
 `PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_*` variables in `.env` and select

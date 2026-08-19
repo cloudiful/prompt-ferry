@@ -4,6 +4,37 @@ use axum::{
 };
 use serde_json::json;
 
+pub fn client_token(headers: &HeaderMap) -> Result<&str, Box<Response>> {
+    let bearer = headers
+        .get(http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    let api_key = headers
+        .get("x-api-key")
+        .and_then(|value| value.to_str().ok());
+
+    if let (Some(bearer), Some(api_key)) = (bearer, api_key)
+        && bearer != api_key
+    {
+        return Err(Box::new(error_response(
+            StatusCode::UNAUTHORIZED,
+            "invalid_authorization",
+            "Authorization and x-api-key must contain the same token",
+        )));
+    }
+
+    bearer
+        .or(api_key)
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| {
+            Box::new(error_response(
+                StatusCode::UNAUTHORIZED,
+                "missing_authorization",
+                "missing Authorization or x-api-key header",
+            ))
+        })
+}
+
 pub fn bearer_token(headers: &HeaderMap) -> Result<&str, Box<Response>> {
     let Some(value) = headers.get(http::header::AUTHORIZATION) else {
         return Err(Box::new(error_response(
@@ -83,5 +114,23 @@ mod tests {
             http::HeaderValue::from_static("Bearer secret"),
         );
         assert!(check_bearer(&headers, "secret").is_ok());
+    }
+
+    #[test]
+    fn accepts_anthropic_api_key() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", http::HeaderValue::from_static("secret"));
+        assert_eq!(client_token(&headers).unwrap(), "secret");
+    }
+
+    #[test]
+    fn rejects_conflicting_authentication_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_static("Bearer first"),
+        );
+        headers.insert("x-api-key", http::HeaderValue::from_static("second"));
+        assert!(client_token(&headers).is_err());
     }
 }

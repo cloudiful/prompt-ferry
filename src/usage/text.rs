@@ -15,24 +15,39 @@ pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
         .and_then(Value::as_i64)
         .or_else(|| Some(input_tokens? + output_tokens?));
     let cached_tokens = usage
-        .get("input_tokens_details")
-        .or_else(|| usage.get("prompt_tokens_details"))
-        .and_then(|details| details.get("cached_tokens"))
-        .and_then(Value::as_i64);
+        .get("cache_read_input_tokens")
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            usage
+                .get("input_tokens_details")
+                .or_else(|| usage.get("prompt_tokens_details"))
+                .and_then(|details| details.get("cached_tokens"))
+                .and_then(Value::as_i64)
+        });
     let cache_read_tokens = usage
-        .get("input_tokens_details")
-        .or_else(|| usage.get("prompt_tokens_details"))
-        .and_then(|details| {
-            details
-                .get("cache_read_tokens")
-                .or_else(|| details.get("cached_tokens"))
-        })
-        .and_then(Value::as_i64);
+        .get("cache_read_input_tokens")
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            usage
+                .get("input_tokens_details")
+                .or_else(|| usage.get("prompt_tokens_details"))
+                .and_then(|details| {
+                    details
+                        .get("cache_read_tokens")
+                        .or_else(|| details.get("cached_tokens"))
+                })
+                .and_then(Value::as_i64)
+        });
     let cache_write_tokens = usage
-        .get("input_tokens_details")
-        .or_else(|| usage.get("prompt_tokens_details"))
-        .and_then(|details| details.get("cache_write_tokens"))
+        .get("cache_creation_input_tokens")
         .and_then(Value::as_i64);
+    let cache_write_tokens = cache_write_tokens.or_else(|| {
+        usage
+            .get("input_tokens_details")
+            .or_else(|| usage.get("prompt_tokens_details"))
+            .and_then(|details| details.get("cache_write_tokens"))
+            .and_then(Value::as_i64)
+    });
 
     if input_tokens.is_none()
         && output_tokens.is_none()
@@ -104,6 +119,23 @@ mod tests {
         assert!(extract_usage(&json!({ "usage": {} })).is_none());
         assert!(extract_usage(&json!({})).is_none());
     }
+
+    #[test]
+    fn extracts_anthropic_cache_usage() {
+        let usage = extract_usage(&json!({
+            "usage": {
+                "input_tokens": 120,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 30,
+                "cache_creation_input_tokens": 7
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.cache_read_tokens, Some(30));
+        assert_eq!(usage.cached_tokens, Some(30));
+        assert_eq!(usage.cache_write_tokens, Some(7));
+    }
 }
 
 pub(super) fn extract_output_text(value: &Value) -> String {
@@ -113,6 +145,13 @@ pub(super) fn extract_output_text(value: &Value) -> String {
         .filter(|_| is_visible_delta_event(value))
         .or_else(|| value.get("text"))
         .or_else(|| value.get("output_text"))
+        .and_then(Value::as_str)
+    {
+        parts.push(text.to_string());
+    }
+    if let Some(text) = value
+        .get("delta")
+        .and_then(|delta| delta.get("text").or_else(|| delta.get("thinking")))
         .and_then(Value::as_str)
     {
         parts.push(text.to_string());
@@ -144,6 +183,18 @@ pub(super) fn extract_output_text(value: &Value) -> String {
                         parts.push(text);
                     }
                 }
+            }
+        }
+    }
+    if let Some(content) = value.get("content").and_then(Value::as_array) {
+        for part in content {
+            let text = value_text(
+                part.get("text")
+                    .or_else(|| part.get("thinking"))
+                    .unwrap_or(part),
+            );
+            if !text.is_empty() {
+                parts.push(text);
             }
         }
     }

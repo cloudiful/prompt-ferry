@@ -188,6 +188,7 @@ pub(super) async fn forward_route_request(
             &upstream_url,
             route,
             &prepared.body,
+            &request.headers,
         )
         .send()
         .await;

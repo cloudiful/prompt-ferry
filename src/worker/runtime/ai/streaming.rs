@@ -26,6 +26,7 @@ use tokio::time::{self, MissedTickBehavior};
 use tracing::{debug, error, info, warn};
 
 use super::forward::ResponseForwardContext;
+use super::forward::forwarded_response_headers;
 use super::request_attempts::{UpstreamAttemptFailure, UpstreamFailurePhase};
 use super::responses_summary_stream::ResponsesReasoningSummarySseFilter;
 use super::stream_restore::SseRestoreFilter;
@@ -258,6 +259,7 @@ pub(super) async fn forward_streaming_response(
         .await;
     }
     let status = response.status();
+    let response_headers = forwarded_response_headers(response.headers());
     let capture_is_sse = matches!(
         response_adapter,
         ResponseAdapter::ChatToResponses
@@ -290,7 +292,7 @@ pub(super) async fn forward_streaming_response(
             request_id: request.request_id.clone(),
             status: status.as_u16(),
             content_type: response_content_type,
-            headers: Vec::new(),
+            headers: response_headers,
         }),
         &mut stream_diag,
     )

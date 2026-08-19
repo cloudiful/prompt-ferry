@@ -20,11 +20,43 @@ use futures::StreamExt;
 use super::super::upstream_restore::restore_ai_response_json_blocking;
 use super::ResponseForwardContext;
 
+pub(crate) fn forwarded_response_headers(
+    headers: &reqwest::header::HeaderMap,
+) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .filter(|(name, _)| {
+            let name = name.as_str();
+            name == "request-id"
+                || name == "x-request-id"
+                || name == "retry-after"
+                || name.starts_with("anthropic-ratelimit-")
+                || name.starts_with("x-ratelimit-")
+        })
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_string(), value.to_string()))
+        })
+        .collect()
+}
+
 pub(super) async fn send_json_response(
     services: &RuntimeServices,
     request_id: &str,
     status: u16,
     body: Vec<u8>,
+) -> anyhow::Result<()> {
+    send_json_response_with_headers(services, request_id, status, body, Vec::new()).await
+}
+
+pub(super) async fn send_json_response_with_headers(
+    services: &RuntimeServices,
+    request_id: &str,
+    status: u16,
+    body: Vec<u8>,
+    headers: Vec<(String, String)>,
 ) -> anyhow::Result<()> {
     services
         .out_tx
@@ -32,7 +64,7 @@ pub(super) async fn send_json_response(
             request_id: request_id.to_string(),
             status,
             content_type: Some("application/json".to_string()),
-            headers: Vec::new(),
+            headers,
         }))
         .await
         .context("relay response channel closed")?;
@@ -69,6 +101,7 @@ pub(super) async fn forward_non_stream_chat_response(
     let raw_content_logging_enabled = context.logging.raw_content_logging_enabled;
     let services = context.services;
     let status = response.status();
+    let response_headers = forwarded_response_headers(response.headers());
     let body = read_response_limited(
         response,
         services.response_limits.max_upstream_response_bytes,
@@ -144,11 +177,12 @@ pub(super) async fn forward_non_stream_chat_response(
     } else {
         None
     };
-    send_json_response(
+    send_json_response_with_headers(
         services,
         &request.request_id,
         status.as_u16(),
         restored_body,
+        response_headers,
     )
     .await?;
     let usage_event_id = record_usage_event(
@@ -213,6 +247,7 @@ pub(super) async fn forward_non_stream_responses_response(
     let raw_content_logging_enabled = context.logging.raw_content_logging_enabled;
     let services = context.services;
     let status = response.status();
+    let response_headers = forwarded_response_headers(response.headers());
     let body = read_response_limited(
         response,
         services.response_limits.max_upstream_response_bytes,
@@ -261,11 +296,12 @@ pub(super) async fn forward_non_stream_responses_response(
     } else {
         None
     };
-    send_json_response(
+    send_json_response_with_headers(
         services,
         &request.request_id,
         status.as_u16(),
         restored_body,
+        response_headers,
     )
     .await?;
     let usage_event_id = record_usage_event(
@@ -332,6 +368,7 @@ pub(super) async fn forward_non_stream_anthropic_response(
     let raw_content_logging_enabled = context.logging.raw_content_logging_enabled;
     let services = context.services;
     let status = response.status();
+    let response_headers = forwarded_response_headers(response.headers());
     let body = read_response_limited(
         response,
         services.response_limits.max_upstream_response_bytes,
@@ -380,11 +417,12 @@ pub(super) async fn forward_non_stream_anthropic_response(
     } else {
         None
     };
-    send_json_response(
+    send_json_response_with_headers(
         services,
         &request.request_id,
         status.as_u16(),
         restored_body.clone(),
+        response_headers,
     )
     .await?;
     let usage_event_id = record_usage_event(

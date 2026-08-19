@@ -22,10 +22,12 @@ use crate::{
 use http::header;
 use non_stream::{
     forward_non_stream_anthropic_response, forward_non_stream_chat_response,
-    forward_non_stream_responses_response, send_json_response,
+    forward_non_stream_responses_response, send_json_response_with_headers,
 };
 use responses_to_chat::forward_non_stream_responses_to_chat_response;
 use tracing::warn;
+
+pub(super) use non_stream::forwarded_response_headers;
 
 #[derive(Clone, Copy)]
 pub(super) struct ResponseLoggingContext {
@@ -79,25 +81,20 @@ pub(super) async fn forward_upstream_response(
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
+    let upstream_response_headers = forwarded_response_headers(response.headers());
     let is_sse = upstream_content_type
         .as_deref()
         .is_some_and(|value| value.contains("text/event-stream"));
     let mut assistant_capture = (route.native_api == crate::config::NativeApi::Chat)
         .then(|| AssistantArtifactCapture::new(is_sse));
-    let mut responses_capture = (matches!(
-        response_adapter,
-        ResponseAdapter::Passthrough
-            | ResponseAdapter::ResponsesToChat
-            | ResponseAdapter::AnthropicMessagesToResponses
-    ) && matches!(
-        route.native_api,
-        crate::config::NativeApi::Responses | crate::config::NativeApi::AnthropicMessages
-    ))
-    .then(|| {
-        ResponsesArtifactCapture::new(
-            is_sse || response_adapter == ResponseAdapter::AnthropicMessagesToResponses,
-        )
-    });
+    let mut responses_capture =
+        should_capture_responses_artifact(&request.path, response_adapter, route.native_api).then(
+            || {
+                ResponsesArtifactCapture::new(
+                    is_sse || response_adapter == ResponseAdapter::AnthropicMessagesToResponses,
+                )
+            },
+        );
 
     if !status.is_success() {
         let body = read_response_sample(response, ERROR_BODY_SAMPLE_BYTES).await;
@@ -110,14 +107,19 @@ pub(super) async fn forward_upstream_response(
         let client_status = client_status_for_upstream_error(status, &body_text);
         let error_body = (!body_text.trim().is_empty())
             .then(|| maybe_redact_text(&body_text, redact_content, request_ctx.user_id));
-        let normalized_error = normalize_response_error(&body_text);
+        let normalized_error = if request.path == "/v1/messages" {
+            anthropic_error_body(&body_text, client_status)
+        } else {
+            normalize_response_error(&body_text)
+        };
         let normalized_bytes =
             serde_json::to_vec(&normalized_error).unwrap_or_else(|_| body.to_vec());
-        send_json_response(
+        send_json_response_with_headers(
             services,
             &request.request_id,
             client_status.as_u16(),
             normalized_bytes,
+            upstream_response_headers,
         )
         .await?;
         record_usage_event(
@@ -192,6 +194,56 @@ pub(super) async fn forward_upstream_response(
         is_sse,
     ))
     .await
+}
+
+fn should_capture_responses_artifact(
+    request_path: &str,
+    response_adapter: ResponseAdapter,
+    native_api: crate::config::NativeApi,
+) -> bool {
+    (request_path == "/v1/responses" || response_adapter != ResponseAdapter::Passthrough)
+        && matches!(
+            response_adapter,
+            ResponseAdapter::Passthrough
+                | ResponseAdapter::ResponsesToChat
+                | ResponseAdapter::AnthropicMessagesToResponses
+        )
+        && matches!(
+            native_api,
+            crate::config::NativeApi::Responses | crate::config::NativeApi::AnthropicMessages
+        )
+}
+
+fn anthropic_error_body(body_text: &str, status: http::StatusCode) -> serde_json::Value {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body_text)
+        && value.get("type").and_then(serde_json::Value::as_str) == Some("error")
+        && value
+            .get("error")
+            .and_then(serde_json::Value::as_object)
+            .is_some()
+    {
+        return value;
+    }
+    serde_json::json!({
+        "type": "error",
+        "error": {
+            "type": anthropic_error_type(status),
+            "message": if body_text.trim().is_empty() {
+                "upstream returned an error"
+            } else {
+                body_text.trim()
+            },
+        },
+    })
+}
+
+fn anthropic_error_type(status: http::StatusCode) -> &'static str {
+    match status {
+        http::StatusCode::UNAUTHORIZED | http::StatusCode::FORBIDDEN => "authentication_error",
+        http::StatusCode::TOO_MANY_REQUESTS => "rate_limit_error",
+        status if status.is_server_error() => "api_error",
+        _ => "invalid_request_error",
+    }
 }
 
 fn client_status_for_upstream_error(

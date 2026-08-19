@@ -17,7 +17,9 @@
 
 ## 核心功能
 
-- 兼容 OpenAI Chat Completions 和 Responses，并支持通过 Responses 转发到 Anthropic Messages 上游。
+- 兼容 OpenAI Chat Completions 和 Responses，并提供原生 Anthropic Messages 和 Models 接口。
+- Anthropic SDK 客户端可使用 `x-api-key` 调用 `POST /v1/messages` 和 `GET /v1/models`；原生
+  Messages 请求只会透明转发到配置为 `AnthropicMessages` 的上游端点。
 - 支持按请求调整思考强度：Chat 使用 `reasoning_effort`，Responses 使用 `reasoning.effort`，包括 DeepSeek 的 `max`；Chat 兼容层会将上游不接受的 `developer` 角色转换为 `system`。
 - 支持对转发内容、日志和用量详情进行配置化脱敏。
 - 支持用户、客户端 API Key、上游端点、模型路由和多 relay 管理。
@@ -55,6 +57,16 @@ docker compose up -d
 OPENAI_BASE_URL=http://127.0.0.1:8787/v1
 OPENAI_API_KEY=<生成的客户端密钥>
 ```
+
+Anthropic SDK 客户端可使用同一个 relay 地址和客户端密钥：
+
+```dotenv
+ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+ANTHROPIC_API_KEY=<生成的客户端密钥>
+```
+
+首期 Anthropic 兼容接口只支持 Messages 和 Models，不会将 Anthropic Messages 请求转换到
+OpenAI Chat 或 Responses 上游，也暂不提供 Anthropic Files、Batches 和 Token Counting 接口。
 
 如需将原始报文放在 PostgreSQL 之外，请在 `.env` 中配置
 `PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_*` 变量，并在 usage-retention 设置中选择

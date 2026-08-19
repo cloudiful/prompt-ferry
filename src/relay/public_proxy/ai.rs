@@ -21,7 +21,11 @@ use super::super::{
     router::drain_body_then,
     state::{AppState, PendingRequest, RemoteAddr, WorkerSender},
 };
-use super::{DownstreamStreamDiag, authorize_client, enforce_public_ip_policy};
+use super::{
+    DownstreamStreamDiag, anthropic_error_response, anthropic_sse_error_event,
+    authorize_anthropic_client, authorize_client, enforce_public_ip_policy,
+    enforce_public_ip_policy_for,
+};
 use axum::{
     Json,
     body::Body,
@@ -48,7 +52,7 @@ fn forwarded_ai_request_headers(headers: &HeaderMap) -> Vec<(String, String)> {
         .iter()
         .filter(|(name, _)| {
             !is_hop_by_hop_request_header(name)
-                && !matches!(name.as_str(), "authorization" | "cookie")
+                && !matches!(name.as_str(), "authorization" | "cookie" | "x-api-key")
         })
         .filter_map(|(name, value)| {
             value
@@ -65,7 +69,21 @@ pub(super) async fn proxy_models(
     Extension(compression): Extension<HttpRequestCompressionContext>,
     headers: HeaderMap,
 ) -> Response {
-    proxy_request(
+    let anthropic_format =
+        headers.contains_key("x-api-key") || headers.contains_key("anthropic-version");
+    if anthropic_format
+        && headers
+            .get("anthropic-version")
+            .and_then(|value| value.to_str().ok())
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        return anthropic_error_response(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "anthropic-version header is required",
+        );
+    }
+    proxy_request_with_options(
         state,
         peer_addr.0.ip(),
         headers,
@@ -73,6 +91,38 @@ pub(super) async fn proxy_models(
         Method::GET,
         "/v1/models",
         Body::empty(),
+        anthropic_format,
+    )
+    .await
+}
+
+pub(super) async fn proxy_anthropic_messages(
+    State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<RemoteAddr>,
+    Extension(compression): Extension<HttpRequestCompressionContext>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    if headers
+        .get("anthropic-version")
+        .and_then(|value| value.to_str().ok())
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        return anthropic_error_response(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "anthropic-version header is required",
+        );
+    }
+    proxy_request_with_options(
+        state,
+        peer_addr.0.ip(),
+        headers,
+        compression,
+        Method::POST,
+        "/v1/messages",
+        body,
+        true,
     )
     .await
 }
@@ -296,10 +346,39 @@ async fn proxy_request(
     path: &'static str,
     body: Body,
 ) -> Response {
-    if let Err(response) = enforce_public_ip_policy(&state, peer_ip, &headers).await {
+    proxy_request_with_options(
+        state,
+        peer_ip,
+        headers,
+        compression,
+        method,
+        path,
+        body,
+        false,
+    )
+    .await
+}
+
+async fn proxy_request_with_options(
+    state: AppState,
+    peer_ip: IpAddr,
+    headers: HeaderMap,
+    compression: HttpRequestCompressionContext,
+    method: Method,
+    path: &'static str,
+    body: Body,
+    anthropic_format: bool,
+) -> Response {
+    if let Err(response) =
+        enforce_public_ip_policy_for(&state, peer_ip, &headers, anthropic_format).await
+    {
         return response;
     }
-    let route = match authorize_client(&state, &headers).await {
+    let route = match if anthropic_format {
+        authorize_anthropic_client(&state, &headers).await
+    } else {
+        authorize_client(&state, &headers).await
+    } {
         Ok(route) => route,
         Err(response) => return response,
     };
@@ -308,15 +387,20 @@ async fn proxy_request(
     let selection = match choose_worker(&state).await {
         Some(selection) => selection,
         None => {
-            return drain_body_then(
-                body,
+            let response = if anthropic_format {
+                anthropic_error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "api_error",
+                    "no worker is connected",
+                )
+            } else {
                 crate::auth::error_response(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "no_worker",
                     "no worker is connected",
-                ),
-            )
-            .await;
+                )
+            };
+            return drain_body_then(body, response).await;
         }
     };
 
@@ -385,25 +469,49 @@ async fn proxy_request(
         Ok(Ok(Err(err))) => {
             remove_pending(&state, &request_id).await;
             cleanup.disarm();
-            return bridge_error_response(err);
+            return if anthropic_format {
+                anthropic_error_response(
+                    StatusCode::from_u16(err.status).unwrap_or(StatusCode::BAD_GATEWAY),
+                    &err.code,
+                    &err.message,
+                )
+            } else {
+                bridge_error_response(err)
+            };
         }
         Ok(Err(_)) => {
             remove_pending(&state, &request_id).await;
             cleanup.disarm();
-            return crate::auth::error_response(
-                StatusCode::BAD_GATEWAY,
-                "worker_response_closed",
-                "worker response channel closed",
-            );
+            return if anthropic_format {
+                anthropic_error_response(
+                    StatusCode::BAD_GATEWAY,
+                    "api_error",
+                    "worker response channel closed",
+                )
+            } else {
+                crate::auth::error_response(
+                    StatusCode::BAD_GATEWAY,
+                    "worker_response_closed",
+                    "worker response channel closed",
+                )
+            };
         }
         Err(_) => {
             remove_pending(&state, &request_id).await;
             cleanup.disarm();
-            return crate::auth::error_response(
-                StatusCode::GATEWAY_TIMEOUT,
-                "request_timeout",
-                "timed out waiting for worker response",
-            );
+            return if anthropic_format {
+                anthropic_error_response(
+                    StatusCode::GATEWAY_TIMEOUT,
+                    "api_error",
+                    "timed out waiting for worker response",
+                )
+            } else {
+                crate::auth::error_response(
+                    StatusCode::GATEWAY_TIMEOUT,
+                    "request_timeout",
+                    "timed out waiting for worker response",
+                )
+            };
         }
     };
 
@@ -442,15 +550,30 @@ async fn proxy_request(
                     yield Ok::<Bytes, std::io::Error>(Bytes::from(data));
                 }
                 Err(err) => {
-                    let outward_code = retryable_outward_code(err.status, &err.code);
+                    let outward_code = if anthropic_format {
+                        anthropic_outward_code(err.status, &err.code)
+                    } else {
+                        retryable_outward_code(err.status, &err.code)
+                    };
                     let body = if is_event_stream {
                         if is_responses_stream {
                             responses_sse_error_event(outward_code, &err.message)
                         } else if is_chat_stream {
                             chat_sse_error_event(outward_code, &err.message)
+                        } else if anthropic_format {
+                            anthropic_sse_error_event(outward_code, &err.message)
                         } else {
                             sse_error_event(outward_code, &err.message)
                         }
+                    } else if anthropic_format {
+                        serde_json::to_vec(&serde_json::json!({
+                            "type": "error",
+                            "error": {
+                                "type": outward_code,
+                                "message": err.message,
+                            },
+                        }))
+                        .expect("Anthropic error response should serialize")
                     } else {
                         serde_json::json!({
                             "error": {
@@ -488,6 +611,36 @@ async fn proxy_request(
         }
     }
     response
+}
+
+fn anthropic_outward_code(status: u16, code: &str) -> &str {
+    match status {
+        401 | 403 => "authentication_error",
+        429 => "rate_limit_error",
+        500..=599 => {
+            if code == "overloaded_error" {
+                code
+            } else {
+                "api_error"
+            }
+        }
+        _ if matches!(
+            code,
+            "invalid_request_error"
+                | "authentication_error"
+                | "permission_error"
+                | "not_found_error"
+                | "request_too_large"
+                | "rate_limit_error"
+                | "billing_error"
+                | "overloaded_error"
+                | "api_error"
+        ) =>
+        {
+            code
+        }
+        _ => "invalid_request_error",
+    }
 }
 
 pub(super) async fn stream_request_body(
@@ -940,6 +1093,92 @@ mod tests {
                 "data: {\"type\":\"response.completed\"}\n\n"
             )
         );
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_accepts_x_api_key_and_forwards_protocol_headers() {
+        let mut state = test_state();
+        state.config.client_token = "test-token".to_string();
+
+        let (worker_tx, mut worker_rx) = mpsc::channel(8);
+        state.inner.workers.lock().await.insert(1, worker_tx);
+        let state_for_worker = state.clone();
+        tokio::spawn(async move {
+            let mut request_id = None;
+            while let Some(message) = worker_rx.recv().await {
+                match message {
+                    BridgeMessage::RequestStart(start) => {
+                        assert_eq!(start.path, "/v1/messages");
+                        assert!(
+                            start
+                                .headers
+                                .iter()
+                                .any(|(name, value)| name == "anthropic-version"
+                                    && value == "2024-10-22")
+                        );
+                        assert!(
+                            start
+                                .headers
+                                .iter()
+                                .any(|(name, value)| name == "anthropic-beta" && value == "tools")
+                        );
+                        assert!(!start.headers.iter().any(|(name, _)| name == "x-api-key"));
+                        request_id = Some(start.request_id);
+                    }
+                    BridgeMessage::RequestEnd(end) => {
+                        let request_id = request_id.unwrap_or(end.request_id);
+                        handle_response_start(
+                            &state_for_worker,
+                            ResponseStart {
+                                request_id: request_id.clone(),
+                                status: StatusCode::OK.as_u16(),
+                                content_type: Some("application/json".to_string()),
+                                headers: vec![("request-id".to_string(), "msg_req_1".to_string())],
+                            },
+                        )
+                        .await;
+                        handle_response_chunk(
+                            &state_for_worker,
+                            ResponseChunk {
+                                request_id: request_id.clone(),
+                                data: br#"{"id":"msg_1","type":"message"}"#.to_vec(),
+                            },
+                        )
+                        .await;
+                        handle_response_end(
+                            &state_for_worker,
+                            crate::protocol::ResponseEnd { request_id },
+                        )
+                        .await;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", "test-token".parse().unwrap());
+        headers.insert("anthropic-version", "2024-10-22".parse().unwrap());
+        headers.insert("anthropic-beta", "tools".parse().unwrap());
+        let response = proxy_request_with_options(
+            state,
+            "127.0.0.1".parse().unwrap(),
+            headers,
+            HttpRequestCompressionContext::default(),
+            Method::POST,
+            "/v1/messages",
+            Body::from(
+                &br#"{"model":"claude-sonnet","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}"#[..],
+            ),
+            true,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers().get("request-id").unwrap(), "msg_req_1");
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(body.as_ref(), &br#"{"id":"msg_1","type":"message"}"#[..]);
     }
 }
 

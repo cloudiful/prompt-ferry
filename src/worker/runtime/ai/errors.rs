@@ -127,12 +127,22 @@ pub(super) async fn respond_with_client_error(
     route_ctx: &RouteExecutionContext,
     err: CompatError,
 ) -> anyhow::Result<()> {
-    let body = serde_json::json!({
-        "error": {
-            "code": err.code,
-            "message": err.message,
-        }
-    })
+    let body = if request.path == "/v1/messages" {
+        serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": anthropic_error_type(err.status, &err.code),
+                "message": err.message,
+            },
+        })
+    } else {
+        serde_json::json!({
+            "error": {
+                "code": err.code,
+                "message": err.message,
+            }
+        })
+    }
     .to_string();
     services
         .out_tx
@@ -184,6 +194,17 @@ pub(super) async fn respond_with_client_error(
     )
     .await;
     Ok(())
+}
+
+fn anthropic_error_type(status: StatusCode, code: &str) -> &'static str {
+    match status {
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => "authentication_error",
+        StatusCode::TOO_MANY_REQUESTS => "rate_limit_error",
+        status if status.is_server_error() => "api_error",
+        _ if code == "permission_error" => "permission_error",
+        _ if code == "not_found_error" => "not_found_error",
+        _ => "invalid_request_error",
+    }
 }
 
 pub(super) async fn respond_with_budget_error(

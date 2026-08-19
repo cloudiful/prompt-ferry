@@ -3,6 +3,57 @@ use serde_json::{Map, Value, json};
 
 use crate::openai_compat::{CompatError, responses_request_to_chat};
 
+pub fn validate_messages_request_body(body: &[u8]) -> Result<(), CompatError> {
+    let value = serde_json::from_slice::<Value>(body).map_err(|_| {
+        CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "request body must be valid JSON",
+        )
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "request body must be a JSON object",
+        )
+    })?;
+    if object
+        .get("model")
+        .and_then(Value::as_str)
+        .is_none_or(|model| model.trim().is_empty())
+    {
+        return Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "model is required",
+        ));
+    }
+    let max_tokens = object
+        .get("max_tokens")
+        .and_then(Value::as_u64)
+        .filter(|value| *value > 0);
+    if max_tokens.is_none() {
+        return Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "max_tokens must be a positive integer",
+        ));
+    }
+    if object
+        .get("messages")
+        .and_then(Value::as_array)
+        .is_none_or(Vec::is_empty)
+    {
+        return Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "messages must be a non-empty array",
+        ));
+    }
+    Ok(())
+}
+
 pub fn responses_request_to_anthropic_messages(body: &[u8]) -> Result<Vec<u8>, CompatError> {
     let chat_request =
         serde_json::from_slice::<Value>(&responses_request_to_chat(body)?).map_err(|_| {
@@ -542,7 +593,27 @@ fn generate_id(prefix: &str) -> String {
 mod tests {
     use serde_json::Value;
 
-    use super::{anthropic_response_to_responses, responses_request_to_anthropic_messages};
+    use super::{
+        anthropic_response_to_responses, responses_request_to_anthropic_messages,
+        validate_messages_request_body,
+    };
+
+    #[test]
+    fn accepts_messages_request_with_unknown_fields() {
+        validate_messages_request_body(
+            br#"{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"metadata":{"trace":"1"}}"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn rejects_missing_max_tokens() {
+        let error = validate_messages_request_body(
+            br#"{"model":"claude-sonnet","messages":[{"role":"user","content":"hi"}]}"#,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "invalid_request_error");
+    }
 
     #[test]
     fn translates_responses_request_to_anthropic_messages() {

@@ -3,7 +3,7 @@ mod ai;
 mod mcp;
 
 use crate::{
-    auth::{bearer_token, error_response},
+    auth::{bearer_token, client_token, error_response},
     bridge_wire, ip_acl,
     keys::hash_client_key,
     protocol::ClientRoute,
@@ -19,7 +19,7 @@ use axum::{
     extract::{ConnectInfo, DefaultBodyLimit, State},
     http::{HeaderMap, StatusCode, header},
     middleware,
-    response::Response,
+    response::{IntoResponse, Response},
     routing::{any, get, post},
 };
 use std::net::IpAddr;
@@ -30,8 +30,8 @@ use tracing::{info, warn};
 use self::{
     admin::proxy_admin_ui,
     ai::{
-        create_realtime_client_secret_handler, proxy_chat, proxy_conversations, proxy_models,
-        proxy_realtime, proxy_responses,
+        create_realtime_client_secret_handler, proxy_anthropic_messages, proxy_chat,
+        proxy_conversations, proxy_models, proxy_realtime, proxy_responses,
     },
     mcp::{proxy_mcp_root, proxy_mcp_server},
 };
@@ -40,6 +40,12 @@ pub(super) fn public_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(public_healthz))
         .route("/v1/models", get(proxy_models))
+        .route(
+            "/v1/messages",
+            post(proxy_anthropic_messages).layer(DefaultBodyLimit::max(
+                bridge_wire::PUBLIC_API_BODY_LIMIT_BYTES,
+            )),
+        )
         .route(
             "/v1/chat/completions",
             post(proxy_chat).layer(DefaultBodyLimit::max(
@@ -118,6 +124,39 @@ pub(super) fn responses_sse_error_event(code: &str, message: &str) -> Vec<u8> {
         serde_json::to_string(&payload).expect("Responses SSE error payload should serialize")
     )
     .into_bytes()
+}
+
+pub(super) fn anthropic_sse_error_event(code: &str, message: &str) -> Vec<u8> {
+    let payload = serde_json::json!({
+        "type": "error",
+        "error": {
+            "type": code,
+            "message": message,
+        },
+    });
+    format!(
+        "event: error\ndata: {}\n\n",
+        serde_json::to_string(&payload).expect("Anthropic SSE error payload should serialize")
+    )
+    .into_bytes()
+}
+
+pub(super) fn anthropic_error_response(
+    status: StatusCode,
+    error_type: &str,
+    message: &str,
+) -> Response {
+    (
+        status,
+        axum::Json(serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": error_type,
+                "message": message,
+            },
+        })),
+    )
+        .into_response()
 }
 
 pub(super) fn chat_sse_error_event(code: &str, message: &str) -> Vec<u8> {
@@ -258,19 +297,52 @@ async fn authorize_client(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<Option<ClientRoute>, Response> {
+    authorize_client_with_format(state, headers, false).await
+}
+
+pub(super) async fn authorize_anthropic_client(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<ClientRoute>, Response> {
+    authorize_client_with_format(state, headers, true).await
+}
+
+async fn authorize_client_with_format(
+    state: &AppState,
+    headers: &HeaderMap,
+    anthropic_format: bool,
+) -> Result<Option<ClientRoute>, Response> {
+    let auth_error = |status, code, message| {
+        if anthropic_format {
+            anthropic_error_response(status, code, message)
+        } else {
+            error_response(status, code, message)
+        }
+    };
     let routes = state.inner.routes.lock().await;
     if routes.is_empty() {
         drop(routes);
-        let token = match bearer_token(headers) {
+        let token = match if anthropic_format {
+            client_token(headers)
+        } else {
+            bearer_token(headers)
+        } {
             Ok(token) => token,
             Err(response) => {
                 warn!("client auth failed: missing or invalid bearer authorization");
+                if anthropic_format {
+                    return Err(anthropic_error_response(
+                        response.status(),
+                        "authentication_error",
+                        "missing or invalid client authentication",
+                    ));
+                }
                 return Err(*response);
             }
         };
         if state.config.client_token.is_empty() {
             warn!("client auth failed: relay client_token is not configured");
-            return Err(error_response(
+            return Err(auth_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "auth_not_configured",
                 "authentication token is not configured",
@@ -283,21 +355,36 @@ async fn authorize_client(
                 token_hash_prefix = %token_hash_prefix(token),
                 "client auth failed: invalid token"
             );
-            return Err(error_response(
+            return Err(auth_error(
                 StatusCode::FORBIDDEN,
-                "forbidden",
+                if anthropic_format {
+                    "authentication_error"
+                } else {
+                    "forbidden"
+                },
                 "invalid token",
             ));
         }
         Ok(None)
     } else {
-        let token = match bearer_token(headers) {
+        let token = match if anthropic_format {
+            client_token(headers)
+        } else {
+            bearer_token(headers)
+        } {
             Ok(token) => token,
             Err(response) => {
                 warn!(
                     route_count = routes.len(),
                     "client auth failed: missing or invalid bearer authorization"
                 );
+                if anthropic_format {
+                    return Err(anthropic_error_response(
+                        response.status(),
+                        "authentication_error",
+                        "missing or invalid client authentication",
+                    ));
+                }
                 return Err(*response);
             }
         };
@@ -313,9 +400,13 @@ async fn authorize_client(
                     key_hash_prefix = %key_hash.chars().take(12).collect::<String>(),
                     "client auth failed: invalid client key"
                 );
-                Err(error_response(
+                Err(auth_error(
                     StatusCode::FORBIDDEN,
-                    "forbidden",
+                    if anthropic_format {
+                        "authentication_error"
+                    } else {
+                        "forbidden"
+                    },
                     "invalid client key",
                 ))
             }
@@ -332,6 +423,24 @@ async fn enforce_public_ip_policy(
     peer_ip: IpAddr,
     headers: &HeaderMap,
 ) -> Result<(), Response> {
+    enforce_public_ip_policy_with_format(state, peer_ip, headers, false).await
+}
+
+pub(super) async fn enforce_public_ip_policy_for(
+    state: &AppState,
+    peer_ip: IpAddr,
+    headers: &HeaderMap,
+    anthropic_format: bool,
+) -> Result<(), Response> {
+    enforce_public_ip_policy_with_format(state, peer_ip, headers, anthropic_format).await
+}
+
+async fn enforce_public_ip_policy_with_format(
+    state: &AppState,
+    peer_ip: IpAddr,
+    headers: &HeaderMap,
+    anthropic_format: bool,
+) -> Result<(), Response> {
     let policy = state.inner.relay_ip_policy.lock().await.clone();
     if policy.allowed_cidrs.is_empty() {
         return Ok(());
@@ -339,19 +448,27 @@ async fn enforce_public_ip_policy(
     let Some(client_ip) = ip_acl::resolve_client_ip(peer_ip, headers, &policy.trusted_proxy_cidrs)
     else {
         warn!(%peer_ip, "relay public request denied: client ip could not be resolved");
-        return Err(error_response(
-            StatusCode::FORBIDDEN,
-            "ip_not_allowed",
-            "client IP is not allowed",
-        ));
+        return Err(public_ip_error(anthropic_format));
     };
     if ip_acl::contains_ip(&policy.allowed_cidrs, client_ip) {
         return Ok(());
     }
     warn!(%peer_ip, %client_ip, "relay public request denied by ip whitelist");
-    Err(error_response(
-        StatusCode::FORBIDDEN,
-        "ip_not_allowed",
-        "client IP is not allowed",
-    ))
+    Err(public_ip_error(anthropic_format))
+}
+
+fn public_ip_error(anthropic_format: bool) -> Response {
+    if anthropic_format {
+        anthropic_error_response(
+            StatusCode::FORBIDDEN,
+            "permission_error",
+            "client IP is not allowed",
+        )
+    } else {
+        error_response(
+            StatusCode::FORBIDDEN,
+            "ip_not_allowed",
+            "client IP is not allowed",
+        )
+    }
 }

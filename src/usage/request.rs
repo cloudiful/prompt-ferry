@@ -67,6 +67,27 @@ pub fn extract_request_prompt(path: &str, body: &[u8]) -> Option<String> {
             })
             .unwrap_or_default(),
         "/v1/responses" => text::value_text(value.get("input")?),
+        "/v1/messages" => {
+            let system = value
+                .get("system")
+                .map(text::value_text)
+                .filter(|text| !text.is_empty())
+                .into_iter();
+            let messages = value
+                .get("messages")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|message| {
+                    let role = message
+                        .get("role")
+                        .and_then(Value::as_str)
+                        .unwrap_or("message");
+                    let content = text::value_text(message.get("content")?);
+                    (!content.is_empty()).then(|| format!("{role}: {content}"))
+                });
+            system.chain(messages).collect::<Vec<_>>().join("\n")
+        }
         _ => String::new(),
     };
     let text = text.trim().to_string();

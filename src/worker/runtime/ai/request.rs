@@ -59,6 +59,10 @@ pub(in crate::worker::runtime) async fn process_request(
     if let Some(state) = services.admin_state()
         && request.path == "/v1/models"
     {
+        let anthropic = request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("anthropic-version"));
         return process_models_request(ModelsRequestContext {
             state,
             client: &services.client,
@@ -68,6 +72,8 @@ pub(in crate::worker::runtime) async fn process_request(
             started: request_ctx.started,
             user_id: request.user_id.unwrap_or_default(),
             owner_worker_id: services.runtime_state.worker_instance_id(),
+            anthropic,
+            request_headers: &request.headers,
         })
         .await;
     }
@@ -210,11 +216,12 @@ pub(super) fn resolve_auto_protocol(
     route.native_api = match request_path {
         "/v1/chat/completions" => NativeApi::Chat,
         "/v1/responses" => NativeApi::Responses,
+        "/v1/messages" => NativeApi::AnthropicMessages,
         _ => {
             return Err(CompatError::new(
                 StatusCode::BAD_REQUEST,
                 "unsupported_auto_protocol",
-                "automatic endpoints support only /v1/chat/completions and /v1/responses",
+                "automatic endpoints support only /v1/chat/completions, /v1/responses, and /v1/messages",
             ));
         }
     };
@@ -253,6 +260,10 @@ mod auto_protocol_tests {
         let mut responses_route = route(NativeApi::Auto);
         resolve_auto_protocol(&mut responses_route, "/v1/responses").unwrap();
         assert_eq!(responses_route.native_api, NativeApi::Responses);
+
+        let mut anthropic_route = route(NativeApi::Auto);
+        resolve_auto_protocol(&mut anthropic_route, "/v1/messages").unwrap();
+        assert_eq!(anthropic_route.native_api, NativeApi::AnthropicMessages);
     }
 
     #[test]

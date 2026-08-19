@@ -113,7 +113,10 @@ impl UsageCapture {
     }
 
     fn observe_json_value(&mut self, value: &Value) {
-        let payload = value.get("response").unwrap_or(value);
+        let payload = value
+            .get("response")
+            .or_else(|| value.get("message"))
+            .unwrap_or(value);
         if self.model.is_none() {
             self.model = payload
                 .get("model")
@@ -136,7 +139,7 @@ impl UsageCapture {
                 .map(str::to_string);
         }
         if let Some(usage) = extract_usage(payload).or_else(|| extract_usage(value)) {
-            self.usage = usage;
+            self.usage = merge_usage(&self.usage, &usage);
         }
         if value.get("response").is_some() {
             text::append_text(&mut self.response_text, &text::extract_output_text(payload));
@@ -161,6 +164,23 @@ impl UsageCapture {
         }
         self.response_text.truncate(end);
         self.response_text_truncated = true;
+    }
+}
+
+fn merge_usage(current: &TokenUsage, next: &TokenUsage) -> TokenUsage {
+    let input_tokens = next.input_tokens.or(current.input_tokens);
+    let output_tokens = next.output_tokens.or(current.output_tokens);
+    TokenUsage {
+        input_tokens,
+        output_tokens,
+        total_tokens: next.total_tokens.or(current.total_tokens).or_else(|| {
+            input_tokens
+                .zip(output_tokens)
+                .map(|(input, output)| input + output)
+        }),
+        cached_tokens: next.cached_tokens.or(current.cached_tokens),
+        cache_read_tokens: next.cache_read_tokens.or(current.cache_read_tokens),
+        cache_write_tokens: next.cache_write_tokens.or(current.cache_write_tokens),
     }
 }
 
@@ -189,5 +209,25 @@ mod tests {
             b"data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{"
         ));
         assert!(capture.observe_chunk(b"\"}\n\n"));
+    }
+
+    #[test]
+    fn captures_anthropic_stream_text_and_usage() {
+        let mut capture = UsageCapture::new(true, None);
+        assert!(!capture.observe_chunk(
+            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-sonnet\",\"usage\":{\"input_tokens\":12,\"cache_read_input_tokens\":3}}}\n\n"
+        ));
+        assert!(capture.observe_chunk(
+            b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n"
+        ));
+        capture.observe_chunk(
+            b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":4}}\n\n",
+        );
+        capture.finish();
+        assert_eq!(capture.response_id.as_deref(), Some("msg_1"));
+        assert_eq!(capture.response_text, "hello");
+        assert_eq!(capture.usage.input_tokens, Some(12));
+        assert_eq!(capture.usage.output_tokens, Some(4));
+        assert_eq!(capture.usage.cache_read_tokens, Some(3));
     }
 }

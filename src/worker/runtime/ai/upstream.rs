@@ -12,7 +12,7 @@ pub(super) async fn send_upstream_request(
     route: &db::RouteConfig,
     body: &PreparedRequestBody,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    build_upstream_request(client, method, url, route, body)
+    build_upstream_request(client, method, url, route, body, &[])
         .send()
         .await
 }
@@ -23,19 +23,47 @@ pub(super) fn build_upstream_request(
     url: &str,
     route: &db::RouteConfig,
     body: &PreparedRequestBody,
+    request_headers: &[(String, String)],
 ) -> reqwest::RequestBuilder {
     let request_builder = client
         .request(method.clone(), url)
         .header(header::CONTENT_TYPE, "application/json");
     let request_builder = match route.native_api {
-        crate::config::NativeApi::AnthropicMessages => request_builder
-            .header("x-api-key", &route.api_key)
-            .header("anthropic-version", "2023-06-01"),
+        crate::config::NativeApi::AnthropicMessages => with_anthropic_headers(
+            request_builder.header("x-api-key", &route.api_key),
+            request_headers,
+        ),
         _ => request_builder.bearer_auth(&route.api_key),
     };
     match body {
         PreparedRequestBody::PassthroughStream(bytes) => request_builder.body(bytes.clone()),
         PreparedRequestBody::BufferedBytes(bytes) => request_builder.body(bytes.clone()),
+    }
+}
+
+pub(super) fn with_anthropic_headers(
+    builder: reqwest::RequestBuilder,
+    request_headers: &[(String, String)],
+) -> reqwest::RequestBuilder {
+    let version = request_headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("anthropic-version"))
+        .map(|(_, value)| value.as_str());
+    let builder = if let Some(version) = version {
+        builder.header("anthropic-version", version)
+    } else {
+        builder.header("anthropic-version", "2023-06-01")
+    };
+    let beta = request_headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("anthropic-beta"))
+        .map(|(_, value)| value.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    if beta.is_empty() {
+        builder
+    } else {
+        builder.header("anthropic-beta", beta)
     }
 }
 
@@ -126,5 +154,48 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn forwards_anthropic_version_and_beta_without_forwarding_client_key() {
+        let route = RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://example.test".to_string(),
+            api_key: "upstream-key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: NativeApi::AnthropicMessages,
+            upstream_model: None,
+            responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
+            route_selection_reason: RouteSelectionReason::Default,
+        };
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://example.test/v1/messages",
+            &route,
+            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            &[
+                ("anthropic-version".to_string(), "2024-10-22".to_string()),
+                ("anthropic-beta".to_string(), "tools-2024-04-04".to_string()),
+                ("x-api-key".to_string(), "client-key".to_string()),
+            ],
+        )
+        .build()
+        .unwrap();
+
+        assert_eq!(request.headers().get("x-api-key").unwrap(), "upstream-key");
+        assert_eq!(
+            request.headers().get("anthropic-version").unwrap(),
+            "2024-10-22"
+        );
+        assert_eq!(
+            request.headers().get("anthropic-beta").unwrap(),
+            "tools-2024-04-04"
+        );
     }
 }

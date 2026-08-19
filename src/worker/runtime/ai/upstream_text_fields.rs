@@ -7,8 +7,23 @@ pub(super) fn should_process_ai_string_field(
     match request_path {
         "/v1/chat/completions" => should_process_chat_string_field(json_path, key),
         "/v1/responses" => should_process_responses_string_field(json_path, object_type, key),
+        "/v1/messages" => should_process_anthropic_string_field(json_path, object_type, key),
         _ => false,
     }
+}
+
+fn should_process_anthropic_string_field(
+    json_path: &str,
+    object_type: Option<&str>,
+    key: &str,
+) -> bool {
+    (key == "text" && (json_path.contains("/messages/") || json_path == "/system"))
+        || (key == "thinking" && json_path.contains("/messages/"))
+        || (key == "content" && json_path.contains("/messages/"))
+        || (key == "input"
+            && json_path.contains("/messages/")
+            && json_path.contains("/content/")
+            && object_type == Some("tool_use"))
 }
 
 fn should_process_chat_string_field(json_path: &str, key: &str) -> bool {
@@ -73,6 +88,28 @@ mod tests {
             "/messages/1/tool_calls/0/function",
             None,
             "name",
+        ));
+    }
+
+    #[test]
+    fn only_matches_anthropic_tool_use_input() {
+        assert!(should_process_ai_string_field(
+            "/v1/messages",
+            "/messages/0/content/1/input",
+            Some("tool_use"),
+            "input",
+        ));
+        assert!(!should_process_ai_string_field(
+            "/v1/messages",
+            "/messages/0/metadata/input",
+            None,
+            "input",
+        ));
+        assert!(!should_process_ai_string_field(
+            "/v1/messages",
+            "/messages/0/content/1/input",
+            Some("text"),
+            "input",
         ));
     }
 }
