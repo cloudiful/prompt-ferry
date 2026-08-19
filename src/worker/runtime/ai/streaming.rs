@@ -27,6 +27,7 @@ use tracing::{debug, error, info, warn};
 
 use super::forward::ResponseForwardContext;
 use super::request_attempts::{UpstreamAttemptFailure, UpstreamFailurePhase};
+use super::responses_summary_stream::ResponsesReasoningSummarySseFilter;
 use super::stream_restore::SseRestoreFilter;
 use super::streaming_terminal::{failure_details, finish_failure};
 use super::streaming_usage::observe_usage_chunk;
@@ -168,6 +169,21 @@ fn response_adapter_name(adapter: ResponseAdapter) -> &'static str {
         ResponseAdapter::ResponsesToChat => "responses_to_chat",
         ResponseAdapter::AnthropicMessagesToResponses => "anthropic_messages_to_responses",
     }
+}
+
+fn augment_responses_summary_chunks(
+    chunks: Vec<Vec<u8>>,
+    filter: &mut Option<ResponsesReasoningSummarySseFilter>,
+) -> anyhow::Result<Vec<Vec<u8>>> {
+    let Some(filter) = filter.as_mut() else {
+        return Ok(chunks);
+    };
+    chunks
+        .into_iter()
+        .try_fold(Vec::new(), |mut output, chunk| {
+            output.extend(filter.push_chunk(chunk)?);
+            Ok(output)
+        })
 }
 
 async fn send_stream_message(
@@ -319,6 +335,8 @@ pub(super) async fn forward_streaming_response(
                 PassthroughSseFilter::new()
             }
         });
+    let mut responses_summary_filter =
+        responses_passthrough.then(ResponsesReasoningSummarySseFilter::new);
     let mut sse_restore_filter = upstream_restore_session.as_ref().map(|session| {
         if responses_passthrough {
             SseRestoreFilter::new_responses(session)
@@ -537,11 +555,15 @@ pub(super) async fn forward_streaming_response(
                 } else {
                     vec![chunk.to_vec()]
                 };
-                let output_chunks = match sse_restore_filter.as_mut() {
-                    Some(filter) => filter.push_chunks(output_chunks)?,
-                    None => output_chunks,
-                };
-                for output_chunk in output_chunks {
+                 let output_chunks = match sse_restore_filter.as_mut() {
+                     Some(filter) => filter.push_chunks(output_chunks)?,
+                     None => output_chunks,
+                 };
+                 let output_chunks = augment_responses_summary_chunks(
+                     output_chunks,
+                     &mut responses_summary_filter,
+                 )?;
+                 for output_chunk in output_chunks {
                     emit_output_chunks(&request.request_id,
                         stream_delta_batcher.push_chunk(output_chunk)?,
                         &services.out_tx,
@@ -652,6 +674,8 @@ pub(super) async fn forward_streaming_response(
             Some(filter) => filter.push_chunks(output_chunks)?,
             None => output_chunks,
         };
+        let output_chunks =
+            augment_responses_summary_chunks(output_chunks, &mut responses_summary_filter)?;
         for output_chunk in output_chunks {
             emit_output_chunks(
                 &request.request_id,
@@ -664,7 +688,9 @@ pub(super) async fn forward_streaming_response(
     }
     let (responses_stream_terminal, responses_error_body) =
         if let Some(filter) = sse_restore_filter.as_mut() {
-            for output_chunk in filter.finish()? {
+            let output_chunks =
+                augment_responses_summary_chunks(filter.finish()?, &mut responses_summary_filter)?;
+            for output_chunk in output_chunks {
                 emit_output_chunks(
                     &request.request_id,
                     stream_delta_batcher.push_chunk(output_chunk)?,

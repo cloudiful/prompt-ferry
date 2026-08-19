@@ -148,6 +148,67 @@ async fn preserves_native_responses_sse_framing_for_passthrough_upstream() {
 }
 
 #[tokio::test]
+async fn adds_reasoning_summary_for_native_responses_stream() {
+    let (status, body) =
+        fetch_native_responses(ResponsesUpstreamMode::MissingReasoningSummary).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains("response.reasoning_summary_part.added"),
+        "body={body}"
+    );
+    assert!(
+        body.contains("response.reasoning_summary_text.delta"),
+        "body={body}"
+    );
+    assert!(
+        body.contains("response.reasoning_summary_text.done"),
+        "body={body}"
+    );
+    assert!(
+        body.contains("response.reasoning_summary_part.done"),
+        "body={body}"
+    );
+    assert!(
+        body.contains("\"summary\":[{\"text\":\"complete reasoning\""),
+        "body={body}"
+    );
+}
+
+#[tokio::test]
+async fn adds_reasoning_summary_for_native_responses_json() {
+    let upstream_addr = spawn_native_responses_json_upstream().await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Responses);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "gpt-test",
+            "input": "hello",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(
+        body["output"][0]["summary"][0]["text"].as_str(),
+        Some("complete reasoning")
+    );
+
+    worker_handle.abort();
+}
+
+#[tokio::test]
 async fn preserves_deepseek_v4_flash_native_responses_reasoning_sse() {
     let (status, requests, body) = fetch_deepseek_native_responses(NativeApi::Responses).await;
 
@@ -1301,6 +1362,7 @@ async fn spawn_flaky_responses_upstream(fail_attempts: usize) -> (SocketAddr, Ar
 enum ResponsesUpstreamMode {
     FramedPassthrough,
     OfficialCompleted,
+    MissingReasoningSummary,
     MissingTerminal,
     FailedTerminal,
     FailedTerminalWithError,
@@ -1391,6 +1453,18 @@ async fn spawn_native_responses_upstream(mode: ResponsesUpstreamMode) -> SocketA
     addr
 }
 
+async fn spawn_native_responses_json_upstream() -> SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = Router::new()
+        .route("/v1/responses", post(fake_native_responses_json))
+        .route("/v1/models", get(fake_models));
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    addr
+}
+
 async fn spawn_deepseek_responses_upstream(log: Arc<ResponsesRequestLog>) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -1432,6 +1506,11 @@ async fn fake_native_responses_stream(
                 native_responses_completed_sse(),
             ))]
         }
+        ResponsesUpstreamMode::MissingReasoningSummary => {
+            vec![Ok::<Bytes, std::io::Error>(Bytes::from(
+                native_responses_missing_reasoning_summary_sse(),
+            ))]
+        }
         ResponsesUpstreamMode::MissingTerminal => {
             vec![Ok::<Bytes, std::io::Error>(Bytes::from(
                 native_responses_missing_terminal_sse(),
@@ -1471,6 +1550,24 @@ async fn fake_native_responses_stream(
         .headers_mut()
         .insert(header::CONTENT_TYPE, "text/event-stream".parse().unwrap());
     response
+}
+
+async fn fake_native_responses_json(_body: Bytes) -> Response {
+    let body = serde_json::json!({
+        "id": "resp_json_1",
+        "object": "response",
+        "status": "completed",
+        "output": [{
+            "id": "reasoning_1",
+            "type": "reasoning",
+            "content": [{"type": "reasoning_text", "text": "complete reasoning"}]
+        }]
+    });
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
 }
 
 async fn fake_deepseek_responses_stream(
@@ -1587,6 +1684,24 @@ fn native_responses_completed_sse() -> String {
         "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
         "event: response.completed\n",
         "data: {\"type\":\"response.completed\"}\n\n"
+    )
+    .to_string()
+}
+
+fn native_responses_missing_reasoning_summary_sse() -> String {
+    concat!(
+        "event: response.created\n",
+        "data: {\"type\":\"response.created\"}\n\n",
+        "event: response.output_item.added\n",
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"reasoning_1\",\"type\":\"reasoning\",\"summary\":[],\"content\":[]}}\n\n",
+        "event: response.reasoning_text.delta\n",
+        "data: {\"type\":\"response.reasoning_text.delta\",\"output_index\":0,\"item_id\":\"reasoning_1\",\"delta\":\"complete reasoning\"}\n\n",
+        "event: response.reasoning_text.done\n",
+        "data: {\"type\":\"response.reasoning_text.done\",\"output_index\":0,\"item_id\":\"reasoning_1\",\"text\":\"complete reasoning\"}\n\n",
+        "event: response.output_item.done\n",
+        "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"reasoning_1\",\"type\":\"reasoning\",\"content\":[{\"type\":\"reasoning_text\",\"text\":\"complete reasoning\"}]}}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"id\":\"reasoning_1\",\"type\":\"reasoning\",\"content\":[{\"type\":\"reasoning_text\",\"text\":\"complete reasoning\"}]}]}}\n\n"
     )
     .to_string()
 }

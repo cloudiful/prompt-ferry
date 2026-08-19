@@ -9,6 +9,9 @@ pub(super) mod request_init;
 pub(super) mod request_logging;
 pub(super) mod request_routes;
 pub(super) mod request_support;
+mod responses_summary_stream;
+#[cfg(test)]
+mod responses_summary_stream_tests;
 pub(super) mod review;
 mod stream_restore;
 pub(super) mod streaming;

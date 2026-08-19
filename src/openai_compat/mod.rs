@@ -12,6 +12,7 @@ mod response_stream_tests;
 mod response_stream_utf8_tests;
 #[cfg(test)]
 mod response_tests;
+mod responses_reasoning_summary;
 mod responses_state;
 
 use http::StatusCode;
@@ -26,6 +27,9 @@ pub use response_stream::{
     AnthropicResponseStreamAdapter, ChatResponseStreamAdapter, ResponsesChatResponseStreamAdapter,
 };
 pub(crate) use response_stream_state::sse_event;
+pub(crate) use responses_reasoning_summary::{
+    ensure_reasoning_summary, normalize_responses_reasoning_summaries_body,
+};
 pub(crate) use responses_state::{
     NormalizedResponsesRequest, assistant_message_to_output_items,
     extract_output_items_from_responses_value, normalize_response_error,

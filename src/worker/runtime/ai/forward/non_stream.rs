@@ -226,6 +226,8 @@ pub(super) async fn forward_non_stream_responses_response(
     } else {
         body.to_vec()
     };
+    let restored_body =
+        crate::openai_compat::normalize_responses_reasoning_summaries_body(restored_body);
     let mut usage_capture = UsageCapture::new(false, request_ctx.request_model.clone());
     usage_capture
         .set_response_text_capture_limit(services.response_limits.max_response_text_capture_bytes);
