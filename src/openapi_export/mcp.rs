@@ -1,7 +1,7 @@
 use crate::{
     db,
     worker_admin_types::{
-        CredentialPageResponse, CredentialQuotaBindingRequest, McpCatalogResponse,
+        CredentialPageResponse, CredentialQuotaBindingRequest, McpCatalogResponse, McpServer,
         McpServerPageResponse, McpServerRequest, McpTestResponse, QuotaGroupRequest,
         QuotaGroupUsageResponse, TablePageQuery,
     },
@@ -20,7 +20,7 @@ pub(super) fn list_mcp_servers() {}
     post,
     path = "/api/v1/admin/mcp-servers",
     request_body = McpServerRequest,
-    responses((status = 200, body = db::McpServer, description = "Created MCP server")),
+    responses((status = 200, body = McpServer, description = "Created MCP server")),
     tag = "mcp"
 )]
 pub(super) fn create_mcp_server() {}
@@ -30,7 +30,7 @@ pub(super) fn create_mcp_server() {}
     path = "/api/v1/admin/mcp-servers/{server_id}",
     params(("server_id" = uuid::Uuid, Path, description = "MCP server ID")),
     request_body = McpServerRequest,
-    responses((status = 200, body = db::McpServer, description = "Updated MCP server")),
+    responses((status = 200, body = McpServer, description = "Updated MCP server")),
     tag = "mcp"
 )]
 pub(super) fn update_mcp_server() {}

@@ -8,6 +8,7 @@ import type {
 import type { McpForm } from '@/models'
 import McpBearerTokensEditor from '@/components/mcp/McpBearerTokensEditor.vue'
 import McpCredentialQuotaEditor from '@/components/mcp/McpCredentialQuotaEditor.vue'
+import McpEnvironmentEditor from '@/components/mcp/McpEnvironmentEditor.vue'
 import RequestLimitFields from '@/components/shared/RequestLimitFields.vue'
 
 const props = defineProps<{
@@ -196,9 +197,9 @@ defineEmits<{
             />
             <UInput
               v-else
-              v-model="form.command"
+              v-model="form.command_argv_text"
               class="w-full"
-              placeholder="uv"
+              placeholder='["uvx", "minimax-coding-plan-mcp", "-y"]'
             />
           </div>
           <McpBearerTokensEditor
@@ -212,26 +213,14 @@ defineEmits<{
             :quota-groups="quotaGroups"
             :t="t"
           />
-          <UTextarea
-            v-if="form.transport === 'stdio'"
-            v-model="form.args_text"
-            class="w-full font-mono"
-            :rows="3"
-            placeholder='["run","server.py"]'
-          />
-          <div v-if="form.transport === 'stdio'" class="text-xs text-muted">
-            {{ t('stdioEnv') }}
-          </div>
-          <UTextarea
-            v-if="form.transport === 'stdio'"
-            v-model="form.env_text"
-            class="w-full font-mono"
-            :rows="4"
-            placeholder='{"API_KEY":"..."}'
-          />
           <div v-if="form.transport === 'stdio'" class="text-xs text-dimmed">
-            {{ t('stdioEnvHint') }}
+            {{ t('stdioCommandHint') }}
           </div>
+          <McpEnvironmentEditor
+            v-if="form.transport === 'stdio'"
+            v-model:variables="form.environment_variables"
+            :t="t"
+          />
           <RequestLimitFields
             v-model:form="form"
             daily-label="dailyCallLimit"

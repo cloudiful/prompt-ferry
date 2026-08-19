@@ -1,5 +1,5 @@
 import type { McpServer, McpServerRequest } from '../../generated/admin-api'
-import type { McpForm } from '../../models'
+import type { McpEnvironmentVariableForm, McpForm } from '../../models'
 
 import {
   normalizeJsonArray,
@@ -7,6 +7,63 @@ import {
   normalizeStringList,
   parseJsonText,
 } from '../utils'
+
+const WORKER_ENV_REFERENCE = /^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/
+
+function commandArgv(server: McpServer): string[] {
+  const command = server.command?.trim()
+  if (!command) return []
+  return [
+    command,
+    ...normalizeJsonArray(server.args).filter(
+      (value): value is string => typeof value === 'string',
+    ),
+  ]
+}
+
+function environmentVariables(value: unknown): McpEnvironmentVariableForm[] {
+  const variables: McpEnvironmentVariableForm[] = []
+  for (const [name, rawValue] of Object.entries(normalizeJsonRecord(value))) {
+    if (typeof rawValue === 'string') {
+      const workerMatch = rawValue.match(WORKER_ENV_REFERENCE)
+      if (workerMatch) {
+        variables.push({
+          name,
+          source: 'worker',
+          value: workerMatch[1],
+          has_saved_value: false,
+        })
+        continue
+      }
+    }
+    variables.push({
+      name,
+      source: 'value',
+      value: '',
+      has_saved_value: true,
+    })
+  }
+  return variables
+}
+
+function parseCommandArgv(text: string): string[] {
+  const parsed = parseJsonText(
+    text,
+    [],
+    'MCP command must be a JSON array of strings',
+  )
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length === 0 ||
+    !parsed.every(
+      (value): value is string =>
+        typeof value === 'string' && value.trim().length > 0,
+    )
+  ) {
+    throw new Error('MCP command must be a non-empty JSON array of strings')
+  }
+  return (parsed as string[]).map((value) => value.trim())
+}
 
 export function createEmptyMcpForm(): McpForm {
   return {
@@ -17,11 +74,10 @@ export function createEmptyMcpForm(): McpForm {
     aggregate_naming_mode: 'passthrough_preferred',
     transport: 'http',
     url: '',
-    command: '',
-    args_text: '[]',
+    command_argv_text: '[]',
     bearer_tokens: [],
     http_headers_text: '{}',
-    env_text: '{}',
+    environment_variables: [],
     tool_filter_mode: 'blacklist',
     allowed_tools: [],
     disabled_tools: [],
@@ -47,8 +103,7 @@ export function mcpServerToForm(server: McpServer): McpForm {
         : 'passthrough_preferred',
     transport: server.transport === 'stdio' ? 'stdio' : 'http',
     url: server.url ?? '',
-    command: server.command ?? '',
-    args_text: JSON.stringify(normalizeJsonArray(server.args), null, 2),
+    command_argv_text: JSON.stringify(commandArgv(server)),
     bearer_tokens: server.bearer_tokens.map((value) => ({
       token: value.token,
       enabled: value.enabled,
@@ -58,7 +113,7 @@ export function mcpServerToForm(server: McpServer): McpForm {
       null,
       2,
     ),
-    env_text: JSON.stringify(normalizeJsonRecord(server.env_json), null, 2),
+    environment_variables: environmentVariables(server.env_json),
     tool_filter_mode:
       server.tool_filter_mode === 'whitelist' ? 'whitelist' : 'blacklist',
     allowed_tools: normalizeStringList(server.allowed_tools),
@@ -78,8 +133,39 @@ export function mcpServerToForm(server: McpServer): McpForm {
 }
 
 export function mcpFormToRequest(form: McpForm): McpServerRequest {
+  const commandArgv =
+    form.transport === 'stdio' ? parseCommandArgv(form.command_argv_text) : []
+
+  const envJson: Record<string, string | null> = {}
+  const names = new Set<string>()
+  for (const variable of form.environment_variables) {
+    const name = variable.name.trim()
+    const value = variable.value.trim()
+    if (!name) continue
+    if (names.has(name)) {
+      throw new Error(`Duplicate MCP environment variable: ${name}`)
+    }
+    names.add(name)
+    if (variable.source === 'worker') {
+      if (!value) {
+        throw new Error(
+          `MCP environment variable ${name} requires a Worker variable name`,
+        )
+      }
+      envJson[name] = `{env:${value}}`
+      continue
+    }
+    if (value) {
+      envJson[name] = value
+    } else if (variable.has_saved_value) {
+      envJson[name] = null
+    } else {
+      throw new Error(`MCP environment variable ${name} requires a value`)
+    }
+  }
+
   return {
-    args: parseJsonText(form.args_text, [], 'MCP args must be a JSON array'),
+    args: commandArgv.slice(1),
     allowed_tools: form.allowed_tools,
     bearer_tokens:
       form.transport === 'http'
@@ -90,14 +176,11 @@ export function mcpFormToRequest(form: McpForm): McpServerRequest {
             }))
             .filter((value) => value.token !== '')
         : null,
-    command: form.transport === 'stdio' ? form.command.trim() : null,
+    command: form.transport === 'stdio' ? String(commandArgv[0]).trim() : null,
     disabled_resources: form.disabled_resources,
     disabled_tools: form.disabled_tools,
     enabled: form.enabled,
-    env_json:
-      form.transport === 'stdio'
-        ? parseJsonText(form.env_text, {}, 'MCP env must be a JSON object')
-        : {},
+    env_json: form.transport === 'stdio' ? envJson : {},
     http_headers_json:
       form.transport === 'http'
         ? parseJsonText(

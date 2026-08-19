@@ -53,6 +53,12 @@ docker compose pull
 docker compose up -d
 ```
 
+The worker image includes `uv`/`uvx` for stdio MCP servers. For example, enter
+`["uvx", "minimax-coding-plan-mcp", "-y"]` as the command. Environment variables
+not configured in the MCP form are inherited from the worker. Sensitive variables
+should be placed in `.env`, such as `MINIMAX_API_KEY`; Compose passes it to the
+worker. Values can also be entered directly in the MCP form.
+
 Open the admin console at <http://127.0.0.1:8789>. After signing in, configure
 an upstream endpoint, model route, user, and client API key. Point an
 OpenAI-compatible client at the relay:

@@ -1,5 +1,10 @@
+ARG UV_VERSION=0.8.17
+
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 FROM dockerhub.cloud1ful.com/library/debian:trixie-slim AS runtime
 ARG TARGETARCH
+
+COPY --from=uv /uv /uvx /usr/local/bin/
 
 COPY docker/apt-cloud1ful-insecure.conf /etc/apt/apt.conf.d/99apt-cloud1ful-insecure
 COPY docker/debian.sources /etc/apt/sources.list.d/debian.sources

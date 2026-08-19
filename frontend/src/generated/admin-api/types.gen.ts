@@ -510,6 +510,11 @@ export type McpQuotaGroup = {
     updated_at: string;
 };
 
+/**
+ * Admin-API representation of an MCP server. Direct stdio environment values
+ * are deliberately omitted; a null value means the saved value is retained
+ * when the server is edited without replacing it.
+ */
 export type McpServer = {
     aggregate_naming_mode: string;
     allowed_tools: unknown;

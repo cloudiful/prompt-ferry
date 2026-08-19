@@ -154,6 +154,16 @@ mod tests {
     }
 
     #[test]
+    fn mcp_env_reference_accepts_only_environment_variable_names() {
+        assert_eq!(
+            mcp_env_reference_name("{env:MINIMAX_API_KEY}"),
+            Some("MINIMAX_API_KEY")
+        );
+        assert_eq!(mcp_env_reference_name("{env:MINIMAX-API-KEY}"), None);
+        assert_eq!(mcp_env_reference_name("MINIMAX_API_KEY"), None);
+    }
+
+    #[test]
     fn bearer_tokens_defaults_missing_enabled_to_enabled() {
         let server = server_with_tokens(serde_json::json!([
             "legacy",
@@ -237,4 +247,24 @@ pub struct McpServerInput {
     pub timeout_ms: i32,
     pub lifecycle_policy: String,
     pub lifecycle_manual_protocol_version: Option<String>,
+}
+
+/// Returns the worker environment variable name for the strict reference form
+/// used by stdio MCP configuration, such as `{env:MINIMAX_API_KEY}`.
+pub fn mcp_env_reference_name(value: &str) -> Option<&str> {
+    let name = value.strip_prefix("{env:")?.strip_suffix('}')?;
+    if name.is_empty()
+        || !name.bytes().enumerate().all(|(index, byte)| match index {
+            0 => byte == b'_' || byte.is_ascii_uppercase() || byte.is_ascii_lowercase(),
+            _ => {
+                byte == b'_'
+                    || byte.is_ascii_uppercase()
+                    || byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+            }
+        })
+    {
+        return None;
+    }
+    Some(name)
 }

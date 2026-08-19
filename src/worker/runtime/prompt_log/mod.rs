@@ -383,12 +383,21 @@ fn codex_thread_key(metadata: &CodexRequestMetadata) -> Option<&str> {
 }
 
 fn session_header_id(headers: &[(String, String)]) -> Option<String> {
-    headers
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("x-session-id"))
-        .map(|(_, value)| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    [
+        "x-session-id",
+        "x-session-affinity",
+        "x-opencode-session",
+        "session-id",
+    ]
+    .into_iter()
+    .find_map(|expected_name| {
+        headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(expected_name))
+            .map(|(_, value)| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
 }
 
 pub(super) fn resolve_mcp_conversation_log() -> RequestPromptLog {
@@ -397,7 +406,7 @@ pub(super) fn resolve_mcp_conversation_log() -> RequestPromptLog {
 
 #[cfg(test)]
 mod tests {
-    use super::{codex_request_metadata, codex_thread_key};
+    use super::{codex_request_metadata, codex_thread_key, session_header_id};
 
     #[test]
     fn codex_thread_identity_precedes_prompt_cache_key() {
@@ -423,5 +432,25 @@ mod tests {
         );
 
         assert_eq!(codex_thread_key(&metadata), Some("guardian:parent-session"));
+    }
+
+    #[test]
+    fn accepts_opencode_session_affinity_headers() {
+        let headers = vec![
+            ("x-session-affinity".to_string(), "ses_123".to_string()),
+            ("user-agent".to_string(), "opencode".to_string()),
+        ];
+
+        assert_eq!(session_header_id(&headers).as_deref(), Some("ses_123"));
+    }
+
+    #[test]
+    fn prefers_explicit_session_id_over_affinity_fallback() {
+        let headers = vec![
+            ("x-session-affinity".to_string(), "affinity".to_string()),
+            ("X-Session-Id".to_string(), "session".to_string()),
+        ];
+
+        assert_eq!(session_header_id(&headers).as_deref(), Some("session"));
     }
 }

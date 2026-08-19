@@ -48,6 +48,37 @@ pub(super) async fn resolve_prompt_conversation(
     session_header_id: Option<&str>,
     codex_thread_key: Option<&str>,
 ) -> Result<Option<PromptConversationResolution>> {
+    if request.path == "/v1/messages" {
+        let Some(session_header_id) = session_header_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(None);
+        };
+        let conversation_id =
+            derive_conversation_id(user_id.unwrap_or_default(), session_header_id);
+        let latest =
+            db::latest_usage_event_locator_by_conversation(&state.pool, user_id, conversation_id)
+                .await?;
+        let next_seq_seed = latest
+            .as_ref()
+            .and_then(|entry| entry.conversation_seq)
+            .unwrap_or(0)
+            + 1;
+        let conversation_seq =
+            db::allocate_conversation_seq(&state.pool, conversation_id, next_seq_seed).await?;
+        return Ok(Some(PromptConversationResolution {
+            conversation_id,
+            // Anthropic Messages clients send their complete history. Keep this
+            // metadata-only identity separate from local replay parentage.
+            parent_event_id: None,
+            replay_unavailable: false,
+            endpoint_id: latest.and_then(|entry| entry.endpoint_id),
+            conversation_seq,
+            source: "anthropic_session_header",
+        }));
+    }
+
     if request.path == "/v1/chat/completions" {
         if let Some(session_header_id) = session_header_id
             .map(str::trim)

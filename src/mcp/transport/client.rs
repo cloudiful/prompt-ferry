@@ -15,7 +15,7 @@ use rmcp::{
     },
     service::ClientLifecycleMode,
     transport::{
-        ConfigureCommandExt, StreamableHttpClientTransport, TokioChildProcess,
+        StreamableHttpClientTransport, TokioChildProcess,
         streamable_http_client::StreamableHttpClientTransportConfig,
     },
 };
@@ -70,22 +70,18 @@ pub(super) async fn connect_with_selected(
             connect_with_lifecycle_fallback(pool, server, move |mode, protocol_version| {
                 let server = server;
                 async move {
-                    let command = tokio::process::Command::new(
-                        server
-                            .command
-                            .as_deref()
-                            .ok_or_else(|| anyhow!("MCP stdio server missing command"))?,
-                    )
-                    .configure(|cmd| {
-                        cmd.args(json_string_vec(&server.args));
-                        for (key, value) in server.env_json.as_object().cloned().unwrap_or_default()
-                        {
-                            if let Some(value) = value.as_str() {
-                                cmd.env(key, value);
-                            }
-                        }
-                    });
-                    let transport = TokioChildProcess::new(command)?;
+                    let command_name = server
+                        .command
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("MCP stdio server missing command"))?;
+                    let mut command = tokio::process::Command::new(command_name);
+                    command.args(json_string_vec(&server.args));
+                    for (key, value) in server.env_json.as_object().cloned().unwrap_or_default() {
+                        command.env(key, resolve_env_value(&value)?);
+                    }
+                    let transport = TokioChildProcess::new(command).map_err(|error| {
+                        anyhow!("failed to start MCP stdio command `{command_name}`: {error}")
+                    })?;
                     Ok(client_info()
                         .with_protocol_version(protocol_version)
                         .serve_with_lifecycle(transport, mode)
@@ -805,6 +801,24 @@ fn json_string_vec(value: &Value) -> Vec<String> {
         .collect()
 }
 
+fn resolve_env_value(value: &Value) -> anyhow::Result<String> {
+    let value = value
+        .as_str()
+        .ok_or_else(|| anyhow!("MCP stdio environment values must be strings"))?;
+    let Some(name) = crate::db::mcp_env_reference_name(value) else {
+        return Ok(value.to_string());
+    };
+    match std::env::var(name) {
+        Ok(value) if !value.is_empty() => Ok(value),
+        Ok(_) => Err(anyhow!(
+            "MCP stdio worker environment variable {name} is empty"
+        )),
+        Err(error) => Err(anyhow!(
+            "MCP stdio worker environment variable {name} is unavailable: {error}"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rmcp::{ErrorData, model::ErrorCode, service::ClientInitializeError};
@@ -1111,6 +1125,22 @@ mod tests {
             UpstreamLifecycle::LegacyInitialize
         ));
         assert_eq!(preference.protocol_version.unwrap().as_str(), "2025-06-18");
+    }
+
+    #[test]
+    fn resolves_worker_environment_references() {
+        assert_eq!(
+            resolve_env_value(&json!("plain-value")).unwrap(),
+            "plain-value"
+        );
+        assert_eq!(
+            crate::db::mcp_env_reference_name("{env:MINIMAX_API_KEY}"),
+            Some("MINIMAX_API_KEY")
+        );
+        assert_eq!(
+            crate::db::mcp_env_reference_name("{env:MINIMAX-API-KEY}"),
+            None
+        );
     }
 
     fn test_server() -> McpServer {

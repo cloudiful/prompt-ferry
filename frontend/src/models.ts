@@ -79,11 +79,10 @@ export type McpForm = {
   aggregate_naming_mode: 'qualified_only' | 'passthrough_preferred'
   transport: 'http' | 'stdio'
   url: string
-  command: string
-  args_text: string
+  command_argv_text: string
   bearer_tokens: McpBearerTokenForm[]
   http_headers_text: string
-  env_text: string
+  environment_variables: McpEnvironmentVariableForm[]
   tool_filter_mode: 'blacklist' | 'whitelist'
   allowed_tools: string[]
   disabled_tools: string[]
@@ -99,6 +98,13 @@ export type McpForm = {
 export type McpBearerTokenForm = {
   token: string
   enabled: boolean
+}
+
+export type McpEnvironmentVariableForm = {
+  name: string
+  source: 'worker' | 'value'
+  value: string
+  has_saved_value: boolean
 }
 
 export type RequestRecordClearForm = {

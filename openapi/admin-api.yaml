@@ -3903,6 +3903,10 @@ components:
           format: date-time
     McpServer:
       type: object
+      description: |-
+        Admin-API representation of an MCP server. Direct stdio environment values
+        are deliberately omitted; a null value means the saved value is retained
+        when the server is edited without replacing it.
       required:
       - server_id
       - scope

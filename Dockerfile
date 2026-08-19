@@ -1,4 +1,9 @@
+ARG UV_VERSION=0.8.17
+
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 FROM debian:trixie-slim AS runtime
+
+COPY --from=uv /uv /uvx /usr/local/bin/
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \

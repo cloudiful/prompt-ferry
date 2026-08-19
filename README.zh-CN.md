@@ -50,6 +50,11 @@ docker compose pull
 docker compose up -d
 ```
 
+stdio MCP 的 worker 镜像包含 `uv`/`uvx`。配置 MCP 时，命令可以填写为
+`["uvx", "minimax-coding-plan-mcp", "-y"]`；未在 MCP 表单中配置的环境变量会自动
+继承 worker 环境。敏感变量建议设置在 `.env` 的 `MINIMAX_API_KEY` 中，Compose 会将其
+传入 worker；也可以在 MCP 表单中直接填写变量值。
+
 打开管理控制台：<http://127.0.0.1:8789>。登录后配置上游端点、模型路由、
 用户和客户端 API Key，再将 OpenAI 兼容客户端指向 relay：
 

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -12,10 +13,101 @@ use super::{SessionUser, validate_request_budget_limit};
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct McpServerPageResponse {
-    pub servers: Vec<db::McpServer>,
+    pub servers: Vec<McpServer>,
     pub total: i64,
     pub first: i64,
     pub rows: i64,
+}
+
+/// Admin-API representation of an MCP server. Direct stdio environment values
+/// are deliberately omitted; a null value means the saved value is retained
+/// when the server is edited without replacing it.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct McpServer {
+    pub server_id: Uuid,
+    pub scope: String,
+    pub owner_user_id: Option<i64>,
+    pub name: String,
+    #[schema(example = "passthrough_preferred")]
+    pub aggregate_naming_mode: String,
+    pub transport: String,
+    pub url: Option<String>,
+    pub command: Option<String>,
+    pub args: Value,
+    pub env_json: Value,
+    #[schema(value_type = Vec<db::McpBearerToken>)]
+    pub bearer_tokens: Vec<db::McpBearerToken>,
+    pub http_headers_json: Value,
+    pub tool_filter_mode: String,
+    pub allowed_tools: Value,
+    pub disabled_tools: Value,
+    pub disabled_resources: Value,
+    pub daily_max_requests: Option<i32>,
+    pub monthly_max_requests: Option<i32>,
+    pub enabled: bool,
+    pub timeout_ms: i32,
+    pub lifecycle_policy: String,
+    pub lifecycle_manual_protocol_version: Option<String>,
+    pub lifecycle_learned_mode: Option<String>,
+    pub lifecycle_learned_protocol_version: Option<String>,
+    pub lifecycle_learned_for_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub lifecycle_learned_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<&db::McpServer> for McpServer {
+    fn from(server: &db::McpServer) -> Self {
+        Self {
+            server_id: server.server_id,
+            scope: server.scope.clone(),
+            owner_user_id: server.owner_user_id,
+            name: server.name.clone(),
+            aggregate_naming_mode: server.aggregate_naming_mode.clone(),
+            transport: server.transport.clone(),
+            url: server.url.clone(),
+            command: server.command.clone(),
+            args: server.args.clone(),
+            env_json: public_env_json(&server.env_json),
+            bearer_tokens: server.bearer_tokens(),
+            http_headers_json: server.http_headers_json.clone(),
+            tool_filter_mode: server.tool_filter_mode.clone(),
+            allowed_tools: server.allowed_tools.clone(),
+            disabled_tools: server.disabled_tools.clone(),
+            disabled_resources: server.disabled_resources.clone(),
+            daily_max_requests: server.daily_max_requests,
+            monthly_max_requests: server.monthly_max_requests,
+            enabled: server.enabled,
+            timeout_ms: server.timeout_ms,
+            lifecycle_policy: server.lifecycle_policy.clone(),
+            lifecycle_manual_protocol_version: server.lifecycle_manual_protocol_version.clone(),
+            lifecycle_learned_mode: server.lifecycle_learned_mode.clone(),
+            lifecycle_learned_protocol_version: server.lifecycle_learned_protocol_version.clone(),
+            lifecycle_learned_for_updated_at: server.lifecycle_learned_for_updated_at,
+            lifecycle_learned_at: server.lifecycle_learned_at,
+            created_at: server.created_at,
+            updated_at: server.updated_at,
+        }
+    }
+}
+
+fn public_env_json(value: &Value) -> Value {
+    let Some(object) = value.as_object() else {
+        return Value::Object(Default::default());
+    };
+    Value::Object(
+        object
+            .iter()
+            .map(|(name, value)| {
+                let public_value = value
+                    .as_str()
+                    .and_then(db::mcp_env_reference_name)
+                    .map(|_| value.clone())
+                    .unwrap_or(Value::Null);
+                (name.clone(), public_value)
+            })
+            .collect(),
+    )
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -74,6 +166,10 @@ impl McpServerRequest {
         } else {
             ("user".to_string(), Some(user.user_id))
         };
+        let env_json = merge_env_json(
+            self.env_json.unwrap_or_else(|| serde_json::json!({})),
+            existing_server.map(|server| &server.env_json),
+        );
         db::McpServerInput {
             scope,
             owner_user_id,
@@ -85,7 +181,7 @@ impl McpServerRequest {
             url: self.url,
             command: self.command,
             args: self.args.unwrap_or_else(|| serde_json::json!([])),
-            env_json: self.env_json.unwrap_or_else(|| serde_json::json!({})),
+            env_json,
             bearer_tokens_json: self
                 .bearer_tokens
                 .map(|tokens| {
@@ -149,6 +245,51 @@ impl McpServerRequest {
             .map_err(|response| *response)?;
         validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")
             .map_err(|response| *response)?;
+        if !matches!(self.transport.as_str(), "http" | "stdio") {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_transport",
+                "transport must be http or stdio",
+            ));
+        }
+        if self.transport == "stdio" {
+            if self
+                .command
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+            {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_command",
+                    "stdio command is required",
+                ));
+            }
+            if self.args.as_ref().is_some_and(|args| {
+                !args.is_array()
+                    || args
+                        .as_array()
+                        .is_some_and(|values| values.iter().any(|value| !value.is_string()))
+            }) {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_args",
+                    "stdio args must be a JSON array of strings",
+                ));
+            }
+            if self
+                .env_json
+                .as_ref()
+                .is_some_and(|env| !valid_stdio_env(env, true))
+            {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_env",
+                    "stdio env must be an object with string values or worker references",
+                ));
+            }
+        }
         let name = self.name.trim();
         if name.is_empty() {
             return Err(error(
@@ -280,6 +421,50 @@ impl McpServerRequest {
     }
 }
 
+fn valid_stdio_env(value: &Value, allow_preserve_null: bool) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.iter().all(|(name, value)| {
+        let valid_name = !name.is_empty()
+            && name.bytes().enumerate().all(|(index, byte)| match index {
+                0 => byte == b'_' || byte.is_ascii_uppercase() || byte.is_ascii_lowercase(),
+                _ => {
+                    byte == b'_'
+                        || byte.is_ascii_uppercase()
+                        || byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                }
+            });
+        let valid_value = value.as_str().is_some_and(|value| {
+            !value.starts_with("{env:") || db::mcp_env_reference_name(value).is_some()
+        });
+        valid_name && (valid_value || (allow_preserve_null && value.is_null()))
+    })
+}
+
+fn merge_env_json(submitted: Value, existing: Option<&Value>) -> Value {
+    let Some(submitted_object) = submitted.as_object() else {
+        return submitted;
+    };
+    let existing_object = existing.and_then(Value::as_object);
+    Value::Object(
+        submitted_object
+            .iter()
+            .filter_map(|(name, value)| {
+                if value.is_null() {
+                    existing_object
+                        .and_then(|object| object.get(name))
+                        .cloned()
+                        .map(|value| (name.clone(), value))
+                } else {
+                    Some((name.clone(), value.clone()))
+                }
+            })
+            .collect(),
+    )
+}
+
 /// A plausible MCP protocol-version date (`YYYY-MM-DD`). Month and day ranges
 /// are validated so an operator typo is rejected at save time instead of being
 /// silently ignored at connect time.
@@ -301,7 +486,7 @@ fn is_valid_protocol_version(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_valid_protocol_version;
+    use super::{is_valid_protocol_version, merge_env_json, public_env_json};
 
     #[test]
     fn protocol_version_validation_accepts_known_dates() {
@@ -317,6 +502,38 @@ mod tests {
         assert!(!is_valid_protocol_version("06-18"));
         assert!(!is_valid_protocol_version("latest"));
         assert!(!is_valid_protocol_version(""));
+    }
+
+    #[test]
+    fn public_environment_values_are_hidden_but_worker_references_remain() {
+        let public = public_env_json(&serde_json::json!({
+            "MINIMAX_API_KEY": "secret",
+            "MINIMAX_API_HOST": "{env:MINIMAX_API_HOST}",
+        }));
+
+        assert_eq!(
+            public,
+            serde_json::json!({
+                "MINIMAX_API_KEY": null,
+                "MINIMAX_API_HOST": "{env:MINIMAX_API_HOST}"
+            })
+        );
+    }
+
+    #[test]
+    fn null_environment_values_preserve_existing_values_on_update() {
+        let merged = merge_env_json(
+            serde_json::json!({ "MINIMAX_API_KEY": null, "NEW_VALUE": "new" }),
+            Some(&serde_json::json!({ "MINIMAX_API_KEY": "secret" })),
+        );
+
+        assert_eq!(
+            merged,
+            serde_json::json!({
+                "MINIMAX_API_KEY": "secret",
+                "NEW_VALUE": "new"
+            })
+        );
     }
 }
 

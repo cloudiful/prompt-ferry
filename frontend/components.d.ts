@@ -40,6 +40,7 @@ declare module 'vue' {
     McpBearerTokensEditor: typeof import('./src/components/mcp/McpBearerTokensEditor.vue')['default']
     McpCredentialQuotaEditor: typeof import('./src/components/mcp/McpCredentialQuotaEditor.vue')['default']
     McpDialog: typeof import('./src/components/mcp/McpDialog.vue')['default']
+    McpEnvironmentEditor: typeof import('./src/components/mcp/McpEnvironmentEditor.vue')['default']
     McpPanel: typeof import('./src/components/mcp/McpPanel.vue')['default']
     McpServerListPanel: typeof import('./src/components/mcp/McpServerListPanel.vue')['default']
     McpUsageDetailDialog: typeof import('./src/components/mcp/McpUsageDetailDialog.vue')['default']

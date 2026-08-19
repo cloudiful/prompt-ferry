@@ -18,7 +18,7 @@ pub(super) async fn list_mcp_servers(
     };
     match result {
         Ok((total, servers)) => Json(McpServerPageResponse {
-            servers,
+            servers: servers.iter().map(McpServer::from).collect(),
             total,
             first,
             rows,
@@ -53,7 +53,7 @@ pub(super) async fn create_mcp_server(
             if server.enabled {
                 state.mcp_catalog_service.spawn_refresh(server.clone());
             }
-            Json(server).into_response()
+            Json(McpServer::from(&server)).into_response()
         }
         Err(err) => internal(&state, err),
     }
@@ -106,7 +106,7 @@ pub(super) async fn update_mcp_server(
             if server.enabled {
                 state.mcp_catalog_service.spawn_refresh(server.clone());
             }
-            Json(server).into_response()
+            Json(McpServer::from(&server)).into_response()
         }
         Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "mcp server not found"),
         Err(err) => internal(&state, err),
