@@ -32,8 +32,23 @@ SELECT
     ue.cached_tokens,
     ue.cache_read_tokens,
     ue.cache_write_tokens,
-    CASE WHEN ue.input_tokens > 0
-        THEN ue.cached_tokens::DOUBLE PRECISION / ue.input_tokens::DOUBLE PRECISION
+    CASE
+        WHEN GREATEST(
+            COALESCE(ue.input_tokens, 0),
+            GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)
+                + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0),
+            0
+        ) > 0
+        THEN LEAST(
+            1.0::DOUBLE PRECISION,
+            GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)::DOUBLE PRECISION
+            / GREATEST(
+                COALESCE(ue.input_tokens, 0),
+                GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)
+                    + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0),
+                0
+            )::DOUBLE PRECISION
+        )
         ELSE NULL
     END AS cache_rate,
     ue.conversation_id,

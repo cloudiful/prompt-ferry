@@ -1,0 +1,97 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH bounds AS (\n    SELECT date_trunc('hour', COALESCE($2::TIMESTAMPTZ, NOW() - ($1::BIGINT * INTERVAL '1 hour'))) AS start_at,\n           date_trunc('hour', COALESCE($3::TIMESTAMPTZ, NOW())) AS end_at\n),\nbuckets AS (\n    SELECT generate_series(start_at, end_at, INTERVAL '1 hour') AS bucket_at FROM bounds\n),\nnormalized AS (\n    SELECT date_trunc('hour', rr.created_at) AS bucket_at,\n           rr.request_state,\n           rr.duration_ms,\n           rr.ttft_ms,\n           GREATEST(COALESCE(rr.input_tokens, 0), 0)::BIGINT AS input_tokens,\n           GREATEST(COALESCE(rr.output_tokens, 0), 0)::BIGINT AS output_tokens,\n           GREATEST(COALESCE(rr.total_tokens, 0), 0)::BIGINT AS total_tokens,\n           GREATEST(\n               COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0),\n               0\n           )::BIGINT AS normalized_cache_read_tokens,\n           GREATEST(COALESCE(rr.cached_tokens, 0), 0)::BIGINT AS normalized_cached_tokens,\n           GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)::BIGINT AS normalized_cache_write_tokens,\n           GREATEST(\n               COALESCE(rr.input_tokens, 0),\n               GREATEST(COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0), 0)\n                   + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),\n               0\n           )::BIGINT AS normalized_full_input_tokens\n    FROM request_records rr, bounds\n    WHERE rr.event_kind = 'request'\n      AND rr.created_at >= bounds.start_at AND rr.created_at < bounds.end_at + INTERVAL '1 hour'\n      AND ($4::BIGINT IS NULL OR rr.user_id = $4)\n      AND ($5::TEXT IS NULL OR rr.request_category = $5::TEXT)\n),\nagg AS (\n    SELECT bucket_at,\n           COUNT(*)::BIGINT AS request_count,\n           COUNT(*) FILTER (WHERE request_state IN ('failed', 'aborted'))::BIGINT AS error_count,\n           COALESCE(SUM(input_tokens), 0)::BIGINT AS input_tokens,\n           COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,\n           COALESCE(SUM(total_tokens), 0)::BIGINT AS total_tokens,\n           COALESCE(SUM(normalized_cached_tokens), 0)::BIGINT AS cached_tokens,\n           COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS cache_read_total,\n           COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS full_input_total,\n           AVG(duration_ms)::DOUBLE PRECISION AS avg_duration_ms,\n           AVG(ttft_ms)::DOUBLE PRECISION AS avg_ttft_ms\n    FROM normalized\n    GROUP BY bucket_at\n)\nSELECT buckets.bucket_at AS \"bucket_at!\",\n       COALESCE(agg.request_count, 0)::BIGINT AS \"request_count!\",\n       COALESCE(agg.error_count, 0)::BIGINT AS \"error_count!\",\n       COALESCE(agg.input_tokens, 0)::BIGINT AS \"input_tokens!\",\n       COALESCE(agg.output_tokens, 0)::BIGINT AS \"output_tokens!\",\n       COALESCE(agg.total_tokens, 0)::BIGINT AS \"total_tokens!\",\n       COALESCE(agg.cached_tokens, 0)::BIGINT AS \"cached_tokens!\",\n       CASE WHEN COALESCE(agg.full_input_total, 0) > 0\n            THEN LEAST(\n                1.0::DOUBLE PRECISION,\n                COALESCE(agg.cache_read_total, 0)::DOUBLE PRECISION\n                    / agg.full_input_total::DOUBLE PRECISION\n            )\n            ELSE NULL\n       END AS cache_rate,\n       CASE WHEN COALESCE(agg.request_count, 0) > 0\n            THEN COALESCE(agg.error_count, 0)::DOUBLE PRECISION / agg.request_count::DOUBLE PRECISION\n            ELSE NULL\n       END AS error_rate,\n       agg.avg_duration_ms AS avg_duration_ms,\n       agg.avg_ttft_ms AS avg_ttft_ms\nFROM buckets\nLEFT JOIN agg USING (bucket_at)\nORDER BY buckets.bucket_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bucket_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "error_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "total_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "cached_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_rate",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "error_rate",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "avg_duration_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "avg_ttft_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b01bca88a3fc53697af23932041f43aaa986230638b1ff5dcde06b2b13204cc2"
+}

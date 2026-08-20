@@ -110,6 +110,15 @@ Acceptance: reviewer passes; changed paths are allowlisted; staged patch check p
 - Changed paths: `src/usage/text.rs`, `src/usage/capture.rs`, known plan path.
 - Checkpoint: ready for `phase(cache-token-normalization): normalize provider usage tokens` after exact-path staging and staged diff checks.
 
+### Phase 2: Unified cache-rate reporting
+
+- Status: IMPLEMENTED, review pending.
+- Dependency: Phase 1 checkpoint `a77ecc7` passed review and is complete.
+- Current phase baseline HEAD: `a77ecc7`.
+- User baseline remains empty; concurrent `.opencode/plans/mcp-list-usage-filter.md` remains out of scope.
+- Executor result: DONE. List/detail/summary/bucket SQL now bounds cache rates to [0,1] and prefers `cache_read_tokens`; overview presentation tests cover bounded ratios. Executor validation reported full lib tests, formatting, SQLx prepare check, and diff check passed.
+- Review focus: verify aggregate `COALESCE` semantics for legacy `cached_tokens`, generated `.sqlx` churn, and consistency with overview totals.
+
 ## Review History
 
 - 2026-08-20: Initial plan created. No implementation review yet.

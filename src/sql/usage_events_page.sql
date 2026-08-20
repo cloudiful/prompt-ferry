@@ -24,7 +24,25 @@ SELECT
     rr.cached_tokens,
     rr.cache_read_tokens,
     rr.cache_write_tokens,
-    CASE WHEN rr.input_tokens > 0 THEN rr.cached_tokens::DOUBLE PRECISION / rr.input_tokens::DOUBLE PRECISION ELSE NULL END AS cache_rate,
+    CASE
+        WHEN GREATEST(
+            COALESCE(rr.input_tokens, 0),
+            GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
+                + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
+            0
+        ) > 0
+        THEN LEAST(
+            1.0::DOUBLE PRECISION,
+            GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)::DOUBLE PRECISION
+            / GREATEST(
+                COALESCE(rr.input_tokens, 0),
+                GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
+                    + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
+                0
+            )::DOUBLE PRECISION
+        )
+        ELSE NULL
+    END AS cache_rate,
     rr.conversation_id,
     rr.parent_event_id,
     rr.conversation_seq,

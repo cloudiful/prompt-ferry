@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH normalized AS (\n    SELECT\n        request_state,\n        duration_ms,\n        GREATEST(COALESCE(input_tokens, 0), 0)::BIGINT AS input_tokens,\n        GREATEST(COALESCE(output_tokens, 0), 0)::BIGINT AS output_tokens,\n        GREATEST(COALESCE(total_tokens, 0), 0)::BIGINT AS total_tokens,\n        GREATEST(\n            COALESCE(COALESCE(cache_read_tokens, cached_tokens), 0),\n            0\n        )::BIGINT AS normalized_cache_read_tokens,\n        GREATEST(COALESCE(cached_tokens, 0), 0)::BIGINT AS normalized_cached_tokens,\n        GREATEST(COALESCE(cache_write_tokens, 0), 0)::BIGINT AS normalized_cache_write_tokens,\n        GREATEST(\n            COALESCE(input_tokens, 0),\n            GREATEST(COALESCE(COALESCE(cache_read_tokens, cached_tokens), 0), 0)\n                + GREATEST(COALESCE(cache_write_tokens, 0), 0),\n            0\n        )::BIGINT AS normalized_full_input_tokens\n    FROM request_records\n    WHERE event_kind = 'request'\n      AND created_at >= NOW() - ($1::BIGINT * INTERVAL '1 day')\n      AND ($2::BIGINT IS NULL OR user_id = $2)\n)\nSELECT\n    COUNT(*)::BIGINT AS \"request_count!\",\n    COUNT(*) FILTER (WHERE request_state = 'completed')::BIGINT AS \"success_count!\",\n    COUNT(*) FILTER (WHERE request_state IN ('failed', 'aborted'))::BIGINT AS \"error_count!\",\n    COALESCE(SUM(input_tokens), 0)::BIGINT AS \"input_tokens!\",\n    COALESCE(SUM(output_tokens), 0)::BIGINT AS \"output_tokens!\",\n    COALESCE(SUM(total_tokens), 0)::BIGINT AS \"total_tokens!\",\n    COALESCE(SUM(normalized_cached_tokens), 0)::BIGINT AS \"cached_tokens!\",\n    CASE WHEN COALESCE(SUM(normalized_full_input_tokens), 0) > 0\n        THEN LEAST(\n            1.0::DOUBLE PRECISION,\n            COALESCE(SUM(normalized_cache_read_tokens), 0)::DOUBLE PRECISION\n                / SUM(normalized_full_input_tokens)::DOUBLE PRECISION\n        )\n        ELSE NULL\n    END AS cache_rate,\n    AVG(duration_ms)::DOUBLE PRECISION AS avg_duration_ms\nFROM normalized",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "success_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "error_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "total_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "cached_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_rate",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "avg_duration_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "97d557b5c4f70b9a60623db455827947994a4603104f2d03c2b65a725382c213"
+}
