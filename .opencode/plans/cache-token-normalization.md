@@ -7,6 +7,7 @@ Status: IN_PROGRESS
 - Mode: LOCAL_PLAN
 - Artifact: `.opencode/plans/cache-token-normalization.md`
 - Forgejo fallback: `fj whoami --remote origin` failed because the configured Forgejo URL returned an invalid content type. Continue locally; do not block implementation.
+- 2026-08-20 recheck: `fj whoami --remote origin` now succeeds, but tracking remains LOCAL_PLAN because the mode is fixed for this task.
 
 ## Goal
 
@@ -96,9 +97,24 @@ Acceptance: reviewer passes; changed paths are allowlisted; staged patch check p
 - Treat cache-read rate as `cache_read / (ordinary_input + cache_read + cache_write)` for normalized usage; do not use ordinary input alone as denominator.
 - Do not infer historical normalized input without retained raw usage.
 
+## Phase Results
+
+### Phase 1: Usage model and new-request normalization
+
+- Result: DONE, review passed.
+- Executor changed: `src/usage/text.rs`, `src/usage/capture.rs`.
+- Behavior: OpenAI-shaped usage is not folded; native Anthropic cache read/write is folded into canonical input exactly once; token values are clamped non-negative; focused tests cover provider shapes and SSE merging.
+- Validation: `cargo test --lib usage` passed (59); `cargo test --lib anthropic` passed (26); `cargo test --lib openai_compat` passed (94); `cargo test --lib db::types::billing` passed (3); `cargo test --lib` passed (542); `cargo fmt --check` passed; `git diff --check` passed.
+- Review: PASS_WITH_NOTES. No P0-P2 findings. P3 notes: future partial provider updates could replace a fold-derived input; negative clamping has no telemetry; verify any future wire-level cache-write aliases. No repair required for current provider paths.
+- Remaining risk: the reviewed future partial-update and clamping-observability notes remain; historical data still requires Phase 3 backfill.
+- Changed paths: `src/usage/text.rs`, `src/usage/capture.rs`, known plan path.
+- Checkpoint: ready for `phase(cache-token-normalization): normalize provider usage tokens` after exact-path staging and staged diff checks.
+
 ## Review History
 
 - 2026-08-20: Initial plan created. No implementation review yet.
+- 2026-08-20: Phase 1 executor reported DONE; independent review pending.
+- 2026-08-20: Phase 1 reviewer returned PASS_WITH_NOTES; no P0-P2 findings, no repair round required.
 
 ## Blocked Questions
 

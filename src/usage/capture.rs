@@ -230,4 +230,63 @@ mod tests {
         assert_eq!(capture.usage.output_tokens, Some(4));
         assert_eq!(capture.usage.cache_read_tokens, Some(3));
     }
+
+    #[test]
+    fn sse_merge_replaces_zero_early_usage_with_final_anthropic_usage() {
+        let mut capture = UsageCapture::new(true, None);
+        // First, an Anthropic message_start chunk reports empty (zero) input and zero cache.
+        capture.observe_chunk(
+            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_2\",\"model\":\"claude-sonnet\",\"usage\":{\"input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0,\"output_tokens\":0}}}\n\n",
+        );
+        // Then a final message_delta provides the authoritative Anthropic usage.
+        capture.observe_chunk(
+            b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":176,\"output_tokens\":42,\"cache_read_input_tokens\":82793,\"cache_creation_input_tokens\":7}}\n\n",
+        );
+        capture.finish();
+
+        // Canonical total = ordinary (176) + cache_read (82793) + cache_write (7).
+        assert_eq!(capture.usage.input_tokens, Some(82976));
+        assert_eq!(capture.usage.output_tokens, Some(42));
+        assert_eq!(capture.usage.cache_read_tokens, Some(82793));
+        assert_eq!(capture.usage.cache_write_tokens, Some(7));
+        assert_eq!(capture.usage.total_tokens, Some(83018));
+    }
+
+    #[test]
+    fn sse_merge_keeps_earlier_cache_when_later_chunk_lacks_cache_fields() {
+        let mut capture = UsageCapture::new(true, None);
+        capture.observe_chunk(
+            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_3\",\"model\":\"claude-sonnet\",\"usage\":{\"input_tokens\":12,\"cache_read_input_tokens\":3,\"cache_creation_input_tokens\":2}}}\n\n",
+        );
+        // A late chunk that only carries an output_tokens update should not lose
+        // the cache meters observed in earlier usage.
+        capture.observe_chunk(
+            b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":4}}\n\n",
+        );
+        capture.finish();
+
+        assert_eq!(capture.usage.input_tokens, Some(17));
+        assert_eq!(capture.usage.output_tokens, Some(4));
+        assert_eq!(capture.usage.cache_read_tokens, Some(3));
+        assert_eq!(capture.usage.cache_write_tokens, Some(2));
+        assert_eq!(capture.usage.total_tokens, Some(21));
+    }
+
+    #[test]
+    fn sse_merge_does_not_double_count_cached_tokens_for_openai_responses() {
+        let mut capture = UsageCapture::new(true, None);
+        capture
+            .observe_chunk(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n");
+        capture.observe_chunk(
+            b"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":120,\"output_tokens\":20,\"total_tokens\":140,\"input_tokens_details\":{\"cached_tokens\":30,\"cache_read_tokens\":30,\"cache_write_tokens\":7}}}}\n\n",
+        );
+        capture.finish();
+
+        // OpenAI Responses: input_tokens already includes cache and cache_write.
+        // The canonical total must remain 120 (no Anthropic-style fold).
+        assert_eq!(capture.usage.input_tokens, Some(120));
+        assert_eq!(capture.usage.cache_read_tokens, Some(30));
+        assert_eq!(capture.usage.cache_write_tokens, Some(7));
+        assert_eq!(capture.usage.cached_tokens, Some(30));
+    }
 }

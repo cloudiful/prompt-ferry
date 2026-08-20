@@ -5,11 +5,13 @@ pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
     let mut input_tokens = usage
         .get("input_tokens")
         .or_else(|| usage.get("prompt_tokens"))
-        .and_then(Value::as_i64);
+        .and_then(Value::as_i64)
+        .map(non_negative);
     let output_tokens = usage
         .get("output_tokens")
         .or_else(|| usage.get("completion_tokens"))
-        .and_then(Value::as_i64);
+        .and_then(Value::as_i64)
+        .map(non_negative);
     let cached_tokens = usage
         .get("cache_read_input_tokens")
         .and_then(Value::as_i64)
@@ -19,7 +21,8 @@ pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
                 .or_else(|| usage.get("prompt_tokens_details"))
                 .and_then(|details| details.get("cached_tokens"))
                 .and_then(Value::as_i64)
-        });
+        })
+        .map(non_negative);
     let cache_read_tokens = usage
         .get("cache_read_input_tokens")
         .and_then(Value::as_i64)
@@ -33,17 +36,19 @@ pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
                         .or_else(|| details.get("cached_tokens"))
                 })
                 .and_then(Value::as_i64)
-        });
+        })
+        .map(non_negative);
     let cache_write_tokens = usage
         .get("cache_creation_input_tokens")
-        .and_then(Value::as_i64);
-    let cache_write_tokens = cache_write_tokens.or_else(|| {
-        usage
-            .get("input_tokens_details")
-            .or_else(|| usage.get("prompt_tokens_details"))
-            .and_then(|details| details.get("cache_write_tokens"))
-            .and_then(Value::as_i64)
-    });
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            usage
+                .get("input_tokens_details")
+                .or_else(|| usage.get("prompt_tokens_details"))
+                .and_then(|details| details.get("cache_write_tokens"))
+                .and_then(Value::as_i64)
+        })
+        .map(non_negative);
     if usage.get("cache_read_input_tokens").is_some()
         || usage.get("cache_creation_input_tokens").is_some()
     {
@@ -56,6 +61,7 @@ pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
     let total_tokens = usage
         .get("total_tokens")
         .and_then(Value::as_i64)
+        .map(non_negative)
         .or_else(|| {
             input_tokens
                 .zip(output_tokens)
@@ -80,6 +86,10 @@ pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
         cache_read_tokens,
         cache_write_tokens,
     })
+}
+
+fn non_negative(value: i64) -> i64 {
+    value.max(0)
 }
 
 #[cfg(test)]
@@ -149,6 +159,129 @@ mod tests {
         assert_eq!(usage.cache_read_tokens, Some(30));
         assert_eq!(usage.cached_tokens, Some(30));
         assert_eq!(usage.cache_write_tokens, Some(7));
+    }
+
+    #[test]
+    fn folds_anthropic_cache_when_input_tokens_is_absent() {
+        let usage = extract_usage(&json!({
+            "usage": {
+                "output_tokens": 12,
+                "cache_read_input_tokens": 30,
+                "cache_creation_input_tokens": 7
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.input_tokens, Some(37));
+        assert_eq!(usage.output_tokens, Some(12));
+        assert_eq!(usage.cache_read_tokens, Some(30));
+        assert_eq!(usage.cache_write_tokens, Some(7));
+    }
+
+    #[test]
+    fn keeps_anthropic_input_when_cache_fields_are_zero() {
+        let usage = extract_usage(&json!({
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.input_tokens, Some(100));
+        assert_eq!(usage.cache_read_tokens, Some(0));
+        assert_eq!(usage.cache_write_tokens, Some(0));
+    }
+
+    #[test]
+    fn clamps_negative_cache_and_input_values_to_zero() {
+        let usage = extract_usage(&json!({
+            "usage": {
+                "input_tokens": 120,
+                "output_tokens": -5,
+                "cache_read_input_tokens": -30,
+                "cache_creation_input_tokens": -7
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.input_tokens, Some(120));
+        assert_eq!(usage.output_tokens, Some(0));
+        assert_eq!(usage.cache_read_tokens, Some(0));
+        assert_eq!(usage.cache_write_tokens, Some(0));
+        assert_eq!(usage.total_tokens, Some(120));
+    }
+
+    #[test]
+    fn preserves_explicit_total_tokens_over_computed_value() {
+        let usage = extract_usage(&json!({
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "total_tokens": 9999,
+                "cache_read_input_tokens": 30,
+                "cache_creation_input_tokens": 5
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.input_tokens, Some(135));
+        assert_eq!(usage.total_tokens, Some(9999));
+    }
+
+    #[test]
+    fn prefers_nested_cache_read_tokens_over_inconsistent_cached_tokens() {
+        let usage = extract_usage(&json!({
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "input_tokens_details": {
+                    "cached_tokens": 99,
+                    "cache_read_tokens": 30
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.input_tokens, Some(100));
+        assert_eq!(usage.cache_read_tokens, Some(30));
+        assert_eq!(usage.cached_tokens, Some(99));
+    }
+
+    #[test]
+    fn openai_chat_with_only_cached_tokens_in_details() {
+        let usage = extract_usage(&json!({
+            "usage": {
+                "prompt_tokens": 80,
+                "completion_tokens": 20,
+                "prompt_tokens_details": { "cached_tokens": 40 }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.input_tokens, Some(80));
+        assert_eq!(usage.output_tokens, Some(20));
+        assert_eq!(usage.cache_read_tokens, Some(40));
+        assert_eq!(usage.cache_write_tokens, None);
+        assert_eq!(usage.total_tokens, Some(100));
+    }
+
+    #[test]
+    fn cache_total_exceeding_input_does_not_inflate_canonical_input() {
+        let usage = extract_usage(&json!({
+            "usage": {
+                "input_tokens": 50,
+                "output_tokens": 10,
+                "cache_read_input_tokens": 80,
+                "cache_creation_input_tokens": 0
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.input_tokens, Some(130));
+        assert_eq!(usage.cache_read_tokens, Some(80));
     }
 }
 
