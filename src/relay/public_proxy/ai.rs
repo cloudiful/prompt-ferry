@@ -613,17 +613,35 @@ async fn proxy_request_with_options(
     response
 }
 
+/// Map an internal error code to the outward Anthropic error type.
+///
+/// By the time this runs in the streaming path, the HTTP response has already
+/// been committed with `200 OK`. The Anthropic SDK and OpenCode's
+/// `@ai-sdk/anthropic` decide retryability from `error.type`, not from the
+/// HTTP status, so the SSE error envelope must carry the canonical retryable
+/// type for any transport/upstream failure:
+///
+/// * `401 | 403` -> `authentication_error` (terminal, no retry).
+/// * `429` -> `rate_limit_error` (terminal here; SDK handles its own retry).
+/// * `500..=599` -> `overloaded_error`. This is the only Anthropic error
+///   class the SDK marks retryable, and is what causes OpenCode's
+///   `SessionRetry` to fire after an unexpected EOF mid-stream. The internal
+///   worker code (e.g. `upstream_stream_error`, `502`, `503`, `504`, `529`)
+///   is preserved for diagnostics; status takes priority over the code so
+///   that genuinely committed-stream 5xx are never mislabelled as a
+///   client error.
+/// * For other statuses, well-known Anthropic codes pass through unchanged;
+///   anything unknown collapses to `invalid_request_error` so that
+///   non-retryable client errors stay non-retryable.
 fn anthropic_outward_code(status: u16, code: &str) -> &str {
     match status {
         401 | 403 => "authentication_error",
         429 => "rate_limit_error",
-        500..=599 => {
-            if code == "overloaded_error" {
-                code
-            } else {
-                "api_error"
-            }
-        }
+        // Committed-stream 5xx must surface as `overloaded_error`; mapping
+        // to `api_error` here would be terminally non-retryable for the
+        // Anthropic SDK even though the failure is upstream-side and
+        // retryable in spirit.
+        500..=599 => "overloaded_error",
         _ if matches!(
             code,
             "invalid_request_error"
@@ -1179,6 +1197,166 @@ mod tests {
         assert_eq!(response.headers().get("request-id").unwrap(), "msg_req_1");
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(body.as_ref(), &br#"{"id":"msg_1","type":"message"}"#[..]);
+    }
+
+    #[test]
+    fn anthropic_outward_code_maps_any_5xx_to_overloaded_error() {
+        // Committed-stream 5xx never carry an HTTP status code the SDK can
+        // retry on, so the SSE error type must be the retryable
+        // `overloaded_error` regardless of the internal code.
+        assert_eq!(
+            anthropic_outward_code(502, "upstream_stream_error"),
+            "overloaded_error"
+        );
+        assert_eq!(
+            anthropic_outward_code(500, "internal_error"),
+            "overloaded_error"
+        );
+        assert_eq!(anthropic_outward_code(503, ""), "overloaded_error");
+        assert_eq!(anthropic_outward_code(504, ""), "overloaded_error");
+        assert_eq!(anthropic_outward_code(529, ""), "overloaded_error");
+        // Pre-existing `overloaded_error` code path stays unchanged.
+        assert_eq!(
+            anthropic_outward_code(500, "overloaded_error"),
+            "overloaded_error"
+        );
+        assert_eq!(
+            anthropic_outward_code(502, "overloaded_error"),
+            "overloaded_error"
+        );
+    }
+
+    #[test]
+    fn anthropic_outward_code_preserves_non_retryable_boundaries() {
+        // Authentication and rate-limit clients stay non-retryable; they
+        // must not be silently converted into a retryable 5xx.
+        assert_eq!(anthropic_outward_code(401, ""), "authentication_error");
+        assert_eq!(
+            anthropic_outward_code(401, "upstream_stream_error"),
+            "authentication_error"
+        );
+        assert_eq!(anthropic_outward_code(403, ""), "authentication_error");
+        assert_eq!(anthropic_outward_code(429, ""), "rate_limit_error");
+
+        // 4xx client errors with a known code keep that code; anything
+        // unknown collapses to `invalid_request_error` rather than being
+        // mislabelled as retryable.
+        assert_eq!(
+            anthropic_outward_code(400, "invalid_request_error"),
+            "invalid_request_error"
+        );
+        assert_eq!(
+            anthropic_outward_code(400, "unknown_code"),
+            "invalid_request_error"
+        );
+        assert_eq!(
+            anthropic_outward_code(404, "not_found_error"),
+            "not_found_error"
+        );
+        assert_eq!(
+            anthropic_outward_code(400, "permission_error"),
+            "permission_error"
+        );
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_stream_5xx_envelope_uses_overloaded_error() {
+        let mut state = test_state();
+        state.config.client_token = "test-token".to_string();
+
+        let (worker_tx, mut worker_rx) = mpsc::channel(8);
+        state.inner.workers.lock().await.insert(1, worker_tx);
+
+        let state_for_worker = state.clone();
+        tokio::spawn(async move {
+            let mut request_id = None;
+            while let Some(message) = worker_rx.recv().await {
+                match message {
+                    BridgeMessage::RequestStart(start) => request_id = Some(start.request_id),
+                    BridgeMessage::RequestEnd(end) => {
+                        let request_id = request_id.unwrap_or(end.request_id);
+                        handle_response_start(
+                            &state_for_worker,
+                            ResponseStart {
+                                request_id: request_id.clone(),
+                                status: StatusCode::OK.as_u16(),
+                                content_type: Some("text/event-stream".to_string()),
+                                headers: Vec::new(),
+                            },
+                        )
+                        .await;
+                        handle_response_chunk(
+                            &state_for_worker,
+                            ResponseChunk {
+                                request_id: request_id.clone(),
+                                data:
+                                    b"event: message_start\ndata: {\"type\":\"message_start\"}\n\n"
+                                        .to_vec(),
+                            },
+                        )
+                        .await;
+                        handle_response_error(
+                            &state_for_worker,
+                            ResponseError {
+                                request_id,
+                                status: StatusCode::BAD_GATEWAY.as_u16(),
+                                code: "upstream_stream_error".to_string(),
+                                message: "stream broke".to_string(),
+                            },
+                        )
+                        .await;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", "test-token".parse().unwrap());
+        headers.insert("anthropic-version", "2024-10-22".parse().unwrap());
+
+        let response = proxy_request_with_options(
+            state,
+            "127.0.0.1".parse().unwrap(),
+            headers,
+            HttpRequestCompressionContext::default(),
+            Method::POST,
+            "/v1/messages",
+            Body::empty(),
+            true,
+        )
+        .await;
+
+        // The stream stays HTTP 200 because output was already committed;
+        // the Anthropic SDK will rely on `error.type` for retry classification.
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/event-stream"
+        );
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert_eq!(
+            text,
+            concat!(
+                "event: message_start\n",
+                "data: {\"type\":\"message_start\"}\n\n",
+                "event: error\n",
+                "data: {\"error\":{\"message\":\"stream broke\",\"type\":\"overloaded_error\"},\"type\":\"error\"}\n\n",
+            )
+        );
+        let error_payload = text
+            .split("\n\n")
+            .find(|part| part.starts_with("event: error"))
+            .and_then(|part| part.strip_prefix("event: error\ndata: "))
+            .expect("Anthropic SSE error event");
+        let value: serde_json::Value = serde_json::from_str(error_payload)
+            .expect("Anthropic SSE error event should be valid JSON");
+        assert_eq!(value["type"], "error");
+        assert_eq!(value["error"]["type"], "overloaded_error");
+        assert_eq!(value["error"]["message"], "stream broke");
     }
 }
 
