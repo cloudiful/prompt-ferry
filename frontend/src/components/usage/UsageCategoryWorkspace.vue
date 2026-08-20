@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { defineAsyncComponent } from 'vue'
-import type { RequestRecordCategory } from '@/generated/admin-api'
+import type {
+  RequestRecordCategory,
+  RequestRecordOverviewResponse,
+} from '@/generated/admin-api'
 import type { RequestRecordFormatting } from '@/models/request-record-formatting'
 import type {
   RequestOverviewMode,
   RequestOverviewDrilldown,
-  RequestOverviewResponse,
 } from '@/request-overview'
 
 defineProps<{
@@ -13,7 +15,7 @@ defineProps<{
   category: RequestRecordCategory
   formatting: RequestRecordFormatting
   loading: boolean
-  overview: RequestOverviewResponse | null
+  overview: RequestRecordOverviewResponse | null
   t: TranslateFn
 }>()
 

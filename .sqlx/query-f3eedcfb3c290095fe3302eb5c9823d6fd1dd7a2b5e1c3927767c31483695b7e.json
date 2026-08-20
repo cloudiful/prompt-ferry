@@ -1,0 +1,104 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH normalized AS (\n    SELECT date_trunc('day', rr.created_at) AS bucket_at,\n           rr.ok,\n           rr.request_state,\n           rr.duration_ms,\n           rr.ttft_ms,\n           GREATEST(\n               COALESCE(rr.input_tokens, 0)\n                   - COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)\n                   - COALESCE(rr.cache_write_tokens, 0),\n               0\n           )::BIGINT AS normalized_input_tokens,\n           COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,\n           COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,\n           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens\n    FROM request_records rr\n    LEFT JOIN users u ON u.user_id = rr.user_id\n    WHERE rr.event_kind = 'request'\n      AND rr.request_category = $2\n      AND ($1::BIGINT IS NULL OR rr.user_id = $1)\n      AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)\n      AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)\n      AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)\n)\nSELECT bucket_at AS \"bucket_at!\",\n       COUNT(*)::BIGINT AS \"request_count!\",\n       COUNT(*) FILTER (WHERE ok IS TRUE)::BIGINT AS \"success_count!\",\n       COUNT(*) FILTER (\n           WHERE ok IS FALSE OR request_state IN ('failed', 'aborted')\n       )::BIGINT AS \"error_count!\",\n       COUNT(*) FILTER (\n           WHERE normalized_cache_read_tokens > 0\n       )::BIGINT AS \"cache_hit_count!\",\n       COALESCE(SUM(normalized_input_tokens), 0)::BIGINT AS \"input_tokens!\",\n       COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS \"cache_read_tokens!\",\n       COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS \"cache_write_tokens!\",\n       COALESCE(SUM(output_tokens), 0)::BIGINT AS \"output_tokens!\",\n       COALESCE(SUM(\n           normalized_input_tokens\n               + normalized_cache_read_tokens\n               + normalized_cache_write_tokens\n               + output_tokens\n       ), 0)::BIGINT AS \"total_tokens!\",\n       percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)\n           FILTER (WHERE duration_ms IS NOT NULL) AS p95_total_ms,\n       percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms)\n           FILTER (WHERE ttft_ms IS NOT NULL) AS p95_first_token_ms\nFROM normalized\nGROUP BY bucket_at\nORDER BY bucket_at ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bucket_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "success_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "error_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "cache_hit_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "total_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "p95_total_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "p95_first_token_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f3eedcfb3c290095fe3302eb5c9823d6fd1dd7a2b5e1c3927767c31483695b7e"
+}

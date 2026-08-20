@@ -6,6 +6,7 @@ import { useLocale } from '@/composables/useLocale'
 import { useNotifier } from '@/composables/useNotifier'
 import { useRequestOverviewMode } from '@/composables/useRequestOverviewMode'
 import type { RequestRecordClearForm, RequestRecordRowView } from '@/models'
+import type { RequestRecordOverviewRange } from '@/generated/admin-api'
 import type { RequestOverviewDrilldown } from '@/request-overview'
 import { useSessionStore } from '@/stores/session'
 import { useRequestRecordsStore } from '@/stores/usage'
@@ -45,6 +46,21 @@ export function useUsagePage() {
   async function refreshRecords(): Promise<void> {
     try {
       await requestRecordsStore.refreshRecords()
+    } catch (cause) {
+      notifyApiError(cause)
+    }
+  }
+
+  async function applyOverviewRange(input: {
+    range: RequestRecordOverviewRange
+    start?: string
+    end?: string
+  }): Promise<void> {
+    requestRecordsStore.range = input.range
+    requestRecordsStore.start = input.start ?? ''
+    requestRecordsStore.end = input.end ?? ''
+    try {
+      await requestRecordsStore.refreshOverview()
     } catch (cause) {
       notifyApiError(cause)
     }
@@ -170,6 +186,7 @@ export function useUsagePage() {
   return {
     UsageClearDialog,
     activeMode,
+    applyOverviewRange,
     clearDialogVisible,
     clearForm,
     clearConversationOverride,

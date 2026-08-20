@@ -688,88 +688,6 @@ export type ModelRouteWhitelistResponse = {
 
 export type NativeApi = 'auto' | 'anthropic_messages' | 'chat' | 'responses' | 'realtime';
 
-export type OverviewErrorBreakdownRow = {
-    count: number;
-    key: string;
-    label: string;
-    rate: number;
-};
-
-export type OverviewHeatmap = {
-    cells: Array<OverviewHeatmapCell>;
-    key: string;
-    x_labels: Array<string>;
-    y_labels: Array<string>;
-};
-
-export type OverviewHeatmapCell = {
-    endpoint_id?: string | null;
-    error_rate: number;
-    mcp_bearer_token_slot?: number | null;
-    mcp_server_id?: string | null;
-    model?: string | null;
-    p95_first_token_ms?: number | null;
-    p95_total_ms?: number | null;
-    quality_score: number;
-    request_count: number;
-    success_rate: number;
-    x_index: number;
-    y_index: number;
-};
-
-export type OverviewMetricCard = {
-    key: string;
-    label: string;
-    unit: string;
-    value: number;
-};
-
-export type OverviewQualityComponent = {
-    description: string;
-    key: string;
-    label: string;
-    weight: number;
-};
-
-export type OverviewQualityFormula = {
-    components: Array<OverviewQualityComponent>;
-    score_kind: string;
-};
-
-export type OverviewRankingGroup = {
-    key: string;
-    rows: Array<OverviewRankingRow>;
-    title: string;
-};
-
-export type OverviewRankingRow = {
-    auth_error_rate?: number | null;
-    cache_hit_rate?: number | null;
-    empty_success_rate?: number | null;
-    endpoint_id?: string | null;
-    label: string;
-    mcp_bearer_token_slot?: number | null;
-    mcp_server_id?: string | null;
-    model?: string | null;
-    p95_first_token_ms?: number | null;
-    p95_total_ms?: number | null;
-    quality_score: number;
-    rate_limit_rate?: number | null;
-    request_count: number;
-    secondary_label?: string | null;
-    success_rate: number;
-    upstream_5xx_rate?: number | null;
-};
-
-export type OverviewTrendBucket = {
-    bucket_at: string;
-    p95_first_token_ms?: number | null;
-    p95_total_ms?: number | null;
-    quality_score: number;
-    request_count: number;
-    success_rate: number;
-};
-
 export type ProviderEndpoint = {
     api_keys?: Array<EndpointApiKey>;
     base_url: string;
@@ -1102,15 +1020,65 @@ export type RequestRecordListRow = {
     user_login_name?: string | null;
 };
 
-export type RequestRecordOverviewRange = '24h' | '7d' | '30d' | 'custom';
+export type RequestRecordOverviewBreakdownRow = {
+    label: string;
+    mcp_server_id?: string | null;
+    model?: string | null;
+    request_count: number;
+    request_share: number;
+    success_count: number;
+    success_rate: number;
+    token_share?: number | null;
+    tokens: RequestRecordOverviewTokenUsage;
+};
+
+export type RequestRecordOverviewErrorRow = {
+    count: number;
+    key: string;
+    label: string;
+    rate: number;
+};
+
+export type RequestRecordOverviewRange = '24h' | '7d' | '30d' | 'month' | 'custom';
 
 export type RequestRecordOverviewResponse = {
-    error_breakdown: Array<OverviewErrorBreakdownRow>;
-    heatmap: OverviewHeatmap;
-    quality_formula: OverviewQualityFormula;
-    summary_cards: Array<OverviewMetricCard>;
-    top_rankings: Array<OverviewRankingGroup>;
-    trend: Array<OverviewTrendBucket>;
+    breakdown: Array<RequestRecordOverviewBreakdownRow>;
+    error_breakdown: Array<RequestRecordOverviewErrorRow>;
+    summary: RequestRecordOverviewSummary;
+    trend: Array<RequestRecordOverviewTrendBucket>;
+};
+
+export type RequestRecordOverviewSummary = {
+    error_count: number;
+    method_count: number;
+    p95_first_token_ms?: number | null;
+    p95_total_ms?: number | null;
+    request_count: number;
+    success_count: number;
+    success_rate: number;
+    tokens: RequestRecordOverviewTokenUsage;
+};
+
+export type RequestRecordOverviewTokenUsage = {
+    cache_hit_rate?: number | null;
+    cache_rate?: number | null;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+};
+
+export type RequestRecordOverviewTrendBucket = {
+    bucket_at: string;
+    error_count: number;
+    error_rate: number;
+    p95_first_token_ms?: number | null;
+    p95_total_ms?: number | null;
+    request_count: number;
+    success_count: number;
+    success_rate: number;
+    tokens: RequestRecordOverviewTokenUsage;
 };
 
 export type RequestRecordPage = {

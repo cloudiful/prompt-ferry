@@ -19,6 +19,8 @@ pub enum RequestRecordOverviewRange {
     Last7d,
     #[serde(rename = "30d")]
     Last30d,
+    #[serde(rename = "month")]
+    CurrentMonth,
     Custom,
 }
 

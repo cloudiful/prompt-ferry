@@ -21,7 +21,6 @@ mod insert;
 mod metadata_maintenance;
 mod overview;
 mod prompt_blocks;
-mod quality;
 mod query;
 mod raw_partitions;
 mod redaction_sessions;

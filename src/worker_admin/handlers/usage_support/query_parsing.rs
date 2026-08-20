@@ -1,4 +1,5 @@
 use super::*;
+use chrono::Datelike;
 
 type UsageDateRange = (
     Option<chrono::DateTime<chrono::Utc>>,
@@ -43,6 +44,15 @@ pub(in crate::worker_admin::handlers) fn parse_overview_window(
         RequestRecordOverviewRange::Last24h => (Some(now - chrono::Duration::hours(24)), Some(now)),
         RequestRecordOverviewRange::Last7d => (Some(now - chrono::Duration::days(7)), Some(now)),
         RequestRecordOverviewRange::Last30d => (Some(now - chrono::Duration::days(30)), Some(now)),
+        RequestRecordOverviewRange::CurrentMonth => {
+            let month_start = now
+                .date_naive()
+                .with_day(1)
+                .and_then(|date| date.and_hms_opt(0, 0, 0))
+                .map(|date| date.and_utc())
+                .expect("a calendar date always has a valid midnight");
+            (Some(month_start), Some(now))
+        }
         RequestRecordOverviewRange::Custom => {
             let Some(start) = start else {
                 return Err(Box::new(bad_request(
@@ -58,14 +68,16 @@ pub(in crate::worker_admin::handlers) fn parse_overview_window(
             (Some(start), Some(end))
         }
     };
-    let bucket = if end
-        .zip(start)
-        .map(|(end, start)| end - start <= chrono::Duration::days(3))
-        .unwrap_or(true)
-    {
-        db::OverviewBucket::Hour
-    } else {
-        db::OverviewBucket::Day
+    let bucket = match range {
+        RequestRecordOverviewRange::CurrentMonth => db::OverviewBucket::Day,
+        _ if end
+            .zip(start)
+            .map(|(end, start)| end - start <= chrono::Duration::days(3))
+            .unwrap_or(true) =>
+        {
+            db::OverviewBucket::Hour
+        }
+        _ => db::OverviewBucket::Day,
     };
     Ok(db::OverviewWindow { start, end, bucket })
 }
@@ -202,6 +214,7 @@ pub(in crate::worker_admin::handlers) fn build_usage_clear_query(
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
+    use chrono::Datelike;
 
     use super::{
         parse_overview_window, parse_usage_date_range, parse_usage_series_bucket,
@@ -236,6 +249,16 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn current_month_starts_at_first_day() {
+        let window =
+            parse_overview_window(Some(RequestRecordOverviewRange::CurrentMonth), None, None)
+                .expect("current month range");
+        assert_eq!(window.start.unwrap().day(), 1);
+        assert!(window.end.unwrap() > window.start.unwrap());
+        assert!(matches!(window.bucket, crate::db::OverviewBucket::Day));
     }
 
     #[test]

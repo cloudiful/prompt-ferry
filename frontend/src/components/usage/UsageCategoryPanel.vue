@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { defineAsyncComponent } from 'vue'
-import type { RequestRecordCategory } from '@/generated/admin-api'
+import type {
+  RequestRecordCategory,
+  RequestRecordOverviewResponse,
+} from '@/generated/admin-api'
 import type { RequestRecordFilterModel, RequestRecordRowView } from '@/models'
 import type { RequestRecordFormatting } from '@/models/request-record-formatting'
 import type { UsageWorkspaceView } from '@/models/usage'
 import type {
   RequestOverviewDrilldown,
   RequestOverviewMode,
-  RequestOverviewResponse,
 } from '@/request-overview'
 import UsageCategoryWorkspace from './UsageCategoryWorkspace.vue'
 
@@ -16,7 +18,7 @@ defineProps<{
   category: RequestRecordCategory
   formatting: RequestRecordFormatting
   isAdmin: boolean
-  overview: RequestOverviewResponse | null
+  overview: RequestRecordOverviewResponse | null
   overviewLoading: boolean
   t: TranslateFn
   workspace: UsageWorkspaceView

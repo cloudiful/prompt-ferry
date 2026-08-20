@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    COALESCE(rr.failure_family, 'unknown') AS \"key!\",\n    COUNT(*)::BIGINT AS \"count!\"\nFROM request_records rr\nLEFT JOIN users u ON u.user_id = rr.user_id\nWHERE rr.event_kind = 'request'\n  AND rr.request_category = $2\n  AND ($1::BIGINT IS NULL OR rr.user_id = $1)\n  AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)\n  AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)\n  AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)\n   AND (\n       rr.failure_family IS NOT NULL\n       OR rr.ok IS FALSE\n       OR rr.request_state IN ('failed', 'aborted')\n   )\nGROUP BY 1\nORDER BY 2 DESC, 1 ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "2cdfd4f66c5c2f2ce6722af7bdf376930ff657ad869ac9dc3c4946efdaa5e4ba"
+}

@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import UsageCategoryPanel from '@/components/usage/UsageCategoryPanel.vue'
 import PageIntro from '../components/PageIntro.vue'
 import RequestOverviewModeSwitch from '../components/RequestOverviewModeSwitch.vue'
+import UsageRangePicker from '../components/usage/UsageRangePicker.vue'
 import { useUsagePage } from '../composables/useUsagePage'
 import { useRequestRecordsStore } from '../stores/usage'
 
@@ -22,6 +23,7 @@ if (usageStore.requestCategory !== activeSection.value) {
 const {
   UsageClearDialog,
   activeMode,
+  applyOverviewRange,
   clearDialogVisible,
   clearForm,
   clearConversationOverride,
@@ -56,6 +58,13 @@ watch(activeSection, (next) => {
   <div class="grid min-w-0 max-w-full gap-3">
     <PageIntro>
       <template #actions>
+        <UsageRangePicker
+          :end="requestRecordsStore.end"
+          :start="requestRecordsStore.start"
+          :t="t"
+          :value="requestRecordsStore.range"
+          @apply="applyOverviewRange"
+        />
         <RequestOverviewModeSwitch
           :active-mode="activeMode"
           @change="setActiveMode"

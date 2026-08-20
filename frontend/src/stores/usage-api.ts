@@ -7,6 +7,7 @@ import {
 import type {
   RequestRecordCategory,
   RequestRecordFacets,
+  RequestRecordOverviewRange,
   RequestRecordsClearResponse,
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
@@ -17,15 +18,15 @@ import type {
   RequestRecordFilterModel,
   RequestRecordRowView,
 } from '../models'
-import type { RequestOverviewResponse } from '../request-overview'
+import type { RequestRecordOverviewResponse } from '../generated/admin-api'
 import { buildRequestRecordListQuery } from './request-records-query'
 
 export async function fetchUsageOverview(input: {
   requestCategory: RequestRecordCategory
-  range: '24h' | '7d' | '30d' | 'custom'
+  range: RequestRecordOverviewRange
   start: string
   end: string
-}): Promise<RequestOverviewResponse | null> {
+}): Promise<RequestRecordOverviewResponse | null> {
   return fetchRequestOverview({
     requestCategory: input.requestCategory,
     range: input.range,

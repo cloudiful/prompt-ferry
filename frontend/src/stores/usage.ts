@@ -7,6 +7,7 @@ import {
 import type {
   RequestRecordCategory,
   RequestRecordFacets,
+  RequestRecordOverviewRange,
   RequestRecordsClearResponse,
 } from '../generated/admin-api'
 import { useLocale } from '../composables/useLocale'
@@ -20,10 +21,8 @@ import {
   createUsageStateOptions,
   createUsageWorkspaceView,
 } from '../models/usage'
-import type {
-  RequestOverviewDrilldown,
-  RequestOverviewResponse,
-} from '../request-overview'
+import type { RequestOverviewDrilldown } from '../request-overview'
+import type { RequestRecordOverviewResponse } from '../generated/admin-api'
 import { createRequestRecordDetailState } from './request-record-detail'
 import { createDefaultRequestRecordFilters } from './request-records-query'
 import {
@@ -42,7 +41,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     records: ref(false),
   }
   const overviewState = {
-    overview: ref<RequestOverviewResponse | null>(null),
+    overview: ref<RequestRecordOverviewResponse | null>(null),
   }
   const queryState = {
     end: ref(''),
@@ -58,7 +57,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     sortOrder: ref<-1 | 0 | 1>(-1),
     start: ref(''),
     total: ref(0),
-    range: ref('24h'),
+    range: ref<RequestRecordOverviewRange>('month'),
   }
   const recordState = {
     facets: ref<RequestRecordFacets>({ dates: [], users: [], models: [] }),
@@ -132,7 +131,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     try {
       overviewState.overview.value = await fetchUsageOverview({
         requestCategory: queryState.requestCategory.value,
-        range: queryState.range.value as '24h' | '7d' | '30d' | 'custom',
+        range: queryState.range.value,
         start: queryState.start.value,
         end: queryState.end.value,
       })

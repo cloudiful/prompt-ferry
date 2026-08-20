@@ -8,7 +8,7 @@ import type { UsageWorkspaceView } from '@/models/usage'
 import { REQUEST_RECORD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import UsageDetailDialog from './detail/UsageDetailDialog.vue'
-import UsageFilterSelect from './UsageFilterSelect.vue'
+import UsageRecordsToolbar from './UsageRecordsToolbar.vue'
 
 const props = defineProps<{
   formatting: RequestRecordFormatting
@@ -97,70 +97,22 @@ const sorting = computed<SortingState>({
     })
   },
 })
-
-function applyFilter(): void {
-  emit('filter', {})
-}
 </script>
 
 <template>
   <div class="grid gap-3">
-    <div class="grid gap-3 border-b border-default pb-3">
-      <div class="flex flex-wrap items-center gap-2">
-        <h2 class="mr-auto text-sm font-semibold text-highlighted">
-          {{ t('recentRequests') }}
-        </h2>
-        <UInput
-          :model-value="filters.global.value ?? undefined"
-          class="min-w-64 flex-1"
-          icon="i-lucide-search"
-          :placeholder="t('search')"
-          @update:model-value="filters.global.value = String($event ?? '')"
-          @keydown.enter="$emit('search')"
-        />
-        <slot name="headerActions" />
-        <UButton
-          color="error"
-          variant="outline"
-          icon="i-lucide-trash-2"
-          :label="t('clearHistory')"
-          @click="$emit('openClearDialog')"
-        />
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <UsageFilterSelect
-          v-model="filters.request_date.value"
-          :options="workspace.facets.request_date_options"
-          :placeholder="t('allDates')"
-          @change="applyFilter"
-        />
-        <UsageFilterSelect
-          v-if="isAdmin"
-          v-model="filters.user_key.value"
-          :options="workspace.facets.request_user_options"
-          :placeholder="t('allUsers')"
-          @change="applyFilter"
-        />
-        <UsageFilterSelect
-          v-model="filters.model_key.value"
-          :options="workspace.facets.request_model_options"
-          :placeholder="t('allModels')"
-          @change="applyFilter"
-        />
-        <UsageFilterSelect
-          v-model="filters.request_state.value"
-          :options="workspace.facets.request_state_options"
-          :placeholder="t('allStatus')"
-          @change="applyFilter"
-        />
-        <UsageFilterSelect
-          v-model="filters.redaction_applied.value"
-          :options="workspace.facets.request_redaction_options"
-          :placeholder="t('allRedactionStates')"
-          @change="applyFilter"
-        />
-      </div>
-    </div>
+    <UsageRecordsToolbar
+      v-model:filters="filters"
+      category="ai"
+      :facets="workspace.facets"
+      :is-admin="isAdmin"
+      :t="t"
+      @filter="$emit('filter', {})"
+      @open-clear-dialog="$emit('openClearDialog')"
+      @search="$emit('search')"
+    >
+      <template #headerActions><slot name="headerActions" /></template>
+    </UsageRecordsToolbar>
 
     <div class="min-w-0 overflow-x-auto overflow-y-hidden">
       <UTable

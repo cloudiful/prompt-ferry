@@ -4454,271 +4454,6 @@ components:
       - chat
       - responses
       - realtime
-    OverviewErrorBreakdownRow:
-      type: object
-      required:
-      - key
-      - label
-      - count
-      - rate
-      properties:
-        count:
-          type: integer
-          format: int64
-        key:
-          type: string
-        label:
-          type: string
-        rate:
-          type: number
-          format: double
-    OverviewHeatmap:
-      type: object
-      required:
-      - key
-      - x_labels
-      - y_labels
-      - cells
-      properties:
-        cells:
-          type: array
-          items:
-            $ref: '#/components/schemas/OverviewHeatmapCell'
-        key:
-          type: string
-        x_labels:
-          type: array
-          items:
-            type: string
-        y_labels:
-          type: array
-          items:
-            type: string
-    OverviewHeatmapCell:
-      type: object
-      required:
-      - x_index
-      - y_index
-      - request_count
-      - success_rate
-      - quality_score
-      - error_rate
-      properties:
-        endpoint_id:
-          type:
-          - string
-          - 'null'
-          format: uuid
-        error_rate:
-          type: number
-          format: double
-        mcp_bearer_token_slot:
-          type:
-          - integer
-          - 'null'
-          format: int32
-        mcp_server_id:
-          type:
-          - string
-          - 'null'
-          format: uuid
-        model:
-          type:
-          - string
-          - 'null'
-        p95_first_token_ms:
-          type:
-          - number
-          - 'null'
-          format: double
-        p95_total_ms:
-          type:
-          - number
-          - 'null'
-          format: double
-        quality_score:
-          type: number
-          format: double
-        request_count:
-          type: integer
-          format: int64
-        success_rate:
-          type: number
-          format: double
-        x_index:
-          type: integer
-          format: int32
-        y_index:
-          type: integer
-          format: int32
-    OverviewMetricCard:
-      type: object
-      required:
-      - key
-      - label
-      - value
-      - unit
-      properties:
-        key:
-          type: string
-        label:
-          type: string
-        unit:
-          type: string
-        value:
-          type: number
-          format: double
-    OverviewQualityComponent:
-      type: object
-      required:
-      - key
-      - label
-      - weight
-      - description
-      properties:
-        description:
-          type: string
-        key:
-          type: string
-        label:
-          type: string
-        weight:
-          type: number
-          format: double
-    OverviewQualityFormula:
-      type: object
-      required:
-      - score_kind
-      - components
-      properties:
-        components:
-          type: array
-          items:
-            $ref: '#/components/schemas/OverviewQualityComponent'
-        score_kind:
-          type: string
-    OverviewRankingGroup:
-      type: object
-      required:
-      - key
-      - title
-      - rows
-      properties:
-        key:
-          type: string
-        rows:
-          type: array
-          items:
-            $ref: '#/components/schemas/OverviewRankingRow'
-        title:
-          type: string
-    OverviewRankingRow:
-      type: object
-      required:
-      - label
-      - request_count
-      - success_rate
-      - quality_score
-      properties:
-        auth_error_rate:
-          type:
-          - number
-          - 'null'
-          format: double
-        cache_hit_rate:
-          type:
-          - number
-          - 'null'
-          format: double
-        empty_success_rate:
-          type:
-          - number
-          - 'null'
-          format: double
-        endpoint_id:
-          type:
-          - string
-          - 'null'
-          format: uuid
-        label:
-          type: string
-        mcp_bearer_token_slot:
-          type:
-          - integer
-          - 'null'
-          format: int32
-        mcp_server_id:
-          type:
-          - string
-          - 'null'
-          format: uuid
-        model:
-          type:
-          - string
-          - 'null'
-        p95_first_token_ms:
-          type:
-          - number
-          - 'null'
-          format: double
-        p95_total_ms:
-          type:
-          - number
-          - 'null'
-          format: double
-        quality_score:
-          type: number
-          format: double
-        rate_limit_rate:
-          type:
-          - number
-          - 'null'
-          format: double
-        request_count:
-          type: integer
-          format: int64
-        secondary_label:
-          type:
-          - string
-          - 'null'
-        success_rate:
-          type: number
-          format: double
-        upstream_5xx_rate:
-          type:
-          - number
-          - 'null'
-          format: double
-    OverviewTrendBucket:
-      type: object
-      required:
-      - bucket_at
-      - request_count
-      - success_rate
-      - quality_score
-      properties:
-        bucket_at:
-          type: string
-          format: date-time
-        p95_first_token_ms:
-          type:
-          - number
-          - 'null'
-          format: double
-        p95_total_ms:
-          type:
-          - number
-          - 'null'
-          format: double
-        quality_score:
-          type: number
-          format: double
-        request_count:
-          type: integer
-          format: int64
-        success_rate:
-          type: number
-          format: double
     ProviderEndpoint:
       type: object
       required:
@@ -5817,43 +5552,206 @@ components:
           type:
           - string
           - 'null'
+    RequestRecordOverviewBreakdownRow:
+      type: object
+      required:
+      - label
+      - request_count
+      - request_share
+      - success_count
+      - success_rate
+      - tokens
+      properties:
+        label:
+          type: string
+        mcp_server_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        model:
+          type:
+          - string
+          - 'null'
+        request_count:
+          type: integer
+          format: int64
+        request_share:
+          type: number
+          format: double
+        success_count:
+          type: integer
+          format: int64
+        success_rate:
+          type: number
+          format: double
+        token_share:
+          type:
+          - number
+          - 'null'
+          format: double
+        tokens:
+          $ref: '#/components/schemas/RequestRecordOverviewTokenUsage'
+    RequestRecordOverviewErrorRow:
+      type: object
+      required:
+      - key
+      - label
+      - count
+      - rate
+      properties:
+        count:
+          type: integer
+          format: int64
+        key:
+          type: string
+        label:
+          type: string
+        rate:
+          type: number
+          format: double
     RequestRecordOverviewRange:
       type: string
       enum:
       - 24h
       - 7d
       - 30d
+      - month
       - custom
     RequestRecordOverviewResponse:
       type: object
       required:
-      - summary_cards
+      - summary
       - trend
-      - quality_formula
-      - top_rankings
-      - heatmap
+      - breakdown
       - error_breakdown
       properties:
+        breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequestRecordOverviewBreakdownRow'
         error_breakdown:
           type: array
           items:
-            $ref: '#/components/schemas/OverviewErrorBreakdownRow'
-        heatmap:
-          $ref: '#/components/schemas/OverviewHeatmap'
-        quality_formula:
-          $ref: '#/components/schemas/OverviewQualityFormula'
-        summary_cards:
-          type: array
-          items:
-            $ref: '#/components/schemas/OverviewMetricCard'
-        top_rankings:
-          type: array
-          items:
-            $ref: '#/components/schemas/OverviewRankingGroup'
+            $ref: '#/components/schemas/RequestRecordOverviewErrorRow'
+        summary:
+          $ref: '#/components/schemas/RequestRecordOverviewSummary'
         trend:
           type: array
           items:
-            $ref: '#/components/schemas/OverviewTrendBucket'
+            $ref: '#/components/schemas/RequestRecordOverviewTrendBucket'
+    RequestRecordOverviewSummary:
+      type: object
+      required:
+      - request_count
+      - success_count
+      - error_count
+      - method_count
+      - success_rate
+      - tokens
+      properties:
+        error_count:
+          type: integer
+          format: int64
+        method_count:
+          type: integer
+          format: int64
+        p95_first_token_ms:
+          type:
+          - number
+          - 'null'
+          format: double
+        p95_total_ms:
+          type:
+          - number
+          - 'null'
+          format: double
+        request_count:
+          type: integer
+          format: int64
+        success_count:
+          type: integer
+          format: int64
+        success_rate:
+          type: number
+          format: double
+        tokens:
+          $ref: '#/components/schemas/RequestRecordOverviewTokenUsage'
+    RequestRecordOverviewTokenUsage:
+      type: object
+      required:
+      - input_tokens
+      - cache_read_tokens
+      - cache_write_tokens
+      - output_tokens
+      - total_tokens
+      properties:
+        cache_hit_rate:
+          type:
+          - number
+          - 'null'
+          format: double
+        cache_rate:
+          type:
+          - number
+          - 'null'
+          format: double
+        cache_read_tokens:
+          type: integer
+          format: int64
+        cache_write_tokens:
+          type: integer
+          format: int64
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        total_tokens:
+          type: integer
+          format: int64
+    RequestRecordOverviewTrendBucket:
+      type: object
+      required:
+      - bucket_at
+      - request_count
+      - success_count
+      - error_count
+      - success_rate
+      - error_rate
+      - tokens
+      properties:
+        bucket_at:
+          type: string
+          format: date-time
+        error_count:
+          type: integer
+          format: int64
+        error_rate:
+          type: number
+          format: double
+        p95_first_token_ms:
+          type:
+          - number
+          - 'null'
+          format: double
+        p95_total_ms:
+          type:
+          - number
+          - 'null'
+          format: double
+        request_count:
+          type: integer
+          format: int64
+        success_count:
+          type: integer
+          format: int64
+        success_rate:
+          type: number
+          format: double
+        tokens:
+          $ref: '#/components/schemas/RequestRecordOverviewTokenUsage'
     RequestRecordPage:
       type: object
       required:
