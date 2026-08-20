@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, created_at, updated_at\nFROM provider_endpoints\nORDER BY updated_at DESC\n",
+  "query": "INSERT INTO provider_endpoints(scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
   "describe": {
     "columns": [
       {
@@ -159,6 +159,17 @@
       },
       {
         "ordinal": 14,
+        "name": "mcp_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "mcp_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -169,7 +180,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -181,7 +192,21 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4",
+        "Text",
+        "Bool",
+        "Bool"
+      ]
     },
     "nullable": [
       false,
@@ -199,8 +224,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "0eeeda65242a97346eef667022ce5793a46d9b57e43f80d009db1142c34ccdaf"
+  "hash": "0c29c6e6417a9babf2e81ad4b619f975ac2ae8ddefdcb247c73ae9f86ce7f94c"
 }

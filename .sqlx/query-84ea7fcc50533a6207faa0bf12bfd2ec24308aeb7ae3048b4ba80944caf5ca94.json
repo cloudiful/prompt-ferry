@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE provider_endpoints\nSET\n    scope = $2,\n    owner_user_id = $3,\n    name = $4,\n    provider = $5,\n    provider_region = $6,\n    base_url = $7,\n    native_api = $8,\n    native_api_source = $9,\n    daily_max_requests = $10,\n    monthly_max_requests = $11,\n    api_key = $12,\n    key_lb_enabled = $13,\n    enabled = $14,\n    updated_at = NOW()\nWHERE endpoint_id = $1\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, created_at, updated_at\n",
+  "query": "UPDATE provider_endpoints\nSET\n    scope = $2,\n    owner_user_id = $3,\n    name = $4,\n    provider = $5,\n    provider_region = $6,\n    base_url = $7,\n    native_api = $8,\n    native_api_source = $9,\n    daily_max_requests = $10,\n    monthly_max_requests = $11,\n    api_key = $12,\n    key_lb_enabled = $13,\n    enabled = $14,\n    updated_at = NOW()\nWHERE endpoint_id = $1\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
   "describe": {
     "columns": [
       {
@@ -159,6 +159,17 @@
       },
       {
         "ordinal": 14,
+        "name": "mcp_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "mcp_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -169,7 +180,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -214,8 +225,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "a8f7f98e515268e9a70a65791baf76bd7d6ae170f4acb8463cf481871aaf2ee1"
+  "hash": "84ea7fcc50533a6207faa0bf12bfd2ec24308aeb7ae3048b4ba80944caf5ca94"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO provider_endpoints(scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, created_at, updated_at\n",
+  "query": "SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\nFROM provider_endpoints\nORDER BY updated_at DESC, endpoint_id DESC\nOFFSET $1\nLIMIT $2\n",
   "describe": {
     "columns": [
       {
@@ -159,6 +159,17 @@
       },
       {
         "ordinal": 14,
+        "name": "mcp_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "mcp_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -169,7 +180,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -182,19 +193,8 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
         "Int8",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Int4",
-        "Int4",
-        "Text",
-        "Bool",
-        "Bool"
+        "Int8"
       ]
     },
     "nullable": [
@@ -213,8 +213,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "cabfe576ee801f3692951a3d65ac29a9a23bad46a1e8ac94b2a0ed1019089580"
+  "hash": "a159134953833591aa441a97326efb88099b112ed8751352dcc92bc5341ecccf"
 }

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE provider_endpoints\nSET mcp_enabled = $2,\n    updated_at = NOW()\nWHERE endpoint_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ce4f56fc922ba06dc3fca1bfc3ac9a54523fe22b2b02eb80e69b3e44131b2a4c"
+}

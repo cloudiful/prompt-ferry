@@ -1,0 +1,218 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\nFROM provider_endpoints\nORDER BY updated_at DESC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "owner_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "provider_region",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "provider_region"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "base_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "base_url"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "native_api",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "native_api"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "native_api_source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "native_api_source"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "daily_max_requests",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "daily_max_requests"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "monthly_max_requests",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "monthly_max_requests"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "api_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "api_key"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "key_lb_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "key_lb_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "mcp_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "mcp_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "75c0f40aa58bfc621c543f57b6ac1cfd1cec0311235041b995cf9c8b8b6ceec2"
+}

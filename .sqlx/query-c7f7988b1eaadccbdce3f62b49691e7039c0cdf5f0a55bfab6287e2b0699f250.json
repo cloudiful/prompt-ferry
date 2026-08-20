@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT server_id, scope, owner_user_id, name, aggregate_naming_mode, transport, url, command, args, env_json, bearer_tokens_json, http_headers_json, tool_filter_mode, allowed_tools, disabled_tools, disabled_resources, daily_max_requests, monthly_max_requests, enabled, timeout_ms, lifecycle_policy, lifecycle_manual_protocol_version, lifecycle_learned_mode, lifecycle_learned_protocol_version, lifecycle_learned_for_updated_at, lifecycle_learned_at, created_at, updated_at\nFROM mcp_servers\nWHERE enabled = TRUE\n  AND (\n    (scope = 'admin' AND owner_user_id IS NULL)\n    OR (scope = 'user' AND owner_user_id = $1)\n  )\nORDER BY name ASC\n",
+  "query": "SELECT server_id, source_endpoint_id, scope, owner_user_id, name, aggregate_naming_mode, transport, url, command, args, env_json, bearer_tokens_json, http_headers_json, tool_filter_mode, allowed_tools, disabled_tools, disabled_resources, daily_max_requests, monthly_max_requests, enabled, timeout_ms, lifecycle_policy, lifecycle_manual_protocol_version, lifecycle_learned_mode, lifecycle_learned_protocol_version, lifecycle_learned_for_updated_at, lifecycle_learned_at, created_at, updated_at\nFROM mcp_servers\nWHERE source_endpoint_id = $1\n",
   "describe": {
     "columns": [
       {
@@ -16,6 +16,17 @@
       },
       {
         "ordinal": 1,
+        "name": "source_endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "source_endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
         "name": "scope",
         "type_info": "Text",
         "origin": {
@@ -26,7 +37,7 @@
         }
       },
       {
-        "ordinal": 2,
+        "ordinal": 3,
         "name": "owner_user_id",
         "type_info": "Int8",
         "origin": {
@@ -37,7 +48,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "name",
         "type_info": "Text",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "aggregate_naming_mode",
         "type_info": "Text",
         "origin": {
@@ -59,7 +70,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "transport",
         "type_info": "Text",
         "origin": {
@@ -70,7 +81,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "url",
         "type_info": "Text",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "command",
         "type_info": "Text",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "args",
         "type_info": "Jsonb",
         "origin": {
@@ -103,7 +114,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "env_json",
         "type_info": "Jsonb",
         "origin": {
@@ -114,7 +125,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "bearer_tokens_json",
         "type_info": "Jsonb",
         "origin": {
@@ -125,7 +136,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "http_headers_json",
         "type_info": "Jsonb",
         "origin": {
@@ -136,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "tool_filter_mode",
         "type_info": "Text",
         "origin": {
@@ -147,7 +158,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "allowed_tools",
         "type_info": "Jsonb",
         "origin": {
@@ -158,7 +169,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "disabled_tools",
         "type_info": "Jsonb",
         "origin": {
@@ -169,7 +180,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "disabled_resources",
         "type_info": "Jsonb",
         "origin": {
@@ -180,7 +191,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "daily_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -191,7 +202,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "monthly_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -202,7 +213,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -213,7 +224,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "timeout_ms",
         "type_info": "Int4",
         "origin": {
@@ -224,7 +235,7 @@
         }
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "lifecycle_policy",
         "type_info": "Text",
         "origin": {
@@ -235,7 +246,7 @@
         }
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "lifecycle_manual_protocol_version",
         "type_info": "Text",
         "origin": {
@@ -246,7 +257,7 @@
         }
       },
       {
-        "ordinal": 22,
+        "ordinal": 23,
         "name": "lifecycle_learned_mode",
         "type_info": "Text",
         "origin": {
@@ -257,7 +268,7 @@
         }
       },
       {
-        "ordinal": 23,
+        "ordinal": 24,
         "name": "lifecycle_learned_protocol_version",
         "type_info": "Text",
         "origin": {
@@ -268,7 +279,7 @@
         }
       },
       {
-        "ordinal": 24,
+        "ordinal": 25,
         "name": "lifecycle_learned_for_updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -279,7 +290,7 @@
         }
       },
       {
-        "ordinal": 25,
+        "ordinal": 26,
         "name": "lifecycle_learned_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -290,7 +301,7 @@
         }
       },
       {
-        "ordinal": 26,
+        "ordinal": 27,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -301,7 +312,7 @@
         }
       },
       {
-        "ordinal": 27,
+        "ordinal": 28,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -314,11 +325,12 @@
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
       false,
+      true,
       false,
       true,
       false,
@@ -348,5 +360,5 @@
       false
     ]
   },
-  "hash": "8ec7fcbaeaa17b04e3ee71af7fd7292a8c58fa3e2f8de90d8b5436ddec8f0365"
+  "hash": "c7f7988b1eaadccbdce3f62b49691e7039c0cdf5f0a55bfab6287e2b0699f250"
 }

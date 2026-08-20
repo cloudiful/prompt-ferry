@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, created_at, updated_at\nFROM provider_endpoints\nORDER BY updated_at DESC, endpoint_id DESC\nOFFSET $1\nLIMIT $2\n",
+  "query": "SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\nFROM provider_endpoints\nWHERE endpoint_id = $1\n",
   "describe": {
     "columns": [
       {
@@ -159,6 +159,17 @@
       },
       {
         "ordinal": 14,
+        "name": "mcp_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "mcp_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -169,7 +180,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -182,8 +193,7 @@
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -202,8 +212,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "2c6c4689bf2556f8ff55e00982fb42915b5118a3d5006043afddc15c3f3bf3ce"
+  "hash": "be4e60aa6317cb4da2e4db362799441b089e8ed640255dc6c462bf723ee94627"
 }
