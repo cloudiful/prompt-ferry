@@ -33,14 +33,3 @@ pub async fn get_usage_assistant_artifacts(
     .fetch_all(pool)
     .await?)
 }
-
-pub async fn list_usage_events_missing_assistant_artifacts(
-    pool: &PgPool,
-) -> Result<Vec<RequestRecordChainEntry>> {
-    Ok(sqlx::query_file_as!(
-        RequestRecordChainEntry,
-        "src/sql/usage/list_usage_events_missing_assistant_artifacts.sql",
-    )
-    .fetch_all(pool)
-    .await?)
-}

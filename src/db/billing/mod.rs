@@ -1,12 +1,6 @@
-mod backfill;
 mod charges;
 mod prices;
 
-pub use backfill::{
-    BackfillBatchOutcome, BackfillCandidate, BackfillDecision, BackfillOptions, BackfillOutcome,
-    BackfillStats, SKIPPED_TRUNCATED_REASON, StatsBucket, backfill_token_usage, billing_lookup_key,
-    classify_outcome, decide_repair, parse_raw_response,
-};
 pub use charges::{
     BillingSummary, billing_summary, get_charge, list_charge_export, list_charges,
     list_monthly_export, record_usage_charge, reprice_unpriced_charges,

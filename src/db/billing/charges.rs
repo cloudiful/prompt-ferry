@@ -318,30 +318,14 @@ pub async fn reprice_unpriced_charges(pool: &PgPool, limit: i64) -> Result<u64> 
     Ok(changed)
 }
 
-pub(super) fn normalized_usage(input: &RequestRecordCreate) -> Option<NormalizedBillingUsage> {
-    normalized_usage_from_fields(
-        input.input_tokens,
-        input.output_tokens,
-        input.cached_tokens,
-        input.cache_read_tokens,
-        input.cache_write_tokens,
-    )
-}
-
-pub(super) fn normalized_usage_from_fields(
-    input_tokens: Option<i64>,
-    output_tokens: Option<i64>,
-    cached_tokens: Option<i64>,
-    cache_read_tokens: Option<i64>,
-    cache_write_tokens: Option<i64>,
-) -> Option<NormalizedBillingUsage> {
+fn normalized_usage(input: &RequestRecordCreate) -> Option<NormalizedBillingUsage> {
     NormalizedBillingUsage::from_usage(&crate::usage::TokenUsage {
-        input_tokens,
-        output_tokens,
+        input_tokens: input.input_tokens,
+        output_tokens: input.output_tokens,
         total_tokens: None,
-        cached_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
+        cached_tokens: input.cached_tokens,
+        cache_read_tokens: input.cache_read_tokens,
+        cache_write_tokens: input.cache_write_tokens,
     })
 }
 

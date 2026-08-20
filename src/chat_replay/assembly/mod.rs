@@ -18,6 +18,7 @@ use crate::{
 mod history;
 mod reconstruct;
 
+#[cfg(test)]
 pub(super) use history::fallback_artifact_for_entry;
 #[cfg(test)]
 pub(super) use reconstruct::{replay_assistant_message, replayable_output_items};

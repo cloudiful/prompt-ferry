@@ -28,7 +28,6 @@ mod replay_snapshots;
 mod route_locator;
 mod runtime;
 
-pub use artifacts::list_usage_events_missing_assistant_artifacts;
 pub use artifacts::{get_usage_assistant_artifacts, upsert_usage_assistant_artifact};
 pub use buckets::usage_buckets;
 pub(crate) use cleanup::run_raw_payload_maintenance_with_store;

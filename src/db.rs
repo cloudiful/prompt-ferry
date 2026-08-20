@@ -95,12 +95,11 @@ pub use usage::{
     latest_usage_event_locator_by_conversation,
     latest_usage_event_locator_by_provider_conversation_key, list_active_request_record_ids,
     list_request_record_facets, list_request_record_tool_calls, list_request_records,
-    list_usage_events_missing_assistant_artifacts, prune_usage_events, record_request_record,
-    record_request_record_with_raw_store, record_request_state, replay_snapshot_before_or_at_seq,
-    request_record_summary, request_records_overview, run_raw_payload_maintenance,
-    run_usage_content_maintenance, upsert_conversation_redaction_session,
-    upsert_request_record_tool_call, upsert_usage_assistant_artifact, upsert_usage_prompt_block,
-    usage_buckets,
+    prune_usage_events, record_request_record, record_request_record_with_raw_store,
+    record_request_state, replay_snapshot_before_or_at_seq, request_record_summary,
+    request_records_overview, run_raw_payload_maintenance, run_usage_content_maintenance,
+    upsert_conversation_redaction_session, upsert_request_record_tool_call,
+    upsert_usage_assistant_artifact, upsert_usage_prompt_block, usage_buckets,
 };
 pub use users::{
     bootstrap_admin, count_client_keys, create_client_key, create_user, delete_client_key,
