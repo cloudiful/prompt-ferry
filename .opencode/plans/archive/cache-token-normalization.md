@@ -1,11 +1,11 @@
 # Cache Token Normalization
 
-Status: IN_PROGRESS
+Status: COMPLETE
 
 ## Tracking
 
 - Mode: LOCAL_PLAN
-- Artifact: `.opencode/plans/cache-token-normalization.md`
+- Artifact: `.opencode/plans/archive/cache-token-normalization.md`
 - Forgejo fallback: `fj whoami --remote origin` failed because the configured Forgejo URL returned an invalid content type. Continue locally; do not block implementation.
 - 2026-08-20 recheck: `fj whoami --remote origin` now succeeds, but tracking remains LOCAL_PLAN because the mode is fixed for this task.
 
@@ -146,6 +146,7 @@ Acceptance: reviewer passes; changed paths are allowlisted; staged patch check p
 - 2026-08-20: Phase 3 reviewer round 1 returned FAIL with two P1 and three P2 findings; repair round 1 addressed cursor/failure/model/state/test-SQL findings.
 - 2026-08-20: Phase 3 reviewer round 2 returned FAIL with two P1 and three P2 findings; repair round 2 addressed truncation/load/diagnostic/pricing/NULL-token safety.
 - 2026-08-20: Final Phase 3 reviewer returned PASS_WITH_NOTES; no P0-P2 findings. Priced-path assertions and missing-price rollback integration regression were added before approval.
+- 2026-08-20: Aggregate reviewer returned PASS_WITH_NOTES for task commits `a77ecc7`, `2a89a32`, and `65530c8`; no P0-P2 findings. Unrelated commits `18b286d` and `63f9f93` were excluded from the task review.
 
 ## Blocked Questions
 
@@ -160,4 +161,4 @@ Acceptance: reviewer passes; changed paths are allowlisted; staged patch check p
 
 ## Final Status
 
-Phase 3 implementation is review-approved and ready for checkpoint. Production deployment and historical `usage_backfill --apply` execution have not been performed.
+COMPLETE. Phase 1, Phase 2, and Phase 3 are implemented, validated, independently reviewed, and checkpointed. Production deployment and historical `usage_backfill --apply` execution have not been performed.
