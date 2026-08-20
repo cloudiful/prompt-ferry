@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Reads the canonical token columns for one `request_records` row so the\n-- backfill integration tests can assert that a repair left the right values\n-- behind.\nSELECT\n    input_tokens,\n    output_tokens,\n    total_tokens,\n    cached_tokens,\n    cache_read_tokens,\n    cache_write_tokens\nFROM request_records\nWHERE event_id = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "input_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "input_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "output_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "output_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "total_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "total_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "cached_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "cached_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "cache_read_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "cache_read_tokens"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "cache_write_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "cache_write_tokens"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "4bdcc091c52c0e3c2c206d8a45ed2f29a1ad3598c6d00d8611b5ca5366b79bbf"
+}

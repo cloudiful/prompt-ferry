@@ -112,18 +112,40 @@ Acceptance: reviewer passes; changed paths are allowlisted; staged patch check p
 
 ### Phase 2: Unified cache-rate reporting
 
-- Status: IMPLEMENTED, review pending.
+- Status: DONE, review passed.
 - Dependency: Phase 1 checkpoint `a77ecc7` passed review and is complete.
 - Current phase baseline HEAD: `a77ecc7`.
 - User baseline remains empty; concurrent `.opencode/plans/mcp-list-usage-filter.md` remains out of scope.
 - Executor result: DONE. List/detail/summary/bucket SQL now bounds cache rates to [0,1] and prefers `cache_read_tokens`; overview presentation tests cover bounded ratios. Executor validation reported full lib tests, formatting, SQLx prepare check, and diff check passed.
-- Review focus: verify aggregate `COALESCE` semantics for legacy `cached_tokens`, generated `.sqlx` churn, and consistency with overview totals.
+- Repair result: restored active integration-test `.sqlx` caches, changed aggregates to per-row fallback before SUM, and made the bounded overview helper production code.
+- Review: PASS_WITH_NOTES. No P0-P2 findings. P3 notes: legacy `cached_tokens` display alias can differ from the cache-rate numerator; overview input tokens are ordinary-only while list/summary/buckets expose stored full input. Integration tests remain meaningful and their caches are preserved.
+- Validation: `SQLX_OFFLINE=true cargo check --tests --offline` passed; `cargo test --lib --offline` passed (547); overview tests passed (7); usage tests passed (64); formatting, diff check, and SQLx cache path review passed.
+- Checkpoint: commit `2a89a32`.
+
+### Phase 3: Historical usage backfill
+
+- Status: DONE, review passed.
+- Dependency: Phase 2 checkpoint `2a89a32` passed review and is complete.
+- Current phase baseline HEAD: `2a89a32`.
+- User baseline remains empty; no production data mutation is authorized in this session.
+- Implementation: reusable `BackfillOptions`/`BackfillStats` library API plus `usage_backfill` CLI. It parses retained PG raw responses through the canonical usage parser, updates only token fields, refreshes charges transactionally, defaults to dry-run, supports bounded batches/time windows/keyset cursor, skips truncated/object-only/missing payloads, and reports failed/skipped event diagnostics.
+- Safety repairs: cursor progression; explicit Failed classification and apply exit code; requested-model/model billing fallback; completed-only candidates; static test SQL; truncated-capture guard; Result-based raw loading; diagnostics; already-priced charge protection when its historical rule is unavailable; parsed-None preservation.
+- Test repairs: priced apply asserts `pricing_status`, `customer_amount`, and all four charge lines; regression test disables the exact historical rule and verifies request tokens, charge amount/status, and lines roll back unchanged.
+- Review: PASS_WITH_NOTES. No P0-P2 findings. P3 notes: parser fallback `.ok()` style, one misleading unit-test name, dry-run failures intentionally return zero, diagnostics are bounded at CLI output but retained per bounded batch in memory. No repair required.
+- Validation: `cargo fmt --check`; `cargo test --lib` (571); backfill unit tests (24); `cargo test --test usage_token_backfill` (10); safety tests (5); regression test (1); `SQLX_OFFLINE=true cargo check --tests --offline`; `git diff --check`; and `.sqlx` scope checks passed. No production `--apply` run.
+- Changed paths: Phase 3 backfill library/CLI/SQL/tests and 8 new `.sqlx` entries; existing integration-test caches unchanged.
+- Checkpoint: ready for `phase(cache-token-normalization): add safe historical usage backfill` after exact-path staging and staged diff checks.
 
 ## Review History
 
 - 2026-08-20: Initial plan created. No implementation review yet.
 - 2026-08-20: Phase 1 executor reported DONE; independent review pending.
 - 2026-08-20: Phase 1 reviewer returned PASS_WITH_NOTES; no P0-P2 findings, no repair round required.
+- 2026-08-20: Phase 2 reviewer initially found active test-cache deletions and aggregate/production-helper issues; repair restored caches and fixed formulas.
+- 2026-08-20: Phase 2 re-review returned PASS_WITH_NOTES; no P0-P2 findings. Integration-test files were assessed as meaningful and retained; only their `.sqlx` caches needed restoration.
+- 2026-08-20: Phase 3 reviewer round 1 returned FAIL with two P1 and three P2 findings; repair round 1 addressed cursor/failure/model/state/test-SQL findings.
+- 2026-08-20: Phase 3 reviewer round 2 returned FAIL with two P1 and three P2 findings; repair round 2 addressed truncation/load/diagnostic/pricing/NULL-token safety.
+- 2026-08-20: Final Phase 3 reviewer returned PASS_WITH_NOTES; no P0-P2 findings. Priced-path assertions and missing-price rollback integration regression were added before approval.
 
 ## Blocked Questions
 
@@ -138,4 +160,4 @@ Acceptance: reviewer passes; changed paths are allowlisted; staged patch check p
 
 ## Final Status
 
-Implementation pending. Production deployment/backfill execution not performed.
+Phase 3 implementation is review-approved and ready for checkpoint. Production deployment and historical `usage_backfill --apply` execution have not been performed.

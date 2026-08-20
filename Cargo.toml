@@ -1,6 +1,6 @@
 [workspace]
-members = [".", "tools/db-init", "tools/usage-replay-backfill"]
-default-members = [".", "tools/db-init", "tools/usage-replay-backfill"]
+members = [".", "tools/db-init", "tools/usage-backfill", "tools/usage-replay-backfill"]
+default-members = [".", "tools/db-init", "tools/usage-backfill", "tools/usage-replay-backfill"]
 
 [package]
 name = "prompt-ferry"

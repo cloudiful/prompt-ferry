@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Marks a `request_records` row as having a truncated response capture so the\n-- backfill candidate SQL surfaces it via `response_capture_truncated`. Used\n-- by the truncated-guard regression test.\nUPDATE request_records\nSET response_capture_truncated = $2\nWHERE event_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d304bd8605ee78c551915d691bbd2ecbcd060570ecb0bfd41f885cfae1e82102"
+}

@@ -318,18 +318,37 @@ pub async fn reprice_unpriced_charges(pool: &PgPool, limit: i64) -> Result<u64> 
     Ok(changed)
 }
 
-fn normalized_usage(input: &RequestRecordCreate) -> Option<NormalizedBillingUsage> {
+pub(super) fn normalized_usage(input: &RequestRecordCreate) -> Option<NormalizedBillingUsage> {
+    normalized_usage_from_fields(
+        input.input_tokens,
+        input.output_tokens,
+        input.cached_tokens,
+        input.cache_read_tokens,
+        input.cache_write_tokens,
+    )
+}
+
+pub(super) fn normalized_usage_from_fields(
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cached_tokens: Option<i64>,
+    cache_read_tokens: Option<i64>,
+    cache_write_tokens: Option<i64>,
+) -> Option<NormalizedBillingUsage> {
     NormalizedBillingUsage::from_usage(&crate::usage::TokenUsage {
-        input_tokens: input.input_tokens,
-        output_tokens: input.output_tokens,
-        total_tokens: input.total_tokens,
-        cached_tokens: input.cached_tokens,
-        cache_read_tokens: input.cache_read_tokens,
-        cache_write_tokens: input.cache_write_tokens,
+        input_tokens,
+        output_tokens,
+        total_tokens: None,
+        cached_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
     })
 }
 
-fn amount_for_usage(rule: &BillingPriceRuleRow, usage: NormalizedBillingUsage) -> Decimal {
+pub(super) fn amount_for_usage(
+    rule: &BillingPriceRuleRow,
+    usage: NormalizedBillingUsage,
+) -> Decimal {
     let mut total = Decimal::ZERO;
     for meter in BillingMeter::ALL {
         total += Decimal::from(usage.token_count(meter)) * rule.rate(meter)
@@ -338,7 +357,7 @@ fn amount_for_usage(rule: &BillingPriceRuleRow, usage: NormalizedBillingUsage) -
     total
 }
 
-async fn insert_lines(
+pub(super) async fn insert_lines(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     charge_id: i64,
     usage: NormalizedBillingUsage,
