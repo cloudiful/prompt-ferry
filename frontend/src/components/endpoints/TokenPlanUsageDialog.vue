@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onBeforeUnmount, ref, watch } from 'vue'
 import type {
   TokenPlanModelUsage,
   TokenPlanUsageResponse,
@@ -14,8 +15,41 @@ const props = defineProps<{
 
 const visible = defineModel<boolean>('visible', { required: true })
 
+// Live "now" anchor used by the reset countdown. It only ticks while the
+// dialog is open so the rendered text stays fresh without leaking background
+// timers after the user closes the modal.
+const nowMs = ref<number>(Date.now())
+let ticker: ReturnType<typeof setInterval> | null = null
+
+function startTicker(): void {
+  if (ticker !== null) return
+  nowMs.value = Date.now()
+  ticker = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+}
+
+function stopTicker(): void {
+  if (ticker === null) return
+  clearInterval(ticker)
+  ticker = null
+}
+
+watch(
+  () => visible.value,
+  (open) => {
+    if (open) startTicker()
+    else stopTicker()
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(stopTicker)
+
 function remainingPercent(window: TokenPlanWindowUsage): number {
-  return Math.max(0, Math.min(100, window.remaining_percent ?? 0))
+  const raw = window.remaining_percent
+  if (raw == null || !Number.isFinite(raw)) return 0
+  return Math.max(0, Math.min(100, raw))
 }
 
 function usedPercent(window: TokenPlanWindowUsage): number {
@@ -25,16 +59,47 @@ function usedPercent(window: TokenPlanWindowUsage): number {
 function progressColor(
   window: TokenPlanWindowUsage,
 ): 'success' | 'warning' | 'error' {
+  // Map by remaining percentage so colors stay stable across the full range
+  // and abnormal inputs fall into the bounded ends via remainingPercent().
   const remaining = remainingPercent(window)
   if (remaining <= 10) return 'error'
   if (remaining <= 30) return 'warning'
   return 'success'
 }
 
-function formatReset(value: string | null | undefined): string {
-  if (!value) return '-'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString()
+function endTimeMs(window: TokenPlanWindowUsage): number | null {
+  const value = window.end_at
+  if (typeof value !== 'string' || value.length === 0) return null
+  const ts = Date.parse(value)
+  return Number.isNaN(ts) ? null : ts
+}
+
+function remainingMs(window: TokenPlanWindowUsage): number | null {
+  // Prefer end_at so the countdown tracks wall-clock time; fall back to the
+  // snapshot value when no parseable end_at is available.
+  const end = endTimeMs(window)
+  if (end !== null) return end - nowMs.value
+  const snapshot = window.remains_time_ms
+  if (typeof snapshot === 'number' && Number.isFinite(snapshot)) {
+    return snapshot
+  }
+  return null
+}
+
+function formatRemaining(window: TokenPlanWindowUsage): string {
+  const ms = remainingMs(window)
+  if (ms === null) return '-'
+  if (ms <= 0) return props.t('tokenPlanExpired')
+  const totalSeconds = Math.floor(ms / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  if (hours > 0) {
+    return props.t('tokenPlanResetExpiresHoursMinutes', { hours, minutes })
+  }
+  if (minutes > 0) {
+    return props.t('tokenPlanResetExpiresMinutes', { minutes })
+  }
+  return props.t('tokenPlanResetExpiresSeconds', { seconds: totalSeconds })
 }
 
 function windowLabel(
@@ -63,7 +128,7 @@ function windowLabel(
           <div
             v-for="key in usage.keys"
             :key="key.key_id"
-            class="grid gap-3 rounded-lg border border-default p-3"
+            class="grid gap-3 border-t border-default pt-3 first:border-t-0 first:pt-0"
           >
             <div class="flex flex-wrap items-center justify-between gap-2">
               <span class="font-semibold text-highlighted">{{
@@ -80,15 +145,12 @@ function windowLabel(
             <p v-if="!key.ok" class="break-words text-error">
               {{ key.error_message ?? t('tokenPlanUsageFailed') }}
             </p>
-            <div v-else class="grid gap-3 md:grid-cols-2">
+            <template v-else>
               <template
                 v-for="model in key.model_remains"
                 :key="model.model_name"
               >
-                <div
-                  v-if="model.interval"
-                  class="grid gap-2 rounded-md bg-elevated p-3"
-                >
+                <div v-if="model.interval" class="grid gap-1.5">
                   <div class="flex items-center justify-between gap-2">
                     <span class="font-medium text-highlighted">{{
                       windowLabel(model, 'interval')
@@ -103,16 +165,10 @@ function windowLabel(
                   />
                   <div class="flex justify-between gap-2 text-dimmed">
                     <span>{{ t('tokenPlanRemaining') }}</span>
-                    <span
-                      >{{ t('tokenPlanResetAt') }}
-                      {{ formatReset(model.interval.end_at) }}</span
-                    >
+                    <span>{{ formatRemaining(model.interval) }}</span>
                   </div>
                 </div>
-                <div
-                  v-if="model.weekly"
-                  class="grid gap-2 rounded-md bg-elevated p-3"
-                >
+                <div v-if="model.weekly" class="grid gap-1.5">
                   <div class="flex items-center justify-between gap-2">
                     <span class="font-medium text-highlighted">{{
                       windowLabel(model, 'weekly')
@@ -127,14 +183,11 @@ function windowLabel(
                   />
                   <div class="flex justify-between gap-2 text-dimmed">
                     <span>{{ t('tokenPlanRemaining') }}</span>
-                    <span
-                      >{{ t('tokenPlanResetAt') }}
-                      {{ formatReset(model.weekly.end_at) }}</span
-                    >
+                    <span>{{ formatRemaining(model.weekly) }}</span>
                   </div>
                 </div>
               </template>
-            </div>
+            </template>
           </div>
           <p v-if="usage.keys.length === 0" class="text-dimmed">
             {{ t('tokenPlanNoUsage') }}
