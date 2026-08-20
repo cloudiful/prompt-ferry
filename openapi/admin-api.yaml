@@ -3281,6 +3281,10 @@ components:
           - 'null'
         key_lb_enabled:
           type: boolean
+        mcp_enabled:
+          type:
+          - boolean
+          - 'null'
         monthly_max_requests:
           type:
           - integer
@@ -3995,6 +3999,11 @@ components:
         server_id:
           type: string
           format: uuid
+        source_endpoint_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
         timeout_ms:
           type: integer
           format: int32
@@ -4089,6 +4098,11 @@ components:
           type:
           - string
           - 'null'
+        source_endpoint_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
         timeout_ms:
           type:
           - integer
@@ -4466,6 +4480,7 @@ components:
       - native_api_source
       - key_lb_enabled
       - enabled
+      - mcp_enabled
       - created_at
       - updated_at
       properties:
@@ -4489,6 +4504,8 @@ components:
           type: string
           format: uuid
         key_lb_enabled:
+          type: boolean
+        mcp_enabled:
           type: boolean
         monthly_max_requests:
           type:

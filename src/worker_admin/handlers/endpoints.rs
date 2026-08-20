@@ -35,14 +35,29 @@ pub(super) async fn create_endpoint(
             "base_url must be the provider base URL without /v1",
         );
     }
+    let mcp_enabled = body
+        .mcp_enabled
+        .unwrap_or(body.provider == db::EndpointProvider::Minimax);
     let input = match resolve_endpoint_input(&state, body, None).await {
         Ok(input) => input,
         Err(response) => return response,
     };
-    match db::create_endpoint(&state.pool, input).await {
+    match db::create_endpoint_with_mcp(&state.pool, input, mcp_enabled).await {
         Ok(endpoint) => {
+            if let Err(err) = db::sync_minimax_mcp_server(&state.pool, &endpoint, mcp_enabled).await
+            {
+                return internal(&state, err);
+            }
+            refresh_managed_minimax_mcp(&state, endpoint.endpoint_id).await;
             let _ = publish_snapshot(&state).await;
-            Json(endpoint).into_response()
+            // The first INSERT already set `mcp_enabled`; reload so the
+            // synchronous response reflects the canonical row plus any
+            // API-key side effects.
+            match db::get_endpoint(&state.pool, endpoint.endpoint_id).await {
+                Ok(Some(endpoint)) => Json(endpoint).into_response(),
+                Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
+                Err(err) => internal(&state, err),
+            }
         }
         Err(err) => internal(&state, err),
     }
@@ -69,17 +84,57 @@ pub(super) async fn update_endpoint(
             "base_url must be the provider base URL without /v1",
         );
     }
+    // When the provider is changed away from MiniMax, MCP exposure is no
+    // longer valid; resolve_endpoint_input already rejects an explicit
+    // `mcp_enabled: true` for non-MiniMax providers, so any other value
+    // (None, Some(false)) must collapse to false here.
+    let provider_is_minimax = body.provider == db::EndpointProvider::Minimax;
+    let mcp_enabled = if provider_is_minimax {
+        body.mcp_enabled.unwrap_or(existing.mcp_enabled)
+    } else {
+        false
+    };
     let input = match resolve_endpoint_input(&state, body, Some(existing.api_keys)).await {
         Ok(input) => input,
         Err(response) => return response,
     };
     match db::update_endpoint(&state.pool, endpoint_id, input).await {
         Ok(Some(endpoint)) => {
+            if let Err(err) =
+                db::set_endpoint_mcp_enabled(&state.pool, endpoint.endpoint_id, mcp_enabled).await
+            {
+                return internal(&state, err);
+            }
+            let endpoint = match db::get_endpoint(&state.pool, endpoint.endpoint_id).await {
+                Ok(Some(endpoint)) => endpoint,
+                Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
+                Err(err) => return internal(&state, err),
+            };
+            if let Err(err) = db::sync_minimax_mcp_server(&state.pool, &endpoint, mcp_enabled).await
+            {
+                return internal(&state, err);
+            }
+            refresh_managed_minimax_mcp(&state, endpoint.endpoint_id).await;
             let _ = publish_snapshot(&state).await;
-            Json(endpoint).into_response()
+            match db::get_endpoint(&state.pool, endpoint.endpoint_id).await {
+                Ok(Some(endpoint)) => Json(endpoint).into_response(),
+                Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
+                Err(err) => internal(&state, err),
+            }
         }
         Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
         Err(err) => internal(&state, err),
+    }
+}
+
+async fn refresh_managed_minimax_mcp(state: &AdminState, endpoint_id: Uuid) {
+    match db::get_mcp_server_by_source_endpoint(&state.pool, endpoint_id).await {
+        Ok(Some(server)) if server.enabled => state.mcp_catalog_service.spawn_refresh(server),
+        Ok(Some(server)) => state.mcp_catalog_service.invalidate(server.server_id).await,
+        Ok(None) => {}
+        Err(err) => {
+            tracing::warn!(error = %err, %endpoint_id, "failed to refresh managed MiniMax MCP")
+        }
     }
 }
 
@@ -91,8 +146,20 @@ pub(super) async fn delete_endpoint(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
+    // Prefetch the managed MCP row so we can invalidate its local and
+    // Valkey-backed catalog cache after the endpoint is gone. A missing row
+    // (no managed MCP for this endpoint) is treated as a no-op so the
+    // delete path is not coupled to MCP exposure.
+    let managed_server = match db::get_mcp_server_by_source_endpoint(&state.pool, endpoint_id).await
+    {
+        Ok(server) => server,
+        Err(err) => return internal(&state, err),
+    };
     match db::delete_endpoint(&state.pool, endpoint_id).await {
         Ok(true) => {
+            if let Some(server) = managed_server {
+                state.mcp_catalog_service.invalidate(server.server_id).await;
+            }
             let _ = publish_snapshot(&state).await;
             StatusCode::NO_CONTENT.into_response()
         }

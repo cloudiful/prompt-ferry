@@ -146,6 +146,7 @@ mod tests {
         let mut create = McpServerRequest {
             scope: Some("system".to_string()),
             owner_user_id: None,
+            source_endpoint_id: None,
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "stdio".to_string(),
@@ -181,6 +182,7 @@ mod tests {
         let update = McpServerRequest {
             scope: Some("admin".to_string()),
             owner_user_id: Some(42),
+            source_endpoint_id: None,
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "stdio".to_string(),
@@ -203,7 +205,7 @@ mod tests {
         };
         assert!(
             update
-                .validate_for_update(&state, Uuid::new_v4(), &user)
+                .validate_for_update(&state, Uuid::new_v4(), None, &user)
                 .await
                 .is_err()
         );
@@ -214,6 +216,7 @@ mod tests {
         let input = McpServerRequest {
             scope: Some("admin".to_string()),
             owner_user_id: None,
+            source_endpoint_id: None,
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "stdio".to_string(),
@@ -247,6 +250,7 @@ mod tests {
     fn mcp_server_into_input_preserves_existing_tokens_when_missing() {
         let existing = db::McpServer {
             server_id: Uuid::new_v4(),
+            source_endpoint_id: None,
             scope: "admin".to_string(),
             owner_user_id: None,
             name: "catalog".to_string(),
@@ -279,6 +283,7 @@ mod tests {
         let input = McpServerRequest {
             scope: Some("admin".to_string()),
             owner_user_id: None,
+            source_endpoint_id: None,
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "http".to_string(),
@@ -309,6 +314,7 @@ mod tests {
         let cleared = McpServerRequest {
             scope: Some("admin".to_string()),
             owner_user_id: None,
+            source_endpoint_id: None,
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "http".to_string(),
@@ -334,6 +340,7 @@ mod tests {
         let replaced = McpServerRequest {
             scope: Some("admin".to_string()),
             owner_user_id: None,
+            source_endpoint_id: None,
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "http".to_string(),
@@ -395,6 +402,7 @@ mod tests {
             let request = McpServerRequest {
                 scope: Some("admin".to_string()),
                 owner_user_id: None,
+                source_endpoint_id: None,
                 name: "reserved-header-server".to_string(),
                 aggregate_naming_mode: None,
                 transport: "http".to_string(),
@@ -427,6 +435,7 @@ mod tests {
     fn lifecycle_manual_protocol_version_none_preserves_existing_and_empty_clears() {
         let existing = db::McpServer {
             server_id: Uuid::new_v4(),
+            source_endpoint_id: None,
             scope: "admin".to_string(),
             owner_user_id: None,
             name: "catalog".to_string(),
@@ -460,6 +469,7 @@ mod tests {
         let preserved = McpServerRequest {
             scope: Some("admin".to_string()),
             owner_user_id: None,
+            source_endpoint_id: None,
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "http".to_string(),
@@ -490,6 +500,7 @@ mod tests {
         let cleared = McpServerRequest {
             scope: Some("admin".to_string()),
             owner_user_id: None,
+            source_endpoint_id: None,
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "http".to_string(),

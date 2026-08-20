@@ -18,6 +18,15 @@ pub async fn fetch_server_snapshot(
 ) -> anyhow::Result<ServerCatalogSnapshot> {
     let timeout = Duration::from_millis(server.timeout_ms.max(100) as u64);
     tokio::time::timeout(timeout, async {
+        if server.transport == "builtin_minimax" {
+            let mut snapshot = crate::mcp::builtin::catalog();
+            snapshot.tools.retain(|item| {
+                item.get("name")
+                    .and_then(Value::as_str)
+                    .is_none_or(|name| is_tool_allowed(server, name))
+            });
+            return Ok(snapshot);
+        }
         let client = transport::connect(pool, server, None).await?;
         let result = async {
             let capabilities = client
@@ -162,6 +171,7 @@ mod tests {
     fn server(transport: &str) -> McpServer {
         McpServer {
             server_id: uuid::Uuid::new_v4(),
+            source_endpoint_id: None,
             scope: "admin".to_string(),
             owner_user_id: None,
             name: "alpha".to_string(),

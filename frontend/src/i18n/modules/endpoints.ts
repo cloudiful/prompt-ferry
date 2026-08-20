@@ -18,6 +18,8 @@ export const endpointMessages = {
       '模型请求使用此自定义地址；套餐用量仍查询所选区域的 MiniMax 官方地址。',
     providerMinimaxAnthropicBaseUrlHint:
       'Anthropic Messages 使用 MiniMax 的 /anthropic 地址；系统会自动追加 /v1/messages。',
+    minimaxMcp: '暴露 MiniMax MCP 工具',
+    minimaxMcpHint: '在 MCP 聚合入口提供 web_search 和 understand_image。',
     chatApi: 'Chat Completions',
     deleteEndpointFailed: '删除上游节点失败',
     dailyRequestLimit: '每日请求上限',
@@ -122,7 +124,9 @@ export const endpointMessages = {
     providerCustomBaseUrlHint:
       'Model requests use this custom URL; token plan usage still uses the official MiniMax URL for the selected region.',
     providerMinimaxAnthropicBaseUrlHint:
-      'Anthropic Messages uses MiniMax\'s /anthropic base URL; /v1/messages is appended automatically.',
+      "Anthropic Messages uses MiniMax's /anthropic base URL; /v1/messages is appended automatically.",
+    minimaxMcp: 'Expose MiniMax MCP tools',
+    minimaxMcpHint: 'Expose web_search and understand_image through MCP.',
     chatApi: 'Chat Completions API',
     deleteEndpointFailed: 'Failed to delete endpoint',
     dailyRequestLimit: 'Daily request limit',

@@ -35,7 +35,12 @@ pub(super) async fn call_once(
     server: &McpServer,
     selected: SelectedToken,
     request: Value,
+    conversation_id: Option<&str>,
 ) -> anyhow::Result<Value> {
+    if server.transport == "builtin_minimax" {
+        let pool = pool.ok_or_else(|| anyhow!("MiniMax MCP requires a database pool"))?;
+        return super::super::builtin::call(pool, server, &request, conversation_id).await;
+    }
     let client = connect_with_selected(pool, server, selected).await?;
     let result = dispatch(client.peer(), server, request).await;
     let cancel_result = client.cancel().await;
@@ -90,6 +95,9 @@ pub(super) async fn connect_with_selected(
             })
             .await
         }
+        "builtin_minimax" => Err(anyhow!(
+            "MiniMax built-in MCP does not use an upstream MCP connection"
+        )),
         other => Err(anyhow!("unsupported MCP transport {other}")),
     }
 }
@@ -1146,6 +1154,7 @@ mod tests {
     fn test_server() -> McpServer {
         McpServer {
             server_id: Uuid::new_v4(),
+            source_endpoint_id: None,
             scope: "admin".to_string(),
             owner_user_id: None,
             name: "test".to_string(),

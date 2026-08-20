@@ -59,6 +59,9 @@ export const mcpMessages = {
     resources: '资源',
     routePreview: '路由预览',
     savedSecret: '已保存，留空保持不变',
+    minimaxManaged: 'MiniMax Token Plan',
+    minimaxManagedHint:
+      '密钥和区域由绑定的 MiniMax 上游管理。此 MCP 暴露 web_search 和 understand_image。',
     refreshCatalog: '刷新目录',
     testStatus: '测试状态',
     testLatency: '测试耗时',
@@ -174,6 +177,9 @@ export const mcpMessages = {
     resources: 'Resources',
     routePreview: 'Route preview',
     savedSecret: 'Saved; leave empty to keep it',
+    minimaxManaged: 'MiniMax Token Plan',
+    minimaxManagedHint:
+      'Keys and region are managed by the linked MiniMax endpoint. This MCP exposes web_search and understand_image.',
     refreshCatalog: 'Refresh catalog',
     testStatus: 'Test status',
     testLatency: 'Test latency',

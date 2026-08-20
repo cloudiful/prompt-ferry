@@ -28,6 +28,7 @@ export function createEmptyEndpointForm(): EndpointForm {
     daily_max_requests: null,
     monthly_max_requests: null,
     enabled: true,
+    mcp_enabled: false,
   }
 }
 
@@ -64,6 +65,7 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
     daily_max_requests: endpoint.daily_max_requests ?? null,
     monthly_max_requests: endpoint.monthly_max_requests ?? null,
     enabled: endpoint.enabled,
+    mcp_enabled: endpoint.mcp_enabled ?? false,
   }
 }
 
@@ -91,5 +93,6 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
     scope: form.scope,
     daily_max_requests: form.daily_max_requests,
     monthly_max_requests: form.monthly_max_requests,
+    mcp_enabled: form.mcp_enabled,
   }
 }

@@ -63,6 +63,11 @@ defineEmits<{
             :label="row.original.owner_label"
             color="neutral"
           />
+          <UBadge
+            v-if="row.original.mcp_enabled"
+            :label="t('minimaxMcp')"
+            color="success"
+          />
         </div>
       </template>
       <template #test-cell="{ row }">

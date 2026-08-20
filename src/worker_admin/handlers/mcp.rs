@@ -83,7 +83,10 @@ pub(super) async fn update_mcp_server(
     let Some(existing) = existing else {
         return error(StatusCode::NOT_FOUND, "not_found", "mcp server not found");
     };
-    if let Err(response) = body.validate_for_update(&state, server_id, &user).await {
+    if let Err(response) = body
+        .validate_for_update(&state, server_id, existing.source_endpoint_id, &user)
+        .await
+    {
         tracing::warn!(
             user_id = user.user_id,
             is_admin = user.is_admin,
@@ -177,6 +180,13 @@ pub(super) async fn test_mcp_server(
         .into_response();
     }
     let started = Instant::now();
+    tracing::info!(
+        category = "mcp_test",
+        server_id = %server_id,
+        server_name = %server.name,
+        transport = %server.transport,
+        "admin MCP test requested"
+    );
     let (server, _) = match state
         .mcp_catalog_service
         .refresh_server_by_id(server_id)
@@ -184,9 +194,20 @@ pub(super) async fn test_mcp_server(
     {
         Ok(result) => result,
         Err(err) => {
+            let summary = summarize_error(&err);
+            tracing::warn!(
+                category = "mcp_test",
+                server_id = %server_id,
+                server_name = %server.name,
+                transport = %server.transport,
+                duration_ms = started.elapsed().as_millis(),
+                error_kind = summary.kind,
+                error_message = %maybe_redact(&state, &summary.message),
+                "admin MCP test failed"
+            );
             return Json(McpTestResponse {
                 ok: false,
-                message: maybe_redact(&state, &err.to_string()),
+                message: maybe_redact(&state, &summary.message),
                 duration_ms: started.elapsed().as_millis(),
                 tool_count: 0,
                 resource_count: 0,
@@ -208,6 +229,15 @@ pub(super) async fn test_mcp_server(
         Ok(catalog) => catalog,
         Err(err) => return internal(&state, err),
     };
+    tracing::info!(
+        category = "mcp_test",
+        server_id = %server_id,
+        server_name = %server.name,
+        transport = %server.transport,
+        duration_ms = started.elapsed().as_millis(),
+        tool_count = catalog.tools.len(),
+        "admin MCP test succeeded"
+    );
     Json(McpTestResponse {
         ok: true,
         message: format!(
@@ -273,5 +303,80 @@ pub(super) async fn get_mcp_catalog(
             "mcp catalog is not ready",
         ),
         Err(err) => internal(&state, err),
+    }
+}
+
+struct ErrorSummary {
+    kind: &'static str,
+    message: String,
+}
+
+fn summarize_error(err: &anyhow::Error) -> ErrorSummary {
+    let top = err
+        .chain()
+        .next()
+        .map(|c| c.to_string())
+        .unwrap_or_default();
+    ErrorSummary {
+        kind: classify_error(err, &top),
+        message: top,
+    }
+}
+
+fn classify_error(err: &anyhow::Error, top: &str) -> &'static str {
+    if err.downcast_ref::<sqlx::Error>().is_some() {
+        return "database";
+    }
+    if err.downcast_ref::<reqwest::Error>().is_some() {
+        return "upstream";
+    }
+    if err.downcast_ref::<serde_json::Error>().is_some() {
+        return "parse";
+    }
+    if err.downcast_ref::<std::io::Error>().is_some() {
+        return "io";
+    }
+    let lower = top.to_ascii_lowercase();
+    if lower.contains("timeout") || lower.contains("timed out") {
+        return "timeout";
+    }
+    if lower.contains("not found") {
+        return "not_found";
+    }
+    if lower.contains("refused") || lower.contains("unreachable") {
+        return "connect";
+    }
+    "other"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_error, summarize_error};
+
+    #[test]
+    fn classify_database_error() {
+        let err: anyhow::Error = anyhow::anyhow!("query failed");
+        assert_eq!(classify_error(&err, "query failed"), "other");
+    }
+
+    #[test]
+    fn summarize_uses_top_level_message_only() {
+        let err = anyhow::anyhow!("outer failure").context("inner context");
+        let summary = summarize_error(&err);
+        assert_eq!(summary.message, "inner context");
+        assert_eq!(summary.kind, "other");
+    }
+
+    #[test]
+    fn classify_io_timeout_and_not_found() {
+        let io_err = anyhow::anyhow!("timeout while dialing");
+        assert_eq!(classify_error(&io_err, "timeout while dialing"), "timeout");
+        let not_found = anyhow::anyhow!("resource not found");
+        assert_eq!(
+            classify_error(&not_found, "resource not found"),
+            "not_found"
+        );
+        let refused = anyhow::anyhow!("connection refused");
+        assert_eq!(classify_error(&refused, "connection refused"), "connect");
     }
 }

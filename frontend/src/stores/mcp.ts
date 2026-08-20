@@ -45,6 +45,7 @@ export const useMcpStore = defineStore('mcp', () => {
         aggregateNamingModeQualifiedOnlyShort: t(
           'aggregateNamingModeQualifiedOnlyShort',
         ),
+        managedMinimax: t('minimaxManaged'),
         privateScope: t('privateScope'),
         publicScope: t('publicScope'),
       },

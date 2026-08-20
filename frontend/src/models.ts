@@ -33,6 +33,7 @@ export type EndpointForm = {
   daily_max_requests: number | null
   monthly_max_requests: number | null
   enabled: boolean
+  mcp_enabled: boolean
 }
 
 export type EndpointApiKeyForm = {
@@ -73,11 +74,12 @@ export type ModelRouteForm = {
 
 export type McpForm = {
   server_id: string
+  source_endpoint_id: string | null
   scope: 'admin' | 'user'
   owner_user_id: number | null
   name: string
   aggregate_naming_mode: 'qualified_only' | 'passthrough_preferred'
-  transport: 'http' | 'stdio'
+  transport: 'http' | 'stdio' | 'builtin_minimax'
   url: string
   command_argv_text: string
   bearer_tokens: McpBearerTokenForm[]

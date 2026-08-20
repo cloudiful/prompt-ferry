@@ -1,27 +1,8 @@
 UPDATE mcp_servers
-SET
-    scope = $2,
+SET scope = $2,
     owner_user_id = $3,
-    source_endpoint_id = $4,
-    name = $5,
-    aggregate_naming_mode = $6,
-    transport = $7,
-    url = $8,
-    command = $9,
-    args = $10,
-    env_json = $11,
-    bearer_tokens_json = $12,
-    http_headers_json = $13,
-    tool_filter_mode = $14,
-    allowed_tools = $15,
-    disabled_tools = $16,
-    disabled_resources = $17,
-    daily_max_requests = $18,
-    monthly_max_requests = $19,
-    enabled = $20,
-    timeout_ms = $21,
-    lifecycle_policy = $22,
-    lifecycle_manual_protocol_version = $23,
+    enabled = $4,
     updated_at = NOW()
 WHERE server_id = $1
+  AND source_endpoint_id IS NOT NULL
 RETURNING server_id, source_endpoint_id, scope, owner_user_id, name, aggregate_naming_mode, transport, url, command, args, env_json, bearer_tokens_json, http_headers_json, tool_filter_mode, allowed_tools, disabled_tools, disabled_resources, daily_max_requests, monthly_max_requests, enabled, timeout_ms, lifecycle_policy, lifecycle_manual_protocol_version, lifecycle_learned_mode, lifecycle_learned_protocol_version, lifecycle_learned_for_updated_at, lifecycle_learned_at, created_at, updated_at

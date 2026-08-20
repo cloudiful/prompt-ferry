@@ -68,6 +68,7 @@ function parseCommandArgv(text: string): string[] {
 export function createEmptyMcpForm(): McpForm {
   return {
     server_id: '',
+    source_endpoint_id: null,
     scope: 'admin',
     owner_user_id: null,
     name: '',
@@ -94,6 +95,7 @@ export function createEmptyMcpForm(): McpForm {
 export function mcpServerToForm(server: McpServer): McpForm {
   return {
     server_id: server.server_id,
+    source_endpoint_id: server.source_endpoint_id ?? null,
     scope: server.scope === 'user' ? 'user' : 'admin',
     owner_user_id: server.owner_user_id ?? null,
     name: server.name,
@@ -101,7 +103,12 @@ export function mcpServerToForm(server: McpServer): McpForm {
       server.aggregate_naming_mode === 'qualified_only'
         ? 'qualified_only'
         : 'passthrough_preferred',
-    transport: server.transport === 'stdio' ? 'stdio' : 'http',
+    transport:
+      server.transport === 'builtin_minimax'
+        ? 'builtin_minimax'
+        : server.transport === 'stdio'
+          ? 'stdio'
+          : 'http',
     url: server.url ?? '',
     command_argv_text: JSON.stringify(commandArgv(server)),
     bearer_tokens: server.bearer_tokens.map((value) => ({
@@ -165,6 +172,7 @@ export function mcpFormToRequest(form: McpForm): McpServerRequest {
   }
 
   return {
+    source_endpoint_id: form.source_endpoint_id,
     args: commandArgv.slice(1),
     allowed_tools: form.allowed_tools,
     bearer_tokens:

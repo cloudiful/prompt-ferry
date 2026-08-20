@@ -78,6 +78,8 @@ pub(super) async fn resolve_endpoint_input(
     body: EndpointRequest,
     existing_endpoint_api_keys: Option<Vec<db::EndpointApiKey>>,
 ) -> Result<EndpointCreate, Response> {
+    validate_mcp_provider(body.mcp_enabled, body.provider)
+        .map_err(|message| error(StatusCode::BAD_REQUEST, "invalid_mcp_provider", message))?;
     validate_request_budget_limit(body.daily_max_requests, "daily_max_requests")
         .map_err(|response| *response)?;
     validate_request_budget_limit(body.monthly_max_requests, "monthly_max_requests")
@@ -290,6 +292,22 @@ pub(super) fn validate_request_budget_limit(
     Ok(())
 }
 
+pub(super) fn validate_mcp_provider(
+    mcp_enabled: Option<bool>,
+    provider: db::EndpointProvider,
+) -> std::result::Result<(), &'static str> {
+    // MCP exposure is only valid for MiniMax endpoints; an explicit true on a
+    // non-MiniMax provider must be rejected. None and Some(false) are
+    // accepted for any provider (the caller will collapse them to false for
+    // non-MiniMax endpoints when persisting).
+    if mcp_enabled.unwrap_or(provider == db::EndpointProvider::Minimax)
+        && provider != db::EndpointProvider::Minimax
+    {
+        return Err("MCP exposure requires a MiniMax endpoint");
+    }
+    Ok(())
+}
+
 pub(super) fn validate_relay_ip_policy(
     policy: RelayIpPolicy,
 ) -> Result<RelayIpPolicy, Box<Response>> {
@@ -311,5 +329,33 @@ pub(super) fn truncate_message(message: &str) -> String {
         format!("{truncated}...")
     } else {
         truncated
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_mcp_provider;
+    use crate::db::EndpointProvider;
+
+    #[test]
+    fn validate_mcp_provider_accepts_explicit_false_for_generic() {
+        assert!(validate_mcp_provider(Some(false), EndpointProvider::Generic).is_ok());
+    }
+
+    #[test]
+    fn validate_mcp_provider_accepts_none_for_generic() {
+        assert!(validate_mcp_provider(None, EndpointProvider::Generic).is_ok());
+    }
+
+    #[test]
+    fn validate_mcp_provider_rejects_explicit_true_for_generic() {
+        assert!(validate_mcp_provider(Some(true), EndpointProvider::Generic).is_err());
+    }
+
+    #[test]
+    fn validate_mcp_provider_accepts_any_value_for_minimax() {
+        assert!(validate_mcp_provider(None, EndpointProvider::Minimax).is_ok());
+        assert!(validate_mcp_provider(Some(false), EndpointProvider::Minimax).is_ok());
+        assert!(validate_mcp_provider(Some(true), EndpointProvider::Minimax).is_ok());
     }
 }

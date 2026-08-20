@@ -226,7 +226,7 @@ mod tests {
         capture.finish();
         assert_eq!(capture.response_id.as_deref(), Some("msg_1"));
         assert_eq!(capture.response_text, "hello");
-        assert_eq!(capture.usage.input_tokens, Some(12));
+        assert_eq!(capture.usage.input_tokens, Some(15));
         assert_eq!(capture.usage.output_tokens, Some(4));
         assert_eq!(capture.usage.cache_read_tokens, Some(3));
     }

@@ -55,7 +55,8 @@ impl NormalizedBillingUsage {
         let input_tokens = usage.input_tokens.unwrap_or_default().max(0);
         let ordinary_input_tokens = input_tokens
             .saturating_sub(cache_read_tokens)
-            .saturating_sub(cache_write_tokens);
+            .saturating_sub(cache_write_tokens)
+            .max(0);
         Some(Self {
             input_tokens: ordinary_input_tokens,
             cache_read_tokens,
@@ -101,6 +102,22 @@ mod tests {
     #[test]
     fn missing_provider_usage_is_unknown() {
         assert!(NormalizedBillingUsage::from_usage(&TokenUsage::default()).is_none());
+    }
+
+    #[test]
+    fn never_emits_negative_ordinary_input_tokens() {
+        let usage = NormalizedBillingUsage::from_usage(&TokenUsage {
+            input_tokens: Some(5),
+            output_tokens: Some(2),
+            cache_read_tokens: Some(3),
+            cache_write_tokens: Some(4),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(usage.token_count(BillingMeter::Input), 0);
+        assert_eq!(usage.token_count(BillingMeter::CacheRead), 3);
+        assert_eq!(usage.token_count(BillingMeter::CacheWrite), 4);
     }
 }
 

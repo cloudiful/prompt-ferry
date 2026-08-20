@@ -466,6 +466,7 @@ async fn visible_mcp_servers_are_scoped_by_owner() -> anyhow::Result<()> {
         db::McpServerInput {
             scope: "admin".to_string(),
             owner_user_id: None,
+            source_endpoint_id: None,
             name: "public-server".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),
@@ -494,6 +495,7 @@ async fn visible_mcp_servers_are_scoped_by_owner() -> anyhow::Result<()> {
         db::McpServerInput {
             scope: "user".to_string(),
             owner_user_id: Some(user_a),
+            source_endpoint_id: None,
             name: "private-a".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),
@@ -522,6 +524,7 @@ async fn visible_mcp_servers_are_scoped_by_owner() -> anyhow::Result<()> {
         db::McpServerInput {
             scope: "user".to_string(),
             owner_user_id: Some(user_b),
+            source_endpoint_id: None,
             name: "private-b".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),
@@ -728,6 +731,7 @@ async fn mcp_lifecycle_learning_is_persisted_and_tied_to_updated_at() -> anyhow:
         db::McpServerInput {
             scope: "admin".to_string(),
             owner_user_id: None,
+            source_endpoint_id: None,
             name: "lifecycle-learn".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),
@@ -781,6 +785,7 @@ async fn mcp_lifecycle_learning_is_persisted_and_tied_to_updated_at() -> anyhow:
         db::McpServerInput {
             scope: "admin".to_string(),
             owner_user_id: None,
+            source_endpoint_id: None,
             name: "lifecycle-learn".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),

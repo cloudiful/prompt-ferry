@@ -110,6 +110,7 @@ mod tests {
     fn server(tool_filter_mode: &str, allowed_tools: Value, disabled_tools: Value) -> McpServer {
         McpServer {
             server_id: uuid::Uuid::nil(),
+            source_endpoint_id: None,
             scope: "admin".to_string(),
             owner_user_id: None,
             name: "test".to_string(),

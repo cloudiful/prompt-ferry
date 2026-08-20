@@ -135,7 +135,14 @@ pub(super) async fn call_with_pool(
             };
             record_token_slot(&selected);
             attempts += 1;
-            let result = client::call_once(pool, server, selected.clone(), request.clone()).await;
+            let result = client::call_once(
+                pool,
+                server,
+                selected.clone(),
+                request.clone(),
+                conversation_id,
+            )
+            .await;
             match result {
                 Ok(value) => {
                     if let Some(credits) = scan_credits_used(&value) {
@@ -299,6 +306,13 @@ fn record_token_slot(selected: &SelectedToken) {
         .and_then(|index| i16::try_from(index + 1).ok());
     let _ = TOKEN_SLOT_TRACKER.try_with(|tracker| {
         *tracker.borrow_mut() = slot;
+    });
+}
+
+pub(crate) fn record_builtin_token_slot(index: usize) {
+    record_token_slot(&SelectedToken {
+        value: None,
+        index: Some(index),
     });
 }
 

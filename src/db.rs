@@ -24,14 +24,16 @@ pub use billing::*;
 pub use budgets::{RequestBudgetCounts, RequestBudgetScope, request_budget_counts};
 pub use connection::{connect, connect_with_max_connections, migrate};
 pub use endpoints::{
-    create_endpoint, delete_endpoint, get_endpoint, list_endpoints, list_endpoints_page,
-    list_visible_endpoints, set_user_endpoint_setting, update_endpoint,
+    create_endpoint, create_endpoint_with_mcp, delete_endpoint, get_endpoint, list_endpoints,
+    list_endpoints_page, list_visible_endpoints, set_endpoint_mcp_enabled,
+    set_user_endpoint_setting, update_endpoint,
 };
 pub use mcp::{
     create_mcp_server, delete_mcp_server, get_mcp_server, get_mcp_server_by_name,
-    get_user_mcp_server, get_visible_mcp_server, list_mcp_servers, list_mcp_servers_page,
-    list_user_mcp_servers, list_user_mcp_servers_page, list_visible_mcp_servers,
-    mark_mcp_lifecycle_learned, update_mcp_server,
+    get_mcp_server_by_source_endpoint, get_user_mcp_server, get_visible_mcp_server,
+    list_mcp_servers, list_mcp_servers_page, list_user_mcp_servers, list_user_mcp_servers_page,
+    list_visible_mcp_servers, mark_mcp_lifecycle_learned, sync_minimax_mcp_server,
+    update_mcp_server,
 };
 pub use mcp_credentials::{
     create_quota_group, delete_credential, delete_quota_group, get_quota_group, insert_credential,

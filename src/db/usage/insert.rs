@@ -103,7 +103,15 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
     tx.commit().await?;
 
     if let Err(err) = crate::db::record_usage_charge(pool, event_id, &input).await {
-        warn!(error = %err, event_id, "failed to persist usage billing snapshot");
+        warn!(
+            error = %err,
+            event_id,
+            input_tokens = input.input_tokens,
+            cache_read_tokens = input.cache_read_tokens,
+            cache_write_tokens = input.cache_write_tokens,
+            output_tokens = input.output_tokens,
+            "failed to persist usage billing snapshot"
+        );
     }
 
     if input.request_state.is_terminal() {

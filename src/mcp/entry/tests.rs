@@ -1026,6 +1026,7 @@ async fn insert_test_mcp_server(
         McpServerInput {
             scope: "admin".to_string(),
             owner_user_id: None,
+            source_endpoint_id: None,
             name: name.to_string(),
             aggregate_naming_mode: "qualified_only".to_string(),
             transport: "http".to_string(),

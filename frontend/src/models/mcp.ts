@@ -22,6 +22,7 @@ export type McpServerWorkspaceView = {
 type McpViewLabels = {
   aggregateNamingModePassthroughPreferredShort: string
   aggregateNamingModeQualifiedOnlyShort: string
+  managedMinimax: string
   privateScope: string
   publicScope: string
 }
@@ -38,11 +39,16 @@ export function createMcpServerListItemView(
     server_id: server.server_id,
     name: server.name,
     enabled: server.enabled,
-    transport: server.transport,
+    transport:
+      server.transport === 'builtin_minimax'
+        ? options.labels.managedMinimax
+        : server.transport,
     endpoint_label:
-      server.transport === 'http'
-        ? (server.url ?? '-')
-        : (server.command ?? '-'),
+      server.transport === 'builtin_minimax'
+        ? options.labels.managedMinimax
+        : server.transport === 'http'
+          ? (server.url ?? '-')
+          : (server.command ?? '-'),
     scope_label:
       server.scope === 'admin'
         ? options.labels.publicScope

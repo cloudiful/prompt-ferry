@@ -55,6 +55,7 @@ export function createEndpointListItemView(
           ? options.endpointSourceDetected
           : options.endpointSourceManual,
     enabled: endpoint.enabled,
+    mcp_enabled: endpoint.mcp_enabled,
     owner_label: endpoint.owner_user_id
       ? `${options.ownerLabel} ${endpoint.owner_user_id}`
       : '',

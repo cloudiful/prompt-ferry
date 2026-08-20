@@ -12,6 +12,7 @@ pub struct McpBearerToken {
 #[derive(Debug, Clone, Serialize, sqlx::FromRow, ToSchema)]
 pub struct McpServer {
     pub server_id: uuid::Uuid,
+    pub source_endpoint_id: Option<uuid::Uuid>,
     pub scope: String,
     pub owner_user_id: Option<i64>,
     pub name: String,
@@ -93,6 +94,7 @@ mod tests {
     fn server_with_tokens(tokens: Value) -> McpServer {
         McpServer {
             server_id: uuid::Uuid::nil(),
+            source_endpoint_id: None,
             scope: "admin".to_string(),
             owner_user_id: None,
             name: "test".to_string(),
@@ -228,6 +230,7 @@ pub fn reserved_http_header(headers: &serde_json::Value) -> Option<String> {
 pub struct McpServerInput {
     pub scope: String,
     pub owner_user_id: Option<i64>,
+    pub source_endpoint_id: Option<uuid::Uuid>,
     pub name: String,
     pub aggregate_naming_mode: String,
     pub transport: String,

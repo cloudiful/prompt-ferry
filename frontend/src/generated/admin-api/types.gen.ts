@@ -303,6 +303,7 @@ export type EndpointRequest = {
     daily_max_requests?: number | null;
     enabled?: boolean | null;
     key_lb_enabled?: boolean;
+    mcp_enabled?: boolean | null;
     monthly_max_requests?: number | null;
     name: string;
     native_api_override?: null | NativeApi;
@@ -539,6 +540,7 @@ export type McpServer = {
     owner_user_id?: number | null;
     scope: string;
     server_id: string;
+    source_endpoint_id?: string | null;
     timeout_ms: number;
     tool_filter_mode: string;
     transport: string;
@@ -571,6 +573,7 @@ export type McpServerRequest = {
     name: string;
     owner_user_id?: number | null;
     scope?: string | null;
+    source_endpoint_id?: string | null;
     timeout_ms?: number | null;
     tool_filter_mode?: string | null;
     transport: string;
@@ -696,6 +699,7 @@ export type ProviderEndpoint = {
     enabled: boolean;
     endpoint_id: string;
     key_lb_enabled: boolean;
+    mcp_enabled: boolean;
     monthly_max_requests?: number | null;
     name: string;
     native_api: string;

@@ -27,6 +27,7 @@ export type EndpointListItemView = {
   native_api_source: string
   native_api_source_label: string
   enabled: boolean
+  mcp_enabled: boolean
   owner_label: string
   testing: boolean
   toggling: boolean

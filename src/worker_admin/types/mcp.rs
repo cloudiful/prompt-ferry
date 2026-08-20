@@ -25,6 +25,7 @@ pub struct McpServerPageResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct McpServer {
     pub server_id: Uuid,
+    pub source_endpoint_id: Option<Uuid>,
     pub scope: String,
     pub owner_user_id: Option<i64>,
     pub name: String,
@@ -60,6 +61,7 @@ impl From<&db::McpServer> for McpServer {
     fn from(server: &db::McpServer) -> Self {
         Self {
             server_id: server.server_id,
+            source_endpoint_id: server.source_endpoint_id,
             scope: server.scope.clone(),
             owner_user_id: server.owner_user_id,
             name: server.name.clone(),
@@ -114,6 +116,7 @@ fn public_env_json(value: &Value) -> Value {
 pub struct McpServerRequest {
     pub scope: Option<String>,
     pub owner_user_id: Option<i64>,
+    pub source_endpoint_id: Option<Uuid>,
     pub name: String,
     pub aggregate_naming_mode: Option<String>,
     pub transport: String,
@@ -141,16 +144,23 @@ impl McpServerRequest {
         state: &AdminState,
         user: &SessionUser,
     ) -> Result<(), Response> {
-        self.validate(state, None, user).await
+        self.validate(state, None, None, user).await
     }
 
     pub async fn validate_for_update(
         &self,
         state: &AdminState,
         existing_server_id: Uuid,
+        existing_source_endpoint_id: Option<Uuid>,
         user: &SessionUser,
     ) -> Result<(), Response> {
-        self.validate(state, Some(existing_server_id), user).await
+        self.validate(
+            state,
+            Some(existing_server_id),
+            existing_source_endpoint_id,
+            user,
+        )
+        .await
     }
 
     pub fn into_input(
@@ -170,9 +180,20 @@ impl McpServerRequest {
             self.env_json.unwrap_or_else(|| serde_json::json!({})),
             existing_server.map(|server| &server.env_json),
         );
+        // Only `builtin_minimax` rows are tied to a source endpoint. For
+        // http/stdio updates, omitting `source_endpoint_id` must clear the
+        // existing binding so the managed row can be reconfigured without
+        // dragging the previous endpoint linkage along.
+        let source_endpoint_id = if self.transport == "builtin_minimax" {
+            self.source_endpoint_id
+                .or_else(|| existing_server.and_then(|server| server.source_endpoint_id))
+        } else {
+            None
+        };
         db::McpServerInput {
             scope,
             owner_user_id,
+            source_endpoint_id,
             name: self.name,
             aggregate_naming_mode: self
                 .aggregate_naming_mode
@@ -239,17 +260,74 @@ impl McpServerRequest {
         &self,
         state: &AdminState,
         existing_server_id: Option<Uuid>,
+        existing_source_endpoint_id: Option<Uuid>,
         user: &SessionUser,
     ) -> Result<(), Response> {
         validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")
             .map_err(|response| *response)?;
         validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")
             .map_err(|response| *response)?;
-        if !matches!(self.transport.as_str(), "http" | "stdio") {
+        if !matches!(
+            self.transport.as_str(),
+            "http" | "stdio" | "builtin_minimax"
+        ) {
             return Err(error(
                 StatusCode::BAD_REQUEST,
                 "invalid_transport",
-                "transport must be http or stdio",
+                "transport must be http, stdio, or builtin_minimax",
+            ));
+        }
+        // For builtin_minimax the request may legitimately omit
+        // `source_endpoint_id` and inherit the existing binding. The
+        // effective value drives both the source-presence check and the
+        // MiniMax endpoint validation below, so http/stdio updates that
+        // clear the binding do not leak the old endpoint here.
+        let effective_source_endpoint_id = if self.transport == "builtin_minimax" {
+            self.source_endpoint_id.or(existing_source_endpoint_id)
+        } else {
+            None
+        };
+        if self.transport == "builtin_minimax" && effective_source_endpoint_id.is_none() {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_source_endpoint",
+                "builtin_minimax requires a source endpoint",
+            ));
+        }
+        if self.transport == "builtin_minimax"
+            && let Some(endpoint_id) = effective_source_endpoint_id
+        {
+            let endpoint = db::get_endpoint(&state.pool, endpoint_id)
+                .await
+                .map_err(|err| internal(state, err))?;
+            let Some(endpoint) = endpoint else {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_source_endpoint",
+                    "MiniMax source endpoint not found",
+                ));
+            };
+            if endpoint.provider != db::EndpointProvider::Minimax {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_source_endpoint",
+                    "MiniMax source endpoint is required",
+                ));
+            }
+            if endpoint.scope != scope_for_request(self, user)
+                || endpoint.owner_user_id != owner_for_request(self, user)
+            {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_source_endpoint",
+                    "MiniMax source endpoint scope does not match the MCP server",
+                ));
+            }
+        } else if self.source_endpoint_id.is_some() {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "invalid_source_endpoint",
+                "source_endpoint_id is only valid for builtin_minimax",
             ));
         }
         if self.transport == "stdio" {
@@ -421,6 +499,22 @@ impl McpServerRequest {
     }
 }
 
+fn scope_for_request(request: &McpServerRequest, user: &SessionUser) -> String {
+    if user.is_admin {
+        request.scope.as_deref().unwrap_or("admin").to_string()
+    } else {
+        "user".to_string()
+    }
+}
+
+fn owner_for_request(request: &McpServerRequest, user: &SessionUser) -> Option<i64> {
+    if user.is_admin {
+        request.owner_user_id
+    } else {
+        Some(user.user_id)
+    }
+}
+
 fn valid_stdio_env(value: &Value, allow_preserve_null: bool) -> bool {
     let Some(object) = value.as_object() else {
         return false;
@@ -486,7 +580,89 @@ fn is_valid_protocol_version(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_protocol_version, merge_env_json, public_env_json};
+    use super::{
+        McpServerRequest, SessionUser, is_valid_protocol_version, merge_env_json, public_env_json,
+    };
+    use crate::db::McpServer;
+    use uuid::Uuid;
+
+    fn admin_user() -> SessionUser {
+        SessionUser {
+            user_id: 1,
+            login_name: "admin".to_string(),
+            display_name: "Admin".to_string(),
+            is_admin: true,
+        }
+    }
+
+    fn existing_with_source(endpoint_id: Uuid) -> McpServer {
+        McpServer {
+            server_id: Uuid::new_v4(),
+            source_endpoint_id: Some(endpoint_id),
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "managed".to_string(),
+            aggregate_naming_mode: "passthrough_preferred".to_string(),
+            transport: "builtin_minimax".to_string(),
+            url: None,
+            command: None,
+            args: serde_json::json!([]),
+            env_json: serde_json::json!({}),
+            bearer_tokens_json: serde_json::json!([]),
+            http_headers_json: serde_json::json!({}),
+            tool_filter_mode: "blacklist".to_string(),
+            allowed_tools: serde_json::json!([]),
+            disabled_tools: serde_json::json!([]),
+            disabled_resources: serde_json::json!([]),
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+            lifecycle_learned_mode: None,
+            lifecycle_learned_protocol_version: None,
+            lifecycle_learned_for_updated_at: None,
+            lifecycle_learned_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn request_for_transport(transport: &str) -> McpServerRequest {
+        McpServerRequest {
+            scope: Some("admin".to_string()),
+            owner_user_id: None,
+            source_endpoint_id: None,
+            name: "reconfigured".to_string(),
+            aggregate_naming_mode: None,
+            transport: transport.to_string(),
+            url: if transport == "http" {
+                Some("http://127.0.0.1:3000/mcp".to_string())
+            } else {
+                None
+            },
+            command: if transport == "stdio" {
+                Some("mcpd".to_string())
+            } else {
+                None
+            },
+            args: None,
+            env_json: None,
+            bearer_tokens: None,
+            http_headers_json: None,
+            tool_filter_mode: None,
+            allowed_tools: None,
+            disabled_tools: None,
+            disabled_resources: None,
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: None,
+            timeout_ms: None,
+            lifecycle_policy: None,
+            lifecycle_manual_protocol_version: None,
+        }
+    }
 
     #[test]
     fn protocol_version_validation_accepts_known_dates() {
@@ -534,6 +710,45 @@ mod tests {
                 "NEW_VALUE": "new"
             })
         );
+    }
+
+    #[test]
+    fn managed_binding_preserved_for_builtin_minimax_update() {
+        let endpoint_id = Uuid::new_v4();
+        let existing = existing_with_source(endpoint_id);
+        let request = McpServerRequest {
+            source_endpoint_id: None,
+            ..request_for_transport("builtin_minimax")
+        };
+
+        let input = request.into_input(&admin_user(), Some(&existing));
+        assert_eq!(input.source_endpoint_id, Some(endpoint_id));
+    }
+
+    #[test]
+    fn managed_binding_cleared_for_http_update() {
+        let endpoint_id = Uuid::new_v4();
+        let existing = existing_with_source(endpoint_id);
+        let request = McpServerRequest {
+            source_endpoint_id: None,
+            ..request_for_transport("http")
+        };
+
+        let input = request.into_input(&admin_user(), Some(&existing));
+        assert_eq!(input.source_endpoint_id, None);
+    }
+
+    #[test]
+    fn managed_binding_cleared_for_stdio_update() {
+        let endpoint_id = Uuid::new_v4();
+        let existing = existing_with_source(endpoint_id);
+        let request = McpServerRequest {
+            source_endpoint_id: None,
+            ..request_for_transport("stdio")
+        };
+
+        let input = request.into_input(&admin_user(), Some(&existing));
+        assert_eq!(input.source_endpoint_id, None);
     }
 }
 

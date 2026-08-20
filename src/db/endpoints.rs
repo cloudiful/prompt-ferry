@@ -119,6 +119,42 @@ pub async fn create_endpoint(pool: &PgPool, input: EndpointCreate) -> Result<Pro
         .remove(0))
 }
 
+/// Insert a new endpoint with `mcp_enabled` set in the same statement so the
+/// first row returned by the create flow already reflects the requested MCP
+/// exposure. Generic `create_endpoint` keeps the existing default-false
+/// behaviour for callers that do not care about managed MCP.
+pub async fn create_endpoint_with_mcp(
+    pool: &PgPool,
+    input: EndpointCreate,
+    mcp_enabled: bool,
+) -> Result<ProviderEndpoint> {
+    let endpoint = sqlx::query_file_as!(
+        ProviderEndpointRow,
+        "src/sql/endpoints/create_endpoint_with_mcp.sql",
+        input.scope,
+        input.owner_user_id,
+        input.name,
+        input.provider.as_str(),
+        input.provider_region.map(|region| region.as_str()),
+        input.base_url,
+        input.native_api.as_str(),
+        input.native_api_source.as_str(),
+        input.daily_max_requests,
+        input.monthly_max_requests,
+        input.api_key,
+        input.key_lb_enabled,
+        input.enabled,
+        mcp_enabled,
+    )
+    .fetch_one(pool)
+    .await
+    .map(ProviderEndpoint::from)?;
+    replace_endpoint_api_keys(pool, endpoint.endpoint_id, &input.api_keys).await?;
+    Ok(attach_endpoint_api_keys(pool, vec![endpoint])
+        .await?
+        .remove(0))
+}
+
 pub async fn update_endpoint(
     pool: &PgPool,
     endpoint_id: uuid::Uuid,
@@ -165,6 +201,21 @@ pub async fn delete_endpoint(pool: &PgPool, endpoint_id: uuid::Uuid) -> Result<b
         super::routes::cleanup_orphan_model_routes(pool).await?;
     }
     Ok(result.rows_affected() > 0)
+}
+
+pub async fn set_endpoint_mcp_enabled(
+    pool: &PgPool,
+    endpoint_id: uuid::Uuid,
+    enabled: bool,
+) -> Result<()> {
+    sqlx::query_file!(
+        "src/sql/endpoints/set_mcp_enabled.sql",
+        endpoint_id,
+        enabled
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 pub async fn set_user_endpoint_setting(

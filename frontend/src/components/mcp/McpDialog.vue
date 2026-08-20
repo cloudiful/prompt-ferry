@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import type {
   McpCatalogResponse,
   McpQuotaGroup,
@@ -32,6 +32,36 @@ const form = defineModel<McpForm>('form', { required: true })
 
 const settingsSectionClass =
   'grid gap-3 rounded border border-default bg-muted p-3'
+
+const transportSelection = computed<'http' | 'stdio' | 'builtin_minimax'>({
+  get: () => form.value.transport,
+  set(value) {
+    form.value.transport = value
+    // The `builtin_minimax` transport is only meaningful for managed rows
+    // tied to a MiniMax source endpoint. Clearing the binding on switch
+    // prevents the backend from re-creating the managed server for a row
+    // that has been reconfigured as a plain http/stdio server.
+    if (value !== 'builtin_minimax' && form.value.source_endpoint_id) {
+      form.value.source_endpoint_id = null
+    }
+  },
+})
+
+// Defensive fallback: if the form is mutated elsewhere (reset, deep clone,
+// template hydration) and ends up with a non-managed transport while still
+// pointing at a source endpoint, drop the stale binding too.
+watch(
+  () => [form.value.transport, form.value.source_endpoint_id] as const,
+  ([transport, sourceEndpointId]) => {
+    if (
+      transport !== 'builtin_minimax' &&
+      sourceEndpointId !== null &&
+      sourceEndpointId !== undefined
+    ) {
+      form.value.source_endpoint_id = null
+    }
+  },
+)
 
 const selectedTools = computed<string[]>({
   get: () =>
@@ -148,6 +178,7 @@ defineEmits<{
               ]"
               label-key="label"
               value-key="value"
+              :disabled="Boolean(form.source_endpoint_id)"
             />
           </div>
           <USelect
@@ -185,9 +216,17 @@ defineEmits<{
           </div>
           <div class="grid gap-3 md:grid-cols-[10rem_minmax(0,1fr)]">
             <USelect
-              v-model="form.transport"
+              v-model="transportSelection"
               class="w-full"
-              :items="['http', 'stdio']"
+              :items="[
+                { label: 'HTTP MCP', value: 'http' },
+                { label: 'stdio', value: 'stdio' },
+                ...(form.source_endpoint_id
+                  ? [{ label: t('minimaxManaged'), value: 'builtin_minimax' }]
+                  : []),
+              ]"
+              label-key="label"
+              value-key="value"
             />
             <UInput
               v-if="form.transport === 'http'"
@@ -196,7 +235,7 @@ defineEmits<{
               placeholder="http://127.0.0.1:3000/mcp"
             />
             <UInput
-              v-else
+              v-else-if="form.transport === 'stdio'"
               v-model="form.command_argv_text"
               class="w-full"
               placeholder='["uvx", "minimax-coding-plan-mcp", "-y"]'
@@ -215,6 +254,12 @@ defineEmits<{
           />
           <div v-if="form.transport === 'stdio'" class="text-xs text-dimmed">
             {{ t('stdioCommandHint') }}
+          </div>
+          <div
+            v-if="form.transport === 'builtin_minimax'"
+            class="rounded border border-default bg-muted/20 p-3 text-xs text-muted"
+          >
+            {{ t('minimaxManagedHint') }}
           </div>
           <McpEnvironmentEditor
             v-if="form.transport === 'stdio'"

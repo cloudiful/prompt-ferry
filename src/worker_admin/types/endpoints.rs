@@ -38,6 +38,8 @@ pub struct EndpointRequest {
     pub daily_max_requests: Option<i32>,
     pub monthly_max_requests: Option<i32>,
     pub enabled: Option<bool>,
+    #[serde(default)]
+    pub mcp_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, ToSchema)]

@@ -229,6 +229,7 @@ async fn spawn_legacy_v2_upstream() -> String {
 fn v2_server(url: &str) -> McpServer {
     McpServer {
         server_id: uuid::Uuid::new_v4(),
+        source_endpoint_id: None,
         scope: "admin".to_string(),
         owner_user_id: None,
         name: "v2-upstream".to_string(),

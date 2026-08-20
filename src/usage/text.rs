@@ -2,7 +2,7 @@ use super::*;
 
 pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
     let usage = value.get("usage")?;
-    let input_tokens = usage
+    let mut input_tokens = usage
         .get("input_tokens")
         .or_else(|| usage.get("prompt_tokens"))
         .and_then(Value::as_i64);
@@ -10,10 +10,6 @@ pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
         .get("output_tokens")
         .or_else(|| usage.get("completion_tokens"))
         .and_then(Value::as_i64);
-    let total_tokens = usage
-        .get("total_tokens")
-        .and_then(Value::as_i64)
-        .or_else(|| Some(input_tokens? + output_tokens?));
     let cached_tokens = usage
         .get("cache_read_input_tokens")
         .and_then(Value::as_i64)
@@ -48,6 +44,23 @@ pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
             .and_then(|details| details.get("cache_write_tokens"))
             .and_then(Value::as_i64)
     });
+    if usage.get("cache_read_input_tokens").is_some()
+        || usage.get("cache_creation_input_tokens").is_some()
+    {
+        let cache_total =
+            cache_read_tokens.unwrap_or_default() + cache_write_tokens.unwrap_or_default();
+        input_tokens = input_tokens
+            .map(|value| value.saturating_add(cache_total))
+            .or((cache_total > 0).then_some(cache_total));
+    }
+    let total_tokens = usage
+        .get("total_tokens")
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            input_tokens
+                .zip(output_tokens)
+                .map(|(input, output)| input + output)
+        });
 
     if input_tokens.is_none()
         && output_tokens.is_none()
@@ -132,6 +145,7 @@ mod tests {
         }))
         .unwrap();
 
+        assert_eq!(usage.input_tokens, Some(157));
         assert_eq!(usage.cache_read_tokens, Some(30));
         assert_eq!(usage.cached_tokens, Some(30));
         assert_eq!(usage.cache_write_tokens, Some(7));

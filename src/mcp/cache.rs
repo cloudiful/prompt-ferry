@@ -204,6 +204,7 @@ mod tests {
     fn server() -> McpServer {
         McpServer {
             server_id: Uuid::new_v4(),
+            source_endpoint_id: None,
             scope: "admin".to_string(),
             owner_user_id: None,
             name: "alpha".to_string(),

@@ -95,6 +95,7 @@ pub struct ProviderEndpointRow {
     pub api_key: String,
     pub key_lb_enabled: bool,
     pub enabled: bool,
+    pub mcp_enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -116,6 +117,7 @@ pub struct ProviderEndpoint {
     pub api_key: String,
     pub key_lb_enabled: bool,
     pub enabled: bool,
+    pub mcp_enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
@@ -139,6 +141,7 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             api_key: value.api_key,
             key_lb_enabled: value.key_lb_enabled,
             enabled: value.enabled,
+            mcp_enabled: value.mcp_enabled,
             created_at: value.created_at,
             updated_at: value.updated_at,
             api_keys: Vec::new(),

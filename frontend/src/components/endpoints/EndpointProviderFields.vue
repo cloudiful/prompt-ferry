@@ -27,10 +27,17 @@ const providerSelection = computed({
     form.value.provider = value
     if (value === 'generic') {
       form.value.provider_region = null
+      // MCP exposure is only valid for MiniMax endpoints; backend validation
+      // rejects an explicit `mcp_enabled: true` for generic providers, so
+      // collapse to false here as well to keep the UI in sync.
+      form.value.mcp_enabled = false
       return
     }
     const region = form.value.provider_region ?? 'cn'
     form.value.provider_region = region
+    if (!form.value.endpoint_id) {
+      form.value.mcp_enabled = true
+    }
     if (form.value.protocol_mode === 'auto') {
       form.value.protocol_mode = 'manual'
       form.value.native_api_override = 'anthropic_messages'
@@ -49,7 +56,9 @@ const isMinimax = computed(() => form.value.provider === 'minimax')
 const usesCustomMinimaxBaseUrl = computed(() => {
   if (!isMinimax.value) return false
   const current = form.value.base_url.trim().replace(/\/+$/, '')
-  const known = Object.values(minimaxBaseUrls).flatMap((urls) => Object.values(urls))
+  const known = Object.values(minimaxBaseUrls).flatMap((urls) =>
+    Object.values(urls),
+  )
   return Boolean(current) && !known.includes(current as (typeof known)[number])
 })
 const protocolSelection = computed({
@@ -91,7 +100,9 @@ function setMinimaxBaseUrl(
   protocol: MinimaxProtocol,
 ): void {
   const current = form.value.base_url.trim().replace(/\/+$/, '')
-  const known = Object.values(minimaxBaseUrls).flatMap((urls) => Object.values(urls))
+  const known = Object.values(minimaxBaseUrls).flatMap((urls) =>
+    Object.values(urls),
+  )
   if (!current || known.includes(current as (typeof known)[number])) {
     form.value.base_url = minimaxBaseUrls[region][protocol]
   }
