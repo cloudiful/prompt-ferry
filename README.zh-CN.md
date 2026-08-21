@@ -93,6 +93,73 @@ forwarding pump 等待慢客户端的时长，默认 5000 毫秒。默认值分�
 请保持 `8789` 端口只对本机或受保护的内网开放。Compose 配置项见
 [.env.example](.env.example)。
 
+### Worker 存储模式
+
+Worker 有两种存储模式。`PROMPT_FERRY_WORKER__DATABASE_URL` 非空时使用现有的
+PostgreSQL 共享托管模式；为空时使用本地 SQLite 配置数据库的独立托管模式。
+已配置但不可用的 PostgreSQL 不会自动降级为 SQLite。
+
+独立模式下，relay 和 worker 可以部署在不同机器上，分别运行
+`prompt-ferry relay` 和 `prompt-ferry worker`。relay-worker 桥接协议不变：worker
+必须能访问 relay 的 worker bind，客户端必须能访问 relay 的 public bind。relay URL
+可通过可重复的 `--relay-url` 参数或 `relay_urls` 配置列表设置；使用环境变量覆盖时，
+`PROMPT_FERRY_WORKER__RELAY_URLS` 的值应为 JSON 数组。
+
+首次启动时，空的 SQLite 数据库会从静态 worker 设置引导，包括 relay URL、上游基础地址
+和 API Key、worker token、TLS 以及桥接加密设置。引导完成后以 SQLite 配置为准；重新加载
+轮询会在不重启 worker 的情况下应用支持的直接 SQLite 修改。必须设置
+`PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY`，其值为 base64 编码的 32 字节密钥，用于
+静态加密保存密钥；SQLite 不会以明文保存上游 API Key。
+
+默认数据库路径为：Linux 使用 `$XDG_DATA_HOME/prompt-ferry/worker.sqlite3`，或
+`$HOME/.local/share/prompt-ferry/worker.sqlite3`；macOS 使用
+`$HOME/Library/Application Support/prompt-ferry/worker.sqlite3`；Windows 使用
+`%LOCALAPPDATA%\\prompt-ferry\\worker.sqlite3`。可通过
+`PROMPT_FERRY_WORKER__STANDALONE_DATABASE_PATH` 或
+`--standalone-database-path` 覆盖。备份或恢复 SQLite 文件时应先停止 worker，并同时
+保管 master key。
+
+独立模式的运行时状态有明确上限：请求和用量只保留在最多 256 条记录的内存摘要环中。
+不会持久化请求或原始报文、计费、审批、配额或重放历史；重启后内存环会清空。MCP
+不可用。脱敏规则会持久化，但按会话的脱敏状态会在重启后重置。Valkey 是可选的：独立
+模式不要求 Valkey；如果配置了可访问的 Valkey URL，仍可使用现有 Valkey 后端。Valkey
+缺失或不可用时，有限的本地 affinity、session 和 replay 内存状态仅限单进程，不会在多个
+worker 之间共享；持久化的请求和用量历史仍不可用。
+
+独立模式暂未提供配置变更 CLI 或 API。静态 worker 设置会引导空的 SQLite 数据库；直接
+修改 SQLite 只有在符合受支持的 schema/配置变更以及正常密钥加密约束时，才会由轮询重新
+加载。需要管理控制面时请使用 PostgreSQL 模式；独立模式不是完整的管理控制台。
+
+不同主机部署时可使用以下占位符示例，并确保 worker 主机能够访问桥接端口：
+
+```dotenv
+# Relay 主机
+PROMPT_FERRY_RELAY__BIND=0.0.0.0:8787
+PROMPT_FERRY_RELAY__WORKER_BIND=0.0.0.0:8788
+PROMPT_FERRY_RELAY__CLIENT_TOKEN=<client-token>
+PROMPT_FERRY_RELAY__WORKER_TOKEN=<worker-token>
+```
+
+```bash
+prompt-ferry relay
+```
+
+```dotenv
+# Worker 主机
+PROMPT_FERRY_WORKER__DATABASE_URL=
+PROMPT_FERRY_WORKER__RELAY_URLS=["wss://relay.example.invalid:8788/ws/worker"]
+PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://upstream.example.invalid
+PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<upstream-api-key>
+PROMPT_FERRY_WORKER__WORKER_TOKEN=<worker-token>
+PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY=<base64-32-byte-key>
+PROMPT_FERRY_WORKER__TLS_MODE=<configured-tls-mode>
+PROMPT_FERRY_WORKER__BRIDGE_ENCRYPTION_MODE=<configured-bridge-mode>
+```
+
+```bash
+prompt-ferry worker
+```
+
 ### 单机二进制
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的

@@ -103,6 +103,87 @@ all three values must be greater than zero.
 Keep port `8789` private. See [.env.example](.env.example) for the available
 Compose settings.
 
+### Worker storage modes
+
+The worker has two storage modes. A non-empty
+`PROMPT_FERRY_WORKER__DATABASE_URL` selects the existing shared-managed mode
+with PostgreSQL. An empty value selects standalone-managed mode with a local
+SQLite configuration database; a configured but unavailable PostgreSQL
+database does not fall back to SQLite.
+
+In standalone mode, relay and worker may run on separate machines with
+`prompt-ferry relay` and `prompt-ferry worker`. The relay-worker bridge
+protocol is unchanged: the worker needs network access to the relay's worker
+bind, and clients need access to the relay's public bind. Configure relay URLs
+with repeatable `--relay-url` options or the `relay_urls` configuration list
+(for environment overrides, `PROMPT_FERRY_WORKER__RELAY_URLS` is a JSON array).
+
+On first startup, an empty SQLite database is bootstrapped from the static
+worker settings, including relay URLs, upstream base URL and API key, worker
+token, TLS, and bridge-encryption settings. After bootstrap, the SQLite
+configuration is authoritative. Reload polling applies supported direct
+SQLite changes without restarting the worker. The required
+`PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY` is a base64-encoded 32-byte key
+used to encrypt secrets at rest; SQLite never stores provider API keys in
+plaintext.
+
+The default database path is `$XDG_DATA_HOME/prompt-ferry/worker.sqlite3` or
+`$HOME/.local/share/prompt-ferry/worker.sqlite3` on Linux,
+`$HOME/Library/Application Support/prompt-ferry/worker.sqlite3` on macOS, and
+`%LOCALAPPDATA%\\prompt-ferry\\worker.sqlite3` on Windows. Override it with
+`PROMPT_FERRY_WORKER__STANDALONE_DATABASE_PATH` or
+`--standalone-database-path`. Back up or restore the SQLite file while the
+worker is stopped, and retain the master key with the backup.
+
+Standalone runtime state is intentionally limited: request and usage data is
+kept only in a bounded in-memory summary ring of 256 entries. There is no
+durable request or raw-payload, billing, approval, quota, or replay history;
+the ring is cleared on restart. MCP is unavailable. Redaction rules persist,
+but conversation-specific redaction sessions reset on restart. Valkey is
+optional: standalone mode does not require it, and a configured reachable
+Valkey URL can use the existing Valkey backend. When Valkey is absent or
+unavailable, bounded local affinity, session, and replay memory is single
+process only and is not shared across workers; durable request and usage
+history remains unavailable.
+
+No standalone configuration-mutation CLI or API is included yet. Static
+worker settings bootstrap an empty SQLite database. Direct SQLite edits are
+picked up by reload polling only for supported schema/configuration changes and
+must satisfy the normal secret-encryption constraints. Use PostgreSQL mode
+when an admin control plane is required; standalone does not provide a full
+admin console.
+
+For a separate-host deployment, use placeholders like these and keep the
+bridge port reachable from the worker host:
+
+```dotenv
+# Relay host
+PROMPT_FERRY_RELAY__BIND=0.0.0.0:8787
+PROMPT_FERRY_RELAY__WORKER_BIND=0.0.0.0:8788
+PROMPT_FERRY_RELAY__CLIENT_TOKEN=<client-token>
+PROMPT_FERRY_RELAY__WORKER_TOKEN=<worker-token>
+```
+
+```bash
+prompt-ferry relay
+```
+
+```dotenv
+# Worker host
+PROMPT_FERRY_WORKER__DATABASE_URL=
+PROMPT_FERRY_WORKER__RELAY_URLS=["wss://relay.example.invalid:8788/ws/worker"]
+PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://upstream.example.invalid
+PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<upstream-api-key>
+PROMPT_FERRY_WORKER__WORKER_TOKEN=<worker-token>
+PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY=<base64-32-byte-key>
+PROMPT_FERRY_WORKER__TLS_MODE=<configured-tls-mode>
+PROMPT_FERRY_WORKER__BRIDGE_ENCRYPTION_MODE=<configured-bridge-mode>
+```
+
+```bash
+prompt-ferry worker
+```
+
 ### Single-host binary
 
 Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases)
