@@ -105,8 +105,9 @@ pub use usage::{
     upsert_usage_assistant_artifact, upsert_usage_prompt_block, usage_buckets,
 };
 pub use users::{
-    bootstrap_admin, count_client_keys, create_client_key, create_user, delete_client_key,
-    delete_user, get_active_user, get_client_key_identity_by_hash, get_client_key_label_by_hash,
-    get_user_endpoint_setting, get_user_password_by_login, list_client_keys, list_client_keys_page,
-    list_users, list_users_page, reset_password, update_client_key, update_user,
+    UserStore, bootstrap_admin, count_client_keys, create_client_key, create_user,
+    delete_client_key, delete_user, get_active_user, get_client_key_identity_by_hash,
+    get_client_key_label_by_hash, get_user_endpoint_setting, get_user_password_by_login,
+    list_client_keys, list_client_keys_page, list_users, list_users_page, reset_password,
+    update_client_key, update_user,
 };

@@ -434,3 +434,77 @@ async fn concurrent_endpoint_writes_and_reads_use_sqlite_busy_timeout() {
     let store = Arc::try_unwrap(store).ok().expect("only store owner");
     cleanup(store, path).await;
 }
+
+#[tokio::test]
+async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
+    let path = database_path();
+    let manager = manager(5);
+    let legacy_key_id = Uuid::new_v4();
+    let pool = crate::db::connect_sqlite(&path).await.expect("pool");
+    sqlx::raw_sql(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/migrations/standalone/0001_initial.sql"
+    )))
+    .execute(&pool)
+    .await
+    .expect("legacy schema");
+    sqlx::raw_sql(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/migrations/standalone/0002_storage_contract.sql"
+    )))
+    .execute(&pool)
+    .await
+    .expect("phase 1 schema");
+
+    let envelope = manager
+        .encrypt("legacy-client-secret")
+        .expect("encrypt key");
+    sqlx::query(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/sql/standalone/save_client_key.sql"
+    )))
+    .bind(legacy_key_id.to_string())
+    .bind(77_i64)
+    .bind("legacy")
+    .bind("Legacy client key")
+    .bind(1_i64)
+    .bind(envelope.ciphertext)
+    .bind(envelope.nonce)
+    .bind(i64::from(envelope.key_version))
+    .execute(&pool)
+    .await
+    .expect("legacy client key");
+    pool.close().await;
+
+    let store = StandaloneConfigStore::open(&path)
+        .await
+        .expect("migrate legacy");
+    let version = sqlx::query(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/sql/standalone/schema_version.sql"
+    )))
+    .fetch_one(store.pool())
+    .await
+    .expect("schema version")
+    .try_get::<i64, _>("schema_version")
+    .expect("version value");
+    assert_eq!(version, 3);
+
+    let snapshot = store
+        .load_snapshot(&manager)
+        .await
+        .expect("load legacy snapshot");
+    assert_eq!(snapshot.client_keys[0].secret, "legacy-client-secret");
+    let legacy_user = sqlx::query(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/standalone_config/sql/users/inspect_user_enabled.sql"
+    )))
+    .bind(77_i64)
+    .fetch_one(store.pool())
+    .await
+    .expect("legacy user placeholder")
+    .try_get::<i64, _>("enabled")
+    .expect("legacy user status");
+    assert_eq!(legacy_user, 0);
+    cleanup(store, path).await;
+}

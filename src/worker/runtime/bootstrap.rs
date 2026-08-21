@@ -12,6 +12,7 @@ use crate::{
     worker_admin::{self, AdminState},
 };
 use anyhow::anyhow;
+use sqlx::postgres::PgPoolOptions;
 use std::{sync::Arc, time::Duration};
 use tracing::{error, warn};
 
@@ -135,19 +136,80 @@ pub(super) async fn build_admin_state(
     config: &WorkerConfig,
     spawn_admin_server: bool,
 ) -> anyhow::Result<Option<AdminState>> {
-    if !config.storage_backend().is_postgres() {
-        return Ok(None);
-    }
     let relay_secret_manager = RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
-    let pool = db::connect(&config.database_url).await?;
-    let lease_pool = db::connect_with_max_connections(&config.database_url, 2).await?;
-    db::migrate(&pool).await?;
-    db::bootstrap_admin(
-        &pool,
-        &config.bootstrap_admin_login,
-        &config.bootstrap_admin_password,
-    )
-    .await?;
+    let is_postgres = config.storage_backend().is_postgres();
+    let (pool, lease_pool, user_store) = if is_postgres {
+        let pool = db::connect(&config.database_url).await?;
+        let lease_pool = db::connect_with_max_connections(&config.database_url, 2).await?;
+        db::migrate(&pool).await?;
+        let user_store = db::UserStore::postgres(&pool);
+        (pool, lease_pool, user_store)
+    } else {
+        let path = runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                anyhow!(error).context("failed to create standalone SQLite parent directory")
+            })?;
+        }
+        let store = StandaloneConfigStore::open(&path).await?;
+        let sqlite_pool = store.pool().clone();
+        let pool =
+            PgPoolOptions::new().connect_lazy("postgres://postgres@localhost/prompt_ferry")?;
+        (pool.clone(), pool, db::UserStore::sqlite(sqlite_pool))
+    };
+    user_store
+        .bootstrap_admin(
+            &config.bootstrap_admin_login,
+            &config.bootstrap_admin_password,
+        )
+        .await?;
+
+    if !is_postgres {
+        let mcp_catalog_cache = crate::mcp::McpCatalogCache::new();
+        let state = AdminState::new(crate::worker_admin_state::AdminStateInit {
+            pool: pool.clone(),
+            lease_pool,
+            replay_cache: ReplayCache::from_config(config).await,
+            configured_relays: config.relay_urls.clone(),
+            managed_mode: false,
+            relay_secret_manager: Some(relay_secret_manager),
+            redaction_enabled: false,
+            model_route_whitelist_enabled: true,
+            request_content_logging: crate::worker_admin_types::RequestContentLoggingResponse {
+                mode: crate::worker_admin_types::RequestContentLoggingMode::Off,
+                raw_retention_days: 3,
+            },
+            usage_retention: crate::worker_admin_types::UsageRetentionSettings::default(),
+            raw_payload_store: None,
+            stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
+            llm_review_settings: llm_review::LlmReviewSettings::default(),
+            mcp_catalog_cache: mcp_catalog_cache.clone(),
+            mcp_catalog_service: crate::mcp::McpCatalogService::new(pool, mcp_catalog_cache),
+            mcp_session_store: None,
+            mcp_allowed_origins: config.mcp_allowed_origins.clone(),
+            mcp_quota_valkey: crate::mcp::McpQuotaValkey::new(),
+            endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
+                Duration::from_secs(config.endpoint_model_cache_ttl_seconds.max(1)),
+            ),
+        })
+        .with_user_store(user_store);
+        if spawn_admin_server {
+            let admin_config = config.clone();
+            let admin_state = state.clone();
+            tokio::spawn(async move {
+                if let Err(err) =
+                    worker_admin::run_admin_server(admin_state, &admin_config.admin_bind).await
+                {
+                    error!(error = %err, "worker admin server stopped");
+                }
+            });
+        }
+        return Ok(Some(state));
+    }
+
     let usage_retention = db::get_usage_retention(&pool).await?;
     let raw_payload_store = match crate::raw_payload_store::RawPayloadStore::from_config(config)? {
         Some(store) => Some(Arc::new(store)),
@@ -203,7 +265,8 @@ pub(super) async fn build_admin_state(
         endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(Duration::from_secs(
             config.endpoint_model_cache_ttl_seconds.max(1),
         )),
-    });
+    })
+    .with_user_store(user_store);
     if spawn_admin_server {
         let admin_config = config.clone();
         let admin_state = state.clone();
@@ -237,7 +300,7 @@ pub(super) async fn build_admin_state(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_config;
+    use super::{build_admin_state, validate_config};
     use crate::config::WorkerConfig;
     use base64::Engine as _;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -294,6 +357,40 @@ mod tests {
         let snapshot = state.snapshot().await;
         assert_eq!(snapshot.relays.len(), 1);
         assert_eq!(snapshot.endpoints.len(), 1);
+        drop(state);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn sqlite_admin_bootstrap_requires_a_non_empty_password() {
+        let path = std::env::temp_dir().join(format!(
+            "prompt-ferry-admin-bootstrap-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let mut config = WorkerConfig {
+            standalone_database_path: path.to_string_lossy().to_string(),
+            bootstrap_admin_login: "admin".to_string(),
+            bootstrap_admin_password: String::new(),
+            relay_secret_master_key: base64::engine::general_purpose::STANDARD.encode([7_u8; 32]),
+            ..WorkerConfig::default()
+        };
+
+        let error = match build_admin_state(&config, false).await {
+            Ok(_) => panic!("empty bootstrap password must fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("bootstrap admin login and password")
+        );
+
+        config.bootstrap_admin_password = "admin-password".to_string();
+        let state = build_admin_state(&config, false)
+            .await
+            .expect("SQLite admin state")
+            .expect("admin state");
+        assert!(state.user_store.is_sqlite());
         drop(state);
         let _ = std::fs::remove_file(path);
     }

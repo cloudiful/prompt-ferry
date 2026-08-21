@@ -258,6 +258,10 @@ pub(crate) async fn insert_client_key(
     transaction: &mut sqlx::Transaction<'_, Sqlite>,
     key: &EncryptedClientKey,
 ) -> Result<()> {
+    standalone_query!("src/standalone_config/sql/users/ensure_client_key_user.sql")
+        .bind(key.client_key.user_id)
+        .execute(&mut **transaction)
+        .await?;
     standalone_query!("src/sql/standalone/save_client_key.sql")
         .bind(key.client_key.key_id.to_string())
         .bind(key.client_key.user_id)

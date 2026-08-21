@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use super::token_plan_cache::TokenPlanQuotaCache;
 use crate::{
-    db::{ManagedRelayRuntimeStatus, StreamDeltaBatchingSettings},
+    db::{ManagedRelayRuntimeStatus, StreamDeltaBatchingSettings, UserStore},
     endpoint_models::EndpointModelCache,
     keys::generate_client_key,
     llm_review::{ApprovalResolution, LlmReviewSettings},
@@ -85,6 +85,7 @@ impl ManagedRelaySupervisorHandle {
 pub struct AdminState {
     pub pool: PgPool,
     pub lease_pool: PgPool,
+    pub user_store: UserStore,
     pub replay_cache: ReplayCache,
     pub relay_senders: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<BridgeMessage>>>>,
     pub configured_relays: Arc<Vec<String>>,
@@ -134,9 +135,11 @@ pub struct AdminStateInit {
 
 impl AdminState {
     pub fn new(init: AdminStateInit) -> Self {
+        let user_store = UserStore::postgres(&init.pool);
         Self {
             pool: init.pool,
             lease_pool: init.lease_pool,
+            user_store,
             replay_cache: init.replay_cache,
             relay_senders: Arc::new(Mutex::new(HashMap::new())),
             configured_relays: Arc::new(init.configured_relays),
@@ -169,6 +172,19 @@ impl AdminState {
         self.relay_secret_manager
             .as_ref()
             .ok_or_else(|| anyhow!("relay secret manager is not configured"))
+    }
+
+    pub fn sqlite_capability_unavailable(&self) -> Response {
+        error(
+            StatusCode::NOT_IMPLEMENTED,
+            "capability_unavailable",
+            "this Admin API capability is not available with SQLite yet",
+        )
+    }
+
+    pub fn with_user_store(mut self, user_store: UserStore) -> Self {
+        self.user_store = user_store;
+        self
     }
 
     pub async fn set_relay_supervisor(&self, handle: ManagedRelaySupervisorHandle) {

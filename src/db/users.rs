@@ -1,22 +1,112 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use sqlx::PgPool;
 
 use crate::{
     db::types::{ClientKey, ClientKeyIdentity, User, UserCreate, UserPassword, UserUpdate},
     keys::hash_password,
+    standalone_config::SqliteUserStore,
 };
 
-pub async fn bootstrap_admin(pool: &PgPool, login: &str, password: &str) -> Result<()> {
-    if login.trim().is_empty() || password.trim().is_empty() {
-        return Ok(());
+#[derive(Clone)]
+pub enum UserStore {
+    Postgres(PgPool),
+    Sqlite(SqliteUserStore),
+}
+
+impl UserStore {
+    pub fn postgres(pool: &PgPool) -> Self {
+        Self::Postgres(pool.clone())
     }
-    let exists = sqlx::query_file!("src/sql/users/bootstrap_admin_exists.sql", login)
+
+    pub fn sqlite(pool: sqlx::SqlitePool) -> Self {
+        Self::Sqlite(SqliteUserStore::new(pool))
+    }
+
+    pub fn is_sqlite(&self) -> bool {
+        matches!(self, Self::Sqlite(_))
+    }
+
+    pub async fn bootstrap_admin(&self, login: &str, password: &str) -> Result<()> {
+        match self {
+            Self::Postgres(pool) => bootstrap_admin(pool, login, password).await,
+            Self::Sqlite(store) => store.bootstrap_admin(login, password).await,
+        }
+    }
+
+    pub async fn get_user_password_by_login(&self, login: &str) -> Result<Option<UserPassword>> {
+        match self {
+            Self::Postgres(pool) => get_user_password_by_login(pool, login).await,
+            Self::Sqlite(store) => store.get_user_password_by_login(login).await,
+        }
+    }
+
+    pub async fn get_active_user(&self, user_id: i64) -> Result<Option<User>> {
+        match self {
+            Self::Postgres(pool) => get_active_user(pool, user_id).await,
+            Self::Sqlite(store) => store.get_active_user(user_id).await,
+        }
+    }
+
+    pub async fn list_users(&self) -> Result<Vec<User>> {
+        match self {
+            Self::Postgres(pool) => list_users(pool).await,
+            Self::Sqlite(store) => store.list_users().await,
+        }
+    }
+
+    pub async fn list_users_page(&self, first: i64, rows: i64) -> Result<(i64, Vec<User>)> {
+        match self {
+            Self::Postgres(pool) => list_users_page(pool, first, rows).await,
+            Self::Sqlite(store) => store.list_users_page(first, rows).await,
+        }
+    }
+
+    pub async fn create_user(&self, input: UserCreate) -> Result<User> {
+        match self {
+            Self::Postgres(pool) => create_user(pool, input).await,
+            Self::Sqlite(store) => store.create_user(input).await,
+        }
+    }
+
+    pub async fn update_user(&self, user_id: i64, input: UserUpdate) -> Result<Option<User>> {
+        match self {
+            Self::Postgres(pool) => update_user(pool, user_id, input).await,
+            Self::Sqlite(store) => store.update_user(user_id, input).await,
+        }
+    }
+
+    pub async fn reset_password(&self, user_id: i64, password_hash: String) -> Result<bool> {
+        match self {
+            Self::Postgres(pool) => reset_password(pool, user_id, password_hash).await,
+            Self::Sqlite(store) => store.reset_password(user_id, password_hash).await,
+        }
+    }
+
+    pub async fn delete_user(&self, user_id: i64) -> Result<bool> {
+        match self {
+            Self::Postgres(pool) => delete_user(pool, user_id).await,
+            Self::Sqlite(store) => store.delete_user(user_id).await,
+        }
+    }
+}
+
+pub async fn bootstrap_admin(pool: &PgPool, login: &str, password: &str) -> Result<()> {
+    let login_exists = sqlx::query_file!("src/sql/users/bootstrap_admin_exists.sql", login)
         .fetch_one(pool)
         .await?
         .exists;
-    if exists {
+    if login_exists {
         return Ok(());
     }
+
+    let has_active_user = sqlx::query_file!("src/sql/users/has_active_users.sql")
+        .fetch_one(pool)
+        .await?
+        .has_active;
+    if has_active_user {
+        return Ok(());
+    }
+    require_bootstrap_credentials(login, password)?;
     let password_hash = hash_password(password)?;
     sqlx::query_file!(
         "src/sql/users/bootstrap_admin_insert.sql",
@@ -26,6 +116,15 @@ pub async fn bootstrap_admin(pool: &PgPool, login: &str, password: &str) -> Resu
     )
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+fn require_bootstrap_credentials(login: &str, password: &str) -> Result<()> {
+    if login.trim().is_empty() || password.trim().is_empty() {
+        return Err(anyhow!(
+            "bootstrap admin login and password are required when no active admin exists"
+        ));
+    }
     Ok(())
 }
 

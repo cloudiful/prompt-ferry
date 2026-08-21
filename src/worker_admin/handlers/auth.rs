@@ -4,7 +4,11 @@ pub(super) async fn login(
     State(state): State<AdminState>,
     Json(body): Json<LoginRequest>,
 ) -> Response {
-    match db::get_user_password_by_login(&state.pool, &body.login_name).await {
+    match state
+        .user_store
+        .get_user_password_by_login(&body.login_name)
+        .await
+    {
         Ok(Some(user))
             if user.is_active && verify_password(&body.password, &user.password_hash) =>
         {

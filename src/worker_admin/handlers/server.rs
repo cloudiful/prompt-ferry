@@ -1,5 +1,9 @@
 use super::*;
 use axum::routing::put;
+use axum::{
+    extract::Request,
+    middleware::{self, Next},
+};
 use std::{env, path::PathBuf};
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -204,6 +208,11 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             post(reject_approval),
         )
         .route("/bridge/status", get(bridge_status))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            reject_unsupported_sqlite_capabilities,
+        ))
+        .fallback(admin_api_fallback)
         .with_state(state.clone());
 
     let frontend_assets = ServeDir::new(frontend_dist.join("assets"));
@@ -214,6 +223,45 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
         .nest_service("/assets", frontend_assets)
         .fallback_service(frontend_index)
         .layer(CorsLayer::permissive())
+}
+
+async fn reject_unsupported_sqlite_capabilities(
+    State(state): State<AdminState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if state.user_store.is_sqlite() {
+        let path = request
+            .uri()
+            .path()
+            .strip_prefix("/api/v1")
+            .unwrap_or_else(|| request.uri().path());
+        if !sqlite_admin_path_supported(path) {
+            return state.sqlite_capability_unavailable();
+        }
+    }
+    next.run(request).await
+}
+
+async fn admin_api_fallback(State(state): State<AdminState>) -> Response {
+    if state.user_store.is_sqlite() {
+        state.sqlite_capability_unavailable()
+    } else {
+        error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Admin API route not found",
+        )
+    }
+}
+
+fn sqlite_admin_path_supported(path: &str) -> bool {
+    matches!(path, "/auth/login" | "/auth/logout" | "/auth/me")
+        || path == "/admin/users"
+        || path == "/admin/users/options"
+        || path
+            .strip_prefix("/admin/users/")
+            .is_some_and(|suffix| !suffix.contains("/client-keys"))
 }
 
 fn frontend_dist_dir() -> PathBuf {
@@ -258,7 +306,7 @@ mod tests {
         AdminState::new(AdminStateInit {
             pool: pool.clone(),
             lease_pool: pool.clone(),
-            replay_cache: ReplayCache::default(),
+            replay_cache: ReplayCache::for_tests(),
             configured_relays: vec!["ws://relay:8788/ws/worker".to_string()],
             managed_mode: false,
             relay_secret_manager: None,
@@ -330,5 +378,102 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(frontend_dir);
+    }
+
+    #[tokio::test]
+    async fn sqlite_admin_api_uses_persisted_auth_and_rejects_later_capabilities() {
+        let path =
+            std::env::temp_dir().join(format!("prompt-ferry-admin-{}.sqlite", Uuid::new_v4()));
+        let sqlite_pool = db::connect_sqlite(&path).await.expect("SQLite pool");
+        db::migrate_standalone(&sqlite_pool)
+            .await
+            .expect("SQLite migrations");
+        let user_store = db::UserStore::sqlite(sqlite_pool.clone());
+        user_store
+            .bootstrap_admin("admin", "admin-password")
+            .await
+            .expect("SQLite admin bootstrap");
+        let frontend_dir = temp_frontend_dir();
+        let app = router_with_frontend_dist(
+            test_state().with_user_store(user_store),
+            frontend_dir.clone(),
+        );
+
+        let login = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "login_name": "admin",
+                            "password": "admin-password"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(login.status(), StatusCode::NO_CONTENT);
+        let cookie = login
+            .headers()
+            .get(header::SET_COOKIE)
+            .expect("session cookie")
+            .to_str()
+            .expect("cookie value")
+            .split(';')
+            .next()
+            .expect("cookie pair")
+            .to_string();
+
+        let me_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/auth/me")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(me_response.status(), StatusCode::OK);
+
+        let users_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/users")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(users_response.status(), StatusCode::OK);
+
+        let unsupported = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/endpoints")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unsupported.status(), StatusCode::NOT_IMPLEMENTED);
+        let body = to_bytes(unsupported.into_body(), usize::MAX).await.unwrap();
+        assert!(
+            std::str::from_utf8(&body)
+                .expect("JSON body")
+                .contains("capability_unavailable")
+        );
+
+        sqlite_pool.close().await;
+        let _ = fs::remove_dir_all(frontend_dir);
+        let _ = fs::remove_file(path);
     }
 }

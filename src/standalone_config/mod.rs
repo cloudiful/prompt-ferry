@@ -16,6 +16,7 @@ mod rows;
 mod store;
 #[cfg(test)]
 mod tests;
+mod users;
 mod validation;
 mod write;
 
@@ -26,3 +27,4 @@ pub use models::{
     StandaloneConfigError,
 };
 pub use store::{BootstrapOutcome, StandaloneConfigStore};
+pub use users::SqliteUserStore;

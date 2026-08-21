@@ -10,6 +10,9 @@ pub(super) async fn list_client_keys(
         Ok(user) => user,
         Err(response) => return response,
     };
+    if state.user_store.is_sqlite() {
+        return state.sqlite_capability_unavailable();
+    }
     let first = query.first.unwrap_or(0).max(0);
     let rows = query.rows.unwrap_or(20).clamp(1, 200);
     match db::list_client_keys_page(&state.pool, user.user_id, first, rows).await {
@@ -33,6 +36,9 @@ pub(super) async fn create_client_key(
         Ok(user) => user,
         Err(response) => return response,
     };
+    if state.user_store.is_sqlite() {
+        return state.sqlite_capability_unavailable();
+    }
     let (secret, prefix, hash) = generate_client_key();
     match db::create_client_key(
         &state.pool,
@@ -71,6 +77,9 @@ pub(super) async fn update_client_key(
         Ok(user) => user,
         Err(response) => return response,
     };
+    if state.user_store.is_sqlite() {
+        return state.sqlite_capability_unavailable();
+    }
     match db::update_client_key(&state.pool, user.user_id, key_id, body.label, body.enabled).await {
         Ok(Some(key)) => {
             let _ = publish_snapshot(&state).await;
@@ -90,6 +99,9 @@ pub(super) async fn delete_client_key(
         Ok(user) => user,
         Err(response) => return response,
     };
+    if state.user_store.is_sqlite() {
+        return state.sqlite_capability_unavailable();
+    }
     match db::delete_client_key(&state.pool, user.user_id, key_id).await {
         Ok(true) => {
             let _ = publish_snapshot(&state).await;
@@ -109,6 +121,9 @@ pub(super) async fn list_available_models(
         Ok(user) => user,
         Err(response) => return response,
     };
+    if state.user_store.is_sqlite() {
+        return state.sqlite_capability_unavailable();
+    }
     let first = query.first.unwrap_or(0).max(0);
     let rows = query.rows.unwrap_or(20).clamp(1, 200);
     match available_models(&state, user.user_id).await {

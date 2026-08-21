@@ -52,16 +52,23 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
         .build()
         .context("failed to build upstream HTTP client")?;
     let admin_state = build_admin_state(&config, true).await?;
+    let runtime_admin_state = if contract.backend.is_postgres() {
+        admin_state.clone()
+    } else {
+        None
+    };
     let standalone_state = if contract.backend.is_postgres() {
         None
     } else {
         Some(build_standalone_state(&config).await?)
     };
     let runtime_state = WorkerRuntimeState::default();
-    super::abort_stale_requests_once(admin_state.as_ref()).await;
-    let _stale_reconciler =
-        super::spawn_stale_request_reconciler(admin_state.as_ref(), runtime_state.control.clone());
-    let raw_maintenance_task = if let Some(state) = admin_state.as_ref() {
+    super::abort_stale_requests_once(runtime_admin_state.as_ref()).await;
+    let _stale_reconciler = super::spawn_stale_request_reconciler(
+        runtime_admin_state.as_ref(),
+        runtime_state.control.clone(),
+    );
+    let raw_maintenance_task = if let Some(state) = runtime_admin_state.as_ref() {
         Some(super::raw_maintenance::spawn(
             &config,
             state.pool.clone(),
@@ -80,7 +87,7 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
 
     let mut relay_tasks = JoinSet::new();
     if contract.backend.is_postgres() {
-        let state = require_managed_admin_state(admin_state.as_ref())?;
+        let state = require_managed_admin_state(runtime_admin_state.as_ref())?;
         spawn_managed_relay_supervisor(
             config.clone(),
             client.clone(),
@@ -104,7 +111,7 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
     }
 
     runtime_state.wait_for_shutdown().await;
-    if let Some(state) = admin_state.as_ref() {
+    if let Some(state) = runtime_admin_state.as_ref() {
         abort_waiting_approvals(state, &client).await;
     }
     relay_tasks.abort_all();
@@ -138,6 +145,11 @@ pub(super) async fn connect_for_test_with_admin(
     client: Client,
 ) -> anyhow::Result<()> {
     let admin_state = build_admin_state(&config, false).await?;
+    let runtime_admin_state = if config.storage_backend().is_postgres() {
+        admin_state.clone()
+    } else {
+        None
+    };
     let standalone_state = if config.storage_backend().is_postgres() {
         None
     } else {
@@ -148,7 +160,7 @@ pub(super) async fn connect_for_test_with_admin(
         &relay,
         config,
         client,
-        admin_state,
+        runtime_admin_state,
         standalone_state,
         WorkerRuntimeState::default(),
     )
