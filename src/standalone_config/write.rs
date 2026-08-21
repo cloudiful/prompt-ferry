@@ -203,6 +203,8 @@ pub(crate) async fn insert_endpoint(
             EnvelopePart::Nonce,
         ))
         .bind(envelope_version(&Some(endpoint.api_key.clone())))
+        .bind(timestamp(endpoint.endpoint.created_at))
+        .bind(timestamp(endpoint.endpoint.updated_at))
         .execute(&mut **transaction)
         .await?;
     for (key, envelope) in &endpoint.api_keys {
@@ -218,6 +220,8 @@ pub(crate) async fn insert_endpoint(
             ))
             .bind(envelope_part(&Some(envelope.clone()), EnvelopePart::Nonce))
             .bind(envelope_version(&Some(envelope.clone())))
+            .bind(timestamp(key.created_at))
+            .bind(timestamp(key.updated_at))
             .execute(&mut **transaction)
             .await?;
     }
@@ -310,6 +314,10 @@ pub(crate) fn decrypt_optional(
 
 fn bool_i64(value: bool) -> i64 {
     i64::from(value)
+}
+
+fn timestamp(value: chrono::DateTime<chrono::Utc>) -> String {
+    value.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
 }
 
 #[derive(Clone, Copy)]

@@ -108,9 +108,20 @@ pub(crate) fn relay(
     ))
 }
 
+pub(crate) fn relay_envelopes(row: &SqliteRow) -> Result<[Option<EncryptedSecretEnvelope>; 4]> {
+    Ok([
+        envelope(row, "relay_ca")?,
+        envelope(row, "client_cert")?,
+        envelope(row, "client_key")?,
+        envelope(row, "bridge_encryption_key")?,
+    ])
+}
+
 pub(crate) fn endpoint(
     row: &SqliteRow,
 ) -> Result<(ProviderEndpointConfig, Option<EncryptedSecretEnvelope>)> {
+    let created_at = sqlite_timestamp(row, "created_at")?;
+    let updated_at = sqlite_timestamp(row, "updated_at")?;
     Ok((
         ProviderEndpointConfig {
             endpoint_id: uuid(row, "endpoint_id")?,
@@ -128,6 +139,8 @@ pub(crate) fn endpoint(
             key_lb_enabled: bool_value(row, "key_lb_enabled")?,
             enabled: bool_value(row, "enabled")?,
             mcp_enabled: bool_value(row, "mcp_enabled")?,
+            created_at,
+            updated_at,
             api_key: String::new(),
             api_keys: Vec::new(),
         },
@@ -138,9 +151,12 @@ pub(crate) fn endpoint(
 pub(crate) fn endpoint_key(
     row: &SqliteRow,
 ) -> Result<(EndpointApiKeyConfig, EncryptedSecretEnvelope)> {
+    let created_at = sqlite_timestamp(row, "created_at")?;
+    let updated_at = sqlite_timestamp(row, "updated_at")?;
     Ok((
         EndpointApiKeyConfig {
             key_id: uuid(row, "key_id")?,
+            endpoint_id: uuid(row, "endpoint_id")?,
             key_label: required_string(row, "key_label")?,
             api_key: String::new(),
             position: i32::try_from(row.try_get::<i64, _>("position")?).map_err(|_| {
@@ -149,12 +165,31 @@ pub(crate) fn endpoint_key(
                 )
             })?,
             enabled: bool_value(row, "enabled")?,
+            created_at,
+            updated_at,
         },
         envelope(row, "api_key")?.ok_or_else(|| {
             StandaloneConfigError::CorruptDatabase(
                 "endpoint key is missing its secret envelope".to_string(),
             )
         })?,
+    ))
+}
+
+fn sqlite_timestamp(row: &SqliteRow, column: &str) -> Result<chrono::DateTime<chrono::Utc>> {
+    let value: String = row.try_get(column)?;
+    if let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(&value) {
+        return Ok(timestamp.with_timezone(&chrono::Utc));
+    }
+    let timestamp =
+        chrono::NaiveDateTime::parse_from_str(&value, "%Y-%m-%d %H:%M:%S").map_err(|error| {
+            StandaloneConfigError::CorruptDatabase(format!(
+                "column {column} is not a timestamp: {error}"
+            ))
+        })?;
+    Ok(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+        timestamp,
+        chrono::Utc,
     ))
 }
 

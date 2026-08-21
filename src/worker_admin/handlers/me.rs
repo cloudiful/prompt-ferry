@@ -10,14 +10,27 @@ pub(super) async fn list_client_keys(
         Ok(user) => user,
         Err(response) => return response,
     };
-    if state.user_store.is_sqlite() {
-        return state.sqlite_capability_unavailable();
-    }
     let first = query.first.unwrap_or(0).max(0);
     let rows = query.rows.unwrap_or(20).clamp(1, 200);
-    match db::list_client_keys_page(&state.pool, user.user_id, first, rows).await {
+    match state
+        .config_repository
+        .list_client_keys_page(user.user_id, first, rows)
+        .await
+    {
         Ok((total, keys)) => Json(ClientKeyPageResponse {
-            keys,
+            keys: keys
+                .into_iter()
+                .map(|key| crate::db::ClientKey {
+                    key_id: key.key_id.as_u128().try_into().unwrap_or(0),
+                    user_id: key.user_id,
+                    key_prefix: key.key_prefix,
+                    label: key.label,
+                    enabled: key.enabled,
+                    last_used_at: None,
+                    created_at: key.created_at,
+                    secret: None,
+                })
+                .collect(),
             total,
             first,
             rows,
@@ -36,30 +49,22 @@ pub(super) async fn create_client_key(
         Ok(user) => user,
         Err(response) => return response,
     };
-    if state.user_store.is_sqlite() {
-        return state.sqlite_capability_unavailable();
-    }
-    let (secret, prefix, hash) = generate_client_key();
-    match db::create_client_key(
-        &state.pool,
-        user.user_id,
-        body.label.as_deref().unwrap_or("Codex key"),
-        &prefix,
-        &hash,
-        &secret,
-    )
-    .await
+    let label = body.label.as_deref();
+    match state
+        .config_repository
+        .create_client_key(user.user_id, label, true)
+        .await
     {
-        Ok(key) => {
+        Ok(created) => {
             let _ = publish_snapshot(&state).await;
             Json(CreateClientKeyResponse {
-                key_id: key.key_id,
-                user_id: key.user_id,
-                key_prefix: key.key_prefix,
-                label: key.label,
-                enabled: key.enabled,
-                created_at: key.created_at,
-                secret,
+                key_id: created.key.key_id.as_u128().try_into().unwrap_or(0),
+                user_id: created.key.user_id,
+                key_prefix: created.key.key_prefix,
+                label: created.key.label,
+                enabled: created.key.enabled,
+                created_at: created.key.created_at,
+                secret: created.secret,
             })
             .into_response()
         }
@@ -77,13 +82,33 @@ pub(super) async fn update_client_key(
         Ok(user) => user,
         Err(response) => return response,
     };
-    if state.user_store.is_sqlite() {
-        return state.sqlite_capability_unavailable();
-    }
-    match db::update_client_key(&state.pool, user.user_id, key_id, body.label, body.enabled).await {
+    let uuid_key_id = match state
+        .config_repository
+        .resolve_client_key_uuid(user.user_id, key_id)
+        .await
+    {
+        Ok(Some(uuid)) => uuid,
+        Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "key not found"),
+        Err(err) => return internal(&state, err),
+    };
+    match state
+        .config_repository
+        .update_client_key(user.user_id, uuid_key_id, body.label, body.enabled)
+        .await
+    {
         Ok(Some(key)) => {
             let _ = publish_snapshot(&state).await;
-            Json(key).into_response()
+            Json(crate::db::ClientKey {
+                key_id: key.key_id.as_u128().try_into().unwrap_or(0),
+                user_id: key.user_id,
+                key_prefix: key.key_prefix,
+                label: key.label,
+                enabled: key.enabled,
+                last_used_at: None,
+                created_at: key.created_at,
+                secret: None,
+            })
+            .into_response()
         }
         Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "key not found"),
         Err(err) => internal(&state, err),
@@ -99,10 +124,20 @@ pub(super) async fn delete_client_key(
         Ok(user) => user,
         Err(response) => return response,
     };
-    if state.user_store.is_sqlite() {
-        return state.sqlite_capability_unavailable();
-    }
-    match db::delete_client_key(&state.pool, user.user_id, key_id).await {
+    let uuid_key_id = match state
+        .config_repository
+        .resolve_client_key_uuid(user.user_id, key_id)
+        .await
+    {
+        Ok(Some(uuid)) => uuid,
+        Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "key not found"),
+        Err(err) => return internal(&state, err),
+    };
+    match state
+        .config_repository
+        .delete_client_key(user.user_id, uuid_key_id)
+        .await
+    {
         Ok(true) => {
             let _ = publish_snapshot(&state).await;
             StatusCode::NO_CONTENT.into_response()
@@ -122,7 +157,7 @@ pub(super) async fn list_available_models(
         Err(response) => return response,
     };
     if state.user_store.is_sqlite() {
-        return state.sqlite_capability_unavailable();
+        return state.capability_unavailable(db::Capability::AvailableModels);
     }
     let first = query.first.unwrap_or(0).max(0);
     let rows = query.rows.unwrap_or(20).clamp(1, 200);

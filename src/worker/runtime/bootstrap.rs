@@ -138,12 +138,13 @@ pub(super) async fn build_admin_state(
 ) -> anyhow::Result<Option<AdminState>> {
     let relay_secret_manager = RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
     let is_postgres = config.storage_backend().is_postgres();
-    let (pool, lease_pool, user_store) = if is_postgres {
+    let (pool, lease_pool, user_store, config_repository) = if is_postgres {
         let pool = db::connect(&config.database_url).await?;
         let lease_pool = db::connect_with_max_connections(&config.database_url, 2).await?;
         db::migrate(&pool).await?;
         let user_store = db::UserStore::postgres(&pool);
-        (pool, lease_pool, user_store)
+        let config_repository = db::ConfigRepository::postgres(&pool);
+        (pool, lease_pool, user_store, config_repository)
     } else {
         let path = runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
         if let Some(parent) = path
@@ -154,11 +155,18 @@ pub(super) async fn build_admin_state(
                 anyhow!(error).context("failed to create standalone SQLite parent directory")
             })?;
         }
-        let store = StandaloneConfigStore::open(&path).await?;
+        let store = Arc::new(StandaloneConfigStore::open(&path).await?);
         let sqlite_pool = store.pool().clone();
         let pool =
             PgPoolOptions::new().connect_lazy("postgres://postgres@localhost/prompt_ferry")?;
-        (pool.clone(), pool, db::UserStore::sqlite(sqlite_pool))
+        let manager = RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
+        let config_repository = db::ConfigRepository::sqlite(store, manager);
+        (
+            pool.clone(),
+            pool,
+            db::UserStore::sqlite(sqlite_pool),
+            config_repository,
+        )
     };
     user_store
         .bootstrap_admin(
@@ -195,7 +203,8 @@ pub(super) async fn build_admin_state(
                 Duration::from_secs(config.endpoint_model_cache_ttl_seconds.max(1)),
             ),
         })
-        .with_user_store(user_store);
+        .with_user_store(user_store)
+        .with_config_repository(config_repository);
         if spawn_admin_server {
             let admin_config = config.clone();
             let admin_state = state.clone();

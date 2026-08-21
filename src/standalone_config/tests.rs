@@ -55,13 +55,18 @@ fn sample_config() -> StandaloneConfig {
             key_lb_enabled: true,
             enabled: true,
             mcp_enabled: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
             api_key: "endpoint-secret".to_string(),
             api_keys: vec![EndpointApiKeyConfig {
                 key_id,
+                endpoint_id,
                 key_label: "primary".to_string(),
                 api_key: "endpoint-key-secret".to_string(),
                 position: 0,
                 enabled: true,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
             }],
         }],
         routes: vec![ModelRouteConfig {
@@ -353,12 +358,16 @@ async fn failed_multi_table_replace_is_atomic() {
         .await
         .expect("initial save");
     let mut invalid = initial.clone();
+    let endpoint_id = invalid.endpoints[0].endpoint_id;
     invalid.endpoints[0].api_keys.push(EndpointApiKeyConfig {
         key_id: Uuid::new_v4(),
+        endpoint_id,
         key_label: "primary".to_string(),
         api_key: "duplicate-label-secret".to_string(),
         position: 1,
         enabled: true,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
     });
     assert!(store.replace_snapshot(&manager(5), &invalid).await.is_err());
     assert_eq!(

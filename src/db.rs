@@ -1,6 +1,7 @@
 mod approvals;
 mod billing;
 mod budgets;
+pub mod config_repository;
 mod connection;
 mod endpoints;
 mod mcp;
@@ -22,6 +23,12 @@ pub use approvals::{
 };
 pub use billing::*;
 pub use budgets::{RequestBudgetCounts, RequestBudgetScope, request_budget_counts};
+pub use config_repository::{
+    Capability, ConfigRepository, ManagedRelaySecrets, PostgresConfigRepository,
+    SqliteConfigRepository, UnifiedClientKey, UnifiedClientKeyCreated, UnifiedEndpointApiKey,
+    UnifiedEndpointPage, UnifiedManagedRelay, UnifiedModelRoute, UnifiedModelRoutePage,
+    UnifiedModelRouteTarget, UnifiedProviderEndpoint, UnifiedSetting,
+};
 pub use connection::{
     connect, connect_sqlite, connect_sqlite_with_max_connections, connect_with_max_connections,
     migrate, migrate_standalone,

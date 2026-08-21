@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use super::token_plan_cache::TokenPlanQuotaCache;
 use crate::{
-    db::{ManagedRelayRuntimeStatus, StreamDeltaBatchingSettings, UserStore},
+    db::{ConfigRepository, ManagedRelayRuntimeStatus, StreamDeltaBatchingSettings, UserStore},
     endpoint_models::EndpointModelCache,
     keys::generate_client_key,
     llm_review::{ApprovalResolution, LlmReviewSettings},
@@ -86,6 +86,7 @@ pub struct AdminState {
     pub pool: PgPool,
     pub lease_pool: PgPool,
     pub user_store: UserStore,
+    pub config_repository: ConfigRepository,
     pub replay_cache: ReplayCache,
     pub relay_senders: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<BridgeMessage>>>>,
     pub configured_relays: Arc<Vec<String>>,
@@ -136,10 +137,12 @@ pub struct AdminStateInit {
 impl AdminState {
     pub fn new(init: AdminStateInit) -> Self {
         let user_store = UserStore::postgres(&init.pool);
+        let config_repository = ConfigRepository::postgres(&init.pool);
         Self {
             pool: init.pool,
             lease_pool: init.lease_pool,
             user_store,
+            config_repository,
             replay_cache: init.replay_cache,
             relay_senders: Arc::new(Mutex::new(HashMap::new())),
             configured_relays: Arc::new(init.configured_relays),
@@ -182,8 +185,21 @@ impl AdminState {
         )
     }
 
+    pub fn capability_unavailable(&self, capability: crate::db::Capability) -> Response {
+        error(
+            StatusCode::NOT_IMPLEMENTED,
+            capability.as_code(),
+            capability.description(),
+        )
+    }
+
     pub fn with_user_store(mut self, user_store: UserStore) -> Self {
         self.user_store = user_store;
+        self
+    }
+
+    pub fn with_config_repository(mut self, repository: ConfigRepository) -> Self {
+        self.config_repository = repository;
         self
     }
 

@@ -270,10 +270,13 @@ impl fmt::Debug for ManagedRelayConfig {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EndpointApiKeyConfig {
     pub key_id: Uuid,
+    pub endpoint_id: Uuid,
     pub key_label: String,
     pub api_key: String,
     pub position: i32,
     pub enabled: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl fmt::Debug for EndpointApiKeyConfig {
@@ -285,6 +288,8 @@ impl fmt::Debug for EndpointApiKeyConfig {
             .field("api_key", &redacted_secret(&self.api_key))
             .field("position", &self.position)
             .field("enabled", &self.enabled)
+            .field("created_at", &self.created_at)
+            .field("updated_at", &self.updated_at)
             .finish()
     }
 }
@@ -301,6 +306,8 @@ pub struct ProviderEndpointConfig {
     pub key_lb_enabled: bool,
     pub enabled: bool,
     pub mcp_enabled: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
     pub api_key: String,
     pub api_keys: Vec<EndpointApiKeyConfig>,
 }
@@ -319,6 +326,8 @@ impl fmt::Debug for ProviderEndpointConfig {
             .field("key_lb_enabled", &self.key_lb_enabled)
             .field("enabled", &self.enabled)
             .field("mcp_enabled", &self.mcp_enabled)
+            .field("created_at", &self.created_at)
+            .field("updated_at", &self.updated_at)
             .field("api_key", &redacted_secret(&self.api_key))
             .field("api_keys", &self.api_keys)
             .finish()

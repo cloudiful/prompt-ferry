@@ -173,6 +173,8 @@ mod tests {
                 key_lb_enabled: false,
                 enabled: true,
                 mcp_enabled: false,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
                 api_key: "endpoint-secret".to_string(),
                 api_keys: Vec::new(),
             }],

@@ -157,13 +157,18 @@ impl BootstrapSeed {
                 key_lb_enabled: false,
                 enabled: true,
                 mcp_enabled: false,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
                 api_key: upstream_api_key.clone(),
                 api_keys: vec![EndpointApiKeyConfig {
                     key_id: endpoint_key_id,
+                    endpoint_id,
                     key_label: "bootstrap".to_string(),
                     api_key: upstream_api_key,
                     position: 0,
                     enabled: true,
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
                 }],
             }],
             ..StandaloneConfig::default()

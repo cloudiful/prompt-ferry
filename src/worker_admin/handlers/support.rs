@@ -1,23 +1,13 @@
 use super::*;
+use crate::db::config_repository::relays as relay_repo;
 
 pub async fn publish_snapshot(state: &AdminState) -> anyhow::Result<i64> {
-    let keys = db::snapshot_keys(&state.pool).await?;
-    let relay_ip_policy = db::get_json_setting::<RelayIpPolicy>(&state.pool, "relay_ip_whitelist")
-        .await?
-        .unwrap_or_default();
+    let snapshot = relay_repo::build_unified_snapshot(&state.config_repository, 0).await?;
     let version = state.snapshot_version.fetch_add(1, Ordering::SeqCst) + 1;
-    let snapshot = ConfigSnapshot {
+    let config_snapshot = ConfigSnapshot {
         version,
-        keys: keys
-            .into_iter()
-            .map(|key| ClientRoute {
-                key_hash: key.key_hash,
-                key_prefix: key.key_prefix,
-                user_id: key.user_id,
-                route_id: key.route_id.to_string(),
-            })
-            .collect(),
-        relay_ip_policy,
+        keys: snapshot.keys.clone(),
+        relay_ip_policy: snapshot.relay_ip_policy,
     };
     let mut relay_senders = state.relay_senders.lock().await;
     let relay_urls = relay_senders.keys().cloned().collect::<Vec<_>>();
@@ -27,7 +17,7 @@ pub async fn publish_snapshot(state: &AdminState) -> anyhow::Result<i64> {
             continue;
         };
         if tx
-            .send(BridgeMessage::ConfigSnapshot(snapshot.clone()))
+            .send(BridgeMessage::ConfigSnapshot(config_snapshot.clone()))
             .is_err()
         {
             disconnected.push(relay_url);
@@ -272,10 +262,6 @@ pub(super) async fn resolve_endpoint_input(
 
 pub(super) fn endpoint_base_url_has_version_path(base_url: &str) -> bool {
     base_url.trim().trim_end_matches('/').ends_with("/v1")
-}
-
-pub(super) fn parse_native_api(value: &str) -> NativeApi {
-    serde_json::from_value(Value::String(value.to_string())).unwrap_or(NativeApi::Responses)
 }
 
 pub(super) fn validate_request_budget_limit(

@@ -4,8 +4,9 @@ use sqlx::{Row, SqlitePool, sqlite::Sqlite};
 
 use super::write::{self, EncryptedConfig};
 use super::{
-    BootstrapSeed, ClientKeyConfig, ManagedRelayConfig, ModelRouteConfig, ProviderEndpointConfig,
-    Result, SettingConfig, StandaloneConfig, StandaloneConfigError, rows,
+    BootstrapSeed, ClientKeyConfig, EndpointApiKeyConfig, ManagedRelayConfig, ModelRouteConfig,
+    ModelRouteTargetConfig, ProviderEndpointConfig, Result, SettingConfig, StandaloneConfig,
+    StandaloneConfigError, rows,
 };
 use crate::relay_secrets::RelaySecretManager;
 
@@ -113,6 +114,268 @@ impl StandaloneConfigStore {
         self.pool.close().await;
     }
 
+    // ---- Row-level reads for the unified configuration repository. ----
+
+    pub async fn list_endpoints_page(
+        &self,
+        manager: &RelaySecretManager,
+        first: i64,
+        rows: i64,
+    ) -> Result<(i64, Vec<ProviderEndpointConfig>)> {
+        let total = standalone_query!("src/sql/standalone/count_endpoints.sql")
+            .fetch_one(&self.pool)
+            .await?
+            .try_get::<i64, _>("total")?;
+        let endpoint_rows = standalone_query!("src/sql/standalone/list_endpoints_page.sql")
+            .bind(rows.clamp(1, 200))
+            .bind(first.max(0))
+            .fetch_all(&self.pool)
+            .await?;
+        let mut endpoints = Vec::with_capacity(endpoint_rows.len());
+        for row in endpoint_rows {
+            let (mut endpoint, envelope) = rows::endpoint(&row)?;
+            endpoint.api_key =
+                write::decrypt_optional(manager, envelope.as_ref())?.ok_or_else(|| {
+                    StandaloneConfigError::CorruptDatabase(
+                        "endpoint is missing its API key".to_string(),
+                    )
+                })?;
+            endpoints.push(endpoint);
+        }
+        Ok((total, endpoints))
+    }
+
+    pub async fn get_endpoint(
+        &self,
+        manager: &RelaySecretManager,
+        endpoint_id: uuid::Uuid,
+    ) -> Result<Option<ProviderEndpointConfig>> {
+        let row = standalone_query!("src/sql/standalone/get_endpoint.sql")
+            .bind(endpoint_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        let (mut endpoint, envelope) = rows::endpoint(&row)?;
+        endpoint.api_key =
+            write::decrypt_optional(manager, envelope.as_ref())?.ok_or_else(|| {
+                StandaloneConfigError::CorruptDatabase(
+                    "endpoint is missing its API key".to_string(),
+                )
+            })?;
+        let key_rows = standalone_query!("src/sql/standalone/list_endpoint_keys_for.sql")
+            .bind(endpoint_id.to_string())
+            .fetch_all(&self.pool)
+            .await?;
+        for row in key_rows {
+            let (mut key, envelope) = rows::endpoint_key(&row)?;
+            key.api_key = manager.decrypt(&envelope)?;
+            endpoint.api_keys.push(key);
+        }
+        Ok(Some(endpoint))
+    }
+
+    pub async fn list_endpoint_keys_for(
+        &self,
+        manager: &RelaySecretManager,
+        endpoint_id: uuid::Uuid,
+    ) -> Result<Vec<EndpointApiKeyConfig>> {
+        let rows = standalone_query!("src/sql/standalone/list_endpoint_keys_for.sql")
+            .bind(endpoint_id.to_string())
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|row| {
+                let (mut key, envelope) = rows::endpoint_key(&row)?;
+                key.api_key = manager.decrypt(&envelope)?;
+                Ok(key)
+            })
+            .collect()
+    }
+
+    pub async fn list_routes_page(
+        &self,
+        first: i64,
+        rows: i64,
+    ) -> Result<(i64, Vec<ModelRouteConfig>)> {
+        let total = standalone_query!("src/sql/standalone/count_model_routes.sql")
+            .fetch_one(&self.pool)
+            .await?
+            .try_get::<i64, _>("total")?;
+        let route_rows = standalone_query!("src/sql/standalone/list_routes_page.sql")
+            .bind(rows.clamp(1, 200))
+            .bind(first.max(0))
+            .fetch_all(&self.pool)
+            .await?;
+        let mut routes = Vec::with_capacity(route_rows.len());
+        for row in route_rows {
+            routes.push(rows::route(&row)?);
+        }
+        for row in standalone_query!("src/sql/standalone/list_route_targets.sql")
+            .fetch_all(&self.pool)
+            .await?
+        {
+            let (rule_id, target) = rows::route_target(&row)?;
+            routes
+                .iter_mut()
+                .find(|route| route.rule_id == rule_id)
+                .ok_or_else(|| {
+                    StandaloneConfigError::CorruptDatabase(
+                        "route target references a missing route".to_string(),
+                    )
+                })?
+                .targets
+                .push(target);
+        }
+        Ok((total, routes))
+    }
+
+    pub async fn get_route(&self, rule_id: uuid::Uuid) -> Result<Option<ModelRouteConfig>> {
+        let row = standalone_query!("src/sql/standalone/get_model_route.sql")
+            .bind(rule_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        let mut route = rows::route(&row)?;
+        for row in standalone_query!("src/sql/standalone/list_route_targets_for.sql")
+            .bind(rule_id.to_string())
+            .fetch_all(&self.pool)
+            .await?
+        {
+            let (_, target) = rows::route_target(&row)?;
+            route.targets.push(target);
+        }
+        Ok(Some(route))
+    }
+
+    pub async fn list_route_targets_for(
+        &self,
+        rule_id: uuid::Uuid,
+    ) -> Result<Vec<ModelRouteTargetConfig>> {
+        let rows = standalone_query!("src/sql/standalone/list_route_targets_for.sql")
+            .bind(rule_id.to_string())
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|row| Ok(rows::route_target(&row)?.1))
+            .collect()
+    }
+
+    pub async fn list_relays_page(
+        &self,
+        manager: &RelaySecretManager,
+        first: i64,
+        rows: i64,
+    ) -> Result<(i64, i64, Vec<ManagedRelayConfig>)> {
+        let counts = standalone_query!("src/sql/standalone/count_relays.sql")
+            .fetch_one(&self.pool)
+            .await?;
+        let total = counts.try_get::<i64, _>("total")?;
+        let enabled_count = counts
+            .try_get::<Option<i64>, _>("enabled_count")?
+            .unwrap_or(0);
+        let relay_rows = standalone_query!("src/sql/standalone/list_relays_page.sql")
+            .bind(rows.clamp(1, 200))
+            .bind(first.max(0))
+            .fetch_all(&self.pool)
+            .await?;
+        let mut relays = Vec::with_capacity(relay_rows.len());
+        for row in relay_rows {
+            let (mut relay, envelopes) = rows::relay(&row)?;
+            relay.relay_ca_pem = write::decrypt_optional(manager, envelopes[0].as_ref())?;
+            relay.client_cert_pem = write::decrypt_optional(manager, envelopes[1].as_ref())?;
+            relay.client_key_pem = write::decrypt_optional(manager, envelopes[2].as_ref())?;
+            relay.bridge_encryption_key = write::decrypt_optional(manager, envelopes[3].as_ref())?;
+            relays.push(relay);
+        }
+        Ok((total, enabled_count, relays))
+    }
+
+    pub async fn get_relay(
+        &self,
+        manager: &RelaySecretManager,
+        relay_id: uuid::Uuid,
+    ) -> Result<Option<ManagedRelayConfig>> {
+        let row = standalone_query!("src/sql/standalone/get_relay.sql")
+            .bind(relay_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        let (mut relay, envelopes) = rows::relay(&row)?;
+        relay.relay_ca_pem = write::decrypt_optional(manager, envelopes[0].as_ref())?;
+        relay.client_cert_pem = write::decrypt_optional(manager, envelopes[1].as_ref())?;
+        relay.client_key_pem = write::decrypt_optional(manager, envelopes[2].as_ref())?;
+        relay.bridge_encryption_key = write::decrypt_optional(manager, envelopes[3].as_ref())?;
+        Ok(Some(relay))
+    }
+
+    /// Look up a managed relay and return the encrypted envelopes for its
+    /// TLS/bridge secrets. Used by update handlers to carry forward
+    /// unchanged secrets via the `Keep` patch mode.
+    pub async fn get_relay_envelopes(
+        &self,
+        relay_id: uuid::Uuid,
+    ) -> Result<Option<[Option<crate::relay_secrets::EncryptedSecretEnvelope>; 4]>> {
+        let row = standalone_query!("src/sql/standalone/get_relay_envelopes.sql")
+            .bind(relay_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        Ok(Some(super::rows::relay_envelopes(&row)?))
+    }
+
+    pub async fn list_client_keys_for(
+        &self,
+        manager: &RelaySecretManager,
+        user_id: i64,
+        first: i64,
+        rows: i64,
+    ) -> Result<(i64, Vec<ClientKeyConfig>)> {
+        let total = standalone_query!("src/sql/standalone/count_client_keys_for.sql")
+            .bind(user_id)
+            .fetch_one(&self.pool)
+            .await?
+            .try_get::<i64, _>("total")?;
+        let rows = standalone_query!("src/sql/standalone/list_client_keys_for.sql")
+            .bind(user_id)
+            .bind(rows.clamp(1, 200))
+            .bind(first.max(0))
+            .fetch_all(&self.pool)
+            .await?;
+        let mut keys = Vec::with_capacity(rows.len());
+        for row in rows {
+            let (mut key, envelope) = rows::client_key(&row)?;
+            key.secret = manager.decrypt(&envelope)?;
+            keys.push(key);
+        }
+        Ok((total, keys))
+    }
+
+    pub async fn get_client_key(
+        &self,
+        manager: &RelaySecretManager,
+        key_id: uuid::Uuid,
+    ) -> Result<Option<ClientKeyConfig>> {
+        let row = standalone_query!("src/sql/standalone/get_client_key.sql")
+            .bind(key_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        let (mut key, envelope) = rows::client_key(&row)?;
+        key.secret = manager.decrypt(&envelope)?;
+        Ok(Some(key))
+    }
+
+    pub async fn get_setting(&self, key: &str) -> Result<Option<SettingConfig>> {
+        let row = standalone_query!("src/sql/standalone/get_setting.sql")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        Ok(Some(rows::setting(&row)?))
+    }
+
     pub async fn load_snapshot(&self, manager: &RelaySecretManager) -> Result<StandaloneConfig> {
         let mut transaction = self.pool.begin().await?;
         let snapshot = StandaloneConfig {
@@ -216,6 +479,21 @@ impl StandaloneConfigStore {
         Ok(())
     }
 
+    /// Insert or replace a single model route and its targets without running
+    /// the full snapshot validator. Used by the unified configuration
+    /// repository when an endpoint has just been created in the same
+    /// transaction context.
+    pub async fn save_route_direct(&self, route: &ModelRouteConfig) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        standalone_query!("src/sql/standalone/delete_route_targets.sql")
+            .bind(route.rule_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        write::insert_route(&mut transaction, route).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn save_client_key(
         &self,
         manager: &RelaySecretManager,
@@ -246,6 +524,62 @@ impl StandaloneConfigStore {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    // ---- Row-level mutations for the unified configuration repository. ----
+
+    pub async fn delete_endpoint(&self, endpoint_id: uuid::Uuid) -> Result<bool> {
+        let mut transaction = self.pool.begin().await?;
+        standalone_query!("src/sql/standalone/delete_endpoint_keys.sql")
+            .bind(endpoint_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        let result = standalone_query!("src/sql/standalone/delete_endpoint.sql")
+            .bind(endpoint_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        let removed = result.rows_affected() > 0;
+        transaction.commit().await?;
+        Ok(removed)
+    }
+
+    pub async fn delete_route(&self, rule_id: uuid::Uuid) -> Result<bool> {
+        let mut transaction = self.pool.begin().await?;
+        standalone_query!("src/sql/standalone/delete_route_targets.sql")
+            .bind(rule_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        let result = standalone_query!("src/sql/standalone/delete_model_route.sql")
+            .bind(rule_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        let removed = result.rows_affected() > 0;
+        transaction.commit().await?;
+        Ok(removed)
+    }
+
+    pub async fn delete_relay(&self, relay_id: uuid::Uuid) -> Result<bool> {
+        let result = standalone_query!("src/sql/standalone/delete_relay.sql")
+            .bind(relay_id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn delete_client_key(&self, key_id: uuid::Uuid) -> Result<bool> {
+        let result = standalone_query!("src/sql/standalone/delete_client_key.sql")
+            .bind(key_id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn delete_setting(&self, key: &str) -> Result<bool> {
+        let result = standalone_query!("src/sql/standalone/delete_setting.sql")
+            .bind(key)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     async fn load_relays(

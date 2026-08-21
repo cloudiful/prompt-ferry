@@ -46,7 +46,7 @@ pub(super) async fn resolve_create_relay_input(
 
 pub(super) async fn resolve_update_relay_input(
     state: &AdminState,
-    existing: db::ManagedRelayRow,
+    existing: crate::db::config_repository::UnifiedManagedRelay,
     body: ManagedRelayPatchRequest,
 ) -> Result<db::ManagedRelayInput, Box<Response>> {
     let manager = state
@@ -61,32 +61,40 @@ pub(super) async fn resolve_update_relay_input(
         .to_string();
     let relay_url = normalize_relay_url(body.relay_url.as_deref().unwrap_or(&existing.relay_url));
     ensure_unique_relay_url(state, &relay_url, Some(existing.relay_id)).await?;
-    let tls_mode = body.tls_mode.unwrap_or(existing.tls_mode());
+    let tls_mode = body.tls_mode.unwrap_or(existing.tls_mode);
     let bridge_encryption_mode = body
         .bridge_encryption_mode
-        .unwrap_or(existing.bridge_encryption_mode());
+        .unwrap_or(existing.bridge_encryption_mode);
+    // When updating a relay, the previous secrets are already encrypted on
+    // disk; treat any incoming patch as a Keep/Clear/Replace on top of the
+    // stored envelopes. We pull the existing envelopes from the unified
+    // repository's `get_managed_relay` call (the unified DTO only exposes
+    // booleans) by falling back to the existing PostgreSQL row.
+    let existing_secrets = load_existing_secrets(state, existing.relay_id).await?;
     let relay_ca = resolve_secret_patch(
         manager,
         body.relay_ca_pem,
-        existing.relay_ca_envelope(),
+        existing_secrets.as_ref().and_then(|s| s.relay_ca.clone()),
         "relay_ca_pem",
     )?;
     let client_cert = resolve_secret_patch(
         manager,
         body.client_cert_pem,
-        existing.client_cert_envelope(),
+        existing_secrets
+            .as_ref()
+            .and_then(|s| s.client_cert.clone()),
         "client_cert_pem",
     )?;
     let client_key = resolve_secret_patch(
         manager,
         body.client_key_pem,
-        existing.client_key_envelope(),
+        existing_secrets.as_ref().and_then(|s| s.client_key.clone()),
         "client_key_pem",
     )?;
     let bridge_encryption_key = resolve_secret_patch(
         manager,
         body.bridge_encryption_key,
-        existing.bridge_encryption_key_envelope(),
+        existing_secrets.and_then(|s| s.bridge_key),
         "bridge_encryption_key",
     )?;
     validate_final_relay_config(FinalRelayConfig {
@@ -112,6 +120,16 @@ pub(super) async fn resolve_update_relay_input(
         client_key,
         bridge_encryption_key,
     })
+}
+
+async fn load_existing_secrets(
+    state: &AdminState,
+    relay_id: uuid::Uuid,
+) -> Result<Option<crate::db::config_repository::ManagedRelaySecrets>, Box<Response>> {
+    use crate::db::config_repository::relay_secrets_for_state;
+    relay_secrets_for_state(state, relay_id)
+        .await
+        .map_err(|err| Box::new(internal(state, err)))
 }
 
 fn decrypt_secret(

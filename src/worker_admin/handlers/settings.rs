@@ -209,24 +209,39 @@ pub(super) async fn set_request_content_logging(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    match db::set_request_content_logging(
-        &state.pool,
-        &RequestContentLoggingResponse {
-            mode: body.mode,
-            raw_retention_days: body.raw_retention_days,
-        },
-    )
-    .await
-    {
-        Ok(config) => {
-            *state.request_content_logging.write().await = config.clone();
-            if let Ok(retention) = db::get_usage_retention(&state.pool).await {
-                *state.usage_retention.write().await = retention;
+    let normalized = RequestContentLoggingResponse {
+        mode: body.mode,
+        raw_retention_days: body.raw_retention_days,
+    };
+    if let Some(pool) = state.config_repository.as_postgres() {
+        match db::set_request_content_logging(pool, &normalized).await {
+            Ok(config) => {
+                *state.request_content_logging.write().await = config.clone();
+                if let Ok(retention) = db::get_usage_retention(pool).await {
+                    *state.usage_retention.write().await = retention;
+                }
+                return Json(config).into_response();
             }
-            Json(config).into_response()
+            Err(err) => return internal(&state, err),
         }
-        Err(err) => internal(&state, err),
     }
+    // SQLite: keep usage retention coherent in memory and persist the JSON.
+    if let Err(err) = state
+        .config_repository
+        .set_json_setting("request_content_logging", &normalized)
+        .await
+    {
+        return internal(&state, err);
+    }
+    if let Err(err) = state
+        .config_repository
+        .set_json_setting("usage_retention", &*state.usage_retention.read().await)
+        .await
+    {
+        return internal(&state, err);
+    }
+    *state.request_content_logging.write().await = normalized.clone();
+    Json(normalized).into_response()
 }
 
 pub(super) async fn get_usage_retention(
@@ -247,18 +262,29 @@ pub(super) async fn set_usage_retention(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    match db::set_usage_retention(&state.pool, &body).await {
-        Ok(config) => {
-            *state.usage_retention.write().await = config.clone();
-            state
-                .request_content_logging
-                .write()
-                .await
-                .raw_retention_days = config.raw_retention_days;
-            Json(config).into_response()
+    if let Some(pool) = state.config_repository.as_postgres() {
+        match db::set_usage_retention(pool, &body).await {
+            Ok(config) => {
+                *state.usage_retention.write().await = config.clone();
+                state
+                    .request_content_logging
+                    .write()
+                    .await
+                    .raw_retention_days = config.raw_retention_days;
+                return Json(config).into_response();
+            }
+            Err(err) => return internal(&state, err),
         }
-        Err(err) => internal(&state, err),
     }
+    if let Err(err) = state
+        .config_repository
+        .set_json_setting("usage_retention", &body)
+        .await
+    {
+        return internal(&state, err);
+    }
+    *state.usage_retention.write().await = body.clone();
+    Json(body).into_response()
 }
 
 pub(super) async fn get_stream_delta_batching(
@@ -268,8 +294,13 @@ pub(super) async fn get_stream_delta_batching(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    match db::get_stream_delta_batching(&state.pool).await {
-        Ok(config) => Json(config).into_response(),
+    match state
+        .config_repository
+        .get_json_setting::<db::StreamDeltaBatchingSettings>("stream_delta_batching")
+        .await
+    {
+        Ok(Some(config)) => Json(config).into_response(),
+        Ok(None) => Json(db::StreamDeltaBatchingSettings::default()).into_response(),
         Err(err) => internal(&state, err),
     }
 }
@@ -282,8 +313,12 @@ pub(super) async fn set_stream_delta_batching(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    match db::set_stream_delta_batching(&state.pool, &body).await {
-        Ok(config) => Json(config).into_response(),
+    match state
+        .config_repository
+        .set_json_setting("stream_delta_batching", &body)
+        .await
+    {
+        Ok(()) => Json(body).into_response(),
         Err(err) => internal(&state, err),
     }
 }
@@ -296,7 +331,21 @@ pub(super) async fn get_endpoint_setting(
         Ok(user) => user,
         Err(response) => return response,
     };
-    match db::get_user_endpoint_setting(&state.pool, user.user_id).await {
+    if let Some(pool) = state.config_repository.as_postgres() {
+        match db::get_user_endpoint_setting(pool, user.user_id).await {
+            Ok(endpoint_id) => {
+                return Json(serde_json::json!({ "endpoint_id": endpoint_id })).into_response();
+            }
+            Err(err) => return internal(&state, err),
+        }
+    }
+    // SQLite: pull from the standalone `user_endpoint_setting` table via the
+    // repository layer (Phase 3 surface).
+    match state
+        .config_repository
+        .get_user_endpoint_setting(user.user_id)
+        .await
+    {
         Ok(endpoint_id) => Json(serde_json::json!({ "endpoint_id": endpoint_id })).into_response(),
         Err(err) => internal(&state, err),
     }
@@ -311,7 +360,20 @@ pub(super) async fn set_endpoint_setting(
         Ok(user) => user,
         Err(response) => return response,
     };
-    match db::set_user_endpoint_setting(&state.pool, user.user_id, body.endpoint_id).await {
+    if let Some(pool) = state.config_repository.as_postgres() {
+        match db::set_user_endpoint_setting(pool, user.user_id, body.endpoint_id).await {
+            Ok(()) => {
+                let _ = publish_snapshot(&state).await;
+                return StatusCode::NO_CONTENT.into_response();
+            }
+            Err(err) => return internal(&state, err),
+        }
+    }
+    match state
+        .config_repository
+        .set_user_endpoint_setting(user.user_id, body.endpoint_id)
+        .await
+    {
         Ok(()) => {
             let _ = publish_snapshot(&state).await;
             StatusCode::NO_CONTENT.into_response()
@@ -327,7 +389,11 @@ pub(super) async fn get_relay_ip_whitelist(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    match db::get_json_setting::<RelayIpPolicy>(&state.pool, "relay_ip_whitelist").await {
+    match state
+        .config_repository
+        .get_json_setting::<RelayIpPolicy>("relay_ip_whitelist")
+        .await
+    {
         Ok(policy) => Json(RelayIpPolicyResponse::from(policy.unwrap_or_default())).into_response(),
         Err(err) => internal(&state, err),
     }
@@ -345,7 +411,11 @@ pub(super) async fn set_relay_ip_whitelist(
         Ok(policy) => policy,
         Err(response) => return *response,
     };
-    if let Err(err) = db::set_json_setting(&state.pool, "relay_ip_whitelist", &policy).await {
+    if let Err(err) = state
+        .config_repository
+        .set_json_setting("relay_ip_whitelist", &policy)
+        .await
+    {
         return internal(&state, err);
     }
     let _ = publish_snapshot(&state).await;
@@ -373,7 +443,11 @@ pub(super) async fn set_llm_review_setting(
     if let Err(err) = body.validate() {
         return bad_request(&err.to_string());
     }
-    if let Err(err) = db::set_json_setting(&state.pool, LLM_REVIEW_SETTINGS_KEY, &body).await {
+    if let Err(err) = state
+        .config_repository
+        .set_json_setting(LLM_REVIEW_SETTINGS_KEY, &body)
+        .await
+    {
         return internal(&state, err);
     }
     *state.llm_review_settings.write().await = body.clone();
@@ -387,7 +461,11 @@ pub(super) async fn get_model_route_whitelist(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    match db::get_bool_setting(&state.pool, "model_route_whitelist_enabled", true).await {
+    match state
+        .config_repository
+        .get_bool_setting("model_route_whitelist_enabled", true)
+        .await
+    {
         Ok(enabled) => Json(ModelRouteWhitelistResponse { enabled }).into_response(),
         Err(err) => internal(&state, err),
     }
@@ -401,8 +479,10 @@ pub(super) async fn set_model_route_whitelist(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    if let Err(err) =
-        db::set_bool_setting(&state.pool, "model_route_whitelist_enabled", body.enabled).await
+    if let Err(err) = state
+        .config_repository
+        .set_bool_setting("model_route_whitelist_enabled", body.enabled)
+        .await
     {
         return internal(&state, err);
     }

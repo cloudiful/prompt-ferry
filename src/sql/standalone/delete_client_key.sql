@@ -1,0 +1,1 @@
+DELETE FROM standalone_client_keys WHERE key_id = ?;

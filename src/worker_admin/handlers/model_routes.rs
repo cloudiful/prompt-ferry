@@ -8,12 +8,10 @@ pub(super) async fn list_model_routes(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    match db::list_model_endpoint_rules_page(
-        &state.pool,
-        query.first.unwrap_or(0),
-        query.rows.unwrap_or(10),
-    )
-    .await
+    match state
+        .config_repository
+        .list_model_routes_page(query.first.unwrap_or(0), query.rows.unwrap_or(10))
+        .await
     {
         Ok(page) => Json(ModelRoutePageResponse::from(page)).into_response(),
         Err(err) => internal(&state, err),
@@ -36,9 +34,16 @@ pub(super) async fn create_model_route(
         Ok(input) => input,
         Err(response) => return response,
     };
-    match db::create_model_endpoint_rule(&state.pool, input).await {
+    let rule_id = Uuid::new_v4();
+    match state
+        .config_repository
+        .create_model_route(rule_id, input)
+        .await
+    {
         Ok(rule) => {
-            let _ = publish_snapshot(&state).await;
+            if let Err(err) = publish_snapshot(&state).await {
+                tracing::warn!(error = %err, "snapshot publication failed after route create");
+            }
             Json(rule).into_response()
         }
         Err(err) => internal(&state, err),
@@ -62,9 +67,15 @@ pub(super) async fn update_model_route(
         Ok(input) => input,
         Err(response) => return response,
     };
-    match db::update_model_endpoint_rule(&state.pool, rule_id, input).await {
+    match state
+        .config_repository
+        .update_model_route(rule_id, input)
+        .await
+    {
         Ok(Some(rule)) => {
-            let _ = publish_snapshot(&state).await;
+            if let Err(err) = publish_snapshot(&state).await {
+                tracing::warn!(error = %err, "snapshot publication failed after route update");
+            }
             Json(rule).into_response()
         }
         Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "model route not found"),
@@ -80,9 +91,11 @@ pub(super) async fn delete_model_route(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    match db::delete_model_endpoint_rule(&state.pool, rule_id).await {
+    match state.config_repository.delete_model_route(rule_id).await {
         Ok(true) => {
-            let _ = publish_snapshot(&state).await;
+            if let Err(err) = publish_snapshot(&state).await {
+                tracing::warn!(error = %err, "snapshot publication failed after route delete");
+            }
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => error(StatusCode::NOT_FOUND, "not_found", "model route not found"),
@@ -98,12 +111,18 @@ pub(super) async fn test_model_route(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    let rule = match db::get_model_endpoint_rule(&state.pool, body.rule_id).await {
+    // For Phase 3 the test path is only implemented against PostgreSQL because
+    // it needs `model_route_candidates` which still joins against the
+    // `provider_endpoints` and `endpoint_api_keys` PostgreSQL tables.
+    let Some(pool) = state.config_repository.as_postgres() else {
+        return state.capability_unavailable(db::Capability::ModelRouteTest);
+    };
+    let rule = match db::get_model_endpoint_rule(pool, body.rule_id).await {
         Ok(Some(rule)) => rule,
         Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "model route not found"),
         Err(err) => return internal(&state, err),
     };
-    let candidate = match db::get_model_route_candidate(&state.pool, body.rule_id).await {
+    let candidate = match db::get_model_route_candidate(pool, body.rule_id).await {
         Ok(Some(candidate)) => candidate,
         Ok(None) => {
             return error(

@@ -1,0 +1,1 @@
+DELETE FROM standalone_settings WHERE setting_key = ?;

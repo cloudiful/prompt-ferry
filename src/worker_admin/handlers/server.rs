@@ -236,11 +236,20 @@ async fn reject_unsupported_sqlite_capabilities(
             .path()
             .strip_prefix("/api/v1")
             .unwrap_or_else(|| request.uri().path());
-        if !sqlite_admin_path_supported(path) {
-            return state.sqlite_capability_unavailable();
+        if let Some(capability) = db::Capability::for_path(normalize_admin_path(path))
+            && !capability.sqlite_supported()
+        {
+            return state.capability_unavailable(capability);
         }
     }
     next.run(request).await
+}
+
+fn normalize_admin_path(path: &str) -> &str {
+    // The current router routes on concrete path segments, so we only ever see
+    // literal URI paths here. A simple pass-through keeps the middleware
+    // flexible if the router ever changes.
+    path
 }
 
 async fn admin_api_fallback(State(state): State<AdminState>) -> Response {
@@ -255,13 +264,38 @@ async fn admin_api_fallback(State(state): State<AdminState>) -> Response {
     }
 }
 
-fn sqlite_admin_path_supported(path: &str) -> bool {
-    matches!(path, "/auth/login" | "/auth/logout" | "/auth/me")
-        || path == "/admin/users"
-        || path == "/admin/users/options"
-        || path
-            .strip_prefix("/admin/users/")
-            .is_some_and(|suffix| !suffix.contains("/client-keys"))
+#[cfg(test)]
+mod admin_routing_tests {
+    use super::normalize_admin_path;
+    use crate::db::Capability;
+
+    #[test]
+    fn capability_lookup_matches_known_route_templates() {
+        for (path, expected) in [
+            ("/admin/endpoints", Some(Capability::Endpoints)),
+            ("/admin/endpoints/test", Some(Capability::Endpoints)),
+            ("/admin/model-routes", Some(Capability::ModelRoutes)),
+            ("/admin/relays", Some(Capability::Relays)),
+            ("/admin/relays/abc/reconnect", Some(Capability::Relays)),
+            ("/me/client-keys", Some(Capability::ClientKeys)),
+            ("/admin/users/7/client-keys", Some(Capability::ClientKeys)),
+            ("/settings/endpoint", Some(Capability::EndpointSetting)),
+            ("/settings/redaction", Some(Capability::Settings)),
+            ("/settings/usage-retention", Some(Capability::Settings)),
+            (
+                "/admin/conversations/abc/endpoint-override",
+                Some(Capability::ConversationEndpointOverride),
+            ),
+            ("/me/models", Some(Capability::AvailableModels)),
+            ("/auth/me", None),
+        ] {
+            assert_eq!(
+                Capability::for_path(normalize_admin_path(path)),
+                expected,
+                "path {path} mapped to {expected:?}"
+            );
+        }
+    }
 }
 
 fn frontend_dist_dir() -> PathBuf {
@@ -455,10 +489,15 @@ mod tests {
             .unwrap();
         assert_eq!(users_response.status(), StatusCode::OK);
 
+        // Conversation endpoint override is the canonical "not yet
+        // supported" path for SQLite; the endpoints/model-routes/relays/
+        // client-keys/settings paths all reach the handler in Phase 3 and
+        // therefore yield unauthorized when no cookie is attached.
         let unsupported = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/admin/endpoints")
+                    .uri("/api/v1/admin/conversations/abc/endpoint-override")
+                    .header(header::COOKIE, &cookie)
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -469,7 +508,9 @@ mod tests {
         assert!(
             std::str::from_utf8(&body)
                 .expect("JSON body")
-                .contains("capability_unavailable")
+                .contains("sqlite_conversation_endpoint_override_unavailable"),
+            "expected precise per-capability error, got: {}",
+            std::str::from_utf8(&body).unwrap_or("<binary>")
         );
 
         sqlite_pool.close().await;

@@ -8,12 +8,10 @@ pub(super) async fn list_endpoints(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    match db::list_endpoints_page(
-        &state.pool,
-        query.first.unwrap_or(0),
-        query.rows.unwrap_or(10),
-    )
-    .await
+    match state
+        .config_repository
+        .list_endpoints_page(query.first.unwrap_or(0), query.rows.unwrap_or(10))
+        .await
     {
         Ok(page) => Json(EndpointPageResponse::from(page)).into_response(),
         Err(err) => internal(&state, err),
@@ -42,18 +40,31 @@ pub(super) async fn create_endpoint(
         Ok(input) => input,
         Err(response) => return response,
     };
-    match db::create_endpoint_with_mcp(&state.pool, input, mcp_enabled).await {
+    let endpoint_id = uuid::Uuid::new_v4();
+    match state
+        .config_repository
+        .create_endpoint(endpoint_id, input, mcp_enabled)
+        .await
+    {
         Ok(endpoint) => {
-            if let Err(err) = db::sync_minimax_mcp_server(&state.pool, &endpoint, mcp_enabled).await
-            {
-                return internal(&state, err);
+            if state.config_repository.is_sqlite() == false {
+                // PostgreSQL keeps the managed MiniMax MCP projection in sync.
+                let pg_endpoint: crate::db::ProviderEndpoint = endpoint.into();
+                if let Err(err) = crate::db::sync_minimax_mcp_server(
+                    state.config_repository.as_postgres().unwrap(),
+                    &pg_endpoint,
+                    mcp_enabled,
+                )
+                .await
+                {
+                    return internal(&state, err);
+                }
+                refresh_managed_minimax_mcp(&state, pg_endpoint.endpoint_id).await;
             }
-            refresh_managed_minimax_mcp(&state, endpoint.endpoint_id).await;
-            let _ = publish_snapshot(&state).await;
-            // The first INSERT already set `mcp_enabled`; reload so the
-            // synchronous response reflects the canonical row plus any
-            // API-key side effects.
-            match db::get_endpoint(&state.pool, endpoint.endpoint_id).await {
+            if let Err(err) = publish_snapshot(&state).await {
+                tracing::warn!(error = %err, "snapshot publication failed after endpoint create");
+            }
+            match state.config_repository.get_endpoint(endpoint_id).await {
                 Ok(Some(endpoint)) => Json(endpoint).into_response(),
                 Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
                 Err(err) => internal(&state, err),
@@ -72,7 +83,7 @@ pub(super) async fn update_endpoint(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    let existing = match db::get_endpoint(&state.pool, endpoint_id).await {
+    let existing = match state.config_repository.get_endpoint(endpoint_id).await {
         Ok(Some(endpoint)) => endpoint,
         Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
         Err(err) => return internal(&state, err),
@@ -84,39 +95,55 @@ pub(super) async fn update_endpoint(
             "base_url must be the provider base URL without /v1",
         );
     }
-    // When the provider is changed away from MiniMax, MCP exposure is no
-    // longer valid; resolve_endpoint_input already rejects an explicit
-    // `mcp_enabled: true` for non-MiniMax providers, so any other value
-    // (None, Some(false)) must collapse to false here.
     let provider_is_minimax = body.provider == db::EndpointProvider::Minimax;
     let mcp_enabled = if provider_is_minimax {
         body.mcp_enabled.unwrap_or(existing.mcp_enabled)
     } else {
         false
     };
-    let input = match resolve_endpoint_input(&state, body, Some(existing.api_keys)).await {
+    let existing_api_keys = match state
+        .config_repository
+        .endpoint_api_keys_for_update(endpoint_id)
+        .await
+    {
+        Ok(keys) => keys,
+        Err(err) => return internal(&state, err),
+    };
+    let input = match resolve_endpoint_input(&state, body, Some(existing_api_keys)).await {
         Ok(input) => input,
         Err(response) => return response,
     };
-    match db::update_endpoint(&state.pool, endpoint_id, input).await {
+    match state
+        .config_repository
+        .update_endpoint(endpoint_id, input)
+        .await
+    {
         Ok(Some(endpoint)) => {
-            if let Err(err) =
-                db::set_endpoint_mcp_enabled(&state.pool, endpoint.endpoint_id, mcp_enabled).await
+            let endpoint_id = endpoint.endpoint_id;
+            if let Err(err) = state
+                .config_repository
+                .set_endpoint_mcp_enabled(endpoint_id, mcp_enabled)
+                .await
             {
                 return internal(&state, err);
             }
-            let endpoint = match db::get_endpoint(&state.pool, endpoint.endpoint_id).await {
-                Ok(Some(endpoint)) => endpoint,
-                Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
-                Err(err) => return internal(&state, err),
-            };
-            if let Err(err) = db::sync_minimax_mcp_server(&state.pool, &endpoint, mcp_enabled).await
-            {
-                return internal(&state, err);
+            if state.config_repository.is_sqlite() == false {
+                let pg_endpoint: crate::db::ProviderEndpoint = endpoint.into();
+                if let Err(err) = crate::db::sync_minimax_mcp_server(
+                    state.config_repository.as_postgres().unwrap(),
+                    &pg_endpoint,
+                    mcp_enabled,
+                )
+                .await
+                {
+                    return internal(&state, err);
+                }
+                refresh_managed_minimax_mcp(&state, pg_endpoint.endpoint_id).await;
             }
-            refresh_managed_minimax_mcp(&state, endpoint.endpoint_id).await;
-            let _ = publish_snapshot(&state).await;
-            match db::get_endpoint(&state.pool, endpoint.endpoint_id).await {
+            if let Err(err) = publish_snapshot(&state).await {
+                tracing::warn!(error = %err, "snapshot publication failed after endpoint update");
+            }
+            match state.config_repository.get_endpoint(endpoint_id).await {
                 Ok(Some(endpoint)) => Json(endpoint).into_response(),
                 Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
                 Err(err) => internal(&state, err),
@@ -128,7 +155,10 @@ pub(super) async fn update_endpoint(
 }
 
 async fn refresh_managed_minimax_mcp(state: &AdminState, endpoint_id: Uuid) {
-    match db::get_mcp_server_by_source_endpoint(&state.pool, endpoint_id).await {
+    let Some(pool) = state.config_repository.as_postgres() else {
+        return;
+    };
+    match crate::db::get_mcp_server_by_source_endpoint(pool, endpoint_id).await {
         Ok(Some(server)) if server.enabled => state.mcp_catalog_service.spawn_refresh(server),
         Ok(Some(server)) => state.mcp_catalog_service.invalidate(server.server_id).await,
         Ok(None) => {}
@@ -146,21 +176,23 @@ pub(super) async fn delete_endpoint(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    // Prefetch the managed MCP row so we can invalidate its local and
-    // Valkey-backed catalog cache after the endpoint is gone. A missing row
-    // (no managed MCP for this endpoint) is treated as a no-op so the
-    // delete path is not coupled to MCP exposure.
-    let managed_server = match db::get_mcp_server_by_source_endpoint(&state.pool, endpoint_id).await
-    {
-        Ok(server) => server,
-        Err(err) => return internal(&state, err),
+    let managed_server = if state.config_repository.is_sqlite() == false {
+        let pool = state.config_repository.as_postgres().unwrap();
+        match crate::db::get_mcp_server_by_source_endpoint(pool, endpoint_id).await {
+            Ok(server) => server,
+            Err(err) => return internal(&state, err),
+        }
+    } else {
+        None
     };
-    match db::delete_endpoint(&state.pool, endpoint_id).await {
+    match state.config_repository.delete_endpoint(endpoint_id).await {
         Ok(true) => {
             if let Some(server) = managed_server {
                 state.mcp_catalog_service.invalidate(server.server_id).await;
             }
-            let _ = publish_snapshot(&state).await;
+            if let Err(err) = publish_snapshot(&state).await {
+                tracing::warn!(error = %err, "snapshot publication failed after endpoint delete");
+            }
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
@@ -176,9 +208,24 @@ pub(super) async fn test_endpoint(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    let endpoint = match db::get_endpoint(&state.pool, endpoint_id).await {
+    let endpoint = match state.config_repository.get_endpoint(endpoint_id).await {
         Ok(Some(endpoint)) => endpoint,
         Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
+        Err(err) => return internal(&state, err),
+    };
+    let api_key = match state
+        .config_repository
+        .first_endpoint_api_key(endpoint_id)
+        .await
+    {
+        Ok(Some(key)) => key,
+        Ok(None) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "missing_endpoint_api_key",
+                "endpoint is missing an API key",
+            );
+        }
         Err(err) => return internal(&state, err),
     };
 
@@ -186,12 +233,12 @@ pub(super) async fn test_endpoint(
     let url = format!("{}/v1/models", endpoint.base_url.trim_end_matches('/'));
     let started = Instant::now();
     let request = client.get(url);
-    let request = if parse_native_api(&endpoint.native_api) == NativeApi::AnthropicMessages {
+    let request = if endpoint.native_api == NativeApi::AnthropicMessages {
         request
-            .header("x-api-key", &endpoint.api_key)
+            .header("x-api-key", &api_key)
             .header("anthropic-version", "2023-06-01")
     } else {
-        request.bearer_auth(&endpoint.api_key)
+        request.bearer_auth(&api_key)
     };
     let result = request.send().await;
 
@@ -220,7 +267,7 @@ pub(super) async fn test_endpoint(
                 })
                 .into_response();
             }
-            let native_api = parse_native_api(&endpoint.native_api);
+            let native_api = endpoint.native_api;
             let native_api_source = endpoint.native_api_source.clone();
             let message = match model_count {
                 Some(count) => format!(
