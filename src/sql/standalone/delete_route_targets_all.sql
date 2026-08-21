@@ -1,0 +1,1 @@
+DELETE FROM standalone_model_route_targets;

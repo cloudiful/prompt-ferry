@@ -1,0 +1,3 @@
+SELECT api_key_ciphertext
+FROM standalone_provider_endpoints
+LIMIT 1;

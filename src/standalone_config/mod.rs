@@ -1,0 +1,28 @@
+macro_rules! standalone_query {
+    ($path:literal) => {
+        // SQLx query-file macros describe against the crate-wide DATABASE_URL. This
+        // crate normally points that URL at PostgreSQL, while these statements target
+        // the runtime-selected standalone SQLite database.
+        sqlx::query(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/",
+            $path
+        )))
+    };
+}
+
+mod models;
+mod rows;
+mod store;
+#[cfg(test)]
+mod tests;
+mod validation;
+mod write;
+
+pub use models::{
+    BootstrapSeed, ClientKeyConfig, ContinuationPolicy, EndpointApiKeyConfig, EndpointProvider,
+    EndpointRegion, ManagedRelayConfig, ModelRouteConfig, ModelRouteTargetConfig,
+    ProviderEndpointConfig, Result, RouteScope, RoutingStrategy, SettingConfig, StandaloneConfig,
+    StandaloneConfigError,
+};
+pub use store::{BootstrapOutcome, StandaloneConfigStore};
