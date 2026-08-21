@@ -6,7 +6,7 @@ use crate::{
     redact,
     relay_secrets::RelaySecretManager,
     replay_cache::ReplayCache,
-    tls,
+    runtime_env, tls,
     worker_admin::{self, AdminState},
 };
 use anyhow::anyhow;
@@ -17,10 +17,10 @@ pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
     if config.worker_token.is_empty() {
         return Err(anyhow!("worker token is required"));
     }
-    let managed_mode = !config.database_url.trim().is_empty();
-    if managed_mode {
+    if config.mode().is_shared_managed() {
         RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
     } else {
+        runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
         let relay_urls = config
             .relay_urls
             .iter()
@@ -46,7 +46,7 @@ pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
             &config.bridge_encryption_key,
         )?;
     }
-    if config.database_url.is_empty() && config.upstream_api_key.is_empty() {
+    if !config.mode().is_shared_managed() && config.upstream_api_key.is_empty() {
         return Err(anyhow!("upstream api key is required"));
     }
     if config
@@ -66,7 +66,7 @@ pub(super) async fn build_admin_state(
     config: &WorkerConfig,
     spawn_admin_server: bool,
 ) -> anyhow::Result<Option<AdminState>> {
-    if config.database_url.trim().is_empty() {
+    if !config.mode().is_shared_managed() {
         return Ok(None);
     }
     let relay_secret_manager = RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
@@ -164,4 +164,37 @@ pub(super) async fn build_admin_state(
         });
     }
     Ok(Some(state))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_config;
+    use crate::config::WorkerConfig;
+    use base64::Engine as _;
+
+    #[test]
+    fn empty_database_url_selects_named_standalone_mode() {
+        let config = WorkerConfig {
+            upstream_api_key: "bootstrap-key".to_string(),
+            worker_token: "token".to_string(),
+            ..WorkerConfig::default()
+        };
+
+        assert_eq!(config.mode().as_str(), "standalone-managed");
+        assert!(validate_config(&config).is_ok());
+    }
+
+    #[test]
+    fn configured_database_url_keeps_shared_managed_mode() {
+        let config = WorkerConfig {
+            database_url: "  postgres://postgres@localhost/prompt_ferry  ".to_string(),
+            relay_urls: Vec::new(),
+            relay_secret_master_key: base64::engine::general_purpose::STANDARD.encode([7_u8; 32]),
+            worker_token: "token".to_string(),
+            ..WorkerConfig::default()
+        };
+
+        assert_eq!(config.mode().as_str(), "shared-managed");
+        assert!(validate_config(&config).is_ok());
+    }
 }

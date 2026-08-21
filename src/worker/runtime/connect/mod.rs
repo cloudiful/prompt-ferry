@@ -9,13 +9,14 @@ use super::{
     SHUTDOWN_DRAIN_TIMEOUT_SECONDS, WorkerRuntimeState, ai::abort_waiting_approvals,
     build_admin_state, validate_config,
 };
-use crate::config::WorkerConfig;
+use crate::{config::WorkerConfig, runtime_env};
 use anyhow::Context;
 use reqwest::Client;
 use std::time::Duration;
 pub(super) use support::is_expected_relay_disconnect;
 use support::shutdown_signal;
 use tokio::task::JoinSet;
+use tracing::info;
 
 use self::{
     config::{
@@ -28,6 +29,21 @@ use self::{
 
 pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
     validate_config(&config)?;
+    if config.mode().is_shared_managed() {
+        info!(
+            mode = config.mode().as_str(),
+            "worker storage mode selected; configured PostgreSQL is authoritative"
+        );
+    } else {
+        let sqlite_path =
+            runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
+        info!(
+            mode = config.mode().as_str(),
+            sqlite_path = %sqlite_path.display(),
+            bootstrap = "static-relay-and-upstream",
+            "worker storage mode selected; standalone configuration store is not initialized yet"
+        );
+    }
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(config.connect_timeout_seconds))
         .build()
@@ -54,9 +70,8 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
         shutdown_state.begin_shutdown();
     });
 
-    let managed_mode = admin_state.as_ref().is_some_and(|state| state.managed_mode);
     let mut relay_tasks = JoinSet::new();
-    if managed_mode {
+    if config.mode().is_shared_managed() {
         let state = require_managed_admin_state(admin_state.as_ref())?;
         spawn_managed_relay_supervisor(
             config.clone(),

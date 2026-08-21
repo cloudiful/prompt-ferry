@@ -95,6 +95,8 @@ pub struct WorkerArgs {
     #[arg(long)]
     pub database_url: Option<String>,
     #[arg(long)]
+    pub standalone_database_path: Option<String>,
+    #[arg(long)]
     pub bootstrap_admin_login: Option<String>,
     #[arg(long)]
     pub bootstrap_admin_password: Option<String>,
@@ -168,6 +170,24 @@ mod tests {
                 assert_eq!(args.internal_worker_bind.as_deref(), Some("127.0.0.1:9788"));
             }
             other => panic!("expected serve command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_worker_standalone_database_path() {
+        let cli = Cli::parse_from([
+            "prompt-ferry",
+            "worker",
+            "--standalone-database-path",
+            "/var/lib/prompt-ferry/worker.sqlite3",
+        ]);
+
+        match cli.command {
+            Command::Worker(args) => assert_eq!(
+                args.standalone_database_path.as_deref(),
+                Some("/var/lib/prompt-ferry/worker.sqlite3")
+            ),
+            other => panic!("expected worker command, got {other:?}"),
         }
     }
 }

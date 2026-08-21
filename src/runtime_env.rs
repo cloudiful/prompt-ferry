@@ -31,12 +31,34 @@ pub fn select_config_app_name() -> Result<&'static str> {
     Ok(CONFIG_APP_NAME)
 }
 
+pub fn resolve_standalone_database_path(configured_path: &str) -> Result<PathBuf> {
+    resolve_standalone_database_path_from(configured_path, |key| env::var_os(key))
+}
+
+fn resolve_standalone_database_path_from(
+    configured_path: &str,
+    get_env: impl Fn(&str) -> Option<OsString>,
+) -> Result<PathBuf> {
+    let configured_path = configured_path.trim();
+    if !configured_path.is_empty() {
+        return Ok(PathBuf::from(configured_path));
+    }
+
+    Ok(data_root_from(get_env)?
+        .join(CONFIG_APP_NAME)
+        .join("worker.sqlite3"))
+}
+
 fn default_config_path(app_name: &str) -> Result<PathBuf> {
     let app_name = Path::new(app_name);
     validate_app_name(app_name)?;
     Ok(config_root_from(|key| env::var_os(key))?
         .join(app_name)
         .join("config.toml"))
+}
+
+fn data_root_from(get_env: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf> {
+    data_root_from_platform(get_env)
 }
 
 fn validate_app_name(app_name: &Path) -> Result<()> {
@@ -86,6 +108,39 @@ fn config_root_from(get_env: impl Fn(&str) -> Option<OsString>) -> Result<PathBu
         .ok_or_else(|| anyhow!("failed to resolve Windows config directory"))
 }
 
+#[cfg(windows)]
+fn data_root_from_platform(get_env: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf> {
+    env_path_with(&get_env, "LOCALAPPDATA")
+        .or_else(|| env_path_with(&get_env, "APPDATA"))
+        .or_else(|| {
+            env_path_with(&get_env, "USERPROFILE").map(|path| path.join("AppData").join("Local"))
+        })
+        .or_else(|| match (get_env("HOMEDRIVE"), get_env("HOMEPATH")) {
+            (Some(drive), Some(path)) if !drive.is_empty() && !path.is_empty() => Some(
+                PathBuf::from(drive)
+                    .join(path)
+                    .join("AppData")
+                    .join("Local"),
+            ),
+            _ => None,
+        })
+        .ok_or_else(|| anyhow!("failed to resolve Windows data directory"))
+}
+
+#[cfg(target_os = "macos")]
+fn data_root_from_platform(get_env: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf> {
+    env_path_with(get_env, "HOME")
+        .map(|path| path.join("Library").join("Application Support"))
+        .ok_or_else(|| anyhow!("failed to resolve macOS data directory from HOME"))
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn data_root_from_platform(get_env: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf> {
+    env_path_with(&get_env, "XDG_DATA_HOME")
+        .or_else(|| env_path_with(get_env, "HOME").map(|path| path.join(".local").join("share")))
+        .ok_or_else(|| anyhow!("failed to resolve data directory from XDG_DATA_HOME or HOME"))
+}
+
 #[cfg(target_os = "macos")]
 fn config_root_from(get_env: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf> {
     env_path_with(get_env, "HOME")
@@ -102,7 +157,9 @@ fn config_root_from(get_env: impl Fn(&str) -> Option<OsString>) -> Result<PathBu
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_database_url;
+    use super::{resolve_database_url, resolve_standalone_database_path_from};
+    use std::ffi::OsString;
+    use std::path::PathBuf;
 
     #[test]
     fn database_url_resolution_prefers_arg_then_new_then_database_url() {
@@ -149,5 +206,25 @@ mod tests {
             std::env::remove_var("PROMPT_FERRY_WORKER__DATABASE_URL");
             std::env::remove_var("DATABASE_URL");
         }
+    }
+
+    #[test]
+    fn standalone_database_path_trims_explicit_override() {
+        assert_eq!(
+            resolve_standalone_database_path_from("  ./state/worker.sqlite3  ", |_| None).unwrap(),
+            PathBuf::from("./state/worker.sqlite3")
+        );
+    }
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    #[test]
+    fn standalone_database_path_uses_xdg_data_home_by_default() {
+        assert_eq!(
+            resolve_standalone_database_path_from("", |key| {
+                (key == "XDG_DATA_HOME").then(|| OsString::from("/tmp/prompt-ferry-data"))
+            })
+            .unwrap(),
+            PathBuf::from("/tmp/prompt-ferry-data/prompt-ferry/worker.sqlite3")
+        );
     }
 }

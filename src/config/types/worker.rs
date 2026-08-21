@@ -4,6 +4,25 @@ use crate::cli::WorkerArgs;
 
 use super::{BridgeEncryptionMode, NativeApi, WorkerTlsMode};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkerMode {
+    SharedManaged,
+    StandaloneManaged,
+}
+
+impl WorkerMode {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::SharedManaged => "shared-managed",
+            Self::StandaloneManaged => "standalone-managed",
+        }
+    }
+
+    pub(crate) fn is_shared_managed(self) -> bool {
+        self == Self::SharedManaged
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorkerConfig {
@@ -15,6 +34,7 @@ pub struct WorkerConfig {
     pub connect_timeout_seconds: u64,
     pub admin_bind: String,
     pub database_url: String,
+    pub standalone_database_path: String,
     pub bootstrap_admin_login: String,
     pub bootstrap_admin_password: String,
     pub tls_mode: WorkerTlsMode,
@@ -56,6 +76,7 @@ impl Default for WorkerConfig {
             connect_timeout_seconds: 30,
             admin_bind: "127.0.0.1:8789".to_string(),
             database_url: String::new(),
+            standalone_database_path: String::new(),
             bootstrap_admin_login: "admin".to_string(),
             bootstrap_admin_password: String::new(),
             tls_mode: WorkerTlsMode::Auto,
@@ -86,6 +107,14 @@ impl Default for WorkerConfig {
 }
 
 impl WorkerConfig {
+    pub(crate) fn mode(&self) -> WorkerMode {
+        if self.database_url.trim().is_empty() {
+            WorkerMode::StandaloneManaged
+        } else {
+            WorkerMode::SharedManaged
+        }
+    }
+
     pub fn merge_args(mut self, args: WorkerArgs) -> Self {
         if !args.relay_url.is_empty() {
             self.relay_urls = args.relay_url;
@@ -110,6 +139,9 @@ impl WorkerConfig {
         }
         if let Some(url) = args.database_url {
             self.database_url = url;
+        }
+        if let Some(path) = args.standalone_database_path {
+            self.standalone_database_path = path;
         }
         if let Some(login) = args.bootstrap_admin_login {
             self.bootstrap_admin_login = login;
