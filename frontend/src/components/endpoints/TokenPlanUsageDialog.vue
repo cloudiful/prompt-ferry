@@ -56,15 +56,10 @@ function usedPercent(window: TokenPlanWindowUsage): number {
   return 100 - remainingPercent(window)
 }
 
-function progressColor(
-  window: TokenPlanWindowUsage,
-): 'success' | 'warning' | 'error' {
-  // Map by remaining percentage so colors stay stable across the full range
-  // and abnormal inputs fall into the bounded ends via remainingPercent().
-  const remaining = remainingPercent(window)
-  if (remaining <= 10) return 'error'
-  if (remaining <= 30) return 'warning'
-  return 'success'
+function progressColor(window: TokenPlanWindowUsage): string {
+  const used = usedPercent(window)
+  const hue = 120 - used * 1.2
+  return `hsl(${hue} 80% 45%)`
 }
 
 function endTimeMs(window: TokenPlanWindowUsage): number | null {
@@ -160,11 +155,15 @@ function windowLabel(
                     >
                   </div>
                   <UProgress
+                    class="token-plan-progress"
                     :model-value="usedPercent(model.interval)"
-                    :color="progressColor(model.interval)"
+                    :style="{
+                      '--token-plan-progress-color': progressColor(
+                        model.interval,
+                      ),
+                    }"
                   />
-                  <div class="flex justify-between gap-2 text-dimmed">
-                    <span>{{ t('tokenPlanRemaining') }}</span>
+                  <div class="flex justify-end gap-2 text-dimmed">
                     <span>{{ formatRemaining(model.interval) }}</span>
                   </div>
                 </div>
@@ -178,11 +177,15 @@ function windowLabel(
                     >
                   </div>
                   <UProgress
+                    class="token-plan-progress"
                     :model-value="usedPercent(model.weekly)"
-                    :color="progressColor(model.weekly)"
+                    :style="{
+                      '--token-plan-progress-color': progressColor(
+                        model.weekly,
+                      ),
+                    }"
                   />
-                  <div class="flex justify-between gap-2 text-dimmed">
-                    <span>{{ t('tokenPlanRemaining') }}</span>
+                  <div class="flex justify-end gap-2 text-dimmed">
                     <span>{{ formatRemaining(model.weekly) }}</span>
                   </div>
                 </div>
@@ -199,3 +202,9 @@ function windowLabel(
     </template>
   </UModal>
 </template>
+
+<style scoped>
+.token-plan-progress :deep([data-slot='indicator']) {
+  background-color: var(--token-plan-progress-color);
+}
+</style>
