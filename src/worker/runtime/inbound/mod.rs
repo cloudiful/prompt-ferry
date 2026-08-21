@@ -87,7 +87,9 @@ pub(super) async fn handle_relay_bridge_message(
                                 state
                                     .redaction_enabled
                                     .load(std::sync::atomic::Ordering::SeqCst)
-                            });
+                            }) || services
+                                .standalone_state()
+                                .is_some_and(|state| state.redaction_enabled());
                             let error_code = if is_bridge_send_error(&err) {
                                 "relay_bridge_error"
                             } else {

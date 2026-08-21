@@ -5,8 +5,11 @@ use uuid::Uuid;
 
 use crate::{
     config::{BridgeEncryptionMode, TlsMode, WorkerConfig, normalize_relay_url},
+    standalone_config::ManagedRelayConfig,
     tls, worker_admin,
 };
+
+use crate::worker::runtime::standalone::StandaloneRuntimeState;
 
 #[derive(Clone)]
 pub(super) struct RelayConnectionConfig {
@@ -85,6 +88,55 @@ pub(super) async fn managed_relay_connection_config(
         client_key_pem,
         bridge_encryption_mode,
         bridge_encryption_key,
+    })
+}
+
+pub(super) async fn standalone_relay_connection_configs(
+    config: &WorkerConfig,
+    state: &StandaloneRuntimeState,
+) -> anyhow::Result<Vec<RelayConnectionConfig>> {
+    let snapshot = state.snapshot().await;
+    let persisted = snapshot
+        .relays
+        .iter()
+        .filter(|relay| relay.enabled)
+        .map(|relay| standalone_relay_connection_config(config, relay))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    if persisted.is_empty() {
+        return simple_relay_connection_configs(config);
+    }
+    Ok(persisted)
+}
+
+fn standalone_relay_connection_config(
+    config: &WorkerConfig,
+    relay: &ManagedRelayConfig,
+) -> anyhow::Result<RelayConnectionConfig> {
+    let relay_url = normalize_relay_url(&relay.relay_url);
+    tls::validate_worker_relay_material(
+        &relay_url,
+        relay.tls_mode,
+        relay.relay_ca_pem.as_deref(),
+        relay.client_cert_pem.as_deref(),
+        relay.client_key_pem.as_deref(),
+    )?;
+    crate::bridge_crypto::validate_settings(
+        "worker",
+        relay.bridge_encryption_mode,
+        relay.bridge_encryption_key.as_deref().unwrap_or_default(),
+    )?;
+    Ok(RelayConnectionConfig {
+        relay_key: relay.relay_id.to_string(),
+        relay_id: Some(relay.relay_id),
+        relay_url,
+        worker_token: config.worker_token.clone(),
+        connect_timeout_seconds: config.connect_timeout_seconds,
+        tls_mode: relay.tls_mode,
+        relay_ca_pem: relay.relay_ca_pem.clone(),
+        client_cert_pem: relay.client_cert_pem.clone(),
+        client_key_pem: relay.client_key_pem.clone(),
+        bridge_encryption_mode: relay.bridge_encryption_mode,
+        bridge_encryption_key: relay.bridge_encryption_key.clone().unwrap_or_default(),
     })
 }
 

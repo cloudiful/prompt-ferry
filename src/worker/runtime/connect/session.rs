@@ -23,6 +23,7 @@ use crate::{
     protocol::BridgeMessage,
     tls,
     worker::runtime::context::{BridgeSender, ResponseLimits},
+    worker::runtime::standalone::StandaloneRuntimeState,
     worker::runtime::{
         RELAY_RECONNECT_DELAY_SECONDS, SHUTDOWN_DRAIN_TIMEOUT_SECONDS, WorkerRuntimeState,
         handle_relay_bridge_message,
@@ -35,6 +36,7 @@ pub(super) async fn run_relay_loop(
     config: WorkerConfig,
     client: Client,
     admin_state: Option<worker_admin::AdminState>,
+    standalone_state: Option<StandaloneRuntimeState>,
     runtime_state: WorkerRuntimeState,
 ) {
     let mut consecutive_failures = 0_u32;
@@ -47,6 +49,7 @@ pub(super) async fn run_relay_loop(
             config.clone(),
             client.clone(),
             admin_state.clone(),
+            standalone_state.clone(),
             runtime_state.clone(),
         )
         .await
@@ -103,6 +106,7 @@ pub(super) async fn connect_once(
     config: WorkerConfig,
     client: Client,
     admin_state: Option<worker_admin::AdminState>,
+    standalone_state: Option<StandaloneRuntimeState>,
     runtime_state: WorkerRuntimeState,
 ) -> anyhow::Result<()> {
     let mut request = relay
@@ -163,9 +167,18 @@ pub(super) async fn connect_once(
         }
     });
     if let Some(state) = admin_state.as_ref() {
-        worker_admin::set_bridge_sender(state, &relay.relay_key, Some(admin_tx)).await;
+        worker_admin::set_bridge_sender(state, &relay.relay_key, Some(admin_tx.clone())).await;
         mark_relay_connected(state, relay).await;
         worker_admin::publish_snapshot(state).await?;
+    }
+    if let Some(state) = standalone_state.as_ref() {
+        state
+            .set_bridge_sender(&relay.relay_key, Some(admin_tx.clone()))
+            .await;
+        if let Some(relay_id) = relay.relay_id {
+            state.mark_connected(relay_id).await;
+        }
+        super::super::standalone::publish_snapshot(state).await?;
     }
 
     let mut write_task = tokio::spawn(async move {
@@ -254,6 +267,11 @@ pub(super) async fn connect_once(
                             runtime_state.clone(),
                             ResponseLimits::from(&config),
                         );
+                        let services = if let Some(state) = standalone_state.clone() {
+                            services.with_standalone_state(state)
+                        } else {
+                            services
+                        };
                         handle_relay_bridge_message(message, &config, &services).await;
                     }
                     Err(err) => {
@@ -285,6 +303,14 @@ pub(super) async fn connect_once(
     admin_forward_task.abort();
     if let Some(state) = admin_state.as_ref() {
         worker_admin::set_bridge_sender(state, &relay.relay_key, None).await;
+    }
+    if let Some(state) = standalone_state.as_ref() {
+        state.set_bridge_sender(&relay.relay_key, None).await;
+        if let Some(relay_id) = relay.relay_id {
+            state
+                .mark_disconnected(relay_id, session_error.as_ref().map(ToString::to_string))
+                .await;
+        }
     }
     match session_error {
         Some(err) => Err(err),

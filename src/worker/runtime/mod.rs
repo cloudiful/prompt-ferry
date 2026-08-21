@@ -18,6 +18,7 @@ mod prompt_log;
 mod raw_maintenance;
 mod request_assembly;
 mod routing;
+mod standalone;
 
 use crate::{config::WorkerConfig, worker_admin::AdminState};
 use reqwest::Client;
@@ -28,7 +29,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-use self::bootstrap::{build_admin_state, validate_config};
+use self::bootstrap::{build_admin_state, build_standalone_state, validate_config};
 use self::budget::check_named_request_budget;
 use self::context::RequestExecutionContext;
 use self::error_handling::{

@@ -37,6 +37,7 @@ use uuid::Uuid;
 
 use crate::{
     db,
+    worker::runtime::standalone::StandaloneRuntimeState,
     worker_admin::AdminState,
     worker_admin_types::RequestContentLoggingResponse,
     worker_usage::{UsageLog, UsageRequestMetadata},
@@ -56,6 +57,7 @@ pub(super) fn is_bridge_send_error(error: &anyhow::Error) -> bool {
 #[derive(Clone)]
 pub(super) struct RuntimeServices {
     pub(super) admin_state: Option<AdminState>,
+    pub(super) standalone_state: Option<StandaloneRuntimeState>,
     pub(super) out_tx: BridgeSender,
     pub(super) client: Client,
     pub(super) runtime_state: WorkerRuntimeState,
@@ -72,6 +74,7 @@ impl RuntimeServices {
     ) -> Self {
         Self {
             admin_state,
+            standalone_state: None,
             out_tx,
             client,
             runtime_state,
@@ -81,6 +84,15 @@ impl RuntimeServices {
 
     pub(super) fn admin_state(&self) -> Option<&AdminState> {
         self.admin_state.as_ref()
+    }
+
+    pub(super) fn standalone_state(&self) -> Option<&StandaloneRuntimeState> {
+        self.standalone_state.as_ref()
+    }
+
+    pub(super) fn with_standalone_state(mut self, state: StandaloneRuntimeState) -> Self {
+        self.standalone_state = Some(state);
+        self
     }
 }
 

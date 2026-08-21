@@ -7,7 +7,7 @@ mod support;
 
 use super::{
     SHUTDOWN_DRAIN_TIMEOUT_SECONDS, WorkerRuntimeState, ai::abort_waiting_approvals,
-    build_admin_state, validate_config,
+    build_admin_state, build_standalone_state, validate_config,
 };
 use crate::{config::WorkerConfig, runtime_env};
 use anyhow::Context;
@@ -19,12 +19,12 @@ use tokio::task::JoinSet;
 use tracing::info;
 
 use self::{
-    config::{
-        RelayConnectionConfig, first_simple_relay_connection_config,
-        simple_relay_connection_configs,
-    },
+    config::{RelayConnectionConfig, first_simple_relay_connection_config},
     session::{connect_once, run_relay_loop},
-    supervisor::{require_managed_admin_state, spawn_managed_relay_supervisor},
+    supervisor::{
+        require_managed_admin_state, spawn_managed_relay_supervisor,
+        spawn_standalone_relay_supervisor,
+    },
 };
 
 pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
@@ -41,15 +41,20 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
             mode = config.mode().as_str(),
             sqlite_path = %sqlite_path.display(),
             bootstrap = "static-relay-and-upstream",
-            "worker storage mode selected; standalone configuration store is not initialized yet"
+            "worker storage mode selected; standalone SQLite configuration store is authoritative"
         );
     }
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(config.connect_timeout_seconds))
         .build()
         .context("failed to build upstream HTTP client")?;
-    let runtime_state = WorkerRuntimeState::default();
     let admin_state = build_admin_state(&config, true).await?;
+    let standalone_state = if config.mode().is_shared_managed() {
+        None
+    } else {
+        Some(build_standalone_state(&config).await?)
+    };
+    let runtime_state = WorkerRuntimeState::default();
     super::abort_stale_requests_once(admin_state.as_ref()).await;
     let _stale_reconciler =
         super::spawn_stale_request_reconciler(admin_state.as_ref(), runtime_state.control.clone());
@@ -82,15 +87,17 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
         )
         .await?;
     } else {
-        for relay in simple_relay_connection_configs(&config)? {
-            relay_tasks.spawn(run_relay_loop(
-                relay,
-                config.clone(),
-                client.clone(),
-                admin_state.clone(),
-                runtime_state.clone(),
-            ));
-        }
+        let state = standalone_state
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("standalone mode requires standalone runtime state"))?;
+        spawn_standalone_relay_supervisor(
+            config.clone(),
+            client.clone(),
+            state,
+            runtime_state.clone(),
+            &mut relay_tasks,
+        )
+        .await?;
     }
 
     runtime_state.wait_for_shutdown().await;
@@ -112,7 +119,15 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
 
 pub(super) async fn connect_for_test(config: WorkerConfig, client: Client) -> anyhow::Result<()> {
     let relay = first_simple_relay_connection_config(&config)?;
-    connect_once(&relay, config, client, None, WorkerRuntimeState::default()).await
+    connect_once(
+        &relay,
+        config,
+        client,
+        None,
+        None,
+        WorkerRuntimeState::default(),
+    )
+    .await
 }
 
 pub(super) async fn connect_for_test_with_admin(
@@ -120,12 +135,18 @@ pub(super) async fn connect_for_test_with_admin(
     client: Client,
 ) -> anyhow::Result<()> {
     let admin_state = build_admin_state(&config, false).await?;
+    let standalone_state = if config.mode().is_shared_managed() {
+        None
+    } else {
+        Some(build_standalone_state(&config).await?)
+    };
     let relay = first_simple_relay_connection_config(&config)?;
     connect_once(
         &relay,
         config,
         client,
         admin_state,
+        standalone_state,
         WorkerRuntimeState::default(),
     )
     .await

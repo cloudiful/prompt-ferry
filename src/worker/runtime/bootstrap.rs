@@ -6,7 +6,9 @@ use crate::{
     redact,
     relay_secrets::RelaySecretManager,
     replay_cache::ReplayCache,
-    runtime_env, tls,
+    runtime_env,
+    standalone_config::{BootstrapSeed, StandaloneConfigStore},
+    tls,
     worker_admin::{self, AdminState},
 };
 use anyhow::anyhow;
@@ -20,6 +22,7 @@ pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
     if config.mode().is_shared_managed() {
         RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
     } else {
+        RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
         runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
         let relay_urls = config
             .relay_urls
@@ -27,27 +30,25 @@ pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
             .map(|relay_url| normalize_relay_url(relay_url))
             .filter(|relay_url| !relay_url.is_empty())
             .collect::<Vec<_>>();
-        if relay_urls.is_empty() {
-            return Err(anyhow!("at least one relay URL is required"));
+        if !relay_urls.is_empty() {
+            let unique_relay_urls = relay_urls
+                .iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>();
+            if unique_relay_urls.len() != relay_urls.len() {
+                return Err(anyhow!(
+                    "worker relay URLs must be unique after normalization"
+                ));
+            }
         }
-        let unique_relay_urls = relay_urls
-            .iter()
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>();
-        if unique_relay_urls.len() != relay_urls.len() {
-            return Err(anyhow!(
-                "worker relay URLs must be unique after normalization"
-            ));
+        if !relay_urls.is_empty() {
+            tls::validate_worker_config(config)?;
+            bridge_crypto::validate_settings(
+                "worker",
+                config.bridge_encryption_mode,
+                &config.bridge_encryption_key,
+            )?;
         }
-        tls::validate_worker_config(config)?;
-        bridge_crypto::validate_settings(
-            "worker",
-            config.bridge_encryption_mode,
-            &config.bridge_encryption_key,
-        )?;
-    }
-    if !config.mode().is_shared_managed() && config.upstream_api_key.is_empty() {
-        return Err(anyhow!("upstream api key is required"));
     }
     if config
         .upstream_base_url
@@ -60,6 +61,70 @@ pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
         ));
     }
     Ok(())
+}
+
+pub(super) async fn build_standalone_state(
+    config: &WorkerConfig,
+) -> anyhow::Result<crate::worker::runtime::standalone::StandaloneRuntimeState> {
+    let manager = RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
+    let path = runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            anyhow!(error).context("failed to create standalone SQLite parent directory")
+        })?;
+    }
+    let store = Arc::new(StandaloneConfigStore::open(&path).await?);
+    if !config.relay_urls.is_empty() && !config.upstream_api_key.is_empty() {
+        let tls_mode = config
+            .relay_urls
+            .first()
+            .map(|url| tls::worker_tls_mode(config, url))
+            .transpose()?;
+        let seed = BootstrapSeed {
+            relay_urls: config
+                .relay_urls
+                .iter()
+                .map(|url| normalize_relay_url(url))
+                .collect(),
+            tls_mode: tls_mode.unwrap_or_default(),
+            relay_ca_pem: optional_file_pem(&config.relay_ca)?,
+            client_cert_pem: optional_file_pem(&config.client_cert)?,
+            client_key_pem: optional_file_pem(&config.client_key)?,
+            bridge_encryption_mode: config.bridge_encryption_mode,
+            bridge_encryption_key: (!config.bridge_encryption_key.trim().is_empty())
+                .then(|| config.bridge_encryption_key.clone()),
+            upstream_base_url: config.upstream_base_url.clone(),
+            upstream_api_key: config.upstream_api_key.clone(),
+            upstream_native_api: config.upstream_native_api,
+        };
+        store.bootstrap_if_empty(&manager, seed).await?;
+    }
+    let snapshot = store.load_snapshot(&manager).await?;
+    if snapshot.relays.iter().all(|relay| !relay.enabled) && config.relay_urls.is_empty() {
+        return Err(anyhow!(
+            "standalone configuration has no enabled persisted relays or static relay URLs"
+        ));
+    }
+    if snapshot.endpoints.iter().all(|endpoint| !endpoint.enabled)
+        && config.upstream_api_key.trim().is_empty()
+    {
+        return Err(anyhow!(
+            "standalone configuration has no enabled persisted endpoints or static upstream API key"
+        ));
+    }
+    Ok(crate::worker::runtime::standalone::StandaloneRuntimeState::new(store, manager, snapshot))
+}
+
+fn optional_file_pem(path: &str) -> anyhow::Result<Option<String>> {
+    let path = path.trim();
+    if path.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(tls::read_pem_file(path)?))
+    }
 }
 
 pub(super) async fn build_admin_state(
@@ -171,12 +236,14 @@ mod tests {
     use super::validate_config;
     use crate::config::WorkerConfig;
     use base64::Engine as _;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn empty_database_url_selects_named_standalone_mode() {
         let config = WorkerConfig {
             upstream_api_key: "bootstrap-key".to_string(),
             worker_token: "token".to_string(),
+            relay_secret_master_key: base64::engine::general_purpose::STANDARD.encode([7_u8; 32]),
             ..WorkerConfig::default()
         };
 
@@ -196,5 +263,34 @@ mod tests {
 
         assert_eq!(config.mode().as_str(), "shared-managed");
         assert!(validate_config(&config).is_ok());
+    }
+
+    #[tokio::test]
+    async fn standalone_runtime_opens_and_bootstraps_legacy_static_configuration() {
+        let path = std::env::temp_dir().join(format!(
+            "prompt-ferry-runtime-bootstrap-{}.sqlite",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let config = WorkerConfig {
+            standalone_database_path: path.to_string_lossy().to_string(),
+            relay_urls: vec!["ws://127.0.0.1:8788/ws/worker".to_string()],
+            upstream_base_url: "https://api.example.test".to_string(),
+            upstream_api_key: "bootstrap-key".to_string(),
+            worker_token: "token".to_string(),
+            relay_secret_master_key: base64::engine::general_purpose::STANDARD.encode([7_u8; 32]),
+            ..WorkerConfig::default()
+        };
+
+        let state = super::super::bootstrap::build_standalone_state(&config)
+            .await
+            .expect("standalone state");
+        let snapshot = state.snapshot().await;
+        assert_eq!(snapshot.relays.len(), 1);
+        assert_eq!(snapshot.endpoints.len(), 1);
+        drop(state);
+        let _ = std::fs::remove_file(path);
     }
 }

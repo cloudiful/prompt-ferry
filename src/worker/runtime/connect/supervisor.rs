@@ -9,9 +9,10 @@ use uuid::Uuid;
 
 use super::{
     WorkerConfig, WorkerRuntimeState,
-    config::{managed_relay_connection_config, relay_fingerprint},
+    config::{managed_relay_connection_config, relay_fingerprint as managed_relay_fingerprint},
     run_relay_loop,
 };
+use crate::worker::runtime::standalone::StandaloneRuntimeState;
 use crate::worker_admin;
 
 #[derive(Debug)]
@@ -108,7 +109,7 @@ async fn reconcile_managed_relays(
     }
 
     for relay in desired_relays {
-        let fingerprint = relay_fingerprint(&relay);
+        let fingerprint = managed_relay_fingerprint(&relay);
         let needs_restart = match tasks.get(&relay.relay_id) {
             Some(task) => task.fingerprint != fingerprint || task.handle.is_finished(),
             None => true,
@@ -137,6 +138,7 @@ async fn reconcile_managed_relays(
             config.clone(),
             client.clone(),
             Some(admin_state.clone()),
+            None,
             runtime_state.clone(),
         ));
         tasks.insert(
@@ -182,16 +184,170 @@ async fn reconnect_managed_relay(
         config.clone(),
         client.clone(),
         Some(admin_state.clone()),
+        None,
         runtime_state.clone(),
     ));
     tasks.insert(
         relay.relay_id,
         ManagedRelayTask {
-            fingerprint: relay_fingerprint(&relay),
+            fingerprint: managed_relay_fingerprint(&relay),
             handle: task,
         },
     );
     Ok(())
+}
+
+pub(super) async fn spawn_standalone_relay_supervisor(
+    config: WorkerConfig,
+    client: reqwest::Client,
+    standalone_state: StandaloneRuntimeState,
+    runtime_state: WorkerRuntimeState,
+    relay_tasks: &mut JoinSet<()>,
+) -> anyhow::Result<()> {
+    relay_tasks.spawn(async move {
+        let mut tasks = HashMap::<String, StandaloneRelayTask>::new();
+        if let Err(err) = reconcile_standalone_relays(
+            &config,
+            &client,
+            &standalone_state,
+            &runtime_state,
+            &mut tasks,
+        )
+        .await
+        {
+            tracing::warn!(error = %err, "initial standalone relay reconcile failed");
+        }
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = runtime_state.wait_for_shutdown() => break,
+                _ = interval.tick() => {
+                    match standalone_state.reload_snapshot().await {
+                        Ok(true) => {
+                            if let Err(err) = reconcile_standalone_relays(
+                                &config,
+                                &client,
+                                &standalone_state,
+                                &runtime_state,
+                                &mut tasks,
+                            ).await {
+                                tracing::warn!(error = %err, "standalone relay reconcile failed after configuration reload");
+                            }
+                            let _ = crate::worker::runtime::standalone::publish_snapshot(&standalone_state).await;
+                        }
+                        Ok(false) => {
+                            if let Err(err) = reconcile_standalone_relays(
+                                &config,
+                                &client,
+                                &standalone_state,
+                                &runtime_state,
+                                &mut tasks,
+                            ).await {
+                                tracing::warn!(error = %err, "standalone relay reconcile failed");
+                            }
+                        }
+                        Err(err) => tracing::warn!(error = %err, "standalone configuration reload failed"),
+                    }
+                }
+            }
+        }
+        for (_, task) in tasks {
+            task.handle.abort();
+        }
+    });
+    Ok(())
+}
+
+#[derive(Debug)]
+struct StandaloneRelayTask {
+    fingerprint: String,
+    handle: JoinHandle<()>,
+}
+
+async fn reconcile_standalone_relays(
+    config: &WorkerConfig,
+    client: &reqwest::Client,
+    standalone_state: &StandaloneRuntimeState,
+    runtime_state: &WorkerRuntimeState,
+    tasks: &mut HashMap<String, StandaloneRelayTask>,
+) -> anyhow::Result<()> {
+    let relays =
+        super::config::standalone_relay_connection_configs(config, standalone_state).await?;
+    let desired = relays
+        .iter()
+        .map(|relay| (relay.relay_key.clone(), relay_fingerprint(relay)))
+        .collect::<HashMap<_, _>>();
+    let removed = tasks
+        .keys()
+        .filter(|key| !desired.contains_key(*key))
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in removed {
+        if let Some(task) = tasks.remove(&key) {
+            task.handle.abort();
+        }
+        if let Ok(relay_id) = key.parse::<Uuid>() {
+            standalone_state.mark_disconnected(relay_id, None).await;
+        }
+    }
+    for relay in relays {
+        let key = relay.relay_key.clone();
+        let fingerprint = desired.get(&key).cloned().unwrap_or_default();
+        let restart = tasks
+            .get(&key)
+            .is_none_or(|task| task.fingerprint != fingerprint || task.handle.is_finished());
+        if !restart {
+            continue;
+        }
+        if let Some(task) = tasks.remove(&key) {
+            task.handle.abort();
+        }
+        let handle = tokio::spawn(run_relay_loop(
+            relay,
+            config.clone(),
+            client.clone(),
+            None,
+            Some(standalone_state.clone()),
+            runtime_state.clone(),
+        ));
+        tasks.insert(
+            key,
+            StandaloneRelayTask {
+                fingerprint,
+                handle,
+            },
+        );
+    }
+    Ok(())
+}
+
+fn relay_fingerprint(relay: &super::config::RelayConnectionConfig) -> String {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    digest.update(relay.relay_key.as_bytes());
+    digest.update(relay.relay_url.as_bytes());
+    digest.update(relay.worker_token.as_bytes());
+    digest.update(relay.tls_mode.as_str().as_bytes());
+    digest.update(relay.bridge_encryption_mode.as_str().as_bytes());
+    digest.update(relay.relay_ca_pem.as_deref().unwrap_or_default().as_bytes());
+    digest.update(
+        relay
+            .client_cert_pem
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    digest.update(
+        relay
+            .client_key_pem
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    digest.update(relay.bridge_encryption_key.as_bytes());
+    STANDARD.encode(digest.finalize())
 }
 
 pub(super) fn require_managed_admin_state(
