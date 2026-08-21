@@ -29,16 +29,19 @@ use self::{
 
 pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
     validate_config(&config)?;
-    if config.mode().is_shared_managed() {
+    let contract = config.storage_contract();
+    if contract.backend.is_postgres() {
         info!(
-            mode = config.mode().as_str(),
+            backend = contract.backend.as_str(),
+            coordinator = contract.coordinator.as_str(),
             "worker storage mode selected; configured PostgreSQL is authoritative"
         );
     } else {
         let sqlite_path =
             runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
         info!(
-            mode = config.mode().as_str(),
+            backend = contract.backend.as_str(),
+            coordinator = contract.coordinator.as_str(),
             sqlite_path = %sqlite_path.display(),
             bootstrap = "static-relay-and-upstream",
             "worker storage mode selected; standalone SQLite configuration store is authoritative"
@@ -49,7 +52,7 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
         .build()
         .context("failed to build upstream HTTP client")?;
     let admin_state = build_admin_state(&config, true).await?;
-    let standalone_state = if config.mode().is_shared_managed() {
+    let standalone_state = if contract.backend.is_postgres() {
         None
     } else {
         Some(build_standalone_state(&config).await?)
@@ -76,7 +79,7 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
     });
 
     let mut relay_tasks = JoinSet::new();
-    if config.mode().is_shared_managed() {
+    if contract.backend.is_postgres() {
         let state = require_managed_admin_state(admin_state.as_ref())?;
         spawn_managed_relay_supervisor(
             config.clone(),
@@ -135,7 +138,7 @@ pub(super) async fn connect_for_test_with_admin(
     client: Client,
 ) -> anyhow::Result<()> {
     let admin_state = build_admin_state(&config, false).await?;
-    let standalone_state = if config.mode().is_shared_managed() {
+    let standalone_state = if config.storage_backend().is_postgres() {
         None
     } else {
         Some(build_standalone_state(&config).await?)

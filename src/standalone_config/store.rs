@@ -1,13 +1,6 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::path::{Path, PathBuf};
 
-use sqlx::{
-    Row, SqlitePool,
-    migrate::Migrator,
-    sqlite::{Sqlite, SqliteConnectOptions, SqlitePoolOptions},
-};
+use sqlx::{Row, SqlitePool, sqlite::Sqlite};
 
 use super::write::{self, EncryptedConfig};
 use super::{
@@ -16,8 +9,7 @@ use super::{
 };
 use crate::relay_secrets::RelaySecretManager;
 
-const CURRENT_SCHEMA_VERSION: i64 = 1;
-static MIGRATOR: Migrator = sqlx::migrate!("./migrations/standalone");
+const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {
@@ -64,15 +56,7 @@ impl StandaloneConfigStore {
                 )));
             }
         }
-        let options = SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(true)
-            .foreign_keys(true)
-            .busy_timeout(Duration::from_secs(5));
-        let pool = SqlitePoolOptions::new()
-            .max_connections(4)
-            .connect_with(options)
-            .await?;
+        let pool = crate::db::connect_sqlite(path).await?;
         let store = Self {
             pool,
             path: path.to_path_buf(),
@@ -85,9 +69,11 @@ impl StandaloneConfigStore {
     }
 
     pub async fn migrate(&self) -> Result<()> {
-        MIGRATOR.run(&self.pool).await.map_err(|error| {
-            StandaloneConfigError::CorruptDatabase(format!("migration failed: {error}"))
-        })?;
+        crate::db::migrate_standalone(&self.pool)
+            .await
+            .map_err(|error| {
+                StandaloneConfigError::CorruptDatabase(format!("migration failed: {error}"))
+            })?;
         let row = standalone_query!("src/sql/standalone/schema_version.sql")
             .fetch_optional(&self.pool)
             .await

@@ -143,6 +143,7 @@ async fn schema_creation_has_typed_tables_without_plaintext_secret_columns() {
     assert!(table_names.contains("standalone_endpoint_keys"));
     assert!(table_names.contains("standalone_model_routes"));
     assert!(table_names.contains("standalone_client_keys"));
+    assert!(table_names.contains("standalone_users"));
     let secret_columns = sqlx::query(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/sql/standalone/schema_columns.sql"

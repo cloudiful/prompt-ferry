@@ -1,27 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-use crate::cli::WorkerArgs;
+use crate::{
+    cli::WorkerArgs,
+    storage::{StorageBackend, StorageContract},
+};
 
 use super::{BridgeEncryptionMode, NativeApi, WorkerTlsMode};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WorkerMode {
-    SharedManaged,
-    StandaloneManaged,
-}
-
-impl WorkerMode {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::SharedManaged => "shared-managed",
-            Self::StandaloneManaged => "standalone-managed",
-        }
-    }
-
-    pub(crate) fn is_shared_managed(self) -> bool {
-        self == Self::SharedManaged
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -107,12 +91,16 @@ impl Default for WorkerConfig {
 }
 
 impl WorkerConfig {
-    pub(crate) fn mode(&self) -> WorkerMode {
+    pub(crate) fn storage_backend(&self) -> StorageBackend {
         if self.database_url.trim().is_empty() {
-            WorkerMode::StandaloneManaged
+            StorageBackend::Sqlite
         } else {
-            WorkerMode::SharedManaged
+            StorageBackend::Postgres
         }
+    }
+
+    pub(crate) fn storage_contract(&self) -> StorageContract {
+        StorageContract::for_backend(self.storage_backend(), &self.valkey_url)
     }
 
     pub fn merge_args(mut self, args: WorkerArgs) -> Self {

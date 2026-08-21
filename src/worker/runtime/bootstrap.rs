@@ -19,10 +19,8 @@ pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
     if config.worker_token.is_empty() {
         return Err(anyhow!("worker token is required"));
     }
-    if config.mode().is_shared_managed() {
-        RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
-    } else {
-        RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
+    let contract = config.storage_contract();
+    if contract.backend.is_sqlite() {
         runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
         let relay_urls = config
             .relay_urls
@@ -50,6 +48,7 @@ pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
             )?;
         }
     }
+    RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
     if config
         .upstream_base_url
         .trim()
@@ -66,6 +65,11 @@ pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
 pub(super) async fn build_standalone_state(
     config: &WorkerConfig,
 ) -> anyhow::Result<crate::worker::runtime::standalone::StandaloneRuntimeState> {
+    if !config.storage_backend().is_sqlite() {
+        return Err(anyhow!(
+            "standalone runtime state requires the SQLite storage backend"
+        ));
+    }
     let manager = RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
     let path = runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
     if let Some(parent) = path
@@ -131,7 +135,7 @@ pub(super) async fn build_admin_state(
     config: &WorkerConfig,
     spawn_admin_server: bool,
 ) -> anyhow::Result<Option<AdminState>> {
-    if !config.mode().is_shared_managed() {
+    if !config.storage_backend().is_postgres() {
         return Ok(None);
     }
     let relay_secret_manager = RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
@@ -247,7 +251,7 @@ mod tests {
             ..WorkerConfig::default()
         };
 
-        assert_eq!(config.mode().as_str(), "standalone-managed");
+        assert_eq!(config.storage_backend().as_str(), "sqlite");
         assert!(validate_config(&config).is_ok());
     }
 
@@ -261,7 +265,7 @@ mod tests {
             ..WorkerConfig::default()
         };
 
-        assert_eq!(config.mode().as_str(), "shared-managed");
+        assert_eq!(config.storage_backend().as_str(), "postgres");
         assert!(validate_config(&config).is_ok());
     }
 

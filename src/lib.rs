@@ -31,6 +31,7 @@ pub mod routing;
 pub mod runtime_env;
 pub mod serve;
 pub mod standalone_config;
+pub mod storage;
 pub mod storage_sanitization;
 pub(crate) mod stream_text;
 pub mod tls;

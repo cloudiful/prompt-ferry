@@ -22,7 +22,10 @@ pub use approvals::{
 };
 pub use billing::*;
 pub use budgets::{RequestBudgetCounts, RequestBudgetScope, request_budget_counts};
-pub use connection::{connect, connect_with_max_connections, migrate};
+pub use connection::{
+    connect, connect_sqlite, connect_sqlite_with_max_connections, connect_with_max_connections,
+    migrate, migrate_standalone,
+};
 pub use endpoints::{
     create_endpoint, create_endpoint_with_mcp, delete_endpoint, get_endpoint, list_endpoints,
     list_endpoints_page, list_visible_endpoints, set_endpoint_mcp_enabled,
