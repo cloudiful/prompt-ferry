@@ -70,11 +70,14 @@ struct RedisAffinityBackend {
 struct LocalAffinityBackend {
     bindings: Mutex<HashMap<String, LocalAffinityEntry>>,
     ttl: Duration,
+    max_entries: usize,
+    next_access: std::sync::atomic::AtomicU64,
 }
 
 struct LocalAffinityEntry {
     binding: ResponseAffinityBinding,
     expires_at: Instant,
+    last_access: u64,
 }
 
 impl Default for ResponseAffinityStore {
@@ -95,10 +98,16 @@ impl ResponseAffinityStore {
     }
 
     pub(crate) fn for_tests_with_ttl(ttl: Duration) -> Self {
+        Self::local_with_ttl_and_capacity(ttl, 10_000)
+    }
+
+    pub(crate) fn local_with_ttl_and_capacity(ttl: Duration, max_entries: usize) -> Self {
         Self {
             backend: ResponseAffinityBackend::Local(Arc::new(LocalAffinityBackend {
                 bindings: Mutex::new(HashMap::new()),
                 ttl,
+                max_entries: max_entries.max(1),
+                next_access: std::sync::atomic::AtomicU64::new(0),
             })),
         }
     }
@@ -132,14 +141,13 @@ impl ResponseAffinityStore {
             }
             ResponseAffinityBackend::Local(inner) => {
                 let mut bindings = inner.bindings.lock().await;
+                let now = Instant::now();
+                bindings.retain(|_, entry| entry.expires_at > now);
                 let Some(entry) = bindings.get_mut(key) else {
                     return Ok(None);
                 };
-                if entry.expires_at <= Instant::now() {
-                    bindings.remove(key);
-                    return Ok(None);
-                }
-                entry.expires_at = Instant::now() + inner.ttl;
+                entry.expires_at = now + inner.ttl;
+                entry.last_access = inner.next_access();
                 Ok(Some(entry.binding.clone()))
             }
             ResponseAffinityBackend::Redis(inner) => {
@@ -166,13 +174,12 @@ impl ResponseAffinityStore {
                 Err(anyhow!("response affinity backend unavailable"))
             }
             ResponseAffinityBackend::Local(inner) => {
-                let bindings = inner.bindings.lock().await;
+                let mut bindings = inner.bindings.lock().await;
+                let now = Instant::now();
+                bindings.retain(|_, entry| entry.expires_at > now);
                 let Some(entry) = bindings.get(key) else {
                     return Ok(None);
                 };
-                if entry.expires_at <= Instant::now() {
-                    return Ok(None);
-                }
                 Ok(Some(entry.binding.clone()))
             }
             ResponseAffinityBackend::Redis(inner) => {
@@ -203,17 +210,28 @@ impl ResponseAffinityStore {
             ResponseAffinityBackend::Local(inner) => {
                 let mut bindings = inner.bindings.lock().await;
                 let now = Instant::now();
+                bindings.retain(|_, entry| entry.expires_at > now);
                 if let Some(entry) = bindings.get_mut(key) {
-                    if entry.expires_at > now {
-                        entry.expires_at = now + inner.ttl;
-                        return Ok(entry.binding.clone());
-                    }
+                    entry.expires_at = now + inner.ttl;
+                    entry.last_access = inner.next_access();
+                    return Ok(entry.binding.clone());
+                }
+                if bindings.len() >= inner.max_entries
+                    && let Some(oldest) = bindings
+                        .iter()
+                        .min_by(|(left_key, left), (right_key, right)| {
+                            (left.last_access, *left_key).cmp(&(right.last_access, *right_key))
+                        })
+                        .map(|(key, _)| key.clone())
+                {
+                    bindings.remove(&oldest);
                 }
                 bindings.insert(
                     key.to_string(),
                     LocalAffinityEntry {
                         binding: candidate.clone(),
                         expires_at: now + inner.ttl,
+                        last_access: inner.next_access(),
                     },
                 );
                 Ok(candidate.clone())
@@ -240,7 +258,10 @@ impl ResponseAffinityStore {
                 Err(anyhow!("response affinity backend unavailable"))
             }
             ResponseAffinityBackend::Local(inner) => {
-                Ok(inner.bindings.lock().await.remove(key).is_some())
+                let mut bindings = inner.bindings.lock().await;
+                let now = Instant::now();
+                bindings.retain(|_, entry| entry.expires_at > now);
+                Ok(bindings.remove(key).is_some())
             }
             ResponseAffinityBackend::Redis(inner) => {
                 let mut manager = inner.manager.clone();
@@ -266,18 +287,16 @@ impl ResponseAffinityStore {
             ResponseAffinityBackend::Local(inner) => {
                 let mut bindings = inner.bindings.lock().await;
                 let now = Instant::now();
+                bindings.retain(|_, entry| entry.expires_at > now);
                 let Some(entry) = bindings.get_mut(key) else {
                     return Ok(false);
                 };
-                if entry.expires_at <= now {
-                    bindings.remove(key);
-                    return Ok(false);
-                }
                 if entry.binding != *expected {
                     return Ok(false);
                 }
                 entry.binding = replacement.clone();
                 entry.expires_at = now + inner.ttl;
+                entry.last_access = inner.next_access();
                 Ok(true)
             }
             ResponseAffinityBackend::Redis(inner) => {
@@ -295,6 +314,14 @@ impl ResponseAffinityStore {
                 Ok(replaced == 1)
             }
         }
+    }
+}
+
+impl LocalAffinityBackend {
+    fn next_access(&self) -> u64 {
+        use std::sync::atomic::Ordering;
+
+        self.next_access.fetch_add(1, Ordering::Relaxed)
     }
 }
 

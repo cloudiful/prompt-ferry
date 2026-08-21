@@ -43,6 +43,61 @@ async fn local_store_delete_reports_whether_key_existed_and_removes_it() {
 }
 
 #[tokio::test]
+async fn local_store_supports_refreshing_get_and_compare_and_replace() {
+    let store = ResponseAffinityStore::local_with_ttl_and_capacity(Duration::from_millis(250), 4);
+    let key = "affinity-crud-key";
+    let first = binding(Uuid::new_v4());
+    let replacement = binding(Uuid::new_v4());
+
+    store.get_or_create(key, &first).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert_eq!(store.get(key).await.unwrap(), Some(first.clone()));
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    assert!(
+        !store
+            .replace_if_current(key, &binding(Uuid::new_v4()), &replacement)
+            .await
+            .unwrap()
+    );
+    assert!(
+        store
+            .replace_if_current(key, &first, &replacement)
+            .await
+            .unwrap()
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(store.peek(key).await.unwrap(), Some(replacement.clone()));
+    tokio::time::sleep(Duration::from_millis(180)).await;
+    assert_eq!(store.get(key).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn local_store_evicts_least_recently_used_binding_at_capacity() {
+    let store = ResponseAffinityStore::local_with_ttl_and_capacity(Duration::from_secs(30), 2);
+    let first_key = "affinity-capacity-first";
+    let second_key = "affinity-capacity-second";
+    let third_key = "affinity-capacity-third";
+
+    store
+        .get_or_create(first_key, &binding(Uuid::new_v4()))
+        .await
+        .unwrap();
+    store
+        .get_or_create(second_key, &binding(Uuid::new_v4()))
+        .await
+        .unwrap();
+    store.get(first_key).await.unwrap();
+    store
+        .get_or_create(third_key, &binding(Uuid::new_v4()))
+        .await
+        .unwrap();
+
+    assert!(store.peek(first_key).await.unwrap().is_some());
+    assert_eq!(store.peek(second_key).await.unwrap(), None);
+    assert!(store.peek(third_key).await.unwrap().is_some());
+}
+
+#[tokio::test]
 async fn local_store_peek_does_not_refresh_ttl() {
     let store = ResponseAffinityStore::for_tests_with_ttl(Duration::from_secs(2));
     let key = "affinity-peek-key";

@@ -129,9 +129,11 @@ impl ReplayCache {
         warn!(
             backend = "local",
             reason,
+            scope = "single-process",
+            cross_worker_coordination = false,
             max_entries = config.local_session_max_entries,
             ttl_seconds = config.session_ttl_seconds,
-            "using local session fallback; backend will not switch at runtime"
+            "using local session and response-affinity fallback; cross-worker coordination is unavailable"
         );
         Self {
             backend: ReplayCacheBackend::Local(Arc::new(LocalBackend::new(
@@ -139,7 +141,10 @@ impl ReplayCache {
                 config.valkey_ttl_seconds,
                 config.local_session_max_entries,
             ))),
-            response_affinity: ResponseAffinityStore::unavailable(),
+            response_affinity: ResponseAffinityStore::local_with_ttl_and_capacity(
+                Duration::from_secs(config.session_ttl_seconds.max(1)),
+                config.local_session_max_entries,
+            ),
         }
     }
 
@@ -151,14 +156,14 @@ impl ReplayCache {
         let client = match redis::Client::open(url) {
             Ok(client) => client,
             Err(err) => {
-                warn!(error = %err, valkey_url = url, "failed to open valkey client; falling back to local in-memory sessions");
+                warn!(error = %err, "failed to open valkey client; falling back to local in-memory state");
                 return Self::local_sessions_only(config, "valkey_client_open_failed");
             }
         };
         let manager = match client.get_connection_manager().await {
             Ok(manager) => manager,
             Err(err) => {
-                warn!(error = %err, valkey_url = url, "failed to connect valkey; falling back to local in-memory sessions");
+                warn!(error = %err, "failed to connect valkey; falling back to local in-memory state");
                 return Self::local_sessions_only(config, "valkey_connection_failed");
             }
         };
@@ -659,5 +664,59 @@ mod tests {
             .expect("newest local snapshot should be retained");
         assert_eq!(snapshot.conversation_seq, newer.conversation_seq);
         assert_eq!(snapshot.base_event_id, newer.event_id);
+    }
+
+    #[tokio::test]
+    async fn from_config_without_valkey_uses_local_response_affinity() {
+        let mut config = WorkerConfig::default();
+        config.session_ttl_seconds = 60;
+        config.local_session_max_entries = 2;
+
+        let cache = ReplayCache::from_config(&config).await;
+        assert!(!cache.enabled());
+        assert!(cache.session_available());
+
+        let key = "local-response-affinity";
+        let binding = crate::response_affinity::ResponseAffinityBinding {
+            endpoint_id: Uuid::new_v4(),
+            endpoint_key_id: None,
+            endpoint_key_fingerprint: "fingerprint".to_string(),
+        };
+        assert_eq!(
+            cache
+                .response_affinity()
+                .get_or_create(key, &binding)
+                .await
+                .unwrap(),
+            binding
+        );
+    }
+
+    #[tokio::test]
+    async fn from_config_with_invalid_valkey_url_uses_local_response_affinity() {
+        let mut config = WorkerConfig::default();
+        config.valkey_url = "not-a-valkey-url".to_string();
+
+        let cache = ReplayCache::from_config(&config).await;
+        let key = "invalid-valkey-response-affinity";
+        let binding = crate::response_affinity::ResponseAffinityBinding {
+            endpoint_id: Uuid::new_v4(),
+            endpoint_key_id: None,
+            endpoint_key_fingerprint: "fingerprint".to_string(),
+        };
+        assert_eq!(
+            cache.response_affinity().get(key).await.unwrap(),
+            None,
+            "invalid Valkey configuration must fall back to a usable local store"
+        );
+        cache
+            .response_affinity()
+            .get_or_create(key, &binding)
+            .await
+            .unwrap();
+        assert_eq!(
+            cache.response_affinity().peek(key).await.unwrap(),
+            Some(binding)
+        );
     }
 }
