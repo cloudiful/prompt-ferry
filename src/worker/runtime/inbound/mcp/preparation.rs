@@ -297,7 +297,7 @@ pub(super) async fn prepare_upstream(
                 .send_failure(
                     services,
                     StatusCode::NOT_IMPLEMENTED,
-                    "standalone_raw_payload_retention_unavailable",
+                    "sqlite_raw_payload_retention_unavailable",
                     "SQLite MCP upstream redaction session persistence is unavailable".to_string(),
                     "SQLite MCP upstream redaction session persistence is unavailable".to_string(),
                 )

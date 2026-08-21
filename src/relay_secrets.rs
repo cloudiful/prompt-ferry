@@ -24,7 +24,7 @@ impl RelaySecretManager {
         let value = value.trim();
         if value.is_empty() {
             return Err(anyhow!(
-                "relay secret master key is required in managed mode"
+                "relay secret master key is required for encrypted secret storage"
             ));
         }
         let bytes = STANDARD

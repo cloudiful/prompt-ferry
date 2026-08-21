@@ -23,7 +23,7 @@
 - 支持按请求调整思考强度：Chat 使用 `reasoning_effort`，Responses 使用 `reasoning.effort`，包括 DeepSeek 的 `max`；Chat 兼容层会将上游不接受的 `developer` 角色转换为 `system`。
 - 支持对转发内容、日志和用量详情进行配置化脱敏。
 - 支持用户、客户端 API Key、上游端点、模型路由和多 relay 管理。
-- 支持 HTTP/stdio MCP 聚合、请求用量与重放、保留策略、审批和计费。
+- 支持 HTTP/stdio MCP 聚合；SQLite 支持 MCP 配置、目录和运行时执行，MCP 配额及用量账本需要 PostgreSQL。
 - 支持 MCP 凭据配额：按凭据或共享配额组设置请求/credits 预算，原子预占、按使用率均衡多个 API key、
   认证/限流失败自动冷却，并支持 Firecrawl 等按 credits 计费的 `creditsUsed` 校准。
 - 支持 relay-worker 之间的 TLS、双向 TLS 和应用层加密。
@@ -93,13 +93,20 @@ forwarding pump 等待慢客户端的时长，默认 5000 毫秒。默认值分�
 请保持 `8789` 端口只对本机或受保护的内网开放。Compose 配置项见
 [.env.example](.env.example)。
 
-### Worker 存储模式
+### Worker 存储
 
-Worker 有两种存储模式。`PROMPT_FERRY_WORKER__DATABASE_URL` 非空时使用现有的
-PostgreSQL 共享托管模式；为空时使用本地 SQLite 配置数据库的独立托管模式。
-已配置但不可用的 PostgreSQL 不会自动降级为 SQLite。
+Worker 使用同一套 Admin API 和配置模型，可选择 PostgreSQL 或 SQLite。
+`PROMPT_FERRY_WORKER__DATABASE_URL` 非空时使用 PostgreSQL，适合共享和持久化
+存储；为空时使用本地 SQLite 持久化配置。已配置但不可用的 PostgreSQL 不会自动
+降级为 SQLite。两种后端都支持用户、加密密钥、端点、路由、relay、设置、客户端
+密钥以及 MCP 配置、目录和运行时。SQLite 同样提供 Admin API 和认证，但不提供
+持久化请求记录、原始报文保留、审批、计费、重放历史或 MCP 配额/用量账本。
 
-独立模式下，relay 和 worker 可以部署在不同机器上，分别运行
+SQLite 适合单个 worker；需要多 worker 或完整高级持久化能力时使用 PostgreSQL。
+Valkey 是可选的，可用于共享协调和缓存加速；未配置时，SQLite 使用 SQLite 协调，
+PostgreSQL 按状态语义使用现有后端或有限的本地内存降级。
+
+relay 和 worker 可以部署在不同机器上，分别运行
 `prompt-ferry relay` 和 `prompt-ferry worker`。relay-worker 桥接协议不变：worker
 必须能访问 relay 的 worker bind，客户端必须能访问 relay 的 public bind。relay URL
 可通过可重复的 `--relay-url` 参数或 `relay_urls` 配置列表设置；使用环境变量覆盖时，
@@ -111,7 +118,7 @@ PostgreSQL 共享托管模式；为空时使用本地 SQLite 配置数据库的�
 `PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY`，其值为 base64 编码的 32 字节密钥，用于
 静态加密保存密钥；SQLite 不会以明文保存上游 API Key。
 
-默认数据库路径为：Linux 使用 `$XDG_DATA_HOME/prompt-ferry/worker.sqlite3`，或
+默认 SQLite 数据库路径为：Linux 使用 `$XDG_DATA_HOME/prompt-ferry/worker.sqlite3`，或
 `$HOME/.local/share/prompt-ferry/worker.sqlite3`；macOS 使用
 `$HOME/Library/Application Support/prompt-ferry/worker.sqlite3`；Windows 使用
 `%LOCALAPPDATA%\\prompt-ferry\\worker.sqlite3`。可通过
@@ -119,16 +126,9 @@ PostgreSQL 共享托管模式；为空时使用本地 SQLite 配置数据库的�
 `--standalone-database-path` 覆盖。备份或恢复 SQLite 文件时应先停止 worker，并同时
 保管 master key。
 
-独立模式的运行时状态有明确上限：请求和用量只保留在最多 256 条记录的内存摘要环中。
-不会持久化请求或原始报文、计费、审批、配额或重放历史；重启后内存环会清空。MCP
-不可用。脱敏规则会持久化，但按会话的脱敏状态会在重启后重置。Valkey 是可选的：独立
-模式不要求 Valkey；如果配置了可访问的 Valkey URL，仍可使用现有 Valkey 后端。Valkey
-缺失或不可用时，有限的本地 affinity、session 和 replay 内存状态仅限单进程，不会在多个
-worker 之间共享；持久化的请求和用量历史仍不可用。
-
-独立模式暂未提供配置变更 CLI 或 API。静态 worker 设置会引导空的 SQLite 数据库；直接
-修改 SQLite 只有在符合受支持的 schema/配置变更以及正常密钥加密约束时，才会由轮询重新
-加载。需要管理控制面时请使用 PostgreSQL 模式；独立模式不是完整的管理控制台。
+SQLite 请求和用量摘要最多保留 256 条内存记录，重启后会清空。脱敏规则会持久化，但
+按会话的脱敏状态会在重启后重置。直接修改 SQLite 只有在符合受支持的 schema/配置变更
+以及正常密钥加密约束时，才会由轮询重新加载。
 
 不同主机部署时可使用以下占位符示例，并确保 worker 主机能够访问桥接端口：
 
@@ -169,7 +169,7 @@ prompt-ferry worker
 ./prompt-ferry serve
 ```
 
-非托管模式启动前需要配置 relay 客户端令牌和上游 worker：
+本地 SQLite 存储模式启动前需要配置 relay 客户端令牌和上游 worker：
 
 ```dotenv
 PROMPT_FERRY_RELAY__CLIENT_TOKEN=<客户端令牌>

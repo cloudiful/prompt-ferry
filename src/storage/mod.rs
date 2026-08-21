@@ -51,7 +51,7 @@ impl StorageBackend {
                 backend: self,
                 durable_configuration: true,
                 encrypted_secrets: true,
-                users: false,
+                users: true,
                 client_keys: true,
                 endpoints: true,
                 routes: true,
@@ -60,7 +60,7 @@ impl StorageBackend {
                 request_usage: false,
                 raw_payload_retention: false,
                 approvals: false,
-                mcp: false,
+                mcp: true,
                 billing: false,
                 durable_replay: false,
                 shared_workers: false,
@@ -205,13 +205,17 @@ mod tests {
     use super::{CoordinatorBackend, StateBackend, StorageBackend, StorageContract};
 
     #[test]
-    fn sqlite_contract_is_durable_but_not_claimed_as_shared_or_user_complete() {
+    fn sqlite_contract_is_durable_with_explicit_advanced_limitations() {
         let contract = StorageContract::for_backend(StorageBackend::Sqlite, "");
 
         assert!(contract.capabilities.durable_configuration);
         assert!(contract.capabilities.encrypted_secrets);
+        assert!(contract.capabilities.users);
         assert!(contract.capabilities.client_keys);
-        assert!(!contract.capabilities.users);
+        assert!(contract.capabilities.mcp);
+        assert!(!contract.capabilities.request_usage);
+        assert!(!contract.capabilities.approvals);
+        assert!(!contract.capabilities.billing);
         assert!(!contract.capabilities.shared_workers);
         assert_eq!(contract.coordinator, CoordinatorBackend::Sqlite);
         assert_eq!(contract.sessions, StateBackend::Sqlite);

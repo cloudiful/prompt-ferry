@@ -4,7 +4,7 @@
 //! have to choose between PostgreSQL and SQLite. The PostgreSQL backend keeps
 //! the previously published SQL implementations; the SQLite backend reuses the
 //! existing `StandaloneConfigStore` so encrypted secrets and snapshot
-//! publication semantics stay consistent with the standalone runtime.
+//! publication semantics stay consistent with the SQLite runtime.
 //!
 //! Each domain lives in its own sibling module:
 //!   - `endpoints.rs` for provider endpoint CRUD and endpoint API keys
@@ -143,8 +143,8 @@ mod tests {
     #[test]
     fn sqlite_supported_listing_is_explicit() {
         // The router middleware uses `capability.sqlite_supported()` to decide
-        // whether a path is allowed. Phase 3 turns the following capabilities
-        // on; later phases expand the set.
+        // whether a path is allowed. SQLite supports the unified configuration
+        // and MCP configuration/catalog surface, but not advanced ledgers.
         assert!(Capability::SnapshotPublication.sqlite_supported());
         assert!(Capability::Endpoints.sqlite_supported());
         assert!(Capability::ModelRoutes.sqlite_supported());
@@ -155,6 +155,9 @@ mod tests {
         assert!(Capability::McpServers.sqlite_supported());
         assert!(Capability::McpCredentials.sqlite_supported());
         assert!(Capability::McpCatalog.sqlite_supported());
+        assert!(!Capability::RequestRecords.sqlite_supported());
+        assert!(!Capability::Approvals.sqlite_supported());
+        assert!(!Capability::Billing.sqlite_supported());
         assert!(!Capability::McpQuota.sqlite_supported());
         assert!(!Capability::ConversationEndpointOverride.sqlite_supported());
         assert!(!Capability::AvailableModels.sqlite_supported());

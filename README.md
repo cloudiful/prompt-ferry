@@ -23,8 +23,8 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
   requests are transparently forwarded only to endpoints configured as `AnthropicMessages`.
 - Per-request reasoning controls: Chat `reasoning_effort` and Responses `reasoning.effort`, including DeepSeek `max`; Chat compatibility maps unsupported `developer` roles to `system`.
 - Configurable redaction for forwarded content, logs, and usage details.
-- Managed users, client API keys, upstream endpoints, model routes, and multiple relays.
-- MCP aggregation for HTTP and stdio servers, request usage and replay, retention, approval, and billing.
+- Users, client API keys, upstream endpoints, model routes, and multiple relays.
+- MCP aggregation for HTTP and stdio servers, with SQLite support for configuration, catalog, and runtime execution; MCP quota and usage ledgers require PostgreSQL.
 - MCP credential quota: per-credential and shared quota-group budgets (requests or credits) with
   atomic reservation, usage-ratio balancing across API keys, cooldown on auth/throttle failures,
   and provider credit reconciliation (`creditsUsed`) for Firecrawl-style meters.
@@ -103,15 +103,25 @@ all three values must be greater than zero.
 Keep port `8789` private. See [.env.example](.env.example) for the available
 Compose settings.
 
-### Worker storage modes
+### Worker storage
 
-The worker has two storage modes. A non-empty
-`PROMPT_FERRY_WORKER__DATABASE_URL` selects the existing shared-managed mode
-with PostgreSQL. An empty value selects standalone-managed mode with a local
-SQLite configuration database; a configured but unavailable PostgreSQL
-database does not fall back to SQLite.
+The worker uses one Admin API and one configuration model with either backend.
+A non-empty `PROMPT_FERRY_WORKER__DATABASE_URL` selects PostgreSQL for shared,
+durable storage. An empty value selects SQLite for local durable configuration;
+a configured but unavailable PostgreSQL database does not fall back to SQLite.
+Both backends support users, encrypted secrets, endpoints, routes, relays,
+settings, client keys, and MCP configuration/catalog/runtime. SQLite also
+serves the Admin API, including authentication, but does not provide durable
+request records, raw-payload retention, approvals, billing, replay history, or
+MCP quota/usage ledgers.
 
-In standalone mode, relay and worker may run on separate machines with
+SQLite is intended for a single worker. PostgreSQL remains the choice for
+shared workers and the complete advanced persistence surface. Valkey is
+optional and can provide shared coordination/cache acceleration; without it,
+SQLite uses SQLite coordination and PostgreSQL uses its existing backend or
+bounded local fallbacks according to the state semantics.
+
+The worker and relay may run on separate machines with
 `prompt-ferry relay` and `prompt-ferry worker`. The relay-worker bridge
 protocol is unchanged: the worker needs network access to the relay's worker
 bind, and clients need access to the relay's public bind. Configure relay URLs
@@ -127,7 +137,7 @@ SQLite changes without restarting the worker. The required
 used to encrypt secrets at rest; SQLite never stores provider API keys in
 plaintext.
 
-The default database path is `$XDG_DATA_HOME/prompt-ferry/worker.sqlite3` or
+The default SQLite database path is `$XDG_DATA_HOME/prompt-ferry/worker.sqlite3` or
 `$HOME/.local/share/prompt-ferry/worker.sqlite3` on Linux,
 `$HOME/Library/Application Support/prompt-ferry/worker.sqlite3` on macOS, and
 `%LOCALAPPDATA%\\prompt-ferry\\worker.sqlite3` on Windows. Override it with
@@ -135,23 +145,11 @@ The default database path is `$XDG_DATA_HOME/prompt-ferry/worker.sqlite3` or
 `--standalone-database-path`. Back up or restore the SQLite file while the
 worker is stopped, and retain the master key with the backup.
 
-Standalone runtime state is intentionally limited: request and usage data is
-kept only in a bounded in-memory summary ring of 256 entries. There is no
-durable request or raw-payload, billing, approval, quota, or replay history;
-the ring is cleared on restart. MCP is unavailable. Redaction rules persist,
-but conversation-specific redaction sessions reset on restart. Valkey is
-optional: standalone mode does not require it, and a configured reachable
-Valkey URL can use the existing Valkey backend. When Valkey is absent or
-unavailable, bounded local affinity, session, and replay memory is single
-process only and is not shared across workers; durable request and usage
-history remains unavailable.
-
-No standalone configuration-mutation CLI or API is included yet. Static
-worker settings bootstrap an empty SQLite database. Direct SQLite edits are
-picked up by reload polling only for supported schema/configuration changes and
-must satisfy the normal secret-encryption constraints. Use PostgreSQL mode
-when an admin control plane is required; standalone does not provide a full
-admin console.
+SQLite request and usage summaries remain a bounded in-memory ring of 256
+entries and are cleared on restart. Redaction rules persist, while
+conversation-specific redaction sessions reset on restart. Direct SQLite edits
+are picked up by reload polling only for supported schema/configuration changes
+and must satisfy the normal secret-encryption constraints.
 
 For a separate-host deployment, use placeholders like these and keep the
 bridge port reachable from the worker host:
@@ -193,8 +191,8 @@ and run the relay and worker together:
 ./prompt-ferry serve
 ```
 
-For non-managed mode, configure the relay client token and upstream worker
-settings before starting:
+For a local SQLite storage deployment, configure the relay client token and
+upstream worker settings before starting:
 
 ```dotenv
 PROMPT_FERRY_RELAY__CLIENT_TOKEN=<client-token>

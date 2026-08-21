@@ -36,38 +36,38 @@ pub(crate) fn diagnostic(feature: StandaloneFeature) -> StandaloneFeatureDiagnos
         StandaloneFeature::DbBackedUsage => StandaloneFeatureDiagnostic {
             feature,
             name: "db_backed_usage",
-            code: "standalone_usage_unavailable",
-            message: "database-backed usage persistence is unavailable in standalone mode; recent summaries are in memory only",
+            code: "sqlite_request_records_unavailable",
+            message: "durable request and usage records are unavailable with SQLite; recent summaries are kept in bounded memory only",
         },
         StandaloneFeature::RawPayloadRetention => StandaloneFeatureDiagnostic {
             feature,
             name: "raw_payload_retention",
-            code: "standalone_raw_payload_retention_unavailable",
-            message: "raw request and response payload retention is unavailable in standalone mode",
+            code: "sqlite_raw_payload_retention_unavailable",
+            message: "raw request and response payload retention is unavailable with SQLite",
         },
         StandaloneFeature::Approvals => StandaloneFeatureDiagnostic {
             feature,
             name: "approvals",
-            code: "standalone_approvals_unavailable",
-            message: "approval workflows are unavailable in standalone mode",
+            code: "sqlite_approvals_unavailable",
+            message: "approval workflows are unavailable with SQLite",
         },
         StandaloneFeature::DatabaseQuotas => StandaloneFeatureDiagnostic {
             feature,
             name: "database_quotas",
-            code: "standalone_database_quotas_unavailable",
-            message: "database-backed quotas are unavailable in standalone mode",
+            code: "sqlite_database_quotas_unavailable",
+            message: "database-backed quotas are unavailable with SQLite",
         },
         StandaloneFeature::Mcp => StandaloneFeatureDiagnostic {
             feature,
             name: "mcp",
-            code: "standalone_mcp_unavailable",
-            message: "MCP request execution is unavailable in standalone runtime; configure MCP servers through the Admin API",
+            code: "sqlite_mcp_quota_unavailable",
+            message: "MCP quota and usage ledgers are unavailable with SQLite",
         },
         StandaloneFeature::Billing => StandaloneFeatureDiagnostic {
             feature,
             name: "billing",
-            code: "standalone_billing_unavailable",
-            message: "billing is unavailable in standalone mode",
+            code: "sqlite_billing_unavailable",
+            message: "billing persistence is unavailable with SQLite",
         },
         StandaloneFeature::DurableReplay => StandaloneFeatureDiagnostic {
             feature,
@@ -95,6 +95,11 @@ mod tests {
             diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.code == "replay_unavailable")
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.code.starts_with("standalone_"))
         );
         assert!(
             diagnostics

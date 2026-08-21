@@ -13,6 +13,9 @@ pub enum Capability {
     Relays,
     ClientKeys,
     Settings,
+    RequestRecords,
+    Approvals,
+    Billing,
     EndpointSetting,
     McpServers,
     McpCredentials,
@@ -32,6 +35,9 @@ impl Capability {
             Self::Relays => "sqlite_relays_unavailable",
             Self::ClientKeys => "sqlite_client_keys_unavailable",
             Self::Settings => "sqlite_settings_unavailable",
+            Self::RequestRecords => "sqlite_request_records_unavailable",
+            Self::Approvals => "sqlite_approvals_unavailable",
+            Self::Billing => "sqlite_billing_unavailable",
             Self::EndpointSetting => "sqlite_endpoint_setting_unavailable",
             Self::McpServers => "sqlite_mcp_servers_unavailable",
             Self::McpCredentials => "sqlite_mcp_credentials_unavailable",
@@ -47,29 +53,34 @@ impl Capability {
 
     pub fn description(self) -> &'static str {
         match self {
-            Self::Endpoints => "endpoint CRUD is not yet available on SQLite",
-            Self::ModelRoutes => "model route CRUD is not yet available on SQLite",
+            Self::Endpoints => "endpoint CRUD is available on SQLite",
+            Self::ModelRoutes => "model route CRUD is available on SQLite",
             Self::ModelRouteTest => "model route resolution test is not yet available on SQLite",
-            Self::Relays => "managed relay CRUD is not yet available on SQLite",
-            Self::ClientKeys => "client key CRUD is not yet available on SQLite",
-            Self::Settings => "settings CRUD is not yet available on SQLite",
-            Self::EndpointSetting => "user endpoint setting is not yet available on SQLite",
-            Self::McpServers => "MCP server configuration is not yet available on SQLite",
-            Self::McpCredentials => "MCP credential configuration is not yet available on SQLite",
-            Self::McpCatalog => "MCP catalog probing is not available on SQLite",
+            Self::Relays => "relay CRUD is available on SQLite",
+            Self::ClientKeys => "client key CRUD is available on SQLite",
+            Self::Settings => "settings CRUD is available on SQLite",
+            Self::RequestRecords => {
+                "durable request records and usage history are not available on SQLite"
+            }
+            Self::Approvals => "approval workflows are not available on SQLite",
+            Self::Billing => "billing persistence is not available on SQLite",
+            Self::EndpointSetting => "user endpoint setting is available on SQLite",
+            Self::McpServers => "MCP server configuration is available on SQLite",
+            Self::McpCredentials => "MCP credential configuration is available on SQLite",
+            Self::McpCatalog => "MCP catalog probing is available on SQLite",
             Self::McpQuota => "MCP quota and usage ledgers are not available on SQLite",
             Self::ConversationEndpointOverride => {
                 "conversation endpoint overrides are not yet available on SQLite"
             }
             Self::AvailableModels => "available model discovery is not yet available on SQLite",
-            Self::SnapshotPublication => "snapshot publication is not yet available on SQLite",
+            Self::SnapshotPublication => "snapshot publication is available on SQLite",
         }
     }
 
     pub fn sqlite_supported(self) -> bool {
-        // Phase 3: the core configuration domains are implemented against the
-        // unified repository. The remaining capabilities are deferred to a
-        // later phase or to PostgreSQL-only runtime features.
+        // Core configuration and supported MCP domains use the unified
+        // repository. Durable usage, approvals, billing, and quota ledgers
+        // remain PostgreSQL-only until their SQLite retention semantics exist.
         matches!(
             self,
             Self::Endpoints
@@ -131,6 +142,15 @@ impl Capability {
         }
         if path.starts_with("/admin/conversations/") && path.ends_with("/endpoint-override") {
             return Some(Self::ConversationEndpointOverride);
+        }
+        if path == "/admin/request-records" || path.starts_with("/admin/request-records/") {
+            return Some(Self::RequestRecords);
+        }
+        if path == "/admin/approvals" || path.starts_with("/admin/approvals/") {
+            return Some(Self::Approvals);
+        }
+        if path == "/admin/billing" || path.starts_with("/admin/billing/") {
+            return Some(Self::Billing);
         }
         if path == "/admin/mcp-servers" {
             return Some(Self::McpServers);
@@ -239,6 +259,18 @@ mod tests {
             Capability::for_path("/admin/mcp-quota-groups"),
             Some(Capability::McpQuota)
         );
+        assert_eq!(
+            Capability::for_path("/admin/request-records/summary"),
+            Some(Capability::RequestRecords)
+        );
+        assert_eq!(
+            Capability::for_path("/admin/approvals/abc/approve"),
+            Some(Capability::Approvals)
+        );
+        assert_eq!(
+            Capability::for_path("/admin/billing/summary"),
+            Some(Capability::Billing)
+        );
         assert_eq!(Capability::for_path("/auth/me"), None);
     }
 
@@ -251,6 +283,13 @@ mod tests {
         assert!(Capability::ClientKeys.sqlite_supported());
         assert!(Capability::Settings.sqlite_supported());
         assert!(Capability::EndpointSetting.sqlite_supported());
+        assert!(Capability::McpServers.sqlite_supported());
+        assert!(Capability::McpCredentials.sqlite_supported());
+        assert!(Capability::McpCatalog.sqlite_supported());
+        assert!(!Capability::RequestRecords.sqlite_supported());
+        assert!(!Capability::Approvals.sqlite_supported());
+        assert!(!Capability::Billing.sqlite_supported());
+        assert!(!Capability::McpQuota.sqlite_supported());
         assert!(!Capability::ConversationEndpointOverride.sqlite_supported());
         assert!(!Capability::AvailableModels.sqlite_supported());
         assert!(!Capability::ModelRouteTest.sqlite_supported());

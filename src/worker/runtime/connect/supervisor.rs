@@ -215,7 +215,7 @@ pub(super) async fn spawn_standalone_relay_supervisor(
         )
         .await
         {
-            tracing::warn!(error = %err, "initial standalone relay reconcile failed");
+            tracing::warn!(error = %err, "initial SQLite relay reconcile failed");
         }
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -232,7 +232,7 @@ pub(super) async fn spawn_standalone_relay_supervisor(
                                 &runtime_state,
                                 &mut tasks,
                             ).await {
-                                tracing::warn!(error = %err, "standalone relay reconcile failed after configuration reload");
+                                 tracing::warn!(error = %err, "SQLite relay reconcile failed after configuration reload");
                             }
                             let _ = crate::worker::runtime::standalone::publish_snapshot(&standalone_state).await;
                         }
@@ -244,10 +244,10 @@ pub(super) async fn spawn_standalone_relay_supervisor(
                                 &runtime_state,
                                 &mut tasks,
                             ).await {
-                                tracing::warn!(error = %err, "standalone relay reconcile failed");
+                                tracing::warn!(error = %err, "SQLite relay reconcile failed");
                             }
                         }
-                        Err(err) => tracing::warn!(error = %err, "standalone configuration reload failed"),
+                        Err(err) => tracing::warn!(error = %err, "SQLite configuration reload failed"),
                     }
                 }
             }
@@ -355,5 +355,5 @@ pub(super) fn require_managed_admin_state(
 ) -> anyhow::Result<worker_admin::AdminState> {
     admin_state
         .cloned()
-        .ok_or_else(|| anyhow!("managed mode requires admin state"))
+        .ok_or_else(|| anyhow!("PostgreSQL storage mode requires admin state"))
 }

@@ -286,6 +286,12 @@ mod admin_routing_tests {
                 "/admin/conversations/abc/endpoint-override",
                 Some(Capability::ConversationEndpointOverride),
             ),
+            (
+                "/admin/request-records/summary",
+                Some(Capability::RequestRecords),
+            ),
+            ("/admin/approvals", Some(Capability::Approvals)),
+            ("/admin/billing/summary", Some(Capability::Billing)),
             ("/me/models", Some(Capability::AvailableModels)),
             ("/auth/me", None),
         ] {
@@ -489,11 +495,10 @@ mod tests {
             .unwrap();
         assert_eq!(users_response.status(), StatusCode::OK);
 
-        // Conversation endpoint override is the canonical "not yet
-        // supported" path for SQLite; the endpoints/model-routes/relays/
-        // client-keys/settings paths all reach the handler in Phase 3 and
-        // therefore yield unauthorized when no cookie is attached.
+        // Unsupported SQLite capabilities must be rejected before their
+        // PostgreSQL-specific handlers touch the lazy compatibility pool.
         let unsupported = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/admin/conversations/abc/endpoint-override")
@@ -512,6 +517,43 @@ mod tests {
             "expected precise per-capability error, got: {}",
             std::str::from_utf8(&body).unwrap_or("<binary>")
         );
+
+        for (path, code) in [
+            (
+                "/api/v1/admin/request-records/summary",
+                "sqlite_request_records_unavailable",
+            ),
+            ("/api/v1/admin/approvals", "sqlite_approvals_unavailable"),
+            (
+                "/api/v1/admin/billing/summary",
+                "sqlite_billing_unavailable",
+            ),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header(header::COOKIE, &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::NOT_IMPLEMENTED,
+                "path {path}"
+            );
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert!(
+                std::str::from_utf8(&body)
+                    .expect("JSON body")
+                    .contains(code),
+                "unexpected response for {path}: {}",
+                std::str::from_utf8(&body).unwrap_or("<binary>")
+            );
+        }
 
         sqlite_pool.close().await;
         let _ = fs::remove_dir_all(frontend_dir);

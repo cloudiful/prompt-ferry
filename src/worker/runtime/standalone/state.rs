@@ -263,7 +263,7 @@ mod tests {
         assert_eq!(state.feature_diagnostics().len(), 7);
         assert_eq!(
             state.feature_diagnostic(StandaloneFeature::Mcp).code,
-            "standalone_mcp_unavailable"
+            "sqlite_mcp_quota_unavailable"
         );
         let _ = std::fs::remove_file(path);
     }

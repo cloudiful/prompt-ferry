@@ -213,10 +213,10 @@ async fn sqlite_mcp_request_uses_unified_server_configuration() {
         Some("local")
     );
     assert!(
-        !standalone
+        standalone
             .recent_usage()
             .iter()
-            .any(|summary| summary.error_code.as_deref() == Some("standalone_mcp_unavailable"))
+            .all(|summary| summary.error_code.is_none())
     );
     assert_eq!(request_id, execution.request_ctx.request_id);
 
@@ -231,10 +231,7 @@ async fn sqlite_mcp_request_uses_unified_server_configuration() {
         .next()
         .expect("aggregate request summary");
     assert_eq!(summary.state, "completed", "{summary:?}");
-    assert_ne!(
-        summary.error_code.as_deref(),
-        Some("standalone_mcp_unavailable")
-    );
+    assert!(summary.error_code.is_none(), "{summary:?}");
 
     drop(execution);
     let _ = std::fs::remove_file(path);
