@@ -1,10 +1,21 @@
+use std::{
+    path::PathBuf,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+
 use super::*;
 use crate::{
     protocol::BridgeMessage,
+    relay_secrets::RelaySecretManager,
+    standalone_config::{StandaloneConfig, StandaloneConfigStore},
     worker::runtime::{
         WorkerRuntimeState,
         context::{BridgeSender, ResponseLimits, RuntimeServices},
         request_assembly::BufferedMcpRequest,
+        standalone::StandaloneRuntimeState,
     },
 };
 
@@ -40,6 +51,14 @@ fn test_services(out_tx: BridgeSender) -> RuntimeServices {
         WorkerRuntimeState::default(),
         ResponseLimits::default(),
     )
+}
+
+fn database_path() -> PathBuf {
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    std::env::temp_dir().join(format!("prompt-ferry-mcp-preparation-{suffix}.sqlite"))
 }
 
 #[test]
@@ -101,4 +120,48 @@ fn mcp_handler_completes_on_bounded_worker_stack() {
         }
         assert!(saw_start, "handler must emit an MCP response start");
     });
+}
+
+#[tokio::test]
+async fn standalone_mcp_rejection_records_one_terminal_failure_summary() {
+    let _redaction_guard = crate::redact_test_support::lock();
+    let path = database_path();
+    let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+    let standalone = StandaloneRuntimeState::new(
+        store,
+        RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager"),
+        StandaloneConfig::default(),
+    );
+    let (out_tx, _control_rx, _data_rx) = BridgeSender::channel();
+    let services = RuntimeServices::new(
+        None,
+        out_tx,
+        reqwest::Client::new(),
+        WorkerRuntimeState::default(),
+        ResponseLimits::default(),
+    )
+    .with_standalone_state(standalone.clone());
+    let request = minimal_request();
+    let request_id = uuid::Uuid::parse_str(&request.request_id).expect("request ID");
+
+    assert!(
+        preparation::build_request_context(request, &services)
+            .await
+            .is_none()
+    );
+
+    let summaries = standalone.recent_usage();
+    assert_eq!(summaries.len(), 1);
+    let summary = &summaries[0];
+    assert_eq!(summary.request_id, request_id);
+    assert_eq!(summary.state, "failed");
+    assert_eq!(summary.path, "/mcp");
+    assert_eq!(
+        summary.error_code.as_deref(),
+        Some("standalone_mcp_unavailable")
+    );
+
+    drop(services);
+    drop(standalone);
+    let _ = std::fs::remove_file(path);
 }

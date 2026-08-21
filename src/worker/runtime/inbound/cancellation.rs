@@ -4,7 +4,12 @@ use tokio::sync::Mutex;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::{db, db::RequestAbortReason, worker_admin::AdminState};
+use crate::{
+    db::{self, RequestAbortReason, RequestRecordCategory, RequestRecordState, UsageEventKind},
+    worker::runtime::standalone::StandaloneRuntimeState,
+    worker_admin::AdminState,
+    worker_usage::{UsageLog, UsageRequestMetadata},
+};
 
 use super::super::request_assembly::{PendingIncomingRequest, RequestCancellation};
 
@@ -12,6 +17,8 @@ pub(super) async fn cancel_request(
     pending_requests: &Arc<Mutex<HashMap<String, PendingIncomingRequest>>>,
     cancellations: &Arc<Mutex<HashMap<String, RequestCancellation>>>,
     admin_state: Option<&AdminState>,
+    standalone_state: Option<&StandaloneRuntimeState>,
+    category: RequestRecordCategory,
     request_id: &str,
     reason: &str,
     response_started: bool,
@@ -54,6 +61,35 @@ pub(super) async fn cancel_request(
                 );
             }
         }
+    }
+
+    if let Some(state) = standalone_state
+        && let Ok(request_id) = Uuid::parse_str(request_id)
+    {
+        let log = match category {
+            RequestRecordCategory::Ai => UsageLog::ai_request(
+                request_id,
+                UsageRequestMetadata {
+                    path: "/v1/unknown".to_string(),
+                    ..UsageRequestMetadata::default()
+                },
+                None,
+            ),
+            RequestRecordCategory::Mcp => UsageLog::mcp_request(
+                request_id,
+                UsageRequestMetadata {
+                    path: "/mcp".to_string(),
+                    ..UsageRequestMetadata::default()
+                },
+                None,
+                None,
+                None,
+            ),
+        }
+        .with_state(UsageEventKind::Request, RequestRecordState::Aborted)
+        .with_status(None, Some(false), None, None)
+        .with_error(Some(abort_reason.as_str().to_string()), None, None);
+        state.record_usage(log);
     }
 
     if let Some(pending) = pending_requests.lock().await.remove(request_id) {

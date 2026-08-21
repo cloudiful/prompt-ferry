@@ -12,6 +12,12 @@ use crate::{
     db::ManagedRelayRuntimeStatus,
     relay_secrets::RelaySecretManager,
     standalone_config::{StandaloneConfig, StandaloneConfigStore},
+    worker_usage::{StandaloneUsageSummary, UsageLog},
+};
+
+use super::{
+    DEFAULT_USAGE_CAPACITY, StandaloneFeature, StandaloneFeatureDiagnostic, StandaloneUsageBuffer,
+    standalone_feature_diagnostic, standalone_feature_diagnostics,
 };
 
 #[derive(Clone)]
@@ -25,6 +31,7 @@ pub(crate) struct StandaloneRuntimeState {
         Arc<RwLock<std::collections::HashMap<Uuid, ManagedRelayRuntimeStatus>>>,
     pub(super) snapshot_version: Arc<AtomicI64>,
     redaction_enabled: Arc<AtomicBool>,
+    recent_usage: Arc<StandaloneUsageBuffer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +56,7 @@ impl StandaloneRuntimeState {
             relay_statuses: Arc::new(RwLock::new(std::collections::HashMap::new())),
             snapshot_version: Arc::new(AtomicI64::new(0)),
             redaction_enabled,
+            recent_usage: Arc::new(StandaloneUsageBuffer::new(DEFAULT_USAGE_CAPACITY)),
         }
     }
 
@@ -79,6 +87,28 @@ impl StandaloneRuntimeState {
 
     pub(crate) fn redaction_enabled(&self) -> bool {
         self.redaction_enabled.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn record_usage(&self, log: UsageLog) {
+        self.recent_usage.record(log);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn recent_usage(&self) -> Vec<StandaloneUsageSummary> {
+        self.recent_usage.snapshot()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn feature_diagnostics(&self) -> [StandaloneFeatureDiagnostic; 7] {
+        standalone_feature_diagnostics()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn feature_diagnostic(
+        &self,
+        feature: StandaloneFeature,
+    ) -> StandaloneFeatureDiagnostic {
+        standalone_feature_diagnostic(feature)
     }
 
     pub(crate) async fn client_key_identity(&self, key_hash: &str) -> Option<ClientKeyIdentity> {
@@ -204,6 +234,26 @@ mod tests {
             .expect("identity");
         assert_eq!(identity.user_id, 42);
         assert_eq!(identity.label, "test key");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn new_state_starts_with_empty_disposable_usage() {
+        let _redaction_guard = crate::redact_test_support::lock();
+        let path = database_path();
+        let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+        let state = StandaloneRuntimeState::new(
+            store,
+            RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager"),
+            StandaloneConfig::default(),
+        );
+
+        assert!(state.recent_usage().is_empty());
+        assert_eq!(state.feature_diagnostics().len(), 7);
+        assert_eq!(
+            state.feature_diagnostic(StandaloneFeature::Mcp).code,
+            "standalone_mcp_unavailable"
+        );
         let _ = std::fs::remove_file(path);
     }
 

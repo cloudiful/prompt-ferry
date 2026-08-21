@@ -7,6 +7,12 @@ use crate::{
     usage::TokenUsage,
 };
 
+use super::inference::infer_failure_family;
+
+const STANDALONE_SUMMARY_TEXT_LIMIT: usize = 256;
+const STANDALONE_SUMMARY_LIST_LIMIT: usize = 16;
+const STANDALONE_SUMMARY_LIST_TEXT_LIMIT: usize = 64;
+
 #[derive(Debug, Clone, Default)]
 pub struct UsageRedactionSummary {
     pub applied: bool,
@@ -179,6 +185,48 @@ pub struct UsageLog {
 }
 
 impl UsageLog {
+    pub(crate) fn into_standalone_summary(self) -> StandaloneUsageSummary {
+        let failure_family = self
+            .failure_family
+            .or_else(|| infer_failure_family(&self))
+            .map(|family| family.as_str().to_string());
+        StandaloneUsageSummary {
+            request_id: self.request_id,
+            event_kind: self.event_kind.as_str().to_string(),
+            category: self.request_category.as_str().to_string(),
+            state: self.request_state.as_str().to_string(),
+            path: bounded_text(Some(self.path), STANDALONE_SUMMARY_TEXT_LIMIT).unwrap_or_default(),
+            recorded_at: chrono::Utc::now(),
+            status: self.status,
+            ok: self.ok,
+            duration_ms: self.duration_ms,
+            ttft_ms: self.ttft_ms,
+            model: bounded_text(self.model, STANDALONE_SUMMARY_TEXT_LIMIT),
+            requested_model: bounded_text(self.requested_model, STANDALONE_SUMMARY_TEXT_LIMIT),
+            upstream_model: bounded_text(self.upstream_model, STANDALONE_SUMMARY_TEXT_LIMIT),
+            endpoint_id: self.endpoint_id,
+            endpoint_key_id: self.endpoint_key_id,
+            model_route_rule_id: self.model_route_rule_id,
+            mcp_server_id: self.mcp_server_id,
+            input_tokens: self.usage.input_tokens,
+            output_tokens: self.usage.output_tokens,
+            total_tokens: self.usage.total_tokens,
+            cached_tokens: self.usage.cached_tokens,
+            cache_read_tokens: self.usage.cache_read_tokens,
+            cache_write_tokens: self.usage.cache_write_tokens,
+            error_code: bounded_text(self.error_code, STANDALONE_SUMMARY_TEXT_LIMIT),
+            failure_family,
+            redaction: StandaloneUsageRedactionSummary {
+                applied: self.redaction.applied,
+                findings_count: self.redaction.findings_count,
+                replacements_count: self.redaction.replacements_count,
+                types: bounded_list(self.redaction.types),
+                fields: bounded_list(self.redaction.fields),
+            },
+            route_selection_reason: self.route_selection_reason.as_str().to_string(),
+        }
+    }
+
     pub fn ai_request(
         request_id: uuid::Uuid,
         metadata: UsageRequestMetadata,
@@ -443,4 +491,61 @@ impl UsageLog {
         self.last_heartbeat_at = last_heartbeat_at;
         self
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StandaloneUsageRedactionSummary {
+    pub(crate) applied: bool,
+    pub(crate) findings_count: i32,
+    pub(crate) replacements_count: i32,
+    pub(crate) types: Vec<String>,
+    pub(crate) fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StandaloneUsageSummary {
+    pub(crate) request_id: uuid::Uuid,
+    pub(crate) event_kind: String,
+    pub(crate) category: String,
+    pub(crate) state: String,
+    pub(crate) path: String,
+    pub(crate) recorded_at: chrono::DateTime<chrono::Utc>,
+    pub(crate) status: Option<i32>,
+    pub(crate) ok: Option<bool>,
+    pub(crate) duration_ms: Option<i64>,
+    pub(crate) ttft_ms: Option<i64>,
+    pub(crate) model: Option<String>,
+    pub(crate) requested_model: Option<String>,
+    pub(crate) upstream_model: Option<String>,
+    pub(crate) endpoint_id: Option<uuid::Uuid>,
+    pub(crate) endpoint_key_id: Option<uuid::Uuid>,
+    pub(crate) model_route_rule_id: Option<uuid::Uuid>,
+    pub(crate) mcp_server_id: Option<uuid::Uuid>,
+    pub(crate) input_tokens: Option<i64>,
+    pub(crate) output_tokens: Option<i64>,
+    pub(crate) total_tokens: Option<i64>,
+    pub(crate) cached_tokens: Option<i64>,
+    pub(crate) cache_read_tokens: Option<i64>,
+    pub(crate) cache_write_tokens: Option<i64>,
+    pub(crate) error_code: Option<String>,
+    pub(crate) failure_family: Option<String>,
+    pub(crate) redaction: StandaloneUsageRedactionSummary,
+    pub(crate) route_selection_reason: String,
+}
+
+fn bounded_text(value: Option<String>, limit: usize) -> Option<String> {
+    value.map(|value| value.chars().take(limit).collect())
+}
+
+fn bounded_list(values: Vec<String>) -> Vec<String> {
+    values
+        .into_iter()
+        .take(STANDALONE_SUMMARY_LIST_LIMIT)
+        .map(|value| {
+            value
+                .chars()
+                .take(STANDALONE_SUMMARY_LIST_TEXT_LIMIT)
+                .collect()
+        })
+        .collect()
 }

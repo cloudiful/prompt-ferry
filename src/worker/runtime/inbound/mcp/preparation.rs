@@ -10,14 +10,13 @@ use crate::worker::runtime::lifecycle::RequestLeaseGuard;
 use crate::worker::runtime::{
     RequestExecutionContext, check_named_request_budget, mcp_support::McpResponseContext,
     record_mcp_request_event, redaction_enabled, request_assembly::BufferedMcpRequest,
-    resolve_mcp_conversation_log,
+    resolve_mcp_conversation_log, standalone::StandaloneFeature,
 };
 use crate::{
     db, mcp,
     protocol::{BridgeMessage, McpResponseStart},
     redact_upstream::{UpstreamRedactionSession, decrypt_upstream_session},
     worker_admin_types::{RequestContentLoggingMode, RequestContentLoggingResponse},
-    worker_usage::record_usage_event,
 };
 
 /// Owned state shared across the MCP request stages: request context and
@@ -128,16 +127,55 @@ pub(super) async fn build_request_context(
     let request_lease = services
         .runtime_state
         .spawn_request_lease_guard(services.admin_state(), request_ctx.request_id);
-    record_usage_event(
-        services.admin_state(),
-        request_ctx.mcp_usage_log(
+    if services.standalone_state().is_some() {
+        let diagnostic = crate::worker::runtime::standalone::standalone_feature_diagnostic(
+            StandaloneFeature::Mcp,
+        );
+        services
+            .record_usage_event(
+                request_ctx
+                    .mcp_usage_log(
+                        &request,
+                        &metadata,
+                        &request_content_logging,
+                        redact_content,
+                    )
+                    .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
+                    .with_status(
+                        Some(StatusCode::SERVICE_UNAVAILABLE.as_u16() as i32),
+                        Some(false),
+                        Some(request_ctx.elapsed_ms()),
+                        None,
+                    )
+                    .with_error(Some(diagnostic.code.to_string()), None, None),
+            )
+            .await;
+        let body = serde_json::json!({
+            "error": {
+                "code": diagnostic.code,
+                "message": diagnostic.message,
+            }
+        })
+        .to_string();
+        send_mcp_response(
+            services,
+            &request.request_id,
+            StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+            Some("application/json".to_string()),
+            Vec::new(),
+            body.into_bytes(),
+        )
+        .await;
+        return None;
+    }
+    services
+        .record_usage_event(request_ctx.mcp_usage_log(
             &request,
             &metadata,
             &request_content_logging,
             redact_content,
-        ),
-    )
-    .await;
+        ))
+        .await;
     if services.admin_state().is_none() {
         let _ = services
             .out_tx

@@ -17,7 +17,6 @@ use crate::{
     openai_compat::normalize_response_error,
     upstream_adapter::ResponseAdapter,
     upstream_error::is_quota_exhaustion,
-    worker_usage::record_usage_event,
 };
 use http::header;
 use non_stream::{
@@ -122,28 +121,28 @@ pub(super) async fn forward_upstream_response(
             upstream_response_headers,
         )
         .await?;
-        record_usage_event(
-            services.admin_state(),
-            ai_route_usage_log(request_ctx, request, route_ctx)
-                .with_upstream_redaction(
-                    upstream_restore_session.is_some(),
-                    upstream_redacted_request_json.clone(),
-                    upstream_restore_session.clone(),
-                )
-                .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
-                .with_status(
-                    Some(client_status.as_u16() as i32),
-                    Some(false),
-                    Some(request_ctx.elapsed_ms()),
-                    None,
-                )
-                .with_error(
-                    Some("http_error".to_string()),
-                    Some(http_error_message(status.as_u16(), error_body.as_deref())),
-                    error_body.clone(),
-                ),
-        )
-        .await;
+        services
+            .record_usage_event(
+                ai_route_usage_log(request_ctx, request, route_ctx)
+                    .with_upstream_redaction(
+                        upstream_restore_session.is_some(),
+                        upstream_redacted_request_json.clone(),
+                        upstream_restore_session.clone(),
+                    )
+                    .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
+                    .with_status(
+                        Some(client_status.as_u16() as i32),
+                        Some(false),
+                        Some(request_ctx.elapsed_ms()),
+                        None,
+                    )
+                    .with_error(
+                        Some("http_error".to_string()),
+                        Some(http_error_message(status.as_u16(), error_body.as_deref())),
+                        error_body.clone(),
+                    ),
+            )
+            .await;
         warn!(
             endpoint_id = %route.route_id,
             base_url = %route.base_url,

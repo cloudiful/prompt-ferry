@@ -18,7 +18,6 @@ use crate::{
     upstream_adapter::ResponseAdapter,
     usage::UsageCapture,
     worker::stream_delta_batcher::StreamDeltaBatcher,
-    worker_usage::record_usage_event,
 };
 use anyhow::anyhow;
 use futures::StreamExt;
@@ -396,8 +395,7 @@ pub(super) async fn forward_streaming_response(
                                 redact_content,
                                 request_ctx.user_id,
                             );
-                        record_usage_event(
-                            services.admin_state(),
+                        services.record_usage_event(
                             ai_route_usage_log(request_ctx, request, route_ctx)
                                 .with_upstream_redaction(
                                     upstream_restore_session.is_some(),
@@ -791,42 +789,42 @@ pub(super) async fn forward_streaming_response(
         redact_content,
         request_ctx.user_id,
     );
-    let usage_event_id = record_usage_event(
-        services.admin_state(),
-        ai_route_usage_log(request_ctx, request, route_ctx)
-            .with_upstream_redaction(
-                upstream_restore_session.is_some(),
-                upstream_redacted_request_json,
-                upstream_restore_session,
-            )
-            .with_state(
-                db::UsageEventKind::Request,
-                db::RequestRecordState::Completed,
-            )
-            .with_model(capture.model.clone())
-            .with_status(
-                Some(status.as_u16() as i32),
-                Some(true),
-                Some(request_ctx.elapsed_ms()),
-                ttft_ms,
-            )
-            .with_usage(capture.usage.clone())
-            .with_response(
-                capture.response_id.clone(),
-                capture.provider_conversation_key.clone().or_else(|| {
-                    request_ctx
-                        .request_prompt_log
-                        .request_conversation_key
-                        .clone()
-                }),
-                response_prompt.clone(),
-                response_raw_body,
-            )
-            .with_response_capture_truncated(
-                capture.response_text_truncated || raw_response_capture_truncated,
-            ),
-    )
-    .await;
+    let usage_event_id = services
+        .record_usage_event(
+            ai_route_usage_log(request_ctx, request, route_ctx)
+                .with_upstream_redaction(
+                    upstream_restore_session.is_some(),
+                    upstream_redacted_request_json,
+                    upstream_restore_session,
+                )
+                .with_state(
+                    db::UsageEventKind::Request,
+                    db::RequestRecordState::Completed,
+                )
+                .with_model(capture.model.clone())
+                .with_status(
+                    Some(status.as_u16() as i32),
+                    Some(true),
+                    Some(request_ctx.elapsed_ms()),
+                    ttft_ms,
+                )
+                .with_usage(capture.usage.clone())
+                .with_response(
+                    capture.response_id.clone(),
+                    capture.provider_conversation_key.clone().or_else(|| {
+                        request_ctx
+                            .request_prompt_log
+                            .request_conversation_key
+                            .clone()
+                    }),
+                    response_prompt.clone(),
+                    response_raw_body,
+                )
+                .with_response_capture_truncated(
+                    capture.response_text_truncated || raw_response_capture_truncated,
+                ),
+        )
+        .await;
     persist_assistant_artifact(
         services.admin_state(),
         usage_event_id,
@@ -1010,42 +1008,42 @@ async fn forward_buffered_non_sse_response(
         redact_content,
         request_ctx.user_id,
     );
-    let usage_event_id = record_usage_event(
-        services.admin_state(),
-        ai_route_usage_log(request_ctx, request, route_ctx)
-            .with_upstream_redaction(
-                true,
-                upstream_redacted_request_json,
-                Some(upstream_restore_session),
-            )
-            .with_state(
-                db::UsageEventKind::Request,
-                db::RequestRecordState::Completed,
-            )
-            .with_model(capture.model.clone())
-            .with_status(
-                Some(status.as_u16() as i32),
-                Some(true),
-                Some(request_ctx.elapsed_ms()),
-                None,
-            )
-            .with_usage(capture.usage.clone())
-            .with_response(
-                capture.response_id.clone(),
-                capture.provider_conversation_key.clone().or_else(|| {
-                    request_ctx
-                        .request_prompt_log
-                        .request_conversation_key
-                        .clone()
-                }),
-                response_prompt.clone(),
-                response_raw_body,
-            )
-            .with_response_capture_truncated(
-                capture.response_text_truncated || raw_response_capture_truncated,
-            ),
-    )
-    .await;
+    let usage_event_id = services
+        .record_usage_event(
+            ai_route_usage_log(request_ctx, request, route_ctx)
+                .with_upstream_redaction(
+                    true,
+                    upstream_redacted_request_json,
+                    Some(upstream_restore_session),
+                )
+                .with_state(
+                    db::UsageEventKind::Request,
+                    db::RequestRecordState::Completed,
+                )
+                .with_model(capture.model.clone())
+                .with_status(
+                    Some(status.as_u16() as i32),
+                    Some(true),
+                    Some(request_ctx.elapsed_ms()),
+                    None,
+                )
+                .with_usage(capture.usage.clone())
+                .with_response(
+                    capture.response_id.clone(),
+                    capture.provider_conversation_key.clone().or_else(|| {
+                        request_ctx
+                            .request_prompt_log
+                            .request_conversation_key
+                            .clone()
+                    }),
+                    response_prompt.clone(),
+                    response_raw_body,
+                )
+                .with_response_capture_truncated(
+                    capture.response_text_truncated || raw_response_capture_truncated,
+                ),
+        )
+        .await;
     persist_assistant_artifact(
         services.admin_state(),
         usage_event_id,

@@ -1,6 +1,9 @@
 use crate::db::{self, RequestFailureFamily};
 
-use super::{UsageLog, UsageRequestMetadata, inference::infer_failure_family};
+use super::{
+    UsageLog, UsageRecordingMode, UsageRequestMetadata, inference::infer_failure_family,
+    usage_recording_mode,
+};
 
 #[test]
 fn ai_request_constructor_sets_ai_defaults() {
@@ -113,4 +116,17 @@ fn infers_quota_before_generic_rate_limit_for_explicit_quota_errors() {
         infer_failure_family(&ordinary_server_error),
         Some(RequestFailureFamily::Upstream5xx)
     );
+}
+
+#[test]
+fn runtime_usage_routing_prefers_postgres_then_standalone_then_noop() {
+    assert_eq!(
+        usage_recording_mode(true, true),
+        UsageRecordingMode::SharedManaged
+    );
+    assert_eq!(
+        usage_recording_mode(false, true),
+        UsageRecordingMode::Standalone
+    );
+    assert_eq!(usage_recording_mode(false, false), UsageRecordingMode::Noop);
 }

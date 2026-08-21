@@ -40,7 +40,10 @@ use crate::{
     worker::runtime::standalone::StandaloneRuntimeState,
     worker_admin::AdminState,
     worker_admin_types::RequestContentLoggingResponse,
-    worker_usage::{UsageLog, UsageRequestMetadata},
+    worker_usage::{
+        UsageLog, UsageRecordingMode, UsageRequestMetadata,
+        record_usage_event as record_managed_usage, usage_recording_mode,
+    },
 };
 
 use super::{BufferedBridgeRequest, BufferedMcpRequest, RequestPromptLog, WorkerRuntimeState};
@@ -93,6 +96,21 @@ impl RuntimeServices {
     pub(super) fn with_standalone_state(mut self, state: StandaloneRuntimeState) -> Self {
         self.standalone_state = Some(state);
         self
+    }
+
+    pub(super) async fn record_usage_event(&self, log: UsageLog) -> Option<i64> {
+        match usage_recording_mode(self.admin_state.is_some(), self.standalone_state.is_some()) {
+            UsageRecordingMode::SharedManaged => {
+                record_managed_usage(self.admin_state(), log).await
+            }
+            UsageRecordingMode::Standalone => {
+                if let Some(state) = self.standalone_state() {
+                    state.record_usage(log);
+                }
+                None
+            }
+            UsageRecordingMode::Noop => None,
+        }
     }
 }
 
@@ -286,6 +304,83 @@ impl RouteExecutionContext {
             model_route_rule_id: route.model_route_rule_id,
             route_selection_reason: route.route_selection_reason,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        path::PathBuf,
+        sync::Arc,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    use super::{ResponseLimits, RuntimeServices};
+    use crate::{
+        relay_secrets::RelaySecretManager,
+        standalone_config::{StandaloneConfig, StandaloneConfigStore},
+        worker::runtime::{WorkerRuntimeState, standalone::StandaloneRuntimeState},
+        worker_usage::{UsageLog, UsageRequestMetadata},
+    };
+
+    fn database_path() -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!("prompt-ferry-usage-dispatch-{suffix}.sqlite"))
+    }
+
+    #[tokio::test]
+    async fn dispatches_standalone_usage_and_keeps_no_state_as_noop() {
+        let path = database_path();
+        let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+        let standalone = StandaloneRuntimeState::new(
+            store,
+            RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager"),
+            StandaloneConfig::default(),
+        );
+        let services = RuntimeServices::new(
+            None,
+            super::BridgeSender::test_sender(),
+            reqwest::Client::new(),
+            WorkerRuntimeState::default(),
+            ResponseLimits::default(),
+        )
+        .with_standalone_state(standalone.clone());
+        let log = UsageLog::ai_request(
+            uuid::Uuid::new_v4(),
+            UsageRequestMetadata {
+                path: "/v1/models".to_string(),
+                ..UsageRequestMetadata::default()
+            },
+            None,
+        );
+
+        services.record_usage_event(log).await;
+        assert_eq!(standalone.recent_usage().len(), 1);
+
+        let no_state = RuntimeServices::new(
+            None,
+            super::BridgeSender::test_sender(),
+            reqwest::Client::new(),
+            WorkerRuntimeState::default(),
+            ResponseLimits::default(),
+        );
+        no_state
+            .record_usage_event(UsageLog::ai_request(
+                uuid::Uuid::new_v4(),
+                UsageRequestMetadata {
+                    path: "/v1/models".to_string(),
+                    ..UsageRequestMetadata::default()
+                },
+                None,
+            ))
+            .await;
+        assert_eq!(standalone.recent_usage().len(), 1);
+        let _ = std::fs::remove_file(path);
     }
 }
 

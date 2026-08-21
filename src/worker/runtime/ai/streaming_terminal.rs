@@ -7,7 +7,6 @@ use crate::{
     db,
     protocol::{BridgeMessage, ResponseEnd, ResponseError},
     usage::UsageCapture,
-    worker_usage::record_usage_event,
 };
 use anyhow::Context;
 
@@ -63,41 +62,41 @@ pub(super) async fn finish_failure(
     let upstream_error_body = upstream_error_body
         .map(|body| maybe_redact_text(body, context.logging.redact_content, request_ctx.user_id))
         .filter(|body| !body.trim().is_empty());
-    record_usage_event(
-        services.admin_state(),
-        ai_route_usage_log(request_ctx, request, route_ctx)
-            .with_upstream_redaction(
-                context.upstream_restore_session.is_some(),
-                context.upstream_redacted_request_json.clone(),
-                context.upstream_restore_session.clone(),
-            )
-            .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
-            .with_model(capture.model.clone())
-            .with_status(
-                Some(status as i32),
-                Some(false),
-                Some(request_ctx.elapsed_ms()),
-                ttft_ms,
-            )
-            .with_usage(capture.usage.clone())
-            .with_response(
-                capture.response_id.clone(),
-                capture.provider_conversation_key.clone().or_else(|| {
-                    request_ctx
-                        .request_prompt_log
-                        .request_conversation_key
-                        .clone()
-                }),
-                response_prompt,
-                response_raw_body,
-            )
-            .with_error(
-                Some(code.to_string()),
-                Some(message.to_string()),
-                upstream_error_body,
-            ),
-    )
-    .await;
+    services
+        .record_usage_event(
+            ai_route_usage_log(request_ctx, request, route_ctx)
+                .with_upstream_redaction(
+                    context.upstream_restore_session.is_some(),
+                    context.upstream_redacted_request_json.clone(),
+                    context.upstream_restore_session.clone(),
+                )
+                .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
+                .with_model(capture.model.clone())
+                .with_status(
+                    Some(status as i32),
+                    Some(false),
+                    Some(request_ctx.elapsed_ms()),
+                    ttft_ms,
+                )
+                .with_usage(capture.usage.clone())
+                .with_response(
+                    capture.response_id.clone(),
+                    capture.provider_conversation_key.clone().or_else(|| {
+                        request_ctx
+                            .request_prompt_log
+                            .request_conversation_key
+                            .clone()
+                    }),
+                    response_prompt,
+                    response_raw_body,
+                )
+                .with_error(
+                    Some(code.to_string()),
+                    Some(message.to_string()),
+                    upstream_error_body,
+                ),
+        )
+        .await;
 
     if terminal.is_some() {
         services

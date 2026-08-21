@@ -11,6 +11,26 @@ use tracing::warn;
 
 use super::{UsageLog, inference::infer_failure_family};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UsageRecordingMode {
+    SharedManaged,
+    Standalone,
+    Noop,
+}
+
+pub(crate) fn usage_recording_mode(
+    has_admin_state: bool,
+    has_standalone_state: bool,
+) -> UsageRecordingMode {
+    if has_admin_state {
+        UsageRecordingMode::SharedManaged
+    } else if has_standalone_state {
+        UsageRecordingMode::Standalone
+    } else {
+        UsageRecordingMode::Noop
+    }
+}
+
 pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog) -> Option<i64> {
     let state = admin_state?;
     let failure_family = log.failure_family.or_else(|| infer_failure_family(&log));

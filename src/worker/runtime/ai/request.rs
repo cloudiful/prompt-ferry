@@ -21,7 +21,6 @@ use crate::{
     config::{NativeApi, WorkerConfig},
     db,
     openai_compat::CompatError,
-    worker_usage::record_usage_event,
 };
 use http::StatusCode;
 
@@ -43,11 +42,9 @@ pub(in crate::worker::runtime) async fn process_request(
     let _request_lease = services
         .runtime_state
         .spawn_request_lease_guard(services.admin_state(), request_ctx.request_id);
-    record_usage_event(
-        services.admin_state(),
-        request_ctx.ai_usage_log(&request, None),
-    )
-    .await;
+    services
+        .record_usage_event(request_ctx.ai_usage_log(&request, None))
+        .await;
     if request.path == "/v1/responses" {
         mark_function_call_outputs_received(
             services.admin_state(),
@@ -174,35 +171,35 @@ pub(in crate::worker::runtime) async fn process_request(
     } else {
         "upstream_error"
     };
-    record_usage_event(
-        services.admin_state(),
-        request_ctx
-            .ai_usage_log(&request, Some(route.user_id))
-            .with_upstream_redaction(
-                request_ctx.request_prompt_log.upstream_redaction_enabled,
-                request_ctx
-                    .request_prompt_log
-                    .upstream_redacted_request_json
-                    .clone(),
-                request_ctx
-                    .request_prompt_log
-                    .upstream_restore_session
-                    .clone(),
-            )
-            .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
-            .with_route(route_ctx.endpoint_id, route_ctx.model_route_rule_id)
-            .with_endpoint_key(
-                route_ctx.route.endpoint_key_id,
-                route_ctx.route.endpoint_key_label.clone(),
-            )
-            .with_status(None, Some(false), Some(request_ctx.elapsed_ms()), None)
-            .with_error(
-                Some(error_code.to_string()),
-                Some(safe_error(&err, redact_content, request_ctx.user_id)),
-                None,
-            ),
-    )
-    .await;
+    services
+        .record_usage_event(
+            request_ctx
+                .ai_usage_log(&request, Some(route.user_id))
+                .with_upstream_redaction(
+                    request_ctx.request_prompt_log.upstream_redaction_enabled,
+                    request_ctx
+                        .request_prompt_log
+                        .upstream_redacted_request_json
+                        .clone(),
+                    request_ctx
+                        .request_prompt_log
+                        .upstream_restore_session
+                        .clone(),
+                )
+                .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
+                .with_route(route_ctx.endpoint_id, route_ctx.model_route_rule_id)
+                .with_endpoint_key(
+                    route_ctx.route.endpoint_key_id,
+                    route_ctx.route.endpoint_key_label.clone(),
+                )
+                .with_status(None, Some(false), Some(request_ctx.elapsed_ms()), None)
+                .with_error(
+                    Some(error_code.to_string()),
+                    Some(safe_error(&err, redact_content, request_ctx.user_id)),
+                    None,
+                ),
+        )
+        .await;
     Err(err)
 }
 
