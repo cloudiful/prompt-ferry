@@ -138,13 +138,13 @@ pub(super) async fn build_admin_state(
 ) -> anyhow::Result<Option<AdminState>> {
     let relay_secret_manager = RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
     let is_postgres = config.storage_backend().is_postgres();
-    let (pool, lease_pool, user_store, config_repository) = if is_postgres {
+    let (pool, lease_pool, user_store, config_repository, sqlite_pool) = if is_postgres {
         let pool = db::connect(&config.database_url).await?;
         let lease_pool = db::connect_with_max_connections(&config.database_url, 2).await?;
         db::migrate(&pool).await?;
         let user_store = db::UserStore::postgres(&pool);
         let config_repository = db::ConfigRepository::postgres(&pool);
-        (pool, lease_pool, user_store, config_repository)
+        (pool, lease_pool, user_store, config_repository, None)
     } else {
         let path = runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
         if let Some(parent) = path
@@ -164,8 +164,9 @@ pub(super) async fn build_admin_state(
         (
             pool.clone(),
             pool,
-            db::UserStore::sqlite(sqlite_pool),
+            db::UserStore::sqlite(sqlite_pool.clone()),
             config_repository,
+            Some(sqlite_pool),
         )
     };
     user_store
@@ -176,11 +177,12 @@ pub(super) async fn build_admin_state(
         .await?;
 
     if !is_postgres {
-        let mcp_catalog_cache = crate::mcp::McpCatalogCache::new();
+        let mcp_catalog_cache =
+            crate::mcp::McpCatalogCache::from_config_with_sqlite(config, sqlite_pool.clone()).await;
         let state = AdminState::new(crate::worker_admin_state::AdminStateInit {
             pool: pool.clone(),
             lease_pool,
-            replay_cache: ReplayCache::from_config(config).await,
+            replay_cache: ReplayCache::from_config_with_sqlite(config, sqlite_pool.clone()).await,
             configured_relays: config.relay_urls.clone(),
             managed_mode: false,
             relay_secret_manager: Some(relay_secret_manager),
@@ -196,7 +198,11 @@ pub(super) async fn build_admin_state(
             llm_review_settings: llm_review::LlmReviewSettings::default(),
             mcp_catalog_cache: mcp_catalog_cache.clone(),
             mcp_catalog_service: crate::mcp::McpCatalogService::new(pool, mcp_catalog_cache),
-            mcp_session_store: None,
+            mcp_session_store: crate::mcp::McpSessionStore::from_config_with_sqlite(
+                config,
+                sqlite_pool,
+            )
+            .await,
             mcp_allowed_origins: config.mcp_allowed_origins.clone(),
             mcp_quota_valkey: crate::mcp::McpQuotaValkey::new(),
             endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(

@@ -40,6 +40,13 @@ struct StoredCatalog {
 enum CacheBackend {
     Local,
     Valkey(ConnectionManager),
+    Sqlite(SqliteCatalogBackend),
+}
+
+#[derive(Clone)]
+struct SqliteCatalogBackend {
+    coordinator: crate::standalone_config::StandaloneCoordinatorStore,
+    ttl_seconds: u64,
 }
 
 #[derive(Clone)]
@@ -59,22 +66,46 @@ impl McpCatalogCache {
     }
 
     pub async fn from_config(config: &WorkerConfig) -> Self {
+        Self::from_config_with_sqlite(config, None).await
+    }
+
+    pub async fn from_config_with_sqlite(
+        config: &WorkerConfig,
+        sqlite_pool: Option<sqlx::SqlitePool>,
+    ) -> Self {
         let url = config.valkey_url.trim();
         if url.is_empty() {
+            if let Some(pool) = sqlite_pool {
+                return Self::sqlite(pool, config.valkey_ttl_seconds, "valkey_not_configured");
+            }
             return Self::new();
         }
 
         let client = match redis::Client::open(url) {
             Ok(client) => client,
             Err(err) => {
-                warn!(error = %err, valkey_url = url, "failed to open valkey client for MCP catalog; falling back to local cache");
+                warn!(error = %err, valkey_url = url, "failed to open valkey client for MCP catalog");
+                if let Some(pool) = sqlite_pool {
+                    return Self::sqlite(
+                        pool,
+                        config.valkey_ttl_seconds,
+                        "valkey_client_open_failed",
+                    );
+                }
                 return Self::new();
             }
         };
         let manager = match client.get_connection_manager().await {
             Ok(manager) => manager,
             Err(err) => {
-                warn!(error = %err, valkey_url = url, "failed to connect valkey for MCP catalog; falling back to local cache");
+                warn!(error = %err, valkey_url = url, "failed to connect valkey for MCP catalog");
+                if let Some(pool) = sqlite_pool {
+                    return Self::sqlite(
+                        pool,
+                        config.valkey_ttl_seconds,
+                        "valkey_connection_failed",
+                    );
+                }
                 return Self::new();
             }
         };
@@ -86,24 +117,54 @@ impl McpCatalogCache {
         }
     }
 
+    fn sqlite(pool: sqlx::SqlitePool, ttl_seconds: u64, reason: &str) -> Self {
+        warn!(
+            backend = "sqlite",
+            reason,
+            scope = "single-host",
+            network_filesystem_safe = false,
+            "using WAL-backed SQLite MCP catalog cache"
+        );
+        Self {
+            backend: CacheBackend::Sqlite(SqliteCatalogBackend {
+                coordinator: crate::standalone_config::StandaloneCoordinatorStore::new(pool),
+                ttl_seconds: ttl_seconds.max(1),
+            }),
+            local: Arc::new(RwLock::new(HashMap::new())),
+            refreshing: Arc::new(RwLock::new(HashSet::new())),
+        }
+    }
+
     pub async fn get(&self, server: &McpServer) -> Option<ServerCatalogSnapshot> {
-        let CacheBackend::Valkey(manager) = &self.backend else {
-            return self.local_snapshot(server).await;
-        };
-        let key = catalog_key(server.server_id);
-        let mut manager = manager.clone();
-        let value: Option<String> = match manager.get(&key).await {
-            Ok(value) => value,
-            Err(err) => {
-                warn!(error = %err, server_id = %server.server_id, "failed to read MCP catalog from valkey");
-                return self.local_snapshot(server).await;
+        let value = match &self.backend {
+            CacheBackend::Local => return self.local_snapshot(server).await,
+            CacheBackend::Valkey(manager) => {
+                let key = catalog_key(server.server_id);
+                let mut manager = manager.clone();
+                match manager.get(&key).await {
+                    Ok(value) => value,
+                    Err(err) => {
+                        warn!(error = %err, server_id = %server.server_id, "failed to read MCP catalog from valkey");
+                        return self.local_snapshot(server).await;
+                    }
+                }
             }
-        };
-        let value = value?;
+            CacheBackend::Sqlite(store) => match store
+                .coordinator
+                .get("mcp-catalog", &server.server_id.to_string())
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => {
+                    warn!(error = %err, server_id = %server.server_id, "failed to read MCP catalog from SQLite");
+                    return self.local_snapshot(server).await;
+                }
+            },
+        }?;
         let stored: StoredCatalog = match serde_json::from_str(&value) {
             Ok(stored) => stored,
             Err(err) => {
-                warn!(error = %err, server_id = %server.server_id, "invalid MCP catalog valkey payload");
+                warn!(error = %err, server_id = %server.server_id, "invalid MCP catalog cache payload");
                 return None;
             }
         };
@@ -141,6 +202,25 @@ impl McpCatalogCache {
         );
 
         let CacheBackend::Valkey(manager) = &self.backend else {
+            if let CacheBackend::Sqlite(store) = &self.backend {
+                if let Ok(payload) = serde_json::to_string(&StoredCatalog {
+                    updated_at: server.updated_at,
+                    snapshot,
+                }) {
+                    if let Err(err) = store
+                        .coordinator
+                        .put(
+                            "mcp-catalog",
+                            &server.server_id.to_string(),
+                            &payload,
+                            store.ttl_seconds,
+                        )
+                        .await
+                    {
+                        warn!(error = %err, server_id = %server.server_id, "failed to write MCP catalog to SQLite");
+                    }
+                }
+            }
             return;
         };
         let payload = match serde_json::to_string(&StoredCatalog {
@@ -167,6 +247,14 @@ impl McpCatalogCache {
         self.refreshing.write().await.remove(&server_id);
 
         let CacheBackend::Valkey(manager) = &self.backend else {
+            if let CacheBackend::Sqlite(store) = &self.backend
+                && let Err(err) = store
+                    .coordinator
+                    .delete("mcp-catalog", &server_id.to_string())
+                    .await
+            {
+                warn!(error = %err, server_id = %server_id, "failed to delete MCP catalog from SQLite");
+            }
             return;
         };
         let mut manager = manager.clone();
@@ -278,5 +366,25 @@ mod tests {
         cache.finish_refresh(server.server_id).await;
 
         assert!(cache.mark_refresh_inflight(server.server_id).await);
+    }
+
+    #[tokio::test]
+    async fn sqlite_catalog_cache_is_shared_between_cache_instances() {
+        let path =
+            std::env::temp_dir().join(format!("prompt-ferry-mcp-cache-{}.sqlite", Uuid::new_v4()));
+        let pool = crate::db::connect_sqlite(&path).await.unwrap();
+        crate::db::migrate_standalone(&pool).await.unwrap();
+        let config = WorkerConfig::default();
+        let first = McpCatalogCache::from_config_with_sqlite(&config, Some(pool.clone())).await;
+        let second = McpCatalogCache::from_config_with_sqlite(&config, Some(pool.clone())).await;
+        let server = server();
+        let expected = snapshot("sqlite-cached");
+
+        first.put(&server, expected.clone()).await;
+        assert_eq!(second.get(&server).await, Some(expected));
+        second.invalidate(server.server_id).await;
+        assert_eq!(first.get(&server).await, None);
+        pool.close().await;
+        let _ = std::fs::remove_file(path);
     }
 }

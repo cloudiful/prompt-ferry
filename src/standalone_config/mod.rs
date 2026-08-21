@@ -11,6 +11,7 @@ macro_rules! standalone_query {
     };
 }
 
+mod coordinator;
 mod models;
 mod rows;
 mod store;
@@ -20,6 +21,7 @@ mod users;
 mod validation;
 mod write;
 
+pub(crate) use coordinator::StandaloneCoordinatorStore;
 pub use models::{
     BootstrapSeed, ClientKeyConfig, ContinuationPolicy, EndpointApiKeyConfig, EndpointProvider,
     EndpointRegion, ManagedRelayConfig, ModelRouteConfig, ModelRouteTargetConfig,

@@ -8,6 +8,8 @@ use uuid::Uuid;
 use crate::db::{McpCredential, QuotaGrant};
 
 const MAX_PICK_ATTEMPTS: usize = 3;
+const DURABLE_QUOTA_UNAVAILABLE: &str =
+    "MCP quota requires the durable PostgreSQL ledger; no process-local fallback is permitted";
 
 /// Outcome of preparing quota for one MCP request.
 pub enum QuotaDecision {
@@ -35,7 +37,7 @@ pub async fn prepare_quota(
         Ok(credentials) => credentials,
         Err(err) => {
             return QuotaDecision::Unavailable {
-                reason: err.to_string(),
+                reason: format!("{DURABLE_QUOTA_UNAVAILABLE}: {err}"),
             };
         }
     };
@@ -49,7 +51,7 @@ pub async fn prepare_quota(
             Ok(picked) => picked,
             Err(err) => {
                 return QuotaDecision::Unavailable {
-                    reason: err.to_string(),
+                    reason: format!("{DURABLE_QUOTA_UNAVAILABLE}: {err}"),
                 };
             }
         };
@@ -66,7 +68,7 @@ pub async fn prepare_quota(
             }
             Err(err) => {
                 return QuotaDecision::Unavailable {
-                    reason: err.to_string(),
+                    reason: format!("{DURABLE_QUOTA_UNAVAILABLE}: {err}"),
                 };
             }
         }

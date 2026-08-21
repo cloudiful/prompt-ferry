@@ -445,6 +445,94 @@ async fn concurrent_endpoint_writes_and_reads_use_sqlite_busy_timeout() {
 }
 
 #[tokio::test]
+async fn sqlite_coordinator_allows_only_one_live_lease_owner() {
+    let (store, path) = open_store().await;
+    let first = StandaloneCoordinatorStore::new(store.pool().clone());
+    let second = StandaloneCoordinatorStore::new(store.pool().clone());
+    let barrier = Arc::new(Barrier::new(2));
+    let first_barrier = Arc::clone(&barrier);
+    let second_barrier = Arc::clone(&barrier);
+    let first_task = tokio::spawn(async move {
+        first_barrier.wait().await;
+        first
+            .acquire_lease("maintenance", "worker-a", 30)
+            .await
+            .expect("first lease attempt")
+    });
+    let second_task = tokio::spawn(async move {
+        second_barrier.wait().await;
+        second
+            .acquire_lease("maintenance", "worker-b", 30)
+            .await
+            .expect("second lease attempt")
+    });
+    let first_acquired = first_task.await.expect("first task");
+    let second_acquired = second_task.await.expect("second task");
+    assert_ne!(first_acquired, second_acquired);
+
+    let owner = if first_acquired {
+        "worker-a"
+    } else {
+        "worker-b"
+    };
+    let other = if first_acquired {
+        "worker-b"
+    } else {
+        "worker-a"
+    };
+    let coordinator = StandaloneCoordinatorStore::new(store.pool().clone());
+    assert!(
+        coordinator
+            .refresh_lease("maintenance", owner, 30)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !coordinator
+            .acquire_lease("maintenance", other, 30)
+            .await
+            .unwrap()
+    );
+    coordinator
+        .release_lease("maintenance", owner)
+        .await
+        .expect("release lease");
+    assert!(
+        coordinator
+            .acquire_lease("maintenance", other, 30)
+            .await
+            .unwrap()
+    );
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn sqlite_coordinator_values_refresh_without_process_local_state() {
+    let (store, path) = open_store().await;
+    let first = StandaloneCoordinatorStore::new(store.pool().clone());
+    let second = StandaloneCoordinatorStore::new(store.pool().clone());
+    let value = first
+        .get_or_insert("session", "same-session", "first", 30)
+        .await
+        .expect("insert session value");
+    assert_eq!(value, "first");
+    assert_eq!(
+        second.get("session", "same-session").await.unwrap(),
+        Some("first".to_string())
+    );
+    assert_eq!(
+        second
+            .get_or_insert("session", "same-session", "second", 30)
+            .await
+            .unwrap(),
+        "first"
+    );
+    assert!(second.delete("session", "same-session").await.unwrap());
+    assert_eq!(first.get("session", "same-session").await.unwrap(), None);
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
 async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     let path = database_path();
     let manager = manager(5);
@@ -497,7 +585,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 
     let snapshot = store
         .load_snapshot(&manager)

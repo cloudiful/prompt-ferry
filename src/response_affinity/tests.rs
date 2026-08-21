@@ -121,6 +121,30 @@ async fn local_store_peek_does_not_refresh_ttl() {
     );
 }
 
+#[tokio::test]
+async fn sqlite_store_keeps_one_binding_for_concurrent_creators() {
+    let path =
+        std::env::temp_dir().join(format!("prompt-ferry-affinity-{}.sqlite", Uuid::new_v4()));
+    let pool = crate::db::connect_sqlite(&path).await.unwrap();
+    crate::db::migrate_standalone(&pool).await.unwrap();
+    let store = ResponseAffinityStore::sqlite_with_ttl(
+        crate::standalone_config::StandaloneCoordinatorStore::new(pool.clone()),
+        60,
+    );
+    let key = "sqlite-affinity-key";
+    let first = binding(Uuid::new_v4());
+    let second = binding(Uuid::new_v4());
+    let (left, right) = tokio::join!(
+        store.get_or_create(key, &first),
+        store.get_or_create(key, &second)
+    );
+    let left = left.unwrap();
+    assert_eq!(right.unwrap(), left);
+    assert!(left == first || left == second);
+    pool.close().await;
+    let _ = std::fs::remove_file(path);
+}
+
 #[test]
 fn cache_key_is_hashed_and_scope_sensitive() {
     let rule_id = Uuid::new_v4();

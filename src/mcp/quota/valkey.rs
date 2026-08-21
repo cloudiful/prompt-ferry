@@ -16,6 +16,12 @@ pub struct McpQuotaValkey {
     manager: Option<ConnectionManager>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum McpQuotaStateBackend {
+    PostgresLedgerOnly,
+    ValkeyAcceleration,
+}
+
 impl McpQuotaValkey {
     pub fn new() -> Self {
         Self::default()
@@ -47,6 +53,16 @@ impl McpQuotaValkey {
 
     pub fn is_enabled(&self) -> bool {
         self.manager.is_some()
+    }
+
+    /// Quota reservations never use this optional cache. With no Valkey the
+    /// durable PostgreSQL ledger remains the only state backend.
+    pub(crate) fn state_backend(&self) -> McpQuotaStateBackend {
+        if self.is_enabled() {
+            McpQuotaStateBackend::ValkeyAcceleration
+        } else {
+            McpQuotaStateBackend::PostgresLedgerOnly
+        }
     }
 
     /// Returns the cached cooldown deadline, or `None` when Valkey is not
@@ -126,5 +142,13 @@ mod tests {
         assert!(cooldown_key(id).starts_with(MCP_QUOTA_VALKEY_KEY_PREFIX));
         assert!(cooldown_key(id).ends_with(COOLDOWN_SUFFIX));
         assert!(remaining_key(id).ends_with(REMAINING_SUFFIX));
+    }
+
+    #[test]
+    fn disabled_valkey_does_not_create_a_process_local_quota_backend() {
+        assert_eq!(
+            McpQuotaValkey::new().state_backend(),
+            McpQuotaStateBackend::PostgresLedgerOnly
+        );
     }
 }

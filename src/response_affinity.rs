@@ -55,15 +55,29 @@ pub struct ResponseAffinityStore {
     backend: ResponseAffinityBackend,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseAffinityStateBackend {
+    Valkey,
+    Sqlite,
+    Memory,
+    Unavailable,
+}
+
 #[derive(Clone)]
 enum ResponseAffinityBackend {
     Unavailable,
     Redis(Arc<RedisAffinityBackend>),
+    Sqlite(Arc<SqliteAffinityBackend>),
     Local(Arc<LocalAffinityBackend>),
 }
 
 struct RedisAffinityBackend {
     manager: ConnectionManager,
+    ttl_seconds: u64,
+}
+
+struct SqliteAffinityBackend {
+    coordinator: crate::standalone_config::StandaloneCoordinatorStore,
     ttl_seconds: u64,
 }
 
@@ -121,6 +135,27 @@ impl ResponseAffinityStore {
         }
     }
 
+    pub(crate) fn sqlite_with_ttl(
+        coordinator: crate::standalone_config::StandaloneCoordinatorStore,
+        ttl_seconds: u64,
+    ) -> Self {
+        Self {
+            backend: ResponseAffinityBackend::Sqlite(Arc::new(SqliteAffinityBackend {
+                coordinator,
+                ttl_seconds: ttl_seconds.max(1),
+            })),
+        }
+    }
+
+    pub fn state_backend(&self) -> ResponseAffinityStateBackend {
+        match &self.backend {
+            ResponseAffinityBackend::Redis(_) => ResponseAffinityStateBackend::Valkey,
+            ResponseAffinityBackend::Sqlite(_) => ResponseAffinityStateBackend::Sqlite,
+            ResponseAffinityBackend::Local(_) => ResponseAffinityStateBackend::Memory,
+            ResponseAffinityBackend::Unavailable => ResponseAffinityStateBackend::Unavailable,
+        }
+    }
+
     pub fn cache_key(user_id: i64, rule_id: Uuid, stable_identity: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(user_id.to_string().as_bytes());
@@ -165,6 +200,19 @@ impl ResponseAffinityStore {
                     serde_json::from_str(&payload).context("invalid response affinity binding")?;
                 Ok(Some(binding))
             }
+            ResponseAffinityBackend::Sqlite(inner) => {
+                let Some(payload) = inner.coordinator.get("response-affinity", key).await? else {
+                    return Ok(None);
+                };
+                inner
+                    .coordinator
+                    .put("response-affinity", key, &payload, inner.ttl_seconds)
+                    .await?;
+                Ok(Some(
+                    serde_json::from_str(&payload)
+                        .context("invalid SQLite response affinity binding")?,
+                ))
+            }
         }
     }
 
@@ -194,6 +242,15 @@ impl ResponseAffinityStore {
                 let binding =
                     serde_json::from_str(&payload).context("invalid response affinity binding")?;
                 Ok(Some(binding))
+            }
+            ResponseAffinityBackend::Sqlite(inner) => {
+                let Some(payload) = inner.coordinator.get("response-affinity", key).await? else {
+                    return Ok(None);
+                };
+                Ok(Some(
+                    serde_json::from_str(&payload)
+                        .context("invalid SQLite response affinity binding")?,
+                ))
             }
         }
     }
@@ -249,6 +306,15 @@ impl ResponseAffinityStore {
                 serde_json::from_str(&payload)
                     .context("invalid response affinity binding returned by Valkey")
             }
+            ResponseAffinityBackend::Sqlite(inner) => {
+                let payload = serde_json::to_string(candidate)?;
+                let value = inner
+                    .coordinator
+                    .get_or_insert("response-affinity", key, &payload, inner.ttl_seconds)
+                    .await?;
+                serde_json::from_str(&value)
+                    .context("invalid response affinity binding returned by SQLite")
+            }
         }
     }
 
@@ -270,6 +336,9 @@ impl ResponseAffinityStore {
                     .await
                     .context("failed to delete response affinity binding")?;
                 Ok(deleted > 0)
+            }
+            ResponseAffinityBackend::Sqlite(inner) => {
+                Ok(inner.coordinator.delete("response-affinity", key).await?)
             }
         }
     }
@@ -312,6 +381,20 @@ impl ResponseAffinityStore {
                     .await
                     .context("failed to replace response affinity binding")?;
                 Ok(replaced == 1)
+            }
+            ResponseAffinityBackend::Sqlite(inner) => {
+                let expected_payload = serde_json::to_string(expected)?;
+                let replacement_payload = serde_json::to_string(replacement)?;
+                Ok(inner
+                    .coordinator
+                    .replace_if_current(
+                        "response-affinity",
+                        key,
+                        &expected_payload,
+                        &replacement_payload,
+                        inner.ttl_seconds,
+                    )
+                    .await?)
             }
         }
     }

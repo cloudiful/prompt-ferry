@@ -7,7 +7,7 @@ use scheduler::{
     CoordinatedLeaseConfig, InMemoryStateStore, Job, Schedule, Scheduler, SchedulerConfig, Task,
     TaskContext, ValkeyCoordinatedStateStore,
 };
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, pool::PoolConnection};
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::RwLock, task::JoinHandle, time::timeout};
 use tracing::{info, warn};
@@ -24,7 +24,10 @@ struct RawMaintenanceDependencies {
     pool: PgPool,
     retention: Arc<RwLock<UsageRetentionSettings>>,
     raw_store: Option<Arc<RawPayloadStore>>,
+    postgres_coordination: bool,
 }
+
+const POSTGRES_MAINTENANCE_LOCK_KEY: i64 = 0x7066_6d61_696e_746e;
 
 pub(super) fn spawn(
     config: &WorkerConfig,
@@ -39,13 +42,13 @@ pub(super) fn spawn(
             pool,
             retention,
             raw_store,
+            postgres_coordination: valkey_url.is_empty(),
         });
 
-        if let Err(error) = run_once(&dependencies).await {
-            warn!(error = %error, "initial raw payload maintenance failed");
-        }
-
         if valkey_url.is_empty() {
+            if let Err(error) = run_once(&dependencies).await {
+                warn!(error = %error, "initial raw payload maintenance failed");
+            }
             run_local_scheduler(dependencies, control).await;
             return;
         }
@@ -58,20 +61,24 @@ pub(super) fn spawn(
         {
             Ok(Ok(store)) => Some(store),
             Ok(Err(error)) => {
-                warn!(error = %error, "failed to initialize coordinated raw maintenance scheduler; falling back to local scheduling");
+                warn!(error = %error, capability = "maintenance_coordination", "raw maintenance disabled because Valkey coordination is unavailable");
                 None
             }
             Err(_) => {
                 warn!(
-                    "timed out initializing coordinated raw maintenance scheduler; falling back to local scheduling"
+                    capability = "maintenance_coordination",
+                    "raw maintenance disabled because Valkey coordination initialization timed out"
                 );
                 None
             }
         };
         let Some(store) = store else {
-            run_local_scheduler(dependencies, control).await;
             return;
         };
+
+        if let Err(error) = run_once(&dependencies).await {
+            warn!(error = %error, "initial raw payload maintenance failed");
+        }
 
         let scheduler = Scheduler::with_coordinated_state_store(
             SchedulerConfig::default(),
@@ -89,8 +96,11 @@ pub(super) fn spawn(
         )
         .await
         {
-            warn!(error = %error, "coordinated raw maintenance scheduler stopped; falling back to local scheduling");
-            run_local_scheduler(dependencies, control).await;
+            warn!(
+                error = %error,
+                capability = "maintenance_coordination",
+                "coordinated raw maintenance scheduler stopped; local scheduling is not safe"
+            );
         }
     })
 }
@@ -225,6 +235,14 @@ async fn monitor_valkey_health(url: String) -> anyhow::Result<()> {
 }
 
 async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<()> {
+    let mut postgres_lease = if dependencies.postgres_coordination {
+        match try_postgres_maintenance_lease(&dependencies.pool).await? {
+            Some(lease) => Some(lease),
+            None => return Ok(()),
+        }
+    } else {
+        None
+    };
     let retention = dependencies.retention.read().await.clone().normalized();
     match db::run_usage_content_maintenance(
         &dependencies.pool,
@@ -299,7 +317,43 @@ async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<(
         Ok(None) => {}
         Err(error) => warn!(error = %error, "approval retention maintenance failed"),
     }
+    if let Some(lease) = postgres_lease.take() {
+        lease.release().await?;
+    }
     Ok(())
+}
+
+struct PostgresMaintenanceLease {
+    connection: PoolConnection<Postgres>,
+}
+
+impl PostgresMaintenanceLease {
+    async fn release(mut self) -> anyhow::Result<()> {
+        sqlx::query_file_unchecked!(
+            "src/sql/standalone/postgres_release_advisory_lock.sql",
+            POSTGRES_MAINTENANCE_LOCK_KEY
+        )
+        .fetch_one(&mut *self.connection)
+        .await?;
+        Ok(())
+    }
+}
+
+async fn try_postgres_maintenance_lease(
+    pool: &PgPool,
+) -> anyhow::Result<Option<PostgresMaintenanceLease>> {
+    let mut connection = pool.acquire().await?;
+    let row = sqlx::query_file!(
+        "src/sql/standalone/postgres_try_advisory_lock.sql",
+        POSTGRES_MAINTENANCE_LOCK_KEY
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    if row.acquired.unwrap_or(false) {
+        Ok(Some(PostgresMaintenanceLease { connection }))
+    } else {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

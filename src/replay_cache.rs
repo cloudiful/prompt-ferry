@@ -8,7 +8,7 @@ use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
 use redis::{AsyncCommands, aio::ConnectionManager};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{PgPool, SqlitePool};
 use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
@@ -45,10 +45,19 @@ pub struct ReplayCache {
     response_affinity: ResponseAffinityStore,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplayStateBackend {
+    Valkey,
+    Sqlite,
+    Memory,
+    Unavailable,
+}
+
 #[derive(Clone)]
 enum ReplayCacheBackend {
     Disabled,
     Redis(Arc<RedisBackend>),
+    Sqlite(Arc<SqliteBackend>),
     Local(Arc<LocalBackend>),
 }
 
@@ -64,6 +73,12 @@ struct LocalBackend {
     max_session_entries: usize,
     replay_snapshot_ttl: Duration,
     replay_snapshots: Mutex<HashMap<Uuid, LocalReplaySnapshotEntry>>,
+}
+
+struct SqliteBackend {
+    coordinator: crate::standalone_config::StandaloneCoordinatorStore,
+    replay_ttl_seconds: u64,
+    session_ttl_seconds: u64,
 }
 
 struct LocalSessionEntry {
@@ -125,22 +140,15 @@ impl Default for ReplayCache {
 }
 
 impl ReplayCache {
-    fn local_sessions_only(config: &WorkerConfig, reason: &str) -> Self {
+    fn unavailable_sessions_only(config: &WorkerConfig, reason: &str) -> Self {
         warn!(
-            backend = "local",
+            backend = "unavailable",
             reason,
-            scope = "single-process",
-            cross_worker_coordination = false,
-            max_entries = config.local_session_max_entries,
-            ttl_seconds = config.session_ttl_seconds,
-            "using local session and response-affinity fallback; cross-worker coordination is unavailable"
+            capability = "session_persistence",
+            "session state is unavailable; process-local authentication fallback is disabled"
         );
         Self {
-            backend: ReplayCacheBackend::Local(Arc::new(LocalBackend::new(
-                config.session_ttl_seconds,
-                config.valkey_ttl_seconds,
-                config.local_session_max_entries,
-            ))),
+            backend: ReplayCacheBackend::Disabled,
             response_affinity: ResponseAffinityStore::local_with_ttl_and_capacity(
                 Duration::from_secs(config.session_ttl_seconds.max(1)),
                 config.local_session_max_entries,
@@ -149,22 +157,47 @@ impl ReplayCache {
     }
 
     pub async fn from_config(config: &WorkerConfig) -> Self {
+        Self::from_config_with_sqlite(config, None).await
+    }
+
+    pub async fn from_config_with_sqlite(
+        config: &WorkerConfig,
+        sqlite_pool: Option<SqlitePool>,
+    ) -> Self {
         let url = config.valkey_url.trim();
         if url.is_empty() {
-            return Self::local_sessions_only(config, "valkey_not_configured");
+            if let Some(pool) = sqlite_pool {
+                return Self::sqlite(config, pool, "valkey_not_configured");
+            }
+            return Self::unavailable_sessions_only(
+                config,
+                "valkey_not_configured_without_durable_store",
+            );
         }
         let client = match redis::Client::open(url) {
             Ok(client) => client,
             Err(err) => {
-                warn!(error = %err, "failed to open valkey client; falling back to local in-memory state");
-                return Self::local_sessions_only(config, "valkey_client_open_failed");
+                warn!(error = %err, "failed to open valkey client");
+                if let Some(pool) = sqlite_pool {
+                    return Self::sqlite(config, pool, "valkey_client_open_failed");
+                }
+                return Self::unavailable_sessions_only(
+                    config,
+                    "valkey_client_open_failed_without_durable_store",
+                );
             }
         };
         let manager = match client.get_connection_manager().await {
             Ok(manager) => manager,
             Err(err) => {
-                warn!(error = %err, "failed to connect valkey; falling back to local in-memory state");
-                return Self::local_sessions_only(config, "valkey_connection_failed");
+                warn!(error = %err, "failed to connect valkey");
+                if let Some(pool) = sqlite_pool {
+                    return Self::sqlite(config, pool, "valkey_connection_failed");
+                }
+                return Self::unavailable_sessions_only(
+                    config,
+                    "valkey_connection_failed_without_durable_store",
+                );
             }
         };
         Self {
@@ -180,8 +213,39 @@ impl ReplayCache {
         }
     }
 
+    fn sqlite(config: &WorkerConfig, pool: SqlitePool, reason: &str) -> Self {
+        warn!(
+            backend = "sqlite",
+            reason,
+            scope = "single-host",
+            network_filesystem_safe = false,
+            "using WAL-backed SQLite coordinator for replay and sessions"
+        );
+        let coordinator = crate::standalone_config::StandaloneCoordinatorStore::new(pool);
+        Self {
+            backend: ReplayCacheBackend::Sqlite(Arc::new(SqliteBackend {
+                coordinator: coordinator.clone(),
+                replay_ttl_seconds: config.valkey_ttl_seconds.max(1),
+                session_ttl_seconds: config.session_ttl_seconds.max(1),
+            })),
+            response_affinity: ResponseAffinityStore::sqlite_with_ttl(
+                coordinator,
+                config.session_ttl_seconds,
+            ),
+        }
+    }
+
     pub fn enabled(&self) -> bool {
         matches!(self.backend, ReplayCacheBackend::Redis(_))
+    }
+
+    pub fn state_backend(&self) -> ReplayStateBackend {
+        match &self.backend {
+            ReplayCacheBackend::Redis(_) => ReplayStateBackend::Valkey,
+            ReplayCacheBackend::Sqlite(_) => ReplayStateBackend::Sqlite,
+            ReplayCacheBackend::Local(_) => ReplayStateBackend::Memory,
+            ReplayCacheBackend::Disabled => ReplayStateBackend::Unavailable,
+        }
     }
 
     pub fn session_available(&self) -> bool {
@@ -244,6 +308,19 @@ impl ReplayCache {
                         serde_json::from_str(&text).context("invalid replay valkey snapshot json")
                     })
                     .transpose()
+            }
+            ReplayCacheBackend::Sqlite(inner) => {
+                let Some(payload) = inner
+                    .coordinator
+                    .get("replay", &conversation_id.to_string())
+                    .await?
+                else {
+                    return Ok(None);
+                };
+                Ok(Some(
+                    serde_json::from_str(&payload)
+                        .context("invalid SQLite replay snapshot json")?,
+                ))
             }
         }
     }
@@ -311,6 +388,47 @@ impl ReplayCache {
                     .context("failed to compare-and-set replay valkey snapshot")?;
                 Ok(updated == 1)
             }
+            ReplayCacheBackend::Sqlite(inner) => {
+                let next = ReplaySnapshotValue {
+                    conversation_id: update.conversation_id,
+                    base_event_id: update.event_id,
+                    conversation_seq: update.conversation_seq,
+                    prompt_refs: update.prompt_refs.clone(),
+                    ref_count: i32::try_from(update.prompt_refs.len()).unwrap_or(i32::MAX),
+                    byte_size: update.byte_size()?,
+                    updated_at: Utc::now(),
+                };
+                let key = update.conversation_id.to_string();
+                let payload = serde_json::to_string(&next)?;
+                let current = inner.coordinator.get("replay", &key).await?;
+                if let Some(current) = current {
+                    let current: ReplaySnapshotValue = serde_json::from_str(&current)
+                        .context("invalid SQLite replay snapshot json")?;
+                    if current.conversation_seq > next.conversation_seq
+                        || (current.conversation_seq == next.conversation_seq
+                            && current.base_event_id >= next.base_event_id)
+                    {
+                        return Ok(false);
+                    }
+                }
+                if let Some(current) = inner.coordinator.get("replay", &key).await? {
+                    return Ok(inner
+                        .coordinator
+                        .replace_if_current(
+                            "replay",
+                            &key,
+                            &current,
+                            &payload,
+                            inner.replay_ttl_seconds,
+                        )
+                        .await?);
+                }
+                let stored = inner
+                    .coordinator
+                    .get_or_insert("replay", &key, &payload, inner.replay_ttl_seconds)
+                    .await?;
+                Ok(stored == payload)
+            }
         }
     }
 
@@ -360,6 +478,14 @@ impl ReplayCache {
                     .set_ex(key, payload, inner.session_ttl_seconds)
                     .await
                     .context("failed to write valkey session")?;
+                Ok(())
+            }
+            ReplayCacheBackend::Sqlite(inner) => {
+                let payload = serde_json::to_string(user)?;
+                inner
+                    .coordinator
+                    .put("session", session_id, &payload, inner.session_ttl_seconds)
+                    .await?;
                 Ok(())
             }
         }
@@ -419,6 +545,17 @@ impl ReplayCache {
                     .context("failed to refresh valkey session ttl")?;
                 Ok(Some(user))
             }
+            ReplayCacheBackend::Sqlite(inner) => {
+                let Some(value) = inner.coordinator.get("session", session_id).await? else {
+                    return Ok(None);
+                };
+                let user = serde_json::from_str(&value).context("invalid SQLite session json")?;
+                inner
+                    .coordinator
+                    .put("session", session_id, &value, inner.session_ttl_seconds)
+                    .await?;
+                Ok(Some(user))
+            }
         }
     }
 
@@ -438,6 +575,10 @@ impl ReplayCache {
                     .context("failed to delete valkey session")?;
                 Ok(())
             }
+            ReplayCacheBackend::Sqlite(inner) => {
+                inner.coordinator.delete("session", session_id).await?;
+                Ok(())
+            }
         }
     }
 
@@ -448,7 +589,9 @@ impl ReplayCache {
         ttl_seconds: u64,
     ) -> Result<bool> {
         match &self.backend {
-            ReplayCacheBackend::Disabled | ReplayCacheBackend::Local(_) => Ok(false),
+            ReplayCacheBackend::Disabled
+            | ReplayCacheBackend::Local(_)
+            | ReplayCacheBackend::Sqlite(_) => Ok(false),
             ReplayCacheBackend::Redis(inner) => {
                 let key = request_lease_cache_key(request_id);
                 let mut manager = inner.manager.clone();
@@ -463,7 +606,9 @@ impl ReplayCache {
 
     pub async fn refresh_request_lease(&self, request_id: Uuid, ttl_seconds: u64) -> Result<bool> {
         match &self.backend {
-            ReplayCacheBackend::Disabled | ReplayCacheBackend::Local(_) => Ok(false),
+            ReplayCacheBackend::Disabled
+            | ReplayCacheBackend::Local(_)
+            | ReplayCacheBackend::Sqlite(_) => Ok(false),
             ReplayCacheBackend::Redis(inner) => {
                 let key = request_lease_cache_key(request_id);
                 let mut manager = inner.manager.clone();
@@ -482,7 +627,9 @@ impl ReplayCache {
 
     pub async fn delete_request_lease(&self, request_id: Uuid) -> Result<bool> {
         match &self.backend {
-            ReplayCacheBackend::Disabled | ReplayCacheBackend::Local(_) => Ok(false),
+            ReplayCacheBackend::Disabled
+            | ReplayCacheBackend::Local(_)
+            | ReplayCacheBackend::Sqlite(_) => Ok(false),
             ReplayCacheBackend::Redis(inner) => {
                 let key = request_lease_cache_key(request_id);
                 let mut manager = inner.manager.clone();
@@ -497,7 +644,9 @@ impl ReplayCache {
 
     pub async fn request_lease_exists(&self, request_id: Uuid) -> Result<Option<bool>> {
         match &self.backend {
-            ReplayCacheBackend::Disabled | ReplayCacheBackend::Local(_) => Ok(None),
+            ReplayCacheBackend::Disabled
+            | ReplayCacheBackend::Local(_)
+            | ReplayCacheBackend::Sqlite(_) => Ok(None),
             ReplayCacheBackend::Redis(inner) => {
                 let key = request_lease_cache_key(request_id);
                 let mut manager = inner.manager.clone();
@@ -522,7 +671,9 @@ impl ReplayCache {
                 );
                 Ok(())
             }
-            ReplayCacheBackend::Disabled | ReplayCacheBackend::Redis(_) => Err(anyhow!(
+            ReplayCacheBackend::Disabled
+            | ReplayCacheBackend::Redis(_)
+            | ReplayCacheBackend::Sqlite(_) => Err(anyhow!(
                 "test snapshot injection requires local replay cache backend"
             )),
         }
@@ -674,7 +825,7 @@ mod tests {
 
         let cache = ReplayCache::from_config(&config).await;
         assert!(!cache.enabled());
-        assert!(cache.session_available());
+        assert!(!cache.session_available());
 
         let key = "local-response-affinity";
         let binding = crate::response_affinity::ResponseAffinityBinding {
@@ -718,5 +869,59 @@ mod tests {
             cache.response_affinity().peek(key).await.unwrap(),
             Some(binding)
         );
+    }
+
+    #[tokio::test]
+    async fn sqlite_backend_persists_sessions_and_orders_replay_snapshots() {
+        let path =
+            std::env::temp_dir().join(format!("prompt-ferry-replay-{}.sqlite", Uuid::new_v4()));
+        let pool = crate::db::connect_sqlite(&path).await.unwrap();
+        crate::db::migrate_standalone(&pool).await.unwrap();
+        let mut config = WorkerConfig::default();
+        config.session_ttl_seconds = 60;
+        config.valkey_ttl_seconds = 60;
+        let cache = ReplayCache::from_config_with_sqlite(&config, Some(pool.clone())).await;
+        let user = SessionUser {
+            user_id: 7,
+            login_name: "operator".to_string(),
+            display_name: "Operator".to_string(),
+            is_admin: false,
+        };
+        cache.write_session("sqlite-session", &user).await.unwrap();
+        let loaded = cache
+            .read_session_refresh("sqlite-session")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.user_id, user.user_id);
+        assert_eq!(loaded.login_name, user.login_name);
+        assert_eq!(loaded.is_admin, user.is_admin);
+
+        let conversation_id = Uuid::new_v4();
+        let newer = ReplaySnapshotUpdate {
+            event_id: 12,
+            conversation_id,
+            conversation_seq: 3,
+            prompt_refs: Vec::new(),
+        };
+        let older = ReplaySnapshotUpdate {
+            event_id: 11,
+            conversation_id,
+            conversation_seq: 2,
+            prompt_refs: Vec::new(),
+        };
+        assert!(cache.write_snapshot_if_newer(&newer).await.unwrap());
+        assert!(!cache.write_snapshot_if_newer(&older).await.unwrap());
+        assert_eq!(
+            cache
+                .get_snapshot(conversation_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .conversation_seq,
+            3
+        );
+        pool.close().await;
+        let _ = std::fs::remove_file(path);
     }
 }
