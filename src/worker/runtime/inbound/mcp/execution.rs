@@ -30,12 +30,12 @@ pub(super) async fn execute_mcp_request(request: BufferedMcpRequest, services: &
 /// Stage 4 + 5: execute the MCP transport, then settle quota and send the
 /// final response with usage recording on every outcome.
 async fn run_transport(execution: McpExecution, services: &RuntimeServices) {
-    let Some(state) = services.admin_state() else {
+    let Some(state) = services.mcp_state() else {
         return;
     };
-    let result = mcp::handle_stream_with_session_store(
-        &state.pool,
-        &state.mcp_catalog_cache,
+    let result = mcp::handle_stream_with_storage(
+        &state.storage,
+        &state.catalog_cache,
         mcp::McpRequestContext {
             user_id: execution.request.user_id,
             server_name: execution.request.server_name.as_deref(),
@@ -48,8 +48,8 @@ async fn run_transport(execution: McpExecution, services: &RuntimeServices) {
                 .as_ref()
                 .map(|grant| grant.credential.clone()),
         },
-        state.mcp_session_store.clone(),
-        &state.mcp_allowed_origins,
+        state.session_store.clone(),
+        &state.allowed_origins,
     )
     .await;
     let mut response_context = McpResponseContext {

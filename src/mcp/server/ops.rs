@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use crate::db::McpServer;
 
 use super::{
-    ProxyService, RequestScope, filtering,
+    McpRuntimeStorage, ProxyService, RequestScope, filtering,
     value::{
         json_request, optional_params, parse_call_tool_response, parse_get_prompt_response,
         parse_read_resource_response, parse_result, parse_result_field, required_params, with_meta,
@@ -28,7 +28,7 @@ struct AggregateCallContext<'a> {
     conversation_id: Option<&'a str>,
     request_id: &'a RequestId,
     method: &'a str,
-    pool: &'a sqlx::PgPool,
+    storage: &'a McpRuntimeStorage,
     selected_credential: Option<crate::db::McpCredential>,
 }
 
@@ -111,7 +111,7 @@ impl ProxyService {
                 conversation_id: scope.conversation_id.as_deref(),
                 request_id,
                 method: "tools/call",
-                pool: &scope.pool,
+                storage: &scope.storage,
                 selected_credential: scope.selected_credential.clone(),
             },
             with_meta(params, meta),
@@ -160,7 +160,7 @@ impl ProxyService {
                 conversation_id: scope.conversation_id.as_deref(),
                 request_id,
                 method: "resources/read",
-                pool: &scope.pool,
+                storage: &scope.storage,
                 selected_credential: scope.selected_credential.clone(),
             },
             with_meta(params, meta),
@@ -205,7 +205,7 @@ impl ProxyService {
                 conversation_id: scope.conversation_id.as_deref(),
                 request_id,
                 method: "prompts/get",
-                pool: &scope.pool,
+                storage: &scope.storage,
                 selected_credential: scope.selected_credential.clone(),
             },
             with_meta(params, meta),
@@ -241,7 +241,7 @@ impl ProxyService {
             conversation_id: scope.conversation_id.as_deref(),
             request_id,
             method: "completion/complete",
-            pool: &scope.pool,
+            storage: &scope.storage,
             selected_credential: scope.selected_credential.clone(),
         };
         match params.r#ref {
@@ -379,12 +379,12 @@ impl ProxyService {
         Parse: FnOnce(Value) -> Result<T, ErrorData>,
     {
         let server = self
-            .load_server_by_name(context.user_id, &target.server_name, context.pool)
+            .load_server_by_name(context.user_id, &target.server_name, context.storage)
             .await?;
         validate(&server, &target.upstream_name)?;
         rewrite(&mut params, target.upstream_name);
         let response = filtering::call_server_filtered(
-            Some(context.pool),
+            context.storage,
             &server,
             json_request(context.request_id, context.method, required_params(params)?),
             context.conversation_id,

@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{db, mcp::cache::McpCatalogCache};
 
-use super::fetch_server_snapshot;
+use super::snapshot::fetch_server_snapshot_with_storage;
 
 const WARMUP_CONCURRENCY: usize = 8;
 
@@ -83,7 +83,8 @@ impl McpCatalogService {
         &self,
         server: &db::McpServer,
     ) -> anyhow::Result<super::ServerCatalogSnapshot> {
-        let snapshot = fetch_server_snapshot(self.inner.repository.as_postgres(), server)
+        let storage = crate::mcp::McpRuntimeStorage::from_repository(self.inner.repository.clone());
+        let snapshot = fetch_server_snapshot_with_storage(Some(&storage), server)
             .await
             .map_err(|err| {
                 anyhow::anyhow!("failed to refresh mcp catalog for '{}': {err}", server.name)

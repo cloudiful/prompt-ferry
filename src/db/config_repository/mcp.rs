@@ -70,6 +70,25 @@ impl super::ConfigRepository {
         }
     }
 
+    pub async fn get_visible_mcp_server(
+        &self,
+        user_id: Option<i64>,
+        name: &str,
+    ) -> Result<Option<McpServer>> {
+        match self {
+            Self::Postgres(repo) => {
+                crate::db::get_visible_mcp_server(repo.pool(), user_id, name).await
+            }
+            Self::Sqlite(repo) => {
+                let servers = repo
+                    .store()
+                    .list_visible_mcp_servers(repo.manager(), user_id)
+                    .await?;
+                Ok(servers.into_iter().find(|server| server.name == name))
+            }
+        }
+    }
+
     pub async fn get_mcp_server(&self, server_id: Uuid) -> Result<Option<McpServer>> {
         match self {
             Self::Postgres(repo) => crate::db::get_mcp_server(repo.pool(), server_id).await,

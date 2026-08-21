@@ -8,6 +8,9 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 use super::*;
 use crate::{
+    config::WorkerConfig,
+    db::{ConfigRepository, McpServerInput},
+    mcp::{McpRuntimeState, McpRuntimeStorage},
     protocol::BridgeMessage,
     relay_secrets::RelaySecretManager,
     standalone_config::{StandaloneConfig, StandaloneConfigStore},
@@ -122,16 +125,63 @@ fn mcp_handler_completes_on_bounded_worker_stack() {
     });
 }
 
-#[tokio::test]
-async fn standalone_mcp_rejection_records_one_terminal_failure_summary() {
+fn mcp_input(name: &str, daily_max_requests: Option<i32>) -> McpServerInput {
+    McpServerInput {
+        scope: "admin".to_string(),
+        owner_user_id: None,
+        source_endpoint_id: None,
+        name: name.to_string(),
+        aggregate_naming_mode: "qualified_only".to_string(),
+        transport: "stdio".to_string(),
+        url: None,
+        command: Some("mcpd".to_string()),
+        args: serde_json::json!([]),
+        env_json: serde_json::json!({}),
+        bearer_tokens_json: serde_json::json!([]),
+        http_headers_json: serde_json::json!({}),
+        tool_filter_mode: "blacklist".to_string(),
+        allowed_tools: serde_json::json!([]),
+        disabled_tools: serde_json::json!([]),
+        disabled_resources: serde_json::json!([]),
+        daily_max_requests,
+        monthly_max_requests: None,
+        enabled: true,
+        timeout_ms: 30_000,
+        lifecycle_policy: "auto".to_string(),
+        lifecycle_manual_protocol_version: None,
+    }
+}
+
+async fn sqlite_services(
+    name: &str,
+    daily_max_requests: Option<i32>,
+) -> (
+    RuntimeServices,
+    StandaloneRuntimeState,
+    PathBuf,
+    tokio::sync::mpsc::Receiver<super::super::super::bridge::BridgeData>,
+) {
     let _redaction_guard = crate::redact_test_support::lock();
     let path = database_path();
     let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
-    let standalone = StandaloneRuntimeState::new(
-        store,
-        RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager"),
-        StandaloneConfig::default(),
-    );
+    let manager = RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");
+    let repository = ConfigRepository::sqlite(store.clone(), manager.clone());
+    repository
+        .create_mcp_server(uuid::Uuid::new_v4(), mcp_input(name, daily_max_requests))
+        .await
+        .expect("create SQLite MCP server");
+    let config = WorkerConfig {
+        standalone_database_path: path.to_string_lossy().to_string(),
+        ..WorkerConfig::default()
+    };
+    let mcp_runtime = McpRuntimeState::sqlite(
+        &config,
+        McpRuntimeStorage::from_repository(repository),
+        store.pool().clone(),
+    )
+    .await;
+    let standalone = StandaloneRuntimeState::new(store, manager, StandaloneConfig::default())
+        .with_mcp_runtime(mcp_runtime);
     let (out_tx, _control_rx, _data_rx) = BridgeSender::channel();
     let services = RuntimeServices::new(
         None,
@@ -141,27 +191,81 @@ async fn standalone_mcp_rejection_records_one_terminal_failure_summary() {
         ResponseLimits::default(),
     )
     .with_standalone_state(standalone.clone());
+    (services, standalone, path, _data_rx)
+}
+
+#[tokio::test]
+async fn sqlite_mcp_request_uses_unified_server_configuration() {
+    let (services, standalone, path, mut _data_rx) = sqlite_services("local", None).await;
     let request = minimal_request();
+    let mut request = request;
+    request.server_name = Some("local".to_string());
     let request_id = uuid::Uuid::parse_str(&request.request_id).expect("request ID");
 
-    assert!(
-        preparation::build_request_context(request, &services)
-            .await
-            .is_none()
-    );
-
-    let summaries = standalone.recent_usage();
-    assert_eq!(summaries.len(), 1);
-    let summary = &summaries[0];
-    assert_eq!(summary.request_id, request_id);
-    assert_eq!(summary.state, "failed");
-    assert_eq!(summary.path, "/mcp");
+    let execution = preparation::build_request_context(request, &services)
+        .await
+        .expect("SQLite MCP request should pass MCP admission");
+    let execution = preparation::resolve_server_and_quota(execution, &services)
+        .await
+        .expect("SQLite MCP server should resolve through ConfigRepository");
     assert_eq!(
+        execution.server.as_ref().map(|server| server.name.as_str()),
+        Some("local")
+    );
+    assert!(
+        !standalone
+            .recent_usage()
+            .iter()
+            .any(|summary| summary.error_code.as_deref() == Some("standalone_mcp_unavailable"))
+    );
+    assert_eq!(request_id, execution.request_ctx.request_id);
+
+    let mut aggregate_request = minimal_request();
+    aggregate_request.body =
+        br#"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}"#.to_vec();
+    handle_mcp_request(aggregate_request, &services).await;
+    let summary = standalone
+        .recent_usage()
+        .into_iter()
+        .rev()
+        .next()
+        .expect("aggregate request summary");
+    assert_eq!(summary.state, "completed", "{summary:?}");
+    assert_ne!(
         summary.error_code.as_deref(),
         Some("standalone_mcp_unavailable")
     );
 
-    drop(services);
-    drop(standalone);
+    drop(execution);
     let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn sqlite_mcp_request_budget_returns_precise_capability_error() {
+    let (services, standalone, path, _data_rx) = sqlite_services("limited", Some(1)).await;
+    let mut request = minimal_request();
+    request.server_name = Some("limited".to_string());
+    let request_id = request.request_id.clone();
+
+    let execution = preparation::build_request_context(request, &services)
+        .await
+        .expect("request context");
+    assert!(
+        preparation::resolve_server_and_quota(execution, &services)
+            .await
+            .is_none()
+    );
+
+    let summary = standalone
+        .recent_usage()
+        .into_iter()
+        .rev()
+        .find(|summary| summary.request_id.to_string() == request_id)
+        .expect("quota rejection summary");
+    assert_eq!(
+        summary.error_code.as_deref(),
+        Some("sqlite_mcp_quota_unavailable")
+    );
+    let _ = std::fs::remove_file(path);
+    drop(standalone);
 }

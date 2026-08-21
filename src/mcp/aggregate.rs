@@ -1,15 +1,14 @@
-use crate::db;
 use serde_json::{Value, json};
 
 use super::{
-    McpCatalogCache,
+    McpCatalogCache, McpRuntimeStorage,
     protocol::{aggregate_initialize_result, json_response},
     routing::{route_completion, route_prefixed, route_resource},
     service,
 };
 
 pub(super) async fn aggregate(
-    pool: &sqlx::PgPool,
+    storage: &McpRuntimeStorage,
     cache: &McpCatalogCache,
     user_id: Option<i64>,
     conversation_id: Option<&str>,
@@ -23,13 +22,13 @@ pub(super) async fn aggregate(
     match method {
         "initialize" => Ok(json_response(id, aggregate_initialize_result()?)),
         "notifications/initialized" => Ok(Value::Null),
-        "tools/list" => aggregate_tools(pool, cache, user_id, id).await,
-        "resources/list" => aggregate_resources(pool, cache, user_id, id).await,
-        "resources/templates/list" => aggregate_templates(pool, cache, user_id, id).await,
-        "prompts/list" => aggregate_prompts(pool, cache, user_id, id).await,
+        "tools/list" => aggregate_tools(storage, cache, user_id, id).await,
+        "resources/list" => aggregate_resources(storage, cache, user_id, id).await,
+        "resources/templates/list" => aggregate_templates(storage, cache, user_id, id).await,
+        "prompts/list" => aggregate_prompts(storage, cache, user_id, id).await,
         "tools/call" => {
             route_prefixed(
-                pool,
+                storage,
                 user_id,
                 conversation_id,
                 id,
@@ -41,7 +40,7 @@ pub(super) async fn aggregate(
         }
         "prompts/get" => {
             route_prefixed(
-                pool,
+                storage,
                 user_id,
                 conversation_id,
                 id,
@@ -51,54 +50,66 @@ pub(super) async fn aggregate(
             )
             .await
         }
-        "resources/read" => route_resource(pool, user_id, conversation_id, id, request).await,
+        "resources/read" => route_resource(storage, user_id, conversation_id, id, request).await,
         "completion/complete" => {
-            route_completion(pool, user_id, conversation_id, id, request).await
+            route_completion(storage, user_id, conversation_id, id, request).await
         }
         _ => Ok(json_response(id, json!({}))),
     }
 }
 
 async fn aggregate_tools(
-    pool: &sqlx::PgPool,
+    storage: &McpRuntimeStorage,
     cache: &McpCatalogCache,
     user_id: Option<i64>,
     id: Value,
 ) -> anyhow::Result<Value> {
-    let servers = db::list_visible_mcp_servers(pool, user_id).await?;
+    let servers = storage
+        .repository()
+        .list_visible_mcp_servers(user_id)
+        .await?;
     let values = service::aggregate_tools(cache, &servers).await?;
     Ok(json_response(id, json!({ "tools": values })))
 }
 
 async fn aggregate_resources(
-    pool: &sqlx::PgPool,
+    storage: &McpRuntimeStorage,
     cache: &McpCatalogCache,
     user_id: Option<i64>,
     id: Value,
 ) -> anyhow::Result<Value> {
-    let servers = db::list_visible_mcp_servers(pool, user_id).await?;
+    let servers = storage
+        .repository()
+        .list_visible_mcp_servers(user_id)
+        .await?;
     let resources = service::aggregate_resources(cache, &servers).await?;
     Ok(json_response(id, json!({ "resources": resources })))
 }
 
 async fn aggregate_templates(
-    pool: &sqlx::PgPool,
+    storage: &McpRuntimeStorage,
     cache: &McpCatalogCache,
     user_id: Option<i64>,
     id: Value,
 ) -> anyhow::Result<Value> {
-    let servers = db::list_visible_mcp_servers(pool, user_id).await?;
+    let servers = storage
+        .repository()
+        .list_visible_mcp_servers(user_id)
+        .await?;
     let templates = service::aggregate_resource_templates(cache, &servers).await?;
     Ok(json_response(id, json!({ "resourceTemplates": templates })))
 }
 
 async fn aggregate_prompts(
-    pool: &sqlx::PgPool,
+    storage: &McpRuntimeStorage,
     cache: &McpCatalogCache,
     user_id: Option<i64>,
     id: Value,
 ) -> anyhow::Result<Value> {
-    let servers = db::list_visible_mcp_servers(pool, user_id).await?;
+    let servers = storage
+        .repository()
+        .list_visible_mcp_servers(user_id)
+        .await?;
     let prompts = service::aggregate_prompts(cache, &servers).await?;
     Ok(json_response(id, json!({ "prompts": prompts })))
 }

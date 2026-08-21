@@ -60,6 +60,7 @@ pub(super) fn is_bridge_send_error(error: &anyhow::Error) -> bool {
 #[derive(Clone)]
 pub(super) struct RuntimeServices {
     pub(super) admin_state: Option<AdminState>,
+    pub(super) mcp_state: Option<crate::mcp::McpRuntimeState>,
     pub(super) standalone_state: Option<StandaloneRuntimeState>,
     pub(super) out_tx: BridgeSender,
     pub(super) client: Client,
@@ -76,7 +77,10 @@ impl RuntimeServices {
         response_limits: ResponseLimits,
     ) -> Self {
         Self {
-            admin_state,
+            admin_state: admin_state.clone(),
+            mcp_state: admin_state
+                .as_ref()
+                .map(crate::mcp::McpRuntimeState::from_admin_state),
             standalone_state: None,
             out_tx,
             client,
@@ -89,11 +93,18 @@ impl RuntimeServices {
         self.admin_state.as_ref()
     }
 
+    pub(super) fn mcp_state(&self) -> Option<&crate::mcp::McpRuntimeState> {
+        self.mcp_state.as_ref()
+    }
+
     pub(super) fn standalone_state(&self) -> Option<&StandaloneRuntimeState> {
         self.standalone_state.as_ref()
     }
 
     pub(super) fn with_standalone_state(mut self, state: StandaloneRuntimeState) -> Self {
+        if let Some(mcp_state) = state.mcp_runtime() {
+            self.mcp_state = Some(mcp_state);
+        }
         self.standalone_state = Some(state);
         self
     }

@@ -10,7 +10,7 @@ use crate::worker::runtime::lifecycle::RequestLeaseGuard;
 use crate::worker::runtime::{
     RequestExecutionContext, check_named_request_budget, mcp_support::McpResponseContext,
     record_mcp_request_event, redaction_enabled, request_assembly::BufferedMcpRequest,
-    resolve_mcp_conversation_log, standalone::StandaloneFeature,
+    resolve_mcp_conversation_log,
 };
 use crate::{
     db, mcp,
@@ -103,7 +103,7 @@ pub(super) async fn build_request_context(
     services: &RuntimeServices,
 ) -> Option<McpExecution> {
     let started = Instant::now();
-    let request_content_logging = if let Some(state) = services.admin_state() {
+    let request_content_logging = if let Some(state) = services.mcp_state() {
         state.request_content_logging.read().await.clone()
     } else {
         RequestContentLoggingResponse {
@@ -127,47 +127,6 @@ pub(super) async fn build_request_context(
     let request_lease = services
         .runtime_state
         .spawn_request_lease_guard(services.admin_state(), request_ctx.request_id);
-    if services.standalone_state().is_some() {
-        let diagnostic = crate::worker::runtime::standalone::standalone_feature_diagnostic(
-            StandaloneFeature::Mcp,
-        );
-        services
-            .record_usage_event(
-                request_ctx
-                    .mcp_usage_log(
-                        &request,
-                        &metadata,
-                        &request_content_logging,
-                        redact_content,
-                    )
-                    .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
-                    .with_status(
-                        Some(StatusCode::SERVICE_UNAVAILABLE.as_u16() as i32),
-                        Some(false),
-                        Some(request_ctx.elapsed_ms()),
-                        None,
-                    )
-                    .with_error(Some(diagnostic.code.to_string()), None, None),
-            )
-            .await;
-        let body = serde_json::json!({
-            "error": {
-                "code": diagnostic.code,
-                "message": diagnostic.message,
-            }
-        })
-        .to_string();
-        send_mcp_response(
-            services,
-            &request.request_id,
-            StatusCode::SERVICE_UNAVAILABLE.as_u16(),
-            Some("application/json".to_string()),
-            Vec::new(),
-            body.into_bytes(),
-        )
-        .await;
-        return None;
-    }
     services
         .record_usage_event(request_ctx.mcp_usage_log(
             &request,
@@ -176,7 +135,7 @@ pub(super) async fn build_request_context(
             redact_content,
         ))
         .await;
-    if services.admin_state().is_none() {
+    if services.mcp_state().is_none() {
         let _ = services
             .out_tx
             .send(BridgeMessage::McpResponseStart(McpResponseStart {
@@ -211,9 +170,12 @@ pub(super) async fn resolve_server_and_quota(
     mut execution: McpExecution,
     services: &RuntimeServices,
 ) -> Option<McpExecution> {
-    let state = services.admin_state()?;
+    let state = services.mcp_state()?;
     let server = if let Some(server_name) = execution.metadata.server_name.as_deref() {
-        db::get_visible_mcp_server(&state.pool, execution.request.user_id, server_name)
+        state
+            .storage
+            .repository()
+            .get_visible_mcp_server(execution.request.user_id, server_name)
             .await
             .ok()
             .flatten()
@@ -222,24 +184,47 @@ pub(super) async fn resolve_server_and_quota(
     };
     execution.server = server;
     if let Some(server) = execution.server.as_ref()
-        && let Ok(Some(message)) = check_named_request_budget(
-            &state.pool,
-            db::RequestRecordCategory::Mcp,
-            db::RequestBudgetScope::McpServer(server.server_id),
-            "mcp server",
-            &server.name,
-            server.daily_max_requests,
-            server.monthly_max_requests,
-        )
-        .await
+        && let Some(message) = if state.storage.repository().is_sqlite() {
+            (server.daily_max_requests.is_some() || server.monthly_max_requests.is_some())
+                .then(|| crate::db::Capability::McpQuota.description().to_string())
+        } else {
+            check_named_request_budget(
+                state.storage.postgres_pool().expect("PostgreSQL MCP state"),
+                db::RequestRecordCategory::Mcp,
+                db::RequestBudgetScope::McpServer(server.server_id),
+                "mcp server",
+                &server.name,
+                server.daily_max_requests,
+                server.monthly_max_requests,
+            )
+            .await
+            .ok()
+            .flatten()
+        }
     {
         execution
             .send_failure(
                 services,
-                StatusCode::TOO_MANY_REQUESTS,
-                "budget_exceeded",
-                message.clone(),
-                message,
+                if state.storage.repository().is_sqlite() {
+                    StatusCode::NOT_IMPLEMENTED
+                } else {
+                    StatusCode::TOO_MANY_REQUESTS
+                },
+                if state.storage.repository().is_sqlite() {
+                    crate::db::Capability::McpQuota.as_code()
+                } else {
+                    "budget_exceeded"
+                },
+                if state.storage.repository().is_sqlite() {
+                    crate::db::Capability::McpQuota.description().to_string()
+                } else {
+                    message.clone()
+                },
+                if state.storage.repository().is_sqlite() {
+                    crate::db::Capability::McpQuota.description().to_string()
+                } else {
+                    message
+                },
             )
             .await;
         return None;
@@ -251,9 +236,10 @@ pub(super) async fn resolve_server_and_quota(
         .find(|(key, _)| key.eq_ignore_ascii_case("x-prompt-ferry-conversation-id"))
         .and_then(|(_, value)| uuid::Uuid::parse_str(value).ok());
     let budget_grant = match execution.server.as_ref() {
+        Some(_) if state.storage.repository().is_sqlite() => None,
         Some(server) => {
             match mcp::prepare_quota(
-                &state.pool,
+                state.storage.postgres_pool().expect("PostgreSQL MCP state"),
                 server.server_id,
                 execution.request_ctx.request_id,
                 chrono::Utc::now(),
@@ -303,10 +289,21 @@ pub(super) async fn prepare_upstream(
     mut execution: McpExecution,
     services: &RuntimeServices,
 ) -> Option<McpExecution> {
-    let state = services.admin_state()?;
     let upstream_redaction_enabled =
         crate::redact::redaction_enabled_for_user(execution.request.user_id.filter(|id| *id > 0));
     let prior_session = if upstream_redaction_enabled {
+        let Some(state) = services.admin_state() else {
+            execution
+                .send_failure(
+                    services,
+                    StatusCode::NOT_IMPLEMENTED,
+                    "standalone_raw_payload_retention_unavailable",
+                    "SQLite MCP upstream redaction session persistence is unavailable".to_string(),
+                    "SQLite MCP upstream redaction session persistence is unavailable".to_string(),
+                )
+                .await;
+            return None;
+        };
         match load_prior_session(state, execution.conversation_id).await {
             Ok(session) => session,
             Err(err) => {

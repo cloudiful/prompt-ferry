@@ -16,6 +16,14 @@ pub async fn fetch_server_snapshot(
     pool: Option<&sqlx::PgPool>,
     server: &McpServer,
 ) -> anyhow::Result<ServerCatalogSnapshot> {
+    let storage = pool.map(|pool| super::super::McpRuntimeStorage::postgres(pool.clone()));
+    fetch_server_snapshot_with_storage(storage.as_ref(), server).await
+}
+
+pub(crate) async fn fetch_server_snapshot_with_storage(
+    storage: Option<&super::super::McpRuntimeStorage>,
+    server: &McpServer,
+) -> anyhow::Result<ServerCatalogSnapshot> {
     let timeout = Duration::from_millis(server.timeout_ms.max(100) as u64);
     tokio::time::timeout(timeout, async {
         if server.transport == "builtin_minimax" {
@@ -27,7 +35,7 @@ pub async fn fetch_server_snapshot(
             });
             return Ok(snapshot);
         }
-        let client = transport::connect(pool, server, None).await?;
+        let client = transport::connect(storage, server, None).await?;
         let result = async {
             let capabilities = client
                 .peer()

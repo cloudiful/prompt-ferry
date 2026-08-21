@@ -3,20 +3,20 @@ use std::collections::HashSet;
 
 use crate::db::McpServer;
 
-use super::{protocol::json_error_value, transport};
+use super::{McpRuntimeStorage, protocol::json_error_value, transport};
 
 pub(super) async fn call_server(
-    pool: Option<&sqlx::PgPool>,
+    storage: &McpRuntimeStorage,
     server: &McpServer,
     request: Value,
     conversation_id: Option<&str>,
     forced: Option<&crate::db::McpCredential>,
 ) -> anyhow::Result<Value> {
-    transport::call_with_pool(pool, server, request, conversation_id, forced).await
+    transport::call_with_storage(Some(storage), server, request, conversation_id, forced).await
 }
 
 pub(super) async fn call_server_filtered(
-    pool: Option<&sqlx::PgPool>,
+    storage: &McpRuntimeStorage,
     server: &McpServer,
     request: Value,
     conversation_id: Option<&str>,
@@ -40,7 +40,7 @@ pub(super) async fn call_server_filtered(
     {
         return Ok(json_error_value(id, -32602, "resource is disabled"));
     }
-    let mut response = call_server(pool, server, request, conversation_id, forced).await?;
+    let mut response = call_server(storage, server, request, conversation_id, forced).await?;
     if method == "tools/list" {
         filter_tool_items(&mut response, server, "name");
     } else if method == "resources/list" {

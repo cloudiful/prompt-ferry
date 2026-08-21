@@ -94,7 +94,7 @@ fn scan_credits_used(value: &Value) -> Option<f64> {
     }
 }
 
-/// Test-only convenience wrapper: same as [`call_with_pool`] without a
+/// Test-only convenience wrapper: same as [`call_with_storage`] without a
 /// database pool, so connections never persist learned lifecycle state.
 #[cfg(test)]
 pub(super) async fn call(
@@ -103,11 +103,11 @@ pub(super) async fn call(
     conversation_id: Option<&str>,
     forced: Option<&crate::db::McpCredential>,
 ) -> anyhow::Result<Value> {
-    call_with_pool(None, server, request, conversation_id, forced).await
+    call_with_storage(None, server, request, conversation_id, forced).await
 }
 
-pub(super) async fn call_with_pool(
-    pool: Option<&sqlx::PgPool>,
+pub(super) async fn call_with_storage(
+    storage: Option<&super::McpRuntimeStorage>,
     server: &McpServer,
     request: Value,
     conversation_id: Option<&str>,
@@ -136,7 +136,7 @@ pub(super) async fn call_with_pool(
             record_token_slot(&selected);
             attempts += 1;
             let result = client::call_once(
-                pool,
+                storage,
                 server,
                 selected.clone(),
                 request.clone(),
@@ -187,7 +187,7 @@ pub(super) async fn call_with_pool(
 }
 
 pub(super) async fn connect(
-    pool: Option<&sqlx::PgPool>,
+    storage: Option<&super::McpRuntimeStorage>,
     server: &McpServer,
     conversation_id: Option<&str>,
 ) -> anyhow::Result<rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>> {
@@ -196,7 +196,7 @@ pub(super) async fn connect(
         .select_token(server.server_id, &tokens, &[], conversation_id)
         .await;
     record_token_slot(&selected);
-    client::connect_with_selected(pool, server, selected).await
+    client::connect_with_selected(storage, server, selected).await
 }
 
 pub(super) async fn with_tracked_token_slot<F, T>(future: F) -> T

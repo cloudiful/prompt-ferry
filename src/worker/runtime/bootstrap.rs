@@ -120,7 +120,23 @@ pub(super) async fn build_standalone_state(
             "standalone configuration has no enabled persisted endpoints or static upstream API key"
         ));
     }
-    Ok(crate::worker::runtime::standalone::StandaloneRuntimeState::new(store, manager, snapshot))
+    let mcp_repository = db::ConfigRepository::sqlite(store.clone(), manager.clone());
+    let mcp_runtime = crate::mcp::McpRuntimeState::sqlite(
+        config,
+        crate::mcp::McpRuntimeStorage::from_repository(mcp_repository.clone()),
+        store.pool().clone(),
+    )
+    .await;
+    crate::mcp::McpCatalogService::new_with_repository(
+        mcp_repository,
+        mcp_runtime.catalog_cache.clone(),
+    )
+    .warm_enabled_servers()
+    .await;
+    Ok(
+        crate::worker::runtime::standalone::StandaloneRuntimeState::new(store, manager, snapshot)
+            .with_mcp_runtime(mcp_runtime),
+    )
 }
 
 fn optional_file_pem(path: &str) -> anyhow::Result<Option<String>> {

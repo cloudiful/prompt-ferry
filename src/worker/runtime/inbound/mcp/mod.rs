@@ -62,11 +62,14 @@ async fn settle_quota(
     let Some(grant) = grant else {
         return;
     };
-    let Some(state) = services.admin_state() else {
+    let Some(state) = services.mcp_state() else {
         return;
     };
     let commit = (200..300).contains(&status);
-    if let Err(err) = db::settle_reservation(&state.pool, request_id, commit).await {
+    let Some(pool) = state.storage.postgres_pool() else {
+        return;
+    };
+    if let Err(err) = db::settle_reservation(pool, request_id, commit).await {
         tracing::warn!(
             error = %err,
             request_id = %request_id,
@@ -83,7 +86,7 @@ async fn settle_quota(
             .into_iter()
             .flatten()
         {
-            if let Err(err) = db::charge_extra_units(&state.pool, account.account_id, extra).await {
+            if let Err(err) = db::charge_extra_units(pool, account.account_id, extra).await {
                 tracing::warn!(
                     error = %err,
                     request_id = %request_id,
@@ -99,8 +102,8 @@ async fn settle_quota(
     {
         let cooldown_seconds = if upstream_status == 429 { 60 } else { 600 };
         mcp::record_credential_failure(
-            &state.pool,
-            &state.mcp_quota_valkey,
+            pool,
+            &state.quota_valkey,
             &grant.credential,
             &format!("upstream http {upstream_status}"),
             Some(cooldown_seconds),

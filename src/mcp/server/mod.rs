@@ -14,7 +14,9 @@ use rmcp::{
 
 use crate::db::McpServer;
 
-use super::{McpCatalogCache, aggregate, filtering, targeting::load_visible_server};
+use super::{
+    McpCatalogCache, McpRuntimeStorage, aggregate, filtering, targeting::load_visible_server,
+};
 
 mod ops;
 mod value;
@@ -26,7 +28,7 @@ pub(super) struct RequestScope {
     pub(super) user_id: Option<i64>,
     pub(super) server_name: Option<String>,
     pub(super) conversation_id: Option<String>,
-    pub(super) pool: sqlx::PgPool,
+    pub(super) storage: McpRuntimeStorage,
     pub(super) cache: McpCatalogCache,
     pub(super) selected_credential: Option<crate::db::McpCredential>,
 }
@@ -81,7 +83,7 @@ impl ProxyService {
     ) -> Result<serde_json::Value, ErrorData> {
         if scope.server_name.is_none() {
             return aggregate::aggregate(
-                &scope.pool,
+                &scope.storage,
                 &scope.cache,
                 scope.user_id,
                 scope.conversation_id.as_deref(),
@@ -93,7 +95,7 @@ impl ProxyService {
 
         let server = self.load_server(scope).await?;
         filtering::call_server_filtered(
-            Some(&scope.pool),
+            &scope.storage,
             &server,
             request,
             scope.conversation_id.as_deref(),
@@ -107,7 +109,7 @@ impl ProxyService {
         let Some(server_name) = scope.server_name.as_deref() else {
             return Err(ErrorData::internal_error("missing MCP server name", None));
         };
-        self.load_server_by_name(scope.user_id, server_name, &scope.pool)
+        self.load_server_by_name(scope.user_id, server_name, &scope.storage)
             .await
     }
 
@@ -115,9 +117,9 @@ impl ProxyService {
         &self,
         user_id: Option<i64>,
         server_name: &str,
-        pool: &sqlx::PgPool,
+        storage: &McpRuntimeStorage,
     ) -> Result<McpServer, ErrorData> {
-        load_visible_server(pool, user_id, server_name)
+        load_visible_server(storage, user_id, server_name)
             .await
             .map_err(internal_error)?
             .ok_or_else(|| ErrorData::invalid_params("mcp server not found or disabled", None))

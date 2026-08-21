@@ -100,6 +100,75 @@ impl super::ConfigRepository {
         }
     }
 
+    /// Load an endpoint with its decrypted API keys for an internal provider
+    /// integration. This is intentionally crate-private; admin responses use
+    /// the redacted unified endpoint shape above.
+    pub(crate) async fn get_endpoint_for_mcp(
+        &self,
+        endpoint_id: Uuid,
+    ) -> Result<Option<PgProviderEndpoint>> {
+        match self {
+            Self::Postgres(repo) => crate::db::get_endpoint(repo.pool(), endpoint_id).await,
+            Self::Sqlite(repo) => {
+                let Some(endpoint) = repo
+                    .store()
+                    .get_endpoint(repo.manager(), endpoint_id)
+                    .await
+                    .map_err(|err| anyhow::anyhow!("{err}"))?
+                else {
+                    return Ok(None);
+                };
+                Ok(Some(crate::db::ProviderEndpoint {
+                    endpoint_id: endpoint.endpoint_id,
+                    scope: "admin".to_string(),
+                    owner_user_id: None,
+                    name: endpoint.name,
+                    provider: match endpoint.provider {
+                        crate::standalone_config::EndpointProvider::Minimax => {
+                            crate::db::EndpointProvider::Minimax
+                        }
+                        crate::standalone_config::EndpointProvider::Generic => {
+                            crate::db::EndpointProvider::Generic
+                        }
+                    },
+                    provider_region: endpoint.provider_region.map(|region| match region {
+                        crate::standalone_config::EndpointRegion::Cn => {
+                            crate::db::EndpointRegion::Cn
+                        }
+                        crate::standalone_config::EndpointRegion::Global => {
+                            crate::db::EndpointRegion::Global
+                        }
+                    }),
+                    base_url: endpoint.base_url,
+                    native_api: endpoint.native_api.as_str().to_string(),
+                    native_api_source: endpoint.native_api_source.as_str().to_string(),
+                    daily_max_requests: None,
+                    monthly_max_requests: None,
+                    api_key: endpoint.api_key,
+                    key_lb_enabled: endpoint.key_lb_enabled,
+                    enabled: endpoint.enabled,
+                    mcp_enabled: endpoint.mcp_enabled,
+                    created_at: endpoint.created_at,
+                    updated_at: endpoint.updated_at,
+                    api_keys: endpoint
+                        .api_keys
+                        .into_iter()
+                        .map(|key| crate::db::EndpointApiKey {
+                            key_id: key.key_id,
+                            endpoint_id: key.endpoint_id,
+                            key_label: key.key_label,
+                            api_key: key.api_key,
+                            position: key.position,
+                            enabled: key.enabled,
+                            created_at: key.created_at,
+                            updated_at: key.updated_at,
+                        })
+                        .collect(),
+                }))
+            }
+        }
+    }
+
     pub async fn create_endpoint(
         &self,
         endpoint_id: Uuid,

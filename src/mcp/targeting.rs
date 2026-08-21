@@ -1,4 +1,4 @@
-use crate::db::{self, McpServer};
+use crate::db::McpServer;
 use serde_json::Value;
 
 use super::protocol::{decode_resource_template_uri, decode_resource_uri};
@@ -134,11 +134,14 @@ pub fn extract_mcp_request_metadata(
 }
 
 pub async fn load_visible_server(
-    pool: &sqlx::PgPool,
+    storage: &super::McpRuntimeStorage,
     user_id: Option<i64>,
     server_name: &str,
 ) -> anyhow::Result<Option<McpServer>> {
-    db::get_visible_mcp_server(pool, user_id, server_name).await
+    storage
+        .repository()
+        .get_visible_mcp_server(user_id, server_name)
+        .await
 }
 
 #[cfg(test)]

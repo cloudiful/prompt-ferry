@@ -2,6 +2,7 @@ use anyhow::anyhow;
 use serde_json::Value;
 
 use super::{
+    McpRuntimeStorage,
     filtering::{call_server, is_disabled_item},
     protocol::json_error_value,
     targeting::{
@@ -11,7 +12,7 @@ use super::{
 };
 
 pub(super) async fn route_prefixed(
-    pool: &sqlx::PgPool,
+    storage: &McpRuntimeStorage,
     user_id: Option<i64>,
     conversation_id: Option<&str>,
     id: Value,
@@ -30,17 +31,17 @@ pub(super) async fn route_prefixed(
     };
     request["params"][field] = Value::String(target.upstream_name.clone());
     request["method"] = Value::String(method.to_string());
-    let server = load_visible_server(pool, user_id, &target.server_name)
+    let server = load_visible_server(storage, user_id, &target.server_name)
         .await?
         .ok_or_else(|| anyhow!("mcp server not found or disabled"))?;
     if method == "tools/call" && is_disabled_item(&server, "tools", &target.upstream_name) {
         return Ok(json_error_value(id, -32602, "tool is disabled"));
     }
-    call_server(Some(pool), &server, request, conversation_id, None).await
+    call_server(storage, &server, request, conversation_id, None).await
 }
 
 pub(super) async fn route_resource(
-    pool: &sqlx::PgPool,
+    storage: &McpRuntimeStorage,
     user_id: Option<i64>,
     conversation_id: Option<&str>,
     id: Value,
@@ -57,17 +58,17 @@ pub(super) async fn route_resource(
         ));
     };
     request["params"]["uri"] = Value::String(target.upstream_name.clone());
-    let server = load_visible_server(pool, user_id, &target.server_name)
+    let server = load_visible_server(storage, user_id, &target.server_name)
         .await?
         .ok_or_else(|| anyhow!("mcp server not found or disabled"))?;
     if is_disabled_item(&server, "resources", &target.upstream_name) {
         return Ok(json_error_value(id, -32602, "resource is disabled"));
     }
-    call_server(Some(pool), &server, request, conversation_id, None).await
+    call_server(storage, &server, request, conversation_id, None).await
 }
 
 pub(super) async fn route_completion(
-    pool: &sqlx::PgPool,
+    storage: &McpRuntimeStorage,
     user_id: Option<i64>,
     conversation_id: Option<&str>,
     id: Value,
@@ -114,8 +115,8 @@ pub(super) async fn route_completion(
         }
     };
     request["method"] = Value::String("completion/complete".to_string());
-    let server = load_visible_server(pool, user_id, &target.server_name)
+    let server = load_visible_server(storage, user_id, &target.server_name)
         .await?
         .ok_or_else(|| anyhow!("mcp server not found or disabled"))?;
-    call_server(Some(pool), &server, request, conversation_id, None).await
+    call_server(storage, &server, request, conversation_id, None).await
 }

@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use crate::db::McpServer;
 
 use super::{
-    MAX_MCP_REQUEST_BODY_BYTES, McpCatalogCache,
+    MAX_MCP_REQUEST_BODY_BYTES, McpCatalogCache, McpRuntimeStorage,
     server::{ProxyService, RequestScope},
     service,
 };
@@ -96,7 +96,8 @@ pub async fn handle(
     cache: &McpCatalogCache,
     request: McpRequestContext<'_>,
 ) -> anyhow::Result<(u16, String, Vec<(String, String)>, Vec<u8>)> {
-    match handle_stream_with_session_store(pool, cache, request, None, &[]).await? {
+    let storage = McpRuntimeStorage::postgres(pool.clone());
+    match handle_stream_with_storage(&storage, cache, request, None, &[]).await? {
         McpTransportResponse::Buffered {
             status,
             content_type,
@@ -128,11 +129,23 @@ pub async fn handle_stream(
     cache: &McpCatalogCache,
     request: McpRequestContext<'_>,
 ) -> anyhow::Result<McpTransportResponse> {
-    handle_stream_with_session_store(pool, cache, request, None, &[]).await
+    let storage = McpRuntimeStorage::postgres(pool.clone());
+    handle_stream_with_storage(&storage, cache, request, None, &[]).await
 }
 
 pub async fn handle_stream_with_session_store(
     pool: &sqlx::PgPool,
+    cache: &McpCatalogCache,
+    request: McpRequestContext<'_>,
+    session_store: Option<Arc<dyn SessionStore>>,
+    allowed_origins: &[String],
+) -> anyhow::Result<McpTransportResponse> {
+    let storage = McpRuntimeStorage::postgres(pool.clone());
+    handle_stream_with_storage(&storage, cache, request, session_store, allowed_origins).await
+}
+
+pub(crate) async fn handle_stream_with_storage(
+    storage: &McpRuntimeStorage,
     cache: &McpCatalogCache,
     request: McpRequestContext<'_>,
     session_store: Option<Arc<dyn SessionStore>>,
@@ -179,7 +192,7 @@ pub async fn handle_stream_with_session_store(
                 user_id,
                 server_name: server_name.map(str::to_string),
                 conversation_id: None,
-                pool: pool.clone(),
+                storage: storage.clone(),
                 cache: cache.clone(),
                 selected_credential,
             },

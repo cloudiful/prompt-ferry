@@ -31,17 +31,17 @@ use super::{
 };
 
 pub(super) async fn call_once(
-    pool: Option<&sqlx::PgPool>,
+    storage: Option<&super::super::McpRuntimeStorage>,
     server: &McpServer,
     selected: SelectedToken,
     request: Value,
     conversation_id: Option<&str>,
 ) -> anyhow::Result<Value> {
     if server.transport == "builtin_minimax" {
-        let pool = pool.ok_or_else(|| anyhow!("MiniMax MCP requires a database pool"))?;
-        return super::super::builtin::call(pool, server, &request, conversation_id).await;
+        let storage = storage.ok_or_else(|| anyhow!("MiniMax MCP requires unified storage"))?;
+        return super::super::builtin::call(storage, server, &request, conversation_id).await;
     }
-    let client = connect_with_selected(pool, server, selected).await?;
+    let client = connect_with_selected(storage, server, selected).await?;
     let result = dispatch(client.peer(), server, request).await;
     let cancel_result = client.cancel().await;
     match (result, cancel_result) {
@@ -52,14 +52,14 @@ pub(super) async fn call_once(
 }
 
 pub(super) async fn connect_with_selected(
-    pool: Option<&sqlx::PgPool>,
+    storage: Option<&super::super::McpRuntimeStorage>,
     server: &McpServer,
     selected: SelectedToken,
 ) -> anyhow::Result<rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>> {
     match server.transport.as_str() {
         "http" => {
             let config = http_transport_config(server, selected)?;
-            connect_with_lifecycle_fallback(pool, server, move |mode, protocol_version| {
+            connect_with_lifecycle_fallback(storage, server, move |mode, protocol_version| {
                 let config = config.clone();
                 async move {
                     let transport = StreamableHttpClientTransport::from_config(config);
@@ -72,7 +72,7 @@ pub(super) async fn connect_with_selected(
             .await
         }
         "stdio" => {
-            connect_with_lifecycle_fallback(pool, server, move |mode, protocol_version| {
+            connect_with_lifecycle_fallback(storage, server, move |mode, protocol_version| {
                 let server = server;
                 async move {
                     let command_name = server
@@ -122,7 +122,7 @@ pub(super) async fn connect_with_selected(
 /// replaying it on every call. The cache self-heals: when a cached lifecycle
 /// starts being rejected, the other one is probed and the cache is relearned.
 async fn connect_with_lifecycle_fallback<F, Fut>(
-    pool: Option<&sqlx::PgPool>,
+    storage: Option<&super::super::McpRuntimeStorage>,
     server: &McpServer,
     connect: F,
 ) -> anyhow::Result<rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>>
@@ -153,7 +153,7 @@ where
     let first_label = lifecycle_mode_label(&first_mode);
     match connect(first_mode, first_version).await {
         Ok(service) => {
-            remember_lifecycle(pool, server, cache_key, first_is_legacy, &service).await;
+            remember_lifecycle(storage, server, cache_key, first_is_legacy, &service).await;
             Ok(service)
         }
         Err(first_err) if is_protocol_rejection(&first_err) => {
@@ -173,7 +173,8 @@ where
             let second_label = lifecycle_mode_label(&second_mode);
             match connect(second_mode, second_version).await {
                 Ok(service) => {
-                    remember_lifecycle(pool, server, cache_key, second_is_legacy, &service).await;
+                    remember_lifecycle(storage, server, cache_key, second_is_legacy, &service)
+                        .await;
                     Ok(service)
                 }
                 Err(second_err) => {
@@ -260,7 +261,7 @@ fn parse_protocol_version(value: Option<&str>) -> Option<ProtocolVersion> {
 }
 
 async fn remember_lifecycle(
-    pool: Option<&sqlx::PgPool>,
+    storage: Option<&super::super::McpRuntimeStorage>,
     server: &McpServer,
     cache_key: LifecycleCacheKey,
     is_legacy: bool,
@@ -278,15 +279,17 @@ async fn remember_lifecycle(
         .unwrap_or(ProtocolVersion::V_2025_11_25);
     record_lifecycle(cache_key, mode, Some(protocol_version.clone()));
 
-    let Some(pool) = pool else {
+    let Some(storage) = storage else {
         return;
     };
     let mode = match mode {
         UpstreamLifecycle::Auto => "modern_discover",
         UpstreamLifecycle::LegacyInitialize => "legacy_initialize",
     };
-    if let Err(err) =
-        crate::db::mark_mcp_lifecycle_learned(pool, server, mode, protocol_version.as_str()).await
+    if let Err(err) = storage
+        .repository()
+        .mark_mcp_lifecycle_learned(server, mode, protocol_version.as_str())
+        .await
     {
         tracing::warn!(
             server_id = %server.server_id,

@@ -61,7 +61,7 @@ pub(crate) fn catalog() -> ServerCatalogSnapshot {
 }
 
 pub(crate) async fn call(
-    pool: &sqlx::PgPool,
+    storage: &crate::mcp::McpRuntimeStorage,
     server: &db::McpServer,
     request: &Value,
     conversation_id: Option<&str>,
@@ -69,7 +69,9 @@ pub(crate) async fn call(
     let endpoint_id = server
         .source_endpoint_id
         .ok_or_else(|| anyhow!("MiniMax MCP server has no source endpoint"))?;
-    let endpoint = db::get_endpoint(pool, endpoint_id)
+    let endpoint = storage
+        .repository()
+        .get_endpoint_for_mcp(endpoint_id)
         .await?
         .ok_or_else(|| anyhow!("MiniMax MCP source endpoint not found"))?;
     if endpoint.provider != db::EndpointProvider::Minimax {

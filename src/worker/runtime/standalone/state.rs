@@ -32,6 +32,7 @@ pub(crate) struct StandaloneRuntimeState {
     pub(super) snapshot_version: Arc<AtomicI64>,
     redaction_enabled: Arc<AtomicBool>,
     recent_usage: Arc<StandaloneUsageBuffer>,
+    mcp_runtime: Option<crate::mcp::McpRuntimeState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,7 +58,17 @@ impl StandaloneRuntimeState {
             snapshot_version: Arc::new(AtomicI64::new(0)),
             redaction_enabled,
             recent_usage: Arc::new(StandaloneUsageBuffer::new(DEFAULT_USAGE_CAPACITY)),
+            mcp_runtime: None,
         }
+    }
+
+    pub(crate) fn with_mcp_runtime(mut self, mcp_runtime: crate::mcp::McpRuntimeState) -> Self {
+        self.mcp_runtime = Some(mcp_runtime);
+        self
+    }
+
+    pub(crate) fn mcp_runtime(&self) -> Option<crate::mcp::McpRuntimeState> {
+        self.mcp_runtime.clone()
     }
 
     pub(crate) async fn reload_snapshot(&self) -> anyhow::Result<bool> {
