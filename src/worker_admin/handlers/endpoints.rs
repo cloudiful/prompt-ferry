@@ -47,20 +47,15 @@ pub(super) async fn create_endpoint(
         .await
     {
         Ok(endpoint) => {
-            if state.config_repository.is_sqlite() == false {
-                // PostgreSQL keeps the managed MiniMax MCP projection in sync.
-                let pg_endpoint: crate::db::ProviderEndpoint = endpoint.into();
-                if let Err(err) = crate::db::sync_minimax_mcp_server(
-                    state.config_repository.as_postgres().unwrap(),
-                    &pg_endpoint,
-                    mcp_enabled,
-                )
+            let pg_endpoint = endpoint.clone().into_pg();
+            if let Err(err) = state
+                .config_repository
+                .sync_minimax_mcp_server(&pg_endpoint, mcp_enabled)
                 .await
-                {
-                    return internal(&state, err);
-                }
-                refresh_managed_minimax_mcp(&state, pg_endpoint.endpoint_id).await;
+            {
+                return internal(&state, err);
             }
+            refresh_managed_minimax_mcp(&state, pg_endpoint.endpoint_id).await;
             if let Err(err) = publish_snapshot(&state).await {
                 tracing::warn!(error = %err, "snapshot publication failed after endpoint create");
             }
@@ -127,19 +122,15 @@ pub(super) async fn update_endpoint(
             {
                 return internal(&state, err);
             }
-            if state.config_repository.is_sqlite() == false {
-                let pg_endpoint: crate::db::ProviderEndpoint = endpoint.into();
-                if let Err(err) = crate::db::sync_minimax_mcp_server(
-                    state.config_repository.as_postgres().unwrap(),
-                    &pg_endpoint,
-                    mcp_enabled,
-                )
+            let pg_endpoint = endpoint.clone().into_pg();
+            if let Err(err) = state
+                .config_repository
+                .sync_minimax_mcp_server(&pg_endpoint, mcp_enabled)
                 .await
-                {
-                    return internal(&state, err);
-                }
-                refresh_managed_minimax_mcp(&state, pg_endpoint.endpoint_id).await;
+            {
+                return internal(&state, err);
             }
+            refresh_managed_minimax_mcp(&state, pg_endpoint.endpoint_id).await;
             if let Err(err) = publish_snapshot(&state).await {
                 tracing::warn!(error = %err, "snapshot publication failed after endpoint update");
             }
@@ -155,10 +146,11 @@ pub(super) async fn update_endpoint(
 }
 
 async fn refresh_managed_minimax_mcp(state: &AdminState, endpoint_id: Uuid) {
-    let Some(pool) = state.config_repository.as_postgres() else {
-        return;
-    };
-    match crate::db::get_mcp_server_by_source_endpoint(pool, endpoint_id).await {
+    match state
+        .config_repository
+        .get_mcp_server_by_source_endpoint(endpoint_id)
+        .await
+    {
         Ok(Some(server)) if server.enabled => state.mcp_catalog_service.spawn_refresh(server),
         Ok(Some(server)) => state.mcp_catalog_service.invalidate(server.server_id).await,
         Ok(None) => {}
@@ -176,14 +168,13 @@ pub(super) async fn delete_endpoint(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    let managed_server = if state.config_repository.is_sqlite() == false {
-        let pool = state.config_repository.as_postgres().unwrap();
-        match crate::db::get_mcp_server_by_source_endpoint(pool, endpoint_id).await {
-            Ok(server) => server,
-            Err(err) => return internal(&state, err),
-        }
-    } else {
-        None
+    let managed_server = match state
+        .config_repository
+        .get_mcp_server_by_source_endpoint(endpoint_id)
+        .await
+    {
+        Ok(server) => server,
+        Err(err) => return internal(&state, err),
     };
     match state.config_repository.delete_endpoint(endpoint_id).await {
         Ok(true) => {

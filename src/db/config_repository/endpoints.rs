@@ -277,6 +277,7 @@ impl SqliteConfigRepository {
         let config = endpoints_sqlite::sqlite_endpoint_from_create(
             endpoint_id,
             input,
+            _mcp_enabled,
             endpoints_sqlite::EndpointTimestamps::default(),
         )?;
         self.store
@@ -322,7 +323,8 @@ impl SqliteConfigRepository {
             endpoint_updated_at: Some(existing_endpoint.updated_at),
             api_key_timestamps,
         };
-        let config = endpoints_sqlite::sqlite_endpoint_from_create(endpoint_id, input, timestamps)?;
+        let config =
+            endpoints_sqlite::sqlite_endpoint_from_create(endpoint_id, input, false, timestamps)?;
         self.store
             .save_endpoint(&self.manager, &config)
             .await
@@ -336,23 +338,8 @@ impl SqliteConfigRepository {
     }
 
     async fn set_endpoint_mcp_enabled(&self, endpoint_id: Uuid, enabled: bool) -> Result<()> {
-        let snapshot = self
-            .store
-            .load_snapshot(&self.manager)
-            .await
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let mut snapshot = snapshot;
-        if let Some(endpoint) = snapshot
-            .endpoints
-            .iter_mut()
-            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
-        {
-            endpoint.mcp_enabled = enabled;
-        } else {
-            return Ok(());
-        }
         self.store
-            .replace_snapshot(&self.manager, &snapshot)
+            .set_endpoint_mcp_enabled(endpoint_id, enabled)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         Ok(())

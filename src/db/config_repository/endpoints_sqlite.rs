@@ -33,6 +33,7 @@ pub(super) struct ApiKeyTimestamp {
 pub(super) fn sqlite_endpoint_from_create(
     endpoint_id: Uuid,
     input: EndpointCreate,
+    mcp_enabled: bool,
     timestamps: EndpointTimestamps,
 ) -> Result<ScProviderEndpoint> {
     if input.api_key.trim().is_empty() && input.api_keys.is_empty() {
@@ -102,7 +103,7 @@ pub(super) fn sqlite_endpoint_from_create(
         native_api_source: input.native_api_source,
         key_lb_enabled: input.key_lb_enabled,
         enabled: input.enabled,
-        mcp_enabled: false,
+        mcp_enabled,
         created_at: timestamps.endpoint_created_at.unwrap_or(now),
         updated_at: timestamps.endpoint_updated_at.unwrap_or(now),
         api_key,

@@ -16,14 +16,21 @@ pub struct McpCatalogService {
 }
 
 struct McpCatalogServiceInner {
-    pool: sqlx::PgPool,
+    repository: crate::db::ConfigRepository,
     cache: McpCatalogCache,
 }
 
 impl McpCatalogService {
     pub fn new(pool: sqlx::PgPool, cache: McpCatalogCache) -> Self {
+        Self::new_with_repository(crate::db::ConfigRepository::postgres(&pool), cache)
+    }
+
+    pub fn new_with_repository(
+        repository: crate::db::ConfigRepository,
+        cache: McpCatalogCache,
+    ) -> Self {
         Self {
-            inner: Arc::new(McpCatalogServiceInner { pool, cache }),
+            inner: Arc::new(McpCatalogServiceInner { repository, cache }),
         }
     }
 
@@ -35,7 +42,7 @@ impl McpCatalogService {
     }
 
     pub async fn warm_enabled_servers(&self) {
-        let servers = match db::list_mcp_servers(&self.inner.pool).await {
+        let servers = match self.inner.repository.list_all_mcp_servers().await {
             Ok(servers) => servers,
             Err(err) => {
                 warn!(error = %err, "failed to list MCP servers during startup warmup");
@@ -58,7 +65,10 @@ impl McpCatalogService {
         &self,
         server_id: Uuid,
     ) -> anyhow::Result<(db::McpServer, super::ServerCatalogSnapshot)> {
-        let server = db::get_mcp_server(&self.inner.pool, server_id)
+        let server = self
+            .inner
+            .repository
+            .get_mcp_server(server_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("mcp server not found"))?;
         if !server.enabled {
@@ -73,7 +83,7 @@ impl McpCatalogService {
         &self,
         server: &db::McpServer,
     ) -> anyhow::Result<super::ServerCatalogSnapshot> {
-        let snapshot = fetch_server_snapshot(Some(&self.inner.pool), server)
+        let snapshot = fetch_server_snapshot(self.inner.repository.as_postgres(), server)
             .await
             .map_err(|err| {
                 anyhow::anyhow!("failed to refresh mcp catalog for '{}': {err}", server.name)

@@ -130,7 +130,11 @@ pub(super) async fn list_server_credentials(
     if !user.is_admin {
         return forbidden(&state, &user);
     }
-    match db::list_credentials_by_server(&state.pool, server_id).await {
+    match state
+        .config_repository
+        .list_mcp_credentials(server_id)
+        .await
+    {
         Ok(credentials) => {
             let total = credentials.len() as i64;
             let credentials = credentials

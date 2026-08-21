@@ -297,7 +297,9 @@ impl McpServerRequest {
         if self.transport == "builtin_minimax"
             && let Some(endpoint_id) = effective_source_endpoint_id
         {
-            let endpoint = db::get_endpoint(&state.pool, endpoint_id)
+            let endpoint = state
+                .config_repository
+                .get_endpoint(endpoint_id)
                 .await
                 .map_err(|err| internal(state, err))?;
             let Some(endpoint) = endpoint else {
@@ -474,7 +476,9 @@ impl McpServerRequest {
             ));
         }
         if let Some(owner_user_id) = owner_user_id {
-            let owner = db::get_active_user(&state.pool, owner_user_id)
+            let owner = state
+                .user_store
+                .get_active_user(owner_user_id)
                 .await
                 .map_err(|err| internal(state, err))?;
             if owner.is_none() {
@@ -485,7 +489,9 @@ impl McpServerRequest {
                 ));
             }
         }
-        let duplicate = db::get_mcp_server_by_name(&state.pool, name)
+        let duplicate = state
+            .config_repository
+            .get_mcp_server_by_name(name)
             .await
             .map_err(|err| internal(state, err))?;
         if duplicate.is_some_and(|server| Some(server.server_id) != existing_server_id) {

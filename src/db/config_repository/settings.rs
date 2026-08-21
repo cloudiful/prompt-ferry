@@ -136,24 +136,19 @@ impl SqliteConfigRepository {
         T: Serialize,
     {
         let json_value = serde_json::to_value(value)?;
-        let snapshot = self
+        let version = self
             .store
-            .load_snapshot(&self.manager)
+            .get_setting(key)
             .await
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let mut snapshot = snapshot;
-        if let Some(existing) = snapshot.settings.iter_mut().find(|s| s.key == key) {
-            existing.value = json_value;
-            existing.version = existing.version.saturating_add(1);
-        } else {
-            snapshot.settings.push(SettingConfig {
-                key: key.to_string(),
-                version: 1,
-                value: json_value,
-            });
-        }
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+            .map(|setting| setting.version.saturating_add(1))
+            .unwrap_or(1);
         self.store
-            .replace_snapshot(&self.manager, &snapshot)
+            .set_setting(&SettingConfig {
+                key: key.to_string(),
+                version,
+                value: json_value,
+            })
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         Ok(())
@@ -189,25 +184,20 @@ impl SqliteConfigRepository {
     }
 
     async fn set_bool_setting(&self, key: &str, enabled: bool) -> Result<()> {
-        let snapshot = self
-            .store
-            .load_snapshot(&self.manager)
-            .await
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let mut snapshot = snapshot;
         let value = serde_json::Value::Bool(enabled);
-        if let Some(existing) = snapshot.settings.iter_mut().find(|s| s.key == key) {
-            existing.value = value;
-            existing.version = existing.version.saturating_add(1);
-        } else {
-            snapshot.settings.push(SettingConfig {
-                key: key.to_string(),
-                version: 1,
-                value,
-            });
-        }
+        let version = self
+            .store
+            .get_setting(key)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+            .map(|setting| setting.version.saturating_add(1))
+            .unwrap_or(1);
         self.store
-            .replace_snapshot(&self.manager, &snapshot)
+            .set_setting(&SettingConfig {
+                key: key.to_string(),
+                version,
+                value,
+            })
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         Ok(())

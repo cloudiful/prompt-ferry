@@ -19,6 +19,7 @@ pub mod client_keys;
 pub mod endpoints;
 pub mod endpoints_map;
 pub mod endpoints_sqlite;
+pub mod mcp;
 pub mod model_routes;
 pub mod model_routes_map;
 pub mod relays;
@@ -151,6 +152,10 @@ mod tests {
         assert!(Capability::ClientKeys.sqlite_supported());
         assert!(Capability::Settings.sqlite_supported());
         assert!(Capability::EndpointSetting.sqlite_supported());
+        assert!(Capability::McpServers.sqlite_supported());
+        assert!(Capability::McpCredentials.sqlite_supported());
+        assert!(Capability::McpCatalog.sqlite_supported());
+        assert!(!Capability::McpQuota.sqlite_supported());
         assert!(!Capability::ConversationEndpointOverride.sqlite_supported());
         assert!(!Capability::AvailableModels.sqlite_supported());
     }

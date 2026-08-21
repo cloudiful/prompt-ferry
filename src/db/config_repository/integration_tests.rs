@@ -150,6 +150,183 @@ async fn endpoint_crud_round_trips_with_encrypted_secret() {
     close_repository(store, path).await;
 }
 
+fn mcp_input() -> crate::db::McpServerInput {
+    crate::db::McpServerInput {
+        scope: "admin".to_string(),
+        owner_user_id: None,
+        source_endpoint_id: None,
+        name: "local tools".to_string(),
+        aggregate_naming_mode: "passthrough_preferred".to_string(),
+        transport: "stdio".to_string(),
+        url: None,
+        command: Some("mcpd".to_string()),
+        args: serde_json::json!(["--stdio"]),
+        env_json: serde_json::json!({"MCP_SECRET": "stdio-secret"}),
+        bearer_tokens_json: serde_json::json!([
+            {"token": "bearer-secret", "enabled": true}
+        ]),
+        http_headers_json: serde_json::json!({"x-region": "local"}),
+        tool_filter_mode: "blacklist".to_string(),
+        allowed_tools: serde_json::json!([]),
+        disabled_tools: serde_json::json!([]),
+        disabled_resources: serde_json::json!([]),
+        daily_max_requests: None,
+        monthly_max_requests: None,
+        enabled: true,
+        timeout_ms: 30_000,
+        lifecycle_policy: "auto".to_string(),
+        lifecycle_manual_protocol_version: None,
+    }
+}
+
+#[tokio::test]
+async fn mcp_crud_projection_and_credentials_use_encrypted_sqlite_storage() {
+    let (store, manager, path) = open_repository().await;
+    let repo = ConfigRepository::sqlite(store.clone(), manager);
+    let server_id = Uuid::new_v4();
+
+    let created = repo
+        .create_mcp_server(server_id, mcp_input())
+        .await
+        .expect("create MCP server");
+    assert_eq!(created.server_id, server_id);
+    assert_eq!(created.bearer_tokens()[0].token, "bearer-secret");
+    assert_eq!(created.env_json["MCP_SECRET"], "stdio-secret");
+
+    let row = sqlx::query(
+        "SELECT env_ciphertext, bearer_tokens_ciphertext FROM standalone_mcp_servers WHERE server_id = ?",
+    )
+    .bind(server_id.to_string())
+    .fetch_one(store.pool())
+    .await
+    .expect("MCP row");
+    for column in ["env_ciphertext", "bearer_tokens_ciphertext"] {
+        let ciphertext: Vec<u8> = row.try_get(column).expect("ciphertext");
+        let text = String::from_utf8_lossy(&ciphertext);
+        assert!(!text.contains("stdio-secret"));
+        assert!(!text.contains("bearer-secret"));
+    }
+
+    let snapshot = store
+        .load_snapshot(repo.standalone_secret_manager().expect("SQLite manager"))
+        .await
+        .expect("load core snapshot");
+    store
+        .replace_snapshot(
+            repo.standalone_secret_manager().expect("SQLite manager"),
+            &snapshot,
+        )
+        .await
+        .expect("replace core snapshot");
+    assert!(
+        repo.get_mcp_server(server_id)
+            .await
+            .expect("reload MCP server after snapshot replacement")
+            .is_some()
+    );
+
+    let page = repo
+        .list_mcp_servers_page(Some(1), true, 0, 10)
+        .await
+        .expect("list MCP servers");
+    assert_eq!(page.0, 1);
+    assert_eq!(page.1[0].name, "local tools");
+
+    let credentials = repo
+        .list_mcp_credentials(server_id)
+        .await
+        .expect("list MCP credentials");
+    assert_eq!(credentials.len(), 1);
+    let view = crate::db::McpCredentialView::from(credentials.into_iter().next().unwrap());
+    assert!(!view.secret_preview.contains("bearer-secret"));
+
+    let mut updated_input = mcp_input();
+    updated_input.name = "renamed tools".to_string();
+    let updated = repo
+        .update_mcp_server(server_id, updated_input)
+        .await
+        .expect("update MCP server")
+        .expect("MCP server present");
+    assert_eq!(updated.name, "renamed tools");
+    assert_eq!(updated.bearer_tokens()[0].token, "bearer-secret");
+
+    assert!(
+        repo.delete_mcp_server(server_id)
+            .await
+            .expect("delete MCP server")
+    );
+    assert!(
+        repo.get_mcp_server(server_id)
+            .await
+            .expect("get deleted MCP server")
+            .is_none()
+    );
+    close_repository(store, path).await;
+}
+
+#[tokio::test]
+async fn sqlite_minimax_endpoint_creates_managed_mcp_projection() {
+    let (store, manager, path) = open_repository().await;
+    let repo = ConfigRepository::sqlite(store.clone(), manager);
+    let endpoint = repo
+        .create_endpoint(
+            Uuid::new_v4(),
+            EndpointCreate {
+                scope: "admin".to_string(),
+                owner_user_id: None,
+                name: "MiniMax local".to_string(),
+                provider: EndpointProvider::Minimax,
+                provider_region: None,
+                base_url: "https://api.minimax.example".to_string(),
+                native_api: NativeApi::Chat,
+                native_api_source: DbNativeApiSource::Manual,
+                daily_max_requests: None,
+                monthly_max_requests: None,
+                api_key: "minimax-secret".to_string(),
+                api_keys: vec![],
+                key_lb_enabled: false,
+                enabled: true,
+            },
+            true,
+        )
+        .await
+        .expect("create MiniMax endpoint");
+    let pg_endpoint = endpoint.clone().into_pg();
+    repo.sync_minimax_mcp_server(&pg_endpoint, true)
+        .await
+        .expect("sync managed MCP projection");
+    let managed = repo
+        .get_mcp_server_by_source_endpoint(endpoint.endpoint_id)
+        .await
+        .expect("get managed MCP projection")
+        .expect("managed MCP projection");
+    assert_eq!(managed.transport, "builtin_minimax");
+    assert!(managed.enabled);
+
+    repo.set_endpoint_mcp_enabled(endpoint.endpoint_id, false)
+        .await
+        .expect("toggle endpoint MCP flag");
+    assert!(
+        repo.get_mcp_server_by_source_endpoint(endpoint.endpoint_id)
+            .await
+            .expect("reload MCP projection after endpoint toggle")
+            .is_some()
+    );
+
+    repo.sync_minimax_mcp_server(&pg_endpoint, false)
+        .await
+        .expect("disable managed MCP projection");
+    assert!(
+        !repo
+            .get_mcp_server_by_source_endpoint(endpoint.endpoint_id)
+            .await
+            .expect("reload managed MCP projection")
+            .expect("managed MCP projection")
+            .enabled
+    );
+    close_repository(store, path).await;
+}
+
 mod keep_tests;
 
 #[tokio::test]

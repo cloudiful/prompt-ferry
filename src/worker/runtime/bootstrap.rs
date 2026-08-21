@@ -197,7 +197,10 @@ pub(super) async fn build_admin_state(
             stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
             llm_review_settings: llm_review::LlmReviewSettings::default(),
             mcp_catalog_cache: mcp_catalog_cache.clone(),
-            mcp_catalog_service: crate::mcp::McpCatalogService::new(pool, mcp_catalog_cache),
+            mcp_catalog_service: crate::mcp::McpCatalogService::new_with_repository(
+                config_repository.clone(),
+                mcp_catalog_cache,
+            ),
             mcp_session_store: crate::mcp::McpSessionStore::from_config_with_sqlite(
                 config,
                 sqlite_pool,

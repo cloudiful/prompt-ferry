@@ -8,6 +8,7 @@ use super::models::{
 };
 use crate::{
     config::{BridgeEncryptionMode, NativeApi, NativeApiSource, TlsMode},
+    db::McpServer,
     relay_secrets::EncryptedSecretEnvelope,
 };
 
@@ -30,6 +31,19 @@ pub(crate) fn required_string(row: &SqliteRow, column: &str) -> Result<String> {
 
 pub(crate) fn optional_string(row: &SqliteRow, column: &str) -> Result<Option<String>> {
     Ok(row.try_get(column)?)
+}
+
+pub(crate) fn optional_uuid(row: &SqliteRow, column: &str) -> Result<Option<Uuid>> {
+    let value = row.try_get::<Option<String>, _>(column)?;
+    value
+        .map(|value| {
+            Uuid::parse_str(&value).map_err(|error| {
+                StandaloneConfigError::CorruptDatabase(format!(
+                    "column {column} is not a UUID: {error}"
+                ))
+            })
+        })
+        .transpose()
 }
 
 pub(crate) fn bool_value(row: &SqliteRow, column: &str) -> Result<bool> {
@@ -176,8 +190,88 @@ pub(crate) fn endpoint_key(
     ))
 }
 
+pub(crate) fn mcp_server(
+    row: &SqliteRow,
+) -> Result<(McpServer, EncryptedSecretEnvelope, EncryptedSecretEnvelope)> {
+    Ok((
+        McpServer {
+            server_id: uuid(row, "server_id")?,
+            source_endpoint_id: optional_uuid(row, "source_endpoint_id")?,
+            scope: required_string(row, "scope")?,
+            owner_user_id: row.try_get("owner_user_id")?,
+            name: required_string(row, "name")?,
+            aggregate_naming_mode: required_string(row, "aggregate_naming_mode")?,
+            transport: required_string(row, "transport")?,
+            url: optional_string(row, "url")?,
+            command: optional_string(row, "command")?,
+            args: json_value(row, "args_json")?,
+            env_json: serde_json::Value::Null,
+            bearer_tokens_json: serde_json::Value::Null,
+            http_headers_json: json_value(row, "http_headers_json")?,
+            tool_filter_mode: required_string(row, "tool_filter_mode")?,
+            allowed_tools: json_value(row, "allowed_tools_json")?,
+            disabled_tools: json_value(row, "disabled_tools_json")?,
+            disabled_resources: json_value(row, "disabled_resources_json")?,
+            daily_max_requests: optional_i32(row, "daily_max_requests")?,
+            monthly_max_requests: optional_i32(row, "monthly_max_requests")?,
+            enabled: bool_value(row, "enabled")?,
+            timeout_ms: i32::try_from(row.try_get::<i64, _>("timeout_ms")?).map_err(|_| {
+                StandaloneConfigError::CorruptDatabase(
+                    "MCP timeout_ms is outside the i32 range".to_string(),
+                )
+            })?,
+            lifecycle_policy: required_string(row, "lifecycle_policy")?,
+            lifecycle_manual_protocol_version: optional_string(
+                row,
+                "lifecycle_manual_protocol_version",
+            )?,
+            lifecycle_learned_mode: optional_string(row, "lifecycle_learned_mode")?,
+            lifecycle_learned_protocol_version: optional_string(
+                row,
+                "lifecycle_learned_protocol_version",
+            )?,
+            lifecycle_learned_for_updated_at: optional_timestamp(
+                row,
+                "lifecycle_learned_for_updated_at",
+            )?,
+            lifecycle_learned_at: optional_timestamp(row, "lifecycle_learned_at")?,
+            created_at: sqlite_timestamp(row, "created_at")?,
+            updated_at: sqlite_timestamp(row, "updated_at")?,
+        },
+        envelope(row, "env")?.ok_or_else(|| {
+            StandaloneConfigError::CorruptDatabase(
+                "MCP server is missing its environment secret envelope".to_string(),
+            )
+        })?,
+        envelope(row, "bearer_tokens")?.ok_or_else(|| {
+            StandaloneConfigError::CorruptDatabase(
+                "MCP server is missing its bearer token secret envelope".to_string(),
+            )
+        })?,
+    ))
+}
+
+fn json_value(row: &SqliteRow, column: &str) -> Result<serde_json::Value> {
+    let value = required_string(row, column)?;
+    serde_json::from_str(&value).map_err(StandaloneConfigError::Serialization)
+}
+
+fn optional_timestamp(
+    row: &SqliteRow,
+    column: &str,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+    let value = row.try_get::<Option<String>, _>(column)?;
+    value
+        .map(|value| parse_timestamp(&value, column))
+        .transpose()
+}
+
 fn sqlite_timestamp(row: &SqliteRow, column: &str) -> Result<chrono::DateTime<chrono::Utc>> {
     let value: String = row.try_get(column)?;
+    parse_timestamp(&value, column)
+}
+
+fn parse_timestamp(value: &str, column: &str) -> Result<chrono::DateTime<chrono::Utc>> {
     if let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(&value) {
         return Ok(timestamp.with_timezone(&chrono::Utc));
     }

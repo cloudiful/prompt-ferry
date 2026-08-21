@@ -14,6 +14,10 @@ pub enum Capability {
     ClientKeys,
     Settings,
     EndpointSetting,
+    McpServers,
+    McpCredentials,
+    McpCatalog,
+    McpQuota,
     ConversationEndpointOverride,
     AvailableModels,
     SnapshotPublication,
@@ -29,6 +33,10 @@ impl Capability {
             Self::ClientKeys => "sqlite_client_keys_unavailable",
             Self::Settings => "sqlite_settings_unavailable",
             Self::EndpointSetting => "sqlite_endpoint_setting_unavailable",
+            Self::McpServers => "sqlite_mcp_servers_unavailable",
+            Self::McpCredentials => "sqlite_mcp_credentials_unavailable",
+            Self::McpCatalog => "sqlite_mcp_catalog_unavailable",
+            Self::McpQuota => "sqlite_mcp_quota_unavailable",
             Self::ConversationEndpointOverride => {
                 "sqlite_conversation_endpoint_override_unavailable"
             }
@@ -46,6 +54,10 @@ impl Capability {
             Self::ClientKeys => "client key CRUD is not yet available on SQLite",
             Self::Settings => "settings CRUD is not yet available on SQLite",
             Self::EndpointSetting => "user endpoint setting is not yet available on SQLite",
+            Self::McpServers => "MCP server configuration is not yet available on SQLite",
+            Self::McpCredentials => "MCP credential configuration is not yet available on SQLite",
+            Self::McpCatalog => "MCP catalog probing is not available on SQLite",
+            Self::McpQuota => "MCP quota and usage ledgers are not available on SQLite",
             Self::ConversationEndpointOverride => {
                 "conversation endpoint overrides are not yet available on SQLite"
             }
@@ -66,6 +78,9 @@ impl Capability {
                 | Self::ClientKeys
                 | Self::Settings
                 | Self::EndpointSetting
+                | Self::McpServers
+                | Self::McpCredentials
+                | Self::McpCatalog
                 | Self::SnapshotPublication
         )
     }
@@ -116,6 +131,24 @@ impl Capability {
         }
         if path.starts_with("/admin/conversations/") && path.ends_with("/endpoint-override") {
             return Some(Self::ConversationEndpointOverride);
+        }
+        if path == "/admin/mcp-servers" {
+            return Some(Self::McpServers);
+        }
+        if path.starts_with("/admin/mcp-servers/") {
+            if path.ends_with("/catalog") || path.ends_with("/test") {
+                return Some(Self::McpCatalog);
+            }
+            if path.ends_with("/credentials") {
+                return Some(Self::McpCredentials);
+            }
+            if path.contains("/credentials/") {
+                return Some(Self::McpQuota);
+            }
+            return Some(Self::McpServers);
+        }
+        if path.starts_with("/admin/mcp-quota-groups") {
+            return Some(Self::McpQuota);
         }
         if path == "/me/models" {
             return Some(Self::AvailableModels);
@@ -185,6 +218,26 @@ mod tests {
         assert_eq!(
             Capability::for_path("/me/models"),
             Some(Capability::AvailableModels)
+        );
+        assert_eq!(
+            Capability::for_path("/admin/mcp-servers"),
+            Some(Capability::McpServers)
+        );
+        assert_eq!(
+            Capability::for_path("/admin/mcp-servers/abc/catalog"),
+            Some(Capability::McpCatalog)
+        );
+        assert_eq!(
+            Capability::for_path("/admin/mcp-servers/abc/credentials"),
+            Some(Capability::McpCredentials)
+        );
+        assert_eq!(
+            Capability::for_path("/admin/mcp-servers/abc/credentials/def/quota-group"),
+            Some(Capability::McpQuota)
+        );
+        assert_eq!(
+            Capability::for_path("/admin/mcp-quota-groups"),
+            Some(Capability::McpQuota)
         );
         assert_eq!(Capability::for_path("/auth/me"), None);
     }

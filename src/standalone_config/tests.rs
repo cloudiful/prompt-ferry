@@ -149,6 +149,7 @@ async fn schema_creation_has_typed_tables_without_plaintext_secret_columns() {
     assert!(table_names.contains("standalone_model_routes"));
     assert!(table_names.contains("standalone_client_keys"));
     assert!(table_names.contains("standalone_users"));
+    assert!(table_names.contains("standalone_mcp_servers"));
     let secret_columns = sqlx::query(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/sql/standalone/schema_columns.sql"
@@ -585,7 +586,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 
     let snapshot = store
         .load_snapshot(&manager)

@@ -1,0 +1,1 @@
+DELETE FROM standalone_snapshot_endpoint_ids;

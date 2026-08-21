@@ -11,11 +11,10 @@ pub(super) async fn list_mcp_servers(
     };
     let first = query.first.unwrap_or(0).max(0);
     let rows = query.rows.unwrap_or(20).clamp(1, 200);
-    let result = if user.is_admin {
-        db::list_mcp_servers_page(&state.pool, first, rows).await
-    } else {
-        db::list_user_mcp_servers_page(&state.pool, user.user_id, first, rows).await
-    };
+    let result = state
+        .config_repository
+        .list_mcp_servers_page(Some(user.user_id), user.is_admin, first, rows)
+        .await;
     match result {
         Ok((total, servers)) => Json(McpServerPageResponse {
             servers: servers.iter().map(McpServer::from).collect(),
@@ -47,7 +46,11 @@ pub(super) async fn create_mcp_server(
         );
         return response;
     }
-    match db::create_mcp_server(&state.pool, body.into_input(&user, None)).await {
+    match state
+        .config_repository
+        .create_mcp_server(Uuid::new_v4(), body.into_input(&user, None))
+        .await
+    {
         Ok(server) => {
             state.mcp_catalog_cache.invalidate(server.server_id).await;
             if server.enabled {
@@ -70,12 +73,16 @@ pub(super) async fn update_mcp_server(
         Err(response) => return response,
     };
     let existing = if user.is_admin {
-        match db::get_mcp_server(&state.pool, server_id).await {
+        match state.config_repository.get_mcp_server(server_id).await {
             Ok(server) => server,
             Err(err) => return internal(&state, err),
         }
     } else {
-        match db::get_user_mcp_server(&state.pool, user.user_id, server_id).await {
+        match state
+            .config_repository
+            .get_user_mcp_server(user.user_id, server_id)
+            .await
+        {
             Ok(server) => server,
             Err(err) => return internal(&state, err),
         }
@@ -97,12 +104,10 @@ pub(super) async fn update_mcp_server(
         );
         return response;
     }
-    match db::update_mcp_server(
-        &state.pool,
-        server_id,
-        body.into_input(&user, Some(&existing)),
-    )
-    .await
+    match state
+        .config_repository
+        .update_mcp_server(server_id, body.into_input(&user, Some(&existing)))
+        .await
     {
         Ok(Some(server)) => {
             state.mcp_catalog_cache.invalidate(server.server_id).await;
@@ -126,13 +131,17 @@ pub(super) async fn delete_mcp_server(
         Err(response) => return response,
     };
     if !user.is_admin {
-        match db::get_user_mcp_server(&state.pool, user.user_id, server_id).await {
+        match state
+            .config_repository
+            .get_user_mcp_server(user.user_id, server_id)
+            .await
+        {
             Ok(Some(_)) => {}
             Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "mcp server not found"),
             Err(err) => return internal(&state, err),
         }
     }
-    match db::delete_mcp_server(&state.pool, server_id).await {
+    match state.config_repository.delete_mcp_server(server_id).await {
         Ok(true) => {
             state.mcp_catalog_service.invalidate(server_id).await;
             StatusCode::NO_CONTENT.into_response()
@@ -152,12 +161,16 @@ pub(super) async fn test_mcp_server(
         Err(response) => return response,
     };
     let server = if user.is_admin {
-        match db::get_mcp_server(&state.pool, server_id).await {
+        match state.config_repository.get_mcp_server(server_id).await {
             Ok(server) => server,
             Err(err) => return internal(&state, err),
         }
     } else {
-        match db::get_user_mcp_server(&state.pool, user.user_id, server_id).await {
+        match state
+            .config_repository
+            .get_user_mcp_server(user.user_id, server_id)
+            .await
+        {
             Ok(server) => server,
             Err(err) => return internal(&state, err),
         }
@@ -267,12 +280,16 @@ pub(super) async fn get_mcp_catalog(
         Err(response) => return response,
     };
     let server = if user.is_admin {
-        match db::get_mcp_server(&state.pool, server_id).await {
+        match state.config_repository.get_mcp_server(server_id).await {
             Ok(server) => server,
             Err(err) => return internal(&state, err),
         }
     } else {
-        match db::get_user_mcp_server(&state.pool, user.user_id, server_id).await {
+        match state
+            .config_repository
+            .get_user_mcp_server(user.user_id, server_id)
+            .await
+        {
             Ok(server) => server,
             Err(err) => return internal(&state, err),
         }
@@ -288,7 +305,10 @@ pub(super) async fn get_mcp_catalog(
         })
         .into_response();
     }
-    let visible_servers = match db::list_visible_mcp_servers(&state.pool, Some(user.user_id)).await
+    let visible_servers = match state
+        .config_repository
+        .list_visible_mcp_servers(Some(user.user_id))
+        .await
     {
         Ok(servers) => servers,
         Err(err) => return internal(&state, err),

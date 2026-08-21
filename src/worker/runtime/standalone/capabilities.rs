@@ -61,7 +61,7 @@ pub(crate) fn diagnostic(feature: StandaloneFeature) -> StandaloneFeatureDiagnos
             feature,
             name: "mcp",
             code: "standalone_mcp_unavailable",
-            message: "MCP is unavailable in standalone mode",
+            message: "MCP request execution is unavailable in standalone runtime; configure MCP servers through the Admin API",
         },
         StandaloneFeature::Billing => StandaloneFeatureDiagnostic {
             feature,
