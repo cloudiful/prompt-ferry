@@ -13,7 +13,7 @@ const props = defineProps<{
   workspace: ApiKeysWorkspaceView
 }>()
 
-const draftLabels = ref<Record<number, string>>({})
+const draftLabels = ref<Record<string, string>>({})
 
 const columns = computed<TableColumn<ApiKeyItemView>[]>(() => [
   { accessorKey: 'key_prefix', header: props.t('keyPrefix') },
@@ -24,11 +24,11 @@ const columns = computed<TableColumn<ApiKeyItemView>[]>(() => [
 ])
 
 const emit = defineEmits<{
-  toggleKeySecret: [keyId: number]
-  copyKeySecret: [keyId: number]
-  toggleKey: [keyId: number]
-  renameKey: [keyId: number, label: string]
-  deleteKey: [keyId: number]
+  toggleKeySecret: [keyId: string]
+  copyKeySecret: [keyId: string]
+  toggleKey: [keyId: string]
+  renameKey: [keyId: string, label: string]
+  deleteKey: [keyId: string]
   page: [event: TablePageChange]
 }>()
 
@@ -36,7 +36,7 @@ function labelDraft(keyItem: ApiKeyItemView): string {
   return draftLabels.value[keyItem.key_id] ?? keyItem.label
 }
 
-function updateLabel(keyId: number, value: unknown): void {
+function updateLabel(keyId: string, value: unknown): void {
   draftLabels.value[keyId] = String(value ?? '')
 }
 

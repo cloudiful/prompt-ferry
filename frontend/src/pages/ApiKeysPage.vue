@@ -15,7 +15,7 @@ const { notifyApiError, notifyError, notifySuccess } = useNotifier()
 const apiKeysStore = useApiKeysStore()
 const session = useSessionStore()
 
-const visibleKeySecrets = ref<Record<number, boolean>>({})
+const visibleKeySecrets = ref<Record<string, boolean>>({})
 const keyDialogVisible = ref(false)
 const keyLabel = ref('')
 const generatedSecret = ref('')
@@ -91,11 +91,11 @@ async function submitCreateKey(): Promise<void> {
   }
 }
 
-function toggleKeySecret(keyId: number): void {
+function toggleKeySecret(keyId: string): void {
   visibleKeySecrets.value[keyId] = !visibleKeySecrets.value[keyId]
 }
 
-function copyKeySecret(keyId: number): void {
+function copyKeySecret(keyId: string): void {
   const secret =
     apiKeysStore.keys.find((key) => key.key_id === keyId)?.secret ?? ''
   void copyText(secret)
@@ -105,7 +105,7 @@ function copyGeneratedSecret(): void {
   void copyText(generatedSecret.value)
 }
 
-async function toggleKey(keyId: number): Promise<void> {
+async function toggleKey(keyId: string): Promise<void> {
   const key = apiKeysStore.keys.find((item) => item.key_id === keyId)
   if (!key) return
   try {
@@ -115,7 +115,7 @@ async function toggleKey(keyId: number): Promise<void> {
   }
 }
 
-async function renameKey(keyId: number, label: string): Promise<void> {
+async function renameKey(keyId: string, label: string): Promise<void> {
   try {
     await apiKeysStore.saveKey(keyId, { label })
     notifySuccess(t('saved'))
@@ -124,7 +124,7 @@ async function renameKey(keyId: number, label: string): Promise<void> {
   }
 }
 
-async function deleteKey(keyId: number): Promise<void> {
+async function deleteKey(keyId: string): Promise<void> {
   const key = apiKeysStore.keys.find((item) => item.key_id === keyId)
   if (!key) return
   if (!window.confirm(`${t('delete')} ${key.label}?`)) return

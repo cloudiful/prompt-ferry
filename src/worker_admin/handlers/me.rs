@@ -1,6 +1,8 @@
 use super::*;
 use std::collections::HashSet;
 
+use crate::db::config_repository::client_keys::parse_client_key_identifier;
+
 pub(super) async fn list_client_keys(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -18,19 +20,7 @@ pub(super) async fn list_client_keys(
         .await
     {
         Ok((total, keys)) => Json(ClientKeyPageResponse {
-            keys: keys
-                .into_iter()
-                .map(|key| crate::db::ClientKey {
-                    key_id: key.key_id.as_u128().try_into().unwrap_or(0),
-                    user_id: key.user_id,
-                    key_prefix: key.key_prefix,
-                    label: key.label,
-                    enabled: key.enabled,
-                    last_used_at: None,
-                    created_at: key.created_at,
-                    secret: None,
-                })
-                .collect(),
+            keys: keys.into_iter().map(Into::into).collect(),
             total,
             first,
             rows,
@@ -57,16 +47,7 @@ pub(super) async fn create_client_key(
     {
         Ok(created) => {
             let _ = publish_snapshot(&state).await;
-            Json(CreateClientKeyResponse {
-                key_id: created.key.key_id.as_u128().try_into().unwrap_or(0),
-                user_id: created.key.user_id,
-                key_prefix: created.key.key_prefix,
-                label: created.key.label,
-                enabled: created.key.enabled,
-                created_at: created.key.created_at,
-                secret: created.secret,
-            })
-            .into_response()
+            Json(CreateClientKeyResponse::from(created)).into_response()
         }
         Err(err) => internal(&state, err),
     }
@@ -75,16 +56,20 @@ pub(super) async fn create_client_key(
 pub(super) async fn update_client_key(
     State(state): State<AdminState>,
     headers: HeaderMap,
-    Path(key_id): Path<i64>,
+    Path(key_id): Path<String>,
     Json(body): Json<UpdateClientKeyRequest>,
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
         Err(response) => return response,
     };
+    let identifier = match parse_client_key_identifier(&key_id) {
+        Ok(identifier) => identifier,
+        Err(_) => return bad_request("invalid client key identifier"),
+    };
     let uuid_key_id = match state
         .config_repository
-        .resolve_client_key_uuid(user.user_id, key_id)
+        .resolve_client_key_identifier(user.user_id, identifier)
         .await
     {
         Ok(Some(uuid)) => uuid,
@@ -98,17 +83,7 @@ pub(super) async fn update_client_key(
     {
         Ok(Some(key)) => {
             let _ = publish_snapshot(&state).await;
-            Json(crate::db::ClientKey {
-                key_id: key.key_id.as_u128().try_into().unwrap_or(0),
-                user_id: key.user_id,
-                key_prefix: key.key_prefix,
-                label: key.label,
-                enabled: key.enabled,
-                last_used_at: None,
-                created_at: key.created_at,
-                secret: None,
-            })
-            .into_response()
+            Json(ClientKey::from(key)).into_response()
         }
         Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "key not found"),
         Err(err) => internal(&state, err),
@@ -118,15 +93,19 @@ pub(super) async fn update_client_key(
 pub(super) async fn delete_client_key(
     State(state): State<AdminState>,
     headers: HeaderMap,
-    Path(key_id): Path<i64>,
+    Path(key_id): Path<String>,
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
         Err(response) => return response,
     };
+    let identifier = match parse_client_key_identifier(&key_id) {
+        Ok(identifier) => identifier,
+        Err(_) => return bad_request("invalid client key identifier"),
+    };
     let uuid_key_id = match state
         .config_repository
-        .resolve_client_key_uuid(user.user_id, key_id)
+        .resolve_client_key_identifier(user.user_id, identifier)
         .await
     {
         Ok(Some(uuid)) => uuid,

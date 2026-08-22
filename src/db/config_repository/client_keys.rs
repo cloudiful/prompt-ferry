@@ -14,7 +14,6 @@ use super::{PostgresConfigRepository, SqliteConfigRepository};
 use crate::{
     db::ClientKey as PgClientKey, keys::generate_client_key,
     standalone_config::ClientKeyConfig as ScClientKey,
-    worker_admin_types::CreateClientKeyResponse as PgCreateClientKeyResponse,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -25,6 +24,31 @@ pub struct UnifiedClientKey {
     pub label: String,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientKeyIdentifier {
+    Uuid(Uuid),
+    Legacy(i64),
+}
+
+pub fn parse_client_key_identifier(value: &str) -> Result<ClientKeyIdentifier> {
+    if let Ok(key_id) = Uuid::parse_str(value) {
+        return Ok(ClientKeyIdentifier::Uuid(key_id));
+    }
+
+    let legacy_key_id = value
+        .parse::<i64>()
+        .with_context(|| format!("invalid client key identifier {value:?}"))?;
+    if legacy_key_id < 0 {
+        anyhow::bail!("client key identifier must not be negative");
+    }
+    Ok(ClientKeyIdentifier::Legacy(legacy_key_id))
+}
+
+fn postgres_key_id(key_id: Uuid) -> Result<i64> {
+    i64::try_from(key_id.as_u128() >> 64)
+        .context("client key UUID is not a PostgreSQL-compatible identifier")
 }
 
 impl From<PgClientKey> for UnifiedClientKey {
@@ -45,22 +69,6 @@ pub struct UnifiedClientKeyCreated {
     #[serde(flatten)]
     pub key: UnifiedClientKey,
     pub secret: String,
-}
-
-impl From<PgCreateClientKeyResponse> for UnifiedClientKeyCreated {
-    fn from(value: PgCreateClientKeyResponse) -> Self {
-        Self {
-            key: UnifiedClientKey {
-                key_id: Uuid::from_u64_pair(value.key_id as u64, 0),
-                user_id: value.user_id,
-                key_prefix: value.key_prefix,
-                label: value.label,
-                enabled: value.enabled,
-                created_at: value.created_at,
-            },
-            secret: value.secret,
-        }
-    }
 }
 
 impl UnifiedClientKey {
@@ -141,6 +149,19 @@ impl super::ConfigRepository {
             Self::Sqlite(repo) => repo.resolve_client_key_uuid(user_id, legacy_key_id).await,
         }
     }
+
+    pub async fn resolve_client_key_identifier(
+        &self,
+        user_id: i64,
+        identifier: ClientKeyIdentifier,
+    ) -> Result<Option<Uuid>> {
+        match identifier {
+            ClientKeyIdentifier::Uuid(key_id) => Ok(Some(key_id)),
+            ClientKeyIdentifier::Legacy(legacy_key_id) => {
+                self.resolve_client_key_uuid(user_id, legacy_key_id).await
+            }
+        }
+    }
 }
 
 impl PostgresConfigRepository {
@@ -187,7 +208,7 @@ impl PostgresConfigRepository {
         label: Option<String>,
         enabled: Option<bool>,
     ) -> Result<Option<UnifiedClientKey>> {
-        let pg_key_id = i64::try_from(key_id.as_u128() as u64).unwrap_or(0);
+        let pg_key_id = postgres_key_id(key_id)?;
         Ok(
             crate::db::update_client_key(&self.pool, user_id, pg_key_id, label, enabled)
                 .await?
@@ -196,7 +217,7 @@ impl PostgresConfigRepository {
     }
 
     async fn delete_client_key(&self, user_id: i64, key_id: Uuid) -> Result<bool> {
-        let pg_key_id = i64::try_from(key_id.as_u128() as u64).unwrap_or(0);
+        let pg_key_id = postgres_key_id(key_id)?;
         crate::db::delete_client_key(&self.pool, user_id, pg_key_id).await
     }
 }
@@ -340,3 +361,7 @@ impl SqliteConfigRepository {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+#[path = "http_tests.rs"]
+mod http_tests;

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::db;
 
@@ -63,13 +64,25 @@ pub struct CreateClientKeyRequest {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct CreateClientKeyResponse {
-    pub key_id: i64,
+    pub key_id: Uuid,
     pub user_id: i64,
     pub key_prefix: String,
     pub label: String,
     pub enabled: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub secret: String,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ClientKey {
+    pub key_id: Uuid,
+    pub user_id: i64,
+    pub key_prefix: String,
+    pub label: String,
+    pub enabled: bool,
+    pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub secret: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -102,7 +115,7 @@ pub struct UserPageResponse {
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ClientKeyPageResponse {
-    pub keys: Vec<db::ClientKey>,
+    pub keys: Vec<ClientKey>,
     pub total: i64,
     pub first: i64,
     pub rows: i64,

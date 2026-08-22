@@ -1,10 +1,7 @@
 use super::schemas::ErrorEnvelope;
-use crate::{
-    db,
-    worker_admin_types::{
-        AvailableModelsResponse, ClientKeyPageResponse, CreateClientKeyRequest,
-        CreateClientKeyResponse, TablePageQuery, UpdateClientKeyRequest,
-    },
+use crate::worker_admin_types::{
+    AvailableModelsResponse, ClientKey, ClientKeyPageResponse, CreateClientKeyRequest,
+    CreateClientKeyResponse, TablePageQuery, UpdateClientKeyRequest,
 };
 
 #[utoipa::path(
@@ -35,10 +32,10 @@ pub(super) fn me_create_client_key() {}
 #[utoipa::path(
     patch,
     path = "/api/v1/me/client-keys/{key_id}",
-    params(("key_id" = i64, Path, description = "Client key ID")),
+    params(("key_id" = String, Path, description = "Client key UUID; legacy numeric identifiers are also accepted")),
     request_body = UpdateClientKeyRequest,
     responses(
-        (status = 200, body = db::ClientKey, description = "Updated current user client key"),
+        (status = 200, body = ClientKey, description = "Updated current user client key"),
         (status = 401, body = ErrorEnvelope, description = "Unauthorized"),
         (status = 404, body = ErrorEnvelope, description = "Key not found")
     ),
@@ -49,7 +46,7 @@ pub(super) fn me_update_client_key() {}
 #[utoipa::path(
     delete,
     path = "/api/v1/me/client-keys/{key_id}",
-    params(("key_id" = i64, Path, description = "Client key ID")),
+    params(("key_id" = String, Path, description = "Client key UUID; legacy numeric identifiers are also accepted")),
     responses(
         (status = 204, description = "Deleted current user client key"),
         (status = 401, body = ErrorEnvelope, description = "Unauthorized"),

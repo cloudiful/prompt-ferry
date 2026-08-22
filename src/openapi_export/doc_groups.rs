@@ -85,7 +85,7 @@ use crate::{
     llm_review::LlmReviewSettings,
     protocol::RelayIpPolicy,
     worker_admin_types::{
-        ApprovalPageResponse, AvailableModel, AvailableModelsResponse, BridgeStatus,
+        ApprovalPageResponse, AvailableModel, AvailableModelsResponse, BridgeStatus, ClientKey,
         ClientKeyPageResponse, ConversationEndpointOverrideRequest, CreateClientKeyRequest,
         CreateClientKeyResponse, CreateUserRequest, CredentialPageResponse,
         CredentialQuotaBindingRequest, EndpointPageResponse, EndpointRequest,
@@ -133,13 +133,12 @@ use crate::{
             CreateUserRequest,
             AvailableModel,
             AvailableModelsResponse,
-            ClientKeyPageResponse,
+            ClientKey, ClientKeyPageResponse,
             UserOptionsResponse,
             UserPageResponse,
             MeResponse,
             ResetPasswordRequest,
             UpdateClientKeyRequest,
-            db::ClientKey,
             db::User,
             db::UserUpdate
         )

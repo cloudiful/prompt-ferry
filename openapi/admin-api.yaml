@@ -1789,11 +1789,10 @@ paths:
           format: int64
       - name: key_id
         in: path
-        description: Client key ID
+        description: Client key UUID; legacy numeric identifiers are also accepted
         required: true
         schema:
-          type: integer
-          format: int64
+          type: string
       responses:
         '204':
           description: Deleted client key
@@ -1817,11 +1816,10 @@ paths:
           format: int64
       - name: key_id
         in: path
-        description: Client key ID
+        description: Client key UUID; legacy numeric identifiers are also accepted
         required: true
         schema:
-          type: integer
-          format: int64
+          type: string
       requestBody:
         content:
           application/json:
@@ -1995,11 +1993,10 @@ paths:
       parameters:
       - name: key_id
         in: path
-        description: Client key ID
+        description: Client key UUID; legacy numeric identifiers are also accepted
         required: true
         schema:
-          type: integer
-          format: int64
+          type: string
       responses:
         '204':
           description: Deleted current user client key
@@ -2022,11 +2019,10 @@ paths:
       parameters:
       - name: key_id
         in: path
-        description: Client key ID
+        description: Client key UUID; legacy numeric identifiers are also accepted
         required: true
         schema:
-          type: integer
-          format: int64
+          type: string
       requestBody:
         content:
           application/json:
@@ -2959,8 +2955,8 @@ components:
         enabled:
           type: boolean
         key_id:
-          type: integer
-          format: int64
+          type: string
+          format: uuid
         key_prefix:
           type: string
         label:
@@ -3073,8 +3069,8 @@ components:
         enabled:
           type: boolean
         key_id:
-          type: integer
-          format: int64
+          type: string
+          format: uuid
         key_prefix:
           type: string
         label:

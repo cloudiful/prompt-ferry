@@ -83,7 +83,11 @@ export const useApiKeysStore = defineStore('api-keys', () => {
       total.value = page.total
       first.value = page.first
       rows.value = page.rows
-      if (keys.value.length === 0 && total.value > 0 && first.value >= total.value) {
+      if (
+        keys.value.length === 0 &&
+        total.value > 0 &&
+        first.value >= total.value
+      ) {
         const previousFirst =
           Math.floor((total.value - 1) / rows.value) * rows.value
         return await loadKeys(targetUserId, previousFirst, rows.value)
@@ -124,7 +128,7 @@ export const useApiKeysStore = defineStore('api-keys', () => {
   }
 
   async function saveKey(
-    keyId: number,
+    keyId: string,
     input: UpdateClientKeyRequest,
     forceUserId?: number,
   ): Promise<ClientKey> {
@@ -148,7 +152,7 @@ export const useApiKeysStore = defineStore('api-keys', () => {
     return saved
   }
 
-  async function removeKey(keyId: number, forceUserId?: number): Promise<void> {
+  async function removeKey(keyId: string, forceUserId?: number): Promise<void> {
     const targetUserId = forceUserId ?? selectedUserId.value
     if (targetUserId === SELF_USER_ID) {
       await meDeleteClientKey<true>(withData({ path: { key_id: keyId } }))

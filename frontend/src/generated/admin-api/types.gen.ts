@@ -185,7 +185,7 @@ export type BridgeStatus = {
 export type ClientKey = {
     created_at: string;
     enabled: boolean;
-    key_id: number;
+    key_id: string;
     key_prefix: string;
     label: string;
     last_used_at?: string | null;
@@ -223,7 +223,7 @@ export type CreateClientKeyRequest = {
 export type CreateClientKeyResponse = {
     created_at: string;
     enabled: boolean;
-    key_id: number;
+    key_id: string;
     key_prefix: string;
     label: string;
     secret: string;
@@ -2764,9 +2764,9 @@ export type DeleteClientKeyData = {
          */
         user_id: number;
         /**
-         * Client key ID
+         * Client key UUID; legacy numeric identifiers are also accepted
          */
-        key_id: number;
+        key_id: string;
     };
     query?: never;
     url: '/api/v1/admin/users/{user_id}/client-keys/{key_id}';
@@ -2795,9 +2795,9 @@ export type UpdateClientKeyData = {
          */
         user_id: number;
         /**
-         * Client key ID
+         * Client key UUID; legacy numeric identifiers are also accepted
          */
-        key_id: number;
+        key_id: string;
     };
     query?: never;
     url: '/api/v1/admin/users/{user_id}/client-keys/{key_id}';
@@ -2988,9 +2988,9 @@ export type MeDeleteClientKeyData = {
     body?: never;
     path: {
         /**
-         * Client key ID
+         * Client key UUID; legacy numeric identifiers are also accepted
          */
-        key_id: number;
+        key_id: string;
     };
     query?: never;
     url: '/api/v1/me/client-keys/{key_id}';
@@ -3022,9 +3022,9 @@ export type MeUpdateClientKeyData = {
     body: UpdateClientKeyRequest;
     path: {
         /**
-         * Client key ID
+         * Client key UUID; legacy numeric identifiers are also accepted
          */
-        key_id: number;
+        key_id: string;
     };
     query?: never;
     url: '/api/v1/me/client-keys/{key_id}';

@@ -2,9 +2,9 @@ use super::schemas::ErrorEnvelope;
 use crate::{
     db,
     worker_admin_types::{
-        ClientKeyPageResponse, CreateClientKeyRequest, CreateClientKeyResponse, CreateUserRequest,
-        ResetPasswordRequest, TablePageQuery, UpdateClientKeyRequest, UserOptionsResponse,
-        UserPageResponse,
+        ClientKey, ClientKeyPageResponse, CreateClientKeyRequest, CreateClientKeyResponse,
+        CreateUserRequest, ResetPasswordRequest, TablePageQuery, UpdateClientKeyRequest,
+        UserOptionsResponse, UserPageResponse,
     },
 };
 
@@ -115,11 +115,11 @@ pub(super) fn create_client_key() {}
     path = "/api/v1/admin/users/{user_id}/client-keys/{key_id}",
     params(
         ("user_id" = i64, Path, description = "User ID"),
-        ("key_id" = i64, Path, description = "Client key ID")
+        ("key_id" = String, Path, description = "Client key UUID; legacy numeric identifiers are also accepted")
     ),
     request_body = UpdateClientKeyRequest,
     responses(
-        (status = 200, body = db::ClientKey, description = "Updated client key"),
+        (status = 200, body = ClientKey, description = "Updated client key"),
         (status = 404, body = ErrorEnvelope)
     ),
     tag = "users"
@@ -131,7 +131,7 @@ pub(super) fn update_client_key() {}
     path = "/api/v1/admin/users/{user_id}/client-keys/{key_id}",
     params(
         ("user_id" = i64, Path, description = "User ID"),
-        ("key_id" = i64, Path, description = "Client key ID")
+        ("key_id" = String, Path, description = "Client key UUID; legacy numeric identifiers are also accepted")
     ),
     responses(
         (status = 204, description = "Deleted client key"),

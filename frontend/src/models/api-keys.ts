@@ -2,7 +2,7 @@ import type { ClientKey, User } from '../generated/admin-api'
 
 export type ApiKeyItemView = {
   key: ClientKey
-  key_id: number
+  key_id: string
   key_prefix: string
   label: string
   enabled: boolean
@@ -19,7 +19,7 @@ export type ApiKeysWorkspaceView = {
 export function createApiKeysWorkspaceView(options: {
   keys: ClientKey[]
   selectedUser: User | null
-  visibleKeySecrets: Record<number, boolean>
+  visibleKeySecrets: Record<string, boolean>
 }): ApiKeysWorkspaceView {
   return {
     has_keys: options.keys.length > 0,
