@@ -7,7 +7,6 @@ import {
 import type { McpCredentialView, McpQuotaGroup } from '@/generated/admin-api'
 import { expectData, withData } from '@/api'
 import { useNotifier } from '@/composables/useNotifier'
-import { useLocale } from '@/composables/useLocale'
 
 const props = defineProps<{
   t: TranslateFn
@@ -57,7 +56,10 @@ watch(
   { immediate: true },
 )
 
-async function bind(credential: McpCredentialView, groupId: string): Promise<void> {
+async function bind(
+  credential: McpCredentialView,
+  groupId: string,
+): Promise<void> {
   savingId.value = credential.credential_id
   try {
     await bindCredentialGroup<true>({
@@ -85,17 +87,29 @@ defineExpose({ reload: load })
 
 <template>
   <div class="grid gap-2">
-    <div class="text-muted">{{ t('quotaGroupBind') }}</div>
-    <div v-if="!serverId" class="text-xs text-dimmed">
-      {{ t('bearerTokenHint') }}
+    <div class="flex items-center gap-1 text-muted">
+      <span>{{ t('quotaGroupBind') }}</span>
+      <UTooltip :text="t('quotaBindingHint')">
+        <UButton
+          type="button"
+          size="xs"
+          color="neutral"
+          variant="ghost"
+          icon="i-lucide-info"
+          :aria-label="t('quotaBindingHint')"
+        />
+      </UTooltip>
     </div>
-    <div v-else-if="loading" class="text-xs text-dimmed">
+    <div v-if="serverId && loading" class="text-xs text-dimmed">
       {{ t('loadingTools') }}
     </div>
-    <div v-else-if="credentials.length === 0" class="text-xs text-dimmed">
+    <div
+      v-else-if="serverId && credentials.length === 0"
+      class="text-xs text-dimmed"
+    >
       {{ t('quotaNotConfigured') }}
     </div>
-    <div v-else class="grid gap-2">
+    <div v-else-if="serverId" class="grid gap-2">
       <div
         v-for="credential in credentials"
         :key="credential.credential_id"
@@ -119,7 +133,6 @@ defineExpose({ reload: load })
           @update:model-value="bind(credential, String($event))"
         />
       </div>
-      <div class="text-xs text-dimmed">{{ t('quotaBindingHint') }}</div>
     </div>
   </div>
 </template>

@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { EndpointForm } from '@/models'
 
-defineProps<{
+const props = defineProps<{
   t: TranslateFn
 }>()
 
@@ -87,6 +87,16 @@ const protocolSelection = computed({
     }
   },
 })
+const baseUrlHintText = computed(() => {
+  const hints = [props.t('baseUrlHint')]
+  if (isMinimax.value && protocolSelection.value === 'anthropic_messages') {
+    hints.push(props.t('providerMinimaxAnthropicBaseUrlHint'))
+  }
+  if (usesCustomMinimaxBaseUrl.value) {
+    hints.push(props.t('providerCustomBaseUrlHint'))
+  }
+  return hints.join(' ')
+})
 
 function activeMinimaxProtocol(): MinimaxProtocol {
   return form.value.protocol_mode === 'manual' &&
@@ -160,14 +170,14 @@ function setMinimaxBaseUrl(
       <label class="text-xs text-muted" for="endpoint-base-url">
         {{ t('baseUrl') }}
       </label>
-      <UTooltip :text="t('baseUrlHint')">
+      <UTooltip :text="baseUrlHintText">
         <UButton
           type="button"
           size="xs"
           color="neutral"
           variant="ghost"
           icon="i-lucide-info"
-          :aria-label="t('baseUrlHint')"
+          :aria-label="baseUrlHintText"
         />
       </UTooltip>
     </div>
@@ -178,22 +188,10 @@ function setMinimaxBaseUrl(
       :placeholder="t('baseUrl')"
     />
     <p
-      v-if="isMinimax && protocolSelection === 'anthropic_messages'"
-      class="text-xs leading-snug text-muted md:col-start-2"
-    >
-      {{ t('providerMinimaxAnthropicBaseUrlHint') }}
-    </p>
-    <p
       v-if="hasVersionPath"
       class="text-xs leading-snug text-warning md:col-start-2"
     >
       {{ t('baseUrlVersionWarning') }}
-    </p>
-    <p
-      v-if="usesCustomMinimaxBaseUrl"
-      class="text-xs leading-snug text-muted md:col-start-2"
-    >
-      {{ t('providerCustomBaseUrlHint') }}
     </p>
   </div>
 </template>

@@ -67,13 +67,20 @@ function setSource(index: number, source: 'worker' | 'value'): void {
 <template>
   <div class="grid gap-2">
     <div class="flex flex-wrap items-start justify-between gap-3">
-      <div class="grid gap-1">
+      <div class="flex items-center gap-1">
         <label class="text-xs font-medium text-default">
           {{ t('stdioEnv') }}
         </label>
-        <div class="text-xs text-dimmed">
-          {{ t('stdioEnvHint') }}
-        </div>
+        <UTooltip :text="t('stdioEnvHint')">
+          <UButton
+            type="button"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-info"
+            :aria-label="t('stdioEnvHint')"
+          />
+        </UTooltip>
       </div>
       <UButton type="button" size="sm" color="neutral" @click="addVariable">
         {{ t('addEnvironmentVariable') }}

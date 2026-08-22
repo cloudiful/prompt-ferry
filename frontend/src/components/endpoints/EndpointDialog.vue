@@ -40,18 +40,30 @@ defineEmits<{
           @update:model-value="form.owner_user_id = $event ?? null"
         />
         <EndpointApiKeysEditor v-model:form="form" :t="t" />
-        <label
+        <div
           v-if="form.provider === 'minimax'"
           class="flex items-center justify-between gap-3 border-t border-default pt-3"
         >
-          <span class="grid gap-1">
-            <span class="text-xs font-medium text-default">{{
-              t('minimaxMcp')
-            }}</span>
-            <span class="text-xs text-muted">{{ t('minimaxMcpHint') }}</span>
-          </span>
-          <USwitch v-model="form.mcp_enabled" />
-        </label>
+          <div class="flex items-center gap-1">
+            <label
+              for="endpoint-minimax-mcp"
+              class="text-xs font-medium text-default"
+            >
+              {{ t('minimaxMcp') }}
+            </label>
+            <UTooltip :text="t('minimaxMcpHint')">
+              <UButton
+                type="button"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-info"
+                :aria-label="t('minimaxMcpHint')"
+              />
+            </UTooltip>
+          </div>
+          <USwitch id="endpoint-minimax-mcp" v-model="form.mcp_enabled" />
+        </div>
         <RequestLimitFields
           v-model:form="form"
           daily-label="dailyRequestLimit"

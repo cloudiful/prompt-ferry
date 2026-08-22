@@ -36,38 +36,107 @@ defineEmits<{
           <UInput v-model="form.public_model" class="w-full" required />
         </UFormField>
         <div class="grid gap-2 sm:grid-cols-2">
-          <UFormField :label="`${t('inputRate')} (${t('perMillionTokens')})`"
-            ><UInput
+          <UFormField>
+            <template #label>
+              <div class="flex items-center gap-1">
+                <span>{{
+                  `${t('inputRate')} (${t('perMillionTokens')})`
+                }}</span>
+                <UTooltip :text="t('billingRateHint')">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-info"
+                    :aria-label="t('billingRateHint')"
+                  />
+                </UTooltip>
+              </div>
+            </template>
+            <UInput
               v-model="form.input_rate"
               class="w-full"
               inputmode="decimal"
               required
-          /></UFormField>
-          <UFormField
-            :label="`${t('cacheReadRate')} (${t('perMillionTokens')})`"
-            ><UInput
+            />
+          </UFormField>
+          <UFormField>
+            <template #label>
+              <div class="flex items-center gap-1">
+                <span>{{
+                  `${t('cacheReadRate')} (${t('perMillionTokens')})`
+                }}</span>
+                <UTooltip :text="t('billingRateHint')">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-info"
+                    :aria-label="t('billingRateHint')"
+                  />
+                </UTooltip>
+              </div>
+            </template>
+            <UInput
               v-model="form.cache_read_rate"
               class="w-full"
               inputmode="decimal"
               required
-          /></UFormField>
-          <UFormField
-            :label="`${t('cacheWriteRate')} (${t('perMillionTokens')})`"
-            ><UInput
+            />
+          </UFormField>
+          <UFormField>
+            <template #label>
+              <div class="flex items-center gap-1">
+                <span>{{
+                  `${t('cacheWriteRate')} (${t('perMillionTokens')})`
+                }}</span>
+                <UTooltip :text="t('billingRateHint')">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-info"
+                    :aria-label="t('billingRateHint')"
+                  />
+                </UTooltip>
+              </div>
+            </template>
+            <UInput
               v-model="form.cache_write_rate"
               class="w-full"
               inputmode="decimal"
               required
-          /></UFormField>
-          <UFormField :label="`${t('outputRate')} (${t('perMillionTokens')})`"
-            ><UInput
+            />
+          </UFormField>
+          <UFormField>
+            <template #label>
+              <div class="flex items-center gap-1">
+                <span>{{
+                  `${t('outputRate')} (${t('perMillionTokens')})`
+                }}</span>
+                <UTooltip :text="t('billingRateHint')">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-info"
+                    :aria-label="t('billingRateHint')"
+                  />
+                </UTooltip>
+              </div>
+            </template>
+            <UInput
               v-model="form.output_rate"
               class="w-full"
               inputmode="decimal"
               required
-          /></UFormField>
+            />
+          </UFormField>
         </div>
-        <p class="text-xs text-dimmed">{{ t('billingRateHint') }}</p>
         <div class="flex justify-end gap-2">
           <UButton
             type="button"

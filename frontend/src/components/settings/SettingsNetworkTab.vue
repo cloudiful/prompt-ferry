@@ -50,6 +50,24 @@ defineEmits<{
             </template>
             <template #content>
               <div class="grid gap-2">
+                <div class="flex items-center gap-1">
+                  <label
+                    class="text-xs text-muted"
+                    for="settings-allowed-cidrs"
+                  >
+                    {{ t('allowedCidrs') }}
+                  </label>
+                  <UTooltip :text="t('allowedCidrsHelp')">
+                    <UButton
+                      type="button"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-info"
+                      :aria-label="t('allowedCidrsHelp')"
+                    />
+                  </UTooltip>
+                </div>
                 <UTextarea
                   id="settings-allowed-cidrs"
                   v-model="relayIpWhitelist.allowed_cidrs_text"
@@ -59,9 +77,6 @@ defineEmits<{
                   name="settings-allowed-cidrs"
                   :placeholder="t('allowedCidrsPlaceholder')"
                 />
-                <div class="text-xs text-dimmed">
-                  {{ t('allowedCidrsHelp') }}
-                </div>
               </div>
             </template>
           </UCollapsible>
@@ -80,6 +95,24 @@ defineEmits<{
             </template>
             <template #content>
               <div class="grid gap-2">
+                <div class="flex items-center gap-1">
+                  <label
+                    class="text-xs text-muted"
+                    for="settings-trusted-proxy-cidrs"
+                  >
+                    {{ t('trustedProxyCidrs') }}
+                  </label>
+                  <UTooltip :text="t('trustedProxyCidrsHelp')">
+                    <UButton
+                      type="button"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-info"
+                      :aria-label="t('trustedProxyCidrsHelp')"
+                    />
+                  </UTooltip>
+                </div>
                 <UTextarea
                   id="settings-trusted-proxy-cidrs"
                   v-model="relayIpWhitelist.trusted_proxy_cidrs_text"
@@ -89,9 +122,6 @@ defineEmits<{
                   name="settings-trusted-proxy-cidrs"
                   :placeholder="t('trustedProxyCidrsPlaceholder')"
                 />
-                <div class="text-xs text-dimmed">
-                  {{ t('trustedProxyCidrsHelp') }}
-                </div>
               </div>
             </template>
           </UCollapsible>

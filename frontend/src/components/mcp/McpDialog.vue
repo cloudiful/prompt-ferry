@@ -215,31 +215,64 @@ defineEmits<{
             />
           </div>
           <div class="grid gap-3 md:grid-cols-[10rem_minmax(0,1fr)]">
-            <USelect
-              v-model="transportSelection"
-              class="w-full"
-              :items="[
-                { label: 'HTTP MCP', value: 'http' },
-                { label: 'stdio', value: 'stdio' },
-                ...(form.source_endpoint_id
-                  ? [{ label: t('minimaxManaged'), value: 'builtin_minimax' }]
-                  : []),
-              ]"
-              label-key="label"
-              value-key="value"
-            />
-            <UInput
+            <div class="flex min-w-0 items-center gap-1">
+              <USelect
+                v-model="transportSelection"
+                class="min-w-0 flex-1"
+                :items="[
+                  { label: 'HTTP MCP', value: 'http' },
+                  { label: 'stdio', value: 'stdio' },
+                  ...(form.source_endpoint_id
+                    ? [{ label: t('minimaxManaged'), value: 'builtin_minimax' }]
+                    : []),
+                ]"
+                label-key="label"
+                value-key="value"
+              />
+              <UTooltip
+                v-if="form.transport === 'builtin_minimax'"
+                :text="t('minimaxManagedHint')"
+              >
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-info"
+                  :aria-label="t('minimaxManagedHint')"
+                />
+              </UTooltip>
+            </div>
+            <div
               v-if="form.transport === 'http'"
-              v-model="form.url"
-              class="w-full"
-              placeholder="http://127.0.0.1:3000/mcp"
-            />
-            <UInput
+              class="flex min-w-0 items-center gap-1"
+            >
+              <UInput
+                v-model="form.url"
+                class="min-w-0 flex-1"
+                placeholder="http://127.0.0.1:3000/mcp"
+              />
+            </div>
+            <div
               v-else-if="form.transport === 'stdio'"
-              v-model="form.command_argv_text"
-              class="w-full"
-              placeholder='["uvx", "minimax-coding-plan-mcp", "-y"]'
-            />
+              class="flex min-w-0 items-center gap-1"
+            >
+              <UInput
+                v-model="form.command_argv_text"
+                class="min-w-0 flex-1"
+                placeholder='["uvx", "minimax-coding-plan-mcp", "-y"]'
+              />
+              <UTooltip :text="t('stdioCommandHint')">
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-info"
+                  :aria-label="t('stdioCommandHint')"
+                />
+              </UTooltip>
+            </div>
           </div>
           <McpBearerTokensEditor
             v-if="form.transport === 'http'"
@@ -252,15 +285,6 @@ defineEmits<{
             :quota-groups="quotaGroups"
             :t="t"
           />
-          <div v-if="form.transport === 'stdio'" class="text-xs text-dimmed">
-            {{ t('stdioCommandHint') }}
-          </div>
-          <div
-            v-if="form.transport === 'builtin_minimax'"
-            class="rounded border border-default bg-muted/20 p-3 text-xs text-muted"
-          >
-            {{ t('minimaxManagedHint') }}
-          </div>
           <McpEnvironmentEditor
             v-if="form.transport === 'stdio'"
             v-model:variables="form.environment_variables"
@@ -288,7 +312,19 @@ defineEmits<{
                 />
               </div>
               <div class="grid min-w-0 gap-2">
-                <div class="text-muted">{{ t('lifecyclePolicy') }}</div>
+                <div class="flex items-center gap-1 text-muted">
+                  <span>{{ t('lifecyclePolicy') }}</span>
+                  <UTooltip :text="t('lifecyclePolicyHint')">
+                    <UButton
+                      type="button"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-info"
+                      :aria-label="t('lifecyclePolicyHint')"
+                    />
+                  </UTooltip>
+                </div>
                 <USelect
                   v-model="form.lifecycle_policy"
                   class="w-full"
@@ -304,8 +340,18 @@ defineEmits<{
                 />
               </div>
               <div class="grid min-w-0 gap-2">
-                <div class="text-muted">
-                  {{ t('lifecycleManualProtocolVersion') }}
+                <div class="flex items-center gap-1 text-muted">
+                  <span>{{ t('lifecycleManualProtocolVersion') }}</span>
+                  <UTooltip :text="t('lifecycleManualProtocolVersionHint')">
+                    <UButton
+                      type="button"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-info"
+                      :aria-label="t('lifecycleManualProtocolVersionHint')"
+                    />
+                  </UTooltip>
                 </div>
                 <UInput
                   v-model="form.lifecycle_manual_protocol_version"
@@ -313,12 +359,6 @@ defineEmits<{
                   placeholder="2025-06-18"
                 />
               </div>
-            </div>
-            <div class="text-xs text-dimmed">
-              {{ t('lifecyclePolicyHint') }}
-            </div>
-            <div class="text-xs text-dimmed">
-              {{ t('lifecycleManualProtocolVersionHint') }}
             </div>
             <div
               v-if="form.server_id && learned"
@@ -365,7 +405,19 @@ defineEmits<{
                 />
               </div>
               <div class="grid min-w-0 gap-2">
-                <div class="text-muted">{{ t('disabledResources') }}</div>
+                <div class="flex items-center gap-1 text-muted">
+                  <span>{{ t('disabledResources') }}</span>
+                  <UTooltip :text="t('disabledResourcesHint')">
+                    <UButton
+                      type="button"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-info"
+                      :aria-label="t('disabledResourcesHint')"
+                    />
+                  </UTooltip>
+                </div>
                 <USelectMenu
                   v-model="form.disabled_resources"
                   :items="resourceOptions"
@@ -378,9 +430,6 @@ defineEmits<{
                   :ui="{ value: 'block max-w-full truncate' }"
                 />
               </div>
-            </div>
-            <div class="text-xs text-dimmed">
-              {{ t('disabledResourcesHint') }}
             </div>
             <div
               v-if="hasCatalogPreview"

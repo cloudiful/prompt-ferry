@@ -50,9 +50,21 @@ const userOptions = computed(() =>
     <template #body>
       <form class="grid gap-3 text-xs" @submit.prevent="$emit('submit')">
         <div class="grid gap-1">
-          <label class="font-medium text-highlighted">{{
-            t('clearScope')
-          }}</label>
+          <div class="flex items-center gap-1">
+            <label class="font-medium text-highlighted">{{
+              t('clearScope')
+            }}</label>
+            <UTooltip :text="t('clearHistoryHint')">
+              <UButton
+                type="button"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-info"
+                :aria-label="t('clearHistoryHint')"
+              />
+            </UTooltip>
+          </div>
           <USelect
             v-model="form.scope"
             :items="scopeOptions"
@@ -116,9 +128,8 @@ const userOptions = computed(() =>
         </div>
 
         <div
-          class="rounded border border-default bg-muted px-3 py-2 leading-5 text-muted"
+          class="rounded border border-error bg-error/10 px-3 py-2 leading-5 text-error"
         >
-          <div>{{ t('clearHistoryHint') }}</div>
           <div>{{ t('clearHistoryWarning') }}</div>
         </div>
 

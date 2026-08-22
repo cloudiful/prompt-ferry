@@ -38,9 +38,21 @@ const columns = computed<TableColumn<BillingPriceRuleResponse>[]>(() => [
 <template>
   <section class="grid gap-3 rounded-lg bg-default p-3">
     <div class="flex flex-wrap items-center gap-2">
-      <h2 class="mr-auto text-sm font-semibold text-highlighted">
-        {{ t('billingPriceRules') }}
-      </h2>
+      <div class="mr-auto flex items-center gap-1">
+        <h2 class="text-sm font-semibold text-highlighted">
+          {{ t('billingPriceRules') }}
+        </h2>
+        <UTooltip :text="t('billingRuleScopeHint')">
+          <UButton
+            type="button"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-info"
+            :aria-label="t('billingRuleScopeHint')"
+          />
+        </UTooltip>
+      </div>
       <UButton size="sm" icon="i-lucide-plus" @click="emit('create')">{{
         t('newPriceRule')
       }}</UButton>
@@ -122,6 +134,5 @@ const columns = computed<TableColumn<BillingPriceRuleResponse>[]>(() => [
       :page-size-options="STANDARD_PAGE_SIZE_OPTIONS"
       @change="$emit('page', $event)"
     />
-    <p class="text-xs text-dimmed">{{ t('billingRuleScopeHint') }}</p>
   </section>
 </template>

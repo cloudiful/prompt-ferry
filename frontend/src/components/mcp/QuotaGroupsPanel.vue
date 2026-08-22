@@ -175,8 +175,19 @@ defineExpose({ refresh })
   <section class="grid min-w-0 gap-3">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="grid gap-1">
-        <div class="text-sm font-semibold">{{ t('quotaGroups') }}</div>
-        <div class="text-xs text-dimmed">{{ t('quotaGroupsHint') }}</div>
+        <div class="flex items-center gap-1">
+          <div class="text-sm font-semibold">{{ t('quotaGroups') }}</div>
+          <UTooltip :text="t('quotaGroupsHint')">
+            <UButton
+              type="button"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              icon="i-lucide-info"
+              :aria-label="t('quotaGroupsHint')"
+            />
+          </UTooltip>
+        </div>
       </div>
       <UButton size="sm" @click="openCreate">
         <UIcon name="i-lucide-plus" class="h-4 w-4" />

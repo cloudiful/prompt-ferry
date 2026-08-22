@@ -163,22 +163,56 @@ function submit(): void {
             />
           </label>
           <label class="grid gap-1">
-            <span class="text-muted">{{ t('defaultCost') }}</span>
+            <span class="flex items-center gap-1 text-muted">
+              <span>{{ t('defaultCost') }}</span>
+              <UTooltip :text="t('defaultCostHint')">
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-info"
+                  :aria-label="t('defaultCostHint')"
+                />
+              </UTooltip>
+            </span>
             <UInput v-model="defaultCost" type="number" min="0" step="0.01" />
           </label>
         </div>
-        <div class="text-xs text-dimmed">{{ t('defaultCostHint') }}</div>
         <div class="grid gap-2 md:grid-cols-2">
           <label class="grid gap-1">
-            <span class="text-muted">{{ t('billingPeriodStart') }}</span>
+            <span class="flex items-center gap-1 text-muted">
+              <span>{{ t('billingPeriodStart') }}</span>
+              <UTooltip :text="t('billingPeriodHint')">
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-info"
+                  :aria-label="t('billingPeriodHint')"
+                />
+              </UTooltip>
+            </span>
             <UInput v-model="billingPeriodStart" type="datetime-local" />
           </label>
           <label class="grid gap-1">
-            <span class="text-muted">{{ t('billingPeriodEnd') }}</span>
+            <span class="flex items-center gap-1 text-muted">
+              <span>{{ t('billingPeriodEnd') }}</span>
+              <UTooltip :text="t('billingPeriodHint')">
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-info"
+                  :aria-label="t('billingPeriodHint')"
+                />
+              </UTooltip>
+            </span>
             <UInput v-model="billingPeriodEnd" type="datetime-local" />
           </label>
         </div>
-        <div class="text-xs text-dimmed">{{ t('billingPeriodHint') }}</div>
         <div class="flex justify-end gap-2 border-t border-default pt-3">
           <UButton
             type="button"

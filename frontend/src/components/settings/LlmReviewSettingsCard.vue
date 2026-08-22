@@ -159,7 +159,19 @@ const translatedFailurePolicyOptions = computed(() =>
             </div>
           </div>
           <div class="grid gap-2">
-            <label class="text-xs text-muted">{{ t('extraHeaders') }}</label>
+            <div class="flex items-center gap-1">
+              <label class="text-xs text-muted">{{ t('extraHeaders') }}</label>
+              <UTooltip :text="t('extraHeadersHint')">
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-info"
+                  :aria-label="t('extraHeadersHint')"
+                />
+              </UTooltip>
+            </div>
             <UTextarea
               v-model="webhookHeadersText"
               autoresize
@@ -167,9 +179,6 @@ const translatedFailurePolicyOptions = computed(() =>
               class="font-mono"
               :placeholder="t('extraHeadersPlaceholder')"
             />
-            <div class="text-xs text-dimmed">
-              {{ t('extraHeadersHint') }}
-            </div>
           </div>
         </div>
       </template>
