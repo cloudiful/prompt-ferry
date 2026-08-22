@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import type {
+  TokenPlanKeyUsage,
   TokenPlanModelUsage,
   TokenPlanUsageResponse,
   TokenPlanWindowUsage,
@@ -54,6 +55,24 @@ function remainingPercent(window: TokenPlanWindowUsage): number {
 
 function usedPercent(window: TokenPlanWindowUsage): number {
   return 100 - remainingPercent(window)
+}
+
+function keyWindows(key: TokenPlanKeyUsage): TokenPlanWindowUsage[] {
+  return key.model_remains.flatMap((model) =>
+    [model.interval, model.weekly].filter(
+      (window): window is TokenPlanWindowUsage => window != null,
+    ),
+  )
+}
+
+function keyWindowCount(key: TokenPlanKeyUsage): number {
+  return keyWindows(key).length
+}
+
+function minimumRemainingPercent(key: TokenPlanKeyUsage): number | null {
+  const windows = keyWindows(key)
+  if (windows.length === 0) return null
+  return Math.min(...windows.map(remainingPercent))
 }
 
 function progressColor(window: TokenPlanWindowUsage): string {
@@ -121,76 +140,135 @@ function windowLabel(
 
         <template v-else-if="usage">
           <div
-            v-for="key in usage.keys"
+            v-for="(key, keyIndex) in usage.keys"
             :key="key.key_id"
-            class="grid gap-3 border-t border-default pt-3 first:border-t-0 first:pt-0"
+            class="border-b border-default last:border-b-0"
           >
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <span class="font-semibold text-highlighted">{{
-                key.key_label
-              }}</span>
-              <UBadge
-                :label="
-                  key.ok ? t('tokenPlanAvailable') : t('tokenPlanUnavailable')
-                "
-                :color="key.ok ? 'success' : 'error'"
-                variant="subtle"
-              />
-            </div>
-            <p v-if="!key.ok" class="break-words text-error">
-              {{ key.error_message ?? t('tokenPlanUsageFailed') }}
-            </p>
-            <template v-else>
-              <template
-                v-for="model in key.model_remains"
-                :key="model.model_name"
-              >
-                <div v-if="model.interval" class="grid gap-1.5">
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="font-medium text-highlighted">{{
-                      windowLabel(model, 'interval')
-                    }}</span>
-                    <span class="font-semibold"
-                      >{{ remainingPercent(model.interval).toFixed(1) }}%</span
+            <UCollapsible :default-open="keyIndex === 0">
+              <template #default="{ open }">
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  block
+                  class="justify-start px-1 py-2 text-left"
+                  :trailing-icon="
+                    open ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'
+                  "
+                >
+                  <span
+                    class="flex min-w-0 flex-1 items-center justify-between gap-3"
+                  >
+                    <span class="flex min-w-0 items-center gap-2">
+                      <span class="truncate font-semibold text-highlighted">{{
+                        key.key_label
+                      }}</span>
+                      <UBadge
+                        :label="
+                          key.ok
+                            ? t('tokenPlanAvailable')
+                            : t('tokenPlanUnavailable')
+                        "
+                        :color="key.ok ? 'success' : 'error'"
+                        variant="subtle"
+                      />
+                    </span>
+                    <span
+                      v-if="key.ok && keyWindowCount(key) > 0"
+                      class="shrink-0 text-xs text-dimmed"
                     >
-                  </div>
-                  <UProgress
-                    class="token-plan-progress"
-                    :model-value="usedPercent(model.interval)"
-                    :style="{
-                      '--token-plan-progress-color': progressColor(
-                        model.interval,
-                      ),
-                    }"
-                  />
-                  <div class="flex justify-end gap-2 text-dimmed">
-                    <span>{{ formatRemaining(model.interval) }}</span>
-                  </div>
-                </div>
-                <div v-if="model.weekly" class="grid gap-1.5">
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="font-medium text-highlighted">{{
-                      windowLabel(model, 'weekly')
-                    }}</span>
-                    <span class="font-semibold"
-                      >{{ remainingPercent(model.weekly).toFixed(1) }}%</span
-                    >
-                  </div>
-                  <UProgress
-                    class="token-plan-progress"
-                    :model-value="usedPercent(model.weekly)"
-                    :style="{
-                      '--token-plan-progress-color': progressColor(
-                        model.weekly,
-                      ),
-                    }"
-                  />
-                  <div class="flex justify-end gap-2 text-dimmed">
-                    <span>{{ formatRemaining(model.weekly) }}</span>
-                  </div>
+                      {{
+                        t('tokenPlanMinRemaining', {
+                          percent: minimumRemainingPercent(key)?.toFixed(1),
+                        })
+                      }}
+                      ·
+                      {{
+                        t('tokenPlanWindowCount', {
+                          count: keyWindowCount(key),
+                        })
+                      }}
+                    </span>
+                  </span>
+                </UButton>
+              </template>
+              <template #content>
+                <div class="grid gap-2 px-1 pb-3">
+                  <p v-if="!key.ok" class="break-words text-error">
+                    {{ key.error_message ?? t('tokenPlanUsageFailed') }}
+                  </p>
+                  <template v-else>
+                    <div class="grid gap-3 sm:grid-cols-2">
+                      <div
+                        v-for="model in key.model_remains"
+                        :key="model.model_name"
+                        class="grid gap-2"
+                      >
+                        <div
+                          v-if="model.interval"
+                          class="grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_minmax(5rem,1.6fr)_auto] sm:items-center sm:gap-3"
+                        >
+                          <span
+                            class="min-w-0 break-words font-medium text-highlighted"
+                            >{{ windowLabel(model, 'interval') }}</span
+                          >
+                          <UProgress
+                            class="token-plan-progress h-1.5"
+                            :model-value="usedPercent(model.interval)"
+                            :style="{
+                              '--token-plan-progress-color': progressColor(
+                                model.interval,
+                              ),
+                            }"
+                          />
+                          <div
+                            class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
+                          >
+                            <span class="text-dimmed">{{
+                              formatRemaining(model.interval)
+                            }}</span>
+                            <span class="shrink-0 font-semibold"
+                              >{{
+                                remainingPercent(model.interval).toFixed(1)
+                              }}%</span
+                            >
+                          </div>
+                        </div>
+                        <div
+                          v-if="model.weekly"
+                          class="grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_minmax(5rem,1.6fr)_auto] sm:items-center sm:gap-3"
+                        >
+                          <span
+                            class="min-w-0 break-words font-medium text-highlighted"
+                            >{{ windowLabel(model, 'weekly') }}</span
+                          >
+                          <UProgress
+                            class="token-plan-progress h-1.5"
+                            :model-value="usedPercent(model.weekly)"
+                            :style="{
+                              '--token-plan-progress-color': progressColor(
+                                model.weekly,
+                              ),
+                            }"
+                          />
+                          <div
+                            class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
+                          >
+                            <span class="text-dimmed">{{
+                              formatRemaining(model.weekly)
+                            }}</span>
+                            <span class="shrink-0 font-semibold"
+                              >{{
+                                remainingPercent(model.weekly).toFixed(1)
+                              }}%</span
+                            >
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                 </div>
               </template>
-            </template>
+            </UCollapsible>
           </div>
           <p v-if="usage.keys.length === 0" class="text-dimmed">
             {{ t('tokenPlanNoUsage') }}
