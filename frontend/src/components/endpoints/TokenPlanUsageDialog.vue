@@ -2,7 +2,6 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import type {
   TokenPlanKeyUsage,
-  TokenPlanModelUsage,
   TokenPlanUsageResponse,
   TokenPlanWindowUsage,
 } from '@/generated/admin-api'
@@ -115,24 +114,18 @@ function formatRemaining(window: TokenPlanWindowUsage): string {
   }
   return props.t('tokenPlanResetExpiresSeconds', { seconds: totalSeconds })
 }
-
-function windowLabel(
-  model: TokenPlanModelUsage,
-  kind: 'interval' | 'weekly',
-): string {
-  return kind === 'interval'
-    ? `${model.model_name} / ${props.t('tokenPlanInterval')}`
-    : `${model.model_name} / ${props.t('tokenPlanWeekly')}`
-}
 </script>
 
 <template>
   <UModal
     v-model:open="visible"
     :title="`${t('tokenPlanUsage')} / ${endpointName}`"
+    :ui="{ content: 'w-[calc(100vw-2rem)] sm:max-w-6xl' }"
   >
     <template #body>
-      <div class="grid gap-4 text-xs">
+      <div
+        class="grid max-h-[min(70vh,42rem)] gap-4 overflow-y-auto pr-1 text-xs"
+      >
         <div v-if="loading" class="grid gap-2">
           <UProgress animation="carousel" />
           <span class="text-muted">{{ t('loading') }}</span>
@@ -140,11 +133,11 @@ function windowLabel(
 
         <template v-else-if="usage">
           <div
-            v-for="(key, keyIndex) in usage.keys"
+            v-for="key in usage.keys"
             :key="key.key_id"
             class="border-b border-default last:border-b-0"
           >
-            <UCollapsible :default-open="keyIndex === 0">
+            <UCollapsible :default-open="true">
               <template #default="{ open }">
                 <UButton
                   color="neutral"
@@ -201,16 +194,18 @@ function windowLabel(
                       <div
                         v-for="model in key.model_remains"
                         :key="model.model_name"
-                        class="grid gap-2"
+                        class="grid gap-2 rounded-md border border-default p-3"
                       >
+                        <div class="break-words font-medium text-highlighted">
+                          {{ model.model_name }}
+                        </div>
                         <div
                           v-if="model.interval"
-                          class="grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_minmax(5rem,1.6fr)_auto] sm:items-center sm:gap-3"
+                          class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
                         >
-                          <span
-                            class="min-w-0 break-words font-medium text-highlighted"
-                            >{{ windowLabel(model, 'interval') }}</span
-                          >
+                          <span class="text-dimmed">{{
+                            t('tokenPlanInterval')
+                          }}</span>
                           <UProgress
                             class="token-plan-progress h-1.5"
                             :model-value="usedPercent(model.interval)"
@@ -235,12 +230,11 @@ function windowLabel(
                         </div>
                         <div
                           v-if="model.weekly"
-                          class="grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_minmax(5rem,1.6fr)_auto] sm:items-center sm:gap-3"
+                          class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
                         >
-                          <span
-                            class="min-w-0 break-words font-medium text-highlighted"
-                            >{{ windowLabel(model, 'weekly') }}</span
-                          >
+                          <span class="text-dimmed">{{
+                            t('tokenPlanWeekly')
+                          }}</span>
                           <UProgress
                             class="token-plan-progress h-1.5"
                             :model-value="usedPercent(model.weekly)"
