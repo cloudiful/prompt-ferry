@@ -13,18 +13,6 @@ pub struct RequestRecordRedactionSummaryInput {
     pub fields_json: Option<Value>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct RawPayloadInput {
-    pub request_raw_json: Option<Value>,
-    pub response_raw_body: Option<String>,
-}
-
-impl RawPayloadInput {
-    pub fn is_empty(&self) -> bool {
-        self.request_raw_json.is_none() && self.response_raw_body.is_none()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct RequestRecordCreate {
     pub event_kind: UsageEventKind,

@@ -279,15 +279,12 @@ async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<(
         Ok(None) => {}
         Err(error) => warn!(error = %error, "usage metadata maintenance failed"),
     }
-    let raw_store = if retention.raw_backend == "object_store" {
-        dependencies.raw_store.as_deref()
-    } else {
-        None
-    };
+    // Raw payloads always live in the managed object store; maintenance only
+    // prunes expired per-event object metadata and partitions.
     match db::run_raw_payload_maintenance_with_store(
         &dependencies.pool,
         i64::from(retention.raw_retention_days),
-        raw_store,
+        dependencies.raw_store.as_deref(),
     )
     .await
     {

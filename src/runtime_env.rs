@@ -35,6 +35,26 @@ pub fn resolve_standalone_database_path(configured_path: &str) -> Result<PathBuf
     resolve_standalone_database_path_from(configured_path, |key| env::var_os(key))
 }
 
+/// Resolve the local raw-payload object directory. An explicit configuration
+/// value always wins; otherwise the deterministic default lives under the
+/// platform data root next to the standalone database.
+pub fn resolve_raw_object_store_local_dir(configured_dir: &str) -> Result<PathBuf> {
+    resolve_raw_object_store_local_dir_from(configured_dir, |key| env::var_os(key))
+}
+
+fn resolve_raw_object_store_local_dir_from(
+    configured_dir: &str,
+    get_env: impl Fn(&str) -> Option<OsString>,
+) -> Result<PathBuf> {
+    let configured_dir = configured_dir.trim();
+    if !configured_dir.is_empty() {
+        return Ok(PathBuf::from(configured_dir));
+    }
+    Ok(data_root_from(get_env)?
+        .join(CONFIG_APP_NAME)
+        .join("raw-objects"))
+}
+
 fn resolve_standalone_database_path_from(
     configured_path: &str,
     get_env: impl Fn(&str) -> Option<OsString>,
@@ -225,6 +245,28 @@ mod tests {
             })
             .unwrap(),
             PathBuf::from("/tmp/prompt-ferry-data/prompt-ferry/worker.sqlite3")
+        );
+    }
+
+    #[test]
+    fn raw_object_store_local_dir_trims_explicit_override() {
+        use crate::runtime_env::resolve_raw_object_store_local_dir_from;
+        assert_eq!(
+            resolve_raw_object_store_local_dir_from("  /var/lib/pf/raw  ", |_| None).unwrap(),
+            PathBuf::from("/var/lib/pf/raw")
+        );
+    }
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    #[test]
+    fn raw_object_store_local_dir_defaults_under_xdg_data_home() {
+        use crate::runtime_env::resolve_raw_object_store_local_dir_from;
+        assert_eq!(
+            resolve_raw_object_store_local_dir_from("", |key| {
+                (key == "XDG_DATA_HOME").then(|| OsString::from("/tmp/prompt-ferry-data"))
+            })
+            .unwrap(),
+            PathBuf::from("/tmp/prompt-ferry-data/prompt-ferry/raw-objects")
         );
     }
 }

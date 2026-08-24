@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n    ue.event_id AS \"record_id!\",\n    ue.request_id AS \"request_id!\",\n    ue.request_category AS \"request_category!: _\",\n    ue.user_id,\n    u.login_name AS user_login_name,\n    ue.client_key_label,\n    ue.request_user_agent,\n    ue.http_request_content_encoding,\n    ue.http_request_compressed AS \"http_request_compressed!\",\n    ue.http_request_compressed_bytes,\n    ue.http_request_decompressed_bytes,\n    ue.http_request_compression_ratio,\n    ue.endpoint_id,\n    pe.name AS endpoint_name,\n    ue.endpoint_key_id,\n    ue.endpoint_key_label,\n    ue.mcp_server_id,\n    COALESCE(ue.mcp_server_name, ms.name) AS mcp_server_name,\n    ue.mcp_protocol_method,\n    ue.mcp_operation_name,\n    ue.path AS \"path!\",\n    ue.model,\n    ue.request_state AS \"request_state!: _\",\n    ue.status,\n    ue.ok,\n    ue.duration_ms,\n    ue.ttft_ms,\n    ue.input_tokens,\n    ue.output_tokens,\n    ue.total_tokens,\n    ue.cached_tokens,\n    ue.cache_read_tokens,\n    ue.cache_write_tokens,\n    CASE\n        WHEN GREATEST(\n            COALESCE(ue.input_tokens, 0),\n            GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)\n                + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0),\n            0\n        ) > 0\n        THEN LEAST(\n            1.0::DOUBLE PRECISION,\n            GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)::DOUBLE PRECISION\n            / GREATEST(\n                COALESCE(ue.input_tokens, 0),\n                GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)\n                    + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0),\n                0\n            )::DOUBLE PRECISION\n        )\n        ELSE NULL\n    END AS cache_rate,\n    ue.conversation_id,\n    ue.parent_event_id,\n    ue.conversation_seq,\n    ue.conversation_source AS \"conversation_source!\",\n    ue.storage_sanitized AS \"storage_sanitized!\",\n    ue.storage_sanitized_nul_count AS \"storage_sanitized_nul_count!\",\n    ue.redaction_applied AS \"applied!\",\n    ue.redaction_findings_count AS \"findings_count!\",\n    ue.redaction_replacements_count AS \"replacements_count!\",\n    COALESCE(ARRAY(\n        SELECT jsonb_array_elements_text(COALESCE(ue.redaction_types_json, '[]'::jsonb))\n    ), ARRAY[]::TEXT[]) AS \"types!\",\n    COALESCE(ARRAY(\n        SELECT jsonb_array_elements_text(COALESCE(ue.redaction_fields_json, '[]'::jsonb))\n    ), ARRAY[]::TEXT[]) AS \"fields!\",\n    ue.client_installation_id,\n    ue.normalized_item_count,\n    COALESCE(ue.request_storage_mode, 'full') AS \"request_storage_mode!\",\n    raw.request_raw_json,\n    raw.raw_object_key,\n    raw.raw_object_sha256,\n    raw.raw_object_expires_at,\n    ue.request_has_previous_response_id AS \"request_has_previous_response_id!\",\n    ue.request_previous_response_id,\n    ue.request_previous_response_parent_found,\n    ue.request_conversation_key,\n    ue.request_conversation_parent_found,\n    ue.provider_response_id,\n    (ue.request_full_json IS NOT NULL OR ue.request_delta_json IS NOT NULL) AS \"has_full_request!\",\n    (ue.parent_event_id IS NOT NULL) AS \"has_parent!\",\n    ue.response_prompt,\n    raw.response_raw_body,\n    ua.message_json -> 'assistant_message' AS assistant_message_json,\n    ua.message_json -> 'output_items' AS assistant_output_items_json,\n    ua.has_reasoning_content,\n    ue.upstream_error_body,\n    ue.error_code,\n    ue.error_message,\n    ue.abort_reason AS \"abort_reason: _\",\n    ue.abort_from_state AS \"abort_from_state: _\",\n    ue.abort_response_started,\n    ue.failure_family AS \"failure_family: _\",\n    ue.mcp_bearer_token_slot,\n    ue.route_selection_reason AS \"route_selection_reason!: _\",\n    ue.created_at AS \"created_at!\",\n    ue.response_capture_truncated AS \"response_capture_truncated!\"\nFROM request_records ue\nLEFT JOIN users u ON u.user_id = ue.user_id\nLEFT JOIN provider_endpoints pe ON pe.endpoint_id = ue.endpoint_id\nLEFT JOIN mcp_servers ms ON ms.server_id = ue.mcp_server_id\nLEFT JOIN request_record_assistant_artifacts ua ON ua.event_id = ue.event_id\nLEFT JOIN request_record_raw_payloads raw\n  ON raw.event_id = ue.event_id\n AND raw.created_at = ue.created_at\nWHERE ue.event_id = $1\n  AND ($2::BIGINT IS NULL OR ue.user_id = $2)\n",
+  "query": "SELECT\n    ue.event_id AS \"record_id!\",\n    ue.request_id AS \"request_id!\",\n    ue.request_category AS \"request_category!: _\",\n    ue.user_id,\n    u.login_name AS user_login_name,\n    ue.client_key_label,\n    ue.request_user_agent,\n    ue.http_request_content_encoding,\n    ue.http_request_compressed AS \"http_request_compressed!\",\n    ue.http_request_compressed_bytes,\n    ue.http_request_decompressed_bytes,\n    ue.http_request_compression_ratio,\n    ue.endpoint_id,\n    pe.name AS endpoint_name,\n    ue.endpoint_key_id,\n    ue.endpoint_key_label,\n    ue.mcp_server_id,\n    COALESCE(ue.mcp_server_name, ms.name) AS mcp_server_name,\n    ue.mcp_protocol_method,\n    ue.mcp_operation_name,\n    ue.path AS \"path!\",\n    ue.model,\n    ue.request_state AS \"request_state!: _\",\n    ue.status,\n    ue.ok,\n    ue.duration_ms,\n    ue.ttft_ms,\n    ue.input_tokens,\n    ue.output_tokens,\n    ue.total_tokens,\n    ue.cached_tokens,\n    ue.cache_read_tokens,\n    ue.cache_write_tokens,\n    CASE\n        WHEN GREATEST(\n            COALESCE(ue.input_tokens, 0),\n            GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)\n                + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0),\n            0\n        ) > 0\n        THEN LEAST(\n            1.0::DOUBLE PRECISION,\n            GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)::DOUBLE PRECISION\n            / GREATEST(\n                COALESCE(ue.input_tokens, 0),\n                GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)\n                    + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0),\n                0\n            )::DOUBLE PRECISION\n        )\n        ELSE NULL\n    END AS cache_rate,\n    ue.conversation_id,\n    ue.parent_event_id,\n    ue.conversation_seq,\n    ue.conversation_source AS \"conversation_source!\",\n    ue.storage_sanitized AS \"storage_sanitized!\",\n    ue.storage_sanitized_nul_count AS \"storage_sanitized_nul_count!\",\n    ue.redaction_applied AS \"applied!\",\n    ue.redaction_findings_count AS \"findings_count!\",\n    ue.redaction_replacements_count AS \"replacements_count!\",\n    COALESCE(ARRAY(\n        SELECT jsonb_array_elements_text(COALESCE(ue.redaction_types_json, '[]'::jsonb))\n    ), ARRAY[]::TEXT[]) AS \"types!\",\n    COALESCE(ARRAY(\n        SELECT jsonb_array_elements_text(COALESCE(ue.redaction_fields_json, '[]'::jsonb))\n    ), ARRAY[]::TEXT[]) AS \"fields!\",\n    ue.client_installation_id,\n    ue.normalized_item_count,\n    COALESCE(ue.request_storage_mode, 'full') AS \"request_storage_mode!\",\n    raw.raw_object_key,\n    raw.raw_object_sha256,\n    raw.raw_object_expires_at,\n    ue.request_has_previous_response_id AS \"request_has_previous_response_id!\",\n    ue.request_previous_response_id,\n    ue.request_previous_response_parent_found,\n    ue.request_conversation_key,\n    ue.request_conversation_parent_found,\n    ue.provider_response_id,\n    (ue.request_full_json IS NOT NULL OR ue.request_delta_json IS NOT NULL) AS \"has_full_request!\",\n    (ue.parent_event_id IS NOT NULL) AS \"has_parent!\",\n    ue.response_prompt,\n    ua.message_json -> 'assistant_message' AS assistant_message_json,\n    ua.message_json -> 'output_items' AS assistant_output_items_json,\n    ua.has_reasoning_content,\n    ue.upstream_error_body,\n    ue.error_code,\n    ue.error_message,\n    ue.abort_reason AS \"abort_reason: _\",\n    ue.abort_from_state AS \"abort_from_state: _\",\n    ue.abort_response_started,\n    ue.failure_family AS \"failure_family: _\",\n    ue.mcp_bearer_token_slot,\n    ue.route_selection_reason AS \"route_selection_reason!: _\",\n    ue.created_at AS \"created_at!\",\n    ue.response_capture_truncated AS \"response_capture_truncated!\"\nFROM request_records ue\nLEFT JOIN users u ON u.user_id = ue.user_id\nLEFT JOIN provider_endpoints pe ON pe.endpoint_id = ue.endpoint_id\nLEFT JOIN mcp_servers ms ON ms.server_id = ue.mcp_server_id\nLEFT JOIN request_record_assistant_artifacts ua ON ua.event_id = ue.event_id\nLEFT JOIN request_record_raw_payloads raw\n  ON raw.event_id = ue.event_id\n AND raw.created_at = ue.created_at\nWHERE ue.event_id = $1\n  AND ($2::BIGINT IS NULL OR ue.user_id = $2)\n",
   "describe": {
     "columns": [
       {
@@ -508,17 +508,6 @@
       },
       {
         "ordinal": 48,
-        "name": "request_raw_json",
-        "type_info": "Jsonb",
-        "origin": {
-          "Table": {
-            "table": "request_record_raw_payloads",
-            "name": "request_raw_json"
-          }
-        }
-      },
-      {
-        "ordinal": 49,
         "name": "raw_object_key",
         "type_info": "Text",
         "origin": {
@@ -529,7 +518,7 @@
         }
       },
       {
-        "ordinal": 50,
+        "ordinal": 49,
         "name": "raw_object_sha256",
         "type_info": "Text",
         "origin": {
@@ -540,7 +529,7 @@
         }
       },
       {
-        "ordinal": 51,
+        "ordinal": 50,
         "name": "raw_object_expires_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -551,7 +540,7 @@
         }
       },
       {
-        "ordinal": 52,
+        "ordinal": 51,
         "name": "request_has_previous_response_id!",
         "type_info": "Bool",
         "origin": {
@@ -562,7 +551,7 @@
         }
       },
       {
-        "ordinal": 53,
+        "ordinal": 52,
         "name": "request_previous_response_id",
         "type_info": "Text",
         "origin": {
@@ -573,7 +562,7 @@
         }
       },
       {
-        "ordinal": 54,
+        "ordinal": 53,
         "name": "request_previous_response_parent_found",
         "type_info": "Bool",
         "origin": {
@@ -584,7 +573,7 @@
         }
       },
       {
-        "ordinal": 55,
+        "ordinal": 54,
         "name": "request_conversation_key",
         "type_info": "Text",
         "origin": {
@@ -595,7 +584,7 @@
         }
       },
       {
-        "ordinal": 56,
+        "ordinal": 55,
         "name": "request_conversation_parent_found",
         "type_info": "Bool",
         "origin": {
@@ -606,7 +595,7 @@
         }
       },
       {
-        "ordinal": 57,
+        "ordinal": 56,
         "name": "provider_response_id",
         "type_info": "Text",
         "origin": {
@@ -617,19 +606,19 @@
         }
       },
       {
-        "ordinal": 58,
+        "ordinal": 57,
         "name": "has_full_request!",
         "type_info": "Bool",
         "origin": "Expression"
       },
       {
-        "ordinal": 59,
+        "ordinal": 58,
         "name": "has_parent!",
         "type_info": "Bool",
         "origin": "Expression"
       },
       {
-        "ordinal": 60,
+        "ordinal": 59,
         "name": "response_prompt",
         "type_info": "Text",
         "origin": {
@@ -640,30 +629,19 @@
         }
       },
       {
-        "ordinal": 61,
-        "name": "response_raw_body",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "request_record_raw_payloads",
-            "name": "response_raw_body"
-          }
-        }
-      },
-      {
-        "ordinal": 62,
+        "ordinal": 60,
         "name": "assistant_message_json",
         "type_info": "Jsonb",
         "origin": "Expression"
       },
       {
-        "ordinal": 63,
+        "ordinal": 61,
         "name": "assistant_output_items_json",
         "type_info": "Jsonb",
         "origin": "Expression"
       },
       {
-        "ordinal": 64,
+        "ordinal": 62,
         "name": "has_reasoning_content",
         "type_info": "Bool",
         "origin": {
@@ -674,7 +652,7 @@
         }
       },
       {
-        "ordinal": 65,
+        "ordinal": 63,
         "name": "upstream_error_body",
         "type_info": "Text",
         "origin": {
@@ -685,7 +663,7 @@
         }
       },
       {
-        "ordinal": 66,
+        "ordinal": 64,
         "name": "error_code",
         "type_info": "Text",
         "origin": {
@@ -696,7 +674,7 @@
         }
       },
       {
-        "ordinal": 67,
+        "ordinal": 65,
         "name": "error_message",
         "type_info": "Text",
         "origin": {
@@ -707,7 +685,7 @@
         }
       },
       {
-        "ordinal": 68,
+        "ordinal": 66,
         "name": "abort_reason: _",
         "type_info": "Text",
         "origin": {
@@ -718,7 +696,7 @@
         }
       },
       {
-        "ordinal": 69,
+        "ordinal": 67,
         "name": "abort_from_state: _",
         "type_info": "Text",
         "origin": {
@@ -729,7 +707,7 @@
         }
       },
       {
-        "ordinal": 70,
+        "ordinal": 68,
         "name": "abort_response_started",
         "type_info": "Bool",
         "origin": {
@@ -740,7 +718,7 @@
         }
       },
       {
-        "ordinal": 71,
+        "ordinal": 69,
         "name": "failure_family: _",
         "type_info": "Text",
         "origin": {
@@ -751,7 +729,7 @@
         }
       },
       {
-        "ordinal": 72,
+        "ordinal": 70,
         "name": "mcp_bearer_token_slot",
         "type_info": "Int2",
         "origin": {
@@ -762,7 +740,7 @@
         }
       },
       {
-        "ordinal": 73,
+        "ordinal": 71,
         "name": "route_selection_reason!: _",
         "type_info": "Text",
         "origin": {
@@ -773,7 +751,7 @@
         }
       },
       {
-        "ordinal": 74,
+        "ordinal": 72,
         "name": "created_at!",
         "type_info": "Timestamptz",
         "origin": {
@@ -784,7 +762,7 @@
         }
       },
       {
-        "ordinal": 75,
+        "ordinal": 73,
         "name": "response_capture_truncated!",
         "type_info": "Bool",
         "origin": {
@@ -859,10 +837,8 @@
       true,
       true,
       true,
-      true,
       null,
       null,
-      true,
       true,
       null,
       null,
@@ -880,5 +856,5 @@
       true
     ]
   },
-  "hash": "d559340668fb2a265b741379a7edb8f17e9ac68f612ba6a0762755f275fc1ef4"
+  "hash": "d7a56c0e66bd9bd5f15dfceacec49f12a5f03d3cc7d6e0d4cd3ef266d4cc36c9"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT rr.event_id AS \"event_id!\", rr.request_id AS \"request_id!\", rr.user_id, rr.endpoint_id, rr.path AS \"path!\", rr.model, rr.conversation_id, rr.parent_event_id,\n       rr.conversation_seq, rr.conversation_source AS \"conversation_source!\", rr.client_installation_id, rr.normalized_item_count,\n       rr.normalized_chain_hash, rr.normalized_first_ref_hash, rr.normalized_last_ref_hash,\n       rr.request_storage_mode AS \"request_storage_mode!\", rr.request_full_json, rr.request_delta_json,\n       raw.request_raw_json, rr.request_has_previous_response_id AS \"request_has_previous_response_id!\",\n       rr.request_previous_response_id, rr.request_previous_response_parent_found,\n       rr.request_conversation_key, rr.request_conversation_parent_found,\n       rr.provider_response_id, rr.base_checkpoint_event_id, rr.response_prompt, raw.response_raw_body\nFROM request_records rr\nLEFT JOIN request_record_raw_payloads raw\n  ON raw.event_id = rr.event_id\n AND raw.created_at = rr.created_at\nWHERE rr.event_id = $1\n  AND ($2::BIGINT IS NULL OR rr.user_id = $2)\n",
+  "query": "SELECT rr.event_id AS \"event_id!\", rr.request_id AS \"request_id!\", rr.user_id, rr.endpoint_id, rr.path AS \"path!\", rr.model, rr.conversation_id, rr.parent_event_id,\n       rr.conversation_seq, rr.conversation_source AS \"conversation_source!\", rr.client_installation_id, rr.normalized_item_count,\n       rr.normalized_chain_hash, rr.normalized_first_ref_hash, rr.normalized_last_ref_hash,\n       rr.request_storage_mode AS \"request_storage_mode!\", rr.request_full_json, rr.request_delta_json,\n       CAST(NULL AS JSONB) AS request_raw_json, rr.request_has_previous_response_id AS \"request_has_previous_response_id!\",\n       rr.request_previous_response_id, rr.request_previous_response_parent_found,\n       rr.request_conversation_key, rr.request_conversation_parent_found,\n       rr.provider_response_id, rr.base_checkpoint_event_id, rr.response_prompt, CAST(NULL AS TEXT) AS response_raw_body\nFROM request_records rr\nWHERE rr.event_id = $1\n  AND ($2::BIGINT IS NULL OR rr.user_id = $2)\n",
   "describe": {
     "columns": [
       {
@@ -205,12 +205,7 @@
         "ordinal": 18,
         "name": "request_raw_json",
         "type_info": "Jsonb",
-        "origin": {
-          "Table": {
-            "table": "request_record_raw_payloads",
-            "name": "request_raw_json"
-          }
-        }
+        "origin": "Expression"
       },
       {
         "ordinal": 19,
@@ -304,12 +299,7 @@
         "ordinal": 27,
         "name": "response_raw_body",
         "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "request_record_raw_payloads",
-            "name": "response_raw_body"
-          }
-        }
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -337,7 +327,7 @@
       false,
       true,
       true,
-      true,
+      null,
       false,
       true,
       true,
@@ -346,8 +336,8 @@
       true,
       true,
       true,
-      true
+      null
     ]
   },
-  "hash": "ddc85ec6d9c2c2d41864940a5ebeabc5a25ff325e2a6f5adee5446360ee1c56a"
+  "hash": "86f336c5175d6beeb6754a81b325d09aba40bd00eb22de97d39b78137a529335"
 }

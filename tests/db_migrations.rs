@@ -623,7 +623,7 @@ async fn raw_payload_storage_is_partitioned_and_destructive_migration_drops_old_
 }
 
 #[tokio::test]
-async fn raw_payloads_are_written_and_pruned_without_losing_normalized_only_metadata()
+async fn raw_payloads_stay_metadata_only_and_prune_without_losing_normalized_only_metadata()
 -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
@@ -632,26 +632,36 @@ async fn raw_payloads_are_written_and_pruned_without_losing_normalized_only_meta
     let schema = TestSchema::new().await?;
     db::migrate(&schema.pool).await?;
 
+    // Raw bodies submitted for storage never reach PostgreSQL (migration 0066):
+    // only non-body object metadata is recorded alongside the request event.
     let raw_request_id = Uuid::new_v4();
     let mut raw_record = db::RequestRecordCreate::ai_request(raw_request_id, "/v1/responses");
     raw_record.request_raw_json = Some(serde_json::json!({"input": "raw"}));
     raw_record.response_raw_body = Some("raw response".to_string());
     raw_record.request_conversation_key = Some("raw-conversation".to_string());
     let raw_event_id = db::record_request_record(&schema.pool, raw_record).await?;
+    sqlx::query_file!(
+        "src/sql/usage/upsert_request_record_raw_object.sql",
+        raw_event_id,
+        format!("prompt-ferry/raw/events/{raw_event_id}.bin"),
+        16_i64,
+        "ab".repeat(32),
+        chrono::Utc::now() + chrono::Duration::days(3),
+    )
+    .execute(&schema.pool)
+    .await?;
 
     let stored = sqlx::query_file!("tests/sql/raw_payloads_for_event.sql", raw_event_id)
         .fetch_one(&schema.pool)
         .await?;
-    assert_eq!(
-        stored.request_raw_json,
-        Some(serde_json::json!({"input": "raw"}))
-    );
-    assert_eq!(stored.response_raw_body.as_deref(), Some("raw response"));
+    assert_eq!(stored.request_raw_json, None);
+    assert_eq!(stored.response_raw_body, None);
     assert_eq!(
         stored.request_conversation_key.as_deref(),
         Some("raw-conversation")
     );
 
+    // A response-only update for the same request stays metadata-only too.
     let mut raw_update = db::RequestRecordCreate::ai_request(raw_request_id, "/v1/responses");
     raw_update.response_raw_body = Some("updated raw response".to_string());
     let updated_event_id = db::record_request_record(&schema.pool, raw_update).await?;
@@ -659,14 +669,8 @@ async fn raw_payloads_are_written_and_pruned_without_losing_normalized_only_meta
     let updated = sqlx::query_file!("tests/sql/raw_payloads_for_event.sql", raw_event_id)
         .fetch_one(&schema.pool)
         .await?;
-    assert_eq!(
-        updated.request_raw_json,
-        Some(serde_json::json!({"input": "raw"}))
-    );
-    assert_eq!(
-        updated.response_raw_body.as_deref(),
-        Some("updated raw response")
-    );
+    assert_eq!(updated.request_raw_json, None);
+    assert_eq!(updated.response_raw_body, None);
 
     let mut normalized_only = db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses");
     normalized_only.request_conversation_key = Some("normalized-only".to_string());

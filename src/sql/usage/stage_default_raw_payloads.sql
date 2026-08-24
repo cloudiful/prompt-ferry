@@ -1,8 +1,6 @@
 INSERT INTO request_record_raw_payloads_overflow (
     event_id,
     created_at,
-    request_raw_json,
-    response_raw_body,
     raw_object_key,
     raw_object_size_bytes,
     raw_object_sha256,
@@ -11,8 +9,6 @@ INSERT INTO request_record_raw_payloads_overflow (
 SELECT
     event_id,
     created_at,
-    request_raw_json,
-    response_raw_body,
     raw_object_key,
     raw_object_size_bytes,
     raw_object_sha256,

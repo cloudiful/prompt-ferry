@@ -128,11 +128,9 @@ impl UsageRetentionSettings {
         self.content_retention_days = self.content_retention_days.max(1);
         self.raw_retention_days = self.raw_retention_days.max(1);
         self.approval_retention_days = self.approval_retention_days.max(1);
-        if !matches!(self.raw_backend.trim(), "postgres" | "object_store") {
-            self.raw_backend = "postgres".to_string();
-        } else {
-            self.raw_backend = self.raw_backend.trim().to_string();
-        }
+        // Raw payloads are always stored in the managed object store; the
+        // legacy `postgres` backend (and any unknown value) normalizes to it.
+        self.raw_backend = "object_store".to_string();
         self
     }
 }
@@ -174,7 +172,19 @@ mod tests {
         assert_eq!(normalized.content_retention_days, 1);
         assert_eq!(normalized.raw_retention_days, 1);
         assert_eq!(normalized.approval_retention_days, 1);
-        assert_eq!(normalized.raw_backend, "postgres");
+        // The legacy postgres backend no longer stores raw bodies.
+        assert_eq!(normalized.raw_backend, "object_store");
+    }
+
+    #[test]
+    fn legacy_postgres_raw_backend_normalizes_to_managed_store() {
+        let normalized = UsageRetentionSettings {
+            raw_backend: "postgres".to_string(),
+            ..UsageRetentionSettings::default()
+        }
+        .normalized();
+
+        assert_eq!(normalized.raw_backend, "object_store");
     }
 
     #[test]

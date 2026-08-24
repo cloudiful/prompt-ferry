@@ -27,4 +27,11 @@ SELECT
               'restore_session_nonce',
               'restore_session_key_version'
           )
-    ) AS "legacy_payload_columns_removed!"
+    ) AS "legacy_payload_columns_removed!",
+    NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name IN ('request_record_raw_payloads', 'request_record_raw_payloads_overflow')
+          AND column_name IN ('request_raw_json', 'response_raw_body')
+    ) AS "raw_body_columns_removed!"

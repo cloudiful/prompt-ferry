@@ -4,12 +4,11 @@ use serde_json::Value;
 use sqlx::PgPool;
 
 use crate::db::types::{
-    PromptMessageRef, RawPayloadInput, ReplaySnapshotCreate, ReplaySnapshotRow,
-    RequestRecordAssistantArtifact, RequestRecordAssistantArtifactCreate, RequestRecordChainEntry,
-    RequestRecordClearQuery, RequestRecordConversationLocator, RequestRecordCreate,
-    RequestRecordDetail, RequestRecordFacets, RequestRecordListRow, RequestRecordPage,
-    RequestRecordPromptBlock, RequestRecordQuery, RequestRecordState, RequestRecordSummary,
-    UsageClearScope,
+    PromptMessageRef, ReplaySnapshotCreate, ReplaySnapshotRow, RequestRecordAssistantArtifact,
+    RequestRecordAssistantArtifactCreate, RequestRecordChainEntry, RequestRecordClearQuery,
+    RequestRecordConversationLocator, RequestRecordCreate, RequestRecordDetail,
+    RequestRecordFacets, RequestRecordListRow, RequestRecordPage, RequestRecordPromptBlock,
+    RequestRecordQuery, RequestRecordState, RequestRecordSummary, UsageClearScope,
 };
 
 mod artifacts;

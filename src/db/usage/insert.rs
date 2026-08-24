@@ -6,8 +6,6 @@ use tracing::warn;
 pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) -> Result<i64> {
     let ref_full = input.request_full_json.clone();
     let ref_delta = input.request_delta_json.clone();
-    let raw_request_json = input.request_raw_json.clone();
-    let raw_response_body = input.response_raw_body.clone();
     let mut tx = pool.begin().await?;
     let event_id = sqlx::query_file_scalar!(
         "src/sql/usage/upsert_request_record.sql",
@@ -89,17 +87,6 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
     .fetch_one(&mut *tx)
     .await?;
 
-    if raw_request_json.is_some() || raw_response_body.is_some() {
-        sqlx::query_file!(
-            "src/sql/usage/upsert_request_record_raw_payload.sql",
-            event_id,
-            raw_request_json,
-            raw_response_body,
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
-
     tx.commit().await?;
 
     if let Err(err) = crate::db::record_usage_charge(pool, event_id, &input).await {
@@ -134,28 +121,23 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
     Ok(event_id)
 }
 
+/// Persist the request-record metadata first, then upload the raw payload to
+/// the selected store and record its object metadata. There is deliberately no
+/// PostgreSQL body fallback: when the store upload fails the raw payload is
+/// dropped with a warning while the metadata event survives.
 pub async fn record_request_record_with_raw_store(
     pool: &PgPool,
     input: RequestRecordCreate,
-    raw_payload: RawPayloadInput,
     raw_store: Option<&RawPayloadStore>,
     raw_retention_days: i64,
 ) -> Result<i64> {
+    let payload = RawPayloadEnvelope {
+        request_raw_json: input.request_raw_json.clone(),
+        response_raw_body: input.response_raw_body.clone(),
+    };
     let event_id = record_request_record(pool, input).await?;
     let Some(raw_store) = raw_store else {
         return Ok(event_id);
-    };
-
-    let Some(existing) =
-        sqlx::query_file!("src/sql/usage/get_request_record_raw_payload.sql", event_id,)
-            .fetch_optional(pool)
-            .await?
-    else {
-        return Ok(event_id);
-    };
-    let payload = RawPayloadEnvelope {
-        request_raw_json: raw_payload.request_raw_json.or(existing.request_raw_json),
-        response_raw_body: raw_payload.response_raw_body.or(existing.response_raw_body),
     };
     if payload.request_raw_json.is_none() && payload.response_raw_body.is_none() {
         return Ok(event_id);
@@ -169,13 +151,15 @@ pub async fn record_request_record_with_raw_store(
         return Ok(event_id);
     };
     let expires_at = created_at + ChronoDuration::days(raw_retention_days.max(1));
+    // The store merges this phase's fields into any existing per-event object,
+    // so a request-only write followed by a response-only write is idempotent.
     let object = match raw_store
         .put(event_id, created_at, payload, expires_at)
         .await
     {
         Ok(object) => object,
         Err(err) => {
-            warn!(error = %err, event_id, "failed to upload raw payload; retaining postgres copy");
+            warn!(error = %err, event_id, "failed to upload raw payload; dropping raw payload");
             return Ok(event_id);
         }
     };
@@ -190,7 +174,11 @@ pub async fn record_request_record_with_raw_store(
     .execute(pool)
     .await
     {
-        warn!(error = %err, event_id, "failed to persist raw payload object metadata; retaining postgres copy");
+        warn!(
+            error = %err,
+            event_id,
+            "failed to persist raw payload object metadata"
+        );
     }
     Ok(event_id)
 }

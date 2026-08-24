@@ -1,11 +1,11 @@
 use super::*;
-use crate::raw_payload_store::{RawPayloadEnvelope, RawPayloadStore};
+use crate::raw_payload_store::RawPayloadStore;
 use chrono::Duration as ChronoDuration;
 use std::time::Duration;
 
 const RAW_REQUEST_PRUNE_BATCH_SIZE: i64 = 500;
 const RAW_REQUEST_PRUNE_LOCK_KEY: i64 = 0x7072_756e_6552_6177;
-const RAW_OBJECT_MIGRATION_BATCH_SIZE: i64 = 100;
+const RAW_OBJECT_DELETE_BATCH_SIZE: i64 = 200;
 
 #[derive(Debug)]
 struct RawPayloadPruneBatch {
@@ -14,11 +14,10 @@ struct RawPayloadPruneBatch {
 }
 
 #[derive(Debug)]
-struct RawPayloadObjectMigrationRow {
+struct RawExpiredObjectRow {
     event_id: i64,
     created_at: DateTime<Utc>,
-    request_raw_json: Option<Value>,
-    response_raw_body: Option<String>,
+    raw_object_key: String,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -78,8 +77,10 @@ async fn run_raw_payload_maintenance_locked(
         .and_hms_opt(0, 0, 0)
         .map(|value| value.and_utc())
         .ok_or_else(|| anyhow::anyhow!("invalid raw payload retention cutoff"))?;
+    // Expired objects are removed from the store before their metadata rows
+    // disappear so a crash cannot orphan an object without its expiry record.
     if let Some(raw_store) = raw_store {
-        migrate_recent_raw_payloads(conn, raw_store, prune_cutoff, now, retention_days).await?;
+        delete_expired_raw_objects(conn, raw_store, prune_cutoff).await;
     }
     let partitions_created =
         crate::db::usage::raw_partitions::ensure_raw_payload_partitions(conn, now).await?;
@@ -110,68 +111,51 @@ async fn run_raw_payload_maintenance_locked(
     })
 }
 
-async fn migrate_recent_raw_payloads(
+/// Delete expired raw payload objects from the selected store, walking the
+/// expired metadata rows in stable key order. Failures are logged and skipped
+/// so retention still removes the expired metadata; the orphaned object is
+/// left for the store's own lifecycle tooling.
+async fn delete_expired_raw_objects(
     conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
     raw_store: &RawPayloadStore,
     cutoff: DateTime<Utc>,
-    now: DateTime<Utc>,
-    retention_days: i64,
-) -> Result<()> {
+) {
+    let mut cursor_created_at = DateTime::<Utc>::MIN_UTC;
+    let mut cursor_event_id = i64::MIN;
     loop {
-        let rows = sqlx::query_file_as!(
-            RawPayloadObjectMigrationRow,
-            "src/sql/usage/list_raw_payloads_for_object_migration.sql",
+        let rows = match sqlx::query_file_as!(
+            RawExpiredObjectRow,
+            "src/sql/usage/list_expired_raw_payload_objects.sql",
             cutoff,
-            now,
-            RAW_OBJECT_MIGRATION_BATCH_SIZE,
+            cursor_created_at,
+            cursor_event_id,
+            RAW_OBJECT_DELETE_BATCH_SIZE,
         )
         .fetch_all(&mut **conn)
-        .await?;
+        .await
+        {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::warn!(error = %error, "failed to list expired raw payload objects");
+                return;
+            }
+        };
         if rows.is_empty() {
-            break;
+            return;
         }
-        let mut failed = false;
         for row in rows {
-            let expires_at = row.created_at + ChronoDuration::days(retention_days.max(1));
-            let object = match raw_store
-                .put(
-                    row.event_id,
-                    row.created_at,
-                    RawPayloadEnvelope {
-                        request_raw_json: row.request_raw_json,
-                        response_raw_body: row.response_raw_body,
-                    },
-                    expires_at,
-                )
-                .await
-            {
-                Ok(object) => object,
-                Err(error) => {
-                    failed = true;
-                    tracing::warn!(
-                        error = %error,
-                        event_id = row.event_id,
-                        "failed to migrate raw payload to object storage"
-                    );
-                    continue;
-                }
-            };
-            sqlx::query_file!(
-                "src/sql/usage/upsert_request_record_raw_object.sql",
-                row.event_id,
-                object.object_key,
-                object.size_bytes,
-                object.sha256,
-                object.expires_at,
-            )
-            .execute(&mut **conn)
-            .await?;
-        }
-        if failed {
-            break;
+            if let Err(error) = raw_store.delete(&row.raw_object_key).await {
+                tracing::warn!(
+                    error = %error,
+                    event_id = row.event_id,
+                    object_key = %row.raw_object_key,
+                    "failed to delete expired raw payload object"
+                );
+            }
+            cursor_created_at = row.created_at;
+            cursor_event_id = row.event_id;
         }
     }
-    Ok(())
 }
 
 async fn prune_raw_payload_batches(

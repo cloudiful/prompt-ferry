@@ -157,21 +157,11 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         log.lease_expires_at,
         log.last_heartbeat_at,
     );
-    let raw_payload = db::RawPayloadInput {
-        request_raw_json: request_raw_json.clone(),
-        response_raw_body: response_raw_body.clone(),
-    };
     let retention = state.usage_retention.read().await.clone().normalized();
-    let raw_store = if retention.raw_backend == "object_store" {
-        state.raw_payload_store.clone()
-    } else {
-        None
-    };
     match db::record_request_record_with_raw_store(
         &state.pool,
         create,
-        raw_payload,
-        raw_store.as_deref(),
+        state.raw_payload_store.as_deref(),
         i64::from(retention.raw_retention_days),
     )
     .await

@@ -43,6 +43,9 @@ pub struct WorkerConfig {
     pub raw_object_store_secret_key: String,
     pub raw_object_store_prefix: String,
     pub raw_object_store_allow_http: bool,
+    /// Local filesystem directory used when no object-store bucket is
+    /// configured. Empty resolves to `<data root>/prompt-ferry/raw-objects`.
+    pub raw_object_store_local_dir: String,
     /// Browser origins allowed to call the MCP proxy. When non-empty, requests
     /// carrying an `Origin` header must match one of these entries (RFC 6454);
     /// missing `Origin` always passes. Empty keeps Origin validation disabled.
@@ -85,6 +88,7 @@ impl Default for WorkerConfig {
             raw_object_store_secret_key: String::new(),
             raw_object_store_prefix: "prompt-ferry/raw".to_string(),
             raw_object_store_allow_http: false,
+            raw_object_store_local_dir: String::new(),
             mcp_allowed_origins: Vec::new(),
         }
     }

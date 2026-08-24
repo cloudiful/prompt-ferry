@@ -246,16 +246,11 @@ pub(super) async fn build_admin_state(
     }
 
     let usage_retention = db::get_usage_retention(&pool).await?;
-    let raw_payload_store = match crate::raw_payload_store::RawPayloadStore::from_config(config)? {
-        Some(store) => Some(Arc::new(store)),
-        None if usage_retention.raw_backend == "object_store" => {
-            warn!(
-                "raw backend is configured as object_store but no bucket is configured; retaining raw payloads in postgres"
-            );
-            None
-        }
-        None => None,
-    };
+    // Raw payloads always go to the managed store (bucket or local fallback);
+    // PostgreSQL body storage is gone, legacy backend values are normalized.
+    let raw_payload_store = Some(Arc::new(
+        crate::raw_payload_store::RawPayloadStore::from_config(config)?,
+    ));
     let redaction_config = db::get_redaction_config(&pool).await?;
     let user_redaction_configs = db::list_user_redaction_configs(&pool).await?;
     redact::apply_configs(&redaction_config, user_redaction_configs)?;
