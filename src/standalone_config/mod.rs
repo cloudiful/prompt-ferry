@@ -26,7 +26,7 @@ pub use models::{
     BootstrapSeed, ClientKeyConfig, ContinuationPolicy, EndpointApiKeyConfig, EndpointProvider,
     EndpointRegion, ManagedRelayConfig, ModelRouteConfig, ModelRouteTargetConfig,
     ProviderEndpointConfig, Result, RouteScope, RoutingStrategy, SettingConfig, StandaloneConfig,
-    StandaloneConfigError,
+    StandaloneConfigError, StandaloneUsageSummaryRecord,
 };
 pub use store::{BootstrapOutcome, StandaloneConfigStore};
 pub use users::SqliteUserStore;

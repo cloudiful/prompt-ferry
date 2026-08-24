@@ -461,3 +461,88 @@ fn redacted_secret(value: &str) -> String {
 fn redacted_optional_secret(value: Option<&str>) -> Option<String> {
     value.map(redacted_secret)
 }
+
+/// Compact, durable representation of a standalone usage summary.
+///
+/// This DTO mirrors `StandaloneUsageSummary` and is the storage boundary for
+/// the SQLite request ledger introduced in Phase 1A. It owns its own primitive
+/// representation (UUID text, RFC3339 timestamps, integer booleans, JSON
+/// strings) so the standalone-config storage layer never needs to depend on
+/// the higher-level usage logger. Conversion to and from the runtime summary
+/// type lives in `crate::usage::logging::models`.
+#[derive(Clone, PartialEq, Eq)]
+pub struct StandaloneUsageSummaryRecord {
+    pub request_id: Uuid,
+    pub event_kind: String,
+    pub category: String,
+    pub state: String,
+    pub path: String,
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
+    pub status: Option<i32>,
+    pub ok: Option<bool>,
+    pub duration_ms: Option<i64>,
+    pub ttft_ms: Option<i64>,
+    pub model: Option<String>,
+    pub requested_model: Option<String>,
+    pub upstream_model: Option<String>,
+    pub endpoint_id: Option<Uuid>,
+    pub endpoint_key_id: Option<Uuid>,
+    pub model_route_rule_id: Option<Uuid>,
+    pub mcp_server_id: Option<Uuid>,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub cached_tokens: Option<i64>,
+    pub cache_read_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
+    pub error_code: Option<String>,
+    pub failure_family: Option<String>,
+    pub redaction_applied: bool,
+    pub redaction_findings_count: i32,
+    pub redaction_replacements_count: i32,
+    pub redaction_types: Vec<String>,
+    pub redaction_fields: Vec<String>,
+    pub route_selection_reason: String,
+}
+
+impl fmt::Debug for StandaloneUsageSummaryRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StandaloneUsageSummaryRecord")
+            .field("request_id", &self.request_id)
+            .field("event_kind", &self.event_kind)
+            .field("category", &self.category)
+            .field("state", &self.state)
+            .field("path", &self.path)
+            .field("recorded_at", &self.recorded_at)
+            .field("status", &self.status)
+            .field("ok", &self.ok)
+            .field("duration_ms", &self.duration_ms)
+            .field("ttft_ms", &self.ttft_ms)
+            .field("model", &self.model)
+            .field("requested_model", &self.requested_model)
+            .field("upstream_model", &self.upstream_model)
+            .field("endpoint_id", &self.endpoint_id)
+            .field("endpoint_key_id", &self.endpoint_key_id)
+            .field("model_route_rule_id", &self.model_route_rule_id)
+            .field("mcp_server_id", &self.mcp_server_id)
+            .field("input_tokens", &self.input_tokens)
+            .field("output_tokens", &self.output_tokens)
+            .field("total_tokens", &self.total_tokens)
+            .field("cached_tokens", &self.cached_tokens)
+            .field("cache_read_tokens", &self.cache_read_tokens)
+            .field("cache_write_tokens", &self.cache_write_tokens)
+            .field("error_code", &self.error_code)
+            .field("failure_family", &self.failure_family)
+            .field("redaction_applied", &self.redaction_applied)
+            .field("redaction_findings_count", &self.redaction_findings_count)
+            .field(
+                "redaction_replacements_count",
+                &self.redaction_replacements_count,
+            )
+            .field("redaction_types", &self.redaction_types)
+            .field("redaction_fields", &self.redaction_fields)
+            .field("route_selection_reason", &self.route_selection_reason)
+            .finish()
+    }
+}

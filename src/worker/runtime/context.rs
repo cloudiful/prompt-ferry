@@ -116,7 +116,14 @@ impl RuntimeServices {
             }
             UsageRecordingMode::Standalone => {
                 if let Some(state) = self.standalone_state() {
-                    state.record_usage(log);
+                    // Push into the bounded in-memory cache synchronously
+                    // so concurrent reads observe the new summary, then
+                    // await the SQLite insert + prune inline so the
+                    // runtime's request-flow drain covers the durable
+                    // write before shutdown. Persistence errors warn but
+                    // do not fail the upstream request.
+                    let summary = state.record_usage(log);
+                    state.persist_usage(&summary).await;
                 }
                 None
             }

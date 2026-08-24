@@ -50,16 +50,26 @@ impl StandaloneRuntimeState {
         let redaction_enabled = Arc::new(AtomicBool::new(false));
         apply_redaction_settings(&snapshot, &redaction_enabled);
         Self {
-            store,
+            store: store.clone(),
             manager,
             snapshot: Arc::new(RwLock::new(snapshot)),
             relay_senders: Arc::new(Mutex::new(std::collections::HashMap::new())),
             relay_statuses: Arc::new(RwLock::new(std::collections::HashMap::new())),
             snapshot_version: Arc::new(AtomicI64::new(0)),
             redaction_enabled,
-            recent_usage: Arc::new(StandaloneUsageBuffer::new(DEFAULT_USAGE_CAPACITY)),
+            recent_usage: Arc::new(StandaloneUsageBuffer::with_persistence(
+                DEFAULT_USAGE_CAPACITY,
+                store,
+            )),
             mcp_runtime: None,
         }
+    }
+
+    /// Restore the in-memory usage cache from the durable SQLite ledger so
+    /// reopening the same database returns the recent bounded summaries.
+    /// Persistence errors degrade gracefully to an empty cache.
+    pub(crate) async fn hydrate_usage(&self) {
+        self.recent_usage.hydrate_from_store().await;
     }
 
     pub(crate) fn with_mcp_runtime(mut self, mcp_runtime: crate::mcp::McpRuntimeState) -> Self {
@@ -100,8 +110,12 @@ impl StandaloneRuntimeState {
         self.redaction_enabled.load(Ordering::SeqCst)
     }
 
-    pub(crate) fn record_usage(&self, log: UsageLog) {
-        self.recent_usage.record(log);
+    pub(crate) fn record_usage(&self, log: UsageLog) -> StandaloneUsageSummary {
+        self.recent_usage.record(log)
+    }
+
+    pub(crate) async fn persist_usage(&self, summary: &StandaloneUsageSummary) {
+        self.recent_usage.persist(summary).await;
     }
 
     #[allow(dead_code)]
@@ -207,7 +221,9 @@ mod tests {
     use crate::{
         redact::RedactionConfig,
         relay_secrets::RelaySecretManager,
-        standalone_config::{ClientKeyConfig, SettingConfig, StandaloneConfigStore},
+        standalone_config::{
+            ClientKeyConfig, SettingConfig, StandaloneConfigStore, StandaloneUsageSummaryRecord,
+        },
     };
 
     fn database_path() -> PathBuf {
@@ -339,5 +355,170 @@ mod tests {
 
         drop(store);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn standalone_runtime_persists_usage_and_hydrates_on_reopen() {
+        use crate::worker_usage::{UsageLog, UsageRequestMetadata};
+
+        let path = database_path();
+        let manager =
+            RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");
+
+        let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+        let first_state = StandaloneRuntimeState::new(
+            store.clone(),
+            manager.clone(),
+            StandaloneConfig::default(),
+        );
+        first_state.hydrate_usage().await;
+        assert!(first_state.recent_usage().is_empty());
+
+        let first_request = uuid::Uuid::new_v4();
+        let second_request = uuid::Uuid::new_v4();
+        for (request_id, path_label, model) in [
+            (first_request, "/v1/responses", "gpt-5"),
+            (second_request, "/v1/chat", "claude"),
+        ] {
+            let summary = first_state.record_usage(
+                UsageLog::ai_request(
+                    request_id,
+                    UsageRequestMetadata {
+                        path: path_label.to_string(),
+                        ..UsageRequestMetadata::default()
+                    },
+                    Some(model.to_string()),
+                )
+                .with_status(Some(200), Some(true), Some(150), Some(20)),
+            );
+            // Persistence is awaited inline so the SQLite write is durable
+            // before this test continues; no fire-and-forget is left to be
+            // lost by the runtime's drain on shutdown.
+            first_state.persist_usage(&summary).await;
+        }
+
+        let persisted = store
+            .list_usage_summaries(64)
+            .await
+            .expect("persisted list");
+        let persisted_ids = persisted
+            .iter()
+            .map(|record| record.request_id)
+            .collect::<Vec<_>>();
+        assert!(persisted_ids.contains(&first_request));
+        assert!(persisted_ids.contains(&second_request));
+
+        drop(first_state);
+        drop(store);
+
+        let reopened_store = Arc::new(StandaloneConfigStore::open(&path).await.expect("reopen"));
+        let reopened_state = StandaloneRuntimeState::new(
+            reopened_store.clone(),
+            manager.clone(),
+            StandaloneConfig::default(),
+        );
+        reopened_state.hydrate_usage().await;
+        let hydrated = reopened_state.recent_usage();
+        let hydrated_ids = hydrated
+            .iter()
+            .map(|summary| summary.request_id)
+            .collect::<Vec<_>>();
+        assert!(
+            hydrated_ids.contains(&first_request),
+            "first persisted request must hydrate after reopen"
+        );
+        assert!(
+            hydrated_ids.contains(&second_request),
+            "second persisted request must hydrate after reopen"
+        );
+
+        drop(reopened_state);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn standalone_runtime_persists_repeated_lifecycle_events_for_one_request() {
+        use crate::db::{RequestRecordState, UsageEventKind};
+        use crate::worker_usage::{UsageLog, UsageRequestMetadata};
+
+        let path = database_path();
+        let manager =
+            RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");
+        let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+
+        let request_id = uuid::Uuid::new_v4();
+        let initial = UsageLog::ai_request(
+            request_id,
+            UsageRequestMetadata {
+                path: "/v1/responses".to_string(),
+                ..UsageRequestMetadata::default()
+            },
+            Some("gpt-5".to_string()),
+        );
+        let terminal = UsageLog::ai_request(
+            request_id,
+            UsageRequestMetadata {
+                path: "/v1/responses".to_string(),
+                ..UsageRequestMetadata::default()
+            },
+            Some("gpt-5".to_string()),
+        )
+        .with_state(UsageEventKind::Request, RequestRecordState::Failed)
+        .with_status(Some(502), Some(false), Some(40), None)
+        .with_error(Some("upstream_error".to_string()), None, None);
+
+        let state = StandaloneRuntimeState::new(
+            store.clone(),
+            manager.clone(),
+            StandaloneConfig::default(),
+        );
+        let summary_initial = state.record_usage(initial);
+        state.persist_usage(&summary_initial).await;
+        let summary_terminal = state.record_usage(terminal);
+        state.persist_usage(&summary_terminal).await;
+
+        let stored = store
+            .list_usage_summaries(64)
+            .await
+            .expect("persisted list");
+        assert_eq!(
+            stored.len(),
+            2,
+            "both lifecycle events for the same request must be retained"
+        );
+        let states = stored
+            .iter()
+            .map(|record| record.state.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            states,
+            vec!["received", "failed"],
+            "ledger must keep the original Received event and the terminal Failed event"
+        );
+
+        drop(state);
+        drop(store);
+
+        let reopened = Arc::new(StandaloneConfigStore::open(&path).await.expect("reopen"));
+        reopened_state_assert_terminal_state(reopened, request_id).await;
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    async fn reopened_state_assert_terminal_state(
+        store: Arc<StandaloneConfigStore>,
+        request_id: uuid::Uuid,
+    ) {
+        let records = store.list_usage_summaries(64).await.expect("reopen list");
+        let for_request: Vec<&StandaloneUsageSummaryRecord> = records
+            .iter()
+            .filter(|record| record.request_id == request_id)
+            .collect();
+        assert_eq!(for_request.len(), 2);
+        let states: Vec<&str> = for_request
+            .iter()
+            .map(|record| record.state.as_str())
+            .collect();
+        assert_eq!(states, vec!["received", "failed"]);
     }
 }

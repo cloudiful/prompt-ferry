@@ -549,3 +549,81 @@ fn bounded_list(values: Vec<String>) -> Vec<String> {
         })
         .collect()
 }
+
+impl From<&StandaloneUsageSummary> for crate::standalone_config::StandaloneUsageSummaryRecord {
+    fn from(summary: &StandaloneUsageSummary) -> Self {
+        Self {
+            request_id: summary.request_id,
+            event_kind: summary.event_kind.clone(),
+            category: summary.category.clone(),
+            state: summary.state.clone(),
+            path: summary.path.clone(),
+            recorded_at: summary.recorded_at,
+            status: summary.status,
+            ok: summary.ok,
+            duration_ms: summary.duration_ms,
+            ttft_ms: summary.ttft_ms,
+            model: summary.model.clone(),
+            requested_model: summary.requested_model.clone(),
+            upstream_model: summary.upstream_model.clone(),
+            endpoint_id: summary.endpoint_id,
+            endpoint_key_id: summary.endpoint_key_id,
+            model_route_rule_id: summary.model_route_rule_id,
+            mcp_server_id: summary.mcp_server_id,
+            input_tokens: summary.input_tokens,
+            output_tokens: summary.output_tokens,
+            total_tokens: summary.total_tokens,
+            cached_tokens: summary.cached_tokens,
+            cache_read_tokens: summary.cache_read_tokens,
+            cache_write_tokens: summary.cache_write_tokens,
+            error_code: summary.error_code.clone(),
+            failure_family: summary.failure_family.clone(),
+            redaction_applied: summary.redaction.applied,
+            redaction_findings_count: summary.redaction.findings_count,
+            redaction_replacements_count: summary.redaction.replacements_count,
+            redaction_types: summary.redaction.types.clone(),
+            redaction_fields: summary.redaction.fields.clone(),
+            route_selection_reason: summary.route_selection_reason.clone(),
+        }
+    }
+}
+
+impl From<&crate::standalone_config::StandaloneUsageSummaryRecord> for StandaloneUsageSummary {
+    fn from(record: &crate::standalone_config::StandaloneUsageSummaryRecord) -> Self {
+        Self {
+            request_id: record.request_id,
+            event_kind: record.event_kind.clone(),
+            category: record.category.clone(),
+            state: record.state.clone(),
+            path: record.path.clone(),
+            recorded_at: record.recorded_at,
+            status: record.status,
+            ok: record.ok,
+            duration_ms: record.duration_ms,
+            ttft_ms: record.ttft_ms,
+            model: record.model.clone(),
+            requested_model: record.requested_model.clone(),
+            upstream_model: record.upstream_model.clone(),
+            endpoint_id: record.endpoint_id,
+            endpoint_key_id: record.endpoint_key_id,
+            model_route_rule_id: record.model_route_rule_id,
+            mcp_server_id: record.mcp_server_id,
+            input_tokens: record.input_tokens,
+            output_tokens: record.output_tokens,
+            total_tokens: record.total_tokens,
+            cached_tokens: record.cached_tokens,
+            cache_read_tokens: record.cache_read_tokens,
+            cache_write_tokens: record.cache_write_tokens,
+            error_code: record.error_code.clone(),
+            failure_family: record.failure_family.clone(),
+            redaction: StandaloneUsageRedactionSummary {
+                applied: record.redaction_applied,
+                findings_count: record.redaction_findings_count,
+                replacements_count: record.redaction_replacements_count,
+                types: record.redaction_types.clone(),
+                fields: record.redaction_fields.clone(),
+            },
+            route_selection_reason: record.route_selection_reason.clone(),
+        }
+    }
+}

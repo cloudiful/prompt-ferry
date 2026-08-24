@@ -133,10 +133,11 @@ pub(super) async fn build_standalone_state(
     )
     .warm_enabled_servers()
     .await;
-    Ok(
+    let state =
         crate::worker::runtime::standalone::StandaloneRuntimeState::new(store, manager, snapshot)
-            .with_mcp_runtime(mcp_runtime),
-    )
+            .with_mcp_runtime(mcp_runtime);
+    state.hydrate_usage().await;
+    Ok(state)
 }
 
 fn optional_file_pem(path: &str) -> anyhow::Result<Option<String>> {

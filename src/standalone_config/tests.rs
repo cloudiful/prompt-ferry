@@ -586,7 +586,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -604,5 +604,364 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .try_get::<i64, _>("enabled")
     .expect("legacy user status");
     assert_eq!(legacy_user, 0);
+    cleanup(store, path).await;
+}
+
+// ---- Phase 1A standalone usage ledger tests ----
+
+fn sample_usage_record(
+    request_id: Uuid,
+    path: &str,
+    model: Option<&str>,
+) -> StandaloneUsageSummaryRecord {
+    StandaloneUsageSummaryRecord {
+        request_id,
+        event_kind: "request".to_string(),
+        category: "ai".to_string(),
+        state: "completed".to_string(),
+        path: path.to_string(),
+        recorded_at: chrono::Utc::now(),
+        status: Some(200),
+        ok: Some(true),
+        duration_ms: Some(123),
+        ttft_ms: Some(45),
+        model: model.map(str::to_string),
+        requested_model: model.map(str::to_string),
+        upstream_model: model.map(str::to_string),
+        endpoint_id: Some(Uuid::new_v4()),
+        endpoint_key_id: Some(Uuid::new_v4()),
+        model_route_rule_id: Some(Uuid::new_v4()),
+        mcp_server_id: None,
+        input_tokens: Some(11),
+        output_tokens: Some(22),
+        total_tokens: Some(33),
+        cached_tokens: Some(0),
+        cache_read_tokens: Some(0),
+        cache_write_tokens: Some(0),
+        error_code: None,
+        failure_family: None,
+        redaction_applied: true,
+        redaction_findings_count: 1,
+        redaction_replacements_count: 1,
+        redaction_types: vec!["email".to_string()],
+        redaction_fields: vec!["messages.email".to_string()],
+        route_selection_reason: "default".to_string(),
+    }
+}
+
+#[tokio::test]
+async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_six() {
+    let (store, path) = open_store().await;
+    let version = standalone_query!("src/sql/standalone/schema_version.sql")
+        .fetch_one(store.pool())
+        .await
+        .expect("schema version")
+        .try_get::<i64, _>("schema_version")
+        .expect("version value");
+    assert_eq!(version, 6);
+    assert!(
+        store
+            .list_usage_summaries(64)
+            .await
+            .expect("list")
+            .is_empty()
+    );
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn insert_and_list_usage_summaries_preserve_insertion_order() {
+    let (store, path) = open_store().await;
+    let first = sample_usage_record(Uuid::new_v4(), "/v1/responses", Some("gpt-5"));
+    let second = sample_usage_record(Uuid::new_v4(), "/v1/chat", Some("claude"));
+    let third = sample_usage_record(Uuid::new_v4(), "/v1/embeddings", None);
+    let inserts = [&first, &second, &third];
+    let mut event_ids = Vec::new();
+    for record in inserts {
+        let event_id = store
+            .insert_usage_summary(record)
+            .await
+            .expect("insert summary");
+        assert!(event_id > 0, "event_id must be positive");
+        event_ids.push(event_id);
+        // Re-inserting the same record creates a new event row so retries,
+        // replays, and repeated lifecycle events all persist.
+        let duplicate_event_id = store
+            .insert_usage_summary(record)
+            .await
+            .expect("re-insert summary");
+        assert_ne!(
+            duplicate_event_id, event_id,
+            "duplicate insert must allocate a new event_id"
+        );
+    }
+    assert_eq!(event_ids.len(), 3);
+    assert!(
+        event_ids.windows(2).all(|window| window[0] < window[1]),
+        "event_ids must increase monotonically across inserts"
+    );
+
+    let stored = store
+        .list_usage_summaries(64)
+        .await
+        .expect("list summaries");
+    assert_eq!(stored.len(), 6, "duplicate inserts must produce six rows");
+    let ids: Vec<Uuid> = stored.iter().map(|record| record.request_id).collect();
+    assert_eq!(
+        ids,
+        vec![
+            first.request_id,
+            first.request_id,
+            second.request_id,
+            second.request_id,
+            third.request_id,
+            third.request_id,
+        ]
+    );
+    assert_eq!(stored.first().expect("first").path, "/v1/responses");
+    assert_eq!(
+        stored.last().expect("last").redaction_types,
+        vec!["email".to_string()]
+    );
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn repeated_lifecycle_events_for_one_request_retain_terminal_state() {
+    let (store, path) = open_store().await;
+    let request_id = Uuid::new_v4();
+    let mut initial = sample_usage_record(request_id, "/v1/responses", Some("gpt-5"));
+    initial.state = "received".to_string();
+    let mut terminal = sample_usage_record(request_id, "/v1/responses", Some("gpt-5"));
+    terminal.state = "failed".to_string();
+    terminal.error_code = Some("upstream_error".to_string());
+    terminal.failure_family = Some("upstream_5xx".to_string());
+    terminal.status = Some(502);
+    terminal.ok = Some(false);
+
+    let first_event_id = store
+        .insert_usage_summary(&initial)
+        .await
+        .expect("initial insert");
+    let second_event_id = store
+        .insert_usage_summary(&terminal)
+        .await
+        .expect("terminal insert");
+    assert!(
+        second_event_id > first_event_id,
+        "terminal event must allocate a strictly greater event_id"
+    );
+
+    let stored = store
+        .list_usage_summaries(64)
+        .await
+        .expect("list summaries");
+    let for_request: Vec<&StandaloneUsageSummaryRecord> = stored
+        .iter()
+        .filter(|record| record.request_id == request_id)
+        .collect();
+    assert_eq!(for_request.len(), 2, "both lifecycle events must persist");
+    let states: Vec<&str> = for_request
+        .iter()
+        .map(|record| record.state.as_str())
+        .collect();
+    assert_eq!(
+        states,
+        vec!["received", "failed"],
+        "insertion order must keep the original Received event and the terminal Failed event"
+    );
+    assert_eq!(for_request[1].error_code.as_deref(), Some("upstream_error"));
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn prune_usage_summaries_trims_old_rows_to_max_rows() {
+    let (store, path) = open_store().await;
+    let records: Vec<StandaloneUsageSummaryRecord> = (0..5)
+        .map(|index| {
+            sample_usage_record(Uuid::new_v4(), &format!("/v1/test/{index}"), Some("gpt-5"))
+        })
+        .collect();
+    for record in &records {
+        store.insert_usage_summary(record).await.expect("insert");
+    }
+    let removed = store.prune_usage_summaries(2).await.expect("prune");
+    assert_eq!(removed, 3, "three oldest rows must be removed");
+
+    let kept = store.list_usage_summaries(16).await.expect("list kept");
+    assert_eq!(kept.len(), 2);
+    assert_eq!(kept[0].request_id, records[3].request_id);
+    assert_eq!(kept[1].request_id, records[4].request_id);
+
+    // Pruning to a count equal to or larger than the current size is a
+    // no-op and must not error.
+    let noop = store.prune_usage_summaries(2).await.expect("noop prune");
+    assert_eq!(noop, 0);
+
+    // Pruning to a count equal to or larger than the current size is a
+    // no-op and must not error.
+    let noop = store.prune_usage_summaries(2).await.expect("noop prune");
+    assert_eq!(noop, 0);
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn reopen_restores_recent_usage_summaries_from_durable_ledger() {
+    let (store, path) = open_store().await;
+    let persisted = [
+        sample_usage_record(Uuid::new_v4(), "/v1/a", Some("a")),
+        sample_usage_record(Uuid::new_v4(), "/v1/b", Some("b")),
+        sample_usage_record(Uuid::new_v4(), "/v1/c", Some("c")),
+    ];
+    for record in &persisted {
+        store.insert_usage_summary(record).await.expect("insert");
+    }
+    store.close().await;
+
+    let reopened = StandaloneConfigStore::open(&path).await.expect("reopen");
+    let restored = reopened
+        .list_usage_summaries(64)
+        .await
+        .expect("list after reopen");
+    let ids = restored
+        .iter()
+        .map(|record| record.request_id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        persisted
+            .iter()
+            .map(|record| record.request_id)
+            .collect::<Vec<_>>()
+    );
+    cleanup(reopened, path).await;
+}
+
+#[tokio::test]
+async fn usage_summary_record_omits_raw_bodies_and_secrets() {
+    let (store, path) = open_store().await;
+    let mut record = sample_usage_record(Uuid::new_v4(), "/v1/redacted-path", Some("model"));
+    // Even if a caller accidentally tries to push raw body fields through
+    // the storage API, the DTO has no fields for raw bodies or secrets.
+    record.error_code = Some("provider_error".to_string());
+    record.failure_family = Some("upstream_5xx".to_string());
+    store.insert_usage_summary(&record).await.expect("insert");
+    let stored = store
+        .list_usage_summaries(1)
+        .await
+        .expect("list")
+        .into_iter()
+        .next()
+        .expect("stored summary");
+    let debug = format!("{stored:?}");
+    // The path field is a request route, not a body, and must round-trip.
+    assert!(debug.contains("redacted-path"));
+    // The DTO has no fields for raw request bodies, raw response bodies,
+    // or session bodies. Field names like `cache_read_tokens` are token
+    // counters, not token values, so they are not subject to this check.
+    for forbidden in [
+        "request_body",
+        "response_body",
+        "raw_body",
+        "session_secret",
+    ] {
+        assert!(
+            !debug.contains(forbidden),
+            "Debug output must not contain {forbidden:?}; found: {debug}"
+        );
+    }
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn list_usage_summaries_skips_malformed_rows_and_keeps_valid_ones() {
+    let (store, path) = open_store().await;
+    let keep = sample_usage_record(Uuid::new_v4(), "/v1/responses", Some("gpt-5"));
+    let corrupt = sample_usage_record(Uuid::new_v4(), "/v1/chat", Some("claude"));
+    let keep_request_id = keep.request_id;
+    let corrupt_request_id = corrupt.request_id;
+    store
+        .insert_usage_summary(&keep)
+        .await
+        .expect("insert keep");
+    store
+        .insert_usage_summary(&corrupt)
+        .await
+        .expect("insert corrupt");
+
+    // Tamper with only the second row's recorded_at so it carries an
+    // unparseable timestamp that the domain parser rejects.
+    let pool = store.pool().clone();
+    sqlx::query("UPDATE standalone_usage_summaries SET recorded_at = ? WHERE request_id = ?")
+        .bind("not-a-timestamp")
+        .bind(corrupt_request_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("tamper recorded_at");
+
+    let stored = store
+        .list_usage_summaries(64)
+        .await
+        .expect("list tolerates corrupt row");
+    let loaded_ids: Vec<Uuid> = stored.iter().map(|record| record.request_id).collect();
+    assert_eq!(
+        loaded_ids,
+        vec![keep_request_id],
+        "the corrupt row must be skipped and the valid row must still load"
+    );
+
+    // Drop the tampered row so subsequent test runs do not see it.
+    sqlx::query("DELETE FROM standalone_usage_summaries WHERE recorded_at = ?")
+        .bind("not-a-timestamp")
+        .execute(&pool)
+        .await
+        .expect("clean tampered row");
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn list_usage_summaries_skips_malformed_uuid_and_keeps_valid_rows() {
+    let (store, path) = open_store().await;
+    let first = sample_usage_record(Uuid::new_v4(), "/v1/a", Some("a"));
+    let second = sample_usage_record(Uuid::new_v4(), "/v1/b", Some("b"));
+    let first_request_id = first.request_id;
+    let second_request_id = second.request_id;
+    store
+        .insert_usage_summary(&first)
+        .await
+        .expect("insert first row");
+    store
+        .insert_usage_summary(&second)
+        .await
+        .expect("insert second row");
+
+    let pool = store.pool().clone();
+    sqlx::query("UPDATE standalone_usage_summaries SET endpoint_id = ? WHERE request_id = ?")
+        .bind("not-a-uuid")
+        .bind(second_request_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("tamper endpoint_id");
+
+    let stored = store
+        .list_usage_summaries(64)
+        .await
+        .expect("list tolerates corrupt UUID row");
+    let loaded_ids: Vec<Uuid> = stored.iter().map(|record| record.request_id).collect();
+    assert!(
+        loaded_ids.contains(&first_request_id),
+        "first valid row must survive the malformed second row"
+    );
+    assert!(
+        !loaded_ids.contains(&second_request_id),
+        "second row with malformed endpoint_id must be skipped"
+    );
+
+    // Drop the tampered row so the cleanup path can succeed.
+    sqlx::query("DELETE FROM standalone_usage_summaries WHERE endpoint_id = ?")
+        .bind("not-a-uuid")
+        .execute(&pool)
+        .await
+        .expect("clean tampered row");
     cleanup(store, path).await;
 }
