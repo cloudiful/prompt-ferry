@@ -538,6 +538,65 @@ pub struct StandaloneUsageSummaryRecord {
     pub response_capture_truncated: bool,
 }
 
+/// Durable standalone replay snapshot for a single conversation.
+///
+/// Mirrors the columns of `standalone_replay_snapshots` introduced by
+/// migration 0008. Only the latest checkpoint per conversation is
+/// persisted; lower or equal sequence numbers are silently dropped by
+/// the monotonic upsert SQL. `prompt_refs_json` is the same shape as
+/// the PostgreSQL replay snapshot column and the in-memory
+/// `ReplaySnapshotValue::prompt_refs` (role + block-hash references),
+/// not raw request or response bodies.
+#[derive(Clone, PartialEq, Eq)]
+pub struct StandaloneReplaySnapshotRecord {
+    pub conversation_id: Uuid,
+    pub base_event_id: i64,
+    pub conversation_seq: i32,
+    pub prompt_refs_json: String,
+    pub ref_count: i32,
+    pub byte_size: i32,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl fmt::Debug for StandaloneReplaySnapshotRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StandaloneReplaySnapshotRecord")
+            .field("conversation_id", &self.conversation_id)
+            .field("base_event_id", &self.base_event_id)
+            .field("conversation_seq", &self.conversation_seq)
+            .field("prompt_refs_json", &self.prompt_refs_json)
+            .field("ref_count", &self.ref_count)
+            .field("byte_size", &self.byte_size)
+            .field("updated_at", &self.updated_at)
+            .finish()
+    }
+}
+
+/// Outcome of a monotonic upsert against `standalone_replay_snapshots`.
+/// The store distinguishes "applied" from "skipped" without a separate
+/// read-then-compare transaction so the runtime can warn about repeated
+/// regressions without losing the existing snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplaySnapshotUpsertOutcome {
+    /// No existing snapshot for the conversation; a fresh row was
+    /// inserted.
+    Inserted,
+    /// The incoming snapshot was strictly newer by the
+    /// `(conversation_seq, base_event_id)` ordering and replaced the
+    /// stored row.
+    Updated,
+    /// The incoming snapshot would regress the stored row by the
+    /// ordering, so the existing row was preserved unchanged.
+    Skipped,
+}
+
+impl ReplaySnapshotUpsertOutcome {
+    pub fn applied(self) -> bool {
+        matches!(self, Self::Inserted | Self::Updated)
+    }
+}
+
 impl fmt::Debug for StandaloneUsageSummaryRecord {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter

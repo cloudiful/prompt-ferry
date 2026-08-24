@@ -5,7 +5,11 @@ use std::{
 
 use tracing::warn;
 
-use crate::standalone_config::{StandaloneConfigStore, StandaloneUsageSummaryRecord};
+use crate::db;
+use crate::standalone_config::{
+    ReplaySnapshotUpsertOutcome, StandaloneConfigStore, StandaloneReplaySnapshotRecord,
+    StandaloneUsageSummaryRecord,
+};
 use crate::worker_usage::{StandaloneUsageSummary, UsageLog};
 
 pub(crate) const DEFAULT_USAGE_CAPACITY: usize = 256;
@@ -99,6 +103,93 @@ impl StandaloneUsageBuffer {
                 request_id = %summary.request_id,
                 "failed to prune standalone usage ledger"
             );
+        }
+        // The replay-snapshot side effect runs only after the durable
+        // usage summary has landed, so a transient SQLite error here
+        // never blocks the request path. Malformed JSON warns and the
+        // already-persisted summary/cache remain usable.
+        Self::persist_replay_snapshot(persistence.store.as_ref(), summary).await;
+    }
+
+    async fn persist_replay_snapshot(
+        store: &StandaloneConfigStore,
+        summary: &StandaloneUsageSummary,
+    ) {
+        let (Some(conversation_id), Some(conversation_seq), Some(refs_json)) = (
+            summary.replay_conversation_id,
+            summary.replay_conversation_seq,
+            summary.snapshot_prompt_refs_json.as_deref(),
+        ) else {
+            return;
+        };
+        if conversation_seq <= 0 {
+            warn!(
+                request_id = %summary.request_id,
+                conversation_id = %conversation_id,
+                "skipping standalone replay snapshot persistence; conversation_seq must be positive"
+            );
+            return;
+        }
+        let refs_value = match serde_json::from_str::<serde_json::Value>(refs_json) {
+            Ok(value) => value,
+            Err(error) => {
+                warn!(
+                    request_id = %summary.request_id,
+                    conversation_id = %conversation_id,
+                    error = %error,
+                    "skipping standalone replay snapshot persistence; prompt refs JSON is malformed"
+                );
+                return;
+            }
+        };
+        let prompt_refs = match db::decode_prompt_message_refs(&refs_value) {
+            Ok(refs) => refs,
+            Err(error) => {
+                warn!(
+                    request_id = %summary.request_id,
+                    conversation_id = %conversation_id,
+                    error = %error,
+                    "skipping standalone replay snapshot persistence; prompt refs are invalid"
+                );
+                return;
+            }
+        };
+        let ref_count = i32::try_from(prompt_refs.len()).unwrap_or(i32::MAX);
+        let byte_size = match serde_json::to_vec(&prompt_refs) {
+            Ok(bytes) => i32::try_from(bytes.len()).unwrap_or(i32::MAX),
+            Err(error) => {
+                warn!(
+                    request_id = %summary.request_id,
+                    conversation_id = %conversation_id,
+                    error = %error,
+                    "skipping standalone replay snapshot persistence; failed to measure bytes"
+                );
+                return;
+            }
+        };
+        let snapshot = StandaloneReplaySnapshotRecord {
+            conversation_id,
+            base_event_id: 0,
+            conversation_seq,
+            prompt_refs_json: refs_json.to_string(),
+            ref_count,
+            byte_size,
+            updated_at: chrono::Utc::now(),
+        };
+        match store.upsert_replay_snapshot(&snapshot).await {
+            Ok(ReplaySnapshotUpsertOutcome::Skipped) => {
+                // The incoming snapshot would regress the existing row;
+                // preserve the durable checkpoint as-is.
+            }
+            Ok(_) => {}
+            Err(error) => {
+                warn!(
+                    request_id = %summary.request_id,
+                    conversation_id = %conversation_id,
+                    error = %error,
+                    "failed to persist standalone replay snapshot; usage summary remains"
+                );
+            }
         }
     }
 

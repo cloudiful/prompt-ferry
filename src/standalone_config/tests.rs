@@ -586,7 +586,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -684,7 +684,7 @@ async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_seven() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
     assert!(
         store
             .list_usage_summaries(64)
@@ -1546,4 +1546,535 @@ async fn metadata_record_debug_output_omits_raw_body_and_secret_field_names() {
             "metadata record debug output must contain {visible:?}"
         );
     }
+}
+
+// ---- Phase 1C-b standalone replay snapshot tests ----
+
+fn sample_prompt_refs_json(entries: &[(&str, &str)]) -> String {
+    let array = entries
+        .iter()
+        .map(|(role, block_hash)| serde_json::json!({"role": role, "block_hash": block_hash}))
+        .collect::<Vec<_>>();
+    serde_json::to_string(&array).expect("serialize refs")
+}
+
+fn sample_snapshot(
+    conversation_id: Uuid,
+    conversation_seq: i32,
+    base_event_id: i64,
+    refs_json: &str,
+) -> StandaloneReplaySnapshotRecord {
+    let refs_value: serde_json::Value = serde_json::from_str(refs_json).expect("refs JSON");
+    let ref_count = refs_value.as_array().map(|array| array.len()).unwrap_or(0) as i32;
+    let byte_size = refs_json.len() as i32;
+    StandaloneReplaySnapshotRecord {
+        conversation_id,
+        base_event_id,
+        conversation_seq,
+        prompt_refs_json: refs_json.to_string(),
+        ref_count,
+        byte_size,
+        updated_at: chrono::Utc::now(),
+    }
+}
+
+#[tokio::test]
+async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_eight() {
+    let (store, path) = open_store().await;
+    let version = standalone_query!("src/sql/standalone/schema_version.sql")
+        .fetch_one(store.pool())
+        .await
+        .expect("schema version")
+        .try_get::<i64, _>("schema_version")
+        .expect("version value");
+    assert_eq!(version, 8);
+    let pool = store.pool().clone();
+    for (column, declared_type) in [
+        ("conversation_id", "TEXT"),
+        ("base_event_id", "INTEGER"),
+        ("conversation_seq", "INTEGER"),
+        ("prompt_refs_json", "TEXT"),
+        ("ref_count", "INTEGER"),
+        ("byte_size", "INTEGER"),
+        ("updated_at", "TEXT"),
+    ] {
+        let row = sqlx::query(
+            "SELECT type FROM pragma_table_info('standalone_replay_snapshots') WHERE name = ?",
+        )
+        .bind(column)
+        .fetch_optional(&pool)
+        .await
+        .expect("pragma")
+        .unwrap_or_else(|| panic!("missing column {column}"));
+        let actual_type: String = row.try_get("type").expect("type");
+        assert_eq!(actual_type, declared_type, "column {column}");
+    }
+    assert!(
+        store
+            .get_replay_snapshot(Uuid::new_v4())
+            .await
+            .expect("get missing")
+            .is_none(),
+        "fresh database must not have any replay snapshots"
+    );
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn upgrade_from_schema_seven_creates_replay_snapshot_table() {
+    let path = database_path();
+    let pool = crate::db::connect_sqlite(&path).await.expect("pool");
+    // Apply the baseline schema via raw SQL (matching the schema-6
+    // upgrade pattern) so the migrator applies migrations 0007 and 0008
+    // when the store is opened. Applying 0007 via raw SQL here would
+    // make the migrator fail on duplicate columns because the SQLx
+    // Migrator tracks applied migrations in `_sqlx_migrations`, not
+    // `standalone_schema_meta`.
+    for (label, body) in [
+        (
+            "0001_initial.sql",
+            include_str!("/workspace/tools/prompt-ferry/migrations/standalone/0001_initial.sql"),
+        ),
+        (
+            "0002_storage_contract.sql",
+            include_str!(
+                "/workspace/tools/prompt-ferry/migrations/standalone/0002_storage_contract.sql"
+            ),
+        ),
+        (
+            "0003_user_auth_compatibility.sql",
+            include_str!(
+                "/workspace/tools/prompt-ferry/migrations/standalone/0003_user_auth_compatibility.sql"
+            ),
+        ),
+        (
+            "0004_coordinator_state.sql",
+            include_str!(
+                "/workspace/tools/prompt-ferry/migrations/standalone/0004_coordinator_state.sql"
+            ),
+        ),
+        (
+            "0005_mcp_configuration.sql",
+            include_str!(
+                "/workspace/tools/prompt-ferry/migrations/standalone/0005_mcp_configuration.sql"
+            ),
+        ),
+        (
+            "0006_request_ledger.sql",
+            include_str!(
+                "/workspace/tools/prompt-ferry/migrations/standalone/0006_request_ledger.sql"
+            ),
+        ),
+    ] {
+        sqlx::raw_sql(body).execute(&pool).await.expect(label);
+    }
+    pool.close().await;
+
+    let store = StandaloneConfigStore::open(&path).await.expect("upgrade");
+    let version = standalone_query!("src/sql/standalone/schema_version.sql")
+        .fetch_one(store.pool())
+        .await
+        .expect("schema version")
+        .try_get::<i64, _>("schema_version")
+        .expect("version value");
+    assert_eq!(version, 8);
+
+    // Confirm migration 0007 took effect before the new replay table
+    // arrived so the test really exercises the schema-7 -> schema-8
+    // boundary.
+    let pool = store.pool().clone();
+    let user_id_column: i64 = sqlx::query(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('standalone_usage_summaries') WHERE name = 'user_id')",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("user_id pragma")
+    .try_get(0)
+    .expect("pragma value");
+    assert_eq!(user_id_column, 1, "schema 7 metadata columns must exist");
+
+    // The new table must be empty and writable without disturbing
+    // pre-existing schema-7 rows.
+    let conversation_id = Uuid::new_v4();
+    let refs_json = sample_prompt_refs_json(&[("user", "hash-1")]);
+    let snapshot = sample_snapshot(conversation_id, 1, 5, &refs_json);
+    let outcome = store
+        .upsert_replay_snapshot(&snapshot)
+        .await
+        .expect("upsert");
+    assert_eq!(outcome, ReplaySnapshotUpsertOutcome::Inserted);
+    let loaded = store
+        .get_replay_snapshot(conversation_id)
+        .await
+        .expect("get")
+        .expect("snapshot");
+    assert_eq!(loaded.conversation_seq, 1);
+    assert_eq!(loaded.base_event_id, 5);
+    assert_eq!(loaded.ref_count, 1);
+    assert_eq!(loaded.prompt_refs_json, refs_json);
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn replay_snapshot_first_insert_then_higher_sequence_replaces() {
+    let (store, path) = open_store().await;
+    let conversation_id = Uuid::new_v4();
+    let first_refs = sample_prompt_refs_json(&[("user", "hash-1")]);
+    let first = sample_snapshot(conversation_id, 1, 10, &first_refs);
+    assert_eq!(
+        store
+            .upsert_replay_snapshot(&first)
+            .await
+            .expect("first upsert"),
+        ReplaySnapshotUpsertOutcome::Inserted
+    );
+
+    let higher_refs = sample_prompt_refs_json(&[
+        ("user", "hash-1"),
+        ("assistant", "hash-2"),
+        ("user", "hash-3"),
+    ]);
+    let higher = sample_snapshot(conversation_id, 2, 11, &higher_refs);
+    assert_eq!(
+        store
+            .upsert_replay_snapshot(&higher)
+            .await
+            .expect("higher upsert"),
+        ReplaySnapshotUpsertOutcome::Updated
+    );
+
+    let loaded = store
+        .get_replay_snapshot(conversation_id)
+        .await
+        .expect("get")
+        .expect("snapshot");
+    assert_eq!(loaded.conversation_seq, 2);
+    assert_eq!(loaded.base_event_id, 11);
+    assert_eq!(loaded.ref_count, 3);
+    assert_eq!(loaded.prompt_refs_json, higher_refs);
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn replay_snapshot_lower_or_equal_sequence_does_not_regress() {
+    let (store, path) = open_store().await;
+    let conversation_id = Uuid::new_v4();
+    let initial_refs = sample_prompt_refs_json(&[("user", "hash-1"), ("assistant", "hash-2")]);
+    let initial = sample_snapshot(conversation_id, 5, 100, &initial_refs);
+    assert_eq!(
+        store
+            .upsert_replay_snapshot(&initial)
+            .await
+            .expect("initial"),
+        ReplaySnapshotUpsertOutcome::Inserted
+    );
+
+    // Lower sequence must be rejected as a non-regression.
+    let lower_refs = sample_prompt_refs_json(&[("user", "hash-stale")]);
+    let lower = sample_snapshot(conversation_id, 4, 200, &lower_refs);
+    assert_eq!(
+        store
+            .upsert_replay_snapshot(&lower)
+            .await
+            .expect("lower upsert"),
+        ReplaySnapshotUpsertOutcome::Skipped
+    );
+    let loaded = store
+        .get_replay_snapshot(conversation_id)
+        .await
+        .expect("get")
+        .expect("snapshot");
+    assert_eq!(
+        loaded.conversation_seq, 5,
+        "stored sequence must not regress"
+    );
+    assert_eq!(
+        loaded.base_event_id, 100,
+        "stored base_event_id must not regress"
+    );
+    assert_eq!(
+        loaded.prompt_refs_json, initial_refs,
+        "stored refs must not be overwritten by an older snapshot"
+    );
+
+    // Equal sequence with a lower base_event_id must also be rejected.
+    let same_seq_older = sample_snapshot(conversation_id, 5, 99, &lower_refs);
+    assert_eq!(
+        store
+            .upsert_replay_snapshot(&same_seq_older)
+            .await
+            .expect("same seq older"),
+        ReplaySnapshotUpsertOutcome::Skipped
+    );
+    let loaded = store
+        .get_replay_snapshot(conversation_id)
+        .await
+        .expect("get")
+        .expect("snapshot");
+    assert_eq!(loaded.base_event_id, 100);
+    assert_eq!(loaded.prompt_refs_json, initial_refs);
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn replay_snapshot_same_sequence_higher_event_id_replaces() {
+    let (store, path) = open_store().await;
+    let conversation_id = Uuid::new_v4();
+    let first_refs = sample_prompt_refs_json(&[("user", "hash-1")]);
+    let first = sample_snapshot(conversation_id, 7, 50, &first_refs);
+    assert_eq!(
+        store.upsert_replay_snapshot(&first).await.expect("first"),
+        ReplaySnapshotUpsertOutcome::Inserted
+    );
+
+    let newer_refs = sample_prompt_refs_json(&[("user", "hash-2"), ("assistant", "hash-3")]);
+    let newer = sample_snapshot(conversation_id, 7, 75, &newer_refs);
+    assert_eq!(
+        store
+            .upsert_replay_snapshot(&newer)
+            .await
+            .expect("same seq newer"),
+        ReplaySnapshotUpsertOutcome::Updated
+    );
+    let loaded = store
+        .get_replay_snapshot(conversation_id)
+        .await
+        .expect("get")
+        .expect("snapshot");
+    assert_eq!(loaded.conversation_seq, 7);
+    assert_eq!(loaded.base_event_id, 75);
+    assert_eq!(loaded.ref_count, 2);
+    assert_eq!(loaded.prompt_refs_json, newer_refs);
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn replay_snapshot_rejects_invalid_input_payloads() {
+    let (store, path) = open_store().await;
+    let conversation_id = Uuid::new_v4();
+
+    // Empty prompt refs JSON must be rejected so callers cannot insert
+    // a row that could not be reconstructed into typed refs. We build
+    // the DTO directly here because `sample_snapshot` requires valid
+    // JSON to compute its counters.
+    let empty = StandaloneReplaySnapshotRecord {
+        conversation_id,
+        base_event_id: 1,
+        conversation_seq: 1,
+        prompt_refs_json: "[]".to_string(),
+        ref_count: 0,
+        byte_size: 2,
+        updated_at: chrono::Utc::now(),
+    };
+    let error = store
+        .upsert_replay_snapshot(&empty)
+        .await
+        .expect_err("empty refs must fail");
+    assert!(matches!(
+        error,
+        StandaloneConfigError::InvalidInput {
+            field: "prompt_refs_json",
+            ..
+        }
+    ));
+
+    // Non-array payload must be rejected.
+    let object_payload = StandaloneReplaySnapshotRecord {
+        conversation_id,
+        base_event_id: 1,
+        conversation_seq: 1,
+        prompt_refs_json: "{}".to_string(),
+        ref_count: 0,
+        byte_size: 2,
+        updated_at: chrono::Utc::now(),
+    };
+    let error = store
+        .upsert_replay_snapshot(&object_payload)
+        .await
+        .expect_err("non-array refs must fail");
+    assert!(matches!(
+        error,
+        StandaloneConfigError::InvalidInput {
+            field: "prompt_refs_json",
+            ..
+        }
+    ));
+
+    // Malformed JSON must surface as an invalid input error so callers
+    // can warn and continue without poisoning the durable row.
+    let malformed = StandaloneReplaySnapshotRecord {
+        conversation_id,
+        base_event_id: 1,
+        conversation_seq: 1,
+        prompt_refs_json: "not json".to_string(),
+        ref_count: 0,
+        byte_size: 8,
+        updated_at: chrono::Utc::now(),
+    };
+    let error = store
+        .upsert_replay_snapshot(&malformed)
+        .await
+        .expect_err("malformed refs must fail");
+    assert!(matches!(
+        error,
+        StandaloneConfigError::InvalidInput {
+            field: "prompt_refs_json",
+            ..
+        }
+    ));
+
+    // Negative counters must be rejected at the storage boundary.
+    let valid_refs = sample_prompt_refs_json(&[("user", "hash-1")]);
+    let mut negative_refs = sample_snapshot(conversation_id, 1, 1, &valid_refs);
+    negative_refs.ref_count = -1;
+    let error = store
+        .upsert_replay_snapshot(&negative_refs)
+        .await
+        .expect_err("negative ref_count must fail");
+    assert!(matches!(
+        error,
+        StandaloneConfigError::InvalidInput {
+            field: "ref_count",
+            ..
+        }
+    ));
+
+    let mut negative_bytes = sample_snapshot(conversation_id, 1, 1, &valid_refs);
+    negative_bytes.byte_size = -1;
+    let error = store
+        .upsert_replay_snapshot(&negative_bytes)
+        .await
+        .expect_err("negative byte_size must fail");
+    assert!(matches!(
+        error,
+        StandaloneConfigError::InvalidInput {
+            field: "byte_size",
+            ..
+        }
+    ));
+
+    // Non-positive conversation_seq must be rejected.
+    let mut zero_seq = sample_snapshot(conversation_id, 0, 1, &valid_refs);
+    zero_seq.byte_size = valid_refs.len() as i32;
+    let error = store
+        .upsert_replay_snapshot(&zero_seq)
+        .await
+        .expect_err("zero seq must fail");
+    assert!(matches!(
+        error,
+        StandaloneConfigError::InvalidInput {
+            field: "conversation_seq",
+            ..
+        }
+    ));
+
+    // Confirm no row was written by any of the rejected attempts.
+    let loaded = store
+        .get_replay_snapshot(conversation_id)
+        .await
+        .expect("get");
+    assert!(loaded.is_none());
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn replay_snapshot_get_corrupt_row_reports_corrupt_database() {
+    let (store, path) = open_store().await;
+    let conversation_id = Uuid::new_v4();
+    let refs_json = sample_prompt_refs_json(&[("user", "hash-1")]);
+    let snapshot = sample_snapshot(conversation_id, 1, 1, &refs_json);
+    store
+        .upsert_replay_snapshot(&snapshot)
+        .await
+        .expect("upsert");
+
+    // Tamper with the row directly so the next read sees an unparseable
+    // prompt refs JSON; the read path must surface it as a corruption
+    // error rather than silently dropping the row.
+    let pool = store.pool().clone();
+    sqlx::query(
+        "UPDATE standalone_replay_snapshots SET prompt_refs_json = ? WHERE conversation_id = ?",
+    )
+    .bind("not-json")
+    .bind(conversation_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("tamper refs");
+
+    let error = store
+        .get_replay_snapshot(conversation_id)
+        .await
+        .expect_err("corrupt row must error");
+    assert!(matches!(error, StandaloneConfigError::CorruptDatabase(_)));
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn replay_snapshot_persists_across_reopen_and_raw_body_is_excluded() {
+    let (store, path) = open_store().await;
+    let conversation_id = Uuid::new_v4();
+    let refs_json = sample_prompt_refs_json(&[
+        ("system", "system-hash"),
+        ("user", "user-hash"),
+        ("assistant", "assistant-hash"),
+    ]);
+    let snapshot = sample_snapshot(conversation_id, 9, 42, &refs_json);
+    assert_eq!(
+        store
+            .upsert_replay_snapshot(&snapshot)
+            .await
+            .expect("first"),
+        ReplaySnapshotUpsertOutcome::Inserted
+    );
+    store.close().await;
+
+    let reopened = StandaloneConfigStore::open(&path).await.expect("reopen");
+    let loaded = reopened
+        .get_replay_snapshot(conversation_id)
+        .await
+        .expect("get after reopen")
+        .expect("snapshot after reopen");
+    assert_eq!(loaded.conversation_id, conversation_id);
+    assert_eq!(loaded.conversation_seq, 9);
+    assert_eq!(loaded.base_event_id, 42);
+    assert_eq!(loaded.ref_count, 3);
+    assert_eq!(loaded.byte_size, refs_json.len() as i32);
+    assert_eq!(loaded.prompt_refs_json, refs_json);
+
+    // The DTO debug output must not mention raw body, secret, or
+    // session fields; the only string data on this DTO is the
+    // serialized prompt refs JSON.
+    let debug = format!("{loaded:?}");
+    for forbidden in [
+        "request_body",
+        "response_body",
+        "raw_body",
+        "session_secret",
+        "request_raw_json",
+        "response_raw_body",
+        "upstream_redacted_request_json",
+        "upstream_restore_session",
+    ] {
+        assert!(
+            !debug.contains(forbidden),
+            "snapshot debug must not contain {forbidden:?}; got: {debug}"
+        );
+    }
+    // Required fields must be visible in the debug output.
+    for visible in [
+        "conversation_id",
+        "base_event_id",
+        "conversation_seq",
+        "prompt_refs_json",
+        "ref_count",
+        "byte_size",
+        "updated_at",
+    ] {
+        assert!(
+            debug.contains(visible),
+            "snapshot debug must contain {visible:?}"
+        );
+    }
+    cleanup(reopened, path).await;
 }

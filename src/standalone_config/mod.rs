@@ -25,8 +25,9 @@ pub(crate) use coordinator::StandaloneCoordinatorStore;
 pub use models::{
     BootstrapSeed, ClientKeyConfig, ContinuationPolicy, EndpointApiKeyConfig, EndpointProvider,
     EndpointRegion, ManagedRelayConfig, ModelRouteConfig, ModelRouteTargetConfig,
-    ProviderEndpointConfig, Result, RouteScope, RoutingStrategy, SettingConfig, StandaloneConfig,
-    StandaloneConfigError, StandaloneUsageSummaryRecord,
+    ProviderEndpointConfig, ReplaySnapshotUpsertOutcome, Result, RouteScope, RoutingStrategy,
+    SettingConfig, StandaloneConfig, StandaloneConfigError, StandaloneReplaySnapshotRecord,
+    StandaloneUsageSummaryRecord,
 };
 pub use store::{BootstrapOutcome, StandaloneConfigStore};
 pub use users::SqliteUserStore;

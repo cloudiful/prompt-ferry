@@ -72,6 +72,19 @@ impl StandaloneRuntimeState {
         self.recent_usage.hydrate_from_store().await;
     }
 
+    /// Load the latest durable replay snapshot for a conversation, if any
+    /// has been persisted. Used by runtime replay consumers (for example,
+    /// prompt reconstruction) to restore the most recent prompt-ref
+    /// checkpoint after a process restart. Errors are reported via the
+    /// shared `StandaloneConfigError` taxonomy so callers can decide
+    /// whether to skip or fail their load path.
+    pub(crate) async fn latest_replay_snapshot(
+        &self,
+        conversation_id: Uuid,
+    ) -> anyhow::Result<Option<crate::standalone_config::StandaloneReplaySnapshotRecord>> {
+        Ok(self.store.get_replay_snapshot(conversation_id).await?)
+    }
+
     pub(crate) fn with_mcp_runtime(mut self, mcp_runtime: crate::mcp::McpRuntimeState) -> Self {
         self.mcp_runtime = Some(mcp_runtime);
         self
@@ -640,6 +653,176 @@ mod tests {
         }
 
         drop(reopened_state);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn standalone_runtime_persists_phase_1c_b_replay_snapshots() {
+        use crate::worker_usage::{UsageLog, UsageRequestMetadata};
+
+        let path = database_path();
+        let manager =
+            RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");
+        let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+
+        let conversation_id = Uuid::new_v4();
+        let initial = UsageLog::ai_request(
+            Uuid::new_v4(),
+            UsageRequestMetadata {
+                path: "/v1/responses".to_string(),
+                conversation_id: Some(conversation_id),
+                conversation_seq: Some(1),
+                snapshot_prompt_refs_json: Some(serde_json::json!([
+                    {"role": "user", "block_hash": "hash-1"}
+                ])),
+                ..UsageRequestMetadata::default()
+            },
+            Some("gpt-5".to_string()),
+        );
+        let terminal = UsageLog::ai_request(
+            Uuid::new_v4(),
+            UsageRequestMetadata {
+                path: "/v1/responses".to_string(),
+                conversation_id: Some(conversation_id),
+                conversation_seq: Some(2),
+                snapshot_prompt_refs_json: Some(serde_json::json!([
+                    {"role": "user", "block_hash": "hash-1"},
+                    {"role": "assistant", "block_hash": "hash-2"}
+                ])),
+                ..UsageRequestMetadata::default()
+            },
+            Some("gpt-5".to_string()),
+        )
+        .with_state(
+            crate::db::UsageEventKind::Request,
+            crate::db::RequestRecordState::Completed,
+        );
+
+        let state = StandaloneRuntimeState::new(
+            store.clone(),
+            manager.clone(),
+            StandaloneConfig::default(),
+        );
+        let initial_summary = state.record_usage(initial);
+        state.persist_usage(&initial_summary).await;
+        let terminal_summary = state.record_usage(terminal);
+        state.persist_usage(&terminal_summary).await;
+
+        // Reject older sequence: a synthetic snapshot with the same
+        // conversation id at a lower conversation_seq must not regress
+        // the stored row even though `persist_usage` runs again with
+        // stale in-memory data.
+        let stale = UsageLog::ai_request(
+            Uuid::new_v4(),
+            UsageRequestMetadata {
+                path: "/v1/responses".to_string(),
+                conversation_id: Some(conversation_id),
+                conversation_seq: Some(1),
+                snapshot_prompt_refs_json: Some(serde_json::json!([
+                    {"role": "user", "block_hash": "stale"}
+                ])),
+                ..UsageRequestMetadata::default()
+            },
+            Some("gpt-5".to_string()),
+        );
+        let stale_summary = state.record_usage(stale);
+        state.persist_usage(&stale_summary).await;
+
+        let loaded = store
+            .get_replay_snapshot(conversation_id)
+            .await
+            .expect("get snapshot")
+            .expect("stored snapshot");
+        assert_eq!(loaded.conversation_seq, 2);
+        assert_eq!(loaded.ref_count, 2);
+        let hydrated = state
+            .latest_replay_snapshot(conversation_id)
+            .await
+            .expect("runtime hydrate")
+            .expect("runtime snapshot");
+        assert_eq!(hydrated.conversation_seq, 2);
+        assert_eq!(hydrated.ref_count, 2);
+
+        // Restart: reopen the same SQLite file and confirm the
+        // snapshot hydrates without losing the higher sequence.
+        drop(state);
+        drop(store);
+
+        let reopened_store = Arc::new(
+            StandaloneConfigStore::open(&path)
+                .await
+                .expect("reopen store"),
+        );
+        let reopened_state = StandaloneRuntimeState::new(
+            reopened_store.clone(),
+            manager.clone(),
+            StandaloneConfig::default(),
+        );
+        let reopened_snapshot = reopened_state
+            .latest_replay_snapshot(conversation_id)
+            .await
+            .expect("reopen hydrate")
+            .expect("reopen snapshot");
+        assert_eq!(reopened_snapshot.conversation_seq, 2);
+        assert_eq!(reopened_snapshot.ref_count, 2);
+
+        drop(reopened_state);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn standalone_runtime_skips_replay_snapshot_for_malformed_prompt_refs() {
+        use crate::worker_usage::{UsageLog, UsageRequestMetadata};
+
+        let path = database_path();
+        let manager =
+            RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");
+        let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+
+        let conversation_id = Uuid::new_v4();
+        // Malformed JSON for `snapshot_prompt_refs_json` must warn and
+        // leave the request path usable; the usage summary still lands
+        // and no replay row is written.
+        let malformed = UsageLog::ai_request(
+            Uuid::new_v4(),
+            UsageRequestMetadata {
+                path: "/v1/responses".to_string(),
+                conversation_id: Some(conversation_id),
+                conversation_seq: Some(3),
+                snapshot_prompt_refs_json: Some(serde_json::json!("not-an-array")),
+                ..UsageRequestMetadata::default()
+            },
+            Some("gpt-5".to_string()),
+        );
+
+        let state = StandaloneRuntimeState::new(
+            store.clone(),
+            manager.clone(),
+            StandaloneConfig::default(),
+        );
+        let summary = state.record_usage(malformed);
+        state.persist_usage(&summary).await;
+
+        let stored = store
+            .list_usage_summaries(64)
+            .await
+            .expect("usage summary persisted despite malformed refs");
+        assert!(
+            stored
+                .iter()
+                .any(|record| record.request_id == summary.request_id),
+            "usage summary row must still be persisted when the replay refs are malformed"
+        );
+        let snapshot = store
+            .get_replay_snapshot(conversation_id)
+            .await
+            .expect("get snapshot");
+        assert!(
+            snapshot.is_none(),
+            "malformed prompt refs must not write a replay snapshot row"
+        );
+
+        drop(state);
         let _ = std::fs::remove_file(path);
     }
 }

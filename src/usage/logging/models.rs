@@ -200,6 +200,9 @@ impl UsageLog {
             STANDALONE_SUMMARY_TEXT_LIMIT,
         )
         .unwrap_or_else(|| "full".to_string());
+        let snapshot_prompt_refs_json = self.snapshot_prompt_refs_json;
+        let replay_conversation_id = self.conversation_id;
+        let replay_conversation_seq = self.conversation_seq;
         StandaloneUsageSummary {
             request_id: self.request_id,
             event_kind: self.event_kind.as_str().to_string(),
@@ -290,6 +293,11 @@ impl UsageLog {
             request_conversation_parent_found: self.request_conversation_parent_found,
             upstream_redaction_enabled: self.upstream_redaction_enabled,
             response_capture_truncated: self.response_capture_truncated,
+            replay_conversation_id,
+            replay_conversation_seq,
+            snapshot_prompt_refs_json: snapshot_prompt_refs_json_to_string(
+                snapshot_prompt_refs_json,
+            ),
         }
     }
 
@@ -623,6 +631,15 @@ pub(crate) struct StandaloneUsageSummary {
     pub(crate) request_conversation_parent_found: Option<bool>,
     pub(crate) upstream_redaction_enabled: bool,
     pub(crate) response_capture_truncated: bool,
+    // Phase 1C-b transient replay metadata. The standalone persistence
+    // layer decodes `snapshot_prompt_refs_json` and upserts the SQLite
+    // replay snapshot row after the usage-summary write completes; raw
+    // request or response bodies are intentionally absent. `None`
+    // values mean the request was not part of a replay-capable
+    // conversation and the snapshot path is skipped.
+    pub(crate) replay_conversation_id: Option<uuid::Uuid>,
+    pub(crate) replay_conversation_seq: Option<i32>,
+    pub(crate) snapshot_prompt_refs_json: Option<String>,
 }
 
 fn bounded_text(value: Option<String>, limit: usize) -> Option<String> {
@@ -640,6 +657,22 @@ fn bounded_list(values: Vec<String>) -> Vec<String> {
                 .collect()
         })
         .collect()
+}
+
+/// Serialize the transient `snapshot_prompt_refs_json` payload into the
+/// storage representation carried by `StandaloneUsageSummary`. The
+/// persistence layer hands the string back to
+/// `db::decode_prompt_message_refs` for typed validation, so any
+/// `serde_json` failure here would otherwise silently lose replay data;
+/// we therefore fall back to the `Display` form so a malformed value
+/// is still visible (and round-trippable) for diagnostics rather than
+/// vanishing.
+fn snapshot_prompt_refs_json_to_string(value: Option<Value>) -> Option<String> {
+    let value = value?;
+    match serde_json::to_string(&value) {
+        Ok(serialized) => Some(serialized),
+        Err(error) => Some(format!("/* invalid snapshot_prompt_refs_json: {error} */")),
+    }
 }
 
 impl From<&StandaloneUsageSummary> for crate::standalone_config::StandaloneUsageSummaryRecord {
@@ -768,6 +801,13 @@ impl From<&crate::standalone_config::StandaloneUsageSummaryRecord> for Standalon
             request_conversation_parent_found: record.request_conversation_parent_found,
             upstream_redaction_enabled: record.upstream_redaction_enabled,
             response_capture_truncated: record.response_capture_truncated,
+            // Replay metadata is transient: the durable ledger does not
+            // store it, so the round-trip from the record starts empty
+            // and the runtime's `persist` path re-decodes the JSON
+            // snapshot only when an incoming usage event provides it.
+            replay_conversation_id: None,
+            replay_conversation_seq: None,
+            snapshot_prompt_refs_json: None,
         }
     }
 }
