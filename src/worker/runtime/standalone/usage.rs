@@ -167,6 +167,10 @@ mod tests {
     use crate::worker_usage::{UsageLog, UsageRequestMetadata};
 
     fn log(request_id: uuid::Uuid, secret: &str) -> UsageLog {
+        // `error_message`, `provider_response_id`, and `provider_conversation_key`
+        // are non-secret bounded metadata fields that the standalone ledger now
+        // persists; give them distinct, non-secret values so the debug-output
+        // assertion only catches raw body and session material.
         UsageLog::ai_request(
             request_id,
             UsageRequestMetadata {
@@ -177,7 +181,7 @@ mod tests {
         )
         .with_request_raw_json(Some(serde_json::json!({"secret": secret})))
         .with_response(
-            Some("provider-response".to_string()),
+            Some("prv_xxx".to_string()),
             None,
             Some(secret.to_string()),
             Some(secret.to_string()),
@@ -185,7 +189,7 @@ mod tests {
         .with_upstream_redaction(true, Some(serde_json::json!({"secret": secret})), None)
         .with_error(
             Some("provider_error".to_string()),
-            Some(secret.to_string()),
+            Some("upstream returned HTTP 500".to_string()),
             Some(secret.to_string()),
         )
     }
@@ -200,7 +204,17 @@ mod tests {
         let debug = format!("{summary:?}");
         assert_eq!(summary.request_id, request_id);
         assert!(!debug.contains("standalone-secret-body"));
-        assert!(!debug.contains("provider-response"));
+        // response_prompt and response_raw_body are dropped, so the secret
+        // body value the test fed through `with_response` must not surface
+        // anywhere in the summary debug output.
+        assert!(
+            !debug.contains("response_raw_body"),
+            "debug output still mentions the raw-body field name"
+        );
+        assert!(
+            !debug.contains("request_raw_json"),
+            "debug output still mentions the raw-request JSON field name"
+        );
     }
 
     #[test]

@@ -586,7 +586,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -646,11 +646,37 @@ fn sample_usage_record(
         redaction_types: vec!["email".to_string()],
         redaction_fields: vec!["messages.email".to_string()],
         route_selection_reason: "default".to_string(),
+        user_id: None,
+        client_key_id: None,
+        client_key_label: None,
+        request_user_agent: None,
+        endpoint_key_label: None,
+        mcp_server_name: None,
+        mcp_protocol_method: None,
+        mcp_operation_name: None,
+        http_request_content_encoding: None,
+        http_request_compressed: false,
+        http_request_compressed_bytes: None,
+        http_request_decompressed_bytes: None,
+        http_request_compression_ratio: None,
+        conversation_source: "none".to_string(),
+        client_installation_id: None,
+        provider_response_id: None,
+        provider_conversation_key: None,
+        request_storage_mode: "full".to_string(),
+        error_message: None,
+        request_has_previous_response_id: false,
+        request_previous_response_id: None,
+        request_previous_response_parent_found: None,
+        request_conversation_key: None,
+        request_conversation_parent_found: None,
+        upstream_redaction_enabled: false,
+        response_capture_truncated: false,
     }
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_six() {
+async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_seven() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -658,7 +684,7 @@ async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_six() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert!(
         store
             .list_usage_summaries(64)
@@ -964,4 +990,560 @@ async fn list_usage_summaries_skips_malformed_uuid_and_keeps_valid_rows() {
         .await
         .expect("clean tampered row");
     cleanup(store, path).await;
+}
+
+// ---- Phase 1C-a standalone usage metadata tests ----
+
+fn ai_metadata_record(request_id: Uuid) -> StandaloneUsageSummaryRecord {
+    let mut record = sample_usage_record(request_id, "/v1/responses", Some("gpt-5"));
+    record.user_id = Some(42);
+    record.client_key_id = Some(7);
+    record.client_key_label = Some("test client".to_string());
+    record.request_user_agent = Some("prompt-ferry-cli/0.4".to_string());
+    record.endpoint_key_label = Some("primary".to_string());
+    record.http_request_content_encoding = Some("gzip".to_string());
+    record.http_request_compressed = true;
+    record.http_request_compressed_bytes = Some(2048);
+    record.http_request_decompressed_bytes = Some(8192);
+    record.http_request_compression_ratio = Some(0.25);
+    record.conversation_source = "responses".to_string();
+    record.client_installation_id = Some("install-abc".to_string());
+    record.provider_response_id = Some("resp_001".to_string());
+    record.provider_conversation_key = Some("conv-001".to_string());
+    record.request_storage_mode = "summary".to_string();
+    record.error_message = Some("upstream returned HTTP 502".to_string());
+    record.request_has_previous_response_id = true;
+    record.request_previous_response_id = Some("resp_000".to_string());
+    record.request_previous_response_parent_found = Some(true);
+    record.request_conversation_key = Some("conv-001".to_string());
+    record.request_conversation_parent_found = Some(false);
+    record.upstream_redaction_enabled = true;
+    record.response_capture_truncated = true;
+    record
+}
+
+fn mcp_metadata_record(request_id: Uuid) -> StandaloneUsageSummaryRecord {
+    let mut record = sample_usage_record(request_id, "/mcp", None);
+    record.category = "mcp".to_string();
+    record.mcp_server_id = Some(Uuid::new_v4());
+    record.mcp_server_name = Some("catalog".to_string());
+    record.mcp_protocol_method = Some("tools/list".to_string());
+    record.mcp_operation_name = Some("list_tools".to_string());
+    record.request_storage_mode = "metadata_only".to_string();
+    record.request_has_previous_response_id = false;
+    record.upstream_redaction_enabled = false;
+    record.response_capture_truncated = false;
+    record
+}
+
+#[tokio::test]
+async fn fresh_migration_creates_metadata_columns_at_schema_version_seven() {
+    let (store, path) = open_store().await;
+    let pool = store.pool().clone();
+    // Inspect the columns added by migration 0007 are present and have the
+    // expected SQLite types/defaults.
+    for (column, declared_type) in [
+        ("user_id", "INTEGER"),
+        ("client_key_id", "INTEGER"),
+        ("client_key_label", "TEXT"),
+        ("request_user_agent", "TEXT"),
+        ("endpoint_key_label", "TEXT"),
+        ("mcp_server_name", "TEXT"),
+        ("mcp_protocol_method", "TEXT"),
+        ("mcp_operation_name", "TEXT"),
+        ("http_request_content_encoding", "TEXT"),
+        ("http_request_compressed", "INTEGER"),
+        ("http_request_compressed_bytes", "INTEGER"),
+        ("http_request_decompressed_bytes", "INTEGER"),
+        ("http_request_compression_ratio", "REAL"),
+        ("conversation_source", "TEXT"),
+        ("client_installation_id", "TEXT"),
+        ("provider_response_id", "TEXT"),
+        ("provider_conversation_key", "TEXT"),
+        ("request_storage_mode", "TEXT"),
+        ("error_message", "TEXT"),
+        ("request_has_previous_response_id", "INTEGER"),
+        ("request_previous_response_id", "TEXT"),
+        ("request_previous_response_parent_found", "INTEGER"),
+        ("request_conversation_key", "TEXT"),
+        ("request_conversation_parent_found", "INTEGER"),
+        ("upstream_redaction_enabled", "INTEGER"),
+        ("response_capture_truncated", "INTEGER"),
+    ] {
+        let row = sqlx::query(
+            "SELECT type FROM pragma_table_info('standalone_usage_summaries') WHERE name = ?",
+        )
+        .bind(column)
+        .fetch_optional(&pool)
+        .await
+        .expect("pragma")
+        .unwrap_or_else(|| panic!("missing column {column}"));
+        let actual_type: String = row.try_get("type").expect("type");
+        assert_eq!(actual_type, declared_type, "column {column}");
+    }
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn upgrade_from_schema_six_adds_metadata_columns_and_keeps_existing_rows() {
+    let path = database_path();
+    let pool = crate::db::connect_sqlite(&path).await.expect("pool");
+    // Apply the schema through migration 0006 (Phase 1A baseline).
+    for (label, body) in [
+        (
+            "0001_initial.sql",
+            include_str!("/workspace/tools/prompt-ferry/migrations/standalone/0001_initial.sql"),
+        ),
+        (
+            "0002_storage_contract.sql",
+            include_str!(
+                "/workspace/tools/prompt-ferry/migrations/standalone/0002_storage_contract.sql"
+            ),
+        ),
+        (
+            "0003_user_auth_compatibility.sql",
+            include_str!(
+                "/workspace/tools/prompt-ferry/migrations/standalone/0003_user_auth_compatibility.sql"
+            ),
+        ),
+        (
+            "0004_coordinator_state.sql",
+            include_str!(
+                "/workspace/tools/prompt-ferry/migrations/standalone/0004_coordinator_state.sql"
+            ),
+        ),
+        (
+            "0005_mcp_configuration.sql",
+            include_str!(
+                "/workspace/tools/prompt-ferry/migrations/standalone/0005_mcp_configuration.sql"
+            ),
+        ),
+        (
+            "0006_request_ledger.sql",
+            include_str!(
+                "/workspace/tools/prompt-ferry/migrations/standalone/0006_request_ledger.sql"
+            ),
+        ),
+    ] {
+        sqlx::raw_sql(body).execute(&pool).await.expect(label);
+    }
+
+    // Insert a Phase 1A row whose Phase 1C-a metadata columns are NULL so
+    // we can confirm the upgrade preserves it.
+    let request_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO standalone_usage_summaries(
+             request_id, event_kind, category, state, path, recorded_at,
+             redaction_applied, redaction_findings_count, redaction_replacements_count,
+             redaction_types_json, redaction_fields_json, route_selection_reason
+         ) VALUES (
+             ?, 'request', 'ai', 'received', '/v1/legacy', '2026-08-24T00:00:00+00:00',
+             0, 0, 0, '[]', '[]', 'default'
+         )",
+    )
+    .bind(request_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("legacy insert");
+    pool.close().await;
+
+    let store = StandaloneConfigStore::open(&path).await.expect("upgrade");
+    let stored = store
+        .list_usage_summaries(64)
+        .await
+        .expect("list after upgrade");
+    assert_eq!(stored.len(), 1, "Phase 1A row must survive migration");
+    let legacy = &stored[0];
+    assert_eq!(legacy.request_id, request_id);
+    assert!(legacy.user_id.is_none());
+    assert!(legacy.client_key_id.is_none());
+    assert!(legacy.client_key_label.is_none());
+    assert!(legacy.request_user_agent.is_none());
+    assert!(legacy.endpoint_key_label.is_none());
+    assert!(legacy.mcp_server_name.is_none());
+    assert!(legacy.mcp_protocol_method.is_none());
+    assert!(legacy.mcp_operation_name.is_none());
+    assert!(legacy.http_request_content_encoding.is_none());
+    assert!(!legacy.http_request_compressed);
+    assert!(legacy.http_request_compressed_bytes.is_none());
+    assert!(legacy.http_request_decompressed_bytes.is_none());
+    assert!(legacy.http_request_compression_ratio.is_none());
+    assert_eq!(legacy.conversation_source, "none");
+    assert!(legacy.client_installation_id.is_none());
+    assert!(legacy.provider_response_id.is_none());
+    assert!(legacy.provider_conversation_key.is_none());
+    assert_eq!(legacy.request_storage_mode, "full");
+    assert!(legacy.error_message.is_none());
+    assert!(!legacy.request_has_previous_response_id);
+    assert!(legacy.request_previous_response_id.is_none());
+    assert!(legacy.request_previous_response_parent_found.is_none());
+    assert!(legacy.request_conversation_key.is_none());
+    assert!(legacy.request_conversation_parent_found.is_none());
+    assert!(!legacy.upstream_redaction_enabled);
+    assert!(!legacy.response_capture_truncated);
+
+    // Inserting a Phase 1C-a row alongside the legacy one must round-trip
+    // the new metadata columns.
+    let ai_request = Uuid::new_v4();
+    store
+        .insert_usage_summary(&ai_metadata_record(ai_request))
+        .await
+        .expect("ai metadata insert");
+    let after = store.list_usage_summaries(64).await.expect("list");
+    assert_eq!(after.len(), 2);
+    let ai_row = after
+        .iter()
+        .find(|record| record.request_id == ai_request)
+        .expect("ai row");
+    assert_eq!(ai_row.user_id, Some(42));
+    assert_eq!(ai_row.client_key_id, Some(7));
+    assert_eq!(ai_row.client_key_label.as_deref(), Some("test client"));
+    assert_eq!(
+        ai_row.request_user_agent.as_deref(),
+        Some("prompt-ferry-cli/0.4")
+    );
+    assert_eq!(ai_row.endpoint_key_label.as_deref(), Some("primary"));
+    assert_eq!(
+        ai_row.http_request_content_encoding.as_deref(),
+        Some("gzip")
+    );
+    assert!(ai_row.http_request_compressed);
+    assert_eq!(ai_row.http_request_compressed_bytes, Some(2048));
+    assert_eq!(ai_row.http_request_decompressed_bytes, Some(8192));
+    assert_eq!(ai_row.http_request_compression_ratio, Some(0.25));
+    assert_eq!(ai_row.conversation_source, "responses");
+    assert_eq!(
+        ai_row.client_installation_id.as_deref(),
+        Some("install-abc")
+    );
+    assert_eq!(ai_row.provider_response_id.as_deref(), Some("resp_001"));
+    assert_eq!(
+        ai_row.provider_conversation_key.as_deref(),
+        Some("conv-001")
+    );
+    assert_eq!(ai_row.request_storage_mode, "summary");
+    assert_eq!(
+        ai_row.error_message.as_deref(),
+        Some("upstream returned HTTP 502")
+    );
+    assert!(ai_row.request_has_previous_response_id);
+    assert_eq!(
+        ai_row.request_previous_response_id.as_deref(),
+        Some("resp_000")
+    );
+    assert_eq!(ai_row.request_previous_response_parent_found, Some(true));
+    assert_eq!(ai_row.request_conversation_key.as_deref(), Some("conv-001"));
+    assert_eq!(ai_row.request_conversation_parent_found, Some(false));
+    assert!(ai_row.upstream_redaction_enabled);
+    assert!(ai_row.response_capture_truncated);
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn metadata_round_trip_preserves_ai_and_mcp_values() {
+    let (store, path) = open_store().await;
+    let ai = ai_metadata_record(Uuid::new_v4());
+    let mcp = mcp_metadata_record(Uuid::new_v4());
+    let ai_request_id = ai.request_id;
+    let mcp_request_id = mcp.request_id;
+
+    store.insert_usage_summary(&ai).await.expect("ai insert");
+    store.insert_usage_summary(&mcp).await.expect("mcp insert");
+
+    let stored = store
+        .list_usage_summaries(64)
+        .await
+        .expect("list summaries");
+    let ai_row = stored
+        .iter()
+        .find(|record| record.request_id == ai_request_id)
+        .expect("ai row");
+    assert_eq!(ai_row.user_id, Some(42));
+    assert_eq!(ai_row.client_key_id, Some(7));
+    assert_eq!(ai_row.endpoint_key_label.as_deref(), Some("primary"));
+    assert!(ai_row.http_request_compressed);
+    assert_eq!(ai_row.http_request_compressed_bytes, Some(2048));
+    assert_eq!(ai_row.http_request_decompressed_bytes, Some(8192));
+    assert_eq!(ai_row.http_request_compression_ratio, Some(0.25));
+    assert_eq!(ai_row.conversation_source, "responses");
+    assert!(ai_row.request_has_previous_response_id);
+    assert!(ai_row.upstream_redaction_enabled);
+    assert!(ai_row.response_capture_truncated);
+    assert_eq!(ai_row.request_previous_response_parent_found, Some(true));
+
+    let mcp_row = stored
+        .iter()
+        .find(|record| record.request_id == mcp_request_id)
+        .expect("mcp row");
+    assert_eq!(mcp_row.category, "mcp");
+    assert_eq!(mcp_row.mcp_server_name.as_deref(), Some("catalog"));
+    assert_eq!(mcp_row.mcp_protocol_method.as_deref(), Some("tools/list"));
+    assert_eq!(mcp_row.mcp_operation_name.as_deref(), Some("list_tools"));
+    assert_eq!(mcp_row.request_storage_mode, "metadata_only");
+    assert!(!mcp_row.request_has_previous_response_id);
+    assert!(!mcp_row.upstream_redaction_enabled);
+    assert!(!mcp_row.response_capture_truncated);
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn metadata_boolean_and_null_columns_round_trip_via_storage() {
+    let (store, path) = open_store().await;
+    let mut record = sample_usage_record(Uuid::new_v4(), "/v1/responses", Some("gpt-5"));
+    record.http_request_compressed = true;
+    record.request_has_previous_response_id = true;
+    record.upstream_redaction_enabled = true;
+    record.response_capture_truncated = true;
+    record.request_previous_response_parent_found = Some(true);
+    record.request_conversation_parent_found = Some(false);
+    record.request_id = Uuid::new_v4();
+
+    store.insert_usage_summary(&record).await.expect("insert");
+    let stored = store.list_usage_summaries(64).await.expect("list");
+    let row = stored
+        .iter()
+        .find(|r| r.request_id == record.request_id)
+        .expect("row");
+    assert!(row.http_request_compressed);
+    assert!(row.request_has_previous_response_id);
+    assert!(row.upstream_redaction_enabled);
+    assert!(row.response_capture_truncated);
+    assert_eq!(row.request_previous_response_parent_found, Some(true));
+    assert_eq!(row.request_conversation_parent_found, Some(false));
+
+    // Confirm the underlying integer storage is exactly 0/1, not arbitrary
+    // values, so a downstream parse still recognizes the booleans.
+    let pool = store.pool().clone();
+    let raw = sqlx::query(
+        "SELECT http_request_compressed,
+                request_has_previous_response_id,
+                upstream_redaction_enabled,
+                response_capture_truncated,
+                request_previous_response_parent_found,
+                request_conversation_parent_found
+         FROM standalone_usage_summaries
+         WHERE request_id = ?",
+    )
+    .bind(record.request_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("raw row");
+    let http_compressed: i64 = raw.try_get("http_request_compressed").expect("int");
+    let has_previous: i64 = raw
+        .try_get("request_has_previous_response_id")
+        .expect("int");
+    let upstream_enabled: i64 = raw.try_get("upstream_redaction_enabled").expect("int");
+    let capture_truncated: i64 = raw.try_get("response_capture_truncated").expect("int");
+    let parent_found: Option<i64> = raw
+        .try_get("request_previous_response_parent_found")
+        .expect("opt int");
+    let conv_parent_found: Option<i64> = raw
+        .try_get("request_conversation_parent_found")
+        .expect("opt int");
+    assert_eq!(http_compressed, 1);
+    assert_eq!(has_previous, 1);
+    assert_eq!(upstream_enabled, 1);
+    assert_eq!(capture_truncated, 1);
+    assert_eq!(parent_found, Some(1));
+    assert_eq!(conv_parent_found, Some(0));
+
+    // Verify the opposite boolean state (false / None) is also stored
+    // correctly. The CHECK constraints enforced at the schema layer mean a
+    // non 0/1 integer cannot land in the table in the first place; the
+    // parser-side validation is a defensive backup exercised by the
+    // dedicated malformed-row tests in this module.
+    let mut no_metadata = sample_usage_record(Uuid::new_v4(), "/v1/no", Some("gpt-5"));
+    no_metadata.request_previous_response_parent_found = None;
+    no_metadata.request_conversation_parent_found = None;
+    store
+        .insert_usage_summary(&no_metadata)
+        .await
+        .expect("insert no metadata");
+    let no_stored = store
+        .list_usage_summaries(64)
+        .await
+        .expect("list no metadata");
+    let no_row = no_stored
+        .iter()
+        .find(|r| r.request_id == no_metadata.request_id)
+        .expect("no row");
+    assert!(!no_row.http_request_compressed);
+    assert!(!no_row.request_has_previous_response_id);
+    assert!(!no_row.upstream_redaction_enabled);
+    assert!(!no_row.response_capture_truncated);
+    assert_eq!(no_row.request_previous_response_parent_found, None);
+    assert_eq!(no_row.request_conversation_parent_found, None);
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn repeated_lifecycle_events_for_one_request_retain_phase_1c_a_metadata() {
+    let (store, path) = open_store().await;
+    let request_id = Uuid::new_v4();
+
+    let mut initial = ai_metadata_record(request_id);
+    initial.state = "received".to_string();
+
+    let mut terminal = ai_metadata_record(request_id);
+    terminal.state = "failed".to_string();
+    terminal.error_code = Some("upstream_error".to_string());
+    terminal.error_message = Some("upstream returned HTTP 502".to_string());
+    terminal.status = Some(502);
+    terminal.ok = Some(false);
+    terminal.request_has_previous_response_id = false;
+
+    let first_event_id = store
+        .insert_usage_summary(&initial)
+        .await
+        .expect("initial insert");
+    let second_event_id = store
+        .insert_usage_summary(&terminal)
+        .await
+        .expect("terminal insert");
+    assert!(second_event_id > first_event_id);
+
+    let stored = store
+        .list_usage_summaries(64)
+        .await
+        .expect("list summaries");
+    let for_request: Vec<&StandaloneUsageSummaryRecord> = stored
+        .iter()
+        .filter(|record| record.request_id == request_id)
+        .collect();
+    assert_eq!(for_request.len(), 2);
+    assert_eq!(for_request[0].state, "received");
+    assert_eq!(for_request[1].state, "failed");
+    // The metadata fields added in Phase 1C-a must persist on both rows.
+    for row in &for_request {
+        assert_eq!(row.user_id, Some(42));
+        assert_eq!(row.client_key_id, Some(7));
+        assert_eq!(row.client_key_label.as_deref(), Some("test client"));
+        assert_eq!(
+            row.request_user_agent.as_deref(),
+            Some("prompt-ferry-cli/0.4")
+        );
+        assert_eq!(row.endpoint_key_label.as_deref(), Some("primary"));
+        assert!(row.http_request_compressed);
+        assert_eq!(row.http_request_compressed_bytes, Some(2048));
+        assert_eq!(row.conversation_source, "responses");
+        assert_eq!(row.client_installation_id.as_deref(), Some("install-abc"));
+        assert_eq!(row.provider_response_id.as_deref(), Some("resp_001"));
+        assert!(row.upstream_redaction_enabled);
+        assert!(row.response_capture_truncated);
+    }
+    // The terminal event independently overrides request_has_previous_response_id
+    // so the lifecycle distinction is preserved.
+    assert!(for_request[0].request_has_previous_response_id);
+    assert!(!for_request[1].request_has_previous_response_id);
+    assert_eq!(
+        for_request[1].error_message.as_deref(),
+        Some("upstream returned HTTP 502")
+    );
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn metadata_round_trips_after_reopen_and_hydration() {
+    let (store, path) = open_store().await;
+    let request_id = Uuid::new_v4();
+    store
+        .insert_usage_summary(&ai_metadata_record(request_id))
+        .await
+        .expect("insert");
+    store.close().await;
+
+    let reopened = StandaloneConfigStore::open(&path).await.expect("reopen");
+    let stored = reopened
+        .list_usage_summaries(64)
+        .await
+        .expect("list after reopen");
+    assert_eq!(stored.len(), 1);
+    let row = &stored[0];
+    assert_eq!(row.request_id, request_id);
+    assert_eq!(row.user_id, Some(42));
+    assert_eq!(row.client_key_id, Some(7));
+    assert_eq!(row.client_key_label.as_deref(), Some("test client"));
+    assert_eq!(
+        row.request_user_agent.as_deref(),
+        Some("prompt-ferry-cli/0.4")
+    );
+    assert_eq!(row.endpoint_key_label.as_deref(), Some("primary"));
+    assert!(row.http_request_compressed);
+    assert_eq!(row.http_request_compressed_bytes, Some(2048));
+    assert_eq!(row.http_request_decompressed_bytes, Some(8192));
+    assert_eq!(row.http_request_compression_ratio, Some(0.25));
+    assert_eq!(row.conversation_source, "responses");
+    assert_eq!(row.client_installation_id.as_deref(), Some("install-abc"));
+    assert_eq!(row.provider_response_id.as_deref(), Some("resp_001"));
+    assert_eq!(row.provider_conversation_key.as_deref(), Some("conv-001"));
+    assert_eq!(row.request_storage_mode, "summary");
+    assert_eq!(
+        row.error_message.as_deref(),
+        Some("upstream returned HTTP 502")
+    );
+    assert!(row.request_has_previous_response_id);
+    assert_eq!(
+        row.request_previous_response_id.as_deref(),
+        Some("resp_000")
+    );
+    assert_eq!(row.request_previous_response_parent_found, Some(true));
+    assert_eq!(row.request_conversation_key.as_deref(), Some("conv-001"));
+    assert_eq!(row.request_conversation_parent_found, Some(false));
+    assert!(row.upstream_redaction_enabled);
+    assert!(row.response_capture_truncated);
+    cleanup(reopened, path).await;
+}
+
+#[tokio::test]
+async fn metadata_record_debug_output_omits_raw_body_and_secret_field_names() {
+    let record = ai_metadata_record(Uuid::new_v4());
+    let debug = format!("{record:?}");
+    for forbidden in [
+        "request_body",
+        "response_body",
+        "raw_body",
+        "session_secret",
+        "request_raw_json",
+        "response_raw_body",
+        "upstream_redacted_request_json",
+    ] {
+        assert!(
+            !debug.contains(forbidden),
+            "metadata record debug output must not contain {forbidden:?}; got: {debug}"
+        );
+    }
+    // The Phase 1C-a metadata fields must be visible in the debug output so
+    // operators can inspect them.
+    for visible in [
+        "user_id",
+        "client_key_id",
+        "client_key_label",
+        "request_user_agent",
+        "endpoint_key_label",
+        "mcp_server_name",
+        "mcp_protocol_method",
+        "mcp_operation_name",
+        "http_request_content_encoding",
+        "http_request_compressed",
+        "http_request_compressed_bytes",
+        "http_request_decompressed_bytes",
+        "http_request_compression_ratio",
+        "conversation_source",
+        "client_installation_id",
+        "provider_response_id",
+        "provider_conversation_key",
+        "request_storage_mode",
+        "error_message",
+        "request_has_previous_response_id",
+        "request_previous_response_id",
+        "request_conversation_key",
+        "upstream_redaction_enabled",
+        "response_capture_truncated",
+    ] {
+        assert!(
+            debug.contains(visible),
+            "metadata record debug output must contain {visible:?}"
+        );
+    }
 }

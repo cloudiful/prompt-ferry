@@ -521,4 +521,125 @@ mod tests {
             .collect();
         assert_eq!(states, vec!["received", "failed"]);
     }
+
+    #[tokio::test]
+    async fn standalone_runtime_persists_phase_1c_a_request_metadata_and_hydrates_it() {
+        use crate::db::{RequestRecordState, UsageEventKind};
+        use crate::worker_usage::{UsageLog, UsageRequestMetadata};
+
+        let path = database_path();
+        let manager =
+            RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");
+        let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+
+        let request_id = uuid::Uuid::new_v4();
+        let initial = UsageLog::ai_request(
+            request_id,
+            UsageRequestMetadata {
+                path: "/v1/responses".to_string(),
+                client_key_id: Some(7),
+                client_key_label: Some("primary".to_string()),
+                request_user_agent: Some("prompt-ferry-cli/0.4".to_string()),
+                ..UsageRequestMetadata::default()
+            },
+            Some("gpt-5".to_string()),
+        )
+        .with_endpoint_key(Some(uuid::Uuid::new_v4()), Some("primary".to_string()))
+        .with_response(
+            Some("resp_001".to_string()),
+            Some("conv-001".to_string()),
+            None,
+            None,
+        )
+        .with_error(None, Some("upstream returned HTTP 502".to_string()), None);
+
+        let terminal = UsageLog::ai_request(
+            request_id,
+            UsageRequestMetadata {
+                path: "/v1/responses".to_string(),
+                client_key_id: Some(7),
+                client_key_label: Some("primary".to_string()),
+                request_user_agent: Some("prompt-ferry-cli/0.4".to_string()),
+                ..UsageRequestMetadata::default()
+            },
+            Some("gpt-5".to_string()),
+        )
+        .with_endpoint_key(Some(uuid::Uuid::new_v4()), Some("primary".to_string()))
+        .with_response(
+            Some("resp_001".to_string()),
+            Some("conv-001".to_string()),
+            None,
+            None,
+        )
+        .with_state(UsageEventKind::Request, RequestRecordState::Failed)
+        .with_status(Some(502), Some(false), Some(40), None)
+        .with_error(Some("upstream_error".to_string()), None, None);
+
+        let state = StandaloneRuntimeState::new(
+            store.clone(),
+            manager.clone(),
+            StandaloneConfig::default(),
+        );
+        let summary_initial = state.record_usage(initial);
+        state.persist_usage(&summary_initial).await;
+        let summary_terminal = state.record_usage(terminal);
+        state.persist_usage(&summary_terminal).await;
+
+        // Hydrate from the store while the runtime is still open so we can
+        // verify the in-memory cache round-trips the new metadata fields
+        // before restarting the database.
+        state.hydrate_usage().await;
+        let hydrated = state.recent_usage();
+        assert_eq!(hydrated.len(), 2);
+        for summary in &hydrated {
+            assert_eq!(summary.client_key_id, Some(7));
+            assert_eq!(summary.client_key_label.as_deref(), Some("primary"));
+            assert_eq!(
+                summary.request_user_agent.as_deref(),
+                Some("prompt-ferry-cli/0.4")
+            );
+            assert_eq!(summary.endpoint_key_label.as_deref(), Some("primary"));
+            assert_eq!(summary.provider_response_id.as_deref(), Some("resp_001"));
+            assert_eq!(
+                summary.provider_conversation_key.as_deref(),
+                Some("conv-001")
+            );
+        }
+        // The terminal event overwrote the initial error_message; confirm the
+        // distinct value survived the lifecycle.
+        assert_eq!(
+            hydrated[0].error_message.as_deref(),
+            Some("upstream returned HTTP 502")
+        );
+        assert_eq!(hydrated[1].error_message.as_deref(), None);
+
+        drop(state);
+        drop(store);
+
+        let reopened_store = Arc::new(StandaloneConfigStore::open(&path).await.expect("reopen"));
+        let reopened_state = StandaloneRuntimeState::new(
+            reopened_store.clone(),
+            manager.clone(),
+            StandaloneConfig::default(),
+        );
+        reopened_state.hydrate_usage().await;
+        let after_reopen = reopened_state.recent_usage();
+        assert_eq!(after_reopen.len(), 2);
+        for summary in &after_reopen {
+            assert_eq!(summary.client_key_id, Some(7));
+            assert_eq!(summary.client_key_label.as_deref(), Some("primary"));
+            assert_eq!(
+                summary.request_user_agent.as_deref(),
+                Some("prompt-ferry-cli/0.4")
+            );
+            assert_eq!(summary.provider_response_id.as_deref(), Some("resp_001"));
+            assert_eq!(
+                summary.provider_conversation_key.as_deref(),
+                Some("conv-001")
+            );
+        }
+
+        drop(reopened_state);
+        let _ = std::fs::remove_file(path);
+    }
 }

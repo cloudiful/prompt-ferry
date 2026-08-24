@@ -465,12 +465,19 @@ fn redacted_optional_secret(value: Option<&str>) -> Option<String> {
 /// Compact, durable representation of a standalone usage summary.
 ///
 /// This DTO mirrors `StandaloneUsageSummary` and is the storage boundary for
-/// the SQLite request ledger introduced in Phase 1A. It owns its own primitive
-/// representation (UUID text, RFC3339 timestamps, integer booleans, JSON
-/// strings) so the standalone-config storage layer never needs to depend on
-/// the higher-level usage logger. Conversion to and from the runtime summary
-/// type lives in `crate::usage::logging::models`.
-#[derive(Clone, PartialEq, Eq)]
+/// the SQLite request ledger introduced in Phase 1A. Phase 1C-a extends it
+/// with the non-secret request metadata fields carried by
+/// `RequestRecordCreate` so a later Admin query surface can read the same
+/// routing/context columns without re-fetching them. Raw request/response
+/// bodies, encrypted upstream sessions, billing snapshots, approvals, and
+/// quota state remain intentionally absent.
+///
+/// The struct owns its own primitive representation (UUID text, RFC3339
+/// timestamps, integer booleans, JSON strings) so the standalone-config
+/// storage layer never needs to depend on the higher-level usage logger.
+/// Conversion to and from the runtime summary type lives in
+/// `crate::usage::logging::models`.
+#[derive(Clone, PartialEq)]
 pub struct StandaloneUsageSummaryRecord {
     pub request_id: Uuid,
     pub event_kind: String,
@@ -503,6 +510,32 @@ pub struct StandaloneUsageSummaryRecord {
     pub redaction_types: Vec<String>,
     pub redaction_fields: Vec<String>,
     pub route_selection_reason: String,
+    pub user_id: Option<i64>,
+    pub client_key_id: Option<i64>,
+    pub client_key_label: Option<String>,
+    pub request_user_agent: Option<String>,
+    pub endpoint_key_label: Option<String>,
+    pub mcp_server_name: Option<String>,
+    pub mcp_protocol_method: Option<String>,
+    pub mcp_operation_name: Option<String>,
+    pub http_request_content_encoding: Option<String>,
+    pub http_request_compressed: bool,
+    pub http_request_compressed_bytes: Option<i64>,
+    pub http_request_decompressed_bytes: Option<i64>,
+    pub http_request_compression_ratio: Option<f64>,
+    pub conversation_source: String,
+    pub client_installation_id: Option<String>,
+    pub provider_response_id: Option<String>,
+    pub provider_conversation_key: Option<String>,
+    pub request_storage_mode: String,
+    pub error_message: Option<String>,
+    pub request_has_previous_response_id: bool,
+    pub request_previous_response_id: Option<String>,
+    pub request_previous_response_parent_found: Option<bool>,
+    pub request_conversation_key: Option<String>,
+    pub request_conversation_parent_found: Option<bool>,
+    pub upstream_redaction_enabled: bool,
+    pub response_capture_truncated: bool,
 }
 
 impl fmt::Debug for StandaloneUsageSummaryRecord {
@@ -543,6 +576,62 @@ impl fmt::Debug for StandaloneUsageSummaryRecord {
             .field("redaction_types", &self.redaction_types)
             .field("redaction_fields", &self.redaction_fields)
             .field("route_selection_reason", &self.route_selection_reason)
+            .field("user_id", &self.user_id)
+            .field("client_key_id", &self.client_key_id)
+            .field("client_key_label", &self.client_key_label)
+            .field("request_user_agent", &self.request_user_agent)
+            .field("endpoint_key_label", &self.endpoint_key_label)
+            .field("mcp_server_name", &self.mcp_server_name)
+            .field("mcp_protocol_method", &self.mcp_protocol_method)
+            .field("mcp_operation_name", &self.mcp_operation_name)
+            .field(
+                "http_request_content_encoding",
+                &self.http_request_content_encoding,
+            )
+            .field("http_request_compressed", &self.http_request_compressed)
+            .field(
+                "http_request_compressed_bytes",
+                &self.http_request_compressed_bytes,
+            )
+            .field(
+                "http_request_decompressed_bytes",
+                &self.http_request_decompressed_bytes,
+            )
+            .field(
+                "http_request_compression_ratio",
+                &self.http_request_compression_ratio,
+            )
+            .field("conversation_source", &self.conversation_source)
+            .field("client_installation_id", &self.client_installation_id)
+            .field("provider_response_id", &self.provider_response_id)
+            .field("provider_conversation_key", &self.provider_conversation_key)
+            .field("request_storage_mode", &self.request_storage_mode)
+            .field("error_message", &self.error_message)
+            .field(
+                "request_has_previous_response_id",
+                &self.request_has_previous_response_id,
+            )
+            .field(
+                "request_previous_response_id",
+                &self.request_previous_response_id,
+            )
+            .field(
+                "request_previous_response_parent_found",
+                &self.request_previous_response_parent_found,
+            )
+            .field("request_conversation_key", &self.request_conversation_key)
+            .field(
+                "request_conversation_parent_found",
+                &self.request_conversation_parent_found,
+            )
+            .field(
+                "upstream_redaction_enabled",
+                &self.upstream_redaction_enabled,
+            )
+            .field(
+                "response_capture_truncated",
+                &self.response_capture_truncated,
+            )
             .finish()
     }
 }

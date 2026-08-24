@@ -190,6 +190,16 @@ impl UsageLog {
             .failure_family
             .or_else(|| infer_failure_family(&self))
             .map(|family| family.as_str().to_string());
+        let conversation_source = bounded_text(
+            Some(self.conversation_source),
+            STANDALONE_SUMMARY_TEXT_LIMIT,
+        )
+        .unwrap_or_else(|| "none".to_string());
+        let request_storage_mode = bounded_text(
+            Some(self.request_storage_mode),
+            STANDALONE_SUMMARY_TEXT_LIMIT,
+        )
+        .unwrap_or_else(|| "full".to_string());
         StandaloneUsageSummary {
             request_id: self.request_id,
             event_kind: self.event_kind.as_str().to_string(),
@@ -224,6 +234,62 @@ impl UsageLog {
                 fields: bounded_list(self.redaction.fields),
             },
             route_selection_reason: self.route_selection_reason.as_str().to_string(),
+            user_id: self.user_id,
+            client_key_id: self.client_key_id,
+            client_key_label: bounded_text(self.client_key_label, STANDALONE_SUMMARY_TEXT_LIMIT),
+            request_user_agent: bounded_text(
+                self.request_user_agent,
+                STANDALONE_SUMMARY_TEXT_LIMIT,
+            ),
+            endpoint_key_label: bounded_text(
+                self.endpoint_key_label,
+                STANDALONE_SUMMARY_TEXT_LIMIT,
+            ),
+            mcp_server_name: bounded_text(self.mcp_server_name, STANDALONE_SUMMARY_TEXT_LIMIT),
+            mcp_protocol_method: bounded_text(
+                self.mcp_protocol_method,
+                STANDALONE_SUMMARY_TEXT_LIMIT,
+            ),
+            mcp_operation_name: bounded_text(
+                self.mcp_operation_name,
+                STANDALONE_SUMMARY_TEXT_LIMIT,
+            ),
+            http_request_content_encoding: bounded_text(
+                self.http_request_content_encoding,
+                STANDALONE_SUMMARY_TEXT_LIMIT,
+            ),
+            http_request_compressed: self.http_request_compressed,
+            http_request_compressed_bytes: self.http_request_compressed_bytes,
+            http_request_decompressed_bytes: self.http_request_decompressed_bytes,
+            http_request_compression_ratio: self.http_request_compression_ratio,
+            conversation_source,
+            client_installation_id: bounded_text(
+                self.client_installation_id,
+                STANDALONE_SUMMARY_TEXT_LIMIT,
+            ),
+            provider_response_id: bounded_text(
+                self.provider_response_id,
+                STANDALONE_SUMMARY_TEXT_LIMIT,
+            ),
+            provider_conversation_key: bounded_text(
+                self.provider_conversation_key,
+                STANDALONE_SUMMARY_TEXT_LIMIT,
+            ),
+            request_storage_mode,
+            error_message: bounded_text(self.error_message, STANDALONE_SUMMARY_TEXT_LIMIT),
+            request_has_previous_response_id: self.request_has_previous_response_id,
+            request_previous_response_id: bounded_text(
+                self.request_previous_response_id,
+                STANDALONE_SUMMARY_TEXT_LIMIT,
+            ),
+            request_previous_response_parent_found: self.request_previous_response_parent_found,
+            request_conversation_key: bounded_text(
+                self.request_conversation_key,
+                STANDALONE_SUMMARY_TEXT_LIMIT,
+            ),
+            request_conversation_parent_found: self.request_conversation_parent_found,
+            upstream_redaction_enabled: self.upstream_redaction_enabled,
+            response_capture_truncated: self.response_capture_truncated,
         }
     }
 
@@ -502,7 +568,7 @@ pub(crate) struct StandaloneUsageRedactionSummary {
     pub(crate) fields: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StandaloneUsageSummary {
     pub(crate) request_id: uuid::Uuid,
     pub(crate) event_kind: String,
@@ -531,6 +597,32 @@ pub(crate) struct StandaloneUsageSummary {
     pub(crate) failure_family: Option<String>,
     pub(crate) redaction: StandaloneUsageRedactionSummary,
     pub(crate) route_selection_reason: String,
+    pub(crate) user_id: Option<i64>,
+    pub(crate) client_key_id: Option<i64>,
+    pub(crate) client_key_label: Option<String>,
+    pub(crate) request_user_agent: Option<String>,
+    pub(crate) endpoint_key_label: Option<String>,
+    pub(crate) mcp_server_name: Option<String>,
+    pub(crate) mcp_protocol_method: Option<String>,
+    pub(crate) mcp_operation_name: Option<String>,
+    pub(crate) http_request_content_encoding: Option<String>,
+    pub(crate) http_request_compressed: bool,
+    pub(crate) http_request_compressed_bytes: Option<i64>,
+    pub(crate) http_request_decompressed_bytes: Option<i64>,
+    pub(crate) http_request_compression_ratio: Option<f64>,
+    pub(crate) conversation_source: String,
+    pub(crate) client_installation_id: Option<String>,
+    pub(crate) provider_response_id: Option<String>,
+    pub(crate) provider_conversation_key: Option<String>,
+    pub(crate) request_storage_mode: String,
+    pub(crate) error_message: Option<String>,
+    pub(crate) request_has_previous_response_id: bool,
+    pub(crate) request_previous_response_id: Option<String>,
+    pub(crate) request_previous_response_parent_found: Option<bool>,
+    pub(crate) request_conversation_key: Option<String>,
+    pub(crate) request_conversation_parent_found: Option<bool>,
+    pub(crate) upstream_redaction_enabled: bool,
+    pub(crate) response_capture_truncated: bool,
 }
 
 fn bounded_text(value: Option<String>, limit: usize) -> Option<String> {
@@ -584,6 +676,32 @@ impl From<&StandaloneUsageSummary> for crate::standalone_config::StandaloneUsage
             redaction_types: summary.redaction.types.clone(),
             redaction_fields: summary.redaction.fields.clone(),
             route_selection_reason: summary.route_selection_reason.clone(),
+            user_id: summary.user_id,
+            client_key_id: summary.client_key_id,
+            client_key_label: summary.client_key_label.clone(),
+            request_user_agent: summary.request_user_agent.clone(),
+            endpoint_key_label: summary.endpoint_key_label.clone(),
+            mcp_server_name: summary.mcp_server_name.clone(),
+            mcp_protocol_method: summary.mcp_protocol_method.clone(),
+            mcp_operation_name: summary.mcp_operation_name.clone(),
+            http_request_content_encoding: summary.http_request_content_encoding.clone(),
+            http_request_compressed: summary.http_request_compressed,
+            http_request_compressed_bytes: summary.http_request_compressed_bytes,
+            http_request_decompressed_bytes: summary.http_request_decompressed_bytes,
+            http_request_compression_ratio: summary.http_request_compression_ratio,
+            conversation_source: summary.conversation_source.clone(),
+            client_installation_id: summary.client_installation_id.clone(),
+            provider_response_id: summary.provider_response_id.clone(),
+            provider_conversation_key: summary.provider_conversation_key.clone(),
+            request_storage_mode: summary.request_storage_mode.clone(),
+            error_message: summary.error_message.clone(),
+            request_has_previous_response_id: summary.request_has_previous_response_id,
+            request_previous_response_id: summary.request_previous_response_id.clone(),
+            request_previous_response_parent_found: summary.request_previous_response_parent_found,
+            request_conversation_key: summary.request_conversation_key.clone(),
+            request_conversation_parent_found: summary.request_conversation_parent_found,
+            upstream_redaction_enabled: summary.upstream_redaction_enabled,
+            response_capture_truncated: summary.response_capture_truncated,
         }
     }
 }
@@ -624,6 +742,32 @@ impl From<&crate::standalone_config::StandaloneUsageSummaryRecord> for Standalon
                 fields: record.redaction_fields.clone(),
             },
             route_selection_reason: record.route_selection_reason.clone(),
+            user_id: record.user_id,
+            client_key_id: record.client_key_id,
+            client_key_label: record.client_key_label.clone(),
+            request_user_agent: record.request_user_agent.clone(),
+            endpoint_key_label: record.endpoint_key_label.clone(),
+            mcp_server_name: record.mcp_server_name.clone(),
+            mcp_protocol_method: record.mcp_protocol_method.clone(),
+            mcp_operation_name: record.mcp_operation_name.clone(),
+            http_request_content_encoding: record.http_request_content_encoding.clone(),
+            http_request_compressed: record.http_request_compressed,
+            http_request_compressed_bytes: record.http_request_compressed_bytes,
+            http_request_decompressed_bytes: record.http_request_decompressed_bytes,
+            http_request_compression_ratio: record.http_request_compression_ratio,
+            conversation_source: record.conversation_source.clone(),
+            client_installation_id: record.client_installation_id.clone(),
+            provider_response_id: record.provider_response_id.clone(),
+            provider_conversation_key: record.provider_conversation_key.clone(),
+            request_storage_mode: record.request_storage_mode.clone(),
+            error_message: record.error_message.clone(),
+            request_has_previous_response_id: record.request_has_previous_response_id,
+            request_previous_response_id: record.request_previous_response_id.clone(),
+            request_previous_response_parent_found: record.request_previous_response_parent_found,
+            request_conversation_key: record.request_conversation_key.clone(),
+            request_conversation_parent_found: record.request_conversation_parent_found,
+            upstream_redaction_enabled: record.upstream_redaction_enabled,
+            response_capture_truncated: record.response_capture_truncated,
         }
     }
 }

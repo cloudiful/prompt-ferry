@@ -10,7 +10,7 @@ use super::{
 };
 use crate::relay_secrets::RelaySecretManager;
 
-const CURRENT_SCHEMA_VERSION: i64 = 6;
+const CURRENT_SCHEMA_VERSION: i64 = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {
@@ -1001,6 +1001,36 @@ impl StandaloneConfigStore {
             .bind(redaction_types_json)
             .bind(redaction_fields_json)
             .bind(&summary.route_selection_reason)
+            .bind(summary.user_id)
+            .bind(summary.client_key_id)
+            .bind(&summary.client_key_label)
+            .bind(&summary.request_user_agent)
+            .bind(&summary.endpoint_key_label)
+            .bind(&summary.mcp_server_name)
+            .bind(&summary.mcp_protocol_method)
+            .bind(&summary.mcp_operation_name)
+            .bind(&summary.http_request_content_encoding)
+            .bind(i64::from(summary.http_request_compressed))
+            .bind(summary.http_request_compressed_bytes)
+            .bind(summary.http_request_decompressed_bytes)
+            .bind(summary.http_request_compression_ratio)
+            .bind(&summary.conversation_source)
+            .bind(&summary.client_installation_id)
+            .bind(&summary.provider_response_id)
+            .bind(&summary.provider_conversation_key)
+            .bind(&summary.request_storage_mode)
+            .bind(&summary.error_message)
+            .bind(i64::from(summary.request_has_previous_response_id))
+            .bind(&summary.request_previous_response_id)
+            .bind(
+                summary
+                    .request_previous_response_parent_found
+                    .map(i64::from),
+            )
+            .bind(&summary.request_conversation_key)
+            .bind(summary.request_conversation_parent_found.map(i64::from))
+            .bind(i64::from(summary.upstream_redaction_enabled))
+            .bind(i64::from(summary.response_capture_truncated))
             .execute(&self.pool)
             .await?;
         Ok(result.last_insert_rowid())
@@ -1227,5 +1257,34 @@ fn try_parse_usage_summary_row(
         redaction_types: parse_string_list(&redaction_types_json, "redaction_types_json")?,
         redaction_fields: parse_string_list(&redaction_fields_json, "redaction_fields_json")?,
         route_selection_reason: required_string(row, "route_selection_reason")?,
+        user_id: row.try_get("user_id")?,
+        client_key_id: row.try_get("client_key_id")?,
+        client_key_label: optional_string(row, "client_key_label")?,
+        request_user_agent: optional_string(row, "request_user_agent")?,
+        endpoint_key_label: optional_string(row, "endpoint_key_label")?,
+        mcp_server_name: optional_string(row, "mcp_server_name")?,
+        mcp_protocol_method: optional_string(row, "mcp_protocol_method")?,
+        mcp_operation_name: optional_string(row, "mcp_operation_name")?,
+        http_request_content_encoding: optional_string(row, "http_request_content_encoding")?,
+        http_request_compressed: required_bool(row, "http_request_compressed")?,
+        http_request_compressed_bytes: row.try_get("http_request_compressed_bytes")?,
+        http_request_decompressed_bytes: row.try_get("http_request_decompressed_bytes")?,
+        http_request_compression_ratio: row.try_get("http_request_compression_ratio")?,
+        conversation_source: required_string(row, "conversation_source")?,
+        client_installation_id: optional_string(row, "client_installation_id")?,
+        provider_response_id: optional_string(row, "provider_response_id")?,
+        provider_conversation_key: optional_string(row, "provider_conversation_key")?,
+        request_storage_mode: required_string(row, "request_storage_mode")?,
+        error_message: optional_string(row, "error_message")?,
+        request_has_previous_response_id: required_bool(row, "request_has_previous_response_id")?,
+        request_previous_response_id: optional_string(row, "request_previous_response_id")?,
+        request_previous_response_parent_found: optional_bool(
+            row,
+            "request_previous_response_parent_found",
+        )?,
+        request_conversation_key: optional_string(row, "request_conversation_key")?,
+        request_conversation_parent_found: optional_bool(row, "request_conversation_parent_found")?,
+        upstream_redaction_enabled: required_bool(row, "upstream_redaction_enabled")?,
+        response_capture_truncated: required_bool(row, "response_capture_truncated")?,
     })
 }
