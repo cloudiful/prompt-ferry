@@ -124,9 +124,11 @@ pub(super) async fn build_request_context(
         services.runtime_state.worker_instance_id(),
         resolve_mcp_conversation_log(),
     );
-    let request_lease = services
-        .runtime_state
-        .spawn_request_lease_guard(services.admin_state(), request_ctx.request_id);
+    let request_lease = services.runtime_state.spawn_request_lease_guard(
+        services.admin_state(),
+        services.standalone_state(),
+        request_ctx.request_id,
+    );
     services
         .record_usage_event(request_ctx.mcp_usage_log(
             &request,

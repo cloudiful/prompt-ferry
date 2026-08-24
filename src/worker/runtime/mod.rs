@@ -13,6 +13,9 @@ mod error_handling_tests;
 mod inbound;
 mod json_walker;
 mod lifecycle;
+mod lifecycle_standalone;
+#[cfg(test)]
+mod lifecycle_standalone_tests;
 mod mcp_support;
 mod prompt_log;
 mod raw_maintenance;
@@ -40,6 +43,7 @@ use self::lifecycle::{
     ActiveRequestGuard, RequestLeaseGuard, RuntimeControl, abort_stale_requests_once,
     spawn_stale_request_reconciler,
 };
+use self::lifecycle_standalone::{StandaloneLeaseInputs, spawn_standalone_request_lease_guard};
 use self::mcp_support::record_mcp_request_event;
 use self::prompt_log::{
     RequestPromptLog, prepare_request_prompt_log, resolve_mcp_conversation_log,
@@ -53,6 +57,7 @@ use self::routing::{
     discover_dynamic_model_route, materialize_route_api_key_selection_with_quota,
     select_route_for_candidate, upstream_url,
 };
+use self::standalone::StandaloneRuntimeState;
 
 const RELAY_RECONNECT_DELAY_SECONDS: u64 = 1;
 const MCP_ERROR_BODY_CAPTURE_BYTES: usize = 64 * 1024;
@@ -110,8 +115,22 @@ impl WorkerRuntimeState {
     fn spawn_request_lease_guard(
         &self,
         admin_state: Option<&AdminState>,
+        standalone_state: Option<&StandaloneRuntimeState>,
         request_id: uuid::Uuid,
     ) -> Option<RequestLeaseGuard> {
+        if let Some(state) = standalone_state {
+            let inputs = StandaloneLeaseInputs::from_standalone_state(
+                state,
+                self.control.worker_instance_id(),
+                REQUEST_RECORD_LEASE_SECONDS,
+                REQUEST_RECORD_HEARTBEAT_SECONDS,
+            );
+            if let Some(guard) =
+                spawn_standalone_request_lease_guard(Some(inputs), self.control.clone(), request_id)
+            {
+                return Some(RequestLeaseGuard::standalone(guard));
+            }
+        }
         RequestLeaseGuard::spawn(admin_state, request_id, self.control.clone())
     }
 

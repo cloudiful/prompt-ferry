@@ -72,6 +72,14 @@ impl StandaloneRuntimeState {
         self.recent_usage.hydrate_from_store().await;
     }
 
+    /// Expose the underlying SQLite pool so the runtime's request-lease
+    /// guard can spawn its heartbeat task without owning the full
+    /// configuration snapshot. Cloning the pool handle is cheap and
+    /// keeps `StandaloneRuntimeState` decoupled from lease internals.
+    pub(crate) fn store_pool(&self) -> sqlx::SqlitePool {
+        self.store.pool().clone()
+    }
+
     /// Load the latest durable replay snapshot for a conversation, if any
     /// has been persisted. Used by runtime replay consumers (for example,
     /// prompt reconstruction) to restore the most recent prompt-ref

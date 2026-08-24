@@ -13,6 +13,7 @@ macro_rules! standalone_query {
 
 mod coordinator;
 mod models;
+mod request_leases;
 mod rows;
 mod store;
 #[cfg(test)]
@@ -29,5 +30,6 @@ pub use models::{
     SettingConfig, StandaloneConfig, StandaloneConfigError, StandaloneReplaySnapshotRecord,
     StandaloneUsageSummaryRecord,
 };
+pub(crate) use request_leases::{RequestLeaseAcquireOutcome, StandaloneRequestLeaseStore};
 pub use store::{BootstrapOutcome, StandaloneConfigStore};
 pub use users::SqliteUserStore;

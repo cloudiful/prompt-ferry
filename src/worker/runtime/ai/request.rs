@@ -39,9 +39,11 @@ pub(in crate::worker::runtime) async fn process_request(
     let method = initialized.method;
     let redact_content = initialized.redact_content;
     let request_ctx = initialized.request_ctx;
-    let _request_lease = services
-        .runtime_state
-        .spawn_request_lease_guard(services.admin_state(), request_ctx.request_id);
+    let _request_lease = services.runtime_state.spawn_request_lease_guard(
+        services.admin_state(),
+        services.standalone_state(),
+        request_ctx.request_id,
+    );
     services
         .record_usage_event(request_ctx.ai_usage_log(&request, None))
         .await;

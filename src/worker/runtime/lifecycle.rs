@@ -116,6 +116,22 @@ impl Drop for ActiveRequestGuard {
 }
 
 pub(super) struct RequestLeaseGuard {
+    #[allow(dead_code)]
+    inner: RequestLeaseGuardKind,
+}
+
+/// Backend-specific request-lease guard. The Postgres/Valkey heartbeat
+/// stays in this module; the standalone SQLite lease lives in the
+/// sibling `lifecycle_standalone` module and is wrapped here so the
+/// caller only needs to know the abstract `RequestLeaseGuard` type.
+pub(super) enum RequestLeaseGuardKind {
+    #[allow(dead_code)]
+    Managed(ManagedLeaseGuard),
+    #[allow(dead_code)]
+    Standalone(super::lifecycle_standalone::StandaloneRequestLeaseGuard),
+}
+
+pub(super) struct ManagedLeaseGuard {
     handle: JoinHandle<()>,
     request_id: Uuid,
     admin_state: Option<AdminState>,
@@ -202,14 +218,28 @@ impl RequestLeaseGuard {
             }
         });
         Some(Self {
-            handle,
-            request_id,
-            admin_state: admin_state.cloned(),
+            inner: RequestLeaseGuardKind::Managed(ManagedLeaseGuard {
+                handle,
+                request_id,
+                admin_state: admin_state.cloned(),
+            }),
         })
+    }
+
+    /// Construct a guard that owns a standalone SQLite lease. Used by
+    /// the runtime dispatcher in `runtime/mod.rs` when the standalone
+    /// path is active; this keeps the existing `RequestLeaseGuard` API
+    /// surface unchanged for PostgreSQL callers.
+    pub(super) fn standalone(
+        guard: super::lifecycle_standalone::StandaloneRequestLeaseGuard,
+    ) -> Self {
+        Self {
+            inner: RequestLeaseGuardKind::Standalone(guard),
+        }
     }
 }
 
-impl Drop for RequestLeaseGuard {
+impl Drop for ManagedLeaseGuard {
     fn drop(&mut self) {
         self.handle.abort();
         if let Some(state) = self.admin_state.clone() {

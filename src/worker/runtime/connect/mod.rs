@@ -6,8 +6,9 @@ mod supervisor;
 mod support;
 
 use super::{
-    SHUTDOWN_DRAIN_TIMEOUT_SECONDS, WorkerRuntimeState, ai::abort_waiting_approvals,
-    build_admin_state, build_standalone_state, validate_config,
+    SHUTDOWN_DRAIN_TIMEOUT_SECONDS, STALE_REQUEST_SWEEP_SECONDS, WorkerRuntimeState,
+    ai::abort_waiting_approvals, build_admin_state, build_standalone_state,
+    lifecycle_standalone::spawn_standalone_stale_lease_reconciler, validate_config,
 };
 use crate::{config::WorkerConfig, runtime_env};
 use anyhow::Context;
@@ -67,6 +68,11 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
     let _stale_reconciler = super::spawn_stale_request_reconciler(
         runtime_admin_state.as_ref(),
         runtime_state.control.clone(),
+    );
+    let _standalone_stale_reconciler = spawn_standalone_stale_lease_reconciler(
+        standalone_state.clone(),
+        runtime_state.control.clone(),
+        Duration::from_secs(STALE_REQUEST_SWEEP_SECONDS.max(1) as u64),
     );
     let raw_maintenance_task = if let Some(state) = runtime_admin_state.as_ref() {
         Some(super::raw_maintenance::spawn(

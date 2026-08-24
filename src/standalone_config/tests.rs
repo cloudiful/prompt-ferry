@@ -586,7 +586,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -676,7 +676,7 @@ fn sample_usage_record(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_seven() {
+async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_nine() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -684,7 +684,7 @@ async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_seven() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     assert!(
         store
             .list_usage_summaries(64)
@@ -1579,7 +1579,7 @@ fn sample_snapshot(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_eight() {
+async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_nine() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -1587,7 +1587,7 @@ async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_eight()
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     let pool = store.pool().clone();
     for (column, declared_type) in [
         ("conversation_id", "TEXT"),
@@ -1621,52 +1621,85 @@ async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_eight()
 }
 
 #[tokio::test]
-async fn upgrade_from_schema_seven_creates_replay_snapshot_table() {
+async fn upgrade_from_schema_eight_creates_request_lease_table() {
+    use sha2::{Digest, Sha384};
     let path = database_path();
     let pool = crate::db::connect_sqlite(&path).await.expect("pool");
-    // Apply the baseline schema via raw SQL (matching the schema-6
-    // upgrade pattern) so the migrator applies migrations 0007 and 0008
-    // when the store is opened. Applying 0007 via raw SQL here would
-    // make the migrator fail on duplicate columns because the SQLx
-    // Migrator tracks applied migrations in `_sqlx_migrations`, not
-    // `standalone_schema_meta`.
-    for (label, body) in [
+    // Apply the baseline schema via raw SQL so the migrator applies
+    // only migration 0009 when the store is opened. Migration 0007
+    // contains `ALTER TABLE ... ADD COLUMN` statements which fail on
+    // re-run, so we mark 0001..=0008 as already-applied in the SQLx
+    // migrator's tracking table after the raw SQL executes. The
+    // checksum matches the SHA384 digest of each migration's SQL text,
+    // matching `sqlx_core::migrate::migration::checksum`.
+    let applied: &[(&str, &str)] = &[
         (
-            "0001_initial.sql",
-            include_str!("/workspace/tools/prompt-ferry/migrations/standalone/0001_initial.sql"),
+            "0001_initial",
+            include_str!("../../migrations/standalone/0001_initial.sql"),
         ),
         (
-            "0002_storage_contract.sql",
-            include_str!(
-                "/workspace/tools/prompt-ferry/migrations/standalone/0002_storage_contract.sql"
-            ),
+            "0002_storage_contract",
+            include_str!("../../migrations/standalone/0002_storage_contract.sql"),
         ),
         (
-            "0003_user_auth_compatibility.sql",
-            include_str!(
-                "/workspace/tools/prompt-ferry/migrations/standalone/0003_user_auth_compatibility.sql"
-            ),
+            "0003_user_auth_compatibility",
+            include_str!("../../migrations/standalone/0003_user_auth_compatibility.sql"),
         ),
         (
-            "0004_coordinator_state.sql",
-            include_str!(
-                "/workspace/tools/prompt-ferry/migrations/standalone/0004_coordinator_state.sql"
-            ),
+            "0004_coordinator_state",
+            include_str!("../../migrations/standalone/0004_coordinator_state.sql"),
         ),
         (
-            "0005_mcp_configuration.sql",
-            include_str!(
-                "/workspace/tools/prompt-ferry/migrations/standalone/0005_mcp_configuration.sql"
-            ),
+            "0005_mcp_configuration",
+            include_str!("../../migrations/standalone/0005_mcp_configuration.sql"),
         ),
         (
-            "0006_request_ledger.sql",
-            include_str!(
-                "/workspace/tools/prompt-ferry/migrations/standalone/0006_request_ledger.sql"
-            ),
+            "0006_request_ledger",
+            include_str!("../../migrations/standalone/0006_request_ledger.sql"),
         ),
-    ] {
-        sqlx::raw_sql(body).execute(&pool).await.expect(label);
+        (
+            "0007_request_metadata",
+            include_str!("../../migrations/standalone/0007_request_metadata.sql"),
+        ),
+        (
+            "0008_replay_snapshots",
+            include_str!("../../migrations/standalone/0008_replay_snapshots.sql"),
+        ),
+    ];
+    for (version, body) in applied {
+        sqlx::raw_sql(*body)
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|error| panic!("{version}: {error}"));
+    }
+    // Create the SQLx migrations tracking table so we can record the
+    // already-applied 0001..=0008 migrations. Mirroring the migrator's
+    // own `ensure_migrations_table` keeps the test independent of the
+    // SQLx version's internal CREATE TABLE statement.
+    sqlx::raw_sql(
+        r#"CREATE TABLE IF NOT EXISTS _sqlx_migrations (
+            version BIGINT PRIMARY KEY,
+            description TEXT NOT NULL,
+            installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            success BOOLEAN NOT NULL,
+            checksum BLOB NOT NULL,
+            execution_time BIGINT NOT NULL
+        )"#,
+    )
+    .execute(&pool)
+    .await
+    .expect("create sqlx migrations table");
+    for (index, (version, body)) in applied.iter().enumerate() {
+        let checksum = Sha384::digest(body.as_bytes()).to_vec();
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations(version, description, success, checksum, execution_time) VALUES (?, ?, 1, ?, 0)",
+        )
+        .bind(i64::try_from(index + 1).expect("version fits i64"))
+        .bind(*version)
+        .bind(checksum)
+        .execute(&pool)
+        .await
+        .unwrap_or_else(|error| panic!("{version} record: {error}"));
     }
     pool.close().await;
 
@@ -1677,41 +1710,38 @@ async fn upgrade_from_schema_seven_creates_replay_snapshot_table() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
-    // Confirm migration 0007 took effect before the new replay table
-    // arrived so the test really exercises the schema-7 -> schema-8
+    // Confirm migration 0008 took effect before the new lease table
+    // arrived so the test really exercises the schema-8 -> schema-9
     // boundary.
     let pool = store.pool().clone();
-    let user_id_column: i64 = sqlx::query(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('standalone_usage_summaries') WHERE name = 'user_id')",
+    let replay_table_exists: i64 = sqlx::query(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='standalone_replay_snapshots')",
     )
     .fetch_one(&pool)
     .await
-    .expect("user_id pragma")
+    .expect("replay pragma")
     .try_get(0)
     .expect("pragma value");
-    assert_eq!(user_id_column, 1, "schema 7 metadata columns must exist");
+    assert_eq!(replay_table_exists, 1, "schema 8 replay table must exist");
 
     // The new table must be empty and writable without disturbing
-    // pre-existing schema-7 rows.
-    let conversation_id = Uuid::new_v4();
-    let refs_json = sample_prompt_refs_json(&[("user", "hash-1")]);
-    let snapshot = sample_snapshot(conversation_id, 1, 5, &refs_json);
-    let outcome = store
-        .upsert_replay_snapshot(&snapshot)
-        .await
-        .expect("upsert");
-    assert_eq!(outcome, ReplaySnapshotUpsertOutcome::Inserted);
-    let loaded = store
-        .get_replay_snapshot(conversation_id)
-        .await
-        .expect("get")
-        .expect("snapshot");
-    assert_eq!(loaded.conversation_seq, 1);
-    assert_eq!(loaded.base_event_id, 5);
-    assert_eq!(loaded.ref_count, 1);
-    assert_eq!(loaded.prompt_refs_json, refs_json);
+    // pre-existing schema-8 rows.
+    let leases = crate::standalone_config::StandaloneRequestLeaseStore::new(pool.clone());
+    let request_id = Uuid::new_v4();
+    let owner = Uuid::new_v4();
+    assert_eq!(
+        leases
+            .acquire(request_id, owner, 60)
+            .await
+            .expect("acquire lease"),
+        crate::standalone_config::RequestLeaseAcquireOutcome::Acquired
+    );
+    let active = leases.list_active().await.expect("list");
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].request_id, request_id);
+    assert_eq!(active[0].owner_worker_id, owner);
 
     let _ = std::fs::remove_file(path);
 }
