@@ -61,13 +61,12 @@ pub fn bearer_token(headers: &HeaderMap) -> Result<&str, Box<Response>> {
     })
 }
 
+/// Bearer-token check shared by authenticated endpoints. An empty expected
+/// token disables authentication entirely for that endpoint; this is used by
+/// the relay worker bridge when no worker token is configured.
 pub fn check_bearer(headers: &HeaderMap, expected: &str) -> Result<(), Box<Response>> {
     if expected.is_empty() {
-        return Err(Box::new(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "auth_not_configured",
-            "authentication token is not configured",
-        )));
+        return Ok(());
     }
 
     let token = bearer_token(headers)?;
@@ -114,6 +113,28 @@ mod tests {
             http::HeaderValue::from_static("Bearer secret"),
         );
         assert!(check_bearer(&headers, "secret").is_ok());
+    }
+
+    #[test]
+    fn rejects_wrong_bearer() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_static("Bearer other"),
+        );
+        assert!(check_bearer(&headers, "secret").is_err());
+    }
+
+    #[test]
+    fn empty_expected_token_disables_authentication() {
+        let headers = HeaderMap::new();
+        assert!(check_bearer(&headers, "").is_ok());
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_static("Bearer anything"),
+        );
+        assert!(check_bearer(&headers, "").is_ok());
     }
 
     #[test]

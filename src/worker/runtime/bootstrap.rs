@@ -4,7 +4,7 @@ use crate::{
     db,
     llm_review::{self},
     redact,
-    relay_secrets::RelaySecretManager,
+    relay_secrets::{self, BOOTSTRAP_ADMIN_PASSWORD_FILE, RelaySecretManager},
     replay_cache::ReplayCache,
     runtime_env,
     standalone_config::{BootstrapSeed, StandaloneConfigStore},
@@ -13,13 +13,61 @@ use crate::{
 };
 use anyhow::anyhow;
 use sqlx::postgres::PgPoolOptions;
-use std::{sync::Arc, time::Duration};
-use tracing::{error, warn};
+use std::{path::Path, sync::Arc, time::Duration};
+use tracing::{error, info, warn};
+
+/// Atomically publish a generated bootstrap admin password and return the
+/// effective one to store in the database.
+///
+/// The protected file is created only if absent. If another starter already
+/// created it (supported multi-process PostgreSQL startup), that process's
+/// password is read back and reused so every racing process inserts the same
+/// password and the file always matches the database. A short bounded retry
+/// covers reading a file another process has just created but not yet
+/// written; any other failure propagates so no user row is committed.
+fn publish_bootstrap_password(
+    candidate: &str,
+    secrets_dir: Option<&Path>,
+) -> anyhow::Result<String> {
+    use anyhow::Context;
+    let password_path =
+        relay_secrets::resolve_data_file(BOOTSTRAP_ADMIN_PASSWORD_FILE, secrets_dir)?;
+    let won_creation =
+        runtime_env::create_private_file_exclusive(&password_path, &format!("{candidate}\n"))?;
+    if won_creation {
+        return Ok(candidate.to_string());
+    }
+    // Another starter won the race: reuse its published password verbatim
+    // instead of overwriting it.
+    const READ_ATTEMPTS: usize = 50;
+    let mut last_error = None;
+    for _ in 0..READ_ATTEMPTS {
+        match std::fs::read_to_string(&password_path) {
+            Ok(content) => {
+                let existing = content.trim();
+                if !existing.is_empty() {
+                    return Ok(existing.to_string());
+                }
+            }
+            Err(error) => last_error = Some(error),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    Err(last_error.unwrap_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::Other, "file is empty or unreadable")
+    }))
+    .with_context(|| {
+        format!(
+            "bootstrap admin password file {} already exists but could not be read after \
+             retries; remove the file or restore its contents",
+            password_path.display()
+        )
+    })
+}
 
 pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
-    if config.worker_token.is_empty() {
-        return Err(anyhow!("worker token is required"));
-    }
+    // An empty worker token intentionally disables relay worker authentication;
+    // the relay logs a warning when this mode is active.
     let contract = config.storage_contract();
     if contract.backend.is_sqlite() {
         runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
@@ -49,7 +97,12 @@ pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
             )?;
         }
     }
-    RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
+    // An explicitly configured encryption key must already be valid; when none
+    // is configured one is generated later during state construction.
+    let configured_key = config.effective_encryption_key().trim();
+    if !configured_key.is_empty() {
+        RelaySecretManager::from_base64(configured_key)?;
+    }
     if config
         .upstream_base_url
         .trim()
@@ -65,13 +118,17 @@ pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
 
 pub(super) async fn build_standalone_state(
     config: &WorkerConfig,
+    secrets_dir: Option<&Path>,
 ) -> anyhow::Result<crate::worker::runtime::standalone::StandaloneRuntimeState> {
     if !config.storage_backend().is_sqlite() {
         return Err(anyhow!(
             "standalone runtime state requires the SQLite storage backend"
         ));
     }
-    let manager = RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
+    let manager = relay_secrets::load_or_create_worker_config_key_for(
+        config.effective_encryption_key(),
+        secrets_dir,
+    )?;
     let path = runtime_env::resolve_standalone_database_path(&config.standalone_database_path)?;
     if let Some(parent) = path
         .parent()
@@ -113,12 +170,14 @@ pub(super) async fn build_standalone_state(
             "standalone configuration has no enabled persisted relays or static relay URLs"
         ));
     }
-    if snapshot.endpoints.iter().all(|endpoint| !endpoint.enabled)
-        && config.upstream_api_key.trim().is_empty()
-    {
-        return Err(anyhow!(
-            "standalone configuration has no enabled persisted endpoints or static upstream API key"
-        ));
+    // First startup may have no endpoint yet: the worker stays up and the
+    // Admin setup flow creates the first endpoint. Upstream requests are not
+    // possible until an enabled endpoint exists.
+    if snapshot.endpoints.iter().all(|endpoint| !endpoint.enabled) {
+        warn!(
+            "standalone configuration has no enabled endpoints and no static upstream API key; \
+             configure an upstream endpoint through the Admin console before sending requests"
+        );
     }
     let mcp_repository = db::ConfigRepository::sqlite(store.clone(), manager.clone());
     let mcp_runtime = crate::mcp::McpRuntimeState::sqlite(
@@ -152,8 +211,12 @@ fn optional_file_pem(path: &str) -> anyhow::Result<Option<String>> {
 pub(super) async fn build_admin_state(
     config: &WorkerConfig,
     spawn_admin_server: bool,
+    secrets_dir: Option<&Path>,
 ) -> anyhow::Result<Option<AdminState>> {
-    let relay_secret_manager = RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
+    let relay_secret_manager = relay_secrets::load_or_create_worker_config_key_for(
+        config.effective_encryption_key(),
+        secrets_dir,
+    )?;
     let is_postgres = config.storage_backend().is_postgres();
     let (pool, lease_pool, user_store, config_repository, sqlite_pool) = if is_postgres {
         let pool = db::connect(&config.database_url).await?;
@@ -176,8 +239,7 @@ pub(super) async fn build_admin_state(
         let sqlite_pool = store.pool().clone();
         let pool =
             PgPoolOptions::new().connect_lazy("postgres://postgres@localhost/prompt_ferry")?;
-        let manager = RelaySecretManager::from_base64(&config.relay_secret_master_key)?;
-        let config_repository = db::ConfigRepository::sqlite(store, manager);
+        let config_repository = db::ConfigRepository::sqlite(store, relay_secret_manager.clone());
         (
             pool.clone(),
             pool,
@@ -186,10 +248,30 @@ pub(super) async fn build_admin_state(
             Some(sqlite_pool),
         )
     };
+    // When no active user exists and no password is configured, a strong
+    // random candidate password is atomically published to the protected file
+    // (create-if-absent) BEFORE the admin user is committed; if another
+    // starter won the publication race, its existing password is reused so
+    // the file and the database always agree. A failing publication aborts
+    // startup without leaving an account whose password cannot be retrieved.
+    // Only the path and login are logged, never the password itself.
     user_store
-        .bootstrap_admin(
+        .ensure_bootstrap_admin(
             &config.bootstrap_admin_login,
-            &config.bootstrap_admin_password,
+            (!config.bootstrap_admin_password.trim().is_empty())
+                .then_some(config.bootstrap_admin_password.as_str()),
+            |candidate| {
+                let effective = publish_bootstrap_password(candidate, secrets_dir)?;
+                let password_path =
+                    relay_secrets::resolve_data_file(BOOTSTRAP_ADMIN_PASSWORD_FILE, secrets_dir)?;
+                info!(
+                    login = %config.bootstrap_admin_login,
+                    password_file = %password_path.display(),
+                    "no active admin existed and no bootstrap password was configured; an \
+                     initial admin password is available in the logged file"
+                );
+                Ok(effective)
+            },
         )
         .await?;
 
@@ -330,17 +412,27 @@ pub(super) async fn build_admin_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_admin_state, validate_config};
+    use super::{
+        build_admin_state, build_standalone_state, publish_bootstrap_password, validate_config,
+    };
     use crate::config::WorkerConfig;
     use base64::Engine as _;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_key() -> String {
+        base64::engine::general_purpose::STANDARD.encode([7_u8; 32])
+    }
+
+    fn temp_secrets_dir(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("prompt-ferry-{name}-{}", uuid::Uuid::new_v4()))
+    }
 
     #[test]
     fn empty_database_url_selects_named_standalone_mode() {
         let config = WorkerConfig {
             upstream_api_key: "bootstrap-key".to_string(),
             worker_token: "token".to_string(),
-            relay_secret_master_key: base64::engine::general_purpose::STANDARD.encode([7_u8; 32]),
+            relay_secret_master_key: test_key(),
             ..WorkerConfig::default()
         };
 
@@ -349,11 +441,53 @@ mod tests {
     }
 
     #[test]
+    fn first_startup_validates_without_token_upstream_key_or_encryption_key() {
+        let config = WorkerConfig {
+            worker_token: String::new(),
+            ..WorkerConfig::default()
+        };
+
+        assert!(config.worker_token.is_empty());
+        assert!(config.upstream_api_key.is_empty());
+        assert_eq!(config.storage_backend().as_str(), "sqlite");
+        assert!(validate_config(&config).is_ok());
+    }
+
+    #[test]
+    fn invalid_configured_encryption_key_fails_validation() {
+        let config = WorkerConfig {
+            relay_secret_master_key: "not-base64!!".to_string(),
+            ..WorkerConfig::default()
+        };
+        let error = validate_config(&config).unwrap_err();
+        assert!(error.to_string().contains("valid base64"));
+    }
+
+    #[test]
+    fn current_encryption_key_takes_precedence_over_legacy() {
+        // A valid current key wins even when the legacy key is invalid.
+        let config = WorkerConfig {
+            worker_config_encryption_key: test_key(),
+            relay_secret_master_key: "not-base64!!".to_string(),
+            ..WorkerConfig::default()
+        };
+        assert!(validate_config(&config).is_ok());
+
+        // An invalid current key is not silently replaced by the legacy one.
+        let config = WorkerConfig {
+            worker_config_encryption_key: "not-base64!!".to_string(),
+            relay_secret_master_key: test_key(),
+            ..WorkerConfig::default()
+        };
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
     fn configured_database_url_keeps_shared_managed_mode() {
         let config = WorkerConfig {
             database_url: "  postgres://postgres@localhost/prompt_ferry  ".to_string(),
             relay_urls: Vec::new(),
-            relay_secret_master_key: base64::engine::general_purpose::STANDARD.encode([7_u8; 32]),
+            relay_secret_master_key: test_key(),
             worker_token: "token".to_string(),
             ..WorkerConfig::default()
         };
@@ -371,17 +505,17 @@ mod tests {
                 .expect("clock")
                 .as_nanos()
         ));
+        let secrets_dir = temp_secrets_dir("standalone-bootstrap");
         let config = WorkerConfig {
             standalone_database_path: path.to_string_lossy().to_string(),
             relay_urls: vec!["ws://127.0.0.1:8788/ws/worker".to_string()],
             upstream_base_url: "https://api.example.test".to_string(),
             upstream_api_key: "bootstrap-key".to_string(),
             worker_token: "token".to_string(),
-            relay_secret_master_key: base64::engine::general_purpose::STANDARD.encode([7_u8; 32]),
             ..WorkerConfig::default()
         };
 
-        let state = super::super::bootstrap::build_standalone_state(&config)
+        let state = build_standalone_state(&config, Some(&secrets_dir))
             .await
             .expect("standalone state");
         let snapshot = state.snapshot().await;
@@ -389,39 +523,211 @@ mod tests {
         assert_eq!(snapshot.endpoints.len(), 1);
         drop(state);
         let _ = std::fs::remove_file(path);
+        std::fs::remove_dir_all(secrets_dir).ok();
     }
 
     #[tokio::test]
-    async fn sqlite_admin_bootstrap_requires_a_non_empty_password() {
+    async fn standalone_runtime_starts_without_endpoint_for_admin_setup() {
+        let path = std::env::temp_dir().join(format!(
+            "prompt-ferry-no-endpoint-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let secrets_dir = temp_secrets_dir("no-endpoint");
+        let config = WorkerConfig {
+            standalone_database_path: path.to_string_lossy().to_string(),
+            relay_urls: vec!["ws://127.0.0.1:8788/ws/worker".to_string()],
+            upstream_base_url: "https://api.example.test".to_string(),
+            upstream_api_key: String::new(),
+            worker_token: String::new(),
+            ..WorkerConfig::default()
+        };
+
+        let state = build_standalone_state(&config, Some(&secrets_dir))
+            .await
+            .expect("standalone state without endpoint or upstream API key");
+        let snapshot = state.snapshot().await;
+        assert!(snapshot.endpoints.is_empty());
+
+        // The auto-generated encryption key file exists with restricted
+        // permissions so restarts reuse the same key.
+        let key_file = secrets_dir.join(crate::relay_secrets::WORKER_CONFIG_KEY_FILE);
+        assert!(key_file.exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&key_file).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+
+        drop(state);
+        let _ = std::fs::remove_file(path);
+        std::fs::remove_dir_all(secrets_dir).ok();
+    }
+
+    #[test]
+    fn publish_bootstrap_password_reuses_existing_file_without_overwriting() {
+        let secrets_dir = temp_secrets_dir("publish-reuse");
+        const FIRST: &str = "first-starter-candidate-password";
+        const SECOND: &str = "second-starter-candidate-password";
+
+        // The winning starter creates the file and gets its own candidate.
+        let effective = publish_bootstrap_password(FIRST, Some(&secrets_dir)).unwrap();
+        assert_eq!(effective, FIRST);
+
+        // A racing starter loses creation and must reuse the existing
+        // password verbatim instead of overwriting it.
+        let effective = publish_bootstrap_password(SECOND, Some(&secrets_dir)).unwrap();
+        assert_eq!(effective, FIRST);
+
+        let path = secrets_dir.join(crate::relay_secrets::BOOTSTRAP_ADMIN_PASSWORD_FILE);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format!("{FIRST}\n")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+
+        std::fs::remove_dir_all(secrets_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn publish_bootstrap_password_fails_without_overwriting_unreadable_file() {
+        let secrets_dir = temp_secrets_dir("publish-unreadable");
+        let path = secrets_dir.join(crate::relay_secrets::BOOTSTRAP_ADMIN_PASSWORD_FILE);
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+        std::fs::write(&path, "   \n").unwrap();
+
+        let error = {
+            let secrets_dir = secrets_dir.clone();
+            tokio::task::spawn_blocking(move || {
+                publish_bootstrap_password("candidate-password", Some(&secrets_dir))
+            })
+            .await
+            .unwrap()
+            .expect_err("an unreadable existing publication must fail")
+        };
+        assert!(error.to_string().contains("could not be read"));
+        // The existing file is left untouched for an operator to resolve.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "   \n");
+
+        std::fs::remove_dir_all(secrets_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn sqlite_admin_bootstrap_generates_password_into_protected_file() {
         let path = std::env::temp_dir().join(format!(
             "prompt-ferry-admin-bootstrap-{}.sqlite",
             uuid::Uuid::new_v4()
         ));
-        let mut config = WorkerConfig {
+        let secrets_dir = temp_secrets_dir("admin-bootstrap");
+        let config = WorkerConfig {
             standalone_database_path: path.to_string_lossy().to_string(),
             bootstrap_admin_login: "admin".to_string(),
             bootstrap_admin_password: String::new(),
-            relay_secret_master_key: base64::engine::general_purpose::STANDARD.encode([7_u8; 32]),
+            relay_secret_master_key: test_key(),
             ..WorkerConfig::default()
         };
 
-        let error = match build_admin_state(&config, false).await {
-            Ok(_) => panic!("empty bootstrap password must fail"),
-            Err(error) => error,
-        };
-        assert!(
-            error
-                .to_string()
-                .contains("bootstrap admin login and password")
-        );
-
-        config.bootstrap_admin_password = "admin-password".to_string();
-        let state = build_admin_state(&config, false)
+        let state = build_admin_state(&config, false, Some(&secrets_dir))
             .await
             .expect("SQLite admin state")
             .expect("admin state");
         assert!(state.user_store.is_sqlite());
+
+        let password_file = secrets_dir.join(crate::relay_secrets::BOOTSTRAP_ADMIN_PASSWORD_FILE);
+        let generated = std::fs::read_to_string(&password_file)
+            .expect("generated password file")
+            .trim()
+            .to_string();
+        assert!(generated.len() >= 24);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&password_file)
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+
+        let stored = state
+            .user_store
+            .get_user_password_by_login("admin")
+            .await
+            .expect("load admin")
+            .expect("admin user");
+        assert!(crate::keys::verify_password(
+            &generated,
+            &stored.password_hash
+        ));
+
         drop(state);
         let _ = std::fs::remove_file(path);
+        std::fs::remove_dir_all(secrets_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn sqlite_admin_bootstrap_prefers_configured_password_without_file_writes() {
+        let path = std::env::temp_dir().join(format!(
+            "prompt-ferry-admin-configured-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let secrets_dir = temp_secrets_dir("admin-configured");
+        let config = WorkerConfig {
+            standalone_database_path: path.to_string_lossy().to_string(),
+            bootstrap_admin_login: "admin".to_string(),
+            bootstrap_admin_password: "admin-password".to_string(),
+            relay_secret_master_key: test_key(),
+            ..WorkerConfig::default()
+        };
+
+        let state = build_admin_state(&config, false, Some(&secrets_dir))
+            .await
+            .expect("SQLite admin state")
+            .expect("admin state");
+        assert!(state.user_store.is_sqlite());
+        assert!(
+            !secrets_dir
+                .join(crate::relay_secrets::BOOTSTRAP_ADMIN_PASSWORD_FILE)
+                .exists()
+        );
+
+        drop(state);
+        let _ = std::fs::remove_file(path);
+        std::fs::remove_dir_all(secrets_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn sqlite_admin_bootstrap_rejects_empty_login_with_clear_error() {
+        let path = std::env::temp_dir().join(format!(
+            "prompt-ferry-admin-empty-login-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let secrets_dir = temp_secrets_dir("admin-empty-login");
+        let config = WorkerConfig {
+            standalone_database_path: path.to_string_lossy().to_string(),
+            bootstrap_admin_login: "   ".to_string(),
+            bootstrap_admin_password: String::new(),
+            relay_secret_master_key: test_key(),
+            ..WorkerConfig::default()
+        };
+
+        let error = match build_admin_state(&config, false, Some(&secrets_dir)).await {
+            Ok(_) => panic!("empty login must be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("login must not be empty"));
+        assert!(
+            !secrets_dir
+                .join(crate::relay_secrets::BOOTSTRAP_ADMIN_PASSWORD_FILE)
+                .exists()
+        );
+
+        let _ = std::fs::remove_file(path);
+        std::fs::remove_dir_all(secrets_dir).ok();
     }
 }

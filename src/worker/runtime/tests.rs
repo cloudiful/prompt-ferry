@@ -34,13 +34,16 @@ fn builds_upstream_url_without_double_slash() {
 }
 
 #[test]
-fn rejects_missing_upstream_key() {
+fn first_startup_validation_allows_missing_upstream_key() {
     let config = WorkerConfig {
         upstream_api_key: String::new(),
-        worker_token: "token".to_string(),
+        worker_token: String::new(),
         ..WorkerConfig::default()
     };
-    assert!(validate_config(&config).is_err());
+    // Fresh startup may have no upstream API key, no worker token, and no
+    // manually configured encryption key; the Admin setup flow completes
+    // configuration later.
+    assert!(validate_config(&config).is_ok());
 }
 
 #[test]
@@ -55,13 +58,13 @@ fn rejects_upstream_base_url_with_v1_path() {
 }
 
 #[test]
-fn managed_mode_requires_relay_secret_master_key() {
+fn managed_mode_rejects_invalid_encryption_key() {
     let config = WorkerConfig {
         database_url: "postgres://postgres:postgres@localhost/prompt_ferry".to_string(),
         upstream_api_key: String::new(),
         relay_urls: Vec::new(),
         worker_token: "token".to_string(),
-        relay_secret_master_key: String::new(),
+        relay_secret_master_key: "definitely-not-base64!!".to_string(),
         ..WorkerConfig::default()
     };
     assert!(validate_config(&config).is_err());

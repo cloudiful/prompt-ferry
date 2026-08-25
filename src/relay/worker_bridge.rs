@@ -33,6 +33,13 @@ use tracing::{debug, error, info, warn};
 const BRIDGE_SEND_BUFFER: usize = 64;
 
 pub(super) fn worker_router(state: AppState) -> Router {
+    if state.config.worker_token.is_empty() {
+        warn!(
+            "worker authentication is DISABLED: WORKER_TOKEN is empty so any client that can \
+             reach the relay /ws/worker bind can connect as a worker; use TLS and network \
+             isolation to protect this endpoint"
+        );
+    }
     Router::new()
         .route("/healthz", get(worker_healthz))
         .route("/ws/worker", get(worker_ws))

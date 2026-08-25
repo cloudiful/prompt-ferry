@@ -43,7 +43,9 @@ cp .env.example .env
 ```
 
 编辑 `.env`，将 `PROMPT_FERRY_IMAGE` 设置为
-`ghcr.io/cloudiful/prompt-ferry:latest`，并替换所有密钥占位符。然后启动：
+`ghcr.io/cloudiful/prompt-ferry:latest`，并替换其余密钥占位符。worker token、
+加密密钥、上游 API Key 和初始管理员密码均为可选项；未设置的密钥会自动生成或
+延后到 Admin 配置中完成，详见 [Worker 存储](#worker-存储)。然后启动：
 
 ```bash
 docker compose pull
@@ -112,11 +114,24 @@ relay 和 worker 可以部署在不同机器上，分别运行
 可通过可重复的 `--relay-url` 参数或 `relay_urls` 配置列表设置；使用环境变量覆盖时，
 `PROMPT_FERRY_WORKER__RELAY_URLS` 的值应为 JSON 数组。
 
-首次启动时，空的 SQLite 数据库会从静态 worker 设置引导，包括 relay URL、上游基础地址
-和 API Key、worker token、TLS 以及桥接加密设置。引导完成后以 SQLite 配置为准；重新加载
-轮询会在不重启 worker 的情况下应用支持的直接 SQLite 修改。必须设置
-`PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY`，其值为 base64 编码的 32 字节密钥，用于
-静态加密保存密钥；SQLite 不会以明文保存上游 API Key。
+首次启动时，空的 SQLite 数据库会从静态 worker 设置引导，包括 relay URL、上游基础地址、
+TLS 以及桥接加密设置；也可以稍后通过 Admin 引导流程创建第一个上游端点。引导完成后以
+SQLite 配置为准；重新加载轮询会在不重启 worker 的情况下应用支持的直接 SQLite 修改。
+静态加密使用 base64 编码的 32 字节 worker 配置加密密钥
+（`PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY`，旧名称
+`PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY` 仍可使用）。未设置时会自动生成随机密钥，
+并保存到 `<data-root>/prompt-ferry/worker-config.key`（Unix 下权限为 `0600`）。
+SQLite 不会以明文保存上游 API Key，也不提供明文降级路径。
+
+生成文件位于 SQLite 数据库同级的 `prompt-ferry/` 目录下。当不存在任何活跃用户且未配置
+初始管理员密码时，会生成强随机密码并一次性写入
+`<data-root>/prompt-ferry/bootstrap-admin.txt`（Unix 下权限为 `0600`）；日志只输出文件
+路径和登录名。已配置的初始凭据优先，已有用户永远不会被覆盖。
+
+relay 的 `/ws/worker` 端点在 `WORKER_TOKEN` 非空时要求
+`Authorization: Bearer <token>` 认证。token 为空时将完全关闭 worker 认证——任何能访问
+worker bind 的客户端都可以作为 worker 连接——此时必须依靠 TLS 和网络隔离保护该端口，
+relay 启动时会输出警告日志。
 
 默认 SQLite 数据库路径为：Linux 使用 `$XDG_DATA_HOME/prompt-ferry/worker.sqlite3`，或
 `$HOME/.local/share/prompt-ferry/worker.sqlite3`；macOS 使用
@@ -124,7 +139,7 @@ relay 和 worker 可以部署在不同机器上，分别运行
 `%LOCALAPPDATA%\\prompt-ferry\\worker.sqlite3`。可通过
 `PROMPT_FERRY_WORKER__STANDALONE_DATABASE_PATH` 或
 `--standalone-database-path` 覆盖。备份或恢复 SQLite 文件时应先停止 worker，并同时
-保管 master key。
+保管 worker 配置加密密钥（`worker-config.key`）。
 
 SQLite 请求和用量摘要最多保留 256 条内存记录，重启后会清空。脱敏规则会持久化，但
 按会话的脱敏状态会在重启后重置。直接修改 SQLite 只有在符合受支持的 schema/配置变更
@@ -149,9 +164,10 @@ prompt-ferry relay
 PROMPT_FERRY_WORKER__DATABASE_URL=
 PROMPT_FERRY_WORKER__RELAY_URLS=["wss://relay.example.invalid:8788/ws/worker"]
 PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://upstream.example.invalid
-PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<upstream-api-key>
+PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<上游 API 密钥>
 PROMPT_FERRY_WORKER__WORKER_TOKEN=<worker-token>
-PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY=<base64-32-byte-key>
+# 可选；未设置时自动生成到 <data-root>/prompt-ferry/worker-config.key。
+PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY=<base64-32-byte-key>
 PROMPT_FERRY_WORKER__TLS_MODE=<configured-tls-mode>
 PROMPT_FERRY_WORKER__BRIDGE_ENCRYPTION_MODE=<configured-bridge-mode>
 ```
@@ -169,7 +185,11 @@ prompt-ferry worker
 ./prompt-ferry serve
 ```
 
-本地 SQLite 存储模式启动前需要配置 relay 客户端令牌和上游 worker：
+`serve` 会将内部 worker 桥接绑定到本机回环地址，并且首次启动无需任何必填密钥：
+空的 `PROMPT_FERRY_WORKER_TOKEN` 表示该回环端口不启用 worker 认证，加密密钥会在
+首次启动时自动生成，需要的初始管理员密码会写入
+`<data-root>/prompt-ferry/bootstrap-admin.txt`。随后在管理控制台
+<http://127.0.0.1:8789> 中配置客户端令牌和上游端点：
 
 ```dotenv
 PROMPT_FERRY_RELAY__CLIENT_TOKEN=<客户端令牌>

@@ -26,10 +26,31 @@ impl UserStore {
         matches!(self, Self::Sqlite(_))
     }
 
-    pub async fn bootstrap_admin(&self, login: &str, password: &str) -> Result<()> {
+    pub async fn bootstrap_admin(&self, login: &str, password: &str) -> Result<Option<String>> {
         match self {
             Self::Postgres(pool) => bootstrap_admin(pool, login, password).await,
             Self::Sqlite(store) => store.bootstrap_admin(login, password).await,
+        }
+    }
+
+    /// See [`ensure_bootstrap_admin`]: the resolver returns the effective
+    /// generated password (reusing an existing publication when another
+    /// starter won) and it is committed to the database.
+    pub async fn ensure_bootstrap_admin(
+        &self,
+        login: &str,
+        password: Option<&str>,
+        resolve_generated: impl FnOnce(&str) -> Result<String>,
+    ) -> Result<()> {
+        match self {
+            Self::Postgres(pool) => {
+                ensure_bootstrap_admin(pool, login, password, resolve_generated).await
+            }
+            Self::Sqlite(store) => {
+                store
+                    .ensure_bootstrap_admin(login, password, resolve_generated)
+                    .await
+            }
         }
     }
 
@@ -90,7 +111,37 @@ impl UserStore {
     }
 }
 
-pub async fn bootstrap_admin(pool: &PgPool, login: &str, password: &str) -> Result<()> {
+pub async fn bootstrap_admin(pool: &PgPool, login: &str, password: &str) -> Result<Option<String>> {
+    let mut captured: Option<String> = None;
+    ensure_bootstrap_admin(
+        pool,
+        login,
+        (!password.trim().is_empty()).then_some(password),
+        |generated| {
+            captured = Some(generated.to_string());
+            Ok(generated.to_string())
+        },
+    )
+    .await?;
+    Ok(captured)
+}
+
+/// Create the first admin only when needed: the login does not exist yet and
+/// no active user exists. An empty `password` generates a strong random one.
+///
+/// `resolve_generated` is invoked with the generated candidate password
+/// BEFORE the admin row is committed and must return the effective password
+/// to store. This supports atomic create-if-absent publication: if another
+/// starter already published a password file, the resolver returns that
+/// existing password so every racing process inserts the same value. A
+/// failing resolver aborts without leaving an active account whose password
+/// cannot be retrieved. It is not called for configured passwords.
+pub async fn ensure_bootstrap_admin(
+    pool: &PgPool,
+    login: &str,
+    password: Option<&str>,
+    resolve_generated: impl FnOnce(&str) -> Result<String>,
+) -> Result<()> {
     let login_exists = sqlx::query_file!("src/sql/users/bootstrap_admin_exists.sql", login)
         .fetch_one(pool)
         .await?
@@ -106,8 +157,26 @@ pub async fn bootstrap_admin(pool: &PgPool, login: &str, password: &str) -> Resu
     if has_active_user {
         return Ok(());
     }
-    require_bootstrap_credentials(login, password)?;
-    let password_hash = hash_password(password)?;
+    if login.trim().is_empty() {
+        return Err(anyhow!(
+            "bootstrap admin login must not be empty or whitespace when no active admin exists"
+        ));
+    }
+    // An empty configured password is allowed on first startup only: generate
+    // a candidate, let the resolver atomically publish or reuse an existing
+    // publication, and commit the effective password it returns.
+    let generated = password.map(str::trim).unwrap_or("").is_empty();
+    let candidate = if generated {
+        crate::relay_secrets::generate_bootstrap_password()
+    } else {
+        password.unwrap_or_default().to_string()
+    };
+    let effective = if generated {
+        resolve_generated(&candidate)?
+    } else {
+        candidate
+    };
+    let password_hash = hash_password(&effective)?;
     sqlx::query_file!(
         "src/sql/users/bootstrap_admin_insert.sql",
         login,
@@ -116,15 +185,6 @@ pub async fn bootstrap_admin(pool: &PgPool, login: &str, password: &str) -> Resu
     )
     .execute(pool)
     .await?;
-    Ok(())
-}
-
-fn require_bootstrap_credentials(login: &str, password: &str) -> Result<()> {
-    if login.trim().is_empty() || password.trim().is_empty() {
-        return Err(anyhow!(
-            "bootstrap admin login and password are required when no active admin exists"
-        ));
-    }
     Ok(())
 }
 

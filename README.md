@@ -45,7 +45,10 @@ cp .env.example .env
 ```
 
 Edit `.env`, set `PROMPT_FERRY_IMAGE` to
-`ghcr.io/cloudiful/prompt-ferry:latest`, and replace every secret placeholder.
+`ghcr.io/cloudiful/prompt-ferry:latest`, and replace the remaining secret
+placeholders. The worker token, encryption key, upstream API key, and
+bootstrap admin password are optional; unset secrets are generated or
+deferred to Admin setup as described under [Worker storage](#worker-storage).
 Then start the stack:
 
 ```bash
@@ -129,13 +132,30 @@ with repeatable `--relay-url` options or the `relay_urls` configuration list
 (for environment overrides, `PROMPT_FERRY_WORKER__RELAY_URLS` is a JSON array).
 
 On first startup, an empty SQLite database is bootstrapped from the static
-worker settings, including relay URLs, upstream base URL and API key, worker
-token, TLS, and bridge-encryption settings. After bootstrap, the SQLite
-configuration is authoritative. Reload polling applies supported direct
-SQLite changes without restarting the worker. The required
-`PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY` is a base64-encoded 32-byte key
-used to encrypt secrets at rest; SQLite never stores provider API keys in
-plaintext.
+worker settings, including relay URLs, upstream base URL and API key, TLS, and
+bridge-encryption settings; an upstream endpoint can also be created later
+through the Admin setup flow. After bootstrap, the SQLite configuration is
+authoritative. Reload polling applies supported direct SQLite changes without
+restarting the worker. Secrets at rest are encrypted with a base64-encoded
+32-byte worker configuration encryption key
+(`PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY`; the legacy
+`PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY` name is still accepted). When
+unset, a random key is generated and persisted to
+`<data-root>/prompt-ferry/worker-config.key` (`0600` on Unix). SQLite never
+stores provider API keys in plaintext, and there is no plaintext fallback.
+
+The default data root follows the SQLite database location below; generated
+files live next to it under `prompt-ferry/`. When no active admin user exists
+and no bootstrap password is configured, a strong random password is generated
+and written once to `<data-root>/prompt-ferry/bootstrap-admin.txt`
+(`0600` on Unix); only the file path and login are logged. Existing configured
+bootstrap credentials take precedence, and existing users are never modified.
+
+The relay `/ws/worker` endpoint requires `Authorization: Bearer <token>` when
+a non-empty `WORKER_TOKEN` is configured. An empty token disables worker
+authentication entirely — any client that can reach the worker bind can
+connect as a worker — so use TLS and network isolation in that mode; the
+relay logs a warning at startup.
 
 The default SQLite database path is `$XDG_DATA_HOME/prompt-ferry/worker.sqlite3` or
 `$HOME/.local/share/prompt-ferry/worker.sqlite3` on Linux,
@@ -143,7 +163,8 @@ The default SQLite database path is `$XDG_DATA_HOME/prompt-ferry/worker.sqlite3`
 `%LOCALAPPDATA%\\prompt-ferry\\worker.sqlite3` on Windows. Override it with
 `PROMPT_FERRY_WORKER__STANDALONE_DATABASE_PATH` or
 `--standalone-database-path`. Back up or restore the SQLite file while the
-worker is stopped, and retain the master key with the backup.
+worker is stopped, and retain the worker configuration encryption key
+(`worker-config.key`) with the backup.
 
 SQLite request and usage summaries remain a bounded in-memory ring of 256
 entries and are cleared on restart. Redaction rules persist, while
@@ -173,7 +194,8 @@ PROMPT_FERRY_WORKER__RELAY_URLS=["wss://relay.example.invalid:8788/ws/worker"]
 PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://upstream.example.invalid
 PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<upstream-api-key>
 PROMPT_FERRY_WORKER__WORKER_TOKEN=<worker-token>
-PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY=<base64-32-byte-key>
+# Optional; auto-generated at <data-root>/prompt-ferry/worker-config.key when unset.
+PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY=<base64-32-byte-key>
 PROMPT_FERRY_WORKER__TLS_MODE=<configured-tls-mode>
 PROMPT_FERRY_WORKER__BRIDGE_ENCRYPTION_MODE=<configured-bridge-mode>
 ```
@@ -191,8 +213,12 @@ and run the relay and worker together:
 ./prompt-ferry serve
 ```
 
-For a local SQLite storage deployment, configure the relay client token and
-upstream worker settings before starting:
+`serve` binds the internal worker bridge to loopback and starts with no
+required secrets: an empty `PROMPT_FERRY_WORKER_TOKEN` keeps the bridge open
+only on that loopback bind, the encryption key is generated on first start,
+and the initial admin password (if needed) is written to
+`<data-root>/prompt-ferry/bootstrap-admin.txt`. Configure a client token and
+upstream endpoint through the Admin console at <http://127.0.0.1:8789>:
 
 ```dotenv
 PROMPT_FERRY_RELAY__CLIENT_TOKEN=<client-token>

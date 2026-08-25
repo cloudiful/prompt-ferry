@@ -42,6 +42,60 @@ pub fn resolve_raw_object_store_local_dir(configured_dir: &str) -> Result<PathBu
     resolve_raw_object_store_local_dir_from(configured_dir, |key| env::var_os(key))
 }
 
+/// Resolve a named runtime data file (encryption key, bootstrap admin
+/// password) under `<data-root>/<app-name>/`.
+pub fn prompt_ferry_data_file(file_name: &str) -> Result<PathBuf> {
+    Ok(data_root_from(|key| env::var_os(key))?
+        .join(CONFIG_APP_NAME)
+        .join(file_name))
+}
+
+/// Create `path` exclusively with owner-only permissions on Unix, creating
+/// parent directories as needed. Returns `false` without modifying anything
+/// when the file already exists.
+pub fn create_private_file_exclusive(path: &Path, contents: &str) -> Result<bool> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            anyhow!(error).context(format!(
+                "failed to create parent directory {}",
+                parent.display()
+            ))
+        })?;
+    }
+    match private_file_options().create_new(true).open(path) {
+        Ok(mut file) => {
+            use std::io::Write as _;
+            file.write_all(contents.as_bytes())
+                .and_then(|()| file.sync_all())
+                .map_err(|error| {
+                    anyhow!(error).context(format!("failed to write {}", path.display()))
+                })?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(anyhow!(error).context(format!("failed to create {}", path.display()))),
+    }
+}
+
+fn private_file_options() -> std::fs::OpenOptions {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).mode(0o600);
+        options
+    }
+    #[cfg(not(unix))]
+    {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true);
+        options
+    }
+}
+
 fn resolve_raw_object_store_local_dir_from(
     configured_dir: &str,
     get_env: impl Fn(&str) -> Option<OsString>,
@@ -177,9 +231,33 @@ fn config_root_from(get_env: impl Fn(&str) -> Option<OsString>) -> Result<PathBu
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_database_url, resolve_standalone_database_path_from};
+    use super::{
+        create_private_file_exclusive, resolve_database_url, resolve_standalone_database_path_from,
+    };
     use std::ffi::OsString;
     use std::path::PathBuf;
+
+    #[test]
+    fn private_file_create_is_exclusive_and_keeps_contents() {
+        let dir = std::env::temp_dir().join(format!(
+            "prompt-ferry-private-file-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let path = dir.join("nested").join("secret.key");
+
+        assert!(create_private_file_exclusive(&path, "first").unwrap());
+        assert!(!create_private_file_exclusive(&path, "second").unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+
+        std::fs::remove_dir_all(dir).ok();
+    }
 
     #[test]
     fn database_url_resolution_prefers_arg_then_new_then_database_url() {

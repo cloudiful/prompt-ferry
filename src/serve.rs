@@ -1,7 +1,6 @@
 use crate::{
     cli::ServeArgs,
     config::{AppConfig, BridgeEncryptionMode, RelayConfig, TlsMode, WorkerConfig, WorkerTlsMode},
-    keys::generate_client_key,
     relay, worker,
 };
 use anyhow::{Context, anyhow};
@@ -36,16 +35,13 @@ fn derive_configs(
     relay_config.worker_bind = serve_config.internal_worker_bind.clone();
     worker_config.relay_urls = vec![format!("ws://{}/ws/worker", relay_config.worker_bind)];
 
+    // An empty worker token is preserved as empty on both sides: the relay
+    // accepts unauthenticated worker connections and logs a warning. No token
+    // is generated to replace it.
     let worker_token = if worker_config.worker_token.trim().is_empty() {
         relay_config.worker_token.trim().to_string()
     } else {
         worker_config.worker_token.trim().to_string()
-    };
-    let worker_token = if worker_token.is_empty() {
-        let (token, _, _) = generate_client_key();
-        token
-    } else {
-        worker_token
     };
     relay_config.worker_token = worker_token.clone();
     worker_config.worker_token = worker_token;
@@ -146,5 +142,18 @@ mod tests {
             err.to_string()
                 .contains("serve internal worker bind must use a loopback address")
         );
+    }
+
+    #[test]
+    fn serve_mode_preserves_empty_worker_token_on_both_sides() {
+        let mut app_config = AppConfig::default();
+        app_config.relay.worker_token = String::new();
+        app_config.worker.worker_token = String::new();
+
+        let (relay_config, worker_config) =
+            derive_configs(app_config, ServeArgs::default()).unwrap();
+
+        assert_eq!(relay_config.worker_token, "");
+        assert_eq!(worker_config.worker_token, "");
     }
 }

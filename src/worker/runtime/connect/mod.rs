@@ -52,7 +52,7 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
         .connect_timeout(Duration::from_secs(config.connect_timeout_seconds))
         .build()
         .context("failed to build upstream HTTP client")?;
-    let admin_state = build_admin_state(&config, true).await?;
+    let admin_state = build_admin_state(&config, true, None).await?;
     let runtime_admin_state = if contract.backend.is_postgres() {
         admin_state.clone()
     } else {
@@ -61,7 +61,7 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
     let standalone_state = if contract.backend.is_postgres() {
         None
     } else {
-        Some(build_standalone_state(&config).await?)
+        Some(build_standalone_state(&config, None).await?)
     };
     let runtime_state = WorkerRuntimeState::default();
     super::abort_stale_requests_once(runtime_admin_state.as_ref()).await;
@@ -150,7 +150,7 @@ pub(super) async fn connect_for_test_with_admin(
     config: WorkerConfig,
     client: Client,
 ) -> anyhow::Result<()> {
-    let admin_state = build_admin_state(&config, false).await?;
+    let admin_state = build_admin_state(&config, false, None).await?;
     let runtime_admin_state = if config.storage_backend().is_postgres() {
         admin_state.clone()
     } else {
@@ -159,7 +159,7 @@ pub(super) async fn connect_for_test_with_admin(
     let standalone_state = if config.storage_backend().is_postgres() {
         None
     } else {
-        Some(build_standalone_state(&config).await?)
+        Some(build_standalone_state(&config, None).await?)
     };
     let relay = first_simple_relay_connection_config(&config)?;
     connect_once(

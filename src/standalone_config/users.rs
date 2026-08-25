@@ -27,7 +27,41 @@ impl SqliteUserStore {
         Self { pool }
     }
 
-    pub(crate) async fn bootstrap_admin(&self, login: &str, password: &str) -> Result<()> {
+    /// Create the first admin when needed. An empty `password` generates a
+    /// strong random one; existing logins and existing active users are never
+    /// modified.
+    pub(crate) async fn bootstrap_admin(
+        &self,
+        login: &str,
+        password: &str,
+    ) -> Result<Option<String>> {
+        let mut captured: Option<String> = None;
+        self.ensure_bootstrap_admin(
+            login,
+            (!password.trim().is_empty()).then_some(password),
+            |generated| {
+                captured = Some(generated.to_string());
+                Ok(generated.to_string())
+            },
+        )
+        .await?;
+        Ok(captured)
+    }
+
+    /// See [`Self::bootstrap_admin`]. The generated candidate is handed to
+    /// `resolve_generated` BEFORE the admin row is committed, and the
+    /// returned effective password is what gets stored. This supports atomic
+    /// create-if-absent publication across racing starters: if another
+    /// process already published a password file, the resolver returns that
+    /// existing password so every process inserts the same value. A failing
+    /// resolver aborts without leaving an active account whose password
+    /// cannot be retrieved on a later start.
+    pub(crate) async fn ensure_bootstrap_admin(
+        &self,
+        login: &str,
+        password: Option<&str>,
+        resolve_generated: impl FnOnce(&str) -> Result<String>,
+    ) -> Result<()> {
         let login_exists =
             sqlite_query!("src/standalone_config/sql/users/bootstrap_admin_exists.sql")
                 .bind(login)
@@ -48,13 +82,24 @@ impl SqliteUserStore {
         if has_active_user {
             return Ok(());
         }
-        if login.trim().is_empty() || password.trim().is_empty() {
+        if login.trim().is_empty() {
             return Err(anyhow!(
-                "bootstrap admin login and password are required when no active admin exists"
+                "bootstrap admin login must not be empty or whitespace when no active admin exists"
             ));
         }
 
-        let password_hash = hash_password(password)?;
+        let generated = password.map(str::trim).unwrap_or("").is_empty();
+        let candidate = if generated {
+            crate::relay_secrets::generate_bootstrap_password()
+        } else {
+            password.unwrap_or_default().to_string()
+        };
+        let effective = if generated {
+            resolve_generated(&candidate)?
+        } else {
+            candidate
+        };
+        let password_hash = hash_password(&effective)?;
         sqlite_query!("src/standalone_config/sql/users/bootstrap_admin_insert.sql")
             .bind(login.trim())
             .bind(password_hash)
@@ -193,23 +238,21 @@ fn sqlite_timestamp(row: &SqliteRow, column: &str) -> Result<DateTime<Utc>> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        path::PathBuf,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::path::PathBuf;
+
+    use anyhow::anyhow;
 
     use super::SqliteUserStore;
 
     fn database_path() -> PathBuf {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        std::env::temp_dir().join(format!("prompt-ferry-users-{suffix}.sqlite"))
+        std::env::temp_dir().join(format!(
+            "prompt-ferry-users-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ))
     }
 
     #[tokio::test]
-    async fn sqlite_bootstrap_requires_a_password_and_persists_auth_users() {
+    async fn sqlite_bootstrap_generates_or_uses_configured_password_and_persists_users() {
         let path = database_path();
         let pool = crate::db::connect_sqlite(&path).await.expect("SQLite pool");
         crate::db::migrate_standalone(&pool)
@@ -217,27 +260,38 @@ mod tests {
             .expect("SQLite migrations");
         let store = SqliteUserStore::new(pool.clone());
 
-        assert!(store.bootstrap_admin("admin", "").await.is_err());
-        store
-            .bootstrap_admin("admin", "correct horse battery staple")
-            .await
-            .expect("bootstrap admin");
-        store
+        // An empty configured password generates one on a fresh database.
+        let generated = store
             .bootstrap_admin("admin", "")
             .await
-            .expect("existing admin is idempotent");
-
-        let password = store
+            .expect("generated bootstrap admin")
+            .expect("generated password");
+        assert!(generated.len() >= 24);
+        assert_ne!(generated, "admin");
+        let stored = store
             .get_user_password_by_login("admin")
             .await
             .expect("load password")
             .expect("admin user");
-        assert!(password.is_admin);
-        assert!(password.is_active);
         assert!(crate::keys::verify_password(
-            "correct horse battery staple",
-            &password.password_hash
+            &generated,
+            &stored.password_hash
         ));
+
+        // An existing admin is idempotent and never regenerated.
+        assert!(
+            store
+                .bootstrap_admin("admin", "")
+                .await
+                .expect("existing admin is idempotent")
+                .is_none()
+        );
+        let unchanged = store
+            .get_user_password_by_login("admin")
+            .await
+            .expect("load password")
+            .expect("admin user");
+        assert_eq!(unchanged.password_hash, stored.password_hash);
 
         let created = store
             .create_user(crate::db::UserCreate {
@@ -262,6 +316,154 @@ mod tests {
                 .await
                 .expect("active user")
                 .is_some()
+        );
+
+        pool.close().await;
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn sqlite_bootstrap_prefers_configured_password_on_fresh_database() {
+        let path = database_path();
+        let pool = crate::db::connect_sqlite(&path).await.expect("SQLite pool");
+        crate::db::migrate_standalone(&pool)
+            .await
+            .expect("SQLite migrations");
+        let store = SqliteUserStore::new(pool.clone());
+
+        assert!(
+            store
+                .bootstrap_admin("admin", "correct horse battery staple")
+                .await
+                .expect("configured bootstrap admin")
+                .is_none()
+        );
+        let stored = store
+            .get_user_password_by_login("admin")
+            .await
+            .expect("load password")
+            .expect("admin user");
+        assert!(stored.is_admin);
+        assert!(stored.is_active);
+        assert!(crate::keys::verify_password(
+            "correct horse battery staple",
+            &stored.password_hash
+        ));
+
+        pool.close().await;
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn sqlite_bootstrap_persist_failure_leaves_no_admin_and_retry_recovers() {
+        let path = database_path();
+        let pool = crate::db::connect_sqlite(&path).await.expect("SQLite pool");
+        crate::db::migrate_standalone(&pool)
+            .await
+            .expect("SQLite migrations");
+        let store = SqliteUserStore::new(pool.clone());
+
+        // A failing protected-file write must abort before the admin row is
+        // committed so the next start can regenerate a retrievable password.
+        let error = store
+            .ensure_bootstrap_admin("admin", None, |_| {
+                Err(anyhow!("simulated bootstrap-admin.txt write failure"))
+            })
+            .await
+            .expect_err("persist failure propagates");
+        assert!(error.to_string().contains("write failure"));
+        assert!(
+            store
+                .get_user_password_by_login("admin")
+                .await
+                .expect("load admin")
+                .is_none(),
+            "no active admin may exist after a failed password publication"
+        );
+
+        // Retry on the next start succeeds and stores exactly the published
+        // password.
+        let mut published: Option<String> = None;
+        store
+            .ensure_bootstrap_admin("admin", None, |generated| {
+                published = Some(generated.to_string());
+                Ok(generated.to_string())
+            })
+            .await
+            .expect("retry creates admin");
+        let generated = published.expect("generated password passed to persistence");
+        let stored = store
+            .get_user_password_by_login("admin")
+            .await
+            .expect("load admin")
+            .expect("admin user");
+        assert!(crate::keys::verify_password(
+            &generated,
+            &stored.password_hash
+        ));
+
+        pool.close().await;
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn sqlite_bootstrap_commits_the_effective_password_returned_by_the_resolver() {
+        let path = database_path();
+        let pool = crate::db::connect_sqlite(&path).await.expect("SQLite pool");
+        crate::db::migrate_standalone(&pool)
+            .await
+            .expect("SQLite migrations");
+        let store = SqliteUserStore::new(pool.clone());
+
+        // Simulate a racing starter that already published a different
+        // password: the resolver reuses it and the database must contain the
+        // effective (winner) password, never the losing candidate.
+        const WINNER: &str = "winner-password-published-by-another-process";
+        let mut candidate_seen: Option<String> = None;
+        store
+            .ensure_bootstrap_admin("admin", None, |candidate| {
+                candidate_seen = Some(candidate.to_string());
+                Ok(WINNER.to_string())
+            })
+            .await
+            .expect("resolver-driven bootstrap admin");
+
+        let candidate = candidate_seen.expect("candidate passed to resolver");
+        assert_ne!(candidate, WINNER);
+        let stored = store
+            .get_user_password_by_login("admin")
+            .await
+            .expect("load admin")
+            .expect("admin user");
+        assert!(crate::keys::verify_password(WINNER, &stored.password_hash));
+        assert!(!crate::keys::verify_password(
+            &candidate,
+            &stored.password_hash
+        ));
+
+        pool.close().await;
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn sqlite_bootstrap_rejects_empty_login_even_when_generating_password() {
+        let path = database_path();
+        let pool = crate::db::connect_sqlite(&path).await.expect("SQLite pool");
+        crate::db::migrate_standalone(&pool)
+            .await
+            .expect("SQLite migrations");
+        let store = SqliteUserStore::new(pool.clone());
+
+        for login in ["", "   "] {
+            let error = store
+                .ensure_bootstrap_admin(login, None, |candidate| Ok(candidate.to_string()))
+                .await
+                .expect_err("empty login is rejected");
+            assert!(error.to_string().contains("login must not be empty"));
+        }
+        assert!(
+            store.list_users().await.expect("list users").is_empty(),
+            "a rejected empty login must not create any account"
         );
 
         pool.close().await;

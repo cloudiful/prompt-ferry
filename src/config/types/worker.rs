@@ -27,6 +27,17 @@ pub struct WorkerConfig {
     pub client_key: String,
     pub bridge_encryption_mode: BridgeEncryptionMode,
     pub bridge_encryption_key: String,
+    /// Worker configuration encryption key (base64-encoded 32 bytes) used to
+    /// encrypt sensitive standalone worker configuration at rest, including
+    /// upstream API keys, relay TLS material, client keys, and bridge keys.
+    /// Current name for `WORKER_CONFIG_ENCRYPTION_KEY`; takes precedence over
+    /// the legacy [`Self::relay_secret_master_key`]. When both are empty, a
+    /// random key is generated and persisted under the data root as
+    /// `worker-config.key`.
+    pub worker_config_encryption_key: String,
+    /// Legacy name for the worker configuration encryption key
+    /// (`RELAY_SECRET_MASTER_KEY`). Kept for compatibility; a non-empty
+    /// current [`Self::worker_config_encryption_key`] always wins.
     pub relay_secret_master_key: String,
     pub valkey_url: String,
     pub valkey_ttl_seconds: u64,
@@ -72,6 +83,7 @@ impl Default for WorkerConfig {
             client_key: String::new(),
             bridge_encryption_mode: BridgeEncryptionMode::Off,
             bridge_encryption_key: String::new(),
+            worker_config_encryption_key: String::new(),
             relay_secret_master_key: String::new(),
             valkey_url: String::new(),
             valkey_ttl_seconds: 24 * 60 * 60,
@@ -95,6 +107,18 @@ impl Default for WorkerConfig {
 }
 
 impl WorkerConfig {
+    /// Effective worker configuration encryption key with explicit
+    /// precedence: a non-empty current `WORKER_CONFIG_ENCRYPTION_KEY` wins
+    /// over the legacy `RELAY_SECRET_MASTER_KEY`; when both are empty the
+    /// caller falls back to the persisted or generated key file.
+    pub fn effective_encryption_key(&self) -> &str {
+        if !self.worker_config_encryption_key.trim().is_empty() {
+            &self.worker_config_encryption_key
+        } else {
+            &self.relay_secret_master_key
+        }
+    }
+
     pub(crate) fn storage_backend(&self) -> StorageBackend {
         if self.database_url.trim().is_empty() {
             StorageBackend::Sqlite
@@ -192,4 +216,44 @@ impl WorkerConfig {
 
 pub fn normalize_relay_url(value: &str) -> String {
     value.trim().trim_end_matches('/').to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorkerConfig;
+
+    const KEY_A: &str = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=";
+    const KEY_B: &str = "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=";
+
+    #[test]
+    fn deserializing_both_encryption_key_names_does_not_conflict() {
+        // Both env/config names can be present at once (for example a legacy
+        // .env plus a new override); this must not raise a duplicate-field
+        // deserialization error.
+        let json = format!(
+            r#"{{"worker_config_encryption_key":"{KEY_A}","relay_secret_master_key":"{KEY_B}"}}"#
+        );
+        let config: WorkerConfig = serde_json::from_str(&json).expect("both key names parse");
+        assert_eq!(config.worker_config_encryption_key, KEY_A);
+        assert_eq!(config.relay_secret_master_key, KEY_B);
+    }
+
+    #[test]
+    fn effective_encryption_key_prefers_current_over_legacy() {
+        let config = WorkerConfig {
+            worker_config_encryption_key: KEY_A.to_string(),
+            relay_secret_master_key: KEY_B.to_string(),
+            ..WorkerConfig::default()
+        };
+        assert_eq!(config.effective_encryption_key(), KEY_A);
+
+        let config = WorkerConfig {
+            relay_secret_master_key: KEY_B.to_string(),
+            ..WorkerConfig::default()
+        };
+        assert_eq!(config.effective_encryption_key(), KEY_B);
+
+        let config = WorkerConfig::default();
+        assert_eq!(config.effective_encryption_key(), "");
+    }
 }
