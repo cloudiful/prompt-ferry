@@ -459,7 +459,7 @@ fn protocol_rejection(err: &anyhow::Error) -> Option<ProtocolRejection> {
         let error = error
             .error
             .downcast_ref::<rmcp::transport::streamable_http_client::StreamableHttpError<reqwest::Error>>()?;
-        if !is_unsupported_version_response(error) {
+        if !is_unsupported_version_response(error) && !is_invalid_session_http_rejection(error) {
             return None;
         }
         return Some(ProtocolRejection {
@@ -542,6 +542,26 @@ fn is_unsupported_version_response(
         }
         _ => false,
     }
+}
+
+/// Narrow classifier for stateful servers (e.g. Grafana mcp-go) that answer
+/// the session-less `server/discover` probe with a non-standard HTTP-layer
+/// rejection instead of a JSON-RPC method-not-found error: an HTTP 404 whose
+/// body says the session id is invalid. Only this exact shape counts as a
+/// lifecycle rejection so the legacy initialize fallback runs; arbitrary 404s
+/// (e.g. a wrong URL), auth failures, DNS/timeout errors, and unrelated
+/// session errors must not trigger the fallback.
+fn is_invalid_session_http_rejection(
+    error: &rmcp::transport::streamable_http_client::StreamableHttpError<reqwest::Error>,
+) -> bool {
+    let rmcp::transport::streamable_http_client::StreamableHttpError::UnexpectedServerResponse(
+        message,
+    ) = error
+    else {
+        return false;
+    };
+    let lower = message.to_ascii_lowercase();
+    lower.contains("http 404") && lower.contains("invalid session id")
 }
 
 fn supported_versions_from_error_data(error_data: &rmcp::ErrorData) -> Vec<ProtocolVersion> {
@@ -952,6 +972,71 @@ mod tests {
         )));
         assert!(!is_protocol_rejection(&anyhow::Error::new(
             ClientInitializeError::NoPreferredProtocolVersion,
+        )));
+    }
+
+    fn streamable_http_transport_error(
+        inner: rmcp::transport::streamable_http_client::StreamableHttpError<reqwest::Error>,
+    ) -> anyhow::Error {
+        anyhow::Error::new(ClientInitializeError::TransportError {
+            error: rmcp::transport::DynamicTransportError::from_parts(
+                "streamable_http_client",
+                std::any::TypeId::of::<StreamableHttpClientTransport<reqwest::Client>>(),
+                Box::new(inner),
+            ),
+            context: "connect".into(),
+        })
+    }
+
+    #[test]
+    fn classifies_grafana_shaped_invalid_session_404() {
+        let err = streamable_http_transport_error(
+            rmcp::transport::streamable_http_client::StreamableHttpError::UnexpectedServerResponse(
+                "HTTP 404 Not Found: Invalid session ID".into(),
+            ),
+        );
+        assert!(is_protocol_rejection(&err));
+    }
+
+    #[test]
+    fn invalid_session_classification_is_case_insensitive() {
+        let err = streamable_http_transport_error(
+            rmcp::transport::streamable_http_client::StreamableHttpError::UnexpectedServerResponse(
+                "HTTP 404: {\"error\":\"invalid session id\"}".into(),
+            ),
+        );
+        assert!(is_protocol_rejection(&err));
+    }
+
+    #[test]
+    fn does_not_classify_other_404s_or_statuses() {
+        // 404 without invalid-session wording (e.g. a wrong URL).
+        assert!(!is_invalid_session_http_rejection(
+            &rmcp::transport::streamable_http_client::StreamableHttpError::UnexpectedServerResponse(
+                "HTTP 404 Not Found: page not found".into(),
+            )
+        ));
+        assert!(!is_protocol_rejection(&streamable_http_transport_error(
+            rmcp::transport::streamable_http_client::StreamableHttpError::UnexpectedServerResponse(
+                "HTTP 404 Not Found: page not found".into(),
+            ),
+        )));
+
+        // Invalid-session wording on a non-404 status must not match.
+        assert!(!is_invalid_session_http_rejection(
+            &rmcp::transport::streamable_http_client::StreamableHttpError::UnexpectedServerResponse(
+                "HTTP 400 Bad Request: Invalid session ID".into(),
+            )
+        ));
+        assert!(!is_protocol_rejection(&streamable_http_transport_error(
+            rmcp::transport::streamable_http_client::StreamableHttpError::UnexpectedServerResponse(
+                "HTTP 400 Bad Request: Invalid session ID".into(),
+            ),
+        )));
+
+        // Other transport error variants are never this rejection.
+        assert!(!is_protocol_rejection(&streamable_http_transport_error(
+            rmcp::transport::streamable_http_client::StreamableHttpError::ServerDoesNotSupportSse,
         )));
     }
 
