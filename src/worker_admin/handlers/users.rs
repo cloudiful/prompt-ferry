@@ -12,7 +12,7 @@ impl From<db::UnifiedClientKey> for ClientKey {
             enabled: key.enabled,
             last_used_at: None,
             created_at: key.created_at,
-            secret: None,
+            secret: key.secret,
         }
     }
 }

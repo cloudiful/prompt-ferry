@@ -145,9 +145,8 @@ async fn sqlite_http_client_keys_round_trip_uuid_identifiers() -> anyhow::Result
         .await?;
     assert_eq!(listed.status(), StatusCode::OK);
     let listed_body = json_body(listed).await;
-    let listed_ids = listed_body["keys"]
-        .as_array()
-        .expect("keys")
+    let listed_keys = listed_body["keys"].as_array().expect("keys");
+    let listed_ids = listed_keys
         .iter()
         .map(|key| key["key_id"].as_str().expect("UUID key ID").to_string())
         .collect::<Vec<_>>();
@@ -156,6 +155,21 @@ async fn sqlite_http_client_keys_round_trip_uuid_identifiers() -> anyhow::Result
         .iter()
         .position(|key_id| key_id == &first.key.key_id.to_string())
         .expect("first key in ordered list");
+
+    // Admin list response must surface the persisted synthetic secret for
+    // every key without re-encrypting it through any unrelated endpoint.
+    let admin_secrets: std::collections::HashMap<String, String> = listed_keys
+        .iter()
+        .map(|key| {
+            (
+                key["key_id"].as_str().expect("UUID key ID").to_string(),
+                key["secret"].as_str().expect("secret string").to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(admin_secrets[&first.key.key_id.to_string()], first.secret);
+    assert_eq!(admin_secrets[&second.key.key_id.to_string()], second.secret);
+    assert_eq!(admin_secrets[&third.key.key_id.to_string()], third.secret);
 
     let legacy_updated = app
         .clone()
@@ -169,6 +183,12 @@ async fn sqlite_http_client_keys_round_trip_uuid_identifiers() -> anyhow::Result
     let legacy_updated_body = json_body(legacy_updated).await;
     assert_eq!(legacy_updated_body["key_id"], first.key.key_id.to_string());
     assert_eq!(legacy_updated_body["label"], "first-legacy");
+    assert_eq!(
+        legacy_updated_body["secret"]
+            .as_str()
+            .expect("legacy secret"),
+        first.secret
+    );
 
     let updated = app
         .clone()
@@ -182,6 +202,30 @@ async fn sqlite_http_client_keys_round_trip_uuid_identifiers() -> anyhow::Result
     let updated_body = json_body(updated).await;
     assert_eq!(updated_body["key_id"], second.key.key_id.to_string());
     assert_eq!(updated_body["label"], "second-updated");
+    assert_eq!(
+        updated_body["secret"].as_str().expect("updated secret"),
+        second.secret
+    );
+
+    let me_listed = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/me/client-keys".to_string(), None))
+        .await?;
+    assert_eq!(me_listed.status(), StatusCode::OK);
+    let me_listed_body = json_body(me_listed).await;
+    let me_listed_keys = me_listed_body["keys"].as_array().expect("me keys");
+    let me_secrets: std::collections::HashMap<String, String> = me_listed_keys
+        .iter()
+        .map(|key| {
+            (
+                key["key_id"].as_str().expect("UUID key ID").to_string(),
+                key["secret"].as_str().expect("secret string").to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(me_secrets[&first.key.key_id.to_string()], first.secret);
+    assert_eq!(me_secrets[&second.key.key_id.to_string()], second.secret);
+    assert_eq!(me_secrets[&third.key.key_id.to_string()], third.secret);
 
     let me_updated = app
         .clone()
@@ -195,6 +239,12 @@ async fn sqlite_http_client_keys_round_trip_uuid_identifiers() -> anyhow::Result
     let me_updated_body = json_body(me_updated).await;
     assert_eq!(me_updated_body["key_id"], third.key.key_id.to_string());
     assert_eq!(me_updated_body["enabled"], false);
+    assert_eq!(
+        me_updated_body["secret"]
+            .as_str()
+            .expect("me updated secret"),
+        third.secret
+    );
 
     let invalid = app
         .clone()

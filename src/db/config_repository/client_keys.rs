@@ -24,6 +24,10 @@ pub struct UnifiedClientKey {
     pub label: String,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
+    /// Decrypted secret retrieved from the configured backend.
+    /// `None` only when the backend could not resolve it; list/update flows
+    /// always populate this for callers behind the authenticated endpoints.
+    pub secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +64,7 @@ impl From<PgClientKey> for UnifiedClientKey {
             label: key.label,
             enabled: key.enabled,
             created_at: key.created_at,
+            secret: key.secret,
         }
     }
 }
@@ -80,6 +85,7 @@ impl UnifiedClientKey {
             label: key.label,
             enabled: key.enabled,
             created_at: Utc::now(),
+            secret: Some(key.secret),
         }
     }
 }
@@ -196,6 +202,7 @@ impl PostgresConfigRepository {
                 label: key.label,
                 enabled: key.enabled,
                 created_at: key.created_at,
+                secret: key.secret,
             },
             secret,
         })
@@ -271,6 +278,7 @@ impl SqliteConfigRepository {
                 label,
                 enabled,
                 created_at: Utc::now(),
+                secret: Some(secret.clone()),
             },
             secret,
         })
@@ -305,6 +313,7 @@ impl SqliteConfigRepository {
                     label: key.label.clone(),
                     enabled: key.enabled,
                     created_at: Utc::now(),
+                    secret: Some(key.secret.clone()),
                 });
                 break;
             }
