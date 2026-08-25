@@ -2168,6 +2168,68 @@ async fn usage_event_detail_includes_assistant_artifact_fields() -> anyhow::Resu
 }
 
 #[tokio::test]
+async fn usage_event_detail_serializes_null_request_has_previous_response_id_as_false()
+-> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin", true).await?;
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::WARN)
+        .with_writer(std::io::stderr)
+        .try_init();
+    // Insert a normal record, then force the legacy NULL state on the column to
+    // mirror historical rows created before the field was non-nullable.
+    let event_id = insert_request_record(&schema.pool, admin.user_id, "deepseek-v4-pro").await?;
+    // The current schema enforces NOT NULL; drop it within this isolated test
+    // schema so we can reproduce a legacy NULL row, then restore it afterwards.
+    sqlx::query(
+        "ALTER TABLE request_records ALTER COLUMN request_has_previous_response_id DROP NOT NULL",
+    )
+    .execute(&schema.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE request_records SET request_has_previous_response_id = NULL WHERE event_id = $1",
+    )
+    .bind(event_id)
+    .execute(&schema.pool)
+    .await?;
+
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    let app = worker_admin::router(state.clone());
+    let response = app
+        .oneshot(auth_request(
+            "GET",
+            format!("/api/v1/admin/request-records/{event_id}"),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        value["request_has_previous_response_id"].as_bool(),
+        Some(false),
+        "NULL legacy request_has_previous_response_id must serialize as false"
+    );
+
+    // Restore the current schema constraint for consistency (the test schema is
+    // dropped on cleanup regardless).
+    sqlx::query(
+        "ALTER TABLE request_records ALTER COLUMN request_has_previous_response_id SET NOT NULL",
+    )
+    .execute(&schema.pool)
+    .await?;
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn rejects_force_passthrough_for_chat_native_target() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");

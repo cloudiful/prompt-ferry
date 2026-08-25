@@ -72,7 +72,7 @@ SELECT
     raw.raw_object_key,
     raw.raw_object_sha256,
     raw.raw_object_expires_at,
-    ue.request_has_previous_response_id AS "request_has_previous_response_id!",
+    COALESCE(ue.request_has_previous_response_id, FALSE) AS "request_has_previous_response_id!",
     ue.request_previous_response_id,
     ue.request_previous_response_parent_found,
     ue.request_conversation_key,
