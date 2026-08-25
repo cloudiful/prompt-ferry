@@ -35,14 +35,10 @@ fn derive_configs(
     relay_config.worker_bind = serve_config.internal_worker_bind.clone();
     worker_config.relay_urls = vec![format!("ws://{}/ws/worker", relay_config.worker_bind)];
 
-    // An empty worker token is preserved as empty on both sides: the relay
-    // accepts unauthenticated worker connections and logs a warning. No token
-    // is generated to replace it.
-    let worker_token = if worker_config.worker_token.trim().is_empty() {
-        relay_config.worker_token.trim().to_string()
-    } else {
-        worker_config.worker_token.trim().to_string()
-    };
+    // The worker-side token is authoritative in serve mode: an explicitly
+    // empty worker token fully opens serve-mode worker auth even when the
+    // relay config carries its default or a custom token.
+    let worker_token = worker_config.worker_token.trim().to_string();
     relay_config.worker_token = worker_token.clone();
     worker_config.worker_token = worker_token;
 
@@ -85,7 +81,7 @@ mod tests {
     fn derive_configs_for_serve_mode_overrides_internal_bridge_settings() {
         let mut app_config = AppConfig::default();
         app_config.relay.worker_token = "relay-token".to_string();
-        app_config.worker.worker_token = String::new();
+        app_config.worker.worker_token = "worker-token".to_string();
         app_config.worker.tls_mode = WorkerTlsMode::Mtls;
         app_config.worker.relay_ca = "/tmp/relay-ca.pem".to_string();
         app_config.worker.client_cert = "/tmp/client.crt".to_string();
@@ -107,8 +103,8 @@ mod tests {
             worker_config.relay_urls,
             vec!["ws://127.0.0.1:8788/ws/worker".to_string()]
         );
-        assert_eq!(relay_config.worker_token, "relay-token");
-        assert_eq!(worker_config.worker_token, "relay-token");
+        assert_eq!(relay_config.worker_token, "worker-token");
+        assert_eq!(worker_config.worker_token, "worker-token");
         assert_eq!(relay_config.worker_tls_mode, TlsMode::Off);
         assert!(relay_config.worker_tls_cert.is_empty());
         assert!(relay_config.worker_tls_key.is_empty());
@@ -148,6 +144,19 @@ mod tests {
     fn serve_mode_preserves_empty_worker_token_on_both_sides() {
         let mut app_config = AppConfig::default();
         app_config.relay.worker_token = String::new();
+        app_config.worker.worker_token = String::new();
+
+        let (relay_config, worker_config) =
+            derive_configs(app_config, ServeArgs::default()).unwrap();
+
+        assert_eq!(relay_config.worker_token, "");
+        assert_eq!(worker_config.worker_token, "");
+    }
+
+    #[test]
+    fn serve_mode_empty_worker_token_overrides_nonempty_relay_token() {
+        let mut app_config = AppConfig::default();
+        app_config.relay.worker_token = "relay-default-token".to_string();
         app_config.worker.worker_token = String::new();
 
         let (relay_config, worker_config) =
