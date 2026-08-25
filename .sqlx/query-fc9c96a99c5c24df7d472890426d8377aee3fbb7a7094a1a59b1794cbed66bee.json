@@ -101,14 +101,14 @@
       ]
     },
     "nullable": [
-      false,
-      false,
       true,
       true,
       true,
       true,
       false,
-      false
+      true,
+      true,
+      true
     ]
   },
   "hash": "fc9c96a99c5c24df7d472890426d8377aee3fbb7a7094a1a59b1794cbed66bee"
