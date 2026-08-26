@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import type { BillingChargeDetailResponse } from '@/generated/admin-api'
-import {
-  formatBillingAmount,
-  formatBillingTime,
-  formatTokenCount,
-} from '@/models/billing'
+import { formatTokenQuantity } from '@/composables/useUsageFormatting'
+import { formatBillingAmount, formatBillingTime } from '@/models/billing'
 
 const props = defineProps<{
   detail: BillingChargeDetailResponse | null
@@ -45,10 +42,10 @@ const visible = defineModel<boolean>('visible', { required: true })
             <div>
               <span class="text-dimmed">{{ t('usageTokens') }}</span
               ><strong class="mt-1 block"
-                >{{ formatTokenCount(detail.charge.input_tokens) }} /
-                {{ formatTokenCount(detail.charge.cache_read_tokens) }} /
-                {{ formatTokenCount(detail.charge.cache_write_tokens) }} /
-                {{ formatTokenCount(detail.charge.output_tokens) }}</strong
+                >{{ formatTokenQuantity(detail.charge.input_tokens) }} /
+                {{ formatTokenQuantity(detail.charge.cache_read_tokens) }} /
+                {{ formatTokenQuantity(detail.charge.cache_write_tokens) }} /
+                {{ formatTokenQuantity(detail.charge.output_tokens) }}</strong
               >
             </div>
             <div>
@@ -87,7 +84,8 @@ const visible = defineModel<boolean>('visible', { required: true })
             class="flex flex-wrap items-center justify-between gap-2 border-b border-default py-2"
           >
             <span
-              >{{ line.meter }} / {{ formatTokenCount(line.token_count) }}</span
+              >{{ line.meter }} /
+              {{ formatTokenQuantity(line.token_count) }}</span
             >
             <span
               >{{ formatBillingAmount(line.amount) }} ({{

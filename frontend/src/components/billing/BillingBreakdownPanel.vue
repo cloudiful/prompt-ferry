@@ -2,6 +2,7 @@
 import type { TableColumn } from '@nuxt/ui'
 import { computed } from 'vue'
 import type { BillingBreakdownResponse } from '@/generated/admin-api'
+import { formatTokenQuantity } from '@/composables/useUsageFormatting'
 import { formatBillingAmount, formatTokenCount } from '@/models/billing'
 
 const props = defineProps<{
@@ -31,16 +32,16 @@ const columns = computed<TableColumn<BillingBreakdownResponse>[]>(() => [
           formatTokenCount(row.original.request_count)
         }}</template>
         <template #input_tokens-cell="{ row }">{{
-          formatTokenCount(row.original.input_tokens)
+          formatTokenQuantity(row.original.input_tokens)
         }}</template>
         <template #cache_read_tokens-cell="{ row }">{{
-          formatTokenCount(row.original.cache_read_tokens)
+          formatTokenQuantity(row.original.cache_read_tokens)
         }}</template>
         <template #cache_write_tokens-cell="{ row }">{{
-          formatTokenCount(row.original.cache_write_tokens)
+          formatTokenQuantity(row.original.cache_write_tokens)
         }}</template>
         <template #output_tokens-cell="{ row }">{{
-          formatTokenCount(row.original.output_tokens)
+          formatTokenQuantity(row.original.output_tokens)
         }}</template>
         <template #customer_amount-cell="{ row }">{{
           formatBillingAmount(row.original.customer_amount)

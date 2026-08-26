@@ -33,6 +33,43 @@ export function formatRequestRecordCount(value?: number | null): string {
   return new Intl.NumberFormat().format(value)
 }
 
+export function formatTokenQuantity(value?: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '-'
+  const abs = Math.abs(value)
+  if (abs < 1000) {
+    return new Intl.NumberFormat(undefined).format(Math.round(value))
+  }
+  let scaled = value
+  let unit = ''
+  if (abs >= 1_000_000_000_000) {
+    scaled = value / 1_000_000_000_000
+    unit = 'T'
+  } else if (abs >= 1_000_000_000) {
+    scaled = value / 1_000_000_000
+    unit = 'B'
+  } else if (abs >= 1_000_000) {
+    scaled = value / 1_000_000
+    unit = 'M'
+  } else {
+    scaled = value / 1_000
+    unit = 'K'
+  }
+  const rounded = Math.round(scaled * 10) / 10
+  const fixed = rounded.toFixed(1)
+  const trimmed = fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed
+  const localized = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+  }).format(Number(trimmed))
+  return `${localized}${unit}`
+}
+
+export function formatTokensPerSecondValue(value?: number | null): string {
+  if (value == null || !Number.isFinite(value) || value <= 0) return '-'
+  const rounded = value >= 100 ? value.toFixed(0) : value.toFixed(1)
+  return `${rounded} token/s`
+}
+
 export function formatRequestRecordPercent(value?: number | null): string {
   if (value == null) return '-'
   return `${Math.round(value * 100)}%`
@@ -103,9 +140,11 @@ export function createRequestRecordFormatting(
 ): RequestRecordFormatting {
   return {
     formatCount: formatRequestRecordCount,
+    formatTokenQuantity,
     formatMs: formatRequestRecordMs,
     formatPercent: formatRequestRecordPercent,
     formatOutputTokensPerSecond: formatRequestRecordOutputTokensPerSecond,
+    formatTokensPerSecond: formatTokensPerSecondValue,
     hasOutputRate,
     formatInputTokensPerSecond: formatRequestRecordInputTokensPerSecond,
     formatRequestStateLabel: (state) =>

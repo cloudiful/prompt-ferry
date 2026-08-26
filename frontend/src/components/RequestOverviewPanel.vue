@@ -61,11 +61,16 @@ const metricCards = computed(() => {
     ]
   }
   return [
-    metric(t('overviewTotalTokens'), summary.tokens.total_tokens, 'count'),
-    metric(t('overviewInputTokens'), summary.tokens.input_tokens, 'count'),
-    metric(t('overviewOutputTokens'), summary.tokens.output_tokens, 'count'),
+    metric(t('overviewTotalTokens'), summary.tokens.total_tokens, 'tokens'),
+    metric(t('overviewInputTokens'), summary.tokens.input_tokens, 'tokens'),
+    metric(t('overviewOutputTokens'), summary.tokens.output_tokens, 'tokens'),
     metric(t('overviewCacheRate'), summary.tokens.cache_rate, 'ratio'),
     metric(t('overviewCacheHitRate'), summary.tokens.cache_hit_rate, 'ratio'),
+    metric(
+      t('overviewAvgOutputRate'),
+      summary.avg_output_tokens_per_second,
+      'tokensPerSecond',
+    ),
     ...common,
   ]
 })
@@ -100,17 +105,20 @@ const errorOption = computed(() =>
 function metric(
   label: string,
   value: number | null | undefined,
-  kind: 'count' | 'ms' | 'ratio',
+  kind: 'count' | 'ms' | 'ratio' | 'tokens' | 'tokensPerSecond',
 ) {
   return { label, value, kind }
 }
 
 function formatMetricValue(
   value: number | null | undefined,
-  kind: 'count' | 'ms' | 'ratio',
+  kind: 'count' | 'ms' | 'ratio' | 'tokens' | 'tokensPerSecond',
 ): string {
   if (kind === 'ratio') return props.formatting.formatPercent(value)
   if (kind === 'ms') return props.formatting.formatMs(value)
+  if (kind === 'tokens') return props.formatting.formatTokenQuantity(value)
+  if (kind === 'tokensPerSecond')
+    return props.formatting.formatTokensPerSecond(value)
   return props.formatting.formatCount(value)
 }
 
@@ -230,7 +238,7 @@ function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
                 <td class="px-4 py-2">
                   {{
                     category === 'ai'
-                      ? formatting.formatCount(row.tokens.total_tokens)
+                      ? formatting.formatTokenQuantity(row.tokens.total_tokens)
                       : formatting.formatPercent(row.success_rate)
                   }}
                 </td>

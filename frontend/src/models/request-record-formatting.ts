@@ -13,9 +13,11 @@ export type RequestRecordTiming = Pick<
 
 export type RequestRecordFormatting = {
   formatCount: (value?: number | null) => string
+  formatTokenQuantity: (value?: number | null) => string
   formatMs: (value?: number | null) => string
   formatPercent: (value?: number | null) => string
   formatOutputTokensPerSecond: (record: RequestRecordTiming) => string
+  formatTokensPerSecond: (value?: number | null) => string
   hasOutputRate: (record: RequestRecordTiming) => boolean
   formatInputTokensPerSecond: (record: RequestRecordTiming) => string
   formatRequestStateLabel: (state: RequestRecordState) => string

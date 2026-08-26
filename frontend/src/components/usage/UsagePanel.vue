@@ -210,8 +210,8 @@ const sorting = computed<SortingState>({
           formatting.formatMs(row.original.duration_ms)
         }}</template>
         <template #total_tokens-cell="{ row }">
-          {{ formatting.formatCount(row.original.total_tokens) }} /
-          {{ formatting.formatCount(row.original.cached_tokens) }} /
+          {{ formatting.formatTokenQuantity(row.original.total_tokens) }} /
+          {{ formatting.formatTokenQuantity(row.original.cached_tokens) }} /
           {{ formatting.formatPercent(row.original.cache_rate) }}
         </template>
         <template #throughput-cell="{ row }">

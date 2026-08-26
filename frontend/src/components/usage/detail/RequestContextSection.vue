@@ -44,12 +44,12 @@ defineProps<{
           </div>
         </DetailKeyValue>
         <DetailKeyValue :label="t('tokens')">
-          {{ formatting.formatCount(event.input_tokens) }} /
-          {{ formatting.formatCount(event.output_tokens) }} /
-          {{ formatting.formatCount(event.total_tokens) }}
+          {{ formatting.formatTokenQuantity(event.input_tokens) }} /
+          {{ formatting.formatTokenQuantity(event.output_tokens) }} /
+          {{ formatting.formatTokenQuantity(event.total_tokens) }}
         </DetailKeyValue>
         <DetailKeyValue :label="t('cachedTokens')">
-          {{ formatting.formatCount(event.cached_tokens) }}
+          {{ formatting.formatTokenQuantity(event.cached_tokens) }}
         </DetailKeyValue>
         <DetailKeyValue :label="t('cacheRate')">
           {{ formatting.formatPercent(event.cache_rate) }}

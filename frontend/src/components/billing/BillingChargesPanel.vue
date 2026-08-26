@@ -2,11 +2,8 @@
 import type { TableColumn } from '@nuxt/ui'
 import { computed } from 'vue'
 import type { BillingChargeResponse } from '@/generated/admin-api'
-import {
-  formatBillingAmount,
-  formatBillingTime,
-  formatTokenCount,
-} from '@/models/billing'
+import { formatTokenQuantity } from '@/composables/useUsageFormatting'
+import { formatBillingAmount, formatBillingTime } from '@/models/billing'
 import { BILLING_PAGE_SIZE_OPTIONS } from '@/models/billing'
 import TablePagination from '@/components/shared/TablePagination.vue'
 
@@ -90,10 +87,10 @@ function statusColor(
           row.original.endpoint_name || '-'
         }}</template>
         <template #tokens-cell="{ row }">
-          {{ formatTokenCount(row.original.input_tokens) }} /
-          {{ formatTokenCount(row.original.cache_read_tokens) }} /
-          {{ formatTokenCount(row.original.cache_write_tokens) }} /
-          {{ formatTokenCount(row.original.output_tokens) }}
+          {{ formatTokenQuantity(row.original.input_tokens) }} /
+          {{ formatTokenQuantity(row.original.cache_read_tokens) }} /
+          {{ formatTokenQuantity(row.original.cache_write_tokens) }} /
+          {{ formatTokenQuantity(row.original.output_tokens) }}
         </template>
         <template #pricing_status-cell="{ row }">
           <UBadge
