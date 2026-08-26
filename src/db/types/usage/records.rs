@@ -179,10 +179,23 @@ pub struct RequestRecordFacets {
     pub users: Vec<String>,
     pub models: Vec<String>,
     pub dates: Vec<String>,
+    #[serde(default)]
+    pub client_keys: Vec<ClientKeyFacet>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ClientKeyFacet {
+    pub key_id: i64,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_login_name: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub(crate) struct UsageFacet {
     pub facet: String,
     pub value: String,
+    pub key_id: Option<i64>,
+    pub label: Option<String>,
+    pub user_login_name: Option<String>,
 }

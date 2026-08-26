@@ -2379,3 +2379,523 @@ async fn abort_pending_helper_marks_records_aborted() -> anyhow::Result<()> {
     schema.cleanup().await?;
     Ok(())
 }
+
+async fn insert_request_record_with_client_key(
+    pool: &PgPool,
+    user_id: i64,
+    model: &str,
+    client_key_id: Option<i64>,
+    client_key_label: Option<&str>,
+) -> anyhow::Result<i64> {
+    db::record_request_record(
+        pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(
+                Some(user_id),
+                client_key_id,
+                client_key_label.map(|label| label.to_string()),
+                None,
+            )
+            .with_model(Some(model.to_string()))
+            .with_timing(Some(200), Some(true), Some(10), Some(1))
+            .with_usage(Some(1), Some(2), Some(3), Some(0), None, None),
+    )
+    .await
+}
+
+async fn create_test_client_key(
+    pool: &PgPool,
+    user_id: i64,
+    label: &str,
+) -> anyhow::Result<db::ClientKey> {
+    let (raw_secret, key_prefix, key_hash) = prompt_ferry::keys::generate_client_key();
+    db::create_client_key(pool, user_id, label, &key_prefix, &key_hash, &raw_secret).await
+}
+
+#[tokio::test]
+async fn request_records_can_be_filtered_by_client_key_id() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!(
+            "skipping request records client key filter test: {TEST_DATABASE_URL_ENV} is not set"
+        );
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-client-key-filter", true).await?;
+    let key_a = create_test_client_key(&schema.pool, admin.user_id, "primary-key").await?;
+    let key_b = create_test_client_key(&schema.pool, admin.user_id, "secondary-key").await?;
+    insert_request_record_with_client_key(
+        &schema.pool,
+        admin.user_id,
+        "gpt-key-a",
+        Some(key_a.key_id),
+        Some("primary-key"),
+    )
+    .await?;
+    insert_request_record_with_client_key(
+        &schema.pool,
+        admin.user_id,
+        "gpt-key-b",
+        Some(key_b.key_id),
+        Some("secondary-key"),
+    )
+    .await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let app = worker_admin::router(state.clone());
+
+    let response = app
+        .clone()
+        .oneshot(auth_request(
+            "GET",
+            format!(
+                "/api/v1/admin/request-records?rows=50&client_key_id={}",
+                key_a.key_id
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["total"].as_i64(), Some(1));
+    assert_eq!(value["records"][0]["client_key_label"], "primary-key");
+
+    let response = app
+        .clone()
+        .oneshot(auth_request(
+            "GET",
+            format!(
+                "/api/v1/admin/request-records?rows=50&client_key_id={}",
+                key_b.key_id
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["total"].as_i64(), Some(1));
+    assert_eq!(value["records"][0]["client_key_label"], "secondary-key");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn request_records_can_be_filtered_by_start_and_end_range() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping request records range filter test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-range-filter", true).await?;
+    let base = chrono::Utc::now() - chrono::Duration::hours(1);
+    let too_old = base - chrono::Duration::days(7);
+    let in_window = base + chrono::Duration::minutes(15);
+    let too_new = base + chrono::Duration::days(7);
+    sqlx::query("UPDATE request_records SET created_at = $2 WHERE event_id = $1")
+        .bind(insert_request_record(&schema.pool, admin.user_id, "gpt-too-old").await?)
+        .bind(too_old)
+        .execute(&schema.pool)
+        .await?;
+    let in_window_id = insert_request_record(&schema.pool, admin.user_id, "gpt-in-window").await?;
+    sqlx::query("UPDATE request_records SET created_at = $2 WHERE event_id = $1")
+        .bind(in_window_id)
+        .bind(in_window)
+        .execute(&schema.pool)
+        .await?;
+    sqlx::query("UPDATE request_records SET created_at = $2 WHERE event_id = $1")
+        .bind(insert_request_record(&schema.pool, admin.user_id, "gpt-too-new").await?)
+        .bind(too_new)
+        .execute(&schema.pool)
+        .await?;
+
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let app = worker_admin::router(state);
+
+    let start = (base - chrono::Duration::minutes(15)).to_rfc3339();
+    let end = (base + chrono::Duration::hours(2)).to_rfc3339();
+    let path = format!(
+        "/api/v1/admin/request-records?rows=50&start={}&end={}",
+        urlencoding(&start),
+        urlencoding(&end)
+    );
+    let response = app.oneshot(auth_request("GET", path)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        value["total"].as_i64(),
+        Some(1),
+        "only the in-window record should be returned for start/end bounds"
+    );
+    assert_eq!(value["records"][0]["model"], "gpt-in-window");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn request_records_legacy_date_filter_still_works() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping request records legacy date test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-legacy-date", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let today = chrono::Utc::now().date_naive();
+    let last_year = chrono::Datelike::year(&today);
+    let _today_record = insert_request_record(&schema.pool, admin.user_id, "gpt-today").await?;
+    let old_record = insert_request_record(&schema.pool, admin.user_id, "gpt-old").await?;
+    sqlx::query("UPDATE request_records SET created_at = $2 WHERE event_id = $1")
+        .bind(old_record)
+        .bind(
+            chrono::NaiveDate::from_ymd_opt(last_year - 1, 1, 1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc(),
+        )
+        .execute(&schema.pool)
+        .await?;
+
+    let app = worker_admin::router(state);
+
+    let path = format!(
+        "/api/v1/admin/request-records?rows=50&date={}",
+        today.format("%Y-%m-%d")
+    );
+    let response = app
+        .clone()
+        .oneshot(auth_request("GET", path))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["total"].as_i64(), Some(1));
+    assert_eq!(value["records"][0]["model"], "gpt-today");
+
+    // Historical date well outside the Last24h preset window must still
+    // return that day's records; this guards against any implicit trailing
+    // 24h narrowing creeping back into date-only queries.
+    let historical = chrono::NaiveDate::from_ymd_opt(last_year - 1, 6, 15).unwrap();
+    let historical_record_id =
+        insert_request_record(&schema.pool, admin.user_id, "gpt-historical").await?;
+    sqlx::query("UPDATE request_records SET created_at = $2 WHERE event_id = $1")
+        .bind(historical_record_id)
+        .bind(historical.and_hms_opt(12, 0, 0).unwrap().and_utc())
+        .execute(&schema.pool)
+        .await?;
+
+    let path = format!(
+        "/api/v1/admin/request-records?rows=50&date={}",
+        historical.format("%Y-%m-%d")
+    );
+    let response = app.oneshot(auth_request("GET", path)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["total"].as_i64(), Some(1));
+    assert_eq!(value["records"][0]["model"], "gpt-historical");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn request_records_rejects_invalid_range_bounds() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!(
+            "skipping request records range validation test: {TEST_DATABASE_URL_ENV} is not set"
+        );
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-bad-range", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let app = worker_admin::router(state);
+
+    let start = "2026-05-21T00:00:00+00:00";
+    let end = "2026-05-20T00:00:00+00:00";
+    let path = format!(
+        "/api/v1/admin/request-records?start={}&end={}",
+        urlencoding(start),
+        urlencoding(end)
+    );
+    let response = app.oneshot(auth_request("GET", path)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["error"]["code"], "bad_request");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn request_records_rejects_empty_intersection_with_legacy_date() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!(
+            "skipping request records range validation test: {TEST_DATABASE_URL_ENV} is not set"
+        );
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-empty-intersect", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let app = worker_admin::router(state);
+
+    let path = format!(
+        "/api/v1/admin/request-records?date={}&start={}&end={}",
+        "2026-05-21",
+        urlencoding("2026-05-22T00:00:00+00:00"),
+        urlencoding("2026-05-23T00:00:00+00:00")
+    );
+    let response = app.oneshot(auth_request("GET", path)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["error"]["code"], "bad_request");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn request_records_preset_range_filters_recent_records() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping request records preset range test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-preset-range", true).await?;
+    let now = chrono::Utc::now();
+    let recent = insert_request_record(&schema.pool, admin.user_id, "gpt-recent").await?;
+    sqlx::query("UPDATE request_records SET created_at = $2 WHERE event_id = $1")
+        .bind(recent)
+        .bind(now - chrono::Duration::minutes(15))
+        .execute(&schema.pool)
+        .await?;
+    let too_old = insert_request_record(&schema.pool, admin.user_id, "gpt-old").await?;
+    sqlx::query("UPDATE request_records SET created_at = $2 WHERE event_id = $1")
+        .bind(too_old)
+        .bind(now - chrono::Duration::days(10))
+        .execute(&schema.pool)
+        .await?;
+
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let app = worker_admin::router(state.clone());
+
+    let response = app
+        .clone()
+        .oneshot(auth_request(
+            "GET",
+            "/api/v1/admin/request-records?rows=50&range=24h".to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        value["total"].as_i64(),
+        Some(1),
+        "preset 24h window must include only the recent record"
+    );
+    assert_eq!(value["records"][0]["model"], "gpt-recent");
+
+    let response = app
+        .oneshot(auth_request(
+            "GET",
+            "/api/v1/admin/request-records?rows=50&range=7d".to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        value["total"].as_i64(),
+        Some(1),
+        "preset 7d window still excludes a record older than 7 days"
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn request_records_rejects_custom_preset_without_bounds() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!(
+            "skipping request records custom-without-bounds test: {TEST_DATABASE_URL_ENV} is not set"
+        );
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-custom-preset", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let app = worker_admin::router(state);
+
+    let response = app
+        .oneshot(auth_request(
+            "GET",
+            "/api/v1/admin/request-records?range=custom".to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["error"]["code"], "bad_request");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn request_record_facets_include_client_key_id_and_label() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!(
+            "skipping request records client key facet test: {TEST_DATABASE_URL_ENV} is not set"
+        );
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-client-key-facet", true).await?;
+    let key = create_test_client_key(&schema.pool, admin.user_id, "facet-primary").await?;
+    insert_request_record_with_client_key(
+        &schema.pool,
+        admin.user_id,
+        "gpt-facet",
+        Some(key.key_id),
+        Some("facet-primary"),
+    )
+    .await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let app = worker_admin::router(state);
+    let response = app
+        .oneshot(auth_request(
+            "GET",
+            "/api/v1/admin/request-records/facets".to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    let client_keys = value["client_keys"]
+        .as_array()
+        .expect("client_keys facet must be present");
+    assert_eq!(client_keys.len(), 1);
+    assert_eq!(client_keys[0]["key_id"], key.key_id);
+    assert_eq!(client_keys[0]["label"], "facet-primary");
+    assert_eq!(
+        client_keys[0]["user_login_name"], "admin-client-key-facet",
+        "admin facets should expose the safe user login metadata for disambiguation"
+    );
+    let body_text = std::str::from_utf8(&body).expect("utf-8 body");
+    assert!(
+        !body_text.contains(&key.key_prefix),
+        "facet payload must never include the client key prefix"
+    );
+    assert!(
+        !body_text.contains("pfy_"),
+        "facet payload must never include the client key secret prefix"
+    );
+    assert!(
+        !body_text.contains("\"api_key\""),
+        "facet payload must never include an api_key field"
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn request_record_facets_omit_user_login_for_non_admin() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!(
+            "skipping request records client key facet non-admin test: {TEST_DATABASE_URL_ENV} is not set"
+        );
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-facet-non-admin", true).await?;
+    let user = create_user(&schema.pool, "user-facet-non-admin", false).await?;
+    let key = create_test_client_key(&schema.pool, user.user_id, "non-admin-key").await?;
+    insert_request_record_with_client_key(
+        &schema.pool,
+        user.user_id,
+        "gpt-non-admin",
+        Some(key.key_id),
+        Some("non-admin-key"),
+    )
+    .await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    state
+        .replay_cache
+        .write_session(
+            "non-admin-facet",
+            &SessionUser {
+                user_id: user.user_id,
+                login_name: user.login_name.clone(),
+                display_name: user.display_name.clone(),
+                is_admin: false,
+            },
+        )
+        .await
+        .unwrap();
+
+    let app = worker_admin::router(state);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/admin/request-records/facets")
+                .header(header::COOKIE, "prompt_ferry_session=non-admin-facet")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    let client_keys = value["client_keys"]
+        .as_array()
+        .expect("client_keys facet must be present");
+    assert_eq!(client_keys.len(), 1);
+    assert_eq!(client_keys[0]["key_id"], key.key_id);
+    assert_eq!(client_keys[0]["label"], "non-admin-key");
+    assert!(
+        client_keys[0].get("user_login_name").is_none()
+            || client_keys[0]["user_login_name"].is_null(),
+        "non-admin facets must not leak user_login_name metadata"
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+fn urlencoding(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                encoded.push('%');
+                encoded.push_str(&format!("{byte:02X}"));
+            }
+        }
+    }
+    encoded
+}

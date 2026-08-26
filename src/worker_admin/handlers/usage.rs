@@ -1,7 +1,8 @@
 use super::usage_support::{
     build_request_record_query, build_usage_clear_query, build_usage_request_full_response,
-    get_visible_usage_event_detail_or_not_found, parse_overview_window, parse_usage_date_range,
-    parse_usage_series_bucket, parse_usage_summary_days,
+    combine_record_date_range, get_visible_usage_event_detail_or_not_found, parse_overview_window,
+    parse_usage_date_range, parse_usage_series_bucket, parse_usage_summary_days,
+    resolve_record_range_bounds,
 };
 use super::*;
 
@@ -124,12 +125,29 @@ pub(super) async fn usage_events(
         Ok(user) => user,
         Err(response) => return response,
     };
-    let (date_start, date_end) = match query.date.as_deref() {
+    let legacy_date_range = match query.date.as_deref() {
         Some(value) if !value.is_empty() => match parse_usage_date_range(value) {
             Ok(range) => range,
             Err(response) => return *response,
         },
         _ => (None, None),
+    };
+    let preset_range_bounds = match resolve_record_range_bounds(
+        query.range,
+        query.start,
+        query.end,
+        chrono::Utc::now(),
+    ) {
+        Ok(range) => range,
+        Err(response) => return *response,
+    };
+    let (date_start, date_end) = match combine_record_date_range(
+        legacy_date_range,
+        preset_range_bounds.0,
+        preset_range_bounds.1,
+    ) {
+        Ok(range) => range,
+        Err(response) => return *response,
     };
     let request_query = build_request_record_query(&user, query, date_start, date_end);
     match db::list_request_records(&state.pool, request_query).await {
@@ -153,6 +171,7 @@ pub(super) async fn usage_facets(
         query
             .request_category
             .unwrap_or(db::RequestRecordCategory::Ai),
+        user.is_admin,
     )
     .await
     {

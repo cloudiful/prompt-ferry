@@ -193,6 +193,12 @@ export type ClientKey = {
     user_id: number;
 };
 
+export type ClientKeyFacet = {
+    key_id: number;
+    label: string;
+    user_login_name?: string | null;
+};
+
 export type ClientKeyPageResponse = {
     first: number;
     keys: Array<ClientKey>;
@@ -949,6 +955,7 @@ export type RequestRecordDetail = {
 };
 
 export type RequestRecordFacets = {
+    client_keys?: Array<ClientKeyFacet>;
     dates: Array<string>;
     models: Array<string>;
     users: Array<string>;
@@ -2335,12 +2342,16 @@ export type ListRequestRecordsData = {
     path?: never;
     query?: {
         request_category?: RequestRecordCategory;
+        range?: RequestRecordOverviewRange;
         first?: number;
         rows?: number;
         sort_field?: string;
         sort_order?: number;
         search?: string;
         date?: string;
+        start?: string;
+        end?: string;
+        client_key_id?: number;
         user?: string;
         model?: string;
         endpoint_id?: string;

@@ -13,6 +13,7 @@ pub struct RequestRecordQuery {
     pub search: Option<String>,
     pub date_start: Option<DateTime<Utc>>,
     pub date_end: Option<DateTime<Utc>>,
+    pub client_key_id: Option<i64>,
     pub user: Option<String>,
     pub model: Option<String>,
     pub endpoint_id: Option<Uuid>,

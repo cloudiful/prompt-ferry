@@ -1224,6 +1224,11 @@ paths:
         required: false
         schema:
           $ref: '#/components/schemas/RequestRecordCategory'
+      - name: range
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/RequestRecordOverviewRange'
       - name: first
         in: query
         required: false
@@ -1257,6 +1262,24 @@ paths:
         required: false
         schema:
           type: string
+      - name: start
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: end
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: client_key_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
       - name: user
         in: query
         required: false
@@ -2973,6 +2996,21 @@ components:
         user_id:
           type: integer
           format: int64
+    ClientKeyFacet:
+      type: object
+      required:
+      - key_id
+      - label
+      properties:
+        key_id:
+          type: integer
+          format: int64
+        label:
+          type: string
+        user_login_name:
+          type:
+          - string
+          - 'null'
     ClientKeyPageResponse:
       type: object
       required:
@@ -5297,6 +5335,10 @@ components:
       - models
       - dates
       properties:
+        client_keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClientKeyFacet'
         dates:
           type: array
           items:

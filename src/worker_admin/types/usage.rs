@@ -38,12 +38,16 @@ pub struct RequestRecordOverviewQuery {
 #[into_params(parameter_in = Query)]
 pub struct RequestRecordsQuery {
     pub request_category: Option<db::RequestRecordCategory>,
+    pub range: Option<RequestRecordOverviewRange>,
     pub first: Option<i64>,
     pub rows: Option<i64>,
     pub sort_field: Option<String>,
     pub sort_order: Option<i64>,
     pub search: Option<String>,
     pub date: Option<String>,
+    pub start: Option<chrono::DateTime<chrono::Utc>>,
+    pub end: Option<chrono::DateTime<chrono::Utc>>,
+    pub client_key_id: Option<i64>,
     pub user: Option<String>,
     pub model: Option<String>,
     pub endpoint_id: Option<Uuid>,

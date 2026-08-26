@@ -33,6 +33,87 @@ pub(in crate::worker_admin::handlers) fn parse_usage_date_range(
     Ok((Some(start_naive.and_utc()), Some(end_naive.and_utc())))
 }
 
+/// Combine the legacy `date` day-range with optional `start`/`end` bounds.
+///
+/// Returns the intersection so a malformed `start`/`end` cannot silently
+/// widen the query: missing or empty inputs are ignored, mismatched bounds
+/// are rejected, and any effective `start >= end` (including empty
+/// intersections between a legacy date and an earlier explicit end) is
+/// surfaced as a bad-request error.
+pub(in crate::worker_admin::handlers) fn combine_record_date_range(
+    date_range: UsageDateRange,
+    start: Option<chrono::DateTime<chrono::Utc>>,
+    end: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<UsageDateRange, Box<Response>> {
+    let (legacy_start, legacy_end) = date_range;
+    if start.is_some() && end.is_some() && start >= end {
+        return Err(Box::new(bad_request("start must be earlier than end")));
+    }
+    let effective_start = match (legacy_start, start) {
+        (Some(legacy), Some(bound)) => Some(legacy.max(bound)),
+        (legacy, bound) => legacy.or(bound),
+    };
+    let effective_end = match (legacy_end, end) {
+        (Some(legacy), Some(bound)) => Some(legacy.min(bound)),
+        (legacy, bound) => legacy.or(bound),
+    };
+    if let (Some(s), Some(e)) = (effective_start, effective_end) {
+        if s >= e {
+            return Err(Box::new(bad_request("range produces an empty window")));
+        }
+    }
+    Ok((effective_start, effective_end))
+}
+
+/// Resolve the effective time bounds for the records list endpoint.
+///
+/// Explicit `start`/`end` always win over the preset `range`. When `range`
+/// is supplied without bounds, the helper applies the existing overview
+/// preset semantics so the records list and overview see the same window
+/// for the same picker selection. When no picker input is present at all,
+/// the helper returns `(None, None)` so legacy `date` (or the historical
+/// unbounded default) remains the sole time filter. `Custom` without
+/// explicit bounds is rejected.
+pub(in crate::worker_admin::handlers) fn resolve_record_range_bounds(
+    range: Option<RequestRecordOverviewRange>,
+    start: Option<chrono::DateTime<chrono::Utc>>,
+    end: Option<chrono::DateTime<chrono::Utc>>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<UsageDateRange, Box<Response>> {
+    if start.is_some() || end.is_some() {
+        if let (Some(s), Some(e)) = (start, end) {
+            if s >= e {
+                return Err(Box::new(bad_request("start must be earlier than end")));
+            }
+            return Ok((Some(s), Some(e)));
+        }
+        return Ok((start, end));
+    }
+    let Some(range) = range else {
+        return Ok((None, None));
+    };
+    let bounds = match range {
+        RequestRecordOverviewRange::Last24h => (Some(now - chrono::Duration::hours(24)), Some(now)),
+        RequestRecordOverviewRange::Last7d => (Some(now - chrono::Duration::days(7)), Some(now)),
+        RequestRecordOverviewRange::Last30d => (Some(now - chrono::Duration::days(30)), Some(now)),
+        RequestRecordOverviewRange::CurrentMonth => {
+            let month_start = now
+                .date_naive()
+                .with_day(1)
+                .and_then(|date| date.and_hms_opt(0, 0, 0))
+                .map(|date| date.and_utc())
+                .expect("a calendar date always has a valid midnight");
+            (Some(month_start), Some(now))
+        }
+        RequestRecordOverviewRange::Custom => {
+            return Err(Box::new(bad_request(
+                "custom range requires start and end query parameters",
+            )));
+        }
+    };
+    Ok(bounds)
+}
+
 pub(in crate::worker_admin::handlers) fn parse_overview_window(
     range: Option<RequestRecordOverviewRange>,
     start: Option<chrono::DateTime<chrono::Utc>>,
@@ -128,6 +209,7 @@ pub(in crate::worker_admin::handlers) fn build_request_record_query(
         search: query.search,
         date_start,
         date_end,
+        client_key_id: query.client_key_id,
         user: query.user,
         model: query.model,
         endpoint_id: query.endpoint_id,
@@ -214,13 +296,14 @@ pub(in crate::worker_admin::handlers) fn build_usage_clear_query(
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
-    use chrono::Datelike;
+    use chrono::{Datelike, Timelike};
 
     use super::{
-        parse_overview_window, parse_usage_date_range, parse_usage_series_bucket,
-        parse_usage_summary_days,
+        combine_record_date_range, parse_overview_window, parse_usage_date_range,
+        parse_usage_series_bucket, parse_usage_summary_days, resolve_record_range_bounds,
     };
     use crate::worker_admin::types::RequestRecordOverviewRange;
+    use crate::worker_admin_types::SessionUser;
 
     #[test]
     fn parses_usage_date_into_utc_day_range() {
@@ -270,6 +353,258 @@ mod tests {
     #[test]
     fn rejects_invalid_usage_series_bucket() {
         let error = parse_usage_series_bucket(Some("week".to_string())).unwrap_err();
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn combine_record_date_range_passes_through_legacy_only() {
+        let (start, end) = parse_usage_date_range("2026-05-21").expect("date range");
+        let (effective_start, effective_end) =
+            combine_record_date_range((start, end), None, None).expect("combine");
+        assert_eq!(effective_start, start);
+        assert_eq!(effective_end, end);
+    }
+
+    #[test]
+    fn combine_record_date_range_intersects_legacy_and_explicit_range() {
+        let (legacy_start, legacy_end) =
+            parse_usage_date_range("2026-05-21").expect("legacy date range");
+        let start = chrono::DateTime::parse_from_rfc3339("2026-05-21T06:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let end = chrono::DateTime::parse_from_rfc3339("2026-05-21T18:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (effective_start, effective_end) =
+            combine_record_date_range((legacy_start, legacy_end), Some(start), Some(end))
+                .expect("combine");
+        assert_eq!(effective_start, Some(start));
+        assert_eq!(effective_end, Some(end));
+    }
+
+    #[test]
+    fn combine_record_date_range_narrows_to_intersection() {
+        let (legacy_start, legacy_end) =
+            parse_usage_date_range("2026-05-21").expect("legacy date range");
+        let later_start = chrono::DateTime::parse_from_rfc3339("2026-05-21T12:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (effective_start, effective_end) =
+            combine_record_date_range((legacy_start, legacy_end), Some(later_start), None)
+                .expect("combine");
+        assert_eq!(effective_start, Some(later_start));
+        assert_eq!(effective_end, legacy_end);
+    }
+
+    #[test]
+    fn combine_record_date_range_rejects_end_before_start() {
+        let start = chrono::DateTime::parse_from_rfc3339("2026-05-21T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let end = chrono::DateTime::parse_from_rfc3339("2026-05-20T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let error = combine_record_date_range((None, None), Some(start), Some(end))
+            .expect_err("invalid bounds");
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn combine_record_date_range_rejects_empty_intersection() {
+        let (legacy_start, legacy_end) =
+            parse_usage_date_range("2026-05-21").expect("legacy date range");
+        let later_start = chrono::DateTime::parse_from_rfc3339("2026-05-22T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let later_end = chrono::DateTime::parse_from_rfc3339("2026-05-23T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let error = combine_record_date_range(
+            (legacy_start, legacy_end),
+            Some(later_start),
+            Some(later_end),
+        )
+        .expect_err("empty intersection");
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn combine_record_date_range_without_legacy_uses_bounds_only() {
+        let start = chrono::DateTime::parse_from_rfc3339("2026-05-21T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let end = chrono::DateTime::parse_from_rfc3339("2026-05-22T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (effective_start, effective_end) =
+            combine_record_date_range((None, None), Some(start), Some(end)).expect("combine");
+        assert_eq!(effective_start, Some(start));
+        assert_eq!(effective_end, Some(end));
+    }
+
+    #[test]
+    fn build_request_record_query_propagates_client_key_id_and_range() {
+        use super::build_request_record_query;
+        use crate::worker_admin::types::UsageEventsQuery;
+        use chrono::{DateTime, Utc};
+
+        let user = SessionUser {
+            user_id: 42,
+            login_name: "owner".to_string(),
+            display_name: "owner".to_string(),
+            is_admin: false,
+        };
+        let start: DateTime<Utc> = DateTime::parse_from_rfc3339("2026-05-21T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let end: DateTime<Utc> = DateTime::parse_from_rfc3339("2026-05-22T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let query = UsageEventsQuery {
+            request_category: None,
+            range: Some(RequestRecordOverviewRange::Custom),
+            first: Some(0),
+            rows: Some(25),
+            sort_field: Some("created_at".to_string()),
+            sort_order: Some(-1),
+            search: Some("needle".to_string()),
+            date: Some("2026-05-21".to_string()),
+            start: Some(start),
+            end: Some(end),
+            client_key_id: Some(7),
+            user: Some("owner".to_string()),
+            model: Some("gpt".to_string()),
+            endpoint_id: None,
+            mcp_server_id: None,
+            mcp_bearer_token_slot: None,
+            request_state: None,
+            redaction_applied: None,
+        };
+        let request_query = build_request_record_query(&user, query, Some(start), Some(end));
+        assert_eq!(request_query.visible_user_id, Some(42));
+        assert_eq!(request_query.client_key_id, Some(7));
+        assert_eq!(request_query.date_start, Some(start));
+        assert_eq!(request_query.date_end, Some(end));
+        assert_eq!(request_query.rows, 25);
+        assert_eq!(request_query.first, 0);
+        assert_eq!(request_query.search.as_deref(), Some("needle"));
+        assert_eq!(request_query.user.as_deref(), Some("owner"));
+        assert_eq!(request_query.model.as_deref(), Some("gpt"));
+    }
+
+    #[test]
+    fn resolve_record_range_bounds_returns_unbounded_when_unset() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-05-21T12:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (start, end) = resolve_record_range_bounds(None, None, None, now).expect("bounds");
+        assert!(
+            start.is_none() && end.is_none(),
+            "no picker input must not introduce an implicit Last24h window"
+        );
+    }
+
+    #[test]
+    fn combine_record_date_range_rejects_empty_intersection_from_legacy_date_and_earlier_end() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-05-21T12:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (legacy_start, legacy_end) =
+            parse_usage_date_range("2026-05-21").expect("legacy date range");
+        let earlier_end = now - chrono::Duration::days(3);
+        let error = combine_record_date_range((legacy_start, legacy_end), None, Some(earlier_end))
+            .expect_err("empty intersection must error");
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn resolve_record_range_bounds_applies_preset_windows() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-05-21T12:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        for (range, expected_span) in [
+            (
+                RequestRecordOverviewRange::Last7d,
+                chrono::Duration::days(7),
+            ),
+            (
+                RequestRecordOverviewRange::Last30d,
+                chrono::Duration::days(30),
+            ),
+        ] {
+            let (start, end) =
+                resolve_record_range_bounds(Some(range), None, None, now).expect("bounds");
+            let start = start.unwrap();
+            let end = end.unwrap();
+            assert_eq!(end, now);
+            assert_eq!(now - start, expected_span);
+        }
+        let (start, end) = resolve_record_range_bounds(
+            Some(RequestRecordOverviewRange::CurrentMonth),
+            None,
+            None,
+            now,
+        )
+        .expect("bounds");
+        let start = start.unwrap();
+        assert_eq!(start.day(), 1);
+        assert_eq!(start.hour(), 0);
+        assert_eq!(start.minute(), 0);
+        assert_eq!(start.second(), 0);
+        assert_eq!(end.unwrap(), now);
+    }
+
+    #[test]
+    fn resolve_record_range_bounds_prefers_explicit_over_preset() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-05-21T12:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let custom_start = chrono::DateTime::parse_from_rfc3339("2026-05-21T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let custom_end = chrono::DateTime::parse_from_rfc3339("2026-05-21T18:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (start, end) = resolve_record_range_bounds(
+            Some(RequestRecordOverviewRange::Last24h),
+            Some(custom_start),
+            Some(custom_end),
+            now,
+        )
+        .expect("bounds");
+        assert_eq!(start, Some(custom_start));
+        assert_eq!(end, Some(custom_end));
+    }
+
+    #[test]
+    fn resolve_record_range_bounds_rejects_end_before_start() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-05-21T12:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let bad_start = chrono::DateTime::parse_from_rfc3339("2026-05-21T18:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let bad_end = chrono::DateTime::parse_from_rfc3339("2026-05-21T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let error = resolve_record_range_bounds(
+            Some(RequestRecordOverviewRange::Custom),
+            Some(bad_start),
+            Some(bad_end),
+            now,
+        )
+        .expect_err("invalid bounds");
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn resolve_record_range_bounds_rejects_custom_without_bounds() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-05-21T12:00:00+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let error =
+            resolve_record_range_bounds(Some(RequestRecordOverviewRange::Custom), None, None, now)
+                .expect_err("custom needs bounds");
         assert_eq!(error.status(), StatusCode::BAD_REQUEST);
     }
 }

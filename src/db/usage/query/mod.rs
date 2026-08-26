@@ -1,7 +1,7 @@
 use super::*;
 use crate::db::{
-    RequestAbortReason, RequestFailureFamily, RequestRecordCategory, RequestRecordRedactionSummary,
-    RequestRecordState, RouteSelectionReason,
+    ClientKeyFacet, RequestAbortReason, RequestFailureFamily, RequestRecordCategory,
+    RequestRecordRedactionSummary, RequestRecordState, RouteSelectionReason,
 };
 
 mod sort;
@@ -162,6 +162,7 @@ pub async fn list_request_records(
         query.mcp_bearer_token_slot,
         query.request_state.map(RequestRecordState::as_str),
         query.redaction_applied,
+        query.client_key_id,
     )
     .fetch_one(pool)
     .await?;
@@ -178,6 +179,7 @@ pub async fn list_request_records(
         .bind(query.mcp_bearer_token_slot)
         .bind(query.request_state.map(RequestRecordState::as_str))
         .bind(query.redaction_applied)
+        .bind(query.client_key_id)
         .bind(rows)
         .bind(first)
         .fetch_all(pool)
@@ -197,6 +199,7 @@ pub async fn list_request_record_facets(
     pool: &PgPool,
     visible_user_id: Option<i64>,
     request_category: RequestRecordCategory,
+    is_admin: bool,
 ) -> Result<RequestRecordFacets> {
     let facets = sqlx::query_file_as!(
         crate::db::types::UsageFacet,
@@ -213,6 +216,20 @@ pub async fn list_request_record_facets(
             "model" => values.models.push(facet.value),
             "target" => values.models.push(facet.value),
             "date" => values.dates.push(facet.value),
+            "client_key" => {
+                let Some(key_id) = facet.key_id else {
+                    continue;
+                };
+                values.client_keys.push(ClientKeyFacet {
+                    key_id,
+                    label: facet.label.unwrap_or(facet.value),
+                    user_login_name: if is_admin {
+                        facet.user_login_name
+                    } else {
+                        None
+                    },
+                });
+            }
             _ => {}
         }
     }
