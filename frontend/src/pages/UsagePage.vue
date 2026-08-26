@@ -4,7 +4,6 @@ import { useRoute } from 'vue-router'
 import UsageCategoryPanel from '@/components/usage/UsageCategoryPanel.vue'
 import PageIntro from '../components/PageIntro.vue'
 import RequestOverviewModeSwitch from '../components/RequestOverviewModeSwitch.vue'
-import UsageRangePicker from '../components/usage/UsageRangePicker.vue'
 import { useUsagePage } from '../composables/useUsagePage'
 import { useRequestRecordsStore } from '../stores/usage'
 
@@ -23,7 +22,7 @@ if (usageStore.requestCategory !== activeSection.value) {
 const {
   UsageClearDialog,
   activeMode,
-  applyOverviewRange,
+  applyRange,
   clearDialogVisible,
   clearForm,
   clearConversationOverride,
@@ -58,13 +57,6 @@ watch(activeSection, (next) => {
   <div class="grid min-w-0 max-w-full gap-3">
     <PageIntro>
       <template #actions>
-        <UsageRangePicker
-          :end="requestRecordsStore.end"
-          :start="requestRecordsStore.start"
-          :t="t"
-          :value="requestRecordsStore.range"
-          @apply="applyOverviewRange"
-        />
         <RequestOverviewModeSwitch
           :active-mode="activeMode"
           @change="setActiveMode"
@@ -87,10 +79,13 @@ watch(activeSection, (next) => {
       v-model:detail-visible="detailVisible"
       :active-mode="activeMode"
       :category="activeSection"
+      :end="requestRecordsStore.end"
       :formatting="formatting"
       :is-admin="session.isAdmin"
       :overview="requestRecordsStore.overview"
       :overview-loading="requestRecordsStore.overviewLoading"
+      :range="requestRecordsStore.range"
+      :start="requestRecordsStore.start"
       :t="t"
       :workspace="requestRecordsStore.usageWorkspaceView"
       @clear-conversation-override="clearConversationOverride"
@@ -100,6 +95,7 @@ watch(activeSection, (next) => {
       @open-clear-dialog="clearDialogVisible = true"
       @open-detail="openDetail"
       @page="onPage"
+      @range="applyRange"
       @reset-session-affinity="resetSessionAffinity"
       @save-conversation-override="saveConversationOverride"
       @search="refreshRecords"

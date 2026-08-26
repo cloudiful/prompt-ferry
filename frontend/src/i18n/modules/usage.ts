@@ -1,7 +1,7 @@
 export const usageMessages = {
   'zh-CN': {
     currentSlice: '当前视图',
-    allDates: '全部日期',
+    allClientKeys: '全部请求 Key',
     allModels: '全部模型',
     allRedactionStates: '全部脱敏状态',
     allStatus: '全部状态',
@@ -216,7 +216,7 @@ export const usageMessages = {
   },
   'en-US': {
     currentSlice: 'Current slice',
-    allDates: 'All dates',
+    allClientKeys: 'All request keys',
     allModels: 'All models',
     allRedactionStates: 'All redaction states',
     allStatus: 'All status',

@@ -1,18 +1,18 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends string | boolean | number">
 import type { Option } from '@/models'
 
 defineProps<{
-  modelValue: string | boolean | null
-  options: Array<Option<string | boolean>>
+  modelValue: T | null
+  options: Array<Option<T>>
   placeholder: string
 }>()
 
 const emit = defineEmits<{
   change: []
-  'update:modelValue': [value: string | boolean | null]
+  'update:modelValue': [value: T | null]
 }>()
 
-function handleUpdate(value: string | boolean | null): void {
+function handleUpdate(value: T | null): void {
   emit('update:modelValue', value)
   emit('change')
 }

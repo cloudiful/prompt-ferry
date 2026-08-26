@@ -2,6 +2,7 @@
 import type { TableColumn } from '@nuxt/ui'
 import type { SortingState } from '@tanstack/vue-table'
 import { computed } from 'vue'
+import type { RequestRecordOverviewRange } from '@/generated/admin-api'
 import type { RequestRecordFilterModel, RequestRecordRowView } from '@/models'
 import type { RequestRecordFormatting } from '@/models/request-record-formatting'
 import type { UsageWorkspaceView } from '@/models/usage'
@@ -11,8 +12,11 @@ import UsageRecordsToolbar from '@/components/usage/UsageRecordsToolbar.vue'
 import McpUsageDetailDialog from './McpUsageDetailDialog.vue'
 
 const props = defineProps<{
+  end: string
   formatting: RequestRecordFormatting
   isAdmin: boolean
+  range: RequestRecordOverviewRange
+  start: string
   t: TranslateFn
   workspace: UsageWorkspaceView
 }>()
@@ -26,6 +30,9 @@ const emit = defineEmits<{
   openClearDialog: []
   openDetail: [record: RequestRecordRowView]
   page: [event: TablePageChange]
+  range: [
+    input: { range: RequestRecordOverviewRange; start?: string; end?: string },
+  ]
   search: []
   sort: [event: TableSortChange]
 }>()
@@ -97,11 +104,15 @@ const sorting = computed<SortingState>({
     <UsageRecordsToolbar
       v-model:filters="filters"
       category="mcp"
+      :end="end"
       :facets="workspace.facets"
       :is-admin="isAdmin"
+      :range="range"
+      :start="start"
       :t="t"
       @filter="$emit('filter', {})"
       @open-clear-dialog="$emit('openClearDialog')"
+      @range="$emit('range', $event)"
       @search="$emit('search')"
     >
       <template #headerActions><slot name="headerActions" /></template>

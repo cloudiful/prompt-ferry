@@ -51,7 +51,7 @@ export function useUsagePage() {
     }
   }
 
-  async function applyOverviewRange(input: {
+  async function applyRange(input: {
     range: RequestRecordOverviewRange
     start?: string
     end?: string
@@ -60,7 +60,10 @@ export function useUsagePage() {
     requestRecordsStore.start = input.start ?? ''
     requestRecordsStore.end = input.end ?? ''
     try {
-      await requestRecordsStore.refreshOverview()
+      await Promise.all([
+        requestRecordsStore.refreshOverview(),
+        requestRecordsStore.refreshRecords(),
+      ])
     } catch (cause) {
       notifyApiError(cause)
     }
@@ -186,7 +189,7 @@ export function useUsagePage() {
   return {
     UsageClearDialog,
     activeMode,
-    applyOverviewRange,
+    applyRange,
     clearDialogVisible,
     clearForm,
     clearConversationOverride,

@@ -152,9 +152,12 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
         filters: queryState.filters.value,
         first: queryState.first.value,
         rows: queryState.rowsPerPage.value,
+        range: queryState.range.value,
         requestCategory: queryState.requestCategory.value,
         sortField: queryState.sortField.value,
         sortOrder: queryState.sortOrder.value,
+        start: queryState.start.value,
+        end: queryState.end.value,
       })
       recordState.rows.value = page.rows
       queryState.total.value = page.total

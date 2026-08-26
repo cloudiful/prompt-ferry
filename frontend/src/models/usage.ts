@@ -1,4 +1,5 @@
 import type {
+  ClientKeyFacet,
   RequestRecordFacets,
   RequestRecordFullResponse,
   RequestRecordState,
@@ -12,9 +13,9 @@ import type {
 } from '../models'
 
 export type UsageFacetOptionsView = {
-  request_date_options: Option[]
   request_user_options: Option[]
   request_model_options: Option[]
+  request_client_key_options: Option<number>[]
   request_state_options: Option<RequestRecordState>[]
   request_redaction_options: Option<boolean>[]
 }
@@ -84,10 +85,6 @@ export function createUsageFacetOptionsView(
   requestStateOptions: Option<RequestRecordState>[],
 ): UsageFacetOptionsView {
   return {
-    request_date_options: facets.dates.map((value) => ({
-      label: value,
-      value,
-    })),
     request_user_options: facets.users.map((value) => ({
       label: value,
       value,
@@ -96,12 +93,26 @@ export function createUsageFacetOptionsView(
       label: value,
       value,
     })),
+    request_client_key_options: createUsageClientKeyOptions(
+      facets.client_keys ?? [],
+    ),
     request_state_options: requestStateOptions,
     request_redaction_options: [
       { label: 'Yes', value: true },
       { label: 'No', value: false },
     ],
   }
+}
+
+function createUsageClientKeyOptions(
+  facets: ClientKeyFacet[],
+): Option<number>[] {
+  return facets.map((facet) => ({
+    label: facet.user_login_name
+      ? `${facet.label} (${facet.user_login_name})`
+      : facet.label,
+    value: facet.key_id,
+  }))
 }
 
 export function createUsageWorkspaceView(options: {

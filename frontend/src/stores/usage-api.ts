@@ -39,9 +39,12 @@ export async function fetchUsageRecords(input: {
   filters: RequestRecordFilterModel
   first: number
   rows: number
+  range: RequestRecordOverviewRange
   requestCategory: RequestRecordCategory
   sortField: string
   sortOrder: -1 | 0 | 1
+  start: string
+  end: string
 }): Promise<{
   rows: RequestRecordRowView[]
   total: number

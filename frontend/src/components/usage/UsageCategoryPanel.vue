@@ -2,6 +2,7 @@
 import { defineAsyncComponent } from 'vue'
 import type {
   RequestRecordCategory,
+  RequestRecordOverviewRange,
   RequestRecordOverviewResponse,
 } from '@/generated/admin-api'
 import type { RequestRecordFilterModel, RequestRecordRowView } from '@/models'
@@ -16,10 +17,13 @@ import UsageCategoryWorkspace from './UsageCategoryWorkspace.vue'
 defineProps<{
   activeMode: RequestOverviewMode
   category: RequestRecordCategory
+  end: string
   formatting: RequestRecordFormatting
   isAdmin: boolean
   overview: RequestRecordOverviewResponse | null
   overviewLoading: boolean
+  range: RequestRecordOverviewRange
+  start: string
   t: TranslateFn
   workspace: UsageWorkspaceView
 }>()
@@ -42,6 +46,9 @@ defineEmits<{
   openClearDialog: []
   openDetail: [record: RequestRecordRowView]
   page: [event: TablePageChange]
+  range: [
+    input: { range: RequestRecordOverviewRange; start?: string; end?: string },
+  ]
   saveConversationOverride: [
     selection: {
       endpointId: string
@@ -73,9 +80,12 @@ const McpUsagePanel = defineAsyncComponent(
         v-if="category === 'ai'"
         v-model:filters="filtersModel"
         v-model:detail-visible="detailVisibleModel"
+        :end="end"
         :formatting="formatting"
         :workspace="workspace"
         :is-admin="isAdmin"
+        :range="range"
+        :start="start"
         :t="t"
         @clear-conversation-override="$emit('clearConversationOverride')"
         @filter="$emit('filter', $event)"
@@ -83,6 +93,7 @@ const McpUsagePanel = defineAsyncComponent(
         @open-clear-dialog="$emit('openClearDialog')"
         @open-detail="$emit('openDetail', $event)"
         @page="$emit('page', $event)"
+        @range="$emit('range', $event)"
         @reset-session-affinity="$emit('resetSessionAffinity')"
         @save-conversation-override="$emit('saveConversationOverride', $event)"
         @search="$emit('search')"
@@ -96,14 +107,18 @@ const McpUsagePanel = defineAsyncComponent(
         v-else
         v-model:filters="filtersModel"
         v-model:detail-visible="detailVisibleModel"
+        :end="end"
         :formatting="formatting"
         :workspace="workspace"
         :is-admin="isAdmin"
+        :range="range"
+        :start="start"
         :t="t"
         @filter="$emit('filter', $event)"
         @open-clear-dialog="$emit('openClearDialog')"
         @open-detail="$emit('openDetail', $event)"
         @page="$emit('page', $event)"
+        @range="$emit('range', $event)"
         @search="$emit('search')"
         @sort="$emit('sort', $event)"
       >

@@ -132,11 +132,11 @@ export type NavigationSection =
 
 export type RequestRecordFilterModel = {
   global: { value: string | null; matchMode: string }
-  request_date: { value: string | null; matchMode: string }
   user_key: { value: string | null; matchMode: string }
   model_key: { value: string | null; matchMode: string }
   request_state: { value: RequestRecordState | null; matchMode: string }
   redaction_applied: { value: boolean | null; matchMode: string }
+  client_key_id: { value: number | null; matchMode: string }
   endpoint_id?: { value: string | null; matchMode: string }
   mcp_server_id?: { value: string | null; matchMode: string }
   mcp_bearer_token_slot?: { value: number | null; matchMode: string }
