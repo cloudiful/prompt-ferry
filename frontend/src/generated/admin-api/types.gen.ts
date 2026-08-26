@@ -1060,6 +1060,13 @@ export type RequestRecordOverviewResponse = {
 };
 
 export type RequestRecordOverviewSummary = {
+    /**
+     * Average output tokens per second for completed AI requests with
+     * positive output tokens and positive duration. `None` when no such
+     * rows match (for example, when the overview filters to MCP requests,
+     * or when there are no completed AI requests in the window).
+     */
+    avg_output_tokens_per_second?: number | null;
     error_count: number;
     method_count: number;
     p95_first_token_ms?: number | null;

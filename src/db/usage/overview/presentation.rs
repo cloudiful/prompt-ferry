@@ -11,6 +11,7 @@ pub(super) fn summary_from_metrics(row: MetricsRow) -> RequestRecordOverviewSumm
         success_rate: ratio(row.success_count, row.request_count),
         p95_total_ms: row.p95_total_ms,
         p95_first_token_ms: row.p95_first_token_ms,
+        avg_output_tokens_per_second: row.avg_output_tokens_per_second,
         tokens: token_usage(
             row.input_tokens,
             row.cache_read_tokens,
@@ -97,7 +98,8 @@ pub(super) fn failure_family_label(key: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{overview_cache_rate, token_usage};
+    use super::{overview_cache_rate, summary_from_metrics, token_usage};
+    use crate::db::usage::overview::queries::MetricsRow;
 
     #[test]
     fn cache_rate_uses_normalized_input_and_stays_bounded() {
@@ -159,5 +161,54 @@ mod tests {
 
         let value = rate.expect("rate must be present");
         assert!((value - 0.25).abs() < 1e-9);
+    }
+
+    fn fixture_metrics_row(avg_output_tokens_per_second: Option<f64>) -> MetricsRow {
+        MetricsRow {
+            request_count: 4,
+            success_count: 3,
+            error_count: 1,
+            cache_hit_count: 1,
+            method_count: 0,
+            input_tokens: 100,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            output_tokens: 200,
+            total_tokens: 300,
+            avg_output_tokens_per_second,
+            p95_total_ms: Some(1_500.0),
+            p95_first_token_ms: Some(120.0),
+        }
+    }
+
+    #[test]
+    fn summary_from_metrics_passes_through_avg_output_tokens_per_second() {
+        let summary = summary_from_metrics(fixture_metrics_row(Some(42.5)));
+
+        assert_eq!(summary.avg_output_tokens_per_second, Some(42.5));
+    }
+
+    #[test]
+    fn summary_from_metrics_keeps_avg_output_tokens_per_second_null_when_no_valid_rows() {
+        // SQL returns NULL when no AI/completed rows had positive output
+        // and duration (e.g. MCP-only window or zero-duration failures).
+        // The presentation must preserve the NULL rather than collapsing it.
+        let summary = summary_from_metrics(fixture_metrics_row(None));
+
+        assert_eq!(summary.avg_output_tokens_per_second, None);
+    }
+
+    #[test]
+    fn summary_from_metrics_preserves_existing_fields_when_setting_avg_speed() {
+        let summary = summary_from_metrics(fixture_metrics_row(Some(7.0)));
+
+        assert_eq!(summary.request_count, 4);
+        assert_eq!(summary.success_count, 3);
+        assert_eq!(summary.error_count, 1);
+        assert_eq!(summary.method_count, 0);
+        assert_eq!(summary.p95_total_ms, Some(1_500.0));
+        assert_eq!(summary.p95_first_token_ms, Some(120.0));
+        assert_eq!(summary.tokens.output_tokens, 200);
+        assert_eq!(summary.tokens.total_tokens, 300);
     }
 }

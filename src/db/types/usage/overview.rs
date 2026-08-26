@@ -23,6 +23,11 @@ pub struct RequestRecordOverviewSummary {
     pub success_rate: f64,
     pub p95_total_ms: Option<f64>,
     pub p95_first_token_ms: Option<f64>,
+    /// Average output tokens per second for completed AI requests with
+    /// positive output tokens and positive duration. `None` when no such
+    /// rows match (for example, when the overview filters to MCP requests,
+    /// or when there are no completed AI requests in the window).
+    pub avg_output_tokens_per_second: Option<f64>,
     pub tokens: RequestRecordOverviewTokenUsage,
 }
 

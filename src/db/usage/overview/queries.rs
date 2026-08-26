@@ -28,6 +28,7 @@ pub(super) struct MetricsRow {
     pub(super) cache_write_tokens: i64,
     pub(super) output_tokens: i64,
     pub(super) total_tokens: i64,
+    pub(super) avg_output_tokens_per_second: Option<f64>,
     pub(super) p95_total_ms: Option<f64>,
     pub(super) p95_first_token_ms: Option<f64>,
 }

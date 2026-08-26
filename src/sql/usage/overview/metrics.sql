@@ -37,6 +37,17 @@ SELECT COUNT(*)::BIGINT AS "request_count!",
                + normalized_cache_write_tokens
                + COALESCE(output_tokens, 0)
        ), 0)::BIGINT AS "total_tokens!",
+       AVG(
+           CASE
+               WHEN request_category = 'ai'
+                   AND request_state = 'completed'
+                   AND output_tokens IS NOT NULL
+                   AND output_tokens > 0
+                   AND duration_ms > 0
+               THEN output_tokens::NUMERIC / duration_ms::NUMERIC * 1000.0
+               ELSE NULL
+           END
+       )::DOUBLE PRECISION AS avg_output_tokens_per_second,
        percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)
            FILTER (WHERE duration_ms IS NOT NULL) AS p95_total_ms,
        percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms)

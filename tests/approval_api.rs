@@ -2899,3 +2899,162 @@ fn urlencoding(value: &str) -> String {
     }
     encoded
 }
+
+#[tokio::test]
+async fn overview_summary_exposes_avg_output_tokens_per_second_for_ai() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-token-speed-ai", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    // Two completed AI requests with valid output and duration:
+    //   row A: 100 tokens / 1000 ms = 100 tokens/sec
+    //   row B: 200 tokens / 2000 ms = 100 tokens/sec
+    // Expected average: 100 tokens/sec.
+    db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_model(Some("gpt-speed-a".to_string()))
+            .with_timing(Some(200), Some(true), Some(1000), Some(50))
+            .with_usage(Some(10), Some(100), Some(110), Some(0), None, None),
+    )
+    .await?;
+    db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_model(Some("gpt-speed-b".to_string()))
+            .with_timing(Some(200), Some(true), Some(2000), Some(50))
+            .with_usage(Some(10), Some(200), Some(210), Some(0), None, None),
+    )
+    .await?;
+
+    // Distractors that must NOT contribute to the AI average:
+    //   a failed request (state != completed) and a request with zero output.
+    db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_model(Some("gpt-speed-failed".to_string()))
+            .with_timing(Some(500), Some(false), Some(1000), Some(50))
+            .with_usage(Some(10), Some(999), Some(1009), Some(0), None, None),
+    )
+    .await?;
+    db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_model(Some("gpt-speed-empty".to_string()))
+            .with_timing(Some(200), Some(true), Some(1000), Some(50))
+            .with_usage(Some(10), Some(0), Some(10), Some(0), None, None),
+    )
+    .await?;
+
+    let response = worker_admin::router(state)
+        .oneshot(auth_request(
+            "GET",
+            format!(
+                "/api/v1/admin/request-records/overview?request_category=ai&range=24h&user={}",
+                urlencoding(&admin.login_name)
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+
+    assert_eq!(body["summary"]["request_count"], 4);
+    let avg_speed = body["summary"]["avg_output_tokens_per_second"]
+        .as_f64()
+        .expect("avg_output_tokens_per_second must be a number for completed AI rows");
+    assert!(
+        (avg_speed - 100.0).abs() < 1e-6,
+        "expected average speed of 100 tokens/sec, got {avg_speed}",
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn overview_summary_avg_output_tokens_per_second_is_null_for_mcp_only_window()
+-> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-token-speed-mcp", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    // Even with a valid AI row in the schema, an MCP-only overview must
+    // return null for the speed metric because the metric is restricted to
+    // the request_category = 'ai' filter.
+    db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_model(Some("gpt-speed-ai-only".to_string()))
+            .with_timing(Some(200), Some(true), Some(1000), Some(50))
+            .with_usage(Some(10), Some(100), Some(110), Some(0), None, None),
+    )
+    .await?;
+    db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::mcp_request(Uuid::new_v4(), "/mcp")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_mcp_context(
+                None,
+                Some("demo-mcp".to_string()),
+                Some("tools/call".to_string()),
+                Some("demo__lookup".to_string()),
+            )
+            .with_timing(Some(200), Some(true), Some(1000), None),
+    )
+    .await?;
+
+    let response = worker_admin::router(state)
+        .oneshot(auth_request(
+            "GET",
+            "/api/v1/admin/request-records/overview?request_category=mcp&range=24h".to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+
+    assert_eq!(body["summary"]["request_count"], 1);
+    assert!(
+        body["summary"]["avg_output_tokens_per_second"].is_null(),
+        "MCP-only overview must report null avg_output_tokens_per_second, got {:?}",
+        body["summary"]["avg_output_tokens_per_second"]
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
