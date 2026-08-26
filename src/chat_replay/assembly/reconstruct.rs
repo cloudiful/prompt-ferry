@@ -24,7 +24,7 @@ pub(super) async fn reconstruct_turn_items(
 ) -> Result<Vec<Value>, crate::openai_compat::CompatError> {
     let refs = prompt_refs_for_entry(entry)?;
     let blocks = ordered_prompt_blocks(pool, &refs).await?;
-    let mut items = match entry.path.as_str() {
+    let mut items = match entry.path.as_deref().unwrap_or("") {
         "/v1/responses" => blocks
             .into_iter()
             .map(|block| block.content_json)
@@ -40,7 +40,7 @@ pub(super) async fn reconstruct_turn_items(
         _ => {
             return Err(replay_error(format!(
                 "stored conversation contains unsupported path `{}` for replay",
-                entry.path
+                entry.path.as_deref().unwrap_or("")
             )));
         }
     };
@@ -82,7 +82,7 @@ pub(in crate::chat_replay) fn replay_assistant_message(
 fn prompt_refs_for_entry(
     entry: &db::UsageEventChainEntry,
 ) -> Result<Vec<PromptMessageRef>, crate::openai_compat::CompatError> {
-    match entry.request_storage_mode.as_str() {
+    match entry.request_storage_mode.as_deref().unwrap_or("full") {
         "full" => entry
             .request_full_json
             .as_ref()

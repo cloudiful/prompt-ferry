@@ -20,7 +20,7 @@ pub(super) async fn reconstruct_prompt_chain(
         if depth > REQUEST_CHAIN_DEPTH_LIMIT {
             return Ok(None);
         }
-        match current.request_storage_mode.as_str() {
+        match current.request_storage_mode.as_deref().unwrap_or("full") {
             "full" => {
                 let Some(value) = current.request_full_json.as_ref() else {
                     return Ok(None);

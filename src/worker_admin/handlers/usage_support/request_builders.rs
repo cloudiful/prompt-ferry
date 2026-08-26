@@ -12,7 +12,7 @@ pub(in crate::worker_admin::handlers) async fn reconstruct_usage_request_refs(
         if depth > REQUEST_CHAIN_DEPTH_LIMIT {
             return Ok(None);
         }
-        match current.request_storage_mode.as_str() {
+        match current.request_storage_mode.as_deref().unwrap_or("full") {
             "full" => {
                 let Some(value) = current.request_full_json.as_ref() else {
                     return Ok(None);
@@ -154,12 +154,12 @@ pub(in crate::worker_admin::handlers) async fn build_usage_request_full_response
     Ok(UsageRequestFullResponse {
         conversation_id: entry.conversation_id,
         record_id,
-        conversation_source: entry.conversation_source,
+        conversation_source: entry.conversation_source.unwrap_or_else(|| "none".to_string()),
         client_installation_id: entry.client_installation_id,
         normalized_item_count: entry.normalized_item_count,
-        request_storage_mode: entry.request_storage_mode,
+        request_storage_mode: entry.request_storage_mode.unwrap_or_else(|| "full".to_string()),
         request_raw_json: entry.request_raw_json,
-        request_has_previous_response_id: entry.request_has_previous_response_id,
+        request_has_previous_response_id: entry.request_has_previous_response_id.unwrap_or(false),
         request_previous_response_id: entry.request_previous_response_id,
         request_previous_response_parent_found: entry.request_previous_response_parent_found,
         rendered_text,
