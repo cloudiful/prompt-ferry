@@ -90,3 +90,47 @@ test('output rate shows dash for incomplete data', () => {
     ),
   ).toBe('-')
 })
+
+function avgOutputTokensPerSecond(
+  records: RequestRecordTiming[],
+): number | null {
+  const rates = records
+    .filter((r) => hasOutputRate(r))
+    .map(
+      (r) => ((r.output_tokens as number) / (r.duration_ms as number)) * 1000,
+    )
+  if (rates.length === 0) return null
+  return rates.reduce((a, b) => a + b, 0) / rates.length
+}
+
+test('per-model average is arithmetic mean of valid per-request rates', () => {
+  const avg = avgOutputTokensPerSecond([
+    record({ output_tokens: 100, duration_ms: 1000 }),
+    record({ output_tokens: 300, duration_ms: 1000 }),
+  ])
+  expect(avg).not.toBeNull()
+  expect(Math.abs((avg as number) - 200)).toBeLessThan(1e-6)
+})
+
+test('per-model average is null when no valid samples', () => {
+  expect(
+    avgOutputTokensPerSecond([record({ output_tokens: 0, duration_ms: 1000 })]),
+  ).toBeNull()
+  expect(
+    avgOutputTokensPerSecond([
+      record({
+        request_state: 'failed',
+        output_tokens: 100,
+        duration_ms: 1000,
+      }),
+    ]),
+  ).toBeNull()
+  expect(avgOutputTokensPerSecond([])).toBeNull()
+})
+
+test('MCP breakdown rows must not use AI-only rate (remains null)', () => {
+  const mcpRecords: RequestRecordTiming[] = [
+    record({ request_category: 'mcp', output_tokens: 100, duration_ms: 1000 }),
+  ]
+  expect(avgOutputTokensPerSecond(mcpRecords)).toBeNull()
+})

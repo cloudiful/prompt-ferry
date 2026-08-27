@@ -217,6 +217,9 @@ function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
                 <th v-if="category === 'ai'" class="px-4 py-2">
                   {{ t('overviewCacheRate') }}
                 </th>
+                <th v-if="category === 'ai'" class="px-4 py-2">
+                  {{ t('overviewAvgOutputRate') }}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -247,6 +250,13 @@ function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
                 </td>
                 <td v-if="category === 'ai'" class="px-4 py-2">
                   {{ formatting.formatPercent(row.tokens.cache_rate) }}
+                </td>
+                <td v-if="category === 'ai'" class="px-4 py-2">
+                  {{
+                    formatting.formatTokensPerSecond(
+                      row.avg_output_tokens_per_second,
+                    )
+                  }}
                 </td>
               </tr>
             </tbody>

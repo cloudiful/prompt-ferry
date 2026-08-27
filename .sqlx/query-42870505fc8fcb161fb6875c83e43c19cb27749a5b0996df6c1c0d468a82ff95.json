@@ -1,0 +1,123 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH normalized AS (\n    SELECT COALESCE(rr.mcp_server_name, ms.name, '(unknown)') AS label,\n           rr.mcp_server_id,\n           rr.ok,\n           COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,\n           COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,\n           GREATEST(\n               COALESCE(rr.input_tokens, 0)\n                   - COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)\n                   - COALESCE(rr.cache_write_tokens, 0),\n               0\n           )::BIGINT AS normalized_input_tokens,\n           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens\n    FROM request_records rr\n    LEFT JOIN users u ON u.user_id = rr.user_id\n    LEFT JOIN mcp_servers ms ON ms.server_id = rr.mcp_server_id\n    WHERE rr.event_kind = 'request'\n      AND rr.request_category = $2\n      AND ($1::BIGINT IS NULL OR rr.user_id = $1)\n      AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)\n      AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)\n      AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)\n), grouped AS (\n    SELECT label,\n           mcp_server_id,\n           COUNT(*)::BIGINT AS request_count,\n           COUNT(*) FILTER (WHERE ok IS TRUE)::BIGINT AS success_count,\n           COUNT(*) FILTER (\n               WHERE normalized_cache_read_tokens > 0\n           )::BIGINT AS cache_hit_count,\n           COALESCE(SUM(normalized_input_tokens), 0)::BIGINT AS input_tokens,\n           COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,\n           COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS cache_write_tokens,\n           COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens\n    FROM normalized\n    GROUP BY label, mcp_server_id\n), totals AS (\n    SELECT SUM(request_count)::DOUBLE PRECISION AS request_count\n    FROM grouped\n)\nSELECT label AS \"label!\",\n       NULL::TEXT AS model,\n       mcp_server_id,\n       grouped.request_count AS \"request_count!\",\n       COALESCE(grouped.request_count::DOUBLE PRECISION / NULLIF(totals.request_count, 0), 0) AS \"request_share!\",\n       success_count AS \"success_count!\",\n       NULL::DOUBLE PRECISION AS token_share,\n       cache_hit_count AS \"cache_hit_count!\",\n       input_tokens AS \"input_tokens!\",\n       cache_read_tokens AS \"cache_read_tokens!\",\n       cache_write_tokens AS \"cache_write_tokens!\",\n       output_tokens AS \"output_tokens!\",\n       (grouped.input_tokens + grouped.cache_read_tokens + grouped.cache_write_tokens + grouped.output_tokens)::BIGINT AS \"total_tokens!\",\n       NULL::DOUBLE PRECISION AS avg_output_tokens_per_second\nFROM grouped\nCROSS JOIN totals\nORDER BY grouped.request_count DESC, grouped.label ASC\nLIMIT 50\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "label!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "model",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "mcp_server_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "mcp_server_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "request_share!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "success_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "token_share",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_hit_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "total_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 13,
+        "name": "avg_output_tokens_per_second",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "42870505fc8fcb161fb6875c83e43c19cb27749a5b0996df6c1c0d468a82ff95"
+}

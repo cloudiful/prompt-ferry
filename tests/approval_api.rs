@@ -3058,3 +3058,201 @@ async fn overview_summary_avg_output_tokens_per_second_is_null_for_mcp_only_wind
     schema.cleanup().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn overview_breakdown_avg_output_tokens_per_second_per_model_valid_average()
+-> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-breakdown-avg", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    // Model with two valid completed requests:
+    //   req A: 100 tokens / 1000 ms = 100 tps
+    //   req B: 300 tokens / 1000 ms = 300 tps
+    // Expected per-model average = (100 + 300) / 2 = 200 tps.
+    let model = "gpt-breakdown-avg";
+    db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_model(Some(model.to_string()))
+            .with_timing(Some(200), Some(true), Some(1000), Some(50))
+            .with_usage(Some(10), Some(100), Some(110), Some(0), None, None),
+    )
+    .await?;
+    db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_model(Some(model.to_string()))
+            .with_timing(Some(200), Some(true), Some(1000), Some(50))
+            .with_usage(Some(10), Some(300), Some(310), Some(0), None, None),
+    )
+    .await?;
+
+    let response = worker_admin::router(state)
+        .oneshot(auth_request(
+            "GET",
+            format!(
+                "/api/v1/admin/request-records/overview?request_category=ai&range=24h&user={}",
+                urlencoding(&admin.login_name)
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    let breakdown = body["breakdown"]
+        .as_array()
+        .expect("breakdown must be array");
+    let row = breakdown
+        .iter()
+        .find(|r| r["label"] == model)
+        .expect("breakdown must contain the model row");
+    let avg = row["avg_output_tokens_per_second"]
+        .as_f64()
+        .expect("avg_output_tokens_per_second must be number for valid samples");
+    assert!(
+        (avg - 200.0).abs() < 1e-6,
+        "expected per-model avg 200, got {avg}"
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn overview_breakdown_avg_output_tokens_per_second_null_when_no_valid_samples()
+-> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-breakdown-null", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    // Model with only invalid samples: zero output and failed state
+    let model = "gpt-breakdown-no-valid";
+    db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_model(Some(model.to_string()))
+            .with_timing(Some(200), Some(true), Some(1000), Some(50))
+            .with_usage(Some(10), Some(0), Some(10), Some(0), None, None),
+    )
+    .await?;
+    db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+            .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_model(Some(model.to_string()))
+            .with_timing(Some(500), Some(false), Some(1000), Some(50))
+            .with_usage(Some(10), Some(999), Some(1009), Some(0), None, None),
+    )
+    .await?;
+
+    let response = worker_admin::router(state)
+        .oneshot(auth_request(
+            "GET",
+            format!(
+                "/api/v1/admin/request-records/overview?request_category=ai&range=24h&user={}",
+                urlencoding(&admin.login_name)
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    let breakdown = body["breakdown"]
+        .as_array()
+        .expect("breakdown must be array");
+    let row = breakdown
+        .iter()
+        .find(|r| r["label"] == model)
+        .expect("breakdown must contain the model row");
+    assert!(
+        row["avg_output_tokens_per_second"].is_null(),
+        "model with no valid samples must report null avg, got {:?}",
+        row["avg_output_tokens_per_second"]
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn overview_breakdown_mcp_rows_have_null_avg_and_compatibility() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-breakdown-mcp", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::mcp_request(Uuid::new_v4(), "/mcp")
+            .with_state(
+                db::UsageEventKind::Request,
+                db::RequestRecordState::Completed,
+            )
+            .with_request_actor(Some(admin.user_id), None, None, None)
+            .with_mcp_context(
+                None,
+                Some("demo-mcp-breakdown".to_string()),
+                Some("tools/call".to_string()),
+                Some("demo__lookup".to_string()),
+            )
+            .with_timing(Some(200), Some(true), Some(1000), None),
+    )
+    .await?;
+
+    let response = worker_admin::router(state)
+        .oneshot(auth_request(
+            "GET",
+            "/api/v1/admin/request-records/overview?request_category=mcp&range=24h&user={}"
+                .replace("{}", &urlencoding(&admin.login_name)),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    let breakdown = body["breakdown"]
+        .as_array()
+        .expect("breakdown must be array");
+    assert!(!breakdown.is_empty(), "MCP breakdown must contain rows");
+    for row in breakdown {
+        assert!(
+            row["avg_output_tokens_per_second"].is_null(),
+            "MCP rows must have null avg_output_tokens_per_second, got {:?}",
+            row["avg_output_tokens_per_second"]
+        );
+        // Ensure contract-compatible fields are present
+        assert!(row.get("label").is_some());
+        assert!(row.get("request_count").is_some());
+        assert!(row.get("tokens").is_some());
+    }
+
+    schema.cleanup().await?;
+    Ok(())
+}

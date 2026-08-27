@@ -50,7 +50,8 @@ SELECT label AS "label!",
        cache_read_tokens AS "cache_read_tokens!",
        cache_write_tokens AS "cache_write_tokens!",
        output_tokens AS "output_tokens!",
-       (grouped.input_tokens + grouped.cache_read_tokens + grouped.cache_write_tokens + grouped.output_tokens)::BIGINT AS "total_tokens!"
+       (grouped.input_tokens + grouped.cache_read_tokens + grouped.cache_write_tokens + grouped.output_tokens)::BIGINT AS "total_tokens!",
+       NULL::DOUBLE PRECISION AS avg_output_tokens_per_second
 FROM grouped
 CROSS JOIN totals
 ORDER BY grouped.request_count DESC, grouped.label ASC

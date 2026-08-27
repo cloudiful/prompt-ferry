@@ -78,3 +78,22 @@ test('formatTokensPerSecondValue renders - for null, invalid, or non-positive va
   expect(formatTokensPerSecondValue(0)).toBe('-')
   expect(formatTokensPerSecondValue(-1)).toBe('-')
 })
+
+test('formatTokensPerSecondValue supports per-model average TPS values', () => {
+  // Per-model average is arithmetic mean of per-request output_tokens/duration*1000
+  // e.g. (100/1000*1000 + 300/1000*1000)/2 = 200
+  expect(formatTokensPerSecondValue(200)).toBe('200 token/s')
+  expect(formatTokensPerSecondValue(23.7)).toBe('23.7 token/s')
+})
+
+test('formatTokensPerSecondValue renders dash for per-model null (no valid samples)', () => {
+  expect(formatTokensPerSecondValue(null)).toBe('-')
+  expect(formatTokensPerSecondValue(undefined)).toBe('-')
+})
+
+test('MCP breakdown rows keep contract compatibility with null avg and still format as dash', () => {
+  const mcpRow = { avg_output_tokens_per_second: null as number | null }
+  expect(formatTokensPerSecondValue(mcpRow.avg_output_tokens_per_second)).toBe(
+    '-',
+  )
+})

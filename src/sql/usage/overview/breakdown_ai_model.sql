@@ -1,6 +1,9 @@
 WITH normalized AS (
     SELECT rr.model,
            rr.ok,
+           rr.request_state,
+           rr.output_tokens AS raw_output_tokens,
+           rr.duration_ms,
            GREATEST(
                COALESCE(rr.input_tokens, 0)
                    - COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)
@@ -35,7 +38,18 @@ WITH normalized AS (
                    + normalized_cache_read_tokens
                    + normalized_cache_write_tokens
                    + output_tokens
-           ), 0)::BIGINT AS total_tokens
+           ), 0)::BIGINT AS total_tokens,
+           AVG(
+               CASE
+                   WHEN request_state = 'completed'
+                       AND raw_output_tokens IS NOT NULL
+                       AND raw_output_tokens > 0
+                       AND duration_ms IS NOT NULL
+                       AND duration_ms > 0
+                   THEN raw_output_tokens::NUMERIC / duration_ms::NUMERIC * 1000.0
+                   ELSE NULL
+               END
+           )::DOUBLE PRECISION AS avg_output_tokens_per_second
     FROM normalized
     GROUP BY model
 ), totals AS (
@@ -55,7 +69,8 @@ SELECT label AS "label!",
        cache_read_tokens AS "cache_read_tokens!",
        cache_write_tokens AS "cache_write_tokens!",
        output_tokens AS "output_tokens!",
-       grouped.total_tokens AS "total_tokens!"
+       grouped.total_tokens AS "total_tokens!",
+       grouped.avg_output_tokens_per_second AS avg_output_tokens_per_second
 FROM grouped
 CROSS JOIN totals
 ORDER BY grouped.total_tokens DESC, grouped.request_count DESC, grouped.label ASC

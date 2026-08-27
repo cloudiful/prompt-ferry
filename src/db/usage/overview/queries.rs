@@ -64,6 +64,7 @@ struct BreakdownRow {
     cache_write_tokens: i64,
     output_tokens: i64,
     total_tokens: i64,
+    avg_output_tokens_per_second: Option<f64>,
 }
 
 #[derive(Debug, FromRow)]
@@ -210,6 +211,7 @@ pub async fn query_breakdown(
             ),
             model: row.model,
             mcp_server_id: row.mcp_server_id,
+            avg_output_tokens_per_second: row.avg_output_tokens_per_second,
         })
         .collect())
 }

@@ -1032,6 +1032,13 @@ export type RequestRecordListRow = {
 };
 
 export type RequestRecordOverviewBreakdownRow = {
+    /**
+     * Average output tokens per second for completed AI requests with
+     * positive output tokens and positive duration, averaged per request
+     * within the breakdown row. `None` when no valid samples exist or
+     * when the row is not an AI model row.
+     */
+    avg_output_tokens_per_second?: number | null;
     label: string;
     mcp_server_id?: string | null;
     model?: string | null;

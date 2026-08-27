@@ -55,6 +55,11 @@ pub struct RequestRecordOverviewBreakdownRow {
     pub tokens: RequestRecordOverviewTokenUsage,
     pub model: Option<String>,
     pub mcp_server_id: Option<Uuid>,
+    /// Average output tokens per second for completed AI requests with
+    /// positive output tokens and positive duration, averaged per request
+    /// within the breakdown row. `None` when no valid samples exist or
+    /// when the row is not an AI model row.
+    pub avg_output_tokens_per_second: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
