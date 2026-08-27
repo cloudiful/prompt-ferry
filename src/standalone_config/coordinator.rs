@@ -119,6 +119,7 @@ impl StandaloneCoordinatorStore {
         Ok(result.rows_affected() == 1)
     }
 
+    #[cfg(test)]
     pub(crate) async fn acquire_lease(
         &self,
         key: &str,
@@ -139,6 +140,7 @@ impl StandaloneCoordinatorStore {
         }))
     }
 
+    #[cfg(test)]
     pub(crate) async fn refresh_lease(
         &self,
         key: &str,
@@ -157,6 +159,7 @@ impl StandaloneCoordinatorStore {
         Ok(result.rows_affected() == 1)
     }
 
+    #[cfg(test)]
     pub(crate) async fn release_lease(&self, key: &str, owner: &str) -> anyhow::Result<()> {
         standalone_query!("src/sql/standalone/coordinator_release_lease.sql")
             .bind(key)

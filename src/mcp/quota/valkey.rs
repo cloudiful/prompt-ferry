@@ -16,6 +16,7 @@ pub struct McpQuotaValkey {
     manager: Option<ConnectionManager>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum McpQuotaStateBackend {
     PostgresLedgerOnly,
@@ -57,6 +58,7 @@ impl McpQuotaValkey {
 
     /// Quota reservations never use this optional cache. With no Valkey the
     /// durable PostgreSQL ledger remains the only state backend.
+    #[cfg(test)]
     pub(crate) fn state_backend(&self) -> McpQuotaStateBackend {
         if self.is_enabled() {
             McpQuotaStateBackend::ValkeyAcceleration

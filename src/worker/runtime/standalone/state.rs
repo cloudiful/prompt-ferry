@@ -86,6 +86,7 @@ impl StandaloneRuntimeState {
     /// checkpoint after a process restart. Errors are reported via the
     /// shared `StandaloneConfigError` taxonomy so callers can decide
     /// whether to skip or fail their load path.
+    #[cfg(test)]
     pub(crate) async fn latest_replay_snapshot(
         &self,
         conversation_id: Uuid,
