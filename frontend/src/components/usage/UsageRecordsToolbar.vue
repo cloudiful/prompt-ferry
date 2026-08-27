@@ -1,18 +1,13 @@
 <script setup lang="ts">
-import type { RequestRecordOverviewRange } from '@/generated/admin-api'
 import type { RequestRecordCategory } from '@/generated/admin-api'
 import type { RequestRecordFilterModel } from '@/models'
 import type { UsageFacetOptionsView } from '@/models/usage'
 import UsageFilterSelect from './UsageFilterSelect.vue'
-import UsageRangePicker from './UsageRangePicker.vue'
 
 defineProps<{
   category: RequestRecordCategory
-  end: string
   facets: UsageFacetOptionsView
   isAdmin: boolean
-  range: RequestRecordOverviewRange
-  start: string
   t: TranslateFn
 }>()
 
@@ -23,22 +18,11 @@ const filters = defineModel<RequestRecordFilterModel>('filters', {
 const emit = defineEmits<{
   filter: []
   openClearDialog: []
-  range: [
-    input: { range: RequestRecordOverviewRange; start?: string; end?: string },
-  ]
   search: []
 }>()
 
 function applyFilter(): void {
   emit('filter')
-}
-
-function applyRange(input: {
-  range: RequestRecordOverviewRange
-  start?: string
-  end?: string
-}): void {
-  emit('range', input)
 }
 </script>
 
@@ -86,13 +70,6 @@ function applyRange(input: {
       :options="facets.request_redaction_options"
       :placeholder="t('allRedactionStates')"
       @change="applyFilter"
-    />
-    <UsageRangePicker
-      :end="end"
-      :start="start"
-      :t="t"
-      :value="range"
-      @apply="applyRange"
     />
     <slot name="headerActions" />
     <UButton
