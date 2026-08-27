@@ -120,7 +120,12 @@ async fn delete_expired_raw_objects(
     raw_store: &RawPayloadStore,
     cutoff: DateTime<Utc>,
 ) {
-    let mut cursor_created_at = DateTime::<Utc>::MIN_UTC;
+    // `DateTime::<Utc>::MIN_UTC` is -262144-01-01, outside Postgres
+    // `timestamptz` range (4713 BC … 294276 AD) and causes
+    // `timestamp out of range` on the first `list_expired_raw_payload_objects`
+    // call. Use UNIX_EPOCH as a safe lower bound that is still earlier than
+    // any real row.
+    let mut cursor_created_at = DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_else(Utc::now);
     let mut cursor_event_id = i64::MIN;
     loop {
         let rows = match sqlx::query_file_as!(
