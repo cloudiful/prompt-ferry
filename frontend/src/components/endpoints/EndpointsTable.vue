@@ -2,6 +2,7 @@
 import type { TableColumn } from '@nuxt/ui'
 import { computed } from 'vue'
 import TablePagination from '@/components/shared/TablePagination.vue'
+import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import type { EndpointListItemView } from '@/models/endpoints'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
@@ -71,13 +72,12 @@ defineEmits<{
         </div>
       </template>
       <template #test-cell="{ row }">
-        <UBadge
-          v-if="row.original.test_severity"
-          :label="row.original.test_message"
-          :color="row.original.test_severity"
-          variant="subtle"
-        />
-        <span v-else class="text-xs text-dimmed">-</span>
+        <div class="min-w-0">
+          <TestResultPopover
+            :message="row.original.test_message"
+            :severity="row.original.test_severity"
+          />
+        </div>
       </template>
       <template #actions-cell="{ row }">
         <div class="flex justify-end gap-2">

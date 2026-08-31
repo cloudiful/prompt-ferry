@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import type { ModelRouteListItemView } from '@/models/endpoints'
 
 const props = defineProps<{
@@ -62,14 +63,17 @@ const targetsLabel = computed(
           }}{{ item.owner_label ? ` / ${item.owner_label}` : '' }}
         </div>
       </div>
-      <div class="grid gap-px">
+      <div class="grid gap-px min-w-0">
         <div
           class="text-[0.7rem] font-bold tracking-wide text-dimmed uppercase"
         >
           {{ t('test') }}
         </div>
-        <div class="break-words text-[0.76rem] leading-[1.38] text-default">
-          {{ item.test_message }}
+        <div class="min-w-0">
+          <TestResultPopover
+            :message="item.test_message"
+            :severity="item.test_severity"
+          />
         </div>
       </div>
     </div>

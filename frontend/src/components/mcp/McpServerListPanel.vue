@@ -2,6 +2,7 @@
 import type { TableColumn } from '@nuxt/ui'
 import { computed } from 'vue'
 import TablePagination from '@/components/shared/TablePagination.vue'
+import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import type { McpServer } from '@/generated/admin-api'
 import type { McpServerListItemView } from '@/models'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
@@ -26,9 +27,7 @@ defineEmits<{
 
 const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
   { accessorKey: 'name', header: props.t('name') },
-  { id: 'status', header: props.t('status') },
   { id: 'test', header: props.t('test') },
-  { accessorKey: 'timeout_label', header: props.t('timeout') },
   { id: 'actions' },
 ])
 </script>
@@ -48,47 +47,52 @@ const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
       </template>
       <template #name-cell="{ row }">
         <div class="min-w-0">
-          <div class="truncate font-semibold text-highlighted">
-            {{ row.original.name }}
-          </div>
-          <div
-            class="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted"
-          >
-            <UIcon name="i-lucide-server" class="h-3.5 w-3.5 shrink-0" />
-            <span class="truncate">{{ row.original.endpoint_label }}</span>
-          </div>
-        </div>
-      </template>
-      <template #status-cell="{ row }">
-        <div
-          class="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overflow-y-hidden whitespace-nowrap pb-px [&>*]:flex-none"
-        >
-          <UBadge :label="row.original.scope_label" color="neutral" />
-          <UBadge :label="row.original.transport" color="info" />
-          <UBadge :label="row.original.naming_mode_label" color="neutral" />
-          <label class="inline-flex flex-none items-center whitespace-nowrap">
-            <USwitch
-              :model-value="row.original.enabled"
-              :aria-label="t('status')"
-              :disabled="busy"
-              @update:model-value="
-                $emit('toggleMcpServer', row.original.server)
-              "
+          <div class="flex min-w-0 items-center gap-1.5">
+            <div class="min-w-0 flex-1 truncate font-semibold text-highlighted">
+              {{ row.original.name }}
+            </div>
+            <UBadge
+              :label="row.original.scope_label"
+              color="neutral"
+              class="shrink-0"
             />
-          </label>
+            <UBadge
+              :label="row.original.transport"
+              color="info"
+              class="shrink-0"
+            />
+          </div>
+          <div class="flex min-w-0 items-center gap-1.5">
+            <UIcon name="i-lucide-server" class="h-3.5 w-3.5 shrink-0" />
+            <span class="min-w-0 flex-1 truncate text-xs text-muted">{{
+              row.original.endpoint_label
+            }}</span>
+            <label class="inline-flex shrink-0 items-center">
+              <USwitch
+                :model-value="row.original.enabled"
+                :aria-label="t('status')"
+                :disabled="busy"
+                @update:model-value="
+                  $emit('toggleMcpServer', row.original.server)
+                "
+              />
+            </label>
+          </div>
         </div>
       </template>
       <template #test-cell="{ row }">
-        <UBadge
-          v-if="row.original.test_ok !== null"
-          :label="row.original.test_message"
-          :color="row.original.test_ok ? 'success' : 'error'"
-          variant="subtle"
-        />
-        <span v-else class="text-xs text-dimmed">-</span>
-      </template>
-      <template #timeout_label-cell="{ row }">
-        <UBadge :label="row.original.timeout_label" />
+        <div class="min-w-0">
+          <TestResultPopover
+            :message="row.original.test_message"
+            :severity="
+              row.original.test_ok === null
+                ? null
+                : row.original.test_ok
+                  ? 'success'
+                  : 'error'
+            "
+          />
+        </div>
       </template>
       <template #actions-cell="{ row }">
         <div class="flex justify-end gap-2">
