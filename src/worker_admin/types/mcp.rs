@@ -39,6 +39,9 @@ pub struct McpServer {
     #[schema(value_type = Vec<db::McpBearerToken>)]
     pub bearer_tokens: Vec<db::McpBearerToken>,
     pub http_headers_json: Value,
+    pub auth_mode: String,
+    pub basic_username: Option<String>,
+    pub has_basic_password: bool,
     pub tool_filter_mode: String,
     pub allowed_tools: Value,
     pub disabled_tools: Value,
@@ -73,6 +76,9 @@ impl From<&db::McpServer> for McpServer {
             env_json: public_env_json(&server.env_json),
             bearer_tokens: server.bearer_tokens(),
             http_headers_json: server.http_headers_json.clone(),
+            auth_mode: server.effective_auth_mode().to_string(),
+            basic_username: server.basic_username.clone(),
+            has_basic_password: server.has_basic_password(),
             tool_filter_mode: server.tool_filter_mode.clone(),
             allowed_tools: server.allowed_tools.clone(),
             disabled_tools: server.disabled_tools.clone(),
@@ -126,6 +132,9 @@ pub struct McpServerRequest {
     pub env_json: Option<serde_json::Value>,
     pub bearer_tokens: Option<Vec<db::McpBearerToken>>,
     pub http_headers_json: Option<serde_json::Value>,
+    pub auth_mode: Option<String>,
+    pub basic_username: Option<String>,
+    pub basic_password: Option<String>,
     pub tool_filter_mode: Option<String>,
     pub allowed_tools: Option<serde_json::Value>,
     pub disabled_tools: Option<serde_json::Value>,
@@ -190,6 +199,107 @@ impl McpServerRequest {
         } else {
             None
         };
+        // Explicit auth mode so bearer/basic remain unambiguous. Preserve
+        // legacy bearer configs: if the request omits auth_mode, keep the
+        // existing effective mode or infer from provided credentials.
+        let mut auth_mode =
+            self.auth_mode
+                .as_deref()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| {
+                    if let Some(existing) = existing_server {
+                        existing.effective_auth_mode().to_string()
+                    } else {
+                        let has_bearer = self.bearer_tokens.as_ref().is_some_and(|tokens| {
+                            tokens.iter().any(|t| !t.token.trim().is_empty())
+                        });
+                        let has_basic = self
+                            .basic_username
+                            .as_deref()
+                            .is_some_and(|v| !v.trim().is_empty())
+                            || self
+                                .basic_password
+                                .as_deref()
+                                .is_some_and(|v| !v.trim().is_empty());
+                        if has_bearer {
+                            db::MCP_AUTH_MODE_BEARER.to_string()
+                        } else if has_basic {
+                            db::MCP_AUTH_MODE_BASIC.to_string()
+                        } else {
+                            db::MCP_AUTH_MODE_NONE.to_string()
+                        }
+                    }
+                });
+        // Non-http transports never carry HTTP auth.
+        if self.transport != "http" {
+            auth_mode = db::MCP_AUTH_MODE_NONE.to_string();
+        } else if !db::is_valid_auth_mode(&auth_mode) {
+            auth_mode = db::MCP_AUTH_MODE_NONE.to_string();
+        }
+        let bearer_tokens_json = self
+            .bearer_tokens
+            .map(|tokens| {
+                serde_json::Value::Array(
+                    tokens
+                        .into_iter()
+                        .map(|mut value| {
+                            value.token = value.token.trim().to_string();
+                            value
+                        })
+                        .filter(|value| !value.token.is_empty())
+                        .map(|value| {
+                            serde_json::json!({
+                                "token": value.token,
+                                "enabled": value.enabled,
+                            })
+                        })
+                        .collect(),
+                )
+            })
+            .or_else(|| existing_server.map(|server| server.bearer_tokens_json.clone()))
+            .unwrap_or_else(|| serde_json::json!([]));
+        // Basic credentials: keep existing when the request omits them so a
+        // bearer<->basic switch does not wipe the other credential set.
+        let basic_username = match self.basic_username {
+            Some(value) => {
+                let trimmed = value.trim().to_string();
+                if trimmed.is_empty() {
+                    existing_server.and_then(|s| s.basic_username.clone())
+                } else {
+                    Some(trimmed)
+                }
+            }
+            None => existing_server.and_then(|s| s.basic_username.clone()),
+        };
+        let basic_password = match self.basic_password {
+            Some(value) => {
+                let trimmed = value.trim().to_string();
+                if trimmed.is_empty() {
+                    // Empty string means keep existing when updating, or no
+                    // password when creating.
+                    existing_server.and_then(|s| s.basic_password.clone())
+                } else {
+                    Some(trimmed)
+                }
+            }
+            None => existing_server.and_then(|s| s.basic_password.clone()),
+        };
+        // When auth_mode is not basic, do not clear stored basic credentials
+        // so they remain for a later switch. Same for bearer when not selected.
+        let (basic_username, basic_password) = if auth_mode == db::MCP_AUTH_MODE_BASIC {
+            (basic_username, basic_password)
+        } else {
+            // Preserve existing basic credentials even when not active.
+            (
+                existing_server
+                    .and_then(|s| s.basic_username.clone())
+                    .or(basic_username),
+                existing_server
+                    .and_then(|s| s.basic_password.clone())
+                    .or(basic_password),
+            )
+        };
         db::McpServerInput {
             scope,
             owner_user_id,
@@ -203,31 +313,13 @@ impl McpServerRequest {
             command: self.command,
             args: self.args.unwrap_or_else(|| serde_json::json!([])),
             env_json,
-            bearer_tokens_json: self
-                .bearer_tokens
-                .map(|tokens| {
-                    serde_json::Value::Array(
-                        tokens
-                            .into_iter()
-                            .map(|mut value| {
-                                value.token = value.token.trim().to_string();
-                                value
-                            })
-                            .filter(|value| !value.token.is_empty())
-                            .map(|value| {
-                                serde_json::json!({
-                                    "token": value.token,
-                                    "enabled": value.enabled,
-                                })
-                            })
-                            .collect(),
-                    )
-                })
-                .or_else(|| existing_server.map(|server| server.bearer_tokens_json.clone()))
-                .unwrap_or_else(|| serde_json::json!([])),
+            bearer_tokens_json,
             http_headers_json: self
                 .http_headers_json
                 .unwrap_or_else(|| serde_json::json!({})),
+            auth_mode,
+            basic_username,
+            basic_password,
             tool_filter_mode: self
                 .tool_filter_mode
                 .unwrap_or_else(|| "blacklist".to_string()),
@@ -430,6 +522,24 @@ impl McpServerRequest {
                 "aggregate_naming_mode must be qualified_only or passthrough_preferred",
             ));
         }
+        if let Some(auth_mode) = self.auth_mode.as_deref() {
+            let trimmed = auth_mode.trim();
+            if !trimmed.is_empty() && !db::is_valid_auth_mode(trimmed) {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_auth_mode",
+                    "auth_mode must be none, bearer, or basic",
+                ));
+            }
+            if self.transport != "http" && !trimmed.is_empty() && trimmed != db::MCP_AUTH_MODE_NONE
+            {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_auth_mode",
+                    "only http transport supports bearer or basic auth",
+                ));
+            }
+        }
         if let Some(tokens) = &self.bearer_tokens {
             if tokens.iter().any(|value| value.token.trim().is_empty()) {
                 return Err(error(
@@ -455,6 +565,98 @@ impl McpServerRequest {
                 "invalid_http_headers",
                 &message,
             ));
+        }
+        // HTTP auth mode validation
+        if self.transport == "http" {
+            let requested_auth = self.auth_mode.as_deref().map(|v| v.trim()).unwrap_or("");
+            if requested_auth == db::MCP_AUTH_MODE_BEARER {
+                let has_request_tokens = self
+                    .bearer_tokens
+                    .as_ref()
+                    .is_some_and(|tokens| tokens.iter().any(|t| !t.token.trim().is_empty()));
+                if !has_request_tokens {
+                    // Need existing tokens when updating
+                    let has_existing = if let Some(id) = existing_server_id {
+                        state
+                            .config_repository
+                            .get_mcp_server(id)
+                            .await
+                            .map_err(|err| internal(state, err))?
+                            .is_some_and(|server| !server.bearer_tokens().is_empty())
+                    } else {
+                        false
+                    };
+                    if !has_existing {
+                        return Err(error(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_bearer_tokens",
+                            "bearer auth requires at least one bearer token",
+                        ));
+                    }
+                }
+            }
+            if requested_auth == db::MCP_AUTH_MODE_BASIC {
+                let username = self.basic_username.as_deref().unwrap_or("").trim();
+                let password = self.basic_password.as_deref().unwrap_or("").trim();
+                if username.is_empty() {
+                    // Allow keeping existing username on update
+                    let has_existing = if let Some(id) = existing_server_id {
+                        state
+                            .config_repository
+                            .get_mcp_server(id)
+                            .await
+                            .map_err(|err| internal(state, err))?
+                            .and_then(|s| s.basic_username)
+                            .is_some_and(|v| !v.trim().is_empty())
+                    } else {
+                        false
+                    };
+                    if !has_existing {
+                        return Err(error(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_basic_auth",
+                            "basic auth requires a username",
+                        ));
+                    }
+                }
+                if password.is_empty() {
+                    let has_existing = if let Some(id) = existing_server_id {
+                        state
+                            .config_repository
+                            .get_mcp_server(id)
+                            .await
+                            .map_err(|err| internal(state, err))?
+                            .and_then(|s| s.basic_password)
+                            .is_some_and(|v| !v.trim().is_empty())
+                    } else {
+                        false
+                    };
+                    if !has_existing {
+                        return Err(error(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_basic_auth",
+                            "basic auth requires a password",
+                        ));
+                    }
+                }
+            }
+        } else {
+            // Non-http transports must not carry HTTP auth material
+            if self
+                .basic_username
+                .as_deref()
+                .is_some_and(|v| !v.trim().is_empty())
+                || self
+                    .basic_password
+                    .as_deref()
+                    .is_some_and(|v| !v.trim().is_empty())
+            {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_auth_mode",
+                    "only http transport supports basic auth",
+                ));
+            }
         }
         let owner_user_id = if user.is_admin {
             self.owner_user_id
@@ -616,6 +818,9 @@ mod tests {
             env_json: serde_json::json!({}),
             bearer_tokens_json: serde_json::json!([]),
             http_headers_json: serde_json::json!({}),
+            auth_mode: crate::db::MCP_AUTH_MODE_NONE.to_string(),
+            basic_username: None,
+            basic_password: None,
             tool_filter_mode: "blacklist".to_string(),
             allowed_tools: serde_json::json!([]),
             disabled_tools: serde_json::json!([]),
@@ -657,6 +862,9 @@ mod tests {
             env_json: None,
             bearer_tokens: None,
             http_headers_json: None,
+            auth_mode: None,
+            basic_username: None,
+            basic_password: None,
             tool_filter_mode: None,
             allowed_tools: None,
             disabled_tools: None,

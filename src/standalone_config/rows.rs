@@ -192,7 +192,14 @@ pub(crate) fn endpoint_key(
 
 pub(crate) fn mcp_server(
     row: &SqliteRow,
-) -> Result<(McpServer, EncryptedSecretEnvelope, EncryptedSecretEnvelope)> {
+) -> Result<(
+    McpServer,
+    EncryptedSecretEnvelope,
+    EncryptedSecretEnvelope,
+    Option<EncryptedSecretEnvelope>,
+)> {
+    let auth_mode = optional_string(row, "auth_mode")?
+        .unwrap_or_else(|| crate::db::MCP_AUTH_MODE_NONE.to_string());
     Ok((
         McpServer {
             server_id: uuid(row, "server_id")?,
@@ -208,6 +215,9 @@ pub(crate) fn mcp_server(
             env_json: serde_json::Value::Null,
             bearer_tokens_json: serde_json::Value::Null,
             http_headers_json: json_value(row, "http_headers_json")?,
+            auth_mode,
+            basic_username: optional_string(row, "basic_username")?,
+            basic_password: None,
             tool_filter_mode: required_string(row, "tool_filter_mode")?,
             allowed_tools: json_value(row, "allowed_tools_json")?,
             disabled_tools: json_value(row, "disabled_tools_json")?,
@@ -248,6 +258,7 @@ pub(crate) fn mcp_server(
                 "MCP server is missing its bearer token secret envelope".to_string(),
             )
         })?,
+        envelope(row, "basic_password")?,
     ))
 }
 

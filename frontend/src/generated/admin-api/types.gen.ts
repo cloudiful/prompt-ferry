@@ -526,6 +526,8 @@ export type McpServer = {
     aggregate_naming_mode: string;
     allowed_tools: unknown;
     args: unknown;
+    auth_mode: string;
+    basic_username?: string | null;
     bearer_tokens: Array<McpBearerToken>;
     command?: string | null;
     created_at: string;
@@ -534,6 +536,7 @@ export type McpServer = {
     disabled_tools: unknown;
     enabled: boolean;
     env_json: unknown;
+    has_basic_password: boolean;
     http_headers_json: unknown;
     lifecycle_learned_at?: string | null;
     lifecycle_learned_for_updated_at?: string | null;
@@ -565,6 +568,9 @@ export type McpServerRequest = {
     aggregate_naming_mode?: string | null;
     allowed_tools?: unknown;
     args?: unknown;
+    auth_mode?: string | null;
+    basic_password?: string | null;
+    basic_username?: string | null;
     bearer_tokens?: Array<McpBearerToken> | null;
     command?: string | null;
     daily_max_requests?: number | null;

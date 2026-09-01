@@ -115,6 +115,24 @@ pub(super) async fn call_with_storage(
 ) -> anyhow::Result<Value> {
     let timeout = Duration::from_millis(server.timeout_ms.max(100) as u64);
     tokio::time::timeout(timeout, async {
+        // Basic and none transports use a single credential; bearer uses token
+        // balancing with retry on 401/403/429.
+        if server.effective_auth_mode() != crate::db::MCP_AUTH_MODE_BEARER {
+            let selected = SelectedToken {
+                value: None,
+                index: None,
+            };
+            record_token_slot(&selected);
+            let result =
+                client::call_once(storage, server, selected, request.clone(), conversation_id)
+                    .await;
+            if let Ok(value) = &result {
+                if let Some(credits) = scan_credits_used(value) {
+                    record_credits_used(credits);
+                }
+            }
+            return result;
+        }
         let tokens = server.bearer_tokens();
         let enabled_token_count = tokens.iter().filter(|token| token.enabled).count();
         let mut attempted = Vec::new();
@@ -191,6 +209,14 @@ pub(super) async fn connect(
     server: &McpServer,
     conversation_id: Option<&str>,
 ) -> anyhow::Result<rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>> {
+    if server.effective_auth_mode() != crate::db::MCP_AUTH_MODE_BEARER {
+        let selected = SelectedToken {
+            value: None,
+            index: None,
+        };
+        record_token_slot(&selected);
+        return client::connect_with_selected(storage, server, selected).await;
+    }
     let tokens = server.bearer_tokens();
     let selected = TOKEN_BALANCER
         .select_token(server.server_id, &tokens, &[], conversation_id)

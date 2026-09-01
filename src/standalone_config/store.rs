@@ -12,7 +12,7 @@ use super::{
 };
 use crate::relay_secrets::RelaySecretManager;
 
-const CURRENT_SCHEMA_VERSION: i64 = 9;
+const CURRENT_SCHEMA_VERSION: i64 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {
@@ -334,6 +334,10 @@ impl StandaloneConfigStore {
     ) -> Result<crate::db::McpServer> {
         let env = manager.encrypt(&serde_json::to_string(&input.env_json)?)?;
         let bearer_tokens = manager.encrypt(&serde_json::to_string(&input.bearer_tokens_json)?)?;
+        let basic_password_envelope = match &input.basic_password {
+            Some(password) if !password.trim().is_empty() => Some(manager.encrypt(password)?),
+            _ => None,
+        };
         let now = chrono::Utc::now();
         standalone_query!("src/sql/standalone/save_mcp_server.sql")
             .bind(server_id.to_string())
@@ -347,6 +351,19 @@ impl StandaloneConfigStore {
             .bind(&input.command)
             .bind(serde_json::to_string(&input.args)?)
             .bind(serde_json::to_string(&input.http_headers_json)?)
+            .bind(&input.auth_mode)
+            .bind(&input.basic_username)
+            .bind(
+                basic_password_envelope
+                    .as_ref()
+                    .map(|e| e.ciphertext.clone()),
+            )
+            .bind(basic_password_envelope.as_ref().map(|e| e.nonce.clone()))
+            .bind(
+                basic_password_envelope
+                    .as_ref()
+                    .map(|e| i64::from(e.key_version)),
+            )
             .bind(&input.tool_filter_mode)
             .bind(serde_json::to_string(&input.allowed_tools)?)
             .bind(serde_json::to_string(&input.disabled_tools)?)
@@ -423,9 +440,13 @@ impl StandaloneConfigStore {
         manager: &RelaySecretManager,
         row: &sqlx::sqlite::SqliteRow,
     ) -> Result<crate::db::McpServer> {
-        let (mut server, env, bearer_tokens) = rows::mcp_server(row)?;
+        let (mut server, env, bearer_tokens, basic_password_envelope) = rows::mcp_server(row)?;
         server.env_json = decrypt_json(manager, &env, "MCP environment")?;
         server.bearer_tokens_json = decrypt_json(manager, &bearer_tokens, "MCP bearer tokens")?;
+        server.basic_password = match basic_password_envelope {
+            Some(envelope) => Some(manager.decrypt(&envelope)?),
+            None => None,
+        };
         Ok(server)
     }
 

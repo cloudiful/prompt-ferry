@@ -3955,6 +3955,8 @@ components:
       - env_json
       - bearer_tokens
       - http_headers_json
+      - auth_mode
+      - has_basic_password
       - tool_filter_mode
       - allowed_tools
       - disabled_tools
@@ -3970,6 +3972,12 @@ components:
           example: passthrough_preferred
         allowed_tools: {}
         args: {}
+        auth_mode:
+          type: string
+        basic_username:
+          type:
+          - string
+          - 'null'
         bearer_tokens:
           type: array
           items:
@@ -3991,6 +3999,8 @@ components:
         enabled:
           type: boolean
         env_json: {}
+        has_basic_password:
+          type: boolean
         http_headers_json: {}
         lifecycle_learned_at:
           type:
@@ -4085,6 +4095,18 @@ components:
           - 'null'
         allowed_tools: {}
         args: {}
+        auth_mode:
+          type:
+          - string
+          - 'null'
+        basic_password:
+          type:
+          - string
+          - 'null'
+        basic_username:
+          type:
+          - string
+          - 'null'
         bearer_tokens:
           type:
           - array

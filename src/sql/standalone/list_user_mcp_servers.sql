@@ -1,6 +1,6 @@
 SELECT server_id, source_endpoint_id, scope, owner_user_id, name,
        aggregate_naming_mode, transport, url, command, args_json,
-       http_headers_json, tool_filter_mode, allowed_tools_json,
+       http_headers_json, auth_mode, basic_username, basic_password_ciphertext, basic_password_nonce, basic_password_key_version, tool_filter_mode, allowed_tools_json,
        disabled_tools_json, disabled_resources_json, daily_max_requests,
        monthly_max_requests, enabled, timeout_ms, lifecycle_policy,
        lifecycle_manual_protocol_version, lifecycle_learned_mode,

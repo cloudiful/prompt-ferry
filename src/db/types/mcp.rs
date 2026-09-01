@@ -9,6 +9,15 @@ pub struct McpBearerToken {
     pub enabled: bool,
 }
 
+pub const MCP_AUTH_MODE_NONE: &str = "none";
+pub const MCP_AUTH_MODE_BEARER: &str = "bearer";
+pub const MCP_AUTH_MODE_BASIC: &str = "basic";
+pub const MCP_AUTH_MODES: [&str; 3] = [
+    MCP_AUTH_MODE_NONE,
+    MCP_AUTH_MODE_BEARER,
+    MCP_AUTH_MODE_BASIC,
+];
+
 #[derive(Debug, Clone, Serialize, sqlx::FromRow, ToSchema)]
 pub struct McpServer {
     pub server_id: uuid::Uuid,
@@ -27,6 +36,9 @@ pub struct McpServer {
     #[serde(rename = "bearer_tokens")]
     pub bearer_tokens_json: serde_json::Value,
     pub http_headers_json: serde_json::Value,
+    pub auth_mode: String,
+    pub basic_username: Option<String>,
+    pub basic_password: Option<String>,
     pub tool_filter_mode: String,
     pub allowed_tools: serde_json::Value,
     pub disabled_tools: serde_json::Value,
@@ -85,6 +97,39 @@ impl McpServer {
     pub fn bearer_tokens(&self) -> Vec<McpBearerToken> {
         McpBearerToken::parse_array(&self.bearer_tokens_json)
     }
+
+    pub fn effective_auth_mode(&self) -> &str {
+        let mode = self.auth_mode.trim();
+        if mode.is_empty() {
+            // Legacy rows written before the explicit auth_mode migration keep
+            // `none`/empty even when bearer tokens exist. Keep them effective
+            // as bearer without requiring a manual edit.
+            if !self.bearer_tokens().is_empty() {
+                return MCP_AUTH_MODE_BEARER;
+            }
+            return MCP_AUTH_MODE_NONE;
+        }
+        match mode {
+            MCP_AUTH_MODE_BEARER | MCP_AUTH_MODE_BASIC | MCP_AUTH_MODE_NONE => mode,
+            _ => {
+                if !self.bearer_tokens().is_empty() {
+                    MCP_AUTH_MODE_BEARER
+                } else {
+                    MCP_AUTH_MODE_NONE
+                }
+            }
+        }
+    }
+
+    pub fn has_basic_password(&self) -> bool {
+        self.basic_password
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+    }
+}
+
+pub fn is_valid_auth_mode(value: &str) -> bool {
+    matches!(value, "none" | "bearer" | "basic")
 }
 
 #[cfg(test)]
@@ -106,6 +151,9 @@ mod tests {
             env_json: Value::Object(Default::default()),
             bearer_tokens_json: tokens,
             http_headers_json: Value::Object(Default::default()),
+            auth_mode: MCP_AUTH_MODE_NONE.to_string(),
+            basic_username: None,
+            basic_password: None,
             tool_filter_mode: "blacklist".to_string(),
             allowed_tools: Value::Array(Vec::new()),
             disabled_tools: Value::Array(Vec::new()),
@@ -240,6 +288,9 @@ pub struct McpServerInput {
     pub env_json: serde_json::Value,
     pub bearer_tokens_json: serde_json::Value,
     pub http_headers_json: serde_json::Value,
+    pub auth_mode: String,
+    pub basic_username: Option<String>,
+    pub basic_password: Option<String>,
     pub tool_filter_mode: String,
     pub allowed_tools: serde_json::Value,
     pub disabled_tools: serde_json::Value,

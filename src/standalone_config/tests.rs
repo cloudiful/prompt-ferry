@@ -586,7 +586,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -684,7 +684,7 @@ async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_nine() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
     assert!(
         store
             .list_usage_summaries(64)
@@ -1092,37 +1092,27 @@ async fn upgrade_from_schema_six_adds_metadata_columns_and_keeps_existing_rows()
     for (label, body) in [
         (
             "0001_initial.sql",
-            include_str!("/workspace/tools/prompt-ferry/migrations/standalone/0001_initial.sql"),
+            include_str!("../../migrations/standalone/0001_initial.sql"),
         ),
         (
             "0002_storage_contract.sql",
-            include_str!(
-                "/workspace/tools/prompt-ferry/migrations/standalone/0002_storage_contract.sql"
-            ),
+            include_str!("../../migrations/standalone/0002_storage_contract.sql"),
         ),
         (
             "0003_user_auth_compatibility.sql",
-            include_str!(
-                "/workspace/tools/prompt-ferry/migrations/standalone/0003_user_auth_compatibility.sql"
-            ),
+            include_str!("../../migrations/standalone/0003_user_auth_compatibility.sql"),
         ),
         (
             "0004_coordinator_state.sql",
-            include_str!(
-                "/workspace/tools/prompt-ferry/migrations/standalone/0004_coordinator_state.sql"
-            ),
+            include_str!("../../migrations/standalone/0004_coordinator_state.sql"),
         ),
         (
             "0005_mcp_configuration.sql",
-            include_str!(
-                "/workspace/tools/prompt-ferry/migrations/standalone/0005_mcp_configuration.sql"
-            ),
+            include_str!("../../migrations/standalone/0005_mcp_configuration.sql"),
         ),
         (
             "0006_request_ledger.sql",
-            include_str!(
-                "/workspace/tools/prompt-ferry/migrations/standalone/0006_request_ledger.sql"
-            ),
+            include_str!("../../migrations/standalone/0006_request_ledger.sql"),
         ),
     ] {
         sqlx::raw_sql(body).execute(&pool).await.expect(label);
@@ -1587,7 +1577,7 @@ async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_nine() 
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
     let pool = store.pool().clone();
     for (column, declared_type) in [
         ("conversation_id", "TEXT"),
@@ -1710,7 +1700,7 @@ async fn upgrade_from_schema_eight_creates_request_lease_table() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
 
     // Confirm migration 0008 took effect before the new lease table
     // arrived so the test really exercises the schema-8 -> schema-9

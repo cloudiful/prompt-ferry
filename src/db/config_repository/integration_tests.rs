@@ -166,6 +166,9 @@ fn mcp_input() -> crate::db::McpServerInput {
             {"token": "bearer-secret", "enabled": true}
         ]),
         http_headers_json: serde_json::json!({"x-region": "local"}),
+        auth_mode: "none".to_string(),
+        basic_username: None,
+        basic_password: None,
         tool_filter_mode: "blacklist".to_string(),
         allowed_tools: serde_json::json!([]),
         disabled_tools: serde_json::json!([]),

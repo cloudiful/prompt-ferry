@@ -33,6 +33,28 @@ const form = defineModel<McpForm>('form', { required: true })
 const settingsSectionClass =
   'grid gap-3 rounded border border-default bg-muted p-3'
 
+const authModeItems = computed(() => [
+  { label: props.t('authModeNone'), value: 'none' },
+  { label: props.t('authModeBearer'), value: 'bearer' },
+  { label: props.t('authModeBasic'), value: 'basic' },
+])
+
+const protocolVersionItems = computed(() => [
+  { label: props.t('lifecycleManualProtocolVersionAuto'), value: '' },
+  { label: '2026-07-28', value: '2026-07-28' },
+  { label: '2025-11-25', value: '2025-11-25' },
+  { label: '2025-06-18', value: '2025-06-18' },
+  { label: '2025-03-26', value: '2025-03-26' },
+  { label: '2024-11-05', value: '2024-11-05' },
+])
+
+const protocolVersionModel = computed<string>({
+  get: () => form.value.lifecycle_manual_protocol_version ?? '',
+  set: (value) => {
+    form.value.lifecycle_manual_protocol_version = value ? value : null
+  },
+})
+
 const transportSelection = computed<'http' | 'stdio' | 'builtin_minimax'>({
   get: () => form.value.transport,
   set(value) {
@@ -97,22 +119,6 @@ const toolCatalogNeedsFilter = computed(() => props.catalog.tools.length > 8)
 const resourceCatalogNeedsFilter = computed(
   () => props.catalog.resources.length > 8,
 )
-const learnedLabel = computed(() => {
-  if (!props.learned) return props.t('lifecycleLearnedNone')
-  if (props.learned.mode === 'modern_discover')
-    return props.t('lifecycleLearnedModern')
-  if (props.learned.mode === 'legacy_initialize')
-    return props.t('lifecycleLearnedLegacy')
-  return props.t('lifecycleLearnedNone')
-})
-const learnedVersionLabel = computed(() => {
-  if (!props.learned?.protocolVersion) return '-'
-  return props.learned.protocolVersion
-})
-const learnedAtLabel = computed(() => {
-  if (!props.learned?.learnedAt) return '-'
-  return new Date(props.learned.learnedAt).toLocaleString()
-})
 const toolOptions = computed(() =>
   props.catalog.tools.map((item) => ({
     ...item,
@@ -274,17 +280,54 @@ defineEmits<{
               </UTooltip>
             </div>
           </div>
-          <McpBearerTokensEditor
+          <div
             v-if="form.transport === 'http'"
+            class="grid min-w-0 gap-2"
+          >
+            <div class="text-muted">{{ t('authMode') }}</div>
+            <USelect
+              v-model="form.auth_mode"
+              class="w-full"
+              :items="authModeItems"
+              label-key="label"
+              value-key="value"
+            />
+          </div>
+          <McpBearerTokensEditor
+            v-if="form.transport === 'http' && form.auth_mode === 'bearer'"
             v-model:tokens="form.bearer_tokens"
             :t="t"
           />
           <McpCredentialQuotaEditor
-            v-if="form.transport === 'http' && isAdmin"
+            v-if="
+              form.transport === 'http' &&
+              form.auth_mode === 'bearer' &&
+              isAdmin
+            "
             :server-id="form.server_id"
             :quota-groups="quotaGroups"
             :t="t"
           />
+          <div
+            v-if="form.transport === 'http' && form.auth_mode === 'basic'"
+            class="grid gap-3 md:grid-cols-2"
+          >
+            <UInput
+              v-model="form.basic_username"
+              class="w-full"
+              :placeholder="t('basicUsernamePlaceholder')"
+            />
+            <UInput
+              v-model="form.basic_password"
+              type="password"
+              class="w-full"
+              :placeholder="
+                form.has_basic_password
+                  ? t('savedSecret')
+                  : t('basicPasswordPlaceholder')
+              "
+            />
+          </div>
           <McpEnvironmentEditor
             v-if="form.transport === 'stdio'"
             v-model:variables="form.environment_variables"
@@ -353,29 +396,13 @@ defineEmits<{
                     />
                   </UTooltip>
                 </div>
-                <UInput
-                  v-model="form.lifecycle_manual_protocol_version"
+                <USelect
+                  v-model="protocolVersionModel"
                   class="w-full font-mono"
-                  placeholder="2025-06-18"
+                  :items="protocolVersionItems"
+                  label-key="label"
+                  value-key="value"
                 />
-              </div>
-            </div>
-            <div
-              v-if="form.server_id && learned"
-              class="grid gap-1 p-3 text-xs"
-            >
-              <div
-                class="grid gap-1 rounded border border-default bg-default p-3 md:grid-cols-3"
-              >
-                <div class="text-dimmed">
-                  {{ t('lifecycleLearned') }}: {{ learnedLabel }}
-                </div>
-                <div class="text-dimmed">
-                  {{ t('lifecycleLearnedVersion') }}: {{ learnedVersionLabel }}
-                </div>
-                <div class="text-dimmed">
-                  {{ t('lifecycleLearnedAt') }}: {{ learnedAtLabel }}
-                </div>
               </div>
             </div>
             <div class="grid gap-3 md:grid-cols-[repeat(3,minmax(0,1fr))]">
@@ -490,9 +517,6 @@ defineEmits<{
                   }}</span>
                 </div>
               </div>
-            </div>
-            <div v-else-if="!catalogLoading" class="text-xs text-dimmed">
-              {{ t('aggregatePreviewEmpty') }}
             </div>
           </div>
         </form>

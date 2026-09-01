@@ -82,7 +82,11 @@ export type McpForm = {
   transport: 'http' | 'stdio' | 'builtin_minimax'
   url: string
   command_argv_text: string
+  auth_mode: 'none' | 'bearer' | 'basic'
   bearer_tokens: McpBearerTokenForm[]
+  basic_username: string
+  basic_password: string
+  has_basic_password: boolean
   http_headers_text: string
   environment_variables: McpEnvironmentVariableForm[]
   tool_filter_mode: 'blacklist' | 'whitelist'

@@ -76,7 +76,11 @@ export function createEmptyMcpForm(): McpForm {
     transport: 'http',
     url: '',
     command_argv_text: '[]',
+    auth_mode: 'none',
     bearer_tokens: [],
+    basic_username: '',
+    basic_password: '',
+    has_basic_password: false,
     http_headers_text: '{}',
     environment_variables: [],
     tool_filter_mode: 'blacklist',
@@ -93,6 +97,10 @@ export function createEmptyMcpForm(): McpForm {
 }
 
 export function mcpServerToForm(server: McpServer): McpForm {
+  const authMode =
+    server.auth_mode === 'bearer' || server.auth_mode === 'basic'
+      ? server.auth_mode
+      : 'none'
   return {
     server_id: server.server_id,
     source_endpoint_id: server.source_endpoint_id ?? null,
@@ -111,10 +119,14 @@ export function mcpServerToForm(server: McpServer): McpForm {
           : 'http',
     url: server.url ?? '',
     command_argv_text: JSON.stringify(commandArgv(server)),
+    auth_mode: authMode,
     bearer_tokens: server.bearer_tokens.map((value) => ({
       token: value.token,
       enabled: value.enabled,
     })),
+    basic_username: server.basic_username ?? '',
+    basic_password: '',
+    has_basic_password: server.has_basic_password ?? false,
     http_headers_text: JSON.stringify(
       normalizeJsonRecord(server.http_headers_json),
       null,
@@ -171,18 +183,32 @@ export function mcpFormToRequest(form: McpForm): McpServerRequest {
     }
   }
 
+  const authMode = form.transport === 'http' ? form.auth_mode : 'none'
   return {
     source_endpoint_id: form.source_endpoint_id,
     args: commandArgv.slice(1),
     allowed_tools: form.allowed_tools,
     bearer_tokens:
-      form.transport === 'http'
+      form.transport === 'http' && authMode === 'bearer'
         ? form.bearer_tokens
             .map((value) => ({
               token: value.token.trim(),
               enabled: value.enabled,
             }))
             .filter((value) => value.token !== '')
+        : null,
+    auth_mode: authMode,
+    basic_username:
+      form.transport === 'http' && authMode === 'basic'
+        ? form.basic_username.trim()
+        : null,
+    basic_password:
+      form.transport === 'http' && authMode === 'basic'
+        ? form.basic_password.trim()
+          ? form.basic_password.trim()
+          : form.has_basic_password
+            ? ''
+            : null
         : null,
     command: form.transport === 'stdio' ? String(commandArgv[0]).trim() : null,
     disabled_resources: form.disabled_resources,

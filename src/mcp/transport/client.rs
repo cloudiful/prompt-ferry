@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::anyhow;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{DateTime, Utc};
 use http::{HeaderName, HeaderValue};
 use rmcp::{
@@ -782,16 +783,48 @@ fn http_transport_config(
             .ok_or_else(|| anyhow!("MCP HTTP server missing url"))?
             .to_string(),
     );
-    if let Some(token) = selected.value.filter(|token| !token.trim().is_empty()) {
-        config = config.auth_header(token);
-    }
+    let effective_mode = server.effective_auth_mode();
     let headers = server
         .http_headers_json
         .as_object()
         .cloned()
         .unwrap_or_default();
-    if !headers.is_empty() {
-        config = config.custom_headers(parse_http_headers(headers)?);
+    let mut custom_headers = if headers.is_empty() {
+        HashMap::new()
+    } else {
+        parse_http_headers(headers)?
+    };
+    match effective_mode {
+        crate::db::MCP_AUTH_MODE_BASIC => {
+            let username = server.basic_username.as_deref().unwrap_or("").trim();
+            let password = server.basic_password.as_deref().unwrap_or("").trim();
+            if !username.is_empty() && !password.is_empty() {
+                let credentials = format!("{username}:{password}");
+                let encoded = STANDARD.encode(credentials);
+                let value = format!("Basic {encoded}");
+                custom_headers.insert(
+                    HeaderName::from_static("authorization"),
+                    HeaderValue::from_str(&value)
+                        .map_err(|_| anyhow!("invalid basic auth header value"))?,
+                );
+            }
+            if !custom_headers.is_empty() {
+                config = config.custom_headers(custom_headers);
+            }
+        }
+        crate::db::MCP_AUTH_MODE_BEARER => {
+            if let Some(token) = selected.value.filter(|token| !token.trim().is_empty()) {
+                config = config.auth_header(token);
+            }
+            if !custom_headers.is_empty() {
+                config = config.custom_headers(custom_headers);
+            }
+        }
+        _ => {
+            if !custom_headers.is_empty() {
+                config = config.custom_headers(custom_headers);
+            }
+        }
     }
     Ok(config)
 }
@@ -1254,6 +1287,9 @@ mod tests {
             env_json: json!({}),
             bearer_tokens_json: json!([]),
             http_headers_json: json!({}),
+            auth_mode: "none".to_string(),
+            basic_username: None,
+            basic_password: None,
             tool_filter_mode: "blacklist".to_string(),
             allowed_tools: json!([]),
             disabled_tools: json!([]),
