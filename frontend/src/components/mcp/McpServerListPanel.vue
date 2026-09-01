@@ -27,6 +27,7 @@ defineEmits<{
 
 const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
   { accessorKey: 'name', header: props.t('name') },
+  { id: 'status', header: props.t('status') },
   { id: 'test', header: props.t('test') },
   { id: 'actions' },
 ])
@@ -67,18 +68,18 @@ const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
             <span class="min-w-0 flex-1 truncate text-xs text-muted">{{
               row.original.endpoint_label
             }}</span>
-            <label class="inline-flex shrink-0 items-center">
-              <USwitch
-                :model-value="row.original.enabled"
-                :aria-label="t('status')"
-                :disabled="busy"
-                @update:model-value="
-                  $emit('toggleMcpServer', row.original.server)
-                "
-              />
-            </label>
           </div>
         </div>
+      </template>
+      <template #status-cell="{ row }">
+        <label class="inline-flex items-center">
+          <USwitch
+            :model-value="row.original.enabled"
+            :aria-label="t('status')"
+            :disabled="busy"
+            @update:model-value="$emit('toggleMcpServer', row.original.server)"
+          />
+        </label>
       </template>
       <template #test-cell="{ row }">
         <div class="min-w-0">
