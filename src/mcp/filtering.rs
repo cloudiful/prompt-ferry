@@ -45,6 +45,17 @@ pub(super) async fn call_server_filtered(
         filter_tool_items(&mut response, server, "name");
     } else if method == "resources/list" {
         filter_result_items(&mut response, server, "resources", "uri");
+    } else if method == "resources/templates/list" {
+        if let Some(items) = response
+            .pointer_mut("/result/resourceTemplates")
+            .and_then(Value::as_array_mut)
+        {
+            items.retain(|item| {
+                item.get("uriTemplate")
+                    .and_then(Value::as_str)
+                    .is_none_or(|uri| !is_disabled_item(server, "resources", uri))
+            });
+        }
     }
     Ok(response)
 }
@@ -156,5 +167,16 @@ mod tests {
         let server = server("whitelist", json!(["public_tool"]), json!(["ignored"]));
         assert!(is_tool_allowed(&server, "public_tool"));
         assert!(!is_tool_allowed(&server, "secret_tool"));
+    }
+
+    #[test]
+    fn disabled_resources_blocks_matching_uris_and_templates() {
+        let mut srv = server("blacklist", json!([]), json!([]));
+        srv.disabled_resources = json!(["file:///secret", "git://{a}/{b}/secret"]);
+        assert!(is_disabled_item(&srv, "resources", "file:///secret"));
+        assert!(!is_disabled_item(&srv, "resources", "file:///public"));
+        // Templates use same disabled_resources list
+        assert!(is_disabled_item(&srv, "resources", "git://{a}/{b}/secret"));
+        assert!(!is_disabled_item(&srv, "resources", "git://{a}/{b}/public"));
     }
 }

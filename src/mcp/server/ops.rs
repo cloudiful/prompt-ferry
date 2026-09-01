@@ -326,9 +326,33 @@ impl ProxyService {
             .await
             .ok_or_else(|| ErrorData::internal_error("mcp catalog is not ready", None))?;
         let items = match field {
-            "tools" => snapshot.tools,
-            "resources" => snapshot.resources,
-            "resourceTemplates" => snapshot.resource_templates,
+            "tools" => snapshot
+                .tools
+                .into_iter()
+                .filter(|item| {
+                    item.get("name")
+                        .and_then(Value::as_str)
+                        .is_none_or(|name| filtering::is_tool_allowed(&server, name))
+                })
+                .collect(),
+            "resources" => snapshot
+                .resources
+                .into_iter()
+                .filter(|item| {
+                    item.get("uri")
+                        .and_then(Value::as_str)
+                        .is_none_or(|uri| !filtering::is_disabled_item(&server, "resources", uri))
+                })
+                .collect(),
+            "resourceTemplates" => snapshot
+                .resource_templates
+                .into_iter()
+                .filter(|item| {
+                    item.get("uriTemplate")
+                        .and_then(Value::as_str)
+                        .is_none_or(|uri| !filtering::is_disabled_item(&server, "resources", uri))
+                })
+                .collect(),
             "prompts" => snapshot.prompts,
             _ => return Err(ErrorData::internal_error("unknown MCP catalog field", None)),
         };

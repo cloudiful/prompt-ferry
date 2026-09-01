@@ -12,6 +12,7 @@ use super::{
     cache::{McpCatalogCache, ServerCatalogSnapshot},
     protocol::{encode_resource_template_uri, encode_resource_uri},
 };
+use crate::mcp::filtering::{is_disabled_item, is_tool_allowed};
 
 mod catalog;
 mod snapshot;
@@ -140,7 +141,7 @@ async fn aggregate_prefixed_items(
         }
     }
 
-    Ok(entries_for_kind(&loaded, kind)
+    Ok(entries_for_kind_filtered(&loaded, kind)
         .into_iter()
         .map(|entry| {
             let mut item = entry.item;
@@ -160,6 +161,37 @@ fn entries_for_kind(
             let Some(upstream_name) = item.get(kind.name_key()).and_then(Value::as_str) else {
                 continue;
             };
+            entries.push(AggregateCatalogEntry {
+                server: server.clone(),
+                upstream_name: upstream_name.to_string(),
+                qualified_name: kind.alias_for(&server.name, upstream_name),
+                item: item.clone(),
+            });
+        }
+    }
+    entries
+}
+
+fn entries_for_kind_filtered(
+    loaded: &[(McpServer, ServerCatalogSnapshot)],
+    kind: AggregateKind,
+) -> Vec<AggregateCatalogEntry> {
+    let mut entries = Vec::new();
+    for (server, snapshot) in loaded {
+        for item in kind.snapshot_items(snapshot) {
+            let Some(upstream_name) = item.get(kind.name_key()).and_then(Value::as_str) else {
+                continue;
+            };
+            let allowed = match kind {
+                AggregateKind::Tools => is_tool_allowed(server, upstream_name),
+                AggregateKind::Resources | AggregateKind::Templates => {
+                    !is_disabled_item(server, "resources", upstream_name)
+                }
+                AggregateKind::Prompts => true,
+            };
+            if !allowed {
+                continue;
+            }
             entries.push(AggregateCatalogEntry {
                 server: server.clone(),
                 upstream_name: upstream_name.to_string(),

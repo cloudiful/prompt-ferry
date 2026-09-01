@@ -7,10 +7,7 @@ use serde_json::{Value, json};
 use crate::db::McpServer;
 
 use super::ServerCatalogSnapshot;
-use crate::mcp::{
-    filtering::{is_disabled_item, is_tool_allowed},
-    transport,
-};
+use crate::mcp::transport;
 
 pub async fn fetch_server_snapshot(
     pool: Option<&sqlx::PgPool>,
@@ -27,13 +24,7 @@ pub(crate) async fn fetch_server_snapshot_with_storage(
     let timeout = Duration::from_millis(server.timeout_ms.max(100) as u64);
     tokio::time::timeout(timeout, async {
         if server.transport == "builtin_minimax" {
-            let mut snapshot = crate::mcp::builtin::catalog();
-            snapshot.tools.retain(|item| {
-                item.get("name")
-                    .and_then(Value::as_str)
-                    .is_none_or(|name| is_tool_allowed(server, name))
-            });
-            return Ok(snapshot);
+            return Ok(crate::mcp::builtin::catalog());
         }
         let client = transport::connect(storage, server, None).await?;
         let result = async {
@@ -44,7 +35,7 @@ pub(crate) async fn fetch_server_snapshot_with_storage(
                 .unwrap_or_default();
             let probe_policy = catalog_probe_policy(server, &capabilities);
 
-            let mut tools = if probe_policy.tools {
+            let tools = if probe_policy.tools {
                 read_peer_list(
                     &transport::peer_list_or_empty(client.peer().list_all_tools().await, "tools")?,
                     "tools",
@@ -52,7 +43,7 @@ pub(crate) async fn fetch_server_snapshot_with_storage(
             } else {
                 Vec::new()
             };
-            let mut resources = if probe_policy.resources {
+            let resources = if probe_policy.resources {
                 read_peer_list(
                     &transport::peer_list_or_empty(
                         client.peer().list_all_resources().await,
@@ -63,7 +54,7 @@ pub(crate) async fn fetch_server_snapshot_with_storage(
             } else {
                 Vec::new()
             };
-            let mut resource_templates = if probe_policy.resources {
+            let resource_templates = if probe_policy.resources {
                 read_peer_list(
                     &transport::peer_list_or_empty(
                         client.peer().list_all_resource_templates().await,
@@ -85,22 +76,6 @@ pub(crate) async fn fetch_server_snapshot_with_storage(
             } else {
                 Vec::new()
             };
-
-            tools.retain(|item| {
-                item.get("name")
-                    .and_then(Value::as_str)
-                    .is_none_or(|name| is_tool_allowed(server, name))
-            });
-            resources.retain(|item| {
-                item.get("uri")
-                    .and_then(Value::as_str)
-                    .is_none_or(|uri| !is_disabled_item(server, "resources", uri))
-            });
-            resource_templates.retain(|item| {
-                item.get("uriTemplate")
-                    .and_then(Value::as_str)
-                    .is_none_or(|uri| !is_disabled_item(server, "resources", uri))
-            });
 
             Ok(ServerCatalogSnapshot {
                 tools,
