@@ -189,6 +189,7 @@ pub(super) async fn forward_route_request(
             route,
             &prepared.body,
             &request.headers,
+            request_ctx.request_prompt_log.conversation_id,
         )
         .send()
         .await;

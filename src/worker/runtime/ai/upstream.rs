@@ -12,7 +12,7 @@ pub(super) async fn send_upstream_request(
     route: &db::RouteConfig,
     body: &PreparedRequestBody,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    build_upstream_request(client, method, url, route, body, &[])
+    build_upstream_request(client, method, url, route, body, &[], None)
         .send()
         .await
 }
@@ -24,6 +24,7 @@ pub(super) fn build_upstream_request(
     route: &db::RouteConfig,
     body: &PreparedRequestBody,
     request_headers: &[(String, String)],
+    conversation_id: Option<uuid::Uuid>,
 ) -> reqwest::RequestBuilder {
     let request_builder = client
         .request(method.clone(), url)
@@ -35,10 +36,116 @@ pub(super) fn build_upstream_request(
         ),
         _ => request_builder.bearer_auth(&route.api_key),
     };
+    let request_builder = if is_opencode_host(&route.base_url) || is_opencode_host(url) {
+        with_opencode_headers(request_builder, request_headers, conversation_id)
+    } else {
+        request_builder
+    };
     match body {
         PreparedRequestBody::PassthroughStream(bytes) => request_builder.body(bytes.clone()),
         PreparedRequestBody::BufferedBytes(bytes) => request_builder.body(bytes.clone()),
     }
+}
+
+pub(super) fn is_opencode_host(url: &str) -> bool {
+    let host = if let Ok(parsed) = reqwest::Url::parse(url) {
+        parsed.host_str().map(|h| h.to_ascii_lowercase())
+    } else {
+        // Fallback manual parsing for robustness in tests with non-standard urls.
+        let trimmed = url.trim();
+        let without_scheme = if let Some(idx) = trimmed.find("://") {
+            &trimmed[idx + 3..]
+        } else {
+            trimmed
+        };
+        let host_part = without_scheme
+            .split('/')
+            .next()
+            .unwrap_or("")
+            .split(':')
+            .next()
+            .unwrap_or("")
+            .split('?')
+            .next()
+            .unwrap_or("")
+            .split('#')
+            .next()
+            .unwrap_or("");
+        if host_part.is_empty() {
+            None
+        } else {
+            Some(host_part.to_ascii_lowercase())
+        }
+    };
+    match host {
+        Some(host) => host == "opencode.ai" || host.ends_with(".opencode.ai"),
+        None => false,
+    }
+}
+
+fn with_opencode_headers(
+    builder: reqwest::RequestBuilder,
+    request_headers: &[(String, String)],
+    conversation_id: Option<uuid::Uuid>,
+) -> reqwest::RequestBuilder {
+    // Preserve caller-supplied non-empty x-opencode-session, else synthesize deterministically.
+    let session_value = request_headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("x-opencode-session"))
+        .map(|(_, value)| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+
+    let builder = if let Some(value) = session_value {
+        builder.header("x-opencode-session", value)
+    } else if let Some(id) = conversation_id.filter(|id| !id.is_nil()) {
+        builder.header("x-opencode-session", format!("ses_{id}"))
+    } else {
+        builder
+    };
+
+    // Preserve caller User-Agent, else synthesize prompt-ferry/<version>.
+    let user_agent_value = request_headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("user-agent"))
+        .map(|(_, value)| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+
+    let builder = if let Some(value) = user_agent_value {
+        builder.header(header::USER_AGENT, value)
+    } else {
+        builder.header(
+            header::USER_AGENT,
+            format!("prompt-ferry/{}", env!("CARGO_PKG_VERSION")),
+        )
+    };
+
+    // Forward other safe OpenCode identity headers (x-opencode-*) that are non-empty.
+    // This keeps the relay's safe header policy for OpenCode without leaking auth/hop-by-hop.
+    let mut builder = builder;
+    for (name, value) in request_headers {
+        if name.eq_ignore_ascii_case("x-opencode-session")
+            || name.eq_ignore_ascii_case("user-agent")
+        {
+            continue;
+        }
+        if name.to_ascii_lowercase().starts_with("x-opencode-") {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // Avoid forwarding auth/hop-by-hop even if mis-prefixed; x-opencode-* is safe, but keep guard.
+            if matches!(
+                name.to_ascii_lowercase().as_str(),
+                "authorization" | "cookie" | "x-api-key" | "host" | "connection"
+            ) {
+                continue;
+            }
+            builder = builder.header(name.as_str(), trimmed);
+        }
+    }
+    builder
 }
 
 pub(super) fn with_anthropic_headers(
@@ -184,6 +291,7 @@ mod tests {
                 ("anthropic-beta".to_string(), "tools-2024-04-04".to_string()),
                 ("x-api-key".to_string(), "client-key".to_string()),
             ],
+            None,
         )
         .build()
         .unwrap();
@@ -196,6 +304,365 @@ mod tests {
         assert_eq!(
             request.headers().get("anthropic-beta").unwrap(),
             "tools-2024-04-04"
+        );
+        // Non-OpenCode hosts must not synthesize opencode headers.
+        assert!(request.headers().get("x-opencode-session").is_none());
+        assert!(request.headers().get(header::USER_AGENT).is_none());
+    }
+
+    #[test]
+    fn is_opencode_host_detects_root_and_subdomains() {
+        assert!(is_opencode_host("https://opencode.ai"));
+        assert!(is_opencode_host("https://opencode.ai/zen/go/v1"));
+        assert!(is_opencode_host("https://api.opencode.ai"));
+        assert!(is_opencode_host("https://foo.bar.opencode.ai"));
+        assert!(is_opencode_host(
+            "https://opencode.ai:8443/v1/chat/completions"
+        ));
+        assert!(is_opencode_host("https://OPENC0DE.AI") == false);
+        assert!(is_opencode_host("https://OPencode.AI"));
+        assert!(is_opencode_host("https://opencode.AI/"));
+        assert!(!is_opencode_host("https://notopencode.ai"));
+        assert!(!is_opencode_host("https://opencode.ai.evil.com"));
+        assert!(!is_opencode_host("https://evilopencode.ai"));
+        assert!(!is_opencode_host("https://example.com"));
+        assert!(!is_opencode_host("https://opencode.ai.evil.com/v1"));
+        assert!(!is_opencode_host("not-a-url"));
+        assert!(!is_opencode_host(""));
+        // boundary: host with prefix attacker
+        assert!(!is_opencode_host("https://attacker-opencode.ai"));
+        // exact subdomain boundary requires dot
+        assert!(is_opencode_host(
+            "https://deep.nested.sub.opencode.ai/path?query=1"
+        ));
+    }
+
+    #[test]
+    fn opencode_passthrough_preserves_caller_session_and_user_agent() {
+        let route = RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://api.opencode.ai".to_string(),
+            api_key: "upstream-key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: NativeApi::Chat,
+            upstream_model: None,
+            responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
+            route_selection_reason: RouteSelectionReason::Default,
+        };
+        let conversation_id =
+            uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://api.opencode.ai/v1/responses",
+            &route,
+            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            &[
+                (
+                    "x-opencode-session".to_string(),
+                    "ses_caller123".to_string(),
+                ),
+                ("User-Agent".to_string(), "opencode/1.0 test".to_string()),
+                ("x-opencode-project".to_string(), "proj_123".to_string()),
+            ],
+            Some(conversation_id),
+        )
+        .build()
+        .unwrap();
+
+        assert_eq!(
+            request.headers().get("x-opencode-session").unwrap(),
+            "ses_caller123"
+        );
+        assert_eq!(
+            request.headers().get(header::USER_AGENT).unwrap(),
+            "opencode/1.0 test"
+        );
+        // safe additional opencode header forwarded
+        assert_eq!(
+            request.headers().get("x-opencode-project").unwrap(),
+            "proj_123"
+        );
+    }
+
+    #[test]
+    fn opencode_synthesizes_session_and_user_agent_when_missing() {
+        let route = RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://opencode.ai".to_string(),
+            api_key: "upstream-key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: NativeApi::Chat,
+            upstream_model: None,
+            responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
+            route_selection_reason: RouteSelectionReason::Default,
+        };
+        let conversation_id =
+            uuid::Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://opencode.ai/zen/go/v1/responses",
+            &route,
+            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            &[],
+            Some(conversation_id),
+        )
+        .build()
+        .unwrap();
+
+        assert_eq!(
+            request
+                .headers()
+                .get("x-opencode-session")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!("ses_{conversation_id}")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get(header::USER_AGENT)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!("prompt-ferry/{}", env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    #[test]
+    fn opencode_empty_header_treated_as_missing_and_synthesized() {
+        let route = RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://opencode.ai".to_string(),
+            api_key: "upstream-key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: NativeApi::Chat,
+            upstream_model: None,
+            responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
+            route_selection_reason: RouteSelectionReason::Default,
+        };
+        let conversation_id =
+            uuid::Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://opencode.ai/v1/responses",
+            &route,
+            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            &[
+                ("x-opencode-session".to_string(), "   ".to_string()),
+                ("user-agent".to_string(), "".to_string()),
+            ],
+            Some(conversation_id),
+        )
+        .build()
+        .unwrap();
+
+        assert_eq!(
+            request
+                .headers()
+                .get("x-opencode-session")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!("ses_{conversation_id}")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get(header::USER_AGENT)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!("prompt-ferry/{}", env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    #[test]
+    fn opencode_no_identity_omits_session_but_sets_user_agent() {
+        let route = RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://sub.opencode.ai".to_string(),
+            api_key: "upstream-key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: NativeApi::Chat,
+            upstream_model: None,
+            responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
+            route_selection_reason: RouteSelectionReason::Default,
+        };
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://sub.opencode.ai/v1/chat/completions",
+            &route,
+            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            &[],
+            None,
+        )
+        .build()
+        .unwrap();
+
+        assert!(request.headers().get("x-opencode-session").is_none());
+        assert_eq!(
+            request
+                .headers()
+                .get(header::USER_AGENT)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!("prompt-ferry/{}", env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    #[test]
+    fn non_opencode_does_not_forward_or_synthesize() {
+        let route = RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://api.openai.com".to_string(),
+            api_key: "upstream-key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: NativeApi::Chat,
+            upstream_model: None,
+            responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
+            route_selection_reason: RouteSelectionReason::Default,
+        };
+        let conversation_id =
+            uuid::Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://api.openai.com/v1/chat/completions",
+            &route,
+            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            &[
+                (
+                    "x-opencode-session".to_string(),
+                    "ses_should_not_forward".to_string(),
+                ),
+                ("User-Agent".to_string(), "custom-agent/1.0".to_string()),
+                (
+                    "x-opencode-project".to_string(),
+                    "proj_should_not_forward".to_string(),
+                ),
+            ],
+            Some(conversation_id),
+        )
+        .build()
+        .unwrap();
+
+        // No opencode headers for non-opencode host, and User-Agent not forwarded/synthesized.
+        assert!(request.headers().get("x-opencode-session").is_none());
+        assert!(request.headers().get("x-opencode-project").is_none());
+        assert!(request.headers().get(header::USER_AGENT).is_none());
+        // Bearer auth still set
+        assert!(request.headers().get(header::AUTHORIZATION).is_some());
+    }
+
+    #[test]
+    fn opencode_detection_does_not_use_body_model_metadata() {
+        // Ensure that even if caller body would contain model "opencode" string,
+        // detection is host-only. Here we use non-opencode host with model hint in headers
+        // but ensure no synthesis.
+        let route = RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://api.example.com".to_string(),
+            api_key: "upstream-key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: NativeApi::Chat,
+            upstream_model: Some("opencode-model".to_string()),
+            responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
+            route_selection_reason: RouteSelectionReason::Default,
+        };
+        let conversation_id =
+            uuid::Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://api.example.com/v1/chat/completions",
+            &route,
+            &PreparedRequestBody::BufferedBytes(br#"{"model":"opencode"}"#.to_vec()),
+            &[],
+            Some(conversation_id),
+        )
+        .build()
+        .unwrap();
+        assert!(request.headers().get("x-opencode-session").is_none());
+        assert!(request.headers().get(header::USER_AGENT).is_none());
+    }
+
+    #[test]
+    fn opencode_host_case_insensitive_and_trims_values() {
+        let route = RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://API.OpEnCoDe.AI".to_string(),
+            api_key: "upstream-key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: NativeApi::Chat,
+            upstream_model: None,
+            responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
+            route_selection_reason: RouteSelectionReason::Default,
+        };
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://API.OpEnCoDe.AI/v1/responses",
+            &route,
+            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
+            &[
+                (
+                    "X-OPENCODE-SESSION".to_string(),
+                    "  ses_case_insensitive  ".to_string(),
+                ),
+                ("UsEr-AgEnT".to_string(), "  custom-ua/2.0  ".to_string()),
+            ],
+            None,
+        )
+        .build()
+        .unwrap();
+        assert_eq!(
+            request.headers().get("x-opencode-session").unwrap(),
+            "ses_case_insensitive"
+        );
+        assert_eq!(
+            request.headers().get(header::USER_AGENT).unwrap(),
+            "custom-ua/2.0"
         );
     }
 }
