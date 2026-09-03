@@ -16,7 +16,6 @@ const props = defineProps<{
 const draftLabels = ref<Record<string, string>>({})
 
 const columns = computed<TableColumn<ApiKeyItemView>[]>(() => [
-  { accessorKey: 'key_prefix', header: props.t('keyPrefix') },
   { accessorKey: 'label', header: props.t('name') },
   { id: 'status', header: props.t('status') },
   { id: 'secret', header: props.t('apiKey') },
@@ -64,14 +63,11 @@ function commitLabel(keyItem: ApiKeyItemView): void {
         class="grid gap-3 rounded-lg border border-default bg-default p-3"
       >
         <div class="flex items-center justify-between gap-2">
-          <div class="min-w-0">
-            <div class="truncate font-mono text-xs text-muted">
-              {{ keyItem.key_prefix }}
-            </div>
+          <div class="min-w-0 flex-1">
             <UInput
               :model-value="labelDraft(keyItem)"
               size="sm"
-              class="mt-1 w-full"
+              class="w-full"
               :aria-label="t('name')"
               @update:model-value="updateLabel(keyItem.key_id, $event)"
               @keydown.enter.prevent="commitLabel(keyItem)"
@@ -159,11 +155,6 @@ function commitLabel(keyItem: ApiKeyItemView): void {
           @keydown.enter.prevent="commitLabel(row.original)"
           @blur="commitLabel(row.original)"
         />
-      </template>
-      <template #key_prefix-cell="{ row }">
-        <span class="font-mono text-xs text-muted">
-          {{ row.original.key_prefix }}
-        </span>
       </template>
       <template #status-cell="{ row }">
         <div class="flex items-center gap-3">

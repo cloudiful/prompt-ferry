@@ -25,3 +25,63 @@ select {
 ::selection {
   background: color-mix(in srgb, var(--ui-primary) 25%, transparent);
 }
+
+:root {
+  --ui-header-height: 3rem;
+}
+
+/* Dashboard chrome: consistent sidebar navigation typography */
+.dashboard-sidebar-nav {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.dashboard-sidebar-nav :where([data-slot='link'], [data-slot='childLink']) {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.dashboard-sidebar-nav
+  :where([data-slot='linkLabel'], [data-slot='childLinkLabel']) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dashboard chrome: toolbar controls share one explicit height */
+#dashboard-navbar-actions {
+  --dashboard-toolbar-height: 2rem;
+}
+
+#dashboard-navbar-actions > div {
+  align-items: center;
+}
+
+#dashboard-navbar-actions
+  :where(button, [role='combobox'], [data-slot='base']) {
+  height: var(--dashboard-toolbar-height);
+  min-height: var(--dashboard-toolbar-height);
+  box-sizing: border-box;
+}
+
+/* Ensure neutral/outline/solid/ghost toolbar buttons keep same height */
+#dashboard-navbar-actions button {
+  height: var(--dashboard-toolbar-height);
+  min-height: var(--dashboard-toolbar-height);
+}
+
+/* Desktop collapse fully hides sidebar rail while preserving mobile slideover */
+@media (min-width: 1024px) {
+  [data-slot='root'][data-collapsed='true'] {
+    width: 0 !important;
+    min-width: 0 !important;
+    overflow: hidden;
+    border-width: 0 !important;
+  }
+
+  [data-slot='root'][data-collapsed='true'] + [data-slot='handle'] {
+    display: none;
+  }
+}

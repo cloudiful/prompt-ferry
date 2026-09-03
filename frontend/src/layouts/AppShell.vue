@@ -61,9 +61,10 @@ async function logout(): Promise<void> {
       v-model:collapsed="collapsed"
       collapsible
       resizable
-      :min-size="12"
-      :max-size="16"
-      :default-size="13"
+      :min-size="16"
+      :max-size="24"
+      :default-size="19"
+      :collapsed-size="0"
     >
       <template #header>
         <div class="flex min-w-0 items-center justify-end px-1">
@@ -79,6 +80,7 @@ async function logout(): Promise<void> {
         :collapsed="collapsed"
         tooltip
         popover
+        class="dashboard-sidebar-nav"
       />
 
       <template #footer="{ collapsed: isCollapsed }">
@@ -102,6 +104,17 @@ async function logout(): Promise<void> {
     <UDashboardPanel>
       <template #header>
         <UDashboardNavbar :ui="{ right: 'min-w-0 flex-1 justify-end' }">
+          <template #leading>
+            <UButton
+              v-if="collapsed"
+              color="neutral"
+              variant="ghost"
+              icon="i-lucide-panel-left-open"
+              :aria-label="t('expandNav')"
+              class="hidden lg:inline-flex"
+              @click="collapsed = false"
+            />
+          </template>
           <template #right>
             <div
               id="dashboard-navbar-actions"
