@@ -174,6 +174,13 @@ export const navItems: NavItem[] = [
         adminOnly: true,
         isActive: (route) => route.path === '/settings/review',
       },
+      {
+        path: '/settings/storage',
+        labelKey: 'settingsStorage',
+        to: { path: '/settings/storage' },
+        adminOnly: true,
+        isActive: (route) => route.path === '/settings/storage',
+      },
     ],
   },
 ]

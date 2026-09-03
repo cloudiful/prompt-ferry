@@ -3,12 +3,14 @@ import { ref } from 'vue'
 import {
   getLlmReviewSetting,
   getModelRouteWhitelist,
+  getRawObjectStore,
   getRequestContentLogging,
   getStreamDeltaBatching,
   getRelayIpWhitelist,
   getUsageRetention,
   setLlmReviewSetting,
   setModelRouteWhitelist,
+  setRawObjectStore,
   setRequestContentLogging,
   setStreamDeltaBatching,
   setRelayIpWhitelist,
@@ -18,6 +20,8 @@ import type {
   LlmReviewSettings,
   LlmReviewWebhookSettings,
   ModelRouteWhitelistResponse,
+  RawObjectStoreSettingsRequest,
+  RawObjectStoreSettingsResponse,
   RequestContentLoggingResponse,
   RelayIpPolicyResponse,
   StreamDeltaBatchingSettings,
@@ -54,6 +58,18 @@ const emptyLlmReview = ensureLlmReviewDefaults({
 
 export const useSettingsStore = defineStore('settings', () => {
   const loading = ref(false)
+  const rawObjectStore = ref<RawObjectStoreSettingsResponse>({
+    backend: 'local',
+    local_dir: '',
+    s3_endpoint: '',
+    s3_bucket: '',
+    s3_region: 'auto',
+    s3_prefix: 'prompt-ferry/raw',
+    s3_allow_http: false,
+    has_s3_access_key: false,
+    has_s3_secret_key: false,
+  })
+  const rawObjectStoreError = ref<string | null>(null)
   const requestContentLogging = ref<RequestContentLoggingResponse>({
     mode: 'off',
     raw_retention_days: 3,
@@ -89,6 +105,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function refresh(): Promise<void> {
     loading.value = true
+    rawObjectStoreError.value = null
     try {
       const [
         contentLogging,
@@ -114,10 +131,28 @@ export const useSettingsStore = defineStore('settings', () => {
       llmReview.value = ensureLlmReviewDefaults(expectData(reviewSettings))
       usageRetention.value = expectData(retention)
       requestContentLogging.value.raw_retention_days =
-        usageRetention.value.raw_retention_days ?? requestContentLogging.value.raw_retention_days
+        usageRetention.value.raw_retention_days ??
+        requestContentLogging.value.raw_retention_days
       llmReviewWebhookHeadersText.value = webhookHeadersToText(
         llmReview.value.webhook?.extra_headers ?? {},
       )
+      try {
+        const raw = await getRawObjectStore<true>(withData())
+        rawObjectStore.value = expectData(raw)
+        rawObjectStoreError.value = null
+      } catch (cause) {
+        const message =
+          cause instanceof Error ? cause.message : String(cause ?? '')
+        const isUnavailable =
+          message.toLowerCase().includes('sqlite') ||
+          message.toLowerCase().includes('not available') ||
+          message.toLowerCase().includes('unavailable')
+        if (isUnavailable) {
+          rawObjectStoreError.value = message || 'unavailable'
+        } else {
+          rawObjectStoreError.value = message || 'failed to load'
+        }
+      }
     } finally {
       loading.value = false
     }
@@ -138,7 +173,8 @@ export const useSettingsStore = defineStore('settings', () => {
       await setUsageRetention<true>(withData({ body: usageRetention.value })),
     )
     requestContentLogging.value.raw_retention_days =
-      usageRetention.value.raw_retention_days ?? requestContentLogging.value.raw_retention_days
+      usageRetention.value.raw_retention_days ??
+      requestContentLogging.value.raw_retention_days
   }
 
   async function saveStreamDeltaBatching(): Promise<void> {
@@ -192,15 +228,43 @@ export const useSettingsStore = defineStore('settings', () => {
     )
   }
 
+  async function saveRawObjectStore(
+    payload: RawObjectStoreSettingsRequest,
+  ): Promise<RawObjectStoreSettingsResponse> {
+    const response = expectData(
+      await setRawObjectStore<true>(withData({ body: payload })),
+    )
+    rawObjectStore.value = response
+    rawObjectStoreError.value = null
+    return response
+  }
+
+  async function refreshRawObjectStore(): Promise<void> {
+    try {
+      const raw = await getRawObjectStore<true>(withData())
+      rawObjectStore.value = expectData(raw)
+      rawObjectStoreError.value = null
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : String(cause ?? '')
+      rawObjectStoreError.value = message
+      throw cause
+    }
+  }
+
   return {
     llmReview,
     llmReviewWebhookHeadersText,
     loading,
     modelRouteWhitelist,
+    rawObjectStore,
+    rawObjectStoreError,
     refresh,
+    refreshRawObjectStore,
     relayIpWhitelist,
     saveLlmReview,
     saveModelRouteWhitelist,
+    saveRawObjectStore,
     saveRelayIpWhitelist,
     requestContentLogging,
     saveRequestContentLogging,

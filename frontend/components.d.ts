@@ -69,6 +69,8 @@ declare module 'vue' {
     SettingsNetworkTab: typeof import('./src/components/settings/SettingsNetworkTab.vue')['default']
     SettingsRequestsTab: typeof import('./src/components/settings/SettingsRequestsTab.vue')['default']
     SettingsReviewTab: typeof import('./src/components/settings/SettingsReviewTab.vue')['default']
+    SettingsStorageCredentials: typeof import('./src/components/settings/SettingsStorageCredentials.vue')['default']
+    SettingsStorageTab: typeof import('./src/components/settings/SettingsStorageTab.vue')['default']
     StreamDeltaBatchingFields: typeof import('./src/components/shared/StreamDeltaBatchingFields.vue')['default']
     TablePagination: typeof import('./src/components/shared/TablePagination.vue')['default']
     TestResultPopover: typeof import('./src/components/shared/TestResultPopover.vue')['default']

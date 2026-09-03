@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import PageIntro from '../components/PageIntro.vue'
 import { useLocale } from '../composables/useLocale'
 import SettingsGeneralTab from '../components/settings/SettingsGeneralTab.vue'
 import SettingsNetworkTab from '../components/settings/SettingsNetworkTab.vue'
 import SettingsRequestsTab from '../components/settings/SettingsRequestsTab.vue'
 import SettingsReviewTab from '../components/settings/SettingsReviewTab.vue'
+import SettingsStorageTab from '../components/settings/SettingsStorageTab.vue'
 import { setLocale } from '../composables/useLocale'
 import { useNotifier } from '../composables/useNotifier'
 import { resolveSettingsTab } from '../models/settings'
@@ -232,6 +234,23 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="grid min-w-0 max-w-full gap-3">
+    <PageIntro>
+      <template #actions>
+        <UButton
+          v-if="session.isAdmin"
+          size="sm"
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-refresh-cw"
+          :loading="settingsStore.loading"
+          :aria-label="t('refresh')"
+          @click="refresh"
+        >
+          <span class="hidden sm:inline">{{ t('refresh') }}</span>
+        </UButton>
+      </template>
+    </PageIntro>
+
     <SettingsGeneralTab
       v-if="activeSection === 'general'"
       v-model:locale="locale"
@@ -267,6 +286,11 @@ onBeforeUnmount(() => {
       :busy="settingsStore.loading"
       :t="t"
       @save-llm-review="saveLlmReview"
+    />
+
+    <SettingsStorageTab
+      v-else-if="session.isAdmin && activeSection === 'storage'"
+      :t="t"
     />
   </div>
 </template>

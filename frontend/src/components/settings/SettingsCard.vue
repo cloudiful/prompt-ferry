@@ -6,10 +6,12 @@ defineProps<{
 </script>
 
 <template>
-  <article class="min-w-0 rounded-lg border border-default bg-default">
+  <article
+    class="min-w-0 overflow-hidden rounded-lg border border-default bg-default"
+  >
     <div
       v-if="$slots.header"
-      class="flex flex-wrap items-start justify-between gap-2 border-b border-default px-3 py-3"
+      class="flex flex-wrap items-start justify-between gap-2 border-b border-default px-3 py-2.5"
       :class="headerClass"
     >
       <slot name="header" />

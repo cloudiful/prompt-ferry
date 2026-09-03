@@ -753,6 +753,47 @@ export type QuotaPeriodKind = 'day' | 'month';
 
 export type QuotaUnit = 'requests' | 'credits';
 
+/**
+ * Raw object-store backend selected by the administrator.
+ */
+export type RawObjectStoreBackend = 'local' | 's3' | 'disabled';
+
+export type RawObjectStoreSecretPatch = {
+    mode: 'keep';
+} | {
+    mode: 'clear';
+} | {
+    mode: 'replace';
+    value: string;
+};
+
+export type RawObjectStoreSettingsRequest = {
+    backend: RawObjectStoreBackend;
+    local_dir: string;
+    s3_access_key?: null | RawObjectStoreSecretPatch;
+    s3_allow_http: boolean;
+    s3_bucket: string;
+    s3_endpoint: string;
+    s3_prefix: string;
+    s3_region: string;
+    s3_secret_key?: null | RawObjectStoreSecretPatch;
+};
+
+/**
+ * Redacted API response for the admin settings surface.
+ */
+export type RawObjectStoreSettingsResponse = {
+    backend: RawObjectStoreBackend;
+    has_s3_access_key: boolean;
+    has_s3_secret_key: boolean;
+    local_dir: string;
+    s3_allow_http: boolean;
+    s3_bucket: string;
+    s3_endpoint: string;
+    s3_prefix: string;
+    s3_region: string;
+};
+
 export type RedactionConfigSchema = {
     custom_strings: Array<CustomStringRuleSchema>;
     enabled: boolean;
@@ -3206,6 +3247,38 @@ export type SetModelRouteWhitelistResponses = {
 };
 
 export type SetModelRouteWhitelistResponse = SetModelRouteWhitelistResponses[keyof SetModelRouteWhitelistResponses];
+
+export type GetRawObjectStoreData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/settings/raw-object-store';
+};
+
+export type GetRawObjectStoreResponses = {
+    /**
+     * Raw object store settings
+     */
+    200: RawObjectStoreSettingsResponse;
+};
+
+export type GetRawObjectStoreResponse = GetRawObjectStoreResponses[keyof GetRawObjectStoreResponses];
+
+export type SetRawObjectStoreData = {
+    body: RawObjectStoreSettingsRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/settings/raw-object-store';
+};
+
+export type SetRawObjectStoreResponses = {
+    /**
+     * Updated raw object store settings
+     */
+    200: RawObjectStoreSettingsResponse;
+};
+
+export type SetRawObjectStoreResponse = SetRawObjectStoreResponses[keyof SetRawObjectStoreResponses];
 
 export type GetRedactionSettingData = {
     body?: never;

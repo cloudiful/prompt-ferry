@@ -48,20 +48,22 @@ const requestContentLoggingModeOptions = computed(() =>
 </script>
 
 <template>
-  <section class="grid gap-4">
+  <section class="grid gap-3">
     <div class="grid items-start gap-3 lg:grid-cols-2">
       <SettingsCard>
         <template #header>
-          <div class="min-w-0">
-            <h3
-              class="m-0 text-[0.82rem] leading-[1.3] font-semibold text-highlighted"
-            >
-              {{ t('contentLogging') }}
-            </h3>
-          </div>
+          <h3
+            class="m-0 inline-flex items-center gap-1.5 text-[0.82rem] leading-[1.3] font-semibold text-highlighted"
+          >
+            <UIcon name="i-lucide-file-text" class="h-3.5 w-3.5 text-muted" />
+            {{ t('contentLogging') }}
+          </h3>
+          <span class="text-[11px] leading-none text-muted">{{
+            t('contentLoggingOff')
+          }}</span>
         </template>
-        <div class="grid items-end gap-3 md:grid-cols-[12rem_auto]">
-          <label class="grid gap-1.5">
+        <div class="grid gap-3">
+          <label class="grid gap-1">
             <span class="text-xs text-muted">{{
               t('contentLoggingMode')
             }}</span>
@@ -74,75 +76,74 @@ const requestContentLoggingModeOptions = computed(() =>
               class="w-full min-w-0"
             />
           </label>
-
-          <label class="grid gap-1.5">
-            <span class="text-xs text-muted">{{ t('rawRetentionDays') }}</span>
-            <UInputNumber
-              v-model="requestContentLogging.raw_retention_days"
-              size="sm"
-              :min="1"
-              :max="30"
-              :use-grouping="false"
-            />
-          </label>
-
-          <label class="grid gap-1.5">
-            <span class="text-xs text-muted">{{
-              t('approvalRetentionDays')
-            }}</span>
-            <UInputNumber
-              v-model="usageRetention.approval_retention_days"
-              size="sm"
-              :min="1"
-              :use-grouping="false"
-            />
-          </label>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="grid gap-1">
+              <span class="text-xs text-muted">{{
+                t('rawRetentionDays')
+              }}</span>
+              <UInputNumber
+                v-model="requestContentLogging.raw_retention_days"
+                size="sm"
+                :min="1"
+                :max="30"
+                :use-grouping="false"
+              />
+            </label>
+            <label class="grid gap-1">
+              <span class="text-xs text-muted">{{
+                t('approvalRetentionDays')
+              }}</span>
+              <UInputNumber
+                v-model="usageRetention.approval_retention_days"
+                size="sm"
+                :min="1"
+                :use-grouping="false"
+              />
+            </label>
+          </div>
         </div>
       </SettingsCard>
 
       <SettingsCard>
         <template #header>
-          <div class="grid gap-2">
-            <h3
-              class="m-0 text-[0.82rem] leading-[1.3] font-semibold text-highlighted"
-            >
-              {{ t('modelRouteWhitelist') }}
-            </h3>
-            <label
-              for="settings-model-route-whitelist-enabled"
-              class="inline-flex cursor-pointer items-center gap-2 select-none"
-            >
-              <USwitch
-                v-model="modelRouteWhitelist.enabled"
-                id="settings-model-route-whitelist-enabled"
-                :aria-label="t('modelRouteWhitelist')"
-              />
-            </label>
-          </div>
+          <h3
+            class="m-0 inline-flex items-center gap-1.5 text-[0.82rem] leading-[1.3] font-semibold text-highlighted"
+          >
+            <UIcon
+              name="i-lucide-shield-check"
+              class="h-3.5 w-3.5 text-muted"
+            />
+            {{ t('modelRouteWhitelist') }}
+          </h3>
+          <USwitch
+            v-model="modelRouteWhitelist.enabled"
+            id="settings-model-route-whitelist-enabled"
+            :aria-label="t('modelRouteWhitelist')"
+          />
         </template>
+        <p class="m-0 text-xs leading-relaxed text-muted">
+          {{ t('modelRouteWhitelistHint') }}
+        </p>
       </SettingsCard>
 
       <SettingsCard class="lg:col-span-full">
         <template #header>
-          <div class="grid gap-2">
-            <h3
-              class="m-0 text-[0.82rem] leading-[1.3] font-semibold text-highlighted"
-            >
-              {{ t('streamDeltaBatching') }}
-            </h3>
-            <label
-              for="settings-stream-delta-batching-enabled"
-              class="inline-flex cursor-pointer items-center gap-2 select-none"
-            >
-              <USwitch
-                v-model="streamDeltaBatching.enabled"
-                id="settings-stream-delta-batching-enabled"
-                :aria-label="t('streamDeltaBatching')"
-              />
-            </label>
-          </div>
+          <h3
+            class="m-0 inline-flex items-center gap-1.5 text-[0.82rem] leading-[1.3] font-semibold text-highlighted"
+          >
+            <UIcon name="i-lucide-zap" class="h-3.5 w-3.5 text-muted" />
+            {{ t('streamDeltaBatching') }}
+          </h3>
+          <USwitch
+            v-model="streamDeltaBatching.enabled"
+            id="settings-stream-delta-batching-enabled"
+            :aria-label="t('streamDeltaBatching')"
+          />
         </template>
         <StreamDeltaBatchingFields v-model:form="streamDeltaBatching" :t="t" />
+        <p class="m-0 text-[11px] leading-relaxed text-muted">
+          {{ t('streamDeltaBatchingSummary') }}
+        </p>
       </SettingsCard>
     </div>
   </section>

@@ -29,23 +29,27 @@ const translatedFailurePolicyOptions = computed(() =>
 
 <template>
   <div class="grid gap-3 p-3">
-    <div class="grid grid-cols-2 gap-3 max-[767px]:grid-cols-1">
-      <div class="grid gap-1.5">
-        <label class="text-xs text-muted">{{ t('reviewBaseUrl') }}</label>
+    <div class="grid gap-3 sm:grid-cols-2">
+      <label class="grid gap-1">
+        <span class="text-xs font-medium text-muted">{{
+          t('reviewBaseUrl')
+        }}</span>
         <UInput
           v-model="llmReview.review_base_url"
           size="sm"
           :placeholder="t('reviewBaseUrlPlaceholder')"
         />
-      </div>
-      <div class="grid gap-1.5">
-        <label class="text-xs text-muted">{{ t('reviewModel') }}</label>
+      </label>
+      <label class="grid gap-1">
+        <span class="text-xs font-medium text-muted">{{
+          t('reviewModel')
+        }}</span>
         <UInput
           v-model="llmReview.review_model"
           size="sm"
           :placeholder="t('reviewModelPlaceholder')"
         />
-      </div>
+      </label>
     </div>
 
     <UCollapsible>
@@ -61,17 +65,21 @@ const translatedFailurePolicyOptions = computed(() =>
         />
       </template>
       <template #content>
-        <div class="grid gap-3 md:grid-cols-2">
-          <div class="grid gap-2">
-            <label class="text-xs text-muted">{{ t('apiKey') }}</label>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label class="grid gap-1">
+            <span class="text-xs font-medium text-muted">{{
+              t('apiKey')
+            }}</span>
             <UInput
               v-model="llmReview.review_api_key"
               size="sm"
               type="password"
             />
-          </div>
-          <div class="grid gap-2">
-            <label class="text-xs text-muted">{{ t('failurePolicy') }}</label>
+          </label>
+          <label class="grid gap-1">
+            <span class="text-xs font-medium text-muted">{{
+              t('failurePolicy')
+            }}</span>
             <USelect
               v-model="llmReview.failure_policy"
               size="sm"
@@ -79,25 +87,27 @@ const translatedFailurePolicyOptions = computed(() =>
               label-key="label"
               value-key="value"
             />
-          </div>
-          <div class="grid gap-2">
-            <label class="text-xs text-muted">{{ t('reviewTimeoutMs') }}</label>
+          </label>
+          <label class="grid gap-1">
+            <span class="text-xs font-medium text-muted">{{
+              t('reviewTimeoutMs')
+            }}</span>
             <UInputNumber
               v-model="llmReview.review_timeout_ms"
               size="sm"
               :min="100"
             />
-          </div>
-          <div class="grid gap-2">
-            <label class="text-xs text-muted">{{
+          </label>
+          <label class="grid gap-1">
+            <span class="text-xs font-medium text-muted">{{
               t('pendingTtlSeconds')
-            }}</label>
+            }}</span>
             <UInputNumber
               v-model="llmReview.pending_ttl_seconds"
               size="sm"
               :min="1"
             />
-          </div>
+          </label>
         </div>
       </template>
     </UCollapsible>
@@ -115,11 +125,15 @@ const translatedFailurePolicyOptions = computed(() =>
         />
       </template>
       <template #content>
-        <div class="grid gap-2">
+        <div class="grid gap-1">
+          <span class="text-xs font-medium text-muted">{{
+            t('customPolicyText')
+          }}</span>
           <UTextarea
             v-model="llmReview.custom_policy_text"
             autoresize
             :rows="3"
+            size="sm"
           />
         </div>
       </template>
