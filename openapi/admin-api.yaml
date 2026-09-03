@@ -2185,6 +2185,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelRouteWhitelistResponse'
+  /api/v1/settings/raw-object-store:
+    get:
+      tags:
+      - settings
+      operationId: get_raw_object_store
+      responses:
+        '200':
+          description: Raw object store settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RawObjectStoreSettingsResponse'
+    patch:
+      tags:
+      - settings
+      operationId: set_raw_object_store
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RawObjectStoreSettingsRequest'
+        required: true
+      responses:
+        '200':
+          description: Updated raw object store settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RawObjectStoreSettingsResponse'
   /api/v1/settings/redaction:
     get:
       tags:
@@ -4683,6 +4712,107 @@ components:
       enum:
       - requests
       - credits
+    RawObjectStoreBackend:
+      type: string
+      description: Raw object-store backend selected by the administrator.
+      enum:
+      - local
+      - s3
+      - disabled
+    RawObjectStoreSecretPatch:
+      oneOf:
+      - type: object
+        required:
+        - mode
+        properties:
+          mode:
+            type: string
+            enum:
+            - keep
+      - type: object
+        required:
+        - mode
+        properties:
+          mode:
+            type: string
+            enum:
+            - clear
+      - type: object
+        required:
+        - value
+        - mode
+        properties:
+          mode:
+            type: string
+            enum:
+            - replace
+          value:
+            type: string
+    RawObjectStoreSettingsRequest:
+      type: object
+      required:
+      - backend
+      - local_dir
+      - s3_endpoint
+      - s3_bucket
+      - s3_region
+      - s3_prefix
+      - s3_allow_http
+      properties:
+        backend:
+          $ref: '#/components/schemas/RawObjectStoreBackend'
+        local_dir:
+          type: string
+        s3_access_key:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RawObjectStoreSecretPatch'
+        s3_allow_http:
+          type: boolean
+        s3_bucket:
+          type: string
+        s3_endpoint:
+          type: string
+        s3_prefix:
+          type: string
+        s3_region:
+          type: string
+        s3_secret_key:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RawObjectStoreSecretPatch'
+    RawObjectStoreSettingsResponse:
+      type: object
+      description: Redacted API response for the admin settings surface.
+      required:
+      - backend
+      - local_dir
+      - s3_endpoint
+      - s3_bucket
+      - s3_region
+      - s3_prefix
+      - s3_allow_http
+      - has_s3_access_key
+      - has_s3_secret_key
+      properties:
+        backend:
+          $ref: '#/components/schemas/RawObjectStoreBackend'
+        has_s3_access_key:
+          type: boolean
+        has_s3_secret_key:
+          type: boolean
+        local_dir:
+          type: string
+        s3_allow_http:
+          type: boolean
+        s3_bucket:
+          type: string
+        s3_endpoint:
+          type: string
+        s3_prefix:
+          type: string
+        s3_region:
+          type: string
     RedactionConfigSchema:
       type: object
       required:

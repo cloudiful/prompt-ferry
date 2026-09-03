@@ -7,7 +7,9 @@ use sqlx::PgPool;
 
 use crate::{
     db::StreamDeltaBatchingSettings,
+    raw_payload_store::{RawObjectStoreConfig, RawObjectStorePersisted},
     redact::RedactionConfig,
+    relay_secrets::RelaySecretManager,
     worker_admin_types::UsageRetentionSettings,
     worker_admin_types::{RequestContentLoggingMode, RequestContentLoggingResponse},
 };
@@ -23,6 +25,7 @@ pub struct RedactionCustomStringRuleListItem {
 pub const REQUEST_CONTENT_LOGGING_SETTINGS_KEY: &str = "request_content_logging";
 pub const USAGE_RETENTION_SETTINGS_KEY: &str = "usage_retention";
 pub const STREAM_DELTA_BATCHING_SETTINGS_KEY: &str = "stream_delta_batching";
+pub const RAW_OBJECT_STORE_SETTINGS_KEY: &str = "raw_object_store";
 const REQUEST_CONTENT_LOGGING_ENABLED_KEY: &str = "request_content_logging_enabled";
 const LEGACY_USAGE_CONTENT_LOGGING_SETTINGS_KEY: &str = "usage_content_logging";
 const LEGACY_USAGE_CONTENT_LOGGING_ENABLED_KEY: &str = "usage_content_logging_enabled";
@@ -330,4 +333,38 @@ fn normalize_stream_delta_batching(
         STREAM_OUTPUT_MAX_BUFFER_BYTES_MAX,
     );
     value
+}
+
+pub async fn get_raw_object_store_persisted(
+    pool: &PgPool,
+) -> Result<Option<RawObjectStorePersisted>> {
+    get_json_setting::<RawObjectStorePersisted>(pool, RAW_OBJECT_STORE_SETTINGS_KEY).await
+}
+
+pub async fn set_raw_object_store_persisted(
+    pool: &PgPool,
+    value: &RawObjectStorePersisted,
+) -> Result<()> {
+    set_json_setting(pool, RAW_OBJECT_STORE_SETTINGS_KEY, value).await
+}
+
+pub async fn get_raw_object_store_config(
+    pool: &PgPool,
+    manager: &RelaySecretManager,
+) -> Result<Option<RawObjectStoreConfig>> {
+    if let Some(persisted) = get_raw_object_store_persisted(pool).await? {
+        Ok(Some(persisted.into_config(manager)?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub async fn set_raw_object_store_config(
+    pool: &PgPool,
+    manager: &RelaySecretManager,
+    config: &RawObjectStoreConfig,
+) -> Result<RawObjectStorePersisted> {
+    let persisted = RawObjectStorePersisted::from_config(config, manager)?;
+    set_raw_object_store_persisted(pool, &persisted).await?;
+    Ok(persisted)
 }

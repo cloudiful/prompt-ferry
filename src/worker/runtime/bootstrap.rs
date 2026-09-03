@@ -329,10 +329,29 @@ pub(super) async fn build_admin_state(
 
     let usage_retention = db::get_usage_retention(&pool).await?;
     // Raw payloads always go to the managed store (bucket or local fallback);
-    // PostgreSQL body storage is gone, legacy backend values are normalized.
-    let raw_payload_store = Some(Arc::new(
-        crate::raw_payload_store::RawPayloadStore::from_config(config)?,
-    ));
+    // when a persisted raw object-store setting exists it replaces the
+    // environment-based fallback without a restart.
+    let raw_payload_store = {
+        let persisted = crate::db::get_raw_object_store_persisted(&pool).await?;
+        let raw_config = if let Some(persisted) = persisted {
+            match persisted.into_config(&relay_secret_manager) {
+                Ok(cfg) => cfg,
+                Err(err) => {
+                    warn!(error = %err, "failed to decrypt persisted raw object store config; falling back to environment-based configuration");
+                    crate::raw_payload_store::RawObjectStoreConfig::from_worker_config(config)
+                }
+            }
+        } else {
+            crate::raw_payload_store::RawObjectStoreConfig::from_worker_config(config)
+        };
+        match raw_config.build_store() {
+            Ok(store) => store.map(Arc::new),
+            Err(err) => {
+                warn!(error = %err, "failed to build raw payload store; raw payloads will be dropped");
+                None
+            }
+        }
+    };
     let redaction_config = db::get_redaction_config(&pool).await?;
     let user_redaction_configs = db::list_user_redaction_configs(&pool).await?;
     redact::apply_configs(&redaction_config, user_redaction_configs)?;

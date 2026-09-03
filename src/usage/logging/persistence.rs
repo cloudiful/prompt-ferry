@@ -158,10 +158,11 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         log.last_heartbeat_at,
     );
     let retention = state.usage_retention.read().await.clone().normalized();
+    let raw_store = state.raw_payload_store.read().await.clone();
     match db::record_request_record_with_raw_store(
         &state.pool,
         create,
-        state.raw_payload_store.as_deref(),
+        raw_store.as_deref(),
         i64::from(retention.raw_retention_days),
     )
     .await

@@ -7,14 +7,311 @@ use object_store::{ObjectStore, ObjectStoreExt, PutPayload, aws::AmazonS3Builder
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use utoipa::ToSchema;
 
 use crate::config::WorkerConfig;
+use crate::relay_secrets::{EncryptedSecretEnvelope, RelaySecretManager};
 
 /// Format marker for compressed raw payload objects: magic bytes followed by a
 /// single format version byte. Objects written before this format existed are
 /// plain JSON and remain readable.
 const OBJECT_MAGIC: &[u8; 4] = b"PFR1";
 const OBJECT_FORMAT_VERSION: u8 = 1;
+
+/// Raw object-store backend selected by the administrator.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RawObjectStoreBackend {
+    #[default]
+    Local,
+    S3,
+    Disabled,
+}
+
+impl RawObjectStoreBackend {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::S3 => "s3",
+            Self::Disabled => "disabled",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "local" => Some(Self::Local),
+            "s3" => Some(Self::S3),
+            "disabled" => Some(Self::Disabled),
+            _ => None,
+        }
+    }
+}
+
+/// Decrypted administrator-facing raw object-store configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct RawObjectStoreConfig {
+    pub backend: RawObjectStoreBackend,
+    pub local_dir: String,
+    pub s3_endpoint: String,
+    pub s3_bucket: String,
+    pub s3_region: String,
+    pub s3_prefix: String,
+    pub s3_allow_http: bool,
+    pub s3_access_key: Option<String>,
+    pub s3_secret_key: Option<String>,
+}
+
+impl Default for RawObjectStoreConfig {
+    fn default() -> Self {
+        Self {
+            backend: RawObjectStoreBackend::Local,
+            local_dir: String::new(),
+            s3_endpoint: String::new(),
+            s3_bucket: String::new(),
+            s3_region: "auto".to_string(),
+            s3_prefix: "prompt-ferry/raw".to_string(),
+            s3_allow_http: false,
+            s3_access_key: None,
+            s3_secret_key: None,
+        }
+    }
+}
+
+impl RawObjectStoreConfig {
+    pub fn from_worker_config(config: &WorkerConfig) -> Self {
+        let bucket = config.raw_object_store_bucket.trim();
+        if bucket.is_empty() {
+            Self {
+                backend: RawObjectStoreBackend::Local,
+                local_dir: config.raw_object_store_local_dir.clone(),
+                s3_endpoint: config.raw_object_store_endpoint.clone(),
+                s3_bucket: String::new(),
+                s3_region: config.raw_object_store_region.clone(),
+                s3_prefix: config.raw_object_store_prefix.clone(),
+                s3_allow_http: config.raw_object_store_allow_http,
+                s3_access_key: {
+                    let v = config.raw_object_store_access_key.trim();
+                    if v.is_empty() {
+                        None
+                    } else {
+                        Some(v.to_string())
+                    }
+                },
+                s3_secret_key: {
+                    let v = config.raw_object_store_secret_key.trim();
+                    if v.is_empty() {
+                        None
+                    } else {
+                        Some(v.to_string())
+                    }
+                },
+            }
+        } else {
+            Self {
+                backend: RawObjectStoreBackend::S3,
+                local_dir: config.raw_object_store_local_dir.clone(),
+                s3_endpoint: config.raw_object_store_endpoint.clone(),
+                s3_bucket: bucket.to_string(),
+                s3_region: config.raw_object_store_region.clone(),
+                s3_prefix: config.raw_object_store_prefix.clone(),
+                s3_allow_http: config.raw_object_store_allow_http,
+                s3_access_key: {
+                    let v = config.raw_object_store_access_key.trim();
+                    if v.is_empty() {
+                        None
+                    } else {
+                        Some(v.to_string())
+                    }
+                },
+                s3_secret_key: {
+                    let v = config.raw_object_store_secret_key.trim();
+                    if v.is_empty() {
+                        None
+                    } else {
+                        Some(v.to_string())
+                    }
+                },
+            }
+        }
+    }
+
+    pub fn normalized(mut self) -> Self {
+        self.backend = match self.backend {
+            RawObjectStoreBackend::S3
+            | RawObjectStoreBackend::Local
+            | RawObjectStoreBackend::Disabled => self.backend,
+        };
+        self.local_dir = self.local_dir.trim().to_string();
+        self.s3_endpoint = self.s3_endpoint.trim().to_string();
+        self.s3_bucket = self.s3_bucket.trim().to_string();
+        self.s3_region = {
+            let v = self.s3_region.trim();
+            if v.is_empty() {
+                "auto".to_string()
+            } else {
+                v.to_string()
+            }
+        };
+        self.s3_prefix = normalize_prefix(&self.s3_prefix);
+        if self.backend == RawObjectStoreBackend::Disabled {
+            // Disabled ignores S3 credentials but keep prefix normalized.
+        }
+        self.s3_access_key = self.s3_access_key.and_then(|v| {
+            let t = v.trim().to_string();
+            if t.is_empty() { None } else { Some(t) }
+        });
+        self.s3_secret_key = self.s3_secret_key.and_then(|v| {
+            let t = v.trim().to_string();
+            if t.is_empty() { None } else { Some(t) }
+        });
+        self
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        match self.backend {
+            RawObjectStoreBackend::Disabled => Ok(()),
+            RawObjectStoreBackend::Local => Ok(()),
+            RawObjectStoreBackend::S3 => {
+                if self.s3_bucket.trim().is_empty() {
+                    return Err(anyhow!("s3 bucket is required for s3 backend"));
+                }
+                if self.s3_region.trim().is_empty() {
+                    return Err(anyhow!("s3 region is required for s3 backend"));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    pub fn build_store(&self) -> Result<Option<RawPayloadStore>> {
+        self.validate()?;
+        match self.backend {
+            RawObjectStoreBackend::Disabled => Ok(None),
+            RawObjectStoreBackend::Local => {
+                let dir = crate::runtime_env::resolve_raw_object_store_local_dir(&self.local_dir)?;
+                std::fs::create_dir_all(&dir).with_context(|| {
+                    format!(
+                        "failed to create local raw payload directory {}",
+                        dir.display()
+                    )
+                })?;
+                let store = Arc::new(object_store::local::LocalFileSystem::new_with_prefix(&dir)?);
+                Ok(Some(RawPayloadStore {
+                    store,
+                    prefix: normalize_prefix(&self.s3_prefix),
+                }))
+            }
+            RawObjectStoreBackend::S3 => {
+                let s3 = build_s3_store_from_config(self)?;
+                Ok(Some(RawPayloadStore {
+                    store: Arc::new(s3),
+                    prefix: normalize_prefix(&self.s3_prefix),
+                }))
+            }
+        }
+    }
+
+    pub fn redacted_response(&self) -> RawObjectStoreSettingsResponse {
+        RawObjectStoreSettingsResponse {
+            backend: self.backend.clone(),
+            local_dir: self.local_dir.clone(),
+            s3_endpoint: self.s3_endpoint.clone(),
+            s3_bucket: self.s3_bucket.clone(),
+            s3_region: self.s3_region.clone(),
+            s3_prefix: normalize_prefix(&self.s3_prefix),
+            s3_allow_http: self.s3_allow_http,
+            has_s3_access_key: self.s3_access_key.is_some(),
+            has_s3_secret_key: self.s3_secret_key.is_some(),
+        }
+    }
+}
+
+/// Persisted JSON representation with encrypted S3 credentials.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawObjectStorePersisted {
+    pub backend: RawObjectStoreBackend,
+    pub local_dir: String,
+    pub s3_endpoint: String,
+    pub s3_bucket: String,
+    pub s3_region: String,
+    pub s3_prefix: String,
+    pub s3_allow_http: bool,
+    pub s3_access_key: Option<EncryptedSecretEnvelope>,
+    pub s3_secret_key: Option<EncryptedSecretEnvelope>,
+}
+
+impl RawObjectStorePersisted {
+    pub fn from_config(
+        config: &RawObjectStoreConfig,
+        manager: &RelaySecretManager,
+    ) -> Result<Self> {
+        let normalized = config.clone().normalized();
+        let s3_access_key = match &normalized.s3_access_key {
+            Some(value) if !value.trim().is_empty() => Some(manager.encrypt(value)?),
+            _ => None,
+        };
+        let s3_secret_key = match &normalized.s3_secret_key {
+            Some(value) if !value.trim().is_empty() => Some(manager.encrypt(value)?),
+            _ => None,
+        };
+        Ok(Self {
+            backend: normalized.backend,
+            local_dir: normalized.local_dir,
+            s3_endpoint: normalized.s3_endpoint,
+            s3_bucket: normalized.s3_bucket,
+            s3_region: normalized.s3_region,
+            s3_prefix: normalized.s3_prefix,
+            s3_allow_http: normalized.s3_allow_http,
+            s3_access_key,
+            s3_secret_key,
+        })
+    }
+
+    pub fn into_config(self, manager: &RelaySecretManager) -> Result<RawObjectStoreConfig> {
+        let s3_access_key = match self.s3_access_key {
+            Some(envelope) => Some(manager.decrypt(&envelope)?),
+            None => None,
+        };
+        let s3_secret_key = match self.s3_secret_key {
+            Some(envelope) => Some(manager.decrypt(&envelope)?),
+            None => None,
+        };
+        Ok(RawObjectStoreConfig {
+            backend: self.backend,
+            local_dir: self.local_dir,
+            s3_endpoint: self.s3_endpoint,
+            s3_bucket: self.s3_bucket,
+            s3_region: self.s3_region,
+            s3_prefix: self.s3_prefix,
+            s3_allow_http: self.s3_allow_http,
+            s3_access_key,
+            s3_secret_key,
+        }
+        .normalized())
+    }
+
+    pub fn has_access_key(&self) -> bool {
+        self.s3_access_key.is_some()
+    }
+
+    pub fn has_secret_key(&self) -> bool {
+        self.s3_secret_key.is_some()
+    }
+}
+
+/// Redacted API response for the admin settings surface.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct RawObjectStoreSettingsResponse {
+    pub backend: RawObjectStoreBackend,
+    pub local_dir: String,
+    pub s3_endpoint: String,
+    pub s3_bucket: String,
+    pub s3_region: String,
+    pub s3_prefix: String,
+    pub s3_allow_http: bool,
+    pub has_s3_access_key: bool,
+    pub has_s3_secret_key: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct RawPayloadEnvelope {
@@ -194,6 +491,66 @@ fn build_s3_store(config: &WorkerConfig, bucket: &str) -> Result<object_store::a
     builder
         .build()
         .context("failed to build raw payload object store")
+}
+
+fn build_s3_store_from_config(
+    config: &RawObjectStoreConfig,
+) -> Result<object_store::aws::AmazonS3> {
+    let mut builder = AmazonS3Builder::new()
+        .with_bucket_name(config.s3_bucket.trim())
+        .with_region(config.s3_region.trim());
+    if !config.s3_endpoint.trim().is_empty() {
+        builder = builder.with_endpoint(config.s3_endpoint.trim());
+    }
+    if let Some(key) = config.s3_access_key.as_deref()
+        && !key.trim().is_empty()
+    {
+        builder = builder.with_access_key_id(key.trim());
+    }
+    if let Some(key) = config.s3_secret_key.as_deref()
+        && !key.trim().is_empty()
+    {
+        builder = builder.with_secret_access_key(key.trim());
+    }
+    if config.s3_allow_http {
+        builder = builder.with_allow_http(true);
+    }
+    builder
+        .build()
+        .context("failed to build raw payload object store")
+}
+
+impl RawObjectStoreConfig {
+    /// Build and validate the candidate store. Returns `None` for disabled.
+    pub async fn build_and_validate(&self) -> Result<Option<RawPayloadStore>> {
+        let store = self.build_store()?;
+        if let Some(ref inner) = store {
+            inner.validate_candidate().await?;
+        }
+        Ok(store)
+    }
+}
+
+impl RawPayloadStore {
+    /// Validate the live store is writable by performing a round-trip health check.
+    pub async fn validate_candidate(&self) -> Result<()> {
+        let test_key = format!("{}/.health/{}", self.prefix, uuid::Uuid::new_v4());
+        let path = Path::from(test_key.as_str());
+        self.store
+            .put(&path, PutPayload::from_static(b"health"))
+            .await
+            .context("raw object store validation put failed")?;
+        let _ = self
+            .store
+            .get(&path)
+            .await
+            .context("raw object store validation get failed")?;
+        self.store
+            .delete(&path)
+            .await
+            .context("raw object store validation delete failed")?;
+        Ok(())
+    }
 }
 
 fn encode_payload(payload: &RawPayloadEnvelope) -> Result<Vec<u8>> {

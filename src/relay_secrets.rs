@@ -3,6 +3,7 @@ use anyhow::{Context, anyhow};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const KEY_BYTES: usize = 32;
@@ -73,11 +74,36 @@ pub enum WorkerConfigKeySource {
     Generated(PathBuf),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EncryptedSecretEnvelope {
+    #[serde(with = "base64_bytes")]
     pub ciphertext: Vec<u8>,
+    #[serde(with = "base64_bytes")]
     pub nonce: Vec<u8>,
     pub key_version: i16,
+}
+
+mod base64_bytes {
+    use super::STANDARD;
+    use base64::Engine as _;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        STANDARD
+            .decode(value.as_bytes())
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 #[derive(Debug, Clone)]

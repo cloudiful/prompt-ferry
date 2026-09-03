@@ -4,8 +4,8 @@ use crate::{
     protocol::RelayIpPolicy,
     worker_admin_types::{
         EndpointSettingRequest, ModelRouteWhitelistRequest, ModelRouteWhitelistResponse,
-        RelayIpPolicyResponse, RequestContentLoggingRequest, RequestContentLoggingResponse,
-        UsageRetentionSettings,
+        RawObjectStoreSettingsRequest, RawObjectStoreSettingsResponse, RelayIpPolicyResponse,
+        RequestContentLoggingRequest, RequestContentLoggingResponse, UsageRetentionSettings,
     },
 };
 
@@ -190,3 +190,20 @@ pub(super) fn get_llm_review_setting() {}
     tag = "settings"
 )]
 pub(super) fn set_llm_review_setting() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/raw-object-store",
+    responses((status = 200, body = RawObjectStoreSettingsResponse, description = "Raw object store settings")),
+    tag = "settings"
+)]
+pub(super) fn get_raw_object_store() {}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/settings/raw-object-store",
+    request_body = RawObjectStoreSettingsRequest,
+    responses((status = 200, body = RawObjectStoreSettingsResponse, description = "Updated raw object store settings")),
+    tag = "settings"
+)]
+pub(super) fn set_raw_object_store() {}

@@ -125,7 +125,9 @@ impl From<RequestRecordDetailRow> for RequestRecordDetail {
             conversation_id: row.conversation_id,
             parent_event_id: row.parent_event_id,
             conversation_seq: row.conversation_seq,
-            conversation_source: row.conversation_source.unwrap_or_else(|| "none".to_string()),
+            conversation_source: row
+                .conversation_source
+                .unwrap_or_else(|| "none".to_string()),
             storage_sanitized: row.storage_sanitized.unwrap_or(false),
             storage_sanitized_nul_count: row.storage_sanitized_nul_count.unwrap_or(0),
             redaction: RequestRecordRedactionSummary {
@@ -137,7 +139,9 @@ impl From<RequestRecordDetailRow> for RequestRecordDetail {
             },
             client_installation_id: row.client_installation_id,
             normalized_item_count: row.normalized_item_count,
-            request_storage_mode: row.request_storage_mode.unwrap_or_else(|| "full".to_string()),
+            request_storage_mode: row
+                .request_storage_mode
+                .unwrap_or_else(|| "full".to_string()),
             // Raw bodies never live in PostgreSQL; they are overlaid from the
             // selected object store below when available.
             request_raw_json: None,

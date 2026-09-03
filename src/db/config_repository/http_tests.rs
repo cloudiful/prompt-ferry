@@ -289,3 +289,56 @@ async fn sqlite_http_client_keys_round_trip_uuid_identifiers() -> anyhow::Result
     let _ = std::fs::remove_file(path);
     Ok(())
 }
+
+#[tokio::test]
+async fn sqlite_raw_object_store_is_explicitly_unsupported() -> anyhow::Result<()> {
+    let (state, store, path) = test_state().await;
+    let app = worker_admin::router(state.clone());
+
+    let get = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/settings/raw-object-store".to_string(),
+            None,
+        ))
+        .await?;
+    assert_eq!(get.status(), StatusCode::NOT_IMPLEMENTED);
+    let body = json_body(get).await;
+    assert_eq!(
+        body["error"]["code"].as_str().expect("code"),
+        "sqlite_raw_object_store_unavailable"
+    );
+
+    let patch = app
+        .oneshot(request(
+            "PATCH",
+            "/api/v1/settings/raw-object-store".to_string(),
+            Some(serde_json::json!({
+                "backend": "local",
+                "local_dir": "",
+                "s3_endpoint": "",
+                "s3_bucket": "",
+                "s3_region": "auto",
+                "s3_prefix": "prompt-ferry/raw",
+                "s3_allow_http": false,
+                "s3_access_key": null,
+                "s3_secret_key": null
+            })),
+        ))
+        .await?;
+    assert_eq!(patch.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(
+        json_body(patch).await["error"]["code"]
+            .as_str()
+            .expect("code"),
+        "sqlite_raw_object_store_unavailable"
+    );
+
+    drop(state);
+    let pool = store.pool().clone();
+    drop(store);
+    pool.close().await;
+    let _ = std::fs::remove_file(path);
+    Ok(())
+}

@@ -23,7 +23,7 @@ const VALKEY_HEALTH_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 struct RawMaintenanceDependencies {
     pool: PgPool,
     retention: Arc<RwLock<UsageRetentionSettings>>,
-    raw_store: Option<Arc<RawPayloadStore>>,
+    raw_store: Arc<RwLock<Option<Arc<RawPayloadStore>>>>,
     postgres_coordination: bool,
 }
 
@@ -33,7 +33,7 @@ pub(super) fn spawn(
     config: &WorkerConfig,
     pool: PgPool,
     retention: Arc<RwLock<UsageRetentionSettings>>,
-    raw_store: Option<Arc<RawPayloadStore>>,
+    raw_store: Arc<RwLock<Option<Arc<RawPayloadStore>>>>,
     control: RuntimeControl,
 ) -> JoinHandle<()> {
     let valkey_url = config.valkey_url.trim().to_string();
@@ -281,10 +281,11 @@ async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<(
     }
     // Raw payloads always live in the managed object store; maintenance only
     // prunes expired per-event object metadata and partitions.
+    let raw_store = dependencies.raw_store.read().await.clone();
     match db::run_raw_payload_maintenance_with_store(
         &dependencies.pool,
         i64::from(retention.raw_retention_days),
-        dependencies.raw_store.as_deref(),
+        raw_store.as_deref(),
     )
     .await
     {

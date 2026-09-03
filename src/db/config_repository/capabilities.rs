@@ -24,6 +24,7 @@ pub enum Capability {
     ConversationEndpointOverride,
     AvailableModels,
     SnapshotPublication,
+    RawObjectStore,
 }
 
 impl Capability {
@@ -48,6 +49,7 @@ impl Capability {
             }
             Self::AvailableModels => "sqlite_available_models_unavailable",
             Self::SnapshotPublication => "sqlite_snapshot_publication_unavailable",
+            Self::RawObjectStore => "sqlite_raw_object_store_unavailable",
         }
     }
 
@@ -74,6 +76,7 @@ impl Capability {
             }
             Self::AvailableModels => "available model discovery is not yet available on SQLite",
             Self::SnapshotPublication => "snapshot publication is available on SQLite",
+            Self::RawObjectStore => "raw object store configuration is not available on SQLite",
         }
     }
 
@@ -138,6 +141,7 @@ impl Capability {
             | "/settings/model-route-whitelist"
             | "/settings/relay-ip-whitelist"
             | "/settings/llm-review" => return Some(Self::Settings),
+            "/settings/raw-object-store" => return Some(Self::RawObjectStore),
             _ => {}
         }
         if path.starts_with("/admin/conversations/") && path.ends_with("/endpoint-override") {
@@ -232,6 +236,10 @@ mod tests {
             Some(Capability::Settings)
         );
         assert_eq!(
+            Capability::for_path("/settings/raw-object-store"),
+            Some(Capability::RawObjectStore)
+        );
+        assert_eq!(
             Capability::for_path("/admin/conversations/abc/endpoint-override"),
             Some(Capability::ConversationEndpointOverride)
         );
@@ -293,5 +301,6 @@ mod tests {
         assert!(!Capability::ConversationEndpointOverride.sqlite_supported());
         assert!(!Capability::AvailableModels.sqlite_supported());
         assert!(!Capability::ModelRouteTest.sqlite_supported());
+        assert!(!Capability::RawObjectStore.sqlite_supported());
     }
 }

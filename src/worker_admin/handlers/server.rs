@@ -197,6 +197,10 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             "/settings/llm-review",
             get(get_llm_review_setting).patch(set_llm_review_setting),
         )
+        .route(
+            "/settings/raw-object-store",
+            get(get_raw_object_store).patch(set_raw_object_store),
+        )
         .route("/admin/approvals", get(list_approvals))
         .route("/admin/approvals/{approval_id}", get(get_approval))
         .route(
@@ -282,6 +286,10 @@ mod admin_routing_tests {
             ("/settings/endpoint", Some(Capability::EndpointSetting)),
             ("/settings/redaction", Some(Capability::Settings)),
             ("/settings/usage-retention", Some(Capability::Settings)),
+            (
+                "/settings/raw-object-store",
+                Some(Capability::RawObjectStore),
+            ),
             (
                 "/admin/conversations/abc/endpoint-override",
                 Some(Capability::ConversationEndpointOverride),

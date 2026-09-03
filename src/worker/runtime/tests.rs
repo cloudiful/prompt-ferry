@@ -800,3 +800,116 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
     assert_eq!(cross_endpoint.selection.secret, "primary-key");
     assert!(cross_endpoint.invalid_conversation_override);
 }
+
+#[test]
+fn raw_object_store_config_validates_s3_requirements() {
+    use crate::raw_payload_store::{RawObjectStoreBackend, RawObjectStoreConfig};
+
+    let mut config = RawObjectStoreConfig {
+        backend: RawObjectStoreBackend::S3,
+        s3_bucket: "".to_string(),
+        s3_region: "auto".to_string(),
+        ..RawObjectStoreConfig::default()
+    };
+    assert!(config.validate().is_err());
+
+    config.s3_bucket = "my-bucket".to_string();
+    config.s3_region = "".to_string();
+    assert!(config.validate().is_err());
+
+    config.s3_region = "auto".to_string();
+    assert!(config.validate().is_ok());
+}
+
+#[test]
+fn raw_object_store_disabled_and_local_build_correctly() {
+    use crate::raw_payload_store::{RawObjectStoreBackend, RawObjectStoreConfig};
+
+    let disabled = RawObjectStoreConfig {
+        backend: RawObjectStoreBackend::Disabled,
+        ..RawObjectStoreConfig::default()
+    };
+    let store = disabled.build_store().expect("build disabled");
+    assert!(store.is_none());
+
+    let local = RawObjectStoreConfig {
+        backend: RawObjectStoreBackend::Local,
+        local_dir: std::env::temp_dir()
+            .join(format!("pf-test-local-{}", uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string(),
+        ..RawObjectStoreConfig::default()
+    };
+    let store = local.build_store().expect("build local");
+    assert!(store.is_some());
+    if let Some(s) = store {
+        // Local store should be validated successfully.
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async { s.validate_candidate().await.expect("local validation") });
+    }
+    let _ = std::fs::remove_dir_all(local.local_dir);
+}
+
+#[test]
+fn raw_object_store_persisted_encrypts_and_redacts() {
+    use crate::raw_payload_store::{
+        RawObjectStoreBackend, RawObjectStoreConfig, RawObjectStorePersisted,
+    };
+    use base64::Engine as _;
+
+    let manager = crate::relay_secrets::RelaySecretManager::from_base64(
+        &base64::engine::general_purpose::STANDARD.encode([9_u8; 32]),
+    )
+    .expect("manager");
+
+    let config = RawObjectStoreConfig {
+        backend: RawObjectStoreBackend::S3,
+        s3_endpoint: "https://s3.example.com".to_string(),
+        s3_bucket: "bucket".to_string(),
+        s3_region: "us-east-1".to_string(),
+        s3_prefix: "pf/raw".to_string(),
+        s3_allow_http: false,
+        s3_access_key: Some("AKIAEXAMPLE".to_string()),
+        s3_secret_key: Some("secret123".to_string()),
+        local_dir: "".to_string(),
+    };
+
+    let persisted = RawObjectStorePersisted::from_config(&config, &manager).expect("persist");
+    assert!(persisted.has_access_key());
+    assert!(persisted.has_secret_key());
+    // Encrypted form should not contain plaintext.
+    let json = serde_json::to_value(&persisted).expect("json");
+    let json_str = json.to_string();
+    assert!(!json_str.contains("AKIAEXAMPLE"));
+    assert!(!json_str.contains("secret123"));
+
+    let decrypted = persisted.into_config(&manager).expect("decrypt");
+    assert_eq!(decrypted.s3_access_key.as_deref(), Some("AKIAEXAMPLE"));
+    assert_eq!(decrypted.s3_secret_key.as_deref(), Some("secret123"));
+
+    let redacted = decrypted.redacted_response();
+    assert!(redacted.has_s3_access_key);
+    assert!(redacted.has_s3_secret_key);
+    // Response JSON must not contain secrets.
+    let resp_json = serde_json::to_value(&redacted).expect("resp json");
+    assert!(!resp_json.to_string().contains("AKIAEXAMPLE"));
+}
+
+#[test]
+fn raw_object_store_secret_keep_clear_semantics() {
+    use crate::worker_admin_types::RawObjectStoreSecretPatch;
+
+    // Keep/clear semantics are validated via the handler helper; ensure the
+    // enum serializes as expected for the OpenAPI contract.
+    let keep = RawObjectStoreSecretPatch::Keep;
+    let clear = RawObjectStoreSecretPatch::Clear;
+    let replace = RawObjectStoreSecretPatch::Replace {
+        value: "new-secret".to_string(),
+    };
+    assert_eq!(serde_json::to_value(&keep).unwrap()["mode"], "keep");
+    assert_eq!(serde_json::to_value(&clear).unwrap()["mode"], "clear");
+    assert_eq!(
+        serde_json::to_value(&replace).unwrap()["value"],
+        "new-secret"
+    );
+}

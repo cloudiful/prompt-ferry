@@ -97,11 +97,12 @@ pub(in crate::worker_admin::handlers) async fn get_visible_usage_event_detail_or
     record_id: i64,
     visible_user_id: Option<i64>,
 ) -> Result<db::UsageEventDetail, Response> {
+    let raw_store = state.raw_payload_store.read().await.clone();
     match db::get_visible_usage_event_detail_with_raw_store(
         &state.pool,
         record_id,
         visible_user_id,
-        state.raw_payload_store.as_deref(),
+        raw_store.as_deref(),
     )
     .await
     {
@@ -154,10 +155,14 @@ pub(in crate::worker_admin::handlers) async fn build_usage_request_full_response
     Ok(UsageRequestFullResponse {
         conversation_id: entry.conversation_id,
         record_id,
-        conversation_source: entry.conversation_source.unwrap_or_else(|| "none".to_string()),
+        conversation_source: entry
+            .conversation_source
+            .unwrap_or_else(|| "none".to_string()),
         client_installation_id: entry.client_installation_id,
         normalized_item_count: entry.normalized_item_count,
-        request_storage_mode: entry.request_storage_mode.unwrap_or_else(|| "full".to_string()),
+        request_storage_mode: entry
+            .request_storage_mode
+            .unwrap_or_else(|| "full".to_string()),
         request_raw_json: entry.request_raw_json,
         request_has_previous_response_id: entry.request_has_previous_response_id.unwrap_or(false),
         request_previous_response_id: entry.request_previous_response_id,

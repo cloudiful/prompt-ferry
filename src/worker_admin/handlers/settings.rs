@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::*;
 
 pub(super) async fn get_redaction_setting(
@@ -493,4 +495,183 @@ pub(super) async fn set_model_route_whitelist(
         enabled: body.enabled,
     })
     .into_response()
+}
+
+pub(super) async fn get_raw_object_store(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response;
+    }
+    if state.config_repository.is_sqlite() {
+        return state.capability_unavailable(crate::db::Capability::RawObjectStore);
+    }
+    let manager = match state.relay_secret_manager() {
+        Ok(manager) => manager,
+        Err(err) => return internal(&state, err),
+    };
+    // Try persisted settings first; fall back to current live config or defaults.
+    let persisted_result: Option<crate::raw_payload_store::RawObjectStorePersisted> =
+        if let Some(pool) = state.config_repository.as_postgres() {
+            match crate::db::get_raw_object_store_persisted(pool).await {
+                Ok(value) => value,
+                Err(err) => return internal(&state, err),
+            }
+        } else {
+            match state
+                .config_repository
+                .get_json_setting::<crate::raw_payload_store::RawObjectStorePersisted>(
+                    crate::db::RAW_OBJECT_STORE_SETTINGS_KEY,
+                )
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => return internal(&state, err),
+            }
+        };
+    if let Some(persisted) = persisted_result {
+        match persisted.into_config(manager) {
+            Ok(config) => return Json(config.redacted_response()).into_response(),
+            Err(err) => return internal(&state, err),
+        }
+    }
+    let fallback = crate::raw_payload_store::RawObjectStoreConfig::default();
+    Json(fallback.redacted_response()).into_response()
+}
+
+pub(super) async fn set_raw_object_store(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Json(body): Json<RawObjectStoreSettingsRequest>,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response;
+    }
+    if state.config_repository.is_sqlite() {
+        return state.capability_unavailable(crate::db::Capability::RawObjectStore);
+    }
+    let manager = match state.relay_secret_manager() {
+        Ok(manager) => manager.clone(),
+        Err(err) => return internal(&state, err),
+    };
+    // Load existing persisted to support keep/clear for secrets.
+    let existing_persisted: Option<crate::raw_payload_store::RawObjectStorePersisted> =
+        if let Some(pool) = state.config_repository.as_postgres() {
+            match crate::db::get_raw_object_store_persisted(pool).await {
+                Ok(value) => value,
+                Err(err) => return internal(&state, err),
+            }
+        } else {
+            match state
+                .config_repository
+                .get_json_setting::<crate::raw_payload_store::RawObjectStorePersisted>(
+                    crate::db::RAW_OBJECT_STORE_SETTINGS_KEY,
+                )
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => return internal(&state, err),
+            }
+        };
+    let existing_config = match existing_persisted {
+        Some(persisted) => match persisted.into_config(&manager) {
+            Ok(config) => Some(config),
+            Err(err) => return internal(&state, err),
+        },
+        None => None,
+    };
+
+    let s3_access_key = match resolve_raw_secret_patch(
+        &manager,
+        body.s3_access_key,
+        existing_config
+            .as_ref()
+            .and_then(|c| c.s3_access_key.as_deref()),
+    ) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let s3_secret_key = match resolve_raw_secret_patch(
+        &manager,
+        body.s3_secret_key,
+        existing_config
+            .as_ref()
+            .and_then(|c| c.s3_secret_key.as_deref()),
+    ) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+
+    let config = crate::raw_payload_store::RawObjectStoreConfig {
+        backend: body.backend,
+        local_dir: body.local_dir,
+        s3_endpoint: body.s3_endpoint,
+        s3_bucket: body.s3_bucket,
+        s3_region: body.s3_region,
+        s3_prefix: body.s3_prefix,
+        s3_allow_http: body.s3_allow_http,
+        s3_access_key,
+        s3_secret_key,
+    }
+    .normalized();
+
+    if let Err(err) = config.validate() {
+        return bad_request(&err.to_string());
+    }
+
+    // Validate candidate store before persisting or replacing live handle.
+    let candidate_store = match config.build_store() {
+        Ok(store) => store,
+        Err(err) => return bad_request(&format!("{err:#}")),
+    };
+    if let Some(ref store) = candidate_store {
+        if let Err(err) = store.validate_candidate().await {
+            return bad_request(&format!("raw object store validation failed: {err:#}"));
+        }
+    }
+
+    let persisted =
+        match crate::raw_payload_store::RawObjectStorePersisted::from_config(&config, &manager) {
+            Ok(value) => value,
+            Err(err) => return internal(&state, err),
+        };
+
+    // Persist atomically; failed validation already returned early.
+    if let Some(pool) = state.config_repository.as_postgres() {
+        if let Err(err) = crate::db::set_raw_object_store_persisted(pool, &persisted).await {
+            return internal(&state, err);
+        }
+    } else if let Err(err) = state
+        .config_repository
+        .set_json_setting(crate::db::RAW_OBJECT_STORE_SETTINGS_KEY, &persisted)
+        .await
+    {
+        return internal(&state, err);
+    }
+
+    // Atomically replace live handle.
+    let arc_store = candidate_store.map(Arc::new);
+    state.set_raw_payload_store(arc_store.clone()).await;
+
+    let response = config.redacted_response();
+    Json(response).into_response()
+}
+
+fn resolve_raw_secret_patch(
+    _manager: &crate::relay_secrets::RelaySecretManager,
+    patch: Option<RawObjectStoreSecretPatch>,
+    existing: Option<&str>,
+) -> Result<Option<String>, Box<Response>> {
+    match patch {
+        None | Some(RawObjectStoreSecretPatch::Keep) => Ok(existing.map(|v| v.to_string())),
+        Some(RawObjectStoreSecretPatch::Clear) => Ok(None),
+        Some(RawObjectStoreSecretPatch::Replace { value }) => {
+            let trimmed = value.trim().to_string();
+            if trimmed.is_empty() {
+                return Err(Box::new(bad_request("secret value cannot be empty")));
+            }
+            Ok(Some(trimmed))
+        }
+    }
 }

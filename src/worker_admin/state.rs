@@ -99,7 +99,7 @@ pub struct AdminState {
     pub model_route_whitelist_enabled: Arc<AtomicBool>,
     pub request_content_logging: Arc<RwLock<RequestContentLoggingResponse>>,
     pub usage_retention: Arc<RwLock<UsageRetentionSettings>>,
-    pub raw_payload_store: Option<Arc<RawPayloadStore>>,
+    pub raw_payload_store: Arc<RwLock<Option<Arc<RawPayloadStore>>>>,
     pub stream_delta_batching: Arc<RwLock<StreamDeltaBatchingSettings>>,
     pub llm_review_settings: Arc<RwLock<LlmReviewSettings>>,
     pub approval_waiters: Arc<Mutex<HashMap<Uuid, oneshot::Sender<ApprovalResolution>>>>,
@@ -157,7 +157,7 @@ impl AdminState {
             )),
             request_content_logging: Arc::new(RwLock::new(init.request_content_logging)),
             usage_retention: Arc::new(RwLock::new(init.usage_retention)),
-            raw_payload_store: init.raw_payload_store,
+            raw_payload_store: Arc::new(RwLock::new(init.raw_payload_store)),
             stream_delta_batching: Arc::new(RwLock::new(init.stream_delta_batching)),
             llm_review_settings: Arc::new(RwLock::new(init.llm_review_settings)),
             approval_waiters: Arc::new(Mutex::new(HashMap::new())),
@@ -169,6 +169,14 @@ impl AdminState {
             endpoint_model_cache: init.endpoint_model_cache,
             token_plan_quota: TokenPlanQuotaCache::default(),
         }
+    }
+
+    pub async fn raw_payload_store(&self) -> Option<Arc<RawPayloadStore>> {
+        self.raw_payload_store.read().await.clone()
+    }
+
+    pub async fn set_raw_payload_store(&self, store: Option<Arc<RawPayloadStore>>) {
+        *self.raw_payload_store.write().await = store;
     }
 
     pub fn relay_secret_manager(&self) -> anyhow::Result<&RelaySecretManager> {

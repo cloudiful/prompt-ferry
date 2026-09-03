@@ -73,13 +73,15 @@ pub use routing_state::{
     get_conversation_endpoint_override, upsert_conversation_endpoint_override,
 };
 pub use settings::{
-    REQUEST_CONTENT_LOGGING_SETTINGS_KEY, RedactionCustomStringRuleListItem,
-    STREAM_DELTA_BATCHING_SETTINGS_KEY, USAGE_RETENTION_SETTINGS_KEY, get_bool_setting,
-    get_json_setting, get_redaction_config, get_request_content_logging, get_stream_delta_batching,
-    get_usage_retention, get_user_redaction_config, list_redaction_custom_string_rules,
-    list_user_redaction_configs, set_bool_setting, set_json_setting, set_redaction_config,
-    set_request_content_logging, set_stream_delta_batching, set_usage_retention,
-    set_user_redaction_config,
+    RAW_OBJECT_STORE_SETTINGS_KEY, REQUEST_CONTENT_LOGGING_SETTINGS_KEY,
+    RedactionCustomStringRuleListItem, STREAM_DELTA_BATCHING_SETTINGS_KEY,
+    USAGE_RETENTION_SETTINGS_KEY, get_bool_setting, get_json_setting, get_raw_object_store_config,
+    get_raw_object_store_persisted, get_redaction_config, get_request_content_logging,
+    get_stream_delta_batching, get_usage_retention, get_user_redaction_config,
+    list_redaction_custom_string_rules, list_user_redaction_configs, set_bool_setting,
+    set_json_setting, set_raw_object_store_config, set_raw_object_store_persisted,
+    set_redaction_config, set_request_content_logging, set_stream_delta_batching,
+    set_usage_retention, set_user_redaction_config,
 };
 pub use types::*;
 pub(crate) use usage::get_visible_usage_event_detail_with_raw_store;

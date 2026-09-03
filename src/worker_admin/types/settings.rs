@@ -6,6 +6,11 @@ use crate::{
     redact::{RedactionConfig, RedactionPreviewRequest, RedactionPreviewResponse},
 };
 
+pub use crate::raw_payload_store::{
+    RawObjectStoreBackend, RawObjectStoreConfig, RawObjectStorePersisted,
+    RawObjectStoreSettingsResponse,
+};
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RedactionScope {
@@ -133,6 +138,27 @@ impl UsageRetentionSettings {
         self.raw_backend = "object_store".to_string();
         self
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case", tag = "mode")]
+pub enum RawObjectStoreSecretPatch {
+    Keep,
+    Clear,
+    Replace { value: String },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct RawObjectStoreSettingsRequest {
+    pub backend: RawObjectStoreBackend,
+    pub local_dir: String,
+    pub s3_endpoint: String,
+    pub s3_bucket: String,
+    pub s3_region: String,
+    pub s3_prefix: String,
+    pub s3_allow_http: bool,
+    pub s3_access_key: Option<RawObjectStoreSecretPatch>,
+    pub s3_secret_key: Option<RawObjectStoreSecretPatch>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
