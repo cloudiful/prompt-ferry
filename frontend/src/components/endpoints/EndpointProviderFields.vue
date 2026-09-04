@@ -167,48 +167,47 @@ function setMinimaxBaseUrl(
       value-key="value"
     />
   </div>
-  <div v-if="isMinimax" class="grid gap-1 md:grid-cols-[8rem_minmax(0,1fr)]">
-    <label class="flex items-center text-xs text-muted">
-      {{ t('providerRegion') }}
-    </label>
-    <USelect
-      v-model="providerRegionSelection"
-      class="w-full"
-      :items="[
-        { label: t('providerRegionCn'), value: 'cn' },
-        { label: t('providerRegionGlobal'), value: 'global' },
-      ]"
-      label-key="label"
-      value-key="value"
-    />
-  </div>
-  <div v-if="isMinimax" class="grid gap-1 md:grid-cols-[8rem_minmax(0,1fr)]">
-    <div class="flex items-center gap-1">
-      <label class="text-xs text-muted" for="endpoint-service-tier">
-        {{ t('serviceTier') }}
+  <div v-if="isMinimax" class="grid gap-3 md:grid-cols-2">
+    <div class="grid gap-1 md:grid-cols-[8rem_minmax(0,1fr)] md:items-center">
+      <label class="flex items-center text-xs text-muted">
+        {{ t('providerRegion') }}
       </label>
-      <UTooltip :text="t('serviceTierHint')">
-        <UButton
-          type="button"
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          icon="i-lucide-info"
-          :aria-label="t('serviceTierHint')"
-        />
-      </UTooltip>
+      <USelect
+        v-model="providerRegionSelection"
+        class="w-full"
+        :items="[
+          { label: t('providerRegionCn'), value: 'cn' },
+          { label: t('providerRegionGlobal'), value: 'global' },
+        ]"
+        label-key="label"
+        value-key="value"
+      />
     </div>
-    <USelect
-      id="endpoint-service-tier"
-      v-model="serviceTierSelection"
-      class="w-full"
-      :items="serviceTierOptions"
-      label-key="label"
-      value-key="value"
-    />
-    <p class="text-xs leading-snug text-muted md:col-start-2">
-      {{ t('serviceTierHint') }}
-    </p>
+    <div class="grid gap-1 md:grid-cols-[8rem_minmax(0,1fr)] md:items-center">
+      <div class="flex items-center gap-1">
+        <label class="text-xs text-muted" for="endpoint-service-tier">
+          {{ t('serviceTier') }}
+        </label>
+        <UTooltip :text="t('serviceTierHint')">
+          <UButton
+            type="button"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-info"
+            :aria-label="t('serviceTierHint')"
+          />
+        </UTooltip>
+      </div>
+      <USelect
+        id="endpoint-service-tier"
+        v-model="serviceTierSelection"
+        class="w-full"
+        :items="serviceTierOptions"
+        label-key="label"
+        value-key="value"
+      />
+    </div>
   </div>
   <div class="grid gap-1 md:grid-cols-[9rem_minmax(0,1fr)] md:items-center">
     <div class="flex items-center gap-1">
