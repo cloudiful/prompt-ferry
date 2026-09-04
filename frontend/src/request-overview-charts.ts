@@ -21,9 +21,43 @@ export function createTrendOption(input: {
   labels: ChartLabels
   trend: RequestRecordOverviewTrendBucket[]
   formatTime: (value: string) => string
+  formatCompact: (value?: number | null) => string
 }) {
   const theme = getChartTheme()
   const isAi = input.category === 'ai'
+  const formatAxisValue = (value: string | number): string => {
+    const numeric = typeof value === 'string' ? Number(value) : value
+    if (Number.isNaN(numeric)) return '-'
+    return input.formatCompact(numeric)
+  }
+  type TrendTooltipParam = {
+    axisValue?: string | number
+    dataIndex: number
+    marker?: string
+    seriesName?: string
+    value?: number | string | null
+  }
+  const formatTooltip = (params: TrendTooltipParam[]): string => {
+    const first = params[0]
+    if (!first) return ''
+    const lines = params.map((item) => {
+      let display: string
+      if (item.value == null) {
+        display = '-'
+      } else if (item.seriesName === input.labels.cacheRate) {
+        display = `${item.value}%`
+      } else {
+        const numeric =
+          typeof item.value === 'string' ? Number(item.value) : item.value
+        display =
+          typeof numeric === 'number' && Number.isNaN(numeric)
+            ? '-'
+            : input.formatCompact(numeric)
+      }
+      return `${item.marker ?? ''}${item.seriesName ?? ''}: ${display}`
+    })
+    return `${first.axisValue ?? ''}<br/>${lines.join('<br/>')}`
+  }
   const series = isAi
     ? [
         {
@@ -98,6 +132,7 @@ export function createTrendOption(input: {
       backgroundColor: theme.bg,
       borderColor: theme.border,
       textStyle: { color: theme.text },
+      formatter: formatTooltip,
     },
     xAxis: {
       type: 'category',
@@ -108,7 +143,11 @@ export function createTrendOption(input: {
     yAxis: [
       {
         type: 'value',
-        axisLabel: { color: theme.muted, fontSize: 10 },
+        axisLabel: {
+          color: theme.muted,
+          fontSize: 10,
+          formatter: formatAxisValue,
+        },
         splitLine: { lineStyle: { color: theme.grid, type: 'dashed' } },
       },
       ...(isAi
@@ -135,12 +174,17 @@ export function createBreakdownOption(input: {
   category: 'ai' | 'mcp'
   labels: ChartLabels
   rows: RequestRecordOverviewBreakdownRow[]
-  formatCount: (value?: number | null) => string
+  formatCompact: (value?: number | null) => string
   formatPercent: (value?: number | null) => string
 }) {
   const theme = getChartTheme()
   const isAi = input.category === 'ai'
   const rows = input.rows.slice(0, 12)
+  const formatAxisValue = (value: string | number): string => {
+    const numeric = typeof value === 'string' ? Number(value) : value
+    if (Number.isNaN(numeric)) return '-'
+    return input.formatCompact(numeric)
+  }
   return {
     backgroundColor: 'transparent',
     grid: { left: 112, right: 32, top: 12, bottom: 24 },
@@ -155,12 +199,16 @@ export function createBreakdownOption(input: {
         if (!row) return ''
         const value = isAi ? row.tokens.total_tokens : row.request_count
         const share = isAi ? row.token_share : row.request_share
-        return `${row.label}<br/>${input.formatCount(value)} / ${input.formatPercent(share)}`
+        return `${row.label}<br/>${input.formatCompact(value)} / ${input.formatPercent(share)}`
       },
     },
     xAxis: {
       type: 'value',
-      axisLabel: { color: theme.muted, fontSize: 10 },
+      axisLabel: {
+        color: theme.muted,
+        fontSize: 10,
+        formatter: formatAxisValue,
+      },
       splitLine: { lineStyle: { color: theme.grid, type: 'dashed' } },
     },
     yAxis: {
@@ -184,11 +232,16 @@ export function createBreakdownOption(input: {
 
 export function createErrorOption(input: {
   rows: RequestRecordOverviewErrorRow[]
-  formatCount: (value?: number | null) => string
+  formatCompact: (value?: number | null) => string
   formatPercent: (value?: number | null) => string
 }) {
   const theme = getChartTheme()
   const rows = input.rows.slice(0, 10)
+  const formatAxisValue = (value: string | number): string => {
+    const numeric = typeof value === 'string' ? Number(value) : value
+    if (Number.isNaN(numeric)) return '-'
+    return input.formatCompact(numeric)
+  }
   return {
     backgroundColor: 'transparent',
     grid: { left: 112, right: 24, top: 12, bottom: 20 },
@@ -201,13 +254,17 @@ export function createErrorOption(input: {
       formatter: (params: Array<{ dataIndex: number }>) => {
         const row = rows[params[0]?.dataIndex ?? 0]
         return row
-          ? `${row.label}<br/>${input.formatCount(row.count)} / ${input.formatPercent(row.rate)}`
+          ? `${row.label}<br/>${input.formatCompact(row.count)} / ${input.formatPercent(row.rate)}`
           : ''
       },
     },
     xAxis: {
       type: 'value',
-      axisLabel: { color: theme.muted, fontSize: 10 },
+      axisLabel: {
+        color: theme.muted,
+        fontSize: 10,
+        formatter: formatAxisValue,
+      },
       splitLine: { lineStyle: { color: theme.grid, type: 'dashed' } },
     },
     yAxis: {

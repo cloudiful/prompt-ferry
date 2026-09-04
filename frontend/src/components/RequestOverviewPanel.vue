@@ -81,6 +81,7 @@ const trendOption = computed(() =>
     labels: chartLabels.value,
     trend: props.overview?.trend ?? [],
     formatTime: formatBucket,
+    formatCompact: props.formatting.formatTokenQuantity,
   }),
 )
 
@@ -89,7 +90,7 @@ const breakdownOption = computed(() =>
     category: props.category,
     labels: chartLabels.value,
     rows: breakdownRows.value,
-    formatCount: props.formatting.formatCount,
+    formatCompact: props.formatting.formatTokenQuantity,
     formatPercent: props.formatting.formatPercent,
   }),
 )
@@ -97,7 +98,7 @@ const breakdownOption = computed(() =>
 const errorOption = computed(() =>
   createErrorOption({
     rows: errorRows.value,
-    formatCount: props.formatting.formatCount,
+    formatCompact: props.formatting.formatTokenQuantity,
     formatPercent: props.formatting.formatPercent,
   }),
 )
