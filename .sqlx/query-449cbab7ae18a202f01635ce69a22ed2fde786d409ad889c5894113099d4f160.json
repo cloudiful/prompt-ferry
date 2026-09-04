@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "WITH preferred AS (\n    SELECT COALESCE(\n        (SELECT endpoint_id FROM user_endpoint_settings WHERE user_id = $1),\n        (SELECT endpoint_id\n         FROM provider_endpoints\n         WHERE scope = 'user'\n           AND owner_user_id = $1\n           AND enabled = TRUE\n         ORDER BY updated_at DESC\n         LIMIT 1),\n        (SELECT endpoint_id\n         FROM provider_endpoints\n         WHERE scope = 'admin'\n           AND owner_user_id IS NULL\n           AND enabled = TRUE\n         ORDER BY updated_at DESC\n         LIMIT 1)\n    ) AS endpoint_id\n)\nSELECT\n    e.endpoint_id AS \"route_id!\",\n    $1::BIGINT AS \"user_id!\",\n    e.base_url,\n    e.api_key,\n    e.key_lb_enabled,\n    e.native_api\nFROM provider_endpoints e\nCROSS JOIN preferred p\nWHERE e.enabled = TRUE\n  AND (\n      (e.scope = 'user' AND e.owner_user_id = $1)\n      OR (e.scope = 'admin' AND e.owner_user_id IS NULL)\n  )\nORDER BY\n    CASE\n        WHEN e.endpoint_id = p.endpoint_id THEN 0\n        WHEN e.scope = 'user' THEN 1\n        ELSE 2\n    END,\n    e.updated_at DESC\n",
+  "query": "WITH selected AS (\n    SELECT COALESCE(\n        (SELECT endpoint_id FROM user_endpoint_settings WHERE user_id = $1),\n        (SELECT endpoint_id FROM provider_endpoints WHERE scope = 'user' AND owner_user_id = $1 AND enabled = TRUE ORDER BY updated_at DESC LIMIT 1),\n        (SELECT endpoint_id FROM provider_endpoints WHERE scope = 'admin' AND enabled = TRUE ORDER BY updated_at DESC LIMIT 1)\n    ) AS endpoint_id\n)\nSELECT e.endpoint_id AS \"route_id!\", $1::BIGINT AS \"user_id!\", e.base_url, e.api_key, e.key_lb_enabled, e.native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier\nFROM selected s\nJOIN provider_endpoints e ON e.endpoint_id = s.endpoint_id\nWHERE e.enabled = TRUE\n",
   "describe": {
     "columns": [
       {
@@ -63,6 +63,23 @@
             "name": "native_api"
           }
         }
+      },
+      {
+        "ordinal": 6,
+        "name": "provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "service_tier",
+        "type_info": "Text",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -76,8 +93,10 @@
       false,
       false,
       false,
-      false
+      false,
+      false,
+      null
     ]
   },
-  "hash": "5028deace68582e59ae0af03429909b5713c598c2c2b884325b7bd76a2951de0"
+  "hash": "449cbab7ae18a202f01635ce69a22ed2fde786d409ad889c5894113099d4f160"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\nFROM provider_endpoints\nORDER BY updated_at DESC, endpoint_id DESC\nOFFSET $1\nLIMIT $2\n",
+  "query": "UPDATE provider_endpoints\nSET\n    scope = $2,\n    owner_user_id = $3,\n    name = $4,\n    provider = $5,\n    provider_region = $6,\n    service_tier = $7,\n    base_url = $8,\n    native_api = $9,\n    native_api_source = $10,\n    daily_max_requests = $11,\n    monthly_max_requests = $12,\n    api_key = $13,\n    key_lb_enabled = $14,\n    enabled = $15,\n    updated_at = NOW()\nWHERE endpoint_id = $1\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,12 @@
       },
       {
         "ordinal": 6,
+        "name": "service_tier",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
         "name": "base_url",
         "type_info": "Text",
         "origin": {
@@ -81,7 +87,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "native_api",
         "type_info": "Text",
         "origin": {
@@ -92,7 +98,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "native_api_source",
         "type_info": "Text",
         "origin": {
@@ -103,7 +109,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "daily_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -114,7 +120,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "monthly_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -125,7 +131,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "api_key",
         "type_info": "Text",
         "origin": {
@@ -136,7 +142,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "key_lb_enabled",
         "type_info": "Bool",
         "origin": {
@@ -147,7 +153,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -158,7 +164,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "mcp_enabled",
         "type_info": "Bool",
         "origin": {
@@ -169,7 +175,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -180,7 +186,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -193,8 +199,21 @@
     ],
     "parameters": {
       "Left": [
+        "Uuid",
+        "Text",
         "Int8",
-        "Int8"
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4",
+        "Text",
+        "Bool",
+        "Bool"
       ]
     },
     "nullable": [
@@ -204,6 +223,7 @@
       false,
       false,
       true,
+      null,
       false,
       false,
       false,
@@ -217,5 +237,5 @@
       false
     ]
   },
-  "hash": "a159134953833591aa441a97326efb88099b112ed8751352dcc92bc5341ecccf"
+  "hash": "53915726807122d60531fa1ee23eeb06dec7fe52d1ddb95b8842a312231cc004"
 }

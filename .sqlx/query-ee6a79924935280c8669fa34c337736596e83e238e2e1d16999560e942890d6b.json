@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO provider_endpoints(scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
+  "query": "INSERT INTO provider_endpoints(scope, owner_user_id, name, provider, provider_region, service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,12 @@
       },
       {
         "ordinal": 6,
+        "name": "service_tier",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
         "name": "base_url",
         "type_info": "Text",
         "origin": {
@@ -81,7 +87,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "native_api",
         "type_info": "Text",
         "origin": {
@@ -92,7 +98,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "native_api_source",
         "type_info": "Text",
         "origin": {
@@ -103,7 +109,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "daily_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -114,7 +120,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "monthly_max_requests",
         "type_info": "Int4",
         "origin": {
@@ -125,7 +131,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "api_key",
         "type_info": "Text",
         "origin": {
@@ -136,7 +142,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "key_lb_enabled",
         "type_info": "Bool",
         "origin": {
@@ -147,7 +153,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -158,7 +164,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "mcp_enabled",
         "type_info": "Bool",
         "origin": {
@@ -169,7 +175,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -180,7 +186,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -201,9 +207,11 @@
         "Text",
         "Text",
         "Text",
+        "Text",
         "Int4",
         "Int4",
         "Text",
+        "Bool",
         "Bool",
         "Bool"
       ]
@@ -215,6 +223,7 @@
       false,
       false,
       true,
+      null,
       false,
       false,
       false,
@@ -228,5 +237,5 @@
       false
     ]
   },
-  "hash": "0c29c6e6417a9babf2e81ad4b619f975ac2ae8ddefdcb247c73ae9f86ce7f94c"
+  "hash": "ee6a79924935280c8669fa34c337736596e83e238e2e1d16999560e942890d6b"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy,\n       r.daily_max_requests, r.monthly_max_requests, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.key_lb_enabled, e.native_api,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.responses_continuation_policy\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\n  AND (\n      (r.scope = 'user' AND r.owner_user_id = $1)\n      OR (r.scope = 'admin' AND r.owner_user_id IS NULL)\n  )\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
+  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy,\n       r.daily_max_requests, r.monthly_max_requests, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.key_lb_enabled, e.native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.responses_continuation_policy\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\n  AND (\n      (r.scope = 'user' AND r.owner_user_id = $1)\n      OR (r.scope = 'admin' AND r.owner_user_id IS NULL)\n  )\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
   "describe": {
     "columns": [
       {
@@ -170,6 +170,23 @@
       },
       {
         "ordinal": 15,
+        "name": "provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "service_tier",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 17,
         "name": "position",
         "type_info": "Int4",
         "origin": {
@@ -180,7 +197,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 18,
         "name": "target_enabled",
         "type_info": "Bool",
         "origin": {
@@ -191,7 +208,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 19,
         "name": "upstream_model",
         "type_info": "Text",
         "origin": {
@@ -202,7 +219,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
         "name": "responses_continuation_policy",
         "type_info": "Text",
         "origin": {
@@ -235,10 +252,12 @@
       false,
       false,
       false,
+      null,
+      false,
       false,
       true,
       false
     ]
   },
-  "hash": "8f216398cf9d6eb5fe28749d5389f93838ba461fe3c513047b7b9a28d4cca541"
+  "hash": "1eb04e8f5cb4c701fb0d00efb069c7c41a93d940092ee9946fb30dad74ec49fa"
 }

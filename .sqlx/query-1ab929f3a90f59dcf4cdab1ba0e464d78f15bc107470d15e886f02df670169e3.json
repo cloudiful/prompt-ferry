@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT endpoint_id AS \"route_id!\", COALESCE(owner_user_id, 0) AS \"user_id!\", base_url, api_key, key_lb_enabled, native_api\nFROM provider_endpoints\nWHERE endpoint_id = $1\n  AND enabled = TRUE\n",
+  "query": "SELECT endpoint_id AS \"route_id!\", COALESCE(owner_user_id, 0) AS \"user_id!\", base_url, api_key, key_lb_enabled, native_api, provider, COALESCE(service_tier, 'standard') AS service_tier\nFROM provider_endpoints\nWHERE endpoint_id = $1\n  AND enabled = TRUE\n",
   "describe": {
     "columns": [
       {
@@ -63,6 +63,23 @@
             "name": "native_api"
           }
         }
+      },
+      {
+        "ordinal": 6,
+        "name": "provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "service_tier",
+        "type_info": "Text",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -76,8 +93,10 @@
       false,
       false,
       false,
-      false
+      false,
+      false,
+      null
     ]
   },
-  "hash": "28010f4007165e0738e15051425e0feace8a5e0a1906a0e55f00193a03d5e473"
+  "hash": "1ab929f3a90f59dcf4cdab1ba0e464d78f15bc107470d15e886f02df670169e3"
 }

@@ -1,0 +1,102 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH preferred AS (\n    SELECT COALESCE(\n        (SELECT endpoint_id FROM user_endpoint_settings WHERE user_id = $1),\n        (SELECT endpoint_id\n         FROM provider_endpoints\n         WHERE scope = 'user'\n           AND owner_user_id = $1\n           AND enabled = TRUE\n         ORDER BY updated_at DESC\n         LIMIT 1),\n        (SELECT endpoint_id\n         FROM provider_endpoints\n         WHERE scope = 'admin'\n           AND owner_user_id IS NULL\n           AND enabled = TRUE\n         ORDER BY updated_at DESC\n         LIMIT 1)\n    ) AS endpoint_id\n)\nSELECT\n    e.endpoint_id AS \"route_id!\",\n    $1::BIGINT AS \"user_id!\",\n    e.base_url,\n    e.api_key,\n    e.key_lb_enabled,\n    e.native_api,\n    e.provider,\n    COALESCE(e.service_tier, 'standard') AS service_tier\nFROM provider_endpoints e\nCROSS JOIN preferred p\nWHERE e.enabled = TRUE\n  AND (\n      (e.scope = 'user' AND e.owner_user_id = $1)\n      OR (e.scope = 'admin' AND e.owner_user_id IS NULL)\n  )\nORDER BY\n    CASE\n        WHEN e.endpoint_id = p.endpoint_id THEN 0\n        WHEN e.scope = 'user' THEN 1\n        ELSE 2\n    END,\n    e.updated_at DESC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "route_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "base_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "base_url"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "api_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "api_key"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "key_lb_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "key_lb_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "native_api",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "native_api"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "service_tier",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "ed35f18b6ea8bebff25377aa408602776f507e77f8d2f9377d5b2e1fb4deb5d9"
+}

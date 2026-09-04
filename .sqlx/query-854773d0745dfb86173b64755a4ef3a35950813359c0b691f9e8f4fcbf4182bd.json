@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT DISTINCT ON (e.endpoint_id) e.endpoint_id, e.base_url, e.api_key, e.key_lb_enabled, e.native_api\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\n  AND (\n      (r.scope = 'user' AND r.owner_user_id = $1)\n      OR (r.scope = 'admin' AND r.owner_user_id IS NULL)\n  )\nORDER BY\n  e.endpoint_id,\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  t.position ASC,\n  r.updated_at DESC\n",
+  "query": "SELECT DISTINCT ON (e.endpoint_id) e.endpoint_id, e.base_url, e.api_key, e.key_lb_enabled, e.native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\n  AND (\n      (r.scope = 'user' AND r.owner_user_id = $1)\n      OR (r.scope = 'admin' AND r.owner_user_id IS NULL)\n  )\nORDER BY\n  e.endpoint_id,\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  t.position ASC,\n  r.updated_at DESC\n",
   "describe": {
     "columns": [
       {
@@ -57,6 +57,23 @@
             "name": "native_api"
           }
         }
+      },
+      {
+        "ordinal": 5,
+        "name": "provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "service_tier",
+        "type_info": "Text",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -69,8 +86,10 @@
       false,
       false,
       false,
-      false
+      false,
+      false,
+      null
     ]
   },
-  "hash": "a2180ad9effbd262b61bda04aeb9c34fffe84fd6672b4a53094030ed0a6acfde"
+  "hash": "854773d0745dfb86173b64755a4ef3a35950813359c0b691f9e8f4fcbf4182bd"
 }
