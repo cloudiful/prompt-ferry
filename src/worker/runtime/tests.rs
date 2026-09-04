@@ -19,6 +19,7 @@ use chrono::Utc;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 
+use super::ai::upstream::upstream_url_for_route;
 use super::connect::is_expected_relay_disconnect;
 use super::routing::{
     RouteAffinityError, materialize_route_api_key_selection, rendezvous_target,
@@ -1019,4 +1020,121 @@ fn raw_object_store_path_style_defaults_to_true_and_legacy_json_loads_as_path_st
     let mapped = RawObjectStoreConfig::from_worker_config(&worker);
     assert!(!mapped.s3_path_style);
     assert!(!mapped.redacted_response().s3_path_style);
+}
+
+fn url_mapping_route(
+    provider: db::EndpointProvider,
+    base_url: &str,
+    native_api: crate::config::NativeApi,
+) -> db::RouteConfig {
+    db::RouteConfig {
+        route_id: uuid::Uuid::new_v4(),
+        user_id: 1,
+        model_route_rule_id: None,
+        base_url: base_url.to_string(),
+        api_key: "test-key".to_string(),
+        endpoint_key_id: None,
+        endpoint_key_label: None,
+        api_keys: Vec::new(),
+        key_lb_enabled: false,
+        native_api,
+        upstream_model: None,
+        responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
+        route_selection_reason: db::RouteSelectionReason::Default,
+        provider,
+        service_tier: db::MinimaxServiceTier::Standard,
+    }
+}
+
+#[test]
+fn minimax_anthropic_official_root_maps_to_prefixed_url() {
+    let route = url_mapping_route(
+        db::EndpointProvider::Minimax,
+        "https://api.minimaxi.com",
+        crate::config::NativeApi::AnthropicMessages,
+    );
+    assert_eq!(
+        upstream_url_for_route(&route, "/v1/messages"),
+        "https://api.minimaxi.com/anthropic/v1/messages"
+    );
+    let global = url_mapping_route(
+        db::EndpointProvider::Minimax,
+        "https://api.minimax.io/",
+        crate::config::NativeApi::AnthropicMessages,
+    );
+    assert_eq!(
+        upstream_url_for_route(&global, "/v1/messages"),
+        "https://api.minimax.io/anthropic/v1/messages"
+    );
+}
+
+#[test]
+fn minimax_anthropic_existing_prefix_is_not_duplicated() {
+    let route = url_mapping_route(
+        db::EndpointProvider::Minimax,
+        "https://api.minimaxi.com/anthropic",
+        crate::config::NativeApi::AnthropicMessages,
+    );
+    let url = upstream_url_for_route(&route, "/v1/messages");
+    assert_eq!(url, "https://api.minimaxi.com/anthropic/v1/messages");
+    assert_eq!(url.matches("/anthropic").count(), 1);
+}
+
+#[test]
+fn minimax_chat_responses_and_generic_keep_plain_urls() {
+    let chat = url_mapping_route(
+        db::EndpointProvider::Minimax,
+        "https://api.minimaxi.com",
+        crate::config::NativeApi::Chat,
+    );
+    assert_eq!(
+        upstream_url_for_route(&chat, "/v1/chat/completions"),
+        "https://api.minimaxi.com/v1/chat/completions"
+    );
+    let responses = url_mapping_route(
+        db::EndpointProvider::Minimax,
+        "https://api.minimaxi.com",
+        crate::config::NativeApi::Responses,
+    );
+    assert_eq!(
+        upstream_url_for_route(&responses, "/v1/responses"),
+        "https://api.minimaxi.com/v1/responses"
+    );
+    let generic = url_mapping_route(
+        db::EndpointProvider::Generic,
+        "https://api.minimaxi.com",
+        crate::config::NativeApi::AnthropicMessages,
+    );
+    assert_eq!(
+        upstream_url_for_route(&generic, "/v1/messages"),
+        "https://api.minimaxi.com/v1/messages"
+    );
+}
+
+#[test]
+fn minimax_custom_base_and_non_allowlisted_paths_stay_plain() {
+    let custom = url_mapping_route(
+        db::EndpointProvider::Minimax,
+        "https://proxy.example.test",
+        crate::config::NativeApi::AnthropicMessages,
+    );
+    assert_eq!(
+        upstream_url_for_route(&custom, "/v1/messages"),
+        "https://proxy.example.test/v1/messages"
+    );
+    let official = url_mapping_route(
+        db::EndpointProvider::Minimax,
+        "https://api.minimaxi.com",
+        crate::config::NativeApi::AnthropicMessages,
+    );
+    for path in [
+        "/v1/messages/extra",
+        "/anthropic/v1/messages",
+        "/v1/responses",
+    ] {
+        assert_eq!(
+            upstream_url_for_route(&official, path),
+            format!("https://api.minimaxi.com{path}")
+        );
+    }
 }

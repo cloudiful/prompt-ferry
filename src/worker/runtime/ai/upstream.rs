@@ -110,6 +110,115 @@ pub(super) fn is_opencode_host(url: &str) -> bool {
     }
 }
 
+/// Build the upstream URL for a resolved route.
+///
+/// Only MiniMax routes with the fixed Anthropic path `/v1/messages` are
+/// remapped to `/anthropic/v1/messages`. All other providers and paths use
+/// the plain `base + path` join so Generic and MiniMax Chat/Responses
+/// behavior is unchanged. Caller paths stay fixed and allowlisted; this
+/// helper never accepts arbitrary suffixes.
+///
+/// A MiniMax base already carrying an `/anthropic` prefix is joined without
+/// duplication. Only known official MiniMax roots gain the prefix; custom
+/// MiniMax bases without that prefix are left unchanged instead of being
+/// blindly rewritten. No credentials are logged here.
+pub(in crate::worker::runtime) fn upstream_url_for_route(
+    route: &db::RouteConfig,
+    path: &str,
+) -> String {
+    if route.provider != crate::db::EndpointProvider::Minimax {
+        return join_base_path(&route.base_url, path);
+    }
+    if path != "/v1/messages" {
+        return join_base_path(&route.base_url, path);
+    }
+    if base_has_anthropic_prefix(&route.base_url) {
+        return join_base_path(&route.base_url, path);
+    }
+    if is_minimax_official_root(&route.base_url) {
+        return format!("{}/anthropic{}", route.base_url.trim_end_matches('/'), path);
+    }
+    join_base_path(&route.base_url, path)
+}
+
+fn join_base_path(base: &str, path: &str) -> String {
+    format!("{}{}", base.trim_end_matches('/'), path)
+}
+
+fn is_minimax_official_host(host: &str) -> bool {
+    matches!(
+        host.to_ascii_lowercase().as_str(),
+        "api.minimaxi.com" | "api.minimax.io"
+    )
+}
+
+/// Return true when the configured base URL path already starts with the
+/// fixed `/anthropic` segment. Uses URL parsing so only a real path segment
+/// matches; a host suffix such as `api.minimaxi.com.evil.com` never matches.
+fn base_has_anthropic_prefix(base_url: &str) -> bool {
+    if let Ok(url) = reqwest::Url::parse(base_url.trim()) {
+        if let Some(mut segments) = url.path_segments() {
+            if let Some(first) = segments.next() {
+                return first == "anthropic";
+            }
+        }
+        return false;
+    }
+    let without_query = base_url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(base_url)
+        .trim()
+        .trim_end_matches('/');
+    without_query.ends_with("/anthropic")
+}
+
+/// Return true for known official MiniMax roots with no extra path. Custom
+/// MiniMax bases return false so they are never blindly rewritten.
+fn is_minimax_official_root(base_url: &str) -> bool {
+    let trimmed = base_url.trim();
+    if let Ok(url) = reqwest::Url::parse(trimmed) {
+        let Some(host) = url.host_str() else {
+            return false;
+        };
+        if !is_minimax_official_host(host) {
+            return false;
+        }
+        return url.path() == "/" || url.path().is_empty();
+    }
+    let without_scheme = if let Some(idx) = trimmed.find("://") {
+        &trimmed[idx + 3..]
+    } else {
+        trimmed
+    };
+    let host_part = without_scheme
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .split('#')
+        .next()
+        .unwrap_or("");
+    if !is_minimax_official_host(host_part) {
+        return false;
+    }
+    let path_part = without_scheme
+        .find('/')
+        .map(|idx| &without_scheme[idx..])
+        .unwrap_or("/");
+    let path_no_query = path_part
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(path_part)
+        .trim_end_matches('/');
+    path_no_query.is_empty()
+}
+
 fn with_opencode_headers(
     builder: reqwest::RequestBuilder,
     request_headers: &[(String, String)],
@@ -818,5 +927,142 @@ mod tests {
             .expect("generic body bytes");
         let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
         assert_eq!(value["service_tier"], "priority");
+    }
+
+    fn minimax_anthropic_route(base_url: &str) -> RouteConfig {
+        RouteConfig {
+            base_url: base_url.to_string(),
+            native_api: NativeApi::AnthropicMessages,
+            provider: crate::db::EndpointProvider::Minimax,
+            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+        }
+    }
+
+    fn route_with_base(route: &RouteConfig, base_url: &str) -> RouteConfig {
+        RouteConfig {
+            base_url: base_url.to_string(),
+            ..route.clone()
+        }
+    }
+
+    #[test]
+    fn minimax_official_roots_gain_anthropic_prefix() {
+        for base in ["https://api.minimaxi.com", "https://api.minimaxi.com/"] {
+            let route = minimax_anthropic_route(base);
+            assert_eq!(
+                upstream_url_for_route(&route, "/v1/messages"),
+                "https://api.minimaxi.com/anthropic/v1/messages",
+                "base {base} should map to the MiniMax Anthropic path"
+            );
+        }
+        let global = minimax_anthropic_route("https://api.minimax.io");
+        assert_eq!(
+            upstream_url_for_route(&global, "/v1/messages"),
+            "https://api.minimax.io/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn minimax_existing_anthropic_prefix_is_not_duplicated() {
+        for base in [
+            "https://api.minimaxi.com/anthropic",
+            "https://api.minimaxi.com/anthropic/",
+            "https://api.minimax.io/anthropic",
+        ] {
+            let route = minimax_anthropic_route(base);
+            let url = upstream_url_for_route(&route, "/v1/messages");
+            assert_eq!(
+                url.matches("/anthropic").count(),
+                1,
+                "base {base} mapped to {url} without duplicating the prefix"
+            );
+            assert!(url.ends_with("/anthropic/v1/messages"));
+        }
+        // Custom MiniMax base with an explicit prefix is compatible.
+        let custom = minimax_anthropic_route("https://proxy.example.test/anthropic");
+        assert_eq!(
+            upstream_url_for_route(&custom, "/v1/messages"),
+            "https://proxy.example.test/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn minimax_chat_and_responses_keep_plain_v1_paths() {
+        let chat = RouteConfig {
+            native_api: NativeApi::Chat,
+            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+        };
+        assert_eq!(
+            upstream_url_for_route(&chat, "/v1/chat/completions"),
+            "https://api.minimaxi.com/v1/chat/completions"
+        );
+        let responses = RouteConfig {
+            native_api: NativeApi::Responses,
+            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+        };
+        assert_eq!(
+            upstream_url_for_route(&responses, "/v1/responses"),
+            "https://api.minimaxi.com/v1/responses"
+        );
+        // Even an Anthropic-native MiniMax route keeps non-messages paths plain.
+        let anthropic = minimax_anthropic_route("https://api.minimaxi.com");
+        assert_eq!(
+            upstream_url_for_route(&anthropic, "/v1/responses"),
+            "https://api.minimaxi.com/v1/responses"
+        );
+    }
+
+    #[test]
+    fn generic_provider_never_gains_anthropic_prefix() {
+        let generic = generic_route();
+        assert_eq!(
+            upstream_url_for_route(&generic, "/v1/messages"),
+            "https://api.minimaxi.com/v1/messages"
+        );
+        let generic_prefixed = route_with_base(&generic, "https://api.minimaxi.com/anthropic");
+        assert_eq!(
+            upstream_url_for_route(&generic_prefixed, "/v1/messages"),
+            "https://api.minimaxi.com/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn custom_minimax_root_without_prefix_is_not_rewritten() {
+        let custom = minimax_anthropic_route("https://proxy.example.test");
+        assert_eq!(
+            upstream_url_for_route(&custom, "/v1/messages"),
+            "https://proxy.example.test/v1/messages",
+            "custom MiniMax bases must not be blindly rewritten"
+        );
+        let evil = minimax_anthropic_route("https://api.minimaxi.com.evil.test");
+        assert_eq!(
+            upstream_url_for_route(&evil, "/v1/messages"),
+            "https://api.minimaxi.com.evil.test/v1/messages"
+        );
+    }
+
+    #[test]
+    fn anthropic_url_mapping_rejects_non_allowlisted_paths() {
+        let route = minimax_anthropic_route("https://api.minimaxi.com");
+        for path in [
+            "/v1/messages/extra",
+            "/v1/messages/",
+            "/V1/MESSAGES",
+            "/anthropic/v1/messages",
+            "/v1/chat/completions",
+            "/v1/responses",
+            "/v1/models",
+        ] {
+            let url = upstream_url_for_route(&route, path);
+            assert_eq!(
+                url,
+                format!("https://api.minimaxi.com{path}"),
+                "path {path} must not gain an Anthropic prefix"
+            );
+            assert_eq!(
+                url.matches("/anthropic").count(),
+                u32::from(path.contains("/anthropic")) as usize
+            );
+        }
     }
 }

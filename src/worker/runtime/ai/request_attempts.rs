@@ -8,13 +8,12 @@ use super::super::{
     RequestExecutionContext, check_named_request_budget,
     context::{RouteExecutionContext, RuntimeServices},
     request_assembly::{BufferedBridgeRequest, RequestCancellation},
-    upstream_url,
 };
 use super::{
     forward::{ResponseForwardContext, ResponseLoggingContext, forward_upstream_response},
     request_logging::log_prepared_upstream_summary,
     request_support::prepare_upstream_request_with_replay,
-    upstream::build_upstream_request,
+    upstream::{build_upstream_request, upstream_url_for_route},
 };
 
 const MAX_UPSTREAM_ATTEMPTS: usize = 3;
@@ -142,7 +141,7 @@ pub(super) async fn forward_route_request(
         Ok(prepared) => prepared,
         Err(err) => return Ok(ForwardOutcome::CompatError(err)),
     };
-    let upstream_url = upstream_url(&route.base_url, &prepared.path);
+    let upstream_url = upstream_url_for_route(route, &prepared.path);
     if let Some(state) = services.admin_state() {
         let _ = db::record_request_state(
             &state.pool,
