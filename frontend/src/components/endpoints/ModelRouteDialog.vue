@@ -57,9 +57,21 @@ function defaultContinuationPolicy(
 function onTargetEndpointChange(
   target: ModelRouteForm['targets'][number],
 ): void {
-  target.responses_continuation_policy = defaultContinuationPolicy(
-    target.endpoint_id,
-  )
+  // Normalize only incompatible selections; preserve an explicit compatible
+  // choice across endpoint switches. Backend rejects force_passthrough for
+  // non-Responses targets, so collapse it to the default when incompatible.
+  if (
+    target.responses_continuation_policy === 'force_passthrough' &&
+    !canUseForcePassthrough(target.endpoint_id)
+  ) {
+    target.responses_continuation_policy = 'force_replay'
+    return
+  }
+  if (!target.responses_continuation_policy) {
+    target.responses_continuation_policy = defaultContinuationPolicy(
+      target.endpoint_id,
+    )
+  }
 }
 
 function canUseForcePassthrough(endpointId: string): boolean {
@@ -68,15 +80,27 @@ function canUseForcePassthrough(endpointId: string): boolean {
   )
 }
 
-function continuationPolicyOptionsFor(endpointId: string): Array<{
+function continuationPolicyOptionsFor(
+  endpointId: string,
+  currentValue: 'force_passthrough' | 'force_replay',
+): Array<{
   label: string
   value: 'force_passthrough' | 'force_replay'
 }> {
-  return canUseForcePassthrough(endpointId)
+  const base = canUseForcePassthrough(endpointId)
     ? continuationPolicyOptions.value
     : continuationPolicyOptions.value.filter(
         (option) => option.value === 'force_replay',
       )
+  // A persisted value that is no longer selectable (or an endpoint that is
+  // not selected/loaded yet) must still render its localized label instead
+  // of falling back to the raw enum string. The value is normalized back to
+  // a compatible option on the next endpoint change.
+  if (base.some((option) => option.value === currentValue)) return base
+  const current = continuationPolicyOptions.value.find(
+    (option) => option.value === currentValue,
+  )
+  return current ? [...base, current] : base
 }
 
 const routingStrategyOptions = computed(() => [
@@ -247,7 +271,12 @@ const targetColumns = computed<
               <USelect
                 v-model="row.original.responses_continuation_policy"
                 class="w-full"
-                :items="continuationPolicyOptionsFor(row.original.endpoint_id)"
+                :items="
+                  continuationPolicyOptionsFor(
+                    row.original.endpoint_id,
+                    row.original.responses_continuation_policy,
+                  )
+                "
                 label-key="label"
                 value-key="value"
               />

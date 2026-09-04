@@ -318,6 +318,7 @@ export type EndpointRequest = {
     provider?: EndpointProvider;
     provider_region?: null | EndpointRegion;
     scope: string;
+    service_tier?: MinimaxServiceTier;
 };
 
 export type EndpointSettingRequest = {
@@ -611,6 +612,8 @@ export type MeResponse = {
     user_id: number;
 };
 
+export type MinimaxServiceTier = 'standard' | 'priority';
+
 export type ModelEndpointRule = {
     created_at: string;
     daily_max_requests?: number | null;
@@ -720,6 +723,7 @@ export type ProviderEndpoint = {
     provider: EndpointProvider;
     provider_region?: null | EndpointRegion;
     scope: string;
+    service_tier?: MinimaxServiceTier;
     updated_at: string;
 };
 

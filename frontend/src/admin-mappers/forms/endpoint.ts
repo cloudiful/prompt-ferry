@@ -1,8 +1,17 @@
 import type {
   EndpointRequest,
+  MinimaxServiceTier,
   ProviderEndpoint,
 } from '../../generated/admin-api'
 import type { EndpointForm } from '../../models'
+
+// Backend treats omitted/unknown tiers as standard; keep the form in sync so
+// legacy endpoints round-trip without changing behavior.
+export function normalizeServiceTier(
+  value: MinimaxServiceTier | string | null | undefined,
+): MinimaxServiceTier {
+  return value === 'priority' ? 'priority' : 'standard'
+}
 
 export function createEmptyEndpointForm(): EndpointForm {
   return {
@@ -12,6 +21,7 @@ export function createEmptyEndpointForm(): EndpointForm {
     name: '',
     provider: 'generic',
     provider_region: null,
+    service_tier: 'standard',
     base_url: '',
     api_keys: [
       {
@@ -48,6 +58,7 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
     name: endpoint.name,
     provider: endpoint.provider ?? 'generic',
     provider_region: endpoint.provider_region ?? null,
+    service_tier: normalizeServiceTier(endpoint.service_tier),
     base_url: endpoint.base_url,
     api_keys: endpointApiKeys.map((key) => ({
       key_label: key.key_label,
@@ -86,6 +97,7 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
     name: form.name.trim(),
     provider: form.provider,
     provider_region: form.provider_region,
+    service_tier: normalizeServiceTier(form.service_tier),
     native_api_override:
       form.protocol_mode === 'manual' ? form.native_api_override : null,
     owner_user_id: form.scope === 'user' ? form.owner_user_id : null,

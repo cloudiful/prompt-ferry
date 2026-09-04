@@ -18,6 +18,11 @@ export const endpointMessages = {
       '模型请求使用此自定义地址；套餐用量仍查询所选区域的 MiniMax 官方地址。',
     providerMinimaxAnthropicBaseUrlHint:
       'Anthropic Messages 使用 MiniMax 的 /anthropic 地址；系统会自动追加 /v1/messages。',
+    serviceTier: '服务等级',
+    serviceTierStandard: '标准',
+    serviceTierPriority: '优先',
+    serviceTierHint:
+      '优先通道会优先准入，并按标准价格的 1.5 倍计费；标准通道保持原有行为。',
     minimaxMcp: '暴露 MiniMax MCP 工具',
     minimaxMcpHint: '在 MCP 聚合入口提供 web_search 和 understand_image。',
     chatApi: 'Chat Completions',
@@ -129,6 +134,11 @@ export const endpointMessages = {
       'Model requests use this custom URL; token plan usage still uses the official MiniMax URL for the selected region.',
     providerMinimaxAnthropicBaseUrlHint:
       "Anthropic Messages uses MiniMax's /anthropic base URL; /v1/messages is appended automatically.",
+    serviceTier: 'Service tier',
+    serviceTierStandard: 'Standard',
+    serviceTierPriority: 'Priority',
+    serviceTierHint:
+      'Priority admission is billed at 1.5x the standard price; standard keeps existing behavior.',
     minimaxMcp: 'Expose MiniMax MCP tools',
     minimaxMcpHint: 'Expose web_search and understand_image through MCP.',
     chatApi: 'Chat Completions API',

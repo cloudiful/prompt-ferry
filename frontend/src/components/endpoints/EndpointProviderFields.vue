@@ -27,6 +27,9 @@ const providerSelection = computed({
     form.value.provider = value
     if (value === 'generic') {
       form.value.provider_region = null
+      // Service tier only applies to MiniMax upstreams; reset to the default
+      // so a later switch back starts from standard behavior.
+      form.value.service_tier = 'standard'
       // MCP exposure is only valid for MiniMax endpoints; backend validation
       // rejects an explicit `mcp_enabled: true` for generic providers, so
       // collapse to false here as well to keep the UI in sync.
@@ -35,6 +38,10 @@ const providerSelection = computed({
     }
     const region = form.value.provider_region ?? 'cn'
     form.value.provider_region = region
+    // Preserve an explicit priority selection across provider switches;
+    // normalize legacy/unknown values to the standard default.
+    form.value.service_tier =
+      form.value.service_tier === 'priority' ? 'priority' : 'standard'
     if (!form.value.endpoint_id) {
       form.value.mcp_enabled = true
     }
@@ -53,6 +60,16 @@ const providerRegionSelection = computed({
   },
 })
 const isMinimax = computed(() => form.value.provider === 'minimax')
+const serviceTierSelection = computed({
+  get: () => (form.value.service_tier === 'priority' ? 'priority' : 'standard'),
+  set(value: 'standard' | 'priority') {
+    form.value.service_tier = value
+  },
+})
+const serviceTierOptions = computed(() => [
+  { label: props.t('serviceTierStandard'), value: 'standard' },
+  { label: props.t('serviceTierPriority'), value: 'priority' },
+])
 const usesCustomMinimaxBaseUrl = computed(() => {
   if (!isMinimax.value) return false
   const current = form.value.base_url.trim().replace(/\/+$/, '')
@@ -164,6 +181,34 @@ function setMinimaxBaseUrl(
       label-key="label"
       value-key="value"
     />
+  </div>
+  <div v-if="isMinimax" class="grid gap-1 md:grid-cols-[8rem_minmax(0,1fr)]">
+    <div class="flex items-center gap-1">
+      <label class="text-xs text-muted" for="endpoint-service-tier">
+        {{ t('serviceTier') }}
+      </label>
+      <UTooltip :text="t('serviceTierHint')">
+        <UButton
+          type="button"
+          size="xs"
+          color="neutral"
+          variant="ghost"
+          icon="i-lucide-info"
+          :aria-label="t('serviceTierHint')"
+        />
+      </UTooltip>
+    </div>
+    <USelect
+      id="endpoint-service-tier"
+      v-model="serviceTierSelection"
+      class="w-full"
+      :items="serviceTierOptions"
+      label-key="label"
+      value-key="value"
+    />
+    <p class="text-xs leading-snug text-muted md:col-start-2">
+      {{ t('serviceTierHint') }}
+    </p>
   </div>
   <div class="grid gap-1 md:grid-cols-[9rem_minmax(0,1fr)] md:items-center">
     <div class="flex items-center gap-1">

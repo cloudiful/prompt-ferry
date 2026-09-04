@@ -7,6 +7,7 @@ import type {
   SessionRouteOptionsResponse,
   EndpointProvider,
   EndpointRegion,
+  MinimaxServiceTier,
   UsageClearScope,
 } from './generated/admin-api'
 
@@ -24,6 +25,7 @@ export type EndpointForm = {
   name: string
   provider: EndpointProvider
   provider_region: EndpointRegion | null
+  service_tier: MinimaxServiceTier
   base_url: string
   api_keys: EndpointApiKeyForm[]
   key_lb_enabled: boolean
