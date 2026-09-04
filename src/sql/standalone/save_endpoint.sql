@@ -1,13 +1,14 @@
 INSERT INTO standalone_provider_endpoints (
-    endpoint_id, name, provider, provider_region, base_url, native_api,
+    endpoint_id, name, provider, provider_region, service_tier, base_url, native_api,
     native_api_source, key_lb_enabled, enabled, mcp_enabled,
     api_key_ciphertext, api_key_nonce, api_key_key_version,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(endpoint_id) DO UPDATE SET
     name = excluded.name,
     provider = excluded.provider,
     provider_region = excluded.provider_region,
+    service_tier = excluded.service_tier,
     base_url = excluded.base_url,
     native_api = excluded.native_api,
     native_api_source = excluded.native_api_source,

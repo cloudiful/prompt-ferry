@@ -38,6 +38,7 @@ pub async fn create_test_endpoint(pool: &sqlx::PgPool) -> anyhow::Result<Uuid> {
             name: "billing-test-endpoint".to_string(),
             provider: db::EndpointProvider::Generic,
             provider_region: None,
+            service_tier: Default::default(),
             base_url: "https://billing-test.invalid".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,

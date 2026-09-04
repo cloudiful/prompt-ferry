@@ -16,6 +16,7 @@ pub async fn spawn_worker(
             name: "replay-default-upstream".to_string(),
             provider: db::EndpointProvider::Generic,
             provider_region: None,
+            service_tier: Default::default(),
             base_url: format!("http://{upstream_addr}"),
             native_api: prompt_ferry::config::NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,

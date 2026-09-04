@@ -42,9 +42,36 @@ pub(super) fn build_upstream_request(
         request_builder
     };
     match body {
-        PreparedRequestBody::PassthroughStream(bytes) => request_builder.body(bytes.clone()),
-        PreparedRequestBody::BufferedBytes(bytes) => request_builder.body(bytes.clone()),
+        PreparedRequestBody::PassthroughStream(bytes) => {
+            request_builder.body(apply_minimax_service_tier(route, bytes))
+        }
+        PreparedRequestBody::BufferedBytes(bytes) => {
+            request_builder.body(apply_minimax_service_tier(route, bytes))
+        }
     }
+}
+
+/// Inject the endpoint-configured MiniMax `service_tier` into an upstream
+/// JSON request body. Only MiniMax endpoints are modified; generic
+/// endpoints return the body unchanged so client-supplied values are
+/// never forwarded or overridden. The configured value overwrites any
+/// existing `service_tier` field. Non-JSON or non-object bodies are
+/// returned unchanged.
+pub(super) fn apply_minimax_service_tier(route: &db::RouteConfig, body: &[u8]) -> Vec<u8> {
+    if route.provider != crate::db::EndpointProvider::Minimax {
+        return body.to_vec();
+    }
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return body.to_vec();
+    };
+    let Some(object) = value.as_object_mut() else {
+        return body.to_vec();
+    };
+    object.insert(
+        "service_tier".to_string(),
+        serde_json::Value::String(route.service_tier.as_str().to_string()),
+    );
+    serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
 }
 
 pub(super) fn is_opencode_host(url: &str) -> bool {
@@ -248,6 +275,8 @@ mod tests {
             upstream_model: None,
             responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
         };
         let response = send_upstream_request(
             &Client::new(),
@@ -279,6 +308,8 @@ mod tests {
             upstream_model: None,
             responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -353,6 +384,8 @@ mod tests {
             upstream_model: None,
             responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
         };
         let conversation_id =
             uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
@@ -406,6 +439,8 @@ mod tests {
             upstream_model: None,
             responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
         };
         let conversation_id =
             uuid::Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
@@ -457,6 +492,8 @@ mod tests {
             upstream_model: None,
             responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
         };
         let conversation_id =
             uuid::Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
@@ -511,6 +548,8 @@ mod tests {
             upstream_model: None,
             responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -552,6 +591,8 @@ mod tests {
             upstream_model: None,
             responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
         };
         let conversation_id =
             uuid::Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
@@ -604,6 +645,8 @@ mod tests {
             upstream_model: Some("opencode-model".to_string()),
             responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
         };
         let conversation_id =
             uuid::Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
@@ -638,6 +681,8 @@ mod tests {
             upstream_model: None,
             responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -664,5 +709,114 @@ mod tests {
             request.headers().get(header::USER_AGENT).unwrap(),
             "custom-ua/2.0"
         );
+    }
+
+    fn minimax_route(tier: crate::db::MinimaxServiceTier) -> RouteConfig {
+        RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://api.minimaxi.com".to_string(),
+            api_key: "minimax-key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: NativeApi::Chat,
+            upstream_model: None,
+            responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
+            route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Minimax,
+            service_tier: tier,
+        }
+    }
+
+    fn generic_route() -> RouteConfig {
+        RouteConfig {
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
+            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+        }
+    }
+
+    #[test]
+    fn minimax_injects_configured_service_tier_over_body_value() {
+        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
+        let body = br#"{"model":"MiniMax-M2","service_tier":"standard"}"#;
+        let injected = apply_minimax_service_tier(&route, body);
+        let value: serde_json::Value = serde_json::from_slice(&injected).unwrap();
+        assert_eq!(value["service_tier"], "priority");
+        assert_eq!(value["model"], "MiniMax-M2");
+    }
+
+    #[test]
+    fn minimax_defaults_to_standard_when_body_omits_tier() {
+        let route = minimax_route(crate::db::MinimaxServiceTier::Standard);
+        let injected = apply_minimax_service_tier(&route, br#"{"model":"MiniMax-M2"}"#);
+        let value: serde_json::Value = serde_json::from_slice(&injected).unwrap();
+        assert_eq!(value["service_tier"], "standard");
+    }
+
+    #[test]
+    fn generic_endpoints_leave_body_unchanged() {
+        let route = generic_route();
+        let body = br#"{"model":"gpt-5","service_tier":"priority"}"#;
+        assert_eq!(apply_minimax_service_tier(&route, body), body);
+    }
+
+    #[test]
+    fn non_json_bodies_pass_through_unchanged() {
+        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
+        let body = b"not-json";
+        assert_eq!(apply_minimax_service_tier(&route, body), body);
+        let array_body = b"[1,2,3]";
+        assert_eq!(apply_minimax_service_tier(&route, array_body), array_body);
+    }
+
+    #[test]
+    fn build_upstream_request_injects_tier_for_buffered_and_passthrough() {
+        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
+        for body in [
+            PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            PreparedRequestBody::PassthroughStream(br#"{"model":"m"}"#.to_vec()),
+        ] {
+            let request = build_upstream_request(
+                &Client::new(),
+                &Method::POST,
+                "https://api.minimaxi.com/v1/chat/completions",
+                &route,
+                &body,
+                &[],
+                None,
+            )
+            .build()
+            .unwrap();
+            let bytes = request
+                .body()
+                .and_then(|body| body.as_bytes())
+                .expect("upstream body bytes");
+            let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+            assert_eq!(value["service_tier"], "priority");
+        }
+        let generic = generic_route();
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://api.minimaxi.com/v1/chat/completions",
+            &generic,
+            &PreparedRequestBody::BufferedBytes(
+                br#"{"model":"m","service_tier":"priority"}"#.to_vec(),
+            ),
+            &[],
+            None,
+        )
+        .build()
+        .unwrap();
+        let bytes = request
+            .body()
+            .and_then(|body| body.as_bytes())
+            .expect("generic body bytes");
+        let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        assert_eq!(value["service_tier"], "priority");
     }
 }

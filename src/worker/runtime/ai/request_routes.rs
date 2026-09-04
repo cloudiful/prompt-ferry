@@ -101,6 +101,8 @@ pub(super) async fn resolve_route(
                         upstream_model: None,
                         responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
                         route_selection_reason: db::RouteSelectionReason::Default,
+                        provider: db::EndpointProvider::Generic,
+                        service_tier: db::MinimaxServiceTier::Standard,
                     },
                     endpoint_id: None,
                     model_route_rule_id: Some(candidate.rule_id),
@@ -236,6 +238,7 @@ mod tests {
                 name: "local endpoint".to_string(),
                 provider: EndpointProvider::Generic,
                 provider_region: None,
+                service_tier: crate::standalone_config::MinimaxServiceTier::Standard,
                 base_url: "https://local.example".to_string(),
                 native_api: NativeApi::Responses,
                 native_api_source: NativeApiSource::Manual,
@@ -354,5 +357,7 @@ fn default_route_for_user(config: &WorkerConfig, user_id: i64) -> db::RouteConfi
         upstream_model: None,
         responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
         route_selection_reason: db::RouteSelectionReason::Default,
+        provider: db::EndpointProvider::Generic,
+        service_tier: db::MinimaxServiceTier::Standard,
     }
 }

@@ -181,6 +181,8 @@ mod tests {
             responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
             model_route_rule_id: None,
             route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
         }
     }
 

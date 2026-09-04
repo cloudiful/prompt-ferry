@@ -6,6 +6,7 @@ use utoipa::ToSchema;
 use crate::config::NativeApi;
 use crate::db::RouteSelectionReason;
 use crate::db::types::EndpointApiKey;
+use crate::db::types::endpoints::{EndpointProvider, MinimaxServiceTier};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -24,10 +25,11 @@ impl ModelRouteRoutingStrategy {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponsesContinuationPolicy {
     ForcePassthrough,
+    #[default]
     ForceReplay,
 }
 
@@ -78,6 +80,8 @@ pub struct RouteConfig {
     pub upstream_model: Option<String>,
     pub responses_continuation_policy: ResponsesContinuationPolicy,
     pub route_selection_reason: RouteSelectionReason,
+    pub provider: EndpointProvider,
+    pub service_tier: MinimaxServiceTier,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow, ToSchema)]
@@ -171,6 +175,8 @@ pub struct ModelRouteCandidateTarget {
     pub enabled: bool,
     pub upstream_model: Option<String>,
     pub responses_continuation_policy: ResponsesContinuationPolicy,
+    pub provider: EndpointProvider,
+    pub service_tier: MinimaxServiceTier,
 }
 
 #[derive(Debug, Clone)]

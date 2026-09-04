@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use crate::{
     config::NativeApi,
     db::types::{
-        EndpointApiKey, EndpointCreate, EndpointPage, ProviderEndpoint, ProviderEndpointRow,
-        RouteConfig,
+        EndpointApiKey, EndpointCreate, EndpointPage, MinimaxServiceTier, ProviderEndpoint,
+        ProviderEndpointRow, RouteConfig,
     },
 };
 
@@ -42,6 +42,8 @@ pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<R
             upstream_model: None,
             responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: crate::db::RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::from_str(&row.provider),
+            service_tier: MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
         })
         .collect::<Vec<_>>();
     attach_route_config_api_keys(pool, routes).await
@@ -101,6 +103,7 @@ pub async fn create_endpoint(pool: &PgPool, input: EndpointCreate) -> Result<Pro
         input.name,
         input.provider.as_str(),
         input.provider_region.map(|region| region.as_str()),
+        input.service_tier.as_str(),
         input.base_url,
         input.native_api.as_str(),
         input.native_api_source.as_str(),
@@ -136,6 +139,7 @@ pub async fn create_endpoint_with_mcp(
         input.name,
         input.provider.as_str(),
         input.provider_region.map(|region| region.as_str()),
+        input.service_tier.as_str(),
         input.base_url,
         input.native_api.as_str(),
         input.native_api_source.as_str(),
@@ -169,6 +173,7 @@ pub async fn update_endpoint(
         input.name,
         input.provider.as_str(),
         input.provider_region.map(|region| region.as_str()),
+        input.service_tier.as_str(),
         input.base_url,
         input.native_api.as_str(),
         input.native_api_source.as_str(),

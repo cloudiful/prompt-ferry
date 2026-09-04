@@ -5,7 +5,7 @@ WITH selected AS (
         (SELECT endpoint_id FROM provider_endpoints WHERE scope = 'admin' AND enabled = TRUE ORDER BY updated_at DESC LIMIT 1)
     ) AS endpoint_id
 )
-SELECT e.endpoint_id AS "route_id!", $1::BIGINT AS "user_id!", e.base_url, e.api_key, e.key_lb_enabled, e.native_api
+SELECT e.endpoint_id AS "route_id!", $1::BIGINT AS "user_id!", e.base_url, e.api_key, e.key_lb_enabled, e.native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier
 FROM selected s
 JOIN provider_endpoints e ON e.endpoint_id = s.endpoint_id
 WHERE e.enabled = TRUE

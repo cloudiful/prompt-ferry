@@ -45,6 +45,8 @@ struct ModelRouteCandidateRow {
     api_key: String,
     key_lb_enabled: bool,
     native_api: String,
+    provider: String,
+    service_tier: Option<String>,
     position: i32,
     target_enabled: bool,
     upstream_model: Option<String>,

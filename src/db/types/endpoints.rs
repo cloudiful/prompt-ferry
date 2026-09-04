@@ -26,9 +26,16 @@ impl EndpointProvider {
         }
     }
 
-    fn from_str(value: &str) -> Self {
+    pub fn from_str(value: &str) -> Self {
         match value {
             "minimax" => Self::Minimax,
+            _ => Self::Generic,
+        }
+    }
+
+    pub fn from_optional(value: Option<&str>) -> Self {
+        match value {
+            Some("minimax") => Self::Minimax,
             _ => Self::Generic,
         }
     }
@@ -54,6 +61,37 @@ impl EndpointRegion {
             Some("cn") => Some(Self::Cn),
             Some("global") => Some(Self::Global),
             _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MinimaxServiceTier {
+    #[default]
+    Standard,
+    Priority,
+}
+
+impl MinimaxServiceTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Priority => "priority",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "priority" => Self::Priority,
+            _ => Self::Standard,
+        }
+    }
+
+    pub fn from_optional(value: Option<&str>) -> Self {
+        match value {
+            Some("priority") => Self::Priority,
+            _ => Self::Standard,
         }
     }
 }
@@ -86,6 +124,7 @@ pub struct ProviderEndpointRow {
     pub name: String,
     pub provider: String,
     pub provider_region: Option<String>,
+    pub service_tier: Option<String>,
     pub base_url: String,
     pub native_api: String,
     pub native_api_source: String,
@@ -108,6 +147,8 @@ pub struct ProviderEndpoint {
     pub name: String,
     pub provider: EndpointProvider,
     pub provider_region: Option<EndpointRegion>,
+    #[serde(default)]
+    pub service_tier: MinimaxServiceTier,
     pub base_url: String,
     pub native_api: String,
     pub native_api_source: String,
@@ -133,6 +174,7 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             name: value.name,
             provider: EndpointProvider::from_str(&value.provider),
             provider_region: EndpointRegion::from_str(value.provider_region.as_deref()),
+            service_tier: MinimaxServiceTier::from_optional(value.service_tier.as_deref()),
             base_url: value.base_url,
             native_api: value.native_api,
             native_api_source: value.native_api_source,
@@ -156,6 +198,8 @@ pub struct EndpointCreate {
     pub name: String,
     pub provider: EndpointProvider,
     pub provider_region: Option<EndpointRegion>,
+    #[serde(default)]
+    pub service_tier: MinimaxServiceTier,
     pub base_url: String,
     pub native_api: NativeApi,
     pub native_api_source: NativeApiSource,
@@ -182,4 +226,47 @@ pub struct EndpointPage {
     pub endpoints: Vec<ProviderEndpoint>,
     pub first: i64,
     pub rows: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn service_tier_defaults_to_standard_and_parses_priority() {
+        assert_eq!(MinimaxServiceTier::default(), MinimaxServiceTier::Standard);
+        assert_eq!(
+            MinimaxServiceTier::from_optional(None),
+            MinimaxServiceTier::Standard
+        );
+        assert_eq!(
+            MinimaxServiceTier::from_optional(Some("priority")),
+            MinimaxServiceTier::Priority
+        );
+        assert_eq!(
+            MinimaxServiceTier::from_optional(Some("standard")),
+            MinimaxServiceTier::Standard
+        );
+        assert_eq!(
+            MinimaxServiceTier::from_optional(Some("legacy-unknown")),
+            MinimaxServiceTier::Standard
+        );
+        assert_eq!(MinimaxServiceTier::Priority.as_str(), "priority");
+        // Legacy/omitted JSON values deserialize as standard.
+        let create: EndpointCreate = serde_json::from_value(serde_json::json!({
+            "scope": "admin",
+            "name": "legacy",
+            "provider": "minimax",
+            "provider_region": "global",
+            "base_url": "https://api.minimaxi.com",
+            "native_api": "chat",
+            "native_api_source": "manual",
+            "api_key": "key",
+            "api_keys": [],
+            "key_lb_enabled": false,
+            "enabled": true
+        }))
+        .expect("legacy endpoint create without service_tier");
+        assert_eq!(create.service_tier, MinimaxServiceTier::Standard);
+    }
 }

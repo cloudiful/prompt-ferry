@@ -93,11 +93,13 @@ pub(super) fn sqlite_endpoint_from_create(
         Some(EndpointRegion::Global) => Some(ScEndpointRegion::Global),
         None => None,
     };
+    let service_tier = super::endpoints_map::service_tier_to_sqlite(input.service_tier);
     Ok(ScProviderEndpoint {
         endpoint_id,
         name: input.name,
         provider,
         provider_region,
+        service_tier,
         base_url: input.base_url,
         native_api: input.native_api,
         native_api_source: input.native_api_source,

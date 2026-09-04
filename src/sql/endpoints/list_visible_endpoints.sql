@@ -23,7 +23,9 @@ SELECT
     e.base_url,
     e.api_key,
     e.key_lb_enabled,
-    e.native_api
+    e.native_api,
+    e.provider,
+    COALESCE(e.service_tier, 'standard') AS service_tier
 FROM provider_endpoints e
 CROSS JOIN preferred p
 WHERE e.enabled = TRUE

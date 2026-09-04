@@ -7,11 +7,12 @@ use crate::{
     config::NativeApi,
     db::{
         EndpointApiKey as PgEndpointApiKey, EndpointProvider, EndpointRegion,
-        ProviderEndpoint as PgProviderEndpoint,
+        MinimaxServiceTier as PgServiceTier, ProviderEndpoint as PgProviderEndpoint,
     },
     standalone_config::{
         EndpointApiKeyConfig as ScEndpointApiKey, EndpointProvider as ScEndpointProvider,
-        EndpointRegion as ScEndpointRegion, ProviderEndpointConfig as ScProviderEndpoint,
+        EndpointRegion as ScEndpointRegion, MinimaxServiceTier as ScServiceTier,
+        ProviderEndpointConfig as ScProviderEndpoint,
     },
 };
 
@@ -25,6 +26,7 @@ pub(super) fn from_postgres(endpoint: PgProviderEndpoint) -> UnifiedProviderEndp
         name: endpoint.name,
         provider: endpoint.provider,
         provider_region: endpoint.provider_region,
+        service_tier: endpoint.service_tier,
         base_url: endpoint.base_url,
         native_api: parse_native_api(&endpoint.native_api),
         native_api_source: endpoint.native_api_source,
@@ -56,6 +58,7 @@ pub(super) fn from_sqlite(endpoint: ScProviderEndpoint) -> Result<UnifiedProvide
         name: endpoint.name,
         provider: provider_from_sqlite(endpoint.provider),
         provider_region: endpoint.provider_region.map(region_from_sqlite),
+        service_tier: service_tier_from_sqlite(endpoint.service_tier),
         base_url: endpoint.base_url,
         native_api: endpoint.native_api,
         native_api_source: endpoint.native_api_source.as_str().to_string(),
@@ -112,6 +115,20 @@ pub(super) fn region_from_sqlite(region: ScEndpointRegion) -> EndpointRegion {
     }
 }
 
+pub(super) fn service_tier_from_sqlite(tier: ScServiceTier) -> PgServiceTier {
+    match tier {
+        ScServiceTier::Priority => PgServiceTier::Priority,
+        ScServiceTier::Standard => PgServiceTier::Standard,
+    }
+}
+
+pub(crate) fn service_tier_to_sqlite(tier: PgServiceTier) -> ScServiceTier {
+    match tier {
+        PgServiceTier::Priority => ScServiceTier::Priority,
+        PgServiceTier::Standard => ScServiceTier::Standard,
+    }
+}
+
 pub(super) fn unified_to_pg(endpoint: UnifiedProviderEndpoint) -> crate::db::ProviderEndpoint {
     let created_at = endpoint.created_at;
     let updated_at = endpoint.updated_at;
@@ -122,6 +139,7 @@ pub(super) fn unified_to_pg(endpoint: UnifiedProviderEndpoint) -> crate::db::Pro
         name: endpoint.name,
         provider: endpoint.provider,
         provider_region: endpoint.provider_region,
+        service_tier: endpoint.service_tier,
         base_url: endpoint.base_url,
         native_api: endpoint.native_api.as_str().to_string(),
         native_api_source: endpoint.native_api_source,

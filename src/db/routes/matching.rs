@@ -22,6 +22,8 @@ pub async fn get_route(pool: &PgPool, route_id: uuid::Uuid) -> Result<Option<Rou
             upstream_model: None,
             responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: crate::db::RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::from_str(&row.provider),
+            service_tier: crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
         });
     match route {
         Some(route) => Ok(

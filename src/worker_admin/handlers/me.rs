@@ -195,6 +195,8 @@ async fn available_models(state: &AdminState, user_id: i64) -> anyhow::Result<Ve
                     upstream_model: target.upstream_model,
                     responses_continuation_policy: target.responses_continuation_policy,
                     route_selection_reason: db::RouteSelectionReason::Default,
+                    provider: target.provider,
+                    service_tier: target.service_tier,
                 };
                 let snapshot = state
                     .endpoint_model_cache

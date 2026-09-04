@@ -161,6 +161,8 @@ fn route_from_target(
         upstream_model: target.upstream_model.clone(),
         responses_continuation_policy: target.responses_continuation_policy,
         route_selection_reason,
+        provider: target.provider,
+        service_tier: target.service_tier,
     }
 }
 

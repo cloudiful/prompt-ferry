@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     config::NativeApi,
-    db::{self, EndpointProvider, EndpointRegion},
+    db::{self, EndpointProvider, EndpointRegion, MinimaxServiceTier},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
@@ -27,6 +27,8 @@ pub struct EndpointRequest {
     pub provider: EndpointProvider,
     #[serde(default)]
     pub provider_region: Option<EndpointRegion>,
+    #[serde(default)]
+    pub service_tier: MinimaxServiceTier,
     pub base_url: String,
     pub api_key: String,
     #[serde(default)]

@@ -24,6 +24,7 @@ pub struct UnifiedProviderEndpoint {
     pub name: String,
     pub provider: crate::db::EndpointProvider,
     pub provider_region: Option<crate::db::EndpointRegion>,
+    pub service_tier: crate::db::MinimaxServiceTier,
     pub base_url: String,
     pub native_api: NativeApi,
     pub native_api_source: String,
@@ -139,6 +140,7 @@ impl super::ConfigRepository {
                             crate::db::EndpointRegion::Global
                         }
                     }),
+                    service_tier: endpoints_map::service_tier_from_sqlite(endpoint.service_tier),
                     base_url: endpoint.base_url,
                     native_api: endpoint.native_api.as_str().to_string(),
                     native_api_source: endpoint.native_api_source.as_str().to_string(),
@@ -474,6 +476,7 @@ mod tests {
             name: "primary".to_string(),
             provider: crate::db::EndpointProvider::Generic,
             provider_region: None,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
             base_url: "https://example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: "manual".to_string(),

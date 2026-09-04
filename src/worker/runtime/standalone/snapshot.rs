@@ -167,6 +167,7 @@ mod tests {
                 name: "local endpoint".to_string(),
                 provider: EndpointProvider::Generic,
                 provider_region: None,
+                service_tier: crate::standalone_config::MinimaxServiceTier::Standard,
                 base_url: "https://upstream.example".to_string(),
                 native_api: NativeApi::Responses,
                 native_api_source: NativeApiSource::Manual,

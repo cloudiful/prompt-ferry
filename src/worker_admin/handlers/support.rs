@@ -248,6 +248,7 @@ pub(super) async fn resolve_endpoint_input(
         name: body.name,
         provider: body.provider,
         provider_region: body.provider_region,
+        service_tier: body.service_tier,
         base_url: body.base_url,
         native_api,
         native_api_source,

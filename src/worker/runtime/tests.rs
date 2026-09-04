@@ -569,6 +569,8 @@ fn sample_candidate() -> ModelRouteCandidate {
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
+                provider: db::EndpointProvider::Generic,
+                service_tier: db::MinimaxServiceTier::Standard,
             },
             ModelRouteCandidateTarget {
                 target_id: uuid::Uuid::new_v4(),
@@ -592,6 +594,8 @@ fn sample_candidate() -> ModelRouteCandidate {
                 enabled: true,
                 upstream_model: None,
                 responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
+                provider: db::EndpointProvider::Generic,
+                service_tier: db::MinimaxServiceTier::Standard,
             },
         ],
     }
@@ -663,6 +667,8 @@ fn endpoint_key_lb_uses_stable_selection_and_first_key_fallback() {
         upstream_model: None,
         responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
         route_selection_reason: db::RouteSelectionReason::Default,
+        provider: db::EndpointProvider::Generic,
+        service_tier: db::MinimaxServiceTier::Standard,
     };
     let sticky_prompt_log = RequestPromptLog {
         request_conversation_key: Some("conv_123".to_string()),
@@ -737,6 +743,8 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
         upstream_model: None,
         responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
         route_selection_reason: db::RouteSelectionReason::Default,
+        provider: db::EndpointProvider::Generic,
+        service_tier: db::MinimaxServiceTier::Standard,
     };
     let fixed_prompt_log = RequestPromptLog {
         conversation_override_endpoint_key_id: Some(fixed_key_id),

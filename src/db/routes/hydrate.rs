@@ -97,6 +97,9 @@ pub(super) async fn model_route_candidates_by_rule(
             .unwrap_or_else(|| {
                 fallback_api_keys(row.endpoint_id, &row.endpoint_name, &row.api_key)
             });
+        let provider = crate::db::EndpointProvider::from_str(&row.provider);
+        let service_tier =
+            crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref());
         if let Some(candidate) = grouped
             .iter_mut()
             .find(|candidate| candidate.rule_id == row.rule_id)
@@ -116,6 +119,8 @@ pub(super) async fn model_route_candidates_by_rule(
                 responses_continuation_policy: parse_responses_continuation_policy(
                     &row.responses_continuation_policy,
                 ),
+                provider,
+                service_tier,
             });
             continue;
         }
@@ -143,6 +148,8 @@ pub(super) async fn model_route_candidates_by_rule(
                 responses_continuation_policy: parse_responses_continuation_policy(
                     &row.responses_continuation_policy,
                 ),
+                provider,
+                service_tier,
             }],
         });
     }

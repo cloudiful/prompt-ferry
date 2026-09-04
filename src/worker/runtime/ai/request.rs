@@ -247,6 +247,8 @@ mod auto_protocol_tests {
             upstream_model: None,
             responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: db::RouteSelectionReason::Default,
+            provider: db::EndpointProvider::Generic,
+            service_tier: db::MinimaxServiceTier::Standard,
         }
     }
 

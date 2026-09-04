@@ -94,7 +94,9 @@ impl From<RequestRecordListRowFlat> for RequestRecordListRow {
             conversation_id: row.conversation_id,
             parent_event_id: row.parent_event_id,
             conversation_seq: row.conversation_seq,
-            conversation_source: row.conversation_source.unwrap_or_else(|| "none".to_string()),
+            conversation_source: row
+                .conversation_source
+                .unwrap_or_else(|| "none".to_string()),
             storage_sanitized: row.storage_sanitized.unwrap_or(false),
             storage_sanitized_nul_count: row.storage_sanitized_nul_count.unwrap_or(0),
             redaction: RequestRecordRedactionSummary {

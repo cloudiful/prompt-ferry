@@ -12,7 +12,7 @@ use super::{
 };
 use crate::relay_secrets::RelaySecretManager;
 
-const CURRENT_SCHEMA_VERSION: i64 = 10;
+const CURRENT_SCHEMA_VERSION: i64 = 11;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {

@@ -223,6 +223,30 @@ impl ContinuationPolicy {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MinimaxServiceTier {
+    #[default]
+    Standard,
+    Priority,
+}
+
+impl MinimaxServiceTier {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Priority => "priority",
+        }
+    }
+
+    pub(crate) fn parse_lossy(value: Option<&str>) -> Self {
+        match value {
+            Some("priority") => Self::Priority,
+            _ => Self::Standard,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManagedRelayConfig {
     pub relay_id: Uuid,
@@ -300,6 +324,8 @@ pub struct ProviderEndpointConfig {
     pub name: String,
     pub provider: EndpointProvider,
     pub provider_region: Option<EndpointRegion>,
+    #[serde(default)]
+    pub service_tier: MinimaxServiceTier,
     pub base_url: String,
     pub native_api: NativeApi,
     pub native_api_source: NativeApiSource,
@@ -320,6 +346,7 @@ impl fmt::Debug for ProviderEndpointConfig {
             .field("name", &self.name)
             .field("provider", &self.provider)
             .field("provider_region", &self.provider_region)
+            .field("service_tier", &self.service_tier)
             .field("base_url", &self.base_url)
             .field("native_api", &self.native_api)
             .field("native_api_source", &self.native_api_source)

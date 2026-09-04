@@ -71,6 +71,8 @@ fn test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
         upstream_model: None,
         responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForcePassthrough,
         route_selection_reason: crate::db::RouteSelectionReason::Default,
+        provider: crate::db::EndpointProvider::Generic,
+        service_tier: crate::db::MinimaxServiceTier::Standard,
     }
 }
 

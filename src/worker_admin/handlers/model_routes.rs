@@ -286,7 +286,7 @@ async fn run_model_route_test(
             }
         }
     }
-    let (path, payload) = match target.native_api {
+    let (path, mut payload) = match target.native_api {
         NativeApi::AnthropicMessages => (
             NativeApi::AnthropicMessages.path(),
             serde_json::json!({
@@ -317,6 +317,17 @@ async fn run_model_route_test(
         NativeApi::Auto => unreachable!("auto model routes return before protocol test"),
         NativeApi::Realtime => unreachable!(),
     };
+    // Keep probe behavior consistent with real forwarding: MiniMax
+    // endpoints always carry the configured `service_tier`, generic
+    // endpoints leave the probe body unchanged.
+    if target.provider == db::EndpointProvider::Minimax
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert(
+            "service_tier".to_string(),
+            serde_json::Value::String(target.service_tier.as_str().to_string()),
+        );
+    }
     let request = client.post(format!("{base}{path}")).json(&payload);
     let request = match target.native_api {
         NativeApi::AnthropicMessages => request

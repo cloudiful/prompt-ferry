@@ -3374,6 +3374,8 @@ components:
           - $ref: '#/components/schemas/EndpointRegion'
         scope:
           type: string
+        service_tier:
+          $ref: '#/components/schemas/MinimaxServiceTier'
     EndpointSettingRequest:
       type: object
       properties:
@@ -4262,6 +4264,11 @@ components:
         user_id:
           type: integer
           format: int64
+    MinimaxServiceTier:
+      type: string
+      enum:
+      - standard
+      - priority
     ModelEndpointRule:
       type: object
       required:
@@ -4616,6 +4623,8 @@ components:
           - $ref: '#/components/schemas/EndpointRegion'
         scope:
           type: string
+        service_tier:
+          $ref: '#/components/schemas/MinimaxServiceTier'
         updated_at:
           type: string
           format: date-time

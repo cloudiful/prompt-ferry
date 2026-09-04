@@ -188,6 +188,7 @@ pub(crate) async fn insert_endpoint(
                 .provider_region
                 .map(|value| value.as_str()),
         )
+        .bind(endpoint.endpoint.service_tier.as_str())
         .bind(&endpoint.endpoint.base_url)
         .bind(endpoint.endpoint.native_api.as_str())
         .bind(endpoint.endpoint.native_api_source.as_str())

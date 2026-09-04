@@ -32,6 +32,8 @@ async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
         upstream_model: None,
         responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
         route_selection_reason: db::RouteSelectionReason::Default,
+        provider: db::EndpointProvider::Minimax,
+        service_tier: db::MinimaxServiceTier::Standard,
     };
     let cache = TokenPlanQuotaCache::default();
     cache

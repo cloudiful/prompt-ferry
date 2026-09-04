@@ -3,8 +3,9 @@ use uuid::Uuid;
 
 use super::models::{
     ClientKeyConfig, ContinuationPolicy, EndpointApiKeyConfig, EndpointProvider, EndpointRegion,
-    ManagedRelayConfig, ModelRouteConfig, ModelRouteTargetConfig, ProviderEndpointConfig, Result,
-    RouteScope, RoutingStrategy, SettingConfig, StandaloneConfigError,
+    ManagedRelayConfig, MinimaxServiceTier, ModelRouteConfig, ModelRouteTargetConfig,
+    ProviderEndpointConfig, Result, RouteScope, RoutingStrategy, SettingConfig,
+    StandaloneConfigError,
 };
 use crate::{
     config::{BridgeEncryptionMode, NativeApi, NativeApiSource, TlsMode},
@@ -136,6 +137,16 @@ pub(crate) fn endpoint(
 ) -> Result<(ProviderEndpointConfig, Option<EncryptedSecretEnvelope>)> {
     let created_at = sqlite_timestamp(row, "created_at")?;
     let updated_at = sqlite_timestamp(row, "updated_at")?;
+    // `service_tier` was added by standalone migration 0011; older rows and
+    // legacy snapshots default to `standard` so existing endpoints keep
+    // their behavior. A missing column (pre-migration snapshot) also
+    // defaults to standard instead of failing the read.
+    let service_tier = match row.try_get::<Option<String>, _>("service_tier") {
+        Err(_) => MinimaxServiceTier::Standard,
+        Ok(None) => MinimaxServiceTier::Standard,
+        Ok(Some(value)) if value.trim().is_empty() => MinimaxServiceTier::Standard,
+        Ok(Some(value)) => MinimaxServiceTier::parse_lossy(Some(value.as_str())),
+    };
     Ok((
         ProviderEndpointConfig {
             endpoint_id: uuid(row, "endpoint_id")?,
@@ -144,6 +155,7 @@ pub(crate) fn endpoint(
             provider_region: EndpointRegion::parse(
                 optional_string(row, "provider_region")?.as_deref(),
             )?,
+            service_tier,
             base_url: required_string(row, "base_url")?,
             native_api: parse_native_api(&required_string(row, "native_api")?)?,
             native_api_source: parse_native_api_source(&required_string(

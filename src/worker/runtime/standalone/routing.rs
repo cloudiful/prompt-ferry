@@ -103,6 +103,18 @@ fn target_from_endpoint(
             }
             ContinuationPolicy::ForceReplay => db::ResponsesContinuationPolicy::ForceReplay,
         },
+        provider: match endpoint.provider {
+            crate::standalone_config::EndpointProvider::Minimax => db::EndpointProvider::Minimax,
+            crate::standalone_config::EndpointProvider::Generic => db::EndpointProvider::Generic,
+        },
+        service_tier: match endpoint.service_tier {
+            crate::standalone_config::MinimaxServiceTier::Priority => {
+                db::MinimaxServiceTier::Priority
+            }
+            crate::standalone_config::MinimaxServiceTier::Standard => {
+                db::MinimaxServiceTier::Standard
+            }
+        },
     }
 }
 
@@ -155,7 +167,8 @@ mod tests {
     use super::*;
     use crate::config::{NativeApi, NativeApiSource};
     use crate::standalone_config::{
-        EndpointProvider, EndpointRegion, ModelRouteTargetConfig, ProviderEndpointConfig,
+        EndpointProvider, EndpointRegion, MinimaxServiceTier, ModelRouteTargetConfig,
+        ProviderEndpointConfig,
     };
     use uuid::Uuid;
 
@@ -168,6 +181,7 @@ mod tests {
                 name: "endpoint".to_string(),
                 provider: EndpointProvider::Generic,
                 provider_region: Some(EndpointRegion::Global),
+                service_tier: MinimaxServiceTier::Standard,
                 base_url: "https://example.test".to_string(),
                 native_api: NativeApi::Responses,
                 native_api_source: NativeApiSource::Manual,
@@ -223,5 +237,54 @@ mod tests {
         let candidate =
             standalone_model_route_candidate(&snapshot, 1, Some("gpt-5")).expect("matching route");
         assert_eq!(candidate.model_pattern, "gpt-5");
+    }
+
+    #[test]
+    fn standalone_candidate_propagates_minimax_service_tier() {
+        use crate::standalone_config::EndpointProvider as ScProvider;
+        let endpoint_id = Uuid::new_v4();
+        let snapshot = StandaloneConfig {
+            endpoints: vec![ProviderEndpointConfig {
+                endpoint_id,
+                name: "minimax".to_string(),
+                provider: ScProvider::Minimax,
+                provider_region: Some(EndpointRegion::Global),
+                service_tier: MinimaxServiceTier::Priority,
+                base_url: "https://api.minimaxi.com".to_string(),
+                native_api: NativeApi::Chat,
+                native_api_source: NativeApiSource::Manual,
+                key_lb_enabled: false,
+                enabled: true,
+                mcp_enabled: false,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+                api_key: "key".to_string(),
+                api_keys: Vec::new(),
+            }],
+            routes: vec![ModelRouteConfig {
+                rule_id: Uuid::new_v4(),
+                scope: RouteScope::Admin,
+                owner_user_id: None,
+                model_pattern: "*".to_string(),
+                routing_strategy: RoutingStrategy::ClientKeyRendezvous,
+                daily_max_requests: None,
+                monthly_max_requests: None,
+                enabled: true,
+                targets: vec![ModelRouteTargetConfig {
+                    target_id: Uuid::new_v4(),
+                    endpoint_id,
+                    position: 0,
+                    enabled: true,
+                    upstream_model: None,
+                    responses_continuation_policy: ContinuationPolicy::ForceReplay,
+                }],
+            }],
+            ..StandaloneConfig::default()
+        };
+        let candidate =
+            standalone_model_route_candidate(&snapshot, 1, Some("anything")).expect("candidate");
+        let target = &candidate.targets[0];
+        assert_eq!(target.provider, db::EndpointProvider::Minimax);
+        assert_eq!(target.service_tier, db::MinimaxServiceTier::Priority);
     }
 }
