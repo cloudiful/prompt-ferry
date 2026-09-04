@@ -66,6 +66,7 @@ export const useSettingsStore = defineStore('settings', () => {
     s3_region: 'auto',
     s3_prefix: 'prompt-ferry/raw',
     s3_allow_http: false,
+    s3_path_style: true,
     has_s3_access_key: false,
     has_s3_secret_key: false,
   })

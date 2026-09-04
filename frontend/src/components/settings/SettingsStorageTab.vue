@@ -18,12 +18,11 @@ const draft = reactive({
   s3_region: 'auto',
   s3_prefix: 'prompt-ferry/raw',
   s3_allow_http: false,
+  s3_path_style: true,
 })
 
 const s3AccessKeyInput = ref('')
 const s3SecretKeyInput = ref('')
-const clearAccessKey = ref(false)
-const clearSecretKey = ref(false)
 const saving = ref(false)
 const localError = ref<string | null>(null)
 
@@ -42,10 +41,9 @@ function syncFromStore(): void {
   draft.s3_region = src.s3_region
   draft.s3_prefix = src.s3_prefix
   draft.s3_allow_http = src.s3_allow_http
+  draft.s3_path_style = src.s3_path_style ?? true
   s3AccessKeyInput.value = ''
   s3SecretKeyInput.value = ''
-  clearAccessKey.value = false
-  clearSecretKey.value = false
   localError.value = null
 }
 
@@ -58,8 +56,7 @@ const isS3 = computed(() => draft.backend === 's3')
 const isLocal = computed(() => draft.backend === 'local')
 const isUnavailable = computed(() => Boolean(settingsStore.rawObjectStoreError))
 
-function buildSecretPatch(input: string, shouldClear: boolean) {
-  if (shouldClear) return { mode: 'clear' as const }
+function buildSecretPatch(input: string) {
   const t = input.trim()
   if (t) return { mode: 'replace' as const, value: t }
   return { mode: 'keep' as const }
@@ -82,14 +79,9 @@ async function save(): Promise<void> {
       s3_region: draft.s3_region || 'auto',
       s3_prefix: draft.s3_prefix,
       s3_allow_http: draft.s3_allow_http,
-      s3_access_key: buildSecretPatch(
-        s3AccessKeyInput.value,
-        clearAccessKey.value,
-      ),
-      s3_secret_key: buildSecretPatch(
-        s3SecretKeyInput.value,
-        clearSecretKey.value,
-      ),
+      s3_path_style: draft.s3_path_style,
+      s3_access_key: buildSecretPatch(s3AccessKeyInput.value),
+      s3_secret_key: buildSecretPatch(s3SecretKeyInput.value),
     })
     syncFromStore()
     notifySuccess(props.t('storageSaved'))
@@ -271,17 +263,33 @@ async function refresh(): Promise<void> {
             </span>
           </label>
 
+          <label class="inline-flex items-center gap-2">
+            <USwitch v-model="draft.s3_path_style" />
+            <span
+              class="inline-flex items-center gap-1 text-xs font-medium text-muted"
+            >
+              {{ t('storageS3PathStyle') }}
+              <UTooltip :text="t('storageS3PathStyleHelp')">
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-info"
+                  :aria-label="t('storageS3PathStyleHelp')"
+                />
+              </UTooltip>
+            </span>
+          </label>
+
           <SettingsStorageCredentials
             v-model:access-key-input="s3AccessKeyInput"
             v-model:secret-key-input="s3SecretKeyInput"
-            v-model:clear-access-key="clearAccessKey"
-            v-model:clear-secret-key="clearSecretKey"
             :t="t"
             :has-access-key="settingsStore.rawObjectStore.has_s3_access_key"
             :has-secret-key="settingsStore.rawObjectStore.has_s3_secret_key"
           />
           <p class="m-0 text-[11px] text-muted">{{ t('storageSecretHint') }}</p>
-          <p class="m-0 text-[11px] text-muted">{{ t('storageS3Hint') }}</p>
         </div>
 
         <div v-else class="grid gap-1">

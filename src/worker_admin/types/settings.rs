@@ -148,6 +148,10 @@ pub enum RawObjectStoreSecretPatch {
     Replace { value: String },
 }
 
+fn default_s3_path_style() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct RawObjectStoreSettingsRequest {
     pub backend: RawObjectStoreBackend,
@@ -157,6 +161,9 @@ pub struct RawObjectStoreSettingsRequest {
     pub s3_region: String,
     pub s3_prefix: String,
     pub s3_allow_http: bool,
+    #[serde(default = "default_s3_path_style")]
+    #[schema(default = true)]
+    pub s3_path_style: bool,
     pub s3_access_key: Option<RawObjectStoreSecretPatch>,
     pub s3_secret_key: Option<RawObjectStoreSecretPatch>,
 }

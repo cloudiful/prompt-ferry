@@ -611,6 +611,7 @@ pub(super) async fn set_raw_object_store(
         s3_region: body.s3_region,
         s3_prefix: body.s3_prefix,
         s3_allow_http: body.s3_allow_http,
+        s3_path_style: body.s3_path_style,
         s3_access_key,
         s3_secret_key,
     }

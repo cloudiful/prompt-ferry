@@ -7,12 +7,6 @@ defineProps<{
 
 const accessKeyInput = defineModel<string>('accessKeyInput', { required: true })
 const secretKeyInput = defineModel<string>('secretKeyInput', { required: true })
-const clearAccessKey = defineModel<boolean>('clearAccessKey', {
-  required: true,
-})
-const clearSecretKey = defineModel<boolean>('clearSecretKey', {
-  required: true,
-})
 </script>
 
 <template>
@@ -36,12 +30,7 @@ const clearSecretKey = defineModel<boolean>('clearSecretKey', {
         size="sm"
         type="password"
         :placeholder="t('storageSecretPlaceholder')"
-        :disabled="clearAccessKey"
       />
-      <label class="inline-flex items-center gap-1.5 text-xs text-muted">
-        <UCheckbox v-model="clearAccessKey" size="xs" />
-        {{ t('storageClear') }}
-      </label>
     </div>
     <div class="grid gap-1">
       <span
@@ -62,12 +51,7 @@ const clearSecretKey = defineModel<boolean>('clearSecretKey', {
         size="sm"
         type="password"
         :placeholder="t('storageSecretPlaceholder')"
-        :disabled="clearSecretKey"
       />
-      <label class="inline-flex items-center gap-1.5 text-xs text-muted">
-        <UCheckbox v-model="clearSecretKey" size="xs" />
-        {{ t('storageClear') }}
-      </label>
     </div>
   </div>
 </template>

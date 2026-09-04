@@ -774,6 +774,7 @@ export type RawObjectStoreSettingsRequest = {
     s3_allow_http: boolean;
     s3_bucket: string;
     s3_endpoint: string;
+    s3_path_style?: boolean;
     s3_prefix: string;
     s3_region: string;
     s3_secret_key?: null | RawObjectStoreSecretPatch;
@@ -790,6 +791,7 @@ export type RawObjectStoreSettingsResponse = {
     s3_allow_http: boolean;
     s3_bucket: string;
     s3_endpoint: string;
+    s3_path_style?: boolean;
     s3_prefix: string;
     s3_region: string;
 };

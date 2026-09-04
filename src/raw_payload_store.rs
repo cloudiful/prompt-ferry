@@ -47,6 +47,10 @@ impl RawObjectStoreBackend {
     }
 }
 
+fn default_s3_path_style() -> bool {
+    true
+}
+
 /// Decrypted administrator-facing raw object-store configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct RawObjectStoreConfig {
@@ -57,6 +61,9 @@ pub struct RawObjectStoreConfig {
     pub s3_region: String,
     pub s3_prefix: String,
     pub s3_allow_http: bool,
+    #[serde(default = "default_s3_path_style")]
+    #[schema(default = true)]
+    pub s3_path_style: bool,
     pub s3_access_key: Option<String>,
     pub s3_secret_key: Option<String>,
 }
@@ -71,6 +78,7 @@ impl Default for RawObjectStoreConfig {
             s3_region: "auto".to_string(),
             s3_prefix: "prompt-ferry/raw".to_string(),
             s3_allow_http: false,
+            s3_path_style: true,
             s3_access_key: None,
             s3_secret_key: None,
         }
@@ -89,6 +97,7 @@ impl RawObjectStoreConfig {
                 s3_region: config.raw_object_store_region.clone(),
                 s3_prefix: config.raw_object_store_prefix.clone(),
                 s3_allow_http: config.raw_object_store_allow_http,
+                s3_path_style: config.raw_object_store_path_style,
                 s3_access_key: {
                     let v = config.raw_object_store_access_key.trim();
                     if v.is_empty() {
@@ -115,6 +124,7 @@ impl RawObjectStoreConfig {
                 s3_region: config.raw_object_store_region.clone(),
                 s3_prefix: config.raw_object_store_prefix.clone(),
                 s3_allow_http: config.raw_object_store_allow_http,
+                s3_path_style: config.raw_object_store_path_style,
                 s3_access_key: {
                     let v = config.raw_object_store_access_key.trim();
                     if v.is_empty() {
@@ -220,6 +230,7 @@ impl RawObjectStoreConfig {
             s3_region: self.s3_region.clone(),
             s3_prefix: normalize_prefix(&self.s3_prefix),
             s3_allow_http: self.s3_allow_http,
+            s3_path_style: self.s3_path_style,
             has_s3_access_key: self.s3_access_key.is_some(),
             has_s3_secret_key: self.s3_secret_key.is_some(),
         }
@@ -236,6 +247,8 @@ pub struct RawObjectStorePersisted {
     pub s3_region: String,
     pub s3_prefix: String,
     pub s3_allow_http: bool,
+    #[serde(default = "default_s3_path_style")]
+    pub s3_path_style: bool,
     pub s3_access_key: Option<EncryptedSecretEnvelope>,
     pub s3_secret_key: Option<EncryptedSecretEnvelope>,
 }
@@ -262,6 +275,7 @@ impl RawObjectStorePersisted {
             s3_region: normalized.s3_region,
             s3_prefix: normalized.s3_prefix,
             s3_allow_http: normalized.s3_allow_http,
+            s3_path_style: normalized.s3_path_style,
             s3_access_key,
             s3_secret_key,
         })
@@ -284,6 +298,7 @@ impl RawObjectStorePersisted {
             s3_region: self.s3_region,
             s3_prefix: self.s3_prefix,
             s3_allow_http: self.s3_allow_http,
+            s3_path_style: self.s3_path_style,
             s3_access_key,
             s3_secret_key,
         }
@@ -309,6 +324,9 @@ pub struct RawObjectStoreSettingsResponse {
     pub s3_region: String,
     pub s3_prefix: String,
     pub s3_allow_http: bool,
+    #[serde(default = "default_s3_path_style")]
+    #[schema(default = true)]
+    pub s3_path_style: bool,
     pub has_s3_access_key: bool,
     pub has_s3_secret_key: bool,
 }
@@ -475,7 +493,8 @@ impl RawPayloadStore {
 fn build_s3_store(config: &WorkerConfig, bucket: &str) -> Result<object_store::aws::AmazonS3> {
     let mut builder = AmazonS3Builder::new()
         .with_bucket_name(bucket)
-        .with_region(config.raw_object_store_region.trim());
+        .with_region(config.raw_object_store_region.trim())
+        .with_virtual_hosted_style_request(!config.raw_object_store_path_style);
     if !config.raw_object_store_endpoint.trim().is_empty() {
         builder = builder.with_endpoint(config.raw_object_store_endpoint.trim());
     }
@@ -498,7 +517,8 @@ fn build_s3_store_from_config(
 ) -> Result<object_store::aws::AmazonS3> {
     let mut builder = AmazonS3Builder::new()
         .with_bucket_name(config.s3_bucket.trim())
-        .with_region(config.s3_region.trim());
+        .with_region(config.s3_region.trim())
+        .with_virtual_hosted_style_request(!config.s3_path_style);
     if !config.s3_endpoint.trim().is_empty() {
         builder = builder.with_endpoint(config.s3_endpoint.trim());
     }

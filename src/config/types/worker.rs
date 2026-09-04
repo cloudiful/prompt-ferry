@@ -54,6 +54,8 @@ pub struct WorkerConfig {
     pub raw_object_store_secret_key: String,
     pub raw_object_store_prefix: String,
     pub raw_object_store_allow_http: bool,
+    #[serde(default = "default_raw_object_store_path_style")]
+    pub raw_object_store_path_style: bool,
     /// Local filesystem directory used when no object-store bucket is
     /// configured. Empty resolves to `<data root>/prompt-ferry/raw-objects`.
     pub raw_object_store_local_dir: String,
@@ -100,6 +102,7 @@ impl Default for WorkerConfig {
             raw_object_store_secret_key: String::new(),
             raw_object_store_prefix: "prompt-ferry/raw".to_string(),
             raw_object_store_allow_http: false,
+            raw_object_store_path_style: true,
             raw_object_store_local_dir: String::new(),
             mcp_allowed_origins: Vec::new(),
         }
@@ -216,6 +219,10 @@ impl WorkerConfig {
 
 pub fn normalize_relay_url(value: &str) -> String {
     value.trim().trim_end_matches('/').to_string()
+}
+
+fn default_raw_object_store_path_style() -> bool {
+    true
 }
 
 #[cfg(test)]

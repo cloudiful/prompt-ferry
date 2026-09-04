@@ -67,9 +67,10 @@ export const settingsMessages = {
     storageSecretPresent: '已配置',
     storageSecretMissing: '未配置',
     storageSecretPlaceholder: '留空保持不变',
-    storageSecretHint: '留空保持不变，清空需点击清除。',
-    storageClear: '清除',
-    storageS3Hint: 'S3 需配置 Bucket 等信息。',
+    storageSecretHint: '留空保持不变。',
+    storageS3PathStyle: 'Path 风格',
+    storageS3PathStyleHelp:
+      '使用 Path 风格地址（endpoint/bucket/key），RustFS 等兼容存储需要。',
     storageDisabledHint: '禁用后不再保存原始负载。',
     storageUnavailable: '当前环境不支持对象存储配置。',
     storageSaved: '对象存储配置已保存',
@@ -167,9 +168,10 @@ export const settingsMessages = {
     storageSecretPresent: 'Set',
     storageSecretMissing: 'Not set',
     storageSecretPlaceholder: 'Leave blank to keep',
-    storageSecretHint: 'Leave blank to keep, use clear to remove.',
-    storageClear: 'Clear',
-    storageS3Hint: 'Configure bucket and related S3 settings.',
+    storageSecretHint: 'Leave blank to keep.',
+    storageS3PathStyle: 'Path-style',
+    storageS3PathStyleHelp:
+      'Use path-style addressing (endpoint/bucket/key), required for RustFS and some S3-compatible stores.',
     storageDisabledHint: 'Payloads are not stored when disabled.',
     storageUnavailable:
       'Object store settings are not available in this environment.',

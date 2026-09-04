@@ -869,6 +869,7 @@ fn raw_object_store_persisted_encrypts_and_redacts() {
         s3_region: "us-east-1".to_string(),
         s3_prefix: "pf/raw".to_string(),
         s3_allow_http: false,
+        s3_path_style: true,
         s3_access_key: Some("AKIAEXAMPLE".to_string()),
         s3_secret_key: Some("secret123".to_string()),
         local_dir: "".to_string(),
@@ -912,4 +913,102 @@ fn raw_object_store_secret_keep_clear_semantics() {
         serde_json::to_value(&replace).unwrap()["value"],
         "new-secret"
     );
+}
+
+#[test]
+fn raw_object_store_path_style_defaults_to_true_and_legacy_json_loads_as_path_style() {
+    use crate::raw_payload_store::{
+        RawObjectStoreBackend, RawObjectStoreConfig, RawObjectStorePersisted,
+        RawObjectStoreSettingsResponse,
+    };
+    use serde_json::json;
+
+    // Fresh defaults must be path-style to preserve RustFS compatibility.
+    assert!(RawObjectStoreConfig::default().s3_path_style);
+    assert!(crate::config::WorkerConfig::default().raw_object_store_path_style);
+
+    // Legacy persisted JSON without s3_path_style (pre-migration) must still
+    // deserialize as path-style.
+    let legacy_config: RawObjectStoreConfig = serde_json::from_value(json!({
+        "backend": "s3",
+        "local_dir": "",
+        "s3_endpoint": "https://s3.example.com",
+        "s3_bucket": "bucket",
+        "s3_region": "auto",
+        "s3_prefix": "prompt-ferry/raw",
+        "s3_allow_http": false,
+        "s3_access_key": "AKIAEXAMPLE",
+        "s3_secret_key": "secret"
+    }))
+    .expect("legacy config deserializes");
+    assert!(legacy_config.s3_path_style);
+
+    let legacy_persisted: RawObjectStorePersisted = serde_json::from_value(json!({
+        "backend": "s3",
+        "local_dir": "",
+        "s3_endpoint": "https://s3.example.com",
+        "s3_bucket": "bucket",
+        "s3_region": "auto",
+        "s3_prefix": "prompt-ferry/raw",
+        "s3_allow_http": false,
+        "s3_access_key": null,
+        "s3_secret_key": null
+    }))
+    .expect("legacy persisted deserializes");
+    assert!(legacy_persisted.s3_path_style);
+
+    let legacy_response: RawObjectStoreSettingsResponse = serde_json::from_value(json!({
+        "backend": "s3",
+        "local_dir": "",
+        "s3_endpoint": "https://s3.example.com",
+        "s3_bucket": "bucket",
+        "s3_region": "auto",
+        "s3_prefix": "prompt-ferry/raw",
+        "s3_allow_http": false,
+        "has_s3_access_key": false,
+        "has_s3_secret_key": false
+    }))
+    .expect("legacy response deserializes");
+    assert!(legacy_response.s3_path_style);
+
+    let legacy_request: crate::worker_admin_types::RawObjectStoreSettingsRequest =
+        serde_json::from_value(json!({
+            "backend": "s3",
+            "local_dir": "",
+            "s3_endpoint": "https://s3.example.com",
+            "s3_bucket": "bucket",
+            "s3_region": "auto",
+            "s3_prefix": "prompt-ferry/raw",
+            "s3_allow_http": false
+        }))
+        .expect("legacy request deserializes");
+    assert!(legacy_request.s3_path_style);
+
+    // WorkerConfig legacy JSON without the new field also defaults to true.
+    let legacy_worker: crate::config::WorkerConfig =
+        serde_json::from_value(json!({"raw_object_store_bucket": "bucket"}))
+            .expect("legacy worker config deserializes");
+    assert!(legacy_worker.raw_object_store_path_style);
+
+    // Explicit false must round-trip and map through worker -> config -> persisted.
+    let explicit = RawObjectStoreConfig {
+        backend: RawObjectStoreBackend::S3,
+        s3_bucket: "bucket".to_string(),
+        s3_region: "auto".to_string(),
+        s3_path_style: false,
+        ..RawObjectStoreConfig::default()
+    };
+    let json = serde_json::to_value(&explicit).expect("serialize explicit");
+    assert_eq!(json["s3_path_style"], false);
+    let round_trip: RawObjectStoreConfig = serde_json::from_value(json).expect("round trip");
+    assert!(!round_trip.s3_path_style);
+
+    let worker = crate::config::WorkerConfig {
+        raw_object_store_bucket: "bucket".to_string(),
+        raw_object_store_path_style: false,
+        ..crate::config::WorkerConfig::default()
+    };
+    let mapped = RawObjectStoreConfig::from_worker_config(&worker);
+    assert!(!mapped.s3_path_style);
+    assert!(!mapped.redacted_response().s3_path_style);
 }

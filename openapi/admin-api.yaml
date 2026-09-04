@@ -4773,6 +4773,9 @@ components:
           type: string
         s3_endpoint:
           type: string
+        s3_path_style:
+          type: boolean
+          default: true
         s3_prefix:
           type: string
         s3_region:
@@ -4809,6 +4812,9 @@ components:
           type: string
         s3_endpoint:
           type: string
+        s3_path_style:
+          type: boolean
+          default: true
         s3_prefix:
           type: string
         s3_region:
