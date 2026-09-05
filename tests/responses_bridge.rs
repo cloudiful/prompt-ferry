@@ -1124,6 +1124,57 @@ async fn normalizes_developer_role_and_forwards_max_reasoning_effort_to_chat_ups
 }
 
 #[tokio::test]
+async fn forwards_reasoning_split_unchanged_for_generic_chat_upstream() {
+    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let client = reqwest::Client::new();
+    let explicit = client
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "generic-test",
+            "messages": [{"role":"user","content":"hello"}],
+            "reasoning_split": false,
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(explicit.status(), StatusCode::OK);
+
+    let missing = client
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "generic-test",
+            "messages": [{"role":"user","content":"hello"}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::OK);
+
+    let requests = upstream_log.bodies.lock().await;
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["reasoning_split"].as_bool(), Some(false));
+    assert!(
+        requests[1].get("reasoning_split").is_none(),
+        "generic upstream must not gain a reasoning_split default"
+    );
+
+    worker_handle.abort();
+}
+
+#[tokio::test]
 async fn translates_bare_reasoning_into_chat_tool_call_history() {
     let upstream_log = Arc::new(ChatRequestLog::default());
     let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;

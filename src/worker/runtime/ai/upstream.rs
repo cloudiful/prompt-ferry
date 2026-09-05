@@ -42,12 +42,12 @@ pub(super) fn build_upstream_request(
         request_builder
     };
     match body {
-        PreparedRequestBody::PassthroughStream(bytes) => {
-            request_builder.body(apply_minimax_service_tier(route, bytes))
-        }
-        PreparedRequestBody::BufferedBytes(bytes) => {
-            request_builder.body(apply_minimax_service_tier(route, bytes))
-        }
+        PreparedRequestBody::PassthroughStream(bytes) => request_builder.body(
+            apply_minimax_reasoning_split(route, &apply_minimax_service_tier(route, bytes)),
+        ),
+        PreparedRequestBody::BufferedBytes(bytes) => request_builder.body(
+            apply_minimax_reasoning_split(route, &apply_minimax_service_tier(route, bytes)),
+        ),
     }
 }
 
@@ -71,6 +71,33 @@ pub(super) fn apply_minimax_service_tier(route: &db::RouteConfig, body: &[u8]) -
         "service_tier".to_string(),
         serde_json::Value::String(route.service_tier.as_str().to_string()),
     );
+    serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
+}
+
+/// Default MiniMax `reasoning_split` to `true` for OpenAI Chat-native
+/// forwarding. Only MiniMax Chat endpoints are modified and only when the
+/// JSON object omits the field; any caller-supplied value (including
+/// `false`, `null`, or non-boolean) is preserved byte-for-byte. Generic
+/// endpoints, non-Chat MiniMax routes (`AnthropicMessages`/`Responses`),
+/// and non-JSON/non-object bodies are returned unchanged. The `thinking`
+/// switch is never touched here.
+pub(super) fn apply_minimax_reasoning_split(route: &db::RouteConfig, body: &[u8]) -> Vec<u8> {
+    if route.provider != crate::db::EndpointProvider::Minimax {
+        return body.to_vec();
+    }
+    if route.native_api != crate::config::NativeApi::Chat {
+        return body.to_vec();
+    }
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return body.to_vec();
+    };
+    let Some(object) = value.as_object_mut() else {
+        return body.to_vec();
+    };
+    if object.contains_key("reasoning_split") {
+        return body.to_vec();
+    }
+    object.insert("reasoning_split".to_string(), serde_json::Value::Bool(true));
     serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
 }
 
@@ -927,6 +954,187 @@ mod tests {
             .expect("generic body bytes");
         let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
         assert_eq!(value["service_tier"], "priority");
+    }
+
+    #[test]
+    fn minimax_reasoning_split_defaults_to_true_when_missing() {
+        let route = minimax_route(crate::db::MinimaxServiceTier::Standard);
+        let injected = apply_minimax_reasoning_split(&route, br#"{"model":"MiniMax-M2"}"#);
+        let value: serde_json::Value = serde_json::from_slice(&injected).unwrap();
+        assert_eq!(value["reasoning_split"], true);
+        assert_eq!(value["model"], "MiniMax-M2");
+    }
+
+    #[test]
+    fn minimax_reasoning_split_preserves_thinking_and_explicit_values() {
+        let route = minimax_route(crate::db::MinimaxServiceTier::Standard);
+        for body in [
+            br#"{"model":"m","reasoning_split":false}"#.as_slice(),
+            br#"{"model":"m","reasoning_split":true}"#.as_slice(),
+            br#"{"model":"m","reasoning_split":null}"#.as_slice(),
+            br#"{"model":"m","reasoning_split":0}"#.as_slice(),
+            br#"{"model":"m","reasoning_split":"yes"}"#.as_slice(),
+            br#"{"model":"m","reasoning_split":{}}"#.as_slice(),
+        ] {
+            assert_eq!(
+                apply_minimax_reasoning_split(&route, body),
+                body,
+                "explicit reasoning_split must stay unchanged"
+            );
+        }
+        let thinking_body = br#"{"model":"m","thinking":{"type":"enabled"}}"#;
+        let injected = apply_minimax_reasoning_split(&route, thinking_body);
+        let value: serde_json::Value = serde_json::from_slice(&injected).unwrap();
+        assert_eq!(value["reasoning_split"], true);
+        assert_eq!(value["thinking"]["type"], "enabled");
+    }
+
+    #[test]
+    fn minimax_reasoning_split_leaves_generic_and_unsupported_bodies_unchanged() {
+        let generic = generic_route();
+        let body = br#"{"model":"gpt-5"}"#;
+        assert_eq!(apply_minimax_reasoning_split(&generic, body), body);
+
+        let minimax = minimax_route(crate::db::MinimaxServiceTier::Standard);
+        for body in [b"not-json".as_slice(), b"[1,2,3]".as_slice()] {
+            assert_eq!(apply_minimax_reasoning_split(&minimax, body), body);
+        }
+    }
+
+    #[test]
+    fn minimax_non_chat_routes_leave_reasoning_split_unchanged() {
+        let body = br#"{"model":"MiniMax-M2"}"#;
+        for native_api in [NativeApi::AnthropicMessages, NativeApi::Responses] {
+            let route = RouteConfig {
+                native_api,
+                ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+            };
+            assert_eq!(
+                apply_minimax_reasoning_split(&route, body),
+                body,
+                "MiniMax {native_api:?} must not gain a reasoning_split default"
+            );
+            for prepared in [
+                PreparedRequestBody::BufferedBytes(body.to_vec()),
+                PreparedRequestBody::PassthroughStream(body.to_vec()),
+            ] {
+                let request = build_upstream_request(
+                    &Client::new(),
+                    &Method::POST,
+                    "https://api.minimaxi.com/v1/chat/completions",
+                    &route,
+                    &prepared,
+                    &[],
+                    None,
+                )
+                .build()
+                .unwrap();
+                let bytes = request
+                    .body()
+                    .and_then(|body| body.as_bytes())
+                    .expect("non-chat body bytes");
+                let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+                assert!(
+                    value.get("reasoning_split").is_none(),
+                    "MiniMax {native_api:?} forwarding must not inject reasoning_split"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn build_upstream_request_defaults_reasoning_split_for_buffered_and_passthrough() {
+        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
+        for body in [
+            PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            PreparedRequestBody::PassthroughStream(br#"{"model":"m"}"#.to_vec()),
+        ] {
+            let request = build_upstream_request(
+                &Client::new(),
+                &Method::POST,
+                "https://api.minimaxi.com/v1/chat/completions",
+                &route,
+                &body,
+                &[],
+                None,
+            )
+            .build()
+            .unwrap();
+            let bytes = request
+                .body()
+                .and_then(|body| body.as_bytes())
+                .expect("upstream body bytes");
+            let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+            assert_eq!(value["reasoning_split"], true);
+            assert_eq!(value["service_tier"], "priority");
+        }
+
+        for (raw, expected) in [
+            (
+                br#"{"model":"m","reasoning_split":false}"#.as_slice(),
+                false,
+            ),
+            (br#"{"model":"m","reasoning_split":true}"#.as_slice(), true),
+        ] {
+            for body in [
+                PreparedRequestBody::BufferedBytes(raw.to_vec()),
+                PreparedRequestBody::PassthroughStream(raw.to_vec()),
+            ] {
+                let request = build_upstream_request(
+                    &Client::new(),
+                    &Method::POST,
+                    "https://api.minimaxi.com/v1/chat/completions",
+                    &route,
+                    &body,
+                    &[],
+                    None,
+                )
+                .build()
+                .unwrap();
+                let bytes = request
+                    .body()
+                    .and_then(|body| body.as_bytes())
+                    .expect("explicit body bytes");
+                let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+                assert_eq!(value["reasoning_split"], expected);
+            }
+        }
+
+        let generic = generic_route();
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://api.minimaxi.com/v1/chat/completions",
+            &generic,
+            &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            &[],
+            None,
+        )
+        .build()
+        .unwrap();
+        let bytes = request
+            .body()
+            .and_then(|body| body.as_bytes())
+            .expect("generic body bytes");
+        let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        assert!(value.get("reasoning_split").is_none());
+
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://api.minimaxi.com/v1/chat/completions",
+            &route,
+            &PreparedRequestBody::BufferedBytes(b"not-json".to_vec()),
+            &[],
+            None,
+        )
+        .build()
+        .unwrap();
+        let bytes = request
+            .body()
+            .and_then(|body| body.as_bytes())
+            .expect("unsupported body bytes");
+        assert_eq!(bytes, b"not-json");
     }
 
     fn minimax_anthropic_route(base_url: &str) -> RouteConfig {
