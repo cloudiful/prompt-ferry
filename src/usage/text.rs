@@ -49,9 +49,31 @@ pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
                 .and_then(Value::as_i64)
         })
         .map(non_negative);
-    if usage.get("cache_read_input_tokens").is_some()
-        || usage.get("cache_creation_input_tokens").is_some()
-    {
+    // Only the native Anthropic shape treats the top-level cache meters as
+    // additive to `input_tokens`/`prompt_tokens`. That shape exposes
+    // `cache_read_input_tokens`/`cache_creation_input_tokens`, never a
+    // `prompt_tokens_details`/`input_tokens_details` block, and never reports an
+    // explicit `total_tokens`.
+    //
+    // OpenAI chat/responses and DeepSeek already count the cached tokens inside
+    // `input_tokens`/`prompt_tokens` (cache is a subset). The adapters
+    // (anthropic_compat / anthropic_stream_adapter) emit pre-folded `input_tokens`
+    // alongside `input_tokens_details`; raw passthrough may omit the details
+    // block but still reports an explicit total that equals input+output, which
+    // proves the input already includes the cache. Folding would double-count in
+    // every one of these cases.
+    let has_details = usage.get("input_tokens_details").is_some()
+        || usage.get("prompt_tokens_details").is_some();
+    let explicit_total_matches = usage
+        .get("total_tokens")
+        .and_then(Value::as_i64)
+        .map(non_negative)
+        .zip(input_tokens)
+        .zip(output_tokens)
+        .is_some_and(|((total, input), output)| total == input + output);
+    let anthropic_top_level_cache = usage.get("cache_read_input_tokens").is_some()
+        || usage.get("cache_creation_input_tokens").is_some();
+    if anthropic_top_level_cache && !has_details && !explicit_total_matches {
         let cache_total =
             cache_read_tokens.unwrap_or_default() + cache_write_tokens.unwrap_or_default();
         input_tokens = input_tokens
@@ -282,6 +304,49 @@ mod tests {
 
         assert_eq!(usage.input_tokens, Some(130));
         assert_eq!(usage.cache_read_tokens, Some(80));
+    }
+
+    #[test]
+    fn raw_passthrough_with_explicit_total_does_not_fold_input() {
+        // OpenAI/DeepSeek raw passthrough may omit the details block but still
+        // reports an explicit total equal to input+output, which proves the
+        // input already includes the cache. Folding would double-count.
+        let usage = extract_usage(&json!({
+            "usage": {
+                "prompt_tokens": 27581,
+                "completion_tokens": 130,
+                "total_tokens": 27711,
+                "cache_read_input_tokens": 27520
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.input_tokens, Some(27581));
+        assert_eq!(usage.output_tokens, Some(130));
+        assert_eq!(usage.total_tokens, Some(27711));
+        assert_eq!(usage.cache_read_tokens, Some(27520));
+    }
+
+    #[test]
+    fn openai_chat_prompt_tokens_with_details_does_not_fold_input() {
+        // OpenAI chat reports the full prompt_tokens plus a top-level cache meter
+        // and a prompt_tokens_details block. prompt_tokens already counts the
+        // cache, so it must not be folded.
+        let usage = extract_usage(&json!({
+            "usage": {
+                "prompt_tokens": 8868,
+                "completion_tokens": 5499,
+                "cache_read_input_tokens": 4534,
+                "prompt_tokens_details": {
+                    "cached_tokens": 4534
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(usage.input_tokens, Some(8868));
+        assert_eq!(usage.output_tokens, Some(5499));
+        assert_eq!(usage.cache_read_tokens, Some(4534));
     }
 }
 
