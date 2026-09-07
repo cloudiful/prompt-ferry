@@ -84,7 +84,9 @@ defineEmits<{
       class="grid gap-2 md:grid-cols-2 [&>button]:w-full [&>button]:justify-center"
     >
       <UButton
-        v-if="item.provider === 'minimax'"
+        v-if="
+          item.provider === 'minimax' || item.provider === 'command_code'
+        "
         size="sm"
         color="neutral"
         variant="outline"

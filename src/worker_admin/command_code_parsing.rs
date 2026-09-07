@@ -296,4 +296,68 @@ mod tests {
         let parsed = parse_credits_section(&body).expect("credits");
         assert_eq!(parse_window_entry(&parsed.windows, "fiveHour"), None);
     }
+
+    #[test]
+    fn plan_and_subscription_boundaries_hold() {
+        assert_eq!(plan_monthly_credits(" Go "), Some(10.0));
+        assert_eq!(plan_monthly_credits("MAX_10X"), Some(150.0));
+        assert_eq!(plan_monthly_credits("team-pro"), Some(40.0));
+        assert_eq!(plan_monthly_credits("pay-as-you-go"), Some(0.0));
+        assert_eq!(plan_monthly_credits(""), None);
+        assert_eq!(plan_monthly_credits("custom"), None);
+        let with_plan = json!({"data": {"planId": "goat", "status": "active"}});
+        assert_eq!(parse_subscription_plan(&with_plan), Some(Some("goat".into())));
+        assert!(parse_subscription_plan(&json!({"data": {}})).is_none());
+        assert!(parse_subscription_plan(&json!({})).is_none());
+        assert!(parse_summary_present(&json!({"totalCost": 1.0, "totalCount": 2})));
+        assert!(!parse_summary_present(&json!({"totalCost": 1.0})));
+        assert!(!parse_summary_present(&json!([1])));
+    }
+
+    #[test]
+    fn credits_and_window_boundaries_hold() {
+        let body =
+            json!({"credits": {"monthlyCredits": "80", "purchasedCredits": 5, "freeCredits": 0}});
+        let parsed = parse_credits_section(&body).expect("credits");
+        assert_eq!(parsed.monthly, Some(80.0));
+        assert_eq!(parsed.purchased, Some(5.0));
+        assert!(parse_credits_section(&json!({"credits": {}})).is_none());
+        assert!(parse_credits_section(&json!({})).is_none());
+        let windows = json!({
+            "empty": {"used": 0.0, "cap": 0.0},
+            "stringy": {"used": "8", "cap": "16", "resetAt": "2023-11-14T22:13:20.000Z"},
+        });
+        assert!(parse_window_entry(&windows, "empty").is_none());
+        assert!(parse_window_entry(&windows, "missing").is_none());
+        let (used, cap, reset) = parse_window_entry(&windows, "stringy").expect("window");
+        assert_eq!((used, cap), (8.0, 16.0));
+        assert!(reset.is_some());
+        assert_eq!(build_window_usage(120.0, 100.0, None).used_percent, Some(100.0));
+        assert_eq!(
+            build_window_usage(120.0, 100.0, None).remaining_percent,
+            Some(0.0)
+        );
+        assert_eq!(build_window_usage(-5.0, 100.0, None).used_percent, Some(0.0));
+        assert!(build_window_usage(1.0, 0.0, None).used_percent.is_none());
+    }
+
+    #[test]
+    fn scalar_and_org_boundaries_hold() {
+        assert!(normalize_reset_at(&json!(-1)).is_none());
+        assert!(normalize_reset_at(&json!("")).is_none());
+        assert!(normalize_reset_at(&json!("not-a-date")).is_none());
+        assert!(normalize_reset_at(&json!("1700000000")).is_some());
+        assert!(normalize_reset_at(&json!(1_700_000_000_i64)).is_some());
+        let no_org = json!({"user": {"userName": "a"}});
+        assert_eq!(parse_whoami_org_id(&no_org), Some(None));
+        let blank_id = json!({"user": {"userName": "a"}, "org": {"id": "  ", "login": "a"}});
+        assert_eq!(parse_whoami_org_id(&blank_id), Some(None));
+        let numeric_id = json!({"user": {"userName": "a"}, "org": {"id": 42, "login": "a"}});
+        assert_eq!(parse_whoami_org_id(&numeric_id), Some(Some("42".into())));
+        assert!(command_code_business_error(&json!({"code": 0})).is_none());
+        assert!(
+            command_code_business_error(&json!({"status_code": "403", "message": "x"})).is_some()
+        );
+        assert!(command_code_business_error(&json!({"error": {"detail": "x"}})).is_none());
+    }
 }
