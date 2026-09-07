@@ -34,7 +34,6 @@ pub struct UnifiedModelRouteTarget {
     pub position: i32,
     pub enabled: bool,
     pub upstream_model: Option<String>,
-    pub responses_continuation_policy: crate::db::ResponsesContinuationPolicy,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,7 +82,6 @@ fn target_to_pg(target: UnifiedModelRouteTarget) -> PgModelRouteTarget {
         position: target.position,
         enabled: target.enabled,
         upstream_model: target.upstream_model,
-        responses_continuation_policy: target.responses_continuation_policy,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }

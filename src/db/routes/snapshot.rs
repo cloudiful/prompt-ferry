@@ -16,7 +16,6 @@ pub async fn effective_route(pool: &PgPool, user_id: i64) -> Result<Option<Route
             key_lb_enabled: row.key_lb_enabled,
             native_api: parse_native_api(&row.native_api),
             upstream_model: None,
-            responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
             route_selection_reason: crate::db::RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::from_str(&row.provider),
             service_tier: crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref()),

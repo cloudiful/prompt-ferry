@@ -9,7 +9,7 @@ use crate::{
     db::config_repository::ConfigRepository,
     db::{
         EndpointCreate, EndpointProvider, ModelEndpointRuleCreate, ModelRouteRoutingStrategy,
-        ModelRouteTargetCreate, ResponsesContinuationPolicy,
+        ModelRouteTargetCreate,
     },
     keys::hash_client_key,
     protocol::RelayIpPolicy,
@@ -375,7 +375,6 @@ async fn model_route_crud_round_trips_with_target_persistence() {
             endpoint_id,
             enabled: true,
             upstream_model: Some("gpt-4o-mini".to_string()),
-            responses_continuation_policy: ResponsesContinuationPolicy::ForceReplay,
         }],
     };
     let rule = repo

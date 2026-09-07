@@ -252,7 +252,6 @@ pub(crate) async fn insert_route(
             .bind(target.position)
             .bind(bool_i64(target.enabled))
             .bind(&target.upstream_model)
-            .bind(target.responses_continuation_policy.as_str())
             .execute(&mut **transaction)
             .await?;
     }

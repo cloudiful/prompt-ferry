@@ -84,7 +84,6 @@ async fn sync_model_route_targets(
             position as i32,
             target.enabled,
             target.upstream_model,
-            target.responses_continuation_policy.as_str(),
         )
         .execute(&mut **tx)
         .await?;

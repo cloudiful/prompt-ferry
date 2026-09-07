@@ -24,11 +24,11 @@ mod write;
 
 pub(crate) use coordinator::StandaloneCoordinatorStore;
 pub use models::{
-    BootstrapSeed, ClientKeyConfig, ContinuationPolicy, EndpointApiKeyConfig, EndpointProvider,
-    EndpointRegion, ManagedRelayConfig, MinimaxServiceTier, ModelRouteConfig,
-    ModelRouteTargetConfig, ProviderEndpointConfig, ReplaySnapshotUpsertOutcome, Result,
-    RouteScope, RoutingStrategy, SettingConfig, StandaloneConfig, StandaloneConfigError,
-    StandaloneReplaySnapshotRecord, StandaloneUsageSummaryRecord,
+    BootstrapSeed, ClientKeyConfig, EndpointApiKeyConfig, EndpointProvider, EndpointRegion,
+    ManagedRelayConfig, MinimaxServiceTier, ModelRouteConfig, ModelRouteTargetConfig,
+    ProviderEndpointConfig, ReplaySnapshotUpsertOutcome, Result, RouteScope, RoutingStrategy,
+    SettingConfig, StandaloneConfig, StandaloneConfigError, StandaloneReplaySnapshotRecord,
+    StandaloneUsageSummaryRecord,
 };
 pub(crate) use request_leases::{RequestLeaseAcquireOutcome, StandaloneRequestLeaseStore};
 pub use store::{BootstrapOutcome, StandaloneConfigStore};

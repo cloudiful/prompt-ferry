@@ -29,8 +29,8 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
   atomic reservation, usage-ratio balancing across API keys, cooldown on auth/throttle failures,
   and provider credit reconciliation (`creditsUsed`) for Firecrawl-style meters.
 - TLS, mutual TLS, and application-layer encryption for relay-worker traffic.
-- Native Responses passthrough, including DeepSeek v4 Flash; use `Responses` or
-  `Auto` endpoints with `force_passthrough` model routes.
+- Native Responses passthrough, including DeepSeek v4 Flash; Responses requests
+  require Responses-native targets and are forwarded without cross-protocol conversion.
 - Bounded relay response buffering with configurable queue and byte limits.
 
 ## Deploy

@@ -3,7 +3,9 @@ use super::super::{
     request_assembly::BufferedBridgeRequest,
     tests::{session_affinity_candidate, session_affinity_services},
 };
-use super::{select_route_for_candidate, session_affinity_tests::request_context};
+use super::{
+    RouteAffinityError, select_route_for_candidate, session_affinity_tests::request_context,
+};
 use crate::{
     db,
     replay_cache::ReplayCache,
@@ -15,7 +17,7 @@ use crate::{
 use chrono::Utc;
 
 #[tokio::test]
-async fn force_replay_rebinds_when_the_bound_key_is_exhausted() {
+async fn exhausted_bound_key_returns_target_unavailable() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
     let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
@@ -76,7 +78,7 @@ async fn force_replay_rebinds_when_the_bound_key_is_exhausted() {
             ..RequestPromptLog::default()
         },
     );
-    let selected = select_route_for_candidate(
+    let error = match select_route_for_candidate(
         &services,
         &request_ctx,
         &candidate,
@@ -85,12 +87,16 @@ async fn force_replay_rebinds_when_the_bound_key_is_exhausted() {
         Some("key-a"),
     )
     .await
-    .expect("quota exhaustion should permit ForceReplay rebinding")
-    .expect("route should be selected");
-
-    assert_eq!(selected.route.route_id, endpoint_id);
-    assert_eq!(selected.route.endpoint_key_id, Some(alternate_key_id));
-    assert_eq!(selected.route.api_key, "alternate-key");
+    {
+        Ok(_) => panic!("exhausted bound key must not fail over to another key"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error
+            .downcast_ref::<RouteAffinityError>()
+            .map(|error| error.code),
+        Some("responses_session_affinity_target_unavailable")
+    );
 }
 
 fn request() -> BufferedBridgeRequest {

@@ -44,7 +44,6 @@ pub async fn spawn_worker(
                 endpoint_id: endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
-                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
             }],
         },
     )

@@ -819,7 +819,6 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
                 endpoint_id: endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
-                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
             }],
         },
     )
@@ -946,7 +945,6 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 endpoint_id: endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
-                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
             }],
         },
     )
@@ -965,7 +963,6 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 endpoint_id: endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
-                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
             }],
         },
     )
@@ -1192,7 +1189,6 @@ async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow
                 endpoint_id: endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
-                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
             }],
         },
     )
@@ -1304,7 +1300,6 @@ async fn session_affinity_options_fixture(
                 endpoint_id: endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
-                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
             }],
         },
     )
@@ -1490,7 +1485,6 @@ async fn reset_session_affinity_clears_anonymous_record_binding_under_user_zero(
                 endpoint_id: endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
-                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
             }],
         },
     )
@@ -1599,7 +1593,6 @@ async fn session_route_options_surfaces_binding_when_rule_no_longer_resolves() -
                     endpoint_id: endpoint.endpoint_id,
                     enabled: true,
                     upstream_model: None,
-                    responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
                 }],
             },
         )
@@ -1696,7 +1689,6 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
                 endpoint_id: routed_endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
-                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
             }],
         },
     )
@@ -1788,7 +1780,6 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
                 endpoint_id: endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
-                responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
             }],
         },
     )
@@ -2244,7 +2235,7 @@ async fn usage_event_detail_serializes_null_request_has_previous_response_id_as_
 }
 
 #[tokio::test]
-async fn rejects_force_passthrough_for_chat_native_target() -> anyhow::Result<()> {
+async fn ignores_obsolete_continuation_policy_field() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
         return Ok(());
@@ -2297,12 +2288,13 @@ async fn rejects_force_passthrough_for_chat_native_target() -> anyhow::Result<()
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await?;
     let json: Value = serde_json::from_slice(&body)?;
-    assert_eq!(
-        json["error"]["code"].as_str(),
-        Some("invalid_target_continuation_policy")
+    assert!(
+        json["targets"][0]
+            .get("responses_continuation_policy")
+            .is_none()
     );
 
     schema.cleanup().await?;
@@ -2310,7 +2302,7 @@ async fn rejects_force_passthrough_for_chat_native_target() -> anyhow::Result<()
 }
 
 #[tokio::test]
-async fn defaults_force_passthrough_for_responses_native_target() -> anyhow::Result<()> {
+async fn model_route_response_omits_continuation_policy() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
         return Ok(());
@@ -2365,9 +2357,10 @@ async fn defaults_force_passthrough_for_responses_native_target() -> anyhow::Res
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await?;
     let json: Value = serde_json::from_slice(&body)?;
-    assert_eq!(
-        json["targets"][0]["responses_continuation_policy"].as_str(),
-        Some("force_passthrough")
+    assert!(
+        json["targets"][0]
+            .get("responses_continuation_policy")
+            .is_none()
     );
 
     schema.cleanup().await?;

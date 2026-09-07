@@ -159,7 +159,6 @@ fn route_from_target(
         key_lb_enabled: target.key_lb_enabled,
         native_api: target.native_api,
         upstream_model: target.upstream_model.clone(),
-        responses_continuation_policy: target.responses_continuation_policy,
         route_selection_reason,
         provider: target.provider,
         service_tier: target.service_tier,

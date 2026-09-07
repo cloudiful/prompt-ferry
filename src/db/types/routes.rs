@@ -25,23 +25,6 @@ impl ModelRouteRoutingStrategy {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ResponsesContinuationPolicy {
-    ForcePassthrough,
-    #[default]
-    ForceReplay,
-}
-
-impl ResponsesContinuationPolicy {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ForcePassthrough => "force_passthrough",
-            Self::ForceReplay => "force_replay",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct StreamDeltaBatchingSettings {
     pub enabled: bool,
@@ -78,7 +61,6 @@ pub struct RouteConfig {
     pub key_lb_enabled: bool,
     pub native_api: NativeApi,
     pub upstream_model: Option<String>,
-    pub responses_continuation_policy: ResponsesContinuationPolicy,
     pub route_selection_reason: RouteSelectionReason,
     pub provider: EndpointProvider,
     pub service_tier: MinimaxServiceTier,
@@ -94,7 +76,6 @@ pub struct ModelRouteTarget {
     pub position: i32,
     pub enabled: bool,
     pub upstream_model: Option<String>,
-    pub responses_continuation_policy: ResponsesContinuationPolicy,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -133,7 +114,6 @@ pub struct ModelRouteTargetCreate {
     pub endpoint_id: uuid::Uuid,
     pub enabled: bool,
     pub upstream_model: Option<String>,
-    pub responses_continuation_policy: ResponsesContinuationPolicy,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -174,7 +154,6 @@ pub struct ModelRouteCandidateTarget {
     pub position: i32,
     pub enabled: bool,
     pub upstream_model: Option<String>,
-    pub responses_continuation_policy: ResponsesContinuationPolicy,
     pub provider: EndpointProvider,
     pub service_tier: MinimaxServiceTier,
 }

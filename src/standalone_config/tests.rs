@@ -85,7 +85,6 @@ fn sample_config() -> StandaloneConfig {
                 position: 0,
                 enabled: true,
                 upstream_model: Some("provider-model".to_string()),
-                responses_continuation_policy: ContinuationPolicy::ForcePassthrough,
             }],
         }],
         client_keys: vec![ClientKeyConfig {

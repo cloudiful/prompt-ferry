@@ -2,10 +2,9 @@ use sqlx::{Row, sqlite::SqliteRow};
 use uuid::Uuid;
 
 use super::models::{
-    ClientKeyConfig, ContinuationPolicy, EndpointApiKeyConfig, EndpointProvider, EndpointRegion,
-    ManagedRelayConfig, MinimaxServiceTier, ModelRouteConfig, ModelRouteTargetConfig,
-    ProviderEndpointConfig, Result, RouteScope, RoutingStrategy, SettingConfig,
-    StandaloneConfigError,
+    ClientKeyConfig, EndpointApiKeyConfig, EndpointProvider, EndpointRegion, ManagedRelayConfig,
+    MinimaxServiceTier, ModelRouteConfig, ModelRouteTargetConfig, ProviderEndpointConfig, Result,
+    RouteScope, RoutingStrategy, SettingConfig, StandaloneConfigError,
 };
 use crate::{
     config::{BridgeEncryptionMode, NativeApi, NativeApiSource, TlsMode},
@@ -337,10 +336,6 @@ pub(crate) fn route_target(row: &SqliteRow) -> Result<(Uuid, ModelRouteTargetCon
             })?,
             enabled: bool_value(row, "enabled")?,
             upstream_model: optional_string(row, "upstream_model")?,
-            responses_continuation_policy: ContinuationPolicy::parse(&required_string(
-                row,
-                "responses_continuation_policy",
-            )?)?,
         },
     ))
 }

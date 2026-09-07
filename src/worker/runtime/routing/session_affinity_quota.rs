@@ -35,33 +35,6 @@ pub(super) fn selection_for_binding<'a>(
     })
 }
 
-pub(super) fn bound_key_exhausted(
-    candidate: &db::ModelRouteCandidate,
-    binding: &ResponseAffinityBinding,
-    request: &BufferedBridgeRequest,
-    quota_cache: Option<&TokenPlanQuotaCache>,
-) -> bool {
-    let Some(quota_cache) = quota_cache else {
-        return false;
-    };
-    let Some(target) = candidate_target_by_endpoint(candidate, binding.endpoint_id) else {
-        return false;
-    };
-    let Some(key_selection) = select_bound_api_key(target, binding) else {
-        return false;
-    };
-    let Some(key_id) = key_selection.key_id else {
-        return false;
-    };
-    quota_cache
-        .key_remaining_percent_now(
-            target.endpoint_id,
-            key_id,
-            request_model(request).as_deref(),
-        )
-        .is_some_and(|remaining| remaining <= 0.0)
-}
-
 pub(super) fn binding_for_selection(
     target: &db::ModelRouteCandidateTarget,
     key_selection: &db::EndpointApiKeySelection,

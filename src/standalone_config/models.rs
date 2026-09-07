@@ -197,32 +197,6 @@ impl RoutingStrategy {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ContinuationPolicy {
-    ForcePassthrough,
-    ForceReplay,
-}
-
-impl ContinuationPolicy {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::ForcePassthrough => "force_passthrough",
-            Self::ForceReplay => "force_replay",
-        }
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self> {
-        match value {
-            "force_passthrough" => Ok(Self::ForcePassthrough),
-            "force_replay" => Ok(Self::ForceReplay),
-            _ => Err(StandaloneConfigError::CorruptDatabase(format!(
-                "unknown continuation policy {value:?}"
-            ))),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MinimaxServiceTier {
@@ -368,7 +342,6 @@ pub struct ModelRouteTargetConfig {
     pub position: i32,
     pub enabled: bool,
     pub upstream_model: Option<String>,
-    pub responses_continuation_policy: ContinuationPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

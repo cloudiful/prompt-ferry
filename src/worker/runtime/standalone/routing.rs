@@ -3,8 +3,8 @@ use chrono::Utc;
 use crate::{
     db::{self, ModelRouteCandidate, ModelRouteCandidateTarget},
     standalone_config::{
-        ContinuationPolicy, EndpointApiKeyConfig, ModelRouteConfig, ProviderEndpointConfig,
-        RouteScope, RoutingStrategy, StandaloneConfig,
+        EndpointApiKeyConfig, ModelRouteConfig, ProviderEndpointConfig, RouteScope,
+        RoutingStrategy, StandaloneConfig,
     },
 };
 
@@ -97,12 +97,6 @@ fn target_from_endpoint(
         position: target.position,
         enabled: target.enabled,
         upstream_model: target.upstream_model.clone(),
-        responses_continuation_policy: match target.responses_continuation_policy {
-            ContinuationPolicy::ForcePassthrough => {
-                db::ResponsesContinuationPolicy::ForcePassthrough
-            }
-            ContinuationPolicy::ForceReplay => db::ResponsesContinuationPolicy::ForceReplay,
-        },
         provider: match endpoint.provider {
             crate::standalone_config::EndpointProvider::Minimax => db::EndpointProvider::Minimax,
             crate::standalone_config::EndpointProvider::Generic => db::EndpointProvider::Generic,
@@ -209,7 +203,6 @@ mod tests {
                         position: 0,
                         enabled: true,
                         upstream_model: None,
-                        responses_continuation_policy: ContinuationPolicy::ForceReplay,
                     }],
                 },
                 ModelRouteConfig {
@@ -227,7 +220,6 @@ mod tests {
                         position: 0,
                         enabled: true,
                         upstream_model: None,
-                        responses_continuation_policy: ContinuationPolicy::ForceReplay,
                     }],
                 },
             ],
@@ -276,7 +268,6 @@ mod tests {
                     position: 0,
                     enabled: true,
                     upstream_model: None,
-                    responses_continuation_policy: ContinuationPolicy::ForceReplay,
                 }],
             }],
             ..StandaloneConfig::default()

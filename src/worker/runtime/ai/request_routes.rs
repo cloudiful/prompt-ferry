@@ -99,7 +99,6 @@ pub(super) async fn resolve_route(
                         key_lb_enabled: false,
                         native_api: config.upstream_native_api,
                         upstream_model: None,
-                        responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
                         route_selection_reason: db::RouteSelectionReason::Default,
                         provider: db::EndpointProvider::Generic,
                         service_tier: db::MinimaxServiceTier::Standard,
@@ -183,8 +182,8 @@ mod tests {
         relay_secrets::RelaySecretManager,
         standalone_config::StandaloneConfigStore,
         standalone_config::{
-            ContinuationPolicy, EndpointProvider, ModelRouteConfig, ModelRouteTargetConfig,
-            ProviderEndpointConfig, RouteScope, RoutingStrategy, StandaloneConfig,
+            EndpointProvider, ModelRouteConfig, ModelRouteTargetConfig, ProviderEndpointConfig,
+            RouteScope, RoutingStrategy, StandaloneConfig,
         },
         worker::runtime::{
             WorkerRuntimeState, prompt_log::RequestPromptLog,
@@ -265,7 +264,6 @@ mod tests {
                     position: 0,
                     enabled: true,
                     upstream_model: Some("provider-local".to_string()),
-                    responses_continuation_policy: ContinuationPolicy::ForcePassthrough,
                 }],
             }],
             ..StandaloneConfig::default()
@@ -355,7 +353,6 @@ fn default_route_for_user(config: &WorkerConfig, user_id: i64) -> db::RouteConfi
         key_lb_enabled: false,
         native_api: config.upstream_native_api,
         upstream_model: None,
-        responses_continuation_policy: db::ResponsesContinuationPolicy::ForceReplay,
         route_selection_reason: db::RouteSelectionReason::Default,
         provider: db::EndpointProvider::Generic,
         service_tier: db::MinimaxServiceTier::Standard,

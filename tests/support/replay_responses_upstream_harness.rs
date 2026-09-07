@@ -38,24 +38,6 @@ pub async fn spawn_replay_responses_upstream(
     addr
 }
 
-pub async fn spawn_replay_responses_upstream_without_conversation(
-    log: Arc<ResponsesRequestLog>,
-) -> std::net::SocketAddr {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let app = Router::new()
-        .route(
-            "/v1/responses",
-            post(fake_responses_completion_without_conversation),
-        )
-        .route("/v1/models", get(chat::fake_models))
-        .with_state(log);
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    addr
-}
-
 async fn fake_responses_completion(
     State(log): State<Arc<ResponsesRequestLog>>,
     body: Bytes,
@@ -155,93 +137,6 @@ async fn fake_responses_completion(
                 "total_tokens": 6,
                 "input_tokens_details": { "cached_tokens": 0 },
                 "output_tokens_details": { "reasoning_tokens": 0 }
-            },
-            "text": { "format": { "type": "text" } },
-            "truncation": "disabled",
-            "tool_choice": "auto",
-            "parallel_tool_calls": false,
-            "store": false,
-            "error": null,
-            "incomplete_details": null,
-            "metadata": {}
-        })
-    };
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap()
-}
-
-async fn fake_responses_completion_without_conversation(
-    State(log): State<Arc<ResponsesRequestLog>>,
-    body: Bytes,
-) -> Response {
-    let value = serde_json::from_slice::<Value>(&body).unwrap();
-    let mut requests = log.bodies.lock().await;
-    requests.push(value.clone());
-    let turn = requests.len();
-    drop(requests);
-
-    let model = value
-        .get("model")
-        .and_then(Value::as_str)
-        .unwrap_or("gpt-test");
-    let body = if turn == 1 {
-        serde_json::json!({
-            "id": "resp_turn1",
-            "object": "response",
-            "created_at": 123,
-            "status": "completed",
-            "model": model,
-            "output": [{
-                "id": "fc_1",
-                "type": "function_call",
-                "status": "completed",
-                "call_id": "call_1",
-                "name": "get_weather",
-                "arguments": "{\"city\":\"Boston\"}"
-            }],
-            "output_text": "",
-            "usage": {
-                "input_tokens": 2,
-                "output_tokens": 3,
-                "total_tokens": 5
-            },
-            "text": { "format": { "type": "text" } },
-            "truncation": "disabled",
-            "tool_choice": "auto",
-            "parallel_tool_calls": false,
-            "store": false,
-            "error": null,
-            "incomplete_details": null,
-            "metadata": {}
-        })
-    } else {
-        serde_json::json!({
-            "id": format!("resp_turn{turn}"),
-            "object": "response",
-            "created_at": 124,
-            "status": "completed",
-            "model": model,
-            "output": [{
-                "id": "msg_1",
-                "type": "message",
-                "status": "completed",
-                "role": "assistant",
-                "content": [{
-                    "type": "output_text",
-                    "text": "done",
-                    "annotations": [],
-                    "logprobs": []
-                }]
-            }],
-            "output_text": "done",
-            "usage": {
-                "input_tokens": 4,
-                "output_tokens": 2,
-                "total_tokens": 6
             },
             "text": { "format": { "type": "text" } },
             "truncation": "disabled",

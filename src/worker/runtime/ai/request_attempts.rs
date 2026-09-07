@@ -12,7 +12,7 @@ use super::super::{
 use super::{
     forward::{ResponseForwardContext, ResponseLoggingContext, forward_upstream_response},
     request_logging::log_prepared_upstream_summary,
-    request_support::prepare_upstream_request_with_replay,
+    request_support::prepare_upstream_request_for_route,
     upstream::{build_upstream_request, upstream_url_for_route},
 };
 
@@ -128,13 +128,11 @@ pub(super) async fn forward_route_request(
         });
     }
 
-    let prepared = match prepare_upstream_request_with_replay(
+    let prepared = match prepare_upstream_request_for_route(
         services.admin_state(),
         route,
         request,
         request_ctx.request_prompt_log.conversation_id,
-        request_ctx.request_prompt_log.parent_event_id,
-        request_ctx.request_prompt_log.replay_unavailable,
     )
     .await
     {

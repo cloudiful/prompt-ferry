@@ -6,11 +6,10 @@ use uuid::Uuid;
 
 use crate::db::{
     ModelEndpointRule as PgModelEndpointRule, ModelEndpointRuleCreate, ModelRouteRoutingStrategy,
-    ResponsesContinuationPolicy,
 };
 use crate::standalone_config::{
-    ContinuationPolicy as ScContinuationPolicy, ModelRouteConfig as ScModelRoute,
-    RouteScope as ScRouteScope, RoutingStrategy as ScRoutingStrategy,
+    ModelRouteConfig as ScModelRoute, RouteScope as ScRouteScope,
+    RoutingStrategy as ScRoutingStrategy,
 };
 
 use super::{UnifiedModelRoute, UnifiedModelRouteTarget};
@@ -39,7 +38,6 @@ pub(super) fn from_postgres_target(target: crate::db::ModelRouteTarget) -> Unifi
         position: target.position,
         enabled: target.enabled,
         upstream_model: target.upstream_model,
-        responses_continuation_policy: target.responses_continuation_policy,
     }
 }
 
@@ -56,24 +54,6 @@ pub(super) fn routing_strategy_to_pg(strategy: ScRoutingStrategy) -> ModelRouteR
         ScRoutingStrategy::ResponsesSessionAffinity => {
             ModelRouteRoutingStrategy::ResponsesSessionAffinity
         }
-    }
-}
-
-pub(super) fn continuation_policy_to_pg(
-    policy: ScContinuationPolicy,
-) -> ResponsesContinuationPolicy {
-    match policy {
-        ScContinuationPolicy::ForcePassthrough => ResponsesContinuationPolicy::ForcePassthrough,
-        ScContinuationPolicy::ForceReplay => ResponsesContinuationPolicy::ForceReplay,
-    }
-}
-
-pub(super) fn continuation_policy_from_pg(
-    policy: ResponsesContinuationPolicy,
-) -> ScContinuationPolicy {
-    match policy {
-        ResponsesContinuationPolicy::ForcePassthrough => ScContinuationPolicy::ForcePassthrough,
-        ResponsesContinuationPolicy::ForceReplay => ScContinuationPolicy::ForceReplay,
     }
 }
 
@@ -112,9 +92,6 @@ where
                 position: target.position,
                 enabled: target.enabled,
                 upstream_model: target.upstream_model,
-                responses_continuation_policy: continuation_policy_to_pg(
-                    target.responses_continuation_policy,
-                ),
             }
         })
         .collect();
@@ -158,9 +135,6 @@ pub(super) fn sqlite_route_from_create(
                 position: i32::try_from(index).unwrap_or(i32::MAX),
                 enabled: target.enabled,
                 upstream_model: target.upstream_model,
-                responses_continuation_policy: continuation_policy_from_pg(
-                    target.responses_continuation_policy,
-                ),
             })
         })
         .collect::<Result<Vec<_>>>()?;

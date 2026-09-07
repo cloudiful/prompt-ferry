@@ -6,7 +6,7 @@ use crate::config::NativeApi;
 use crate::db::types::{
     EndpointApiKey, ModelEndpointRule, ModelEndpointRuleCreate, ModelEndpointRuleRow,
     ModelRouteCandidate, ModelRouteCandidateTarget, ModelRoutePage, ModelRouteRoutingStrategy,
-    ModelRouteTarget, ResponsesContinuationPolicy, RouteConfig, SnapshotKey,
+    ModelRouteTarget, RouteConfig, SnapshotKey,
 };
 
 mod hydrate;
@@ -50,7 +50,6 @@ struct ModelRouteCandidateRow {
     position: i32,
     target_enabled: bool,
     upstream_model: Option<String>,
-    responses_continuation_policy: String,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -63,7 +62,6 @@ struct ModelRouteTargetRow {
     position: i32,
     enabled: bool,
     upstream_model: Option<String>,
-    responses_continuation_policy: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -102,9 +100,4 @@ fn parse_native_api(value: &str) -> NativeApi {
 fn parse_routing_strategy(value: &str) -> ModelRouteRoutingStrategy {
     serde_json::from_value(serde_json::Value::String(value.to_string()))
         .unwrap_or(ModelRouteRoutingStrategy::ClientKeyRendezvous)
-}
-
-fn parse_responses_continuation_policy(value: &str) -> ResponsesContinuationPolicy {
-    serde_json::from_value(serde_json::Value::String(value.to_string()))
-        .unwrap_or(ResponsesContinuationPolicy::ForceReplay)
 }

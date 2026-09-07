@@ -178,7 +178,6 @@ mod tests {
             key_lb_enabled: false,
             native_api: NativeApi::Chat,
             upstream_model: None,
-            responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
             model_route_rule_id: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Generic,

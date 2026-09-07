@@ -51,13 +51,12 @@ impl ModelRouteRequest {
                         endpoint_id,
                         enabled: Some(true),
                         upstream_model: None,
-                        responses_continuation_policy: None,
                     })
                     .collect()
             })
             .into_iter()
             .map(|target| async move {
-                let endpoint = db::get_endpoint(&state.pool, target.endpoint_id)
+                db::get_endpoint(&state.pool, target.endpoint_id)
                     .await
                     .map_err(|err| internal(state, err))?
                     .ok_or_else(|| {
@@ -67,25 +66,6 @@ impl ModelRouteRequest {
                             "target endpoint not found",
                         )
                     })?;
-                let responses_continuation_policy = target.responses_continuation_policy.unwrap_or(
-                    if endpoint.native_api == "responses" || endpoint.native_api == "auto" {
-                        db::ResponsesContinuationPolicy::ForcePassthrough
-                    } else {
-                        db::ResponsesContinuationPolicy::ForceReplay
-                    },
-                );
-                if matches!(
-                    responses_continuation_policy,
-                    db::ResponsesContinuationPolicy::ForcePassthrough
-                ) && endpoint.native_api != "responses"
-                    && endpoint.native_api != "auto"
-                {
-                    return Err(error(
-                        StatusCode::BAD_REQUEST,
-                        "invalid_target_continuation_policy",
-                        "force_passthrough requires a responses-native endpoint target",
-                    ));
-                }
                 Ok(db::ModelRouteTargetCreate {
                     endpoint_id: target.endpoint_id,
                     enabled: target.enabled.unwrap_or(true),
@@ -95,7 +75,6 @@ impl ModelRouteRequest {
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
                         .map(str::to_string),
-                    responses_continuation_policy,
                 })
             });
         let targets = futures::future::try_join_all(targets).await?;
@@ -226,7 +205,6 @@ pub struct ModelRouteTargetRequest {
     pub endpoint_id: Uuid,
     pub enabled: Option<bool>,
     pub upstream_model: Option<String>,
-    pub responses_continuation_policy: Option<db::ResponsesContinuationPolicy>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

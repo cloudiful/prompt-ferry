@@ -130,9 +130,9 @@ mod tests {
         keys::hash_client_key,
         relay_secrets::RelaySecretManager,
         standalone_config::{
-            ClientKeyConfig, ContinuationPolicy, EndpointProvider, ModelRouteConfig,
-            ModelRouteTargetConfig, ProviderEndpointConfig, RouteScope, RoutingStrategy,
-            SettingConfig, StandaloneConfig, StandaloneConfigStore,
+            ClientKeyConfig, EndpointProvider, ModelRouteConfig, ModelRouteTargetConfig,
+            ProviderEndpointConfig, RouteScope, RoutingStrategy, SettingConfig, StandaloneConfig,
+            StandaloneConfigStore,
         },
     };
 
@@ -194,7 +194,6 @@ mod tests {
                     position: 0,
                     enabled: true,
                     upstream_model: None,
-                    responses_continuation_policy: ContinuationPolicy::ForceReplay,
                 }],
             }],
             client_keys: vec![ClientKeyConfig {

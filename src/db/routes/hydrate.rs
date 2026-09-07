@@ -50,9 +50,6 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
             position: row.position,
             enabled: row.enabled,
             upstream_model: row.upstream_model,
-            responses_continuation_policy: parse_responses_continuation_policy(
-                &row.responses_continuation_policy,
-            ),
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -116,9 +113,6 @@ pub(super) async fn model_route_candidates_by_rule(
                 position: row.position,
                 enabled: row.target_enabled,
                 upstream_model: row.upstream_model,
-                responses_continuation_policy: parse_responses_continuation_policy(
-                    &row.responses_continuation_policy,
-                ),
                 provider,
                 service_tier,
             });
@@ -145,9 +139,6 @@ pub(super) async fn model_route_candidates_by_rule(
                 position: row.position,
                 enabled: row.target_enabled,
                 upstream_model: row.upstream_model,
-                responses_continuation_policy: parse_responses_continuation_policy(
-                    &row.responses_continuation_policy,
-                ),
                 provider,
                 service_tier,
             }],

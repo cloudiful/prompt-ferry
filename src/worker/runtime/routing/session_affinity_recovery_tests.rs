@@ -44,7 +44,7 @@ async fn ignores_preferred_endpoint_from_another_model_route() {
 }
 
 #[tokio::test]
-async fn rebinds_when_the_bound_endpoint_leaves_the_route() {
+async fn reports_unavailable_when_the_bound_endpoint_leaves_the_route() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
     let services = session_affinity_services(runtime_state.clone(), replay_cache);
@@ -73,13 +73,12 @@ async fn rebinds_when_the_bound_endpoint_leaves_the_route() {
     changed_candidate
         .targets
         .retain(|target| target.endpoint_id != first.route.route_id);
-    let replacement = changed_candidate
+    changed_candidate
         .targets
         .first()
-        .expect("route should keep one replacement target")
-        .endpoint_id;
+        .expect("route should keep one replacement target");
 
-    let selected = select_route_for_candidate(
+    let error = match select_route_for_candidate(
         &services,
         &request_ctx,
         &changed_candidate,
@@ -88,8 +87,14 @@ async fn rebinds_when_the_bound_endpoint_leaves_the_route() {
         Some("key-a"),
     )
     .await
-    .unwrap()
-    .expect("stale affinity should be rebound");
-
-    assert_eq!(selected.route.route_id, replacement);
+    {
+        Ok(_) => panic!("stale affinity must not silently rebind after the bound endpoint leaves"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error
+            .downcast_ref::<super::RouteAffinityError>()
+            .map(|error| error.code),
+        Some("responses_session_affinity_target_unavailable")
+    );
 }

@@ -50,7 +50,6 @@ export type ModelRouteTargetForm = {
   endpoint_id: string
   enabled: boolean
   upstream_model: string
-  responses_continuation_policy: 'force_passthrough' | 'force_replay'
 }
 
 export type StreamDeltaBatchingForm = {

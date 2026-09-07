@@ -20,7 +20,6 @@ use http::StatusCode;
 pub(crate) use request::normalize_chat_request_for_native;
 pub use request::{chat_request_to_responses, is_streaming_request, responses_request_to_chat};
 pub(crate) use request::{conversation_key, previous_response_id};
-pub(crate) use request_input::translate_input;
 pub use response::{chat_response_to_responses, responses_response_to_chat};
 pub(crate) use response_items::{extract_text, reasoning_details_from_text};
 pub use response_stream::{
@@ -33,9 +32,8 @@ pub(crate) use responses_reasoning_summary::{
 pub(crate) use responses_state::{
     NormalizedResponsesRequest, assistant_message_to_output_items,
     extract_output_items_from_responses_value, normalize_response_error,
-    output_items_to_assistant_message, output_items_to_input_items, persisted_artifact,
-    persisted_assistant_message, persisted_output_items, responses_stream_output_items,
-    validate_raw_responses_request_body,
+    output_items_to_assistant_message, persisted_artifact, persisted_output_items,
+    responses_stream_output_items, validate_raw_responses_request_body,
 };
 
 #[derive(Debug, Clone)]

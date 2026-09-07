@@ -20,7 +20,6 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         endpoint_id: '',
         enabled: true,
         upstream_model: '',
-        responses_continuation_policy: 'force_replay',
       },
     ],
   }
@@ -66,7 +65,6 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
       endpoint_id: target.endpoint_id,
       enabled: target.enabled,
       upstream_model: target.upstream_model ?? '',
-      responses_continuation_policy: target.responses_continuation_policy,
     })),
   }
 }
@@ -88,7 +86,6 @@ export function modelRouteFormToRequest(
         endpoint_id: target.endpoint_id,
         enabled: target.enabled,
         upstream_model: target.upstream_model.trim() || undefined,
-        responses_continuation_policy: target.responses_continuation_policy,
       })),
   }
 }

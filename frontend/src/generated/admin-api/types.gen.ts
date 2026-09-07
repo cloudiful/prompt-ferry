@@ -664,7 +664,6 @@ export type ModelRouteTarget = {
     endpoint_id: string;
     endpoint_name?: string | null;
     position: number;
-    responses_continuation_policy: ResponsesContinuationPolicy;
     rule_id: string;
     target_id: string;
     updated_at: string;
@@ -674,7 +673,6 @@ export type ModelRouteTarget = {
 export type ModelRouteTargetRequest = {
     enabled?: boolean | null;
     endpoint_id: string;
-    responses_continuation_policy?: null | ResponsesContinuationPolicy;
     upstream_model?: string | null;
 };
 
@@ -1227,8 +1225,6 @@ export type RequestToolCallStatus = 'emitted' | 'output_received' | 'failed' | '
 export type ResetPasswordRequest = {
     password: string;
 };
-
-export type ResponsesContinuationPolicy = 'force_passthrough' | 'force_replay';
 
 export type ReviewFailurePolicy = 'fail_open' | 'fail_closed';
 

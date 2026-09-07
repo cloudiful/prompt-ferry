@@ -94,7 +94,6 @@ CREATE TABLE IF NOT EXISTS standalone_model_route_targets (
     position INTEGER NOT NULL,
     enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
     upstream_model TEXT,
-    responses_continuation_policy TEXT NOT NULL CHECK (responses_continuation_policy IN ('force_passthrough', 'force_replay')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(rule_id, position)

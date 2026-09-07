@@ -25,7 +25,6 @@ function addTarget(): void {
     endpoint_id: '',
     enabled: true,
     upstream_model: '',
-    responses_continuation_policy: 'force_replay',
   })
 }
 
@@ -40,69 +39,6 @@ function moveTarget(index: number, offset: -1 | 1): void {
   if (target) form.value.targets.splice(targetIndex, 0, target)
 }
 
-function endpointForTarget(endpointId: string): ProviderEndpoint | undefined {
-  return props.endpoints.find((endpoint) => endpoint.endpoint_id === endpointId)
-}
-
-function defaultContinuationPolicy(
-  endpointId: string,
-): 'force_passthrough' | 'force_replay' {
-  return ['responses', 'auto'].includes(
-    endpointForTarget(endpointId)?.native_api ?? '',
-  )
-    ? 'force_passthrough'
-    : 'force_replay'
-}
-
-function onTargetEndpointChange(
-  target: ModelRouteForm['targets'][number],
-): void {
-  // Normalize only incompatible selections; preserve an explicit compatible
-  // choice across endpoint switches. Backend rejects force_passthrough for
-  // non-Responses targets, so collapse it to the default when incompatible.
-  if (
-    target.responses_continuation_policy === 'force_passthrough' &&
-    !canUseForcePassthrough(target.endpoint_id)
-  ) {
-    target.responses_continuation_policy = 'force_replay'
-    return
-  }
-  if (!target.responses_continuation_policy) {
-    target.responses_continuation_policy = defaultContinuationPolicy(
-      target.endpoint_id,
-    )
-  }
-}
-
-function canUseForcePassthrough(endpointId: string): boolean {
-  return ['responses', 'auto'].includes(
-    endpointForTarget(endpointId)?.native_api ?? '',
-  )
-}
-
-function continuationPolicyOptionsFor(
-  endpointId: string,
-  currentValue: 'force_passthrough' | 'force_replay',
-): Array<{
-  label: string
-  value: 'force_passthrough' | 'force_replay'
-}> {
-  const base = canUseForcePassthrough(endpointId)
-    ? continuationPolicyOptions.value
-    : continuationPolicyOptions.value.filter(
-        (option) => option.value === 'force_replay',
-      )
-  // A persisted value that is no longer selectable (or an endpoint that is
-  // not selected/loaded yet) must still render its localized label instead
-  // of falling back to the raw enum string. The value is normalized back to
-  // a compatible option on the next endpoint change.
-  if (base.some((option) => option.value === currentValue)) return base
-  const current = continuationPolicyOptions.value.find(
-    (option) => option.value === currentValue,
-  )
-  return current ? [...base, current] : base
-}
-
 const routingStrategyOptions = computed(() => [
   {
     label: props.t('routingStrategyClientKey'),
@@ -114,26 +50,12 @@ const routingStrategyOptions = computed(() => [
   },
 ])
 
-const continuationPolicyOptions = computed(
-  (): Array<{
-    label: string
-    value: 'force_passthrough' | 'force_replay'
-  }> => [
-    { label: props.t('continuationPolicyForceReplay'), value: 'force_replay' },
-    {
-      label: props.t('continuationPolicyForcePassthrough'),
-      value: 'force_passthrough',
-    },
-  ],
-)
-
 const targetColumns = computed<
   TableColumn<ModelRouteForm['targets'][number]>[]
 >(() => [
   { id: 'order' },
   { id: 'endpoint', header: props.t('endpoint') },
   { id: 'status', header: props.t('status') },
-  { id: 'continuation', header: props.t('continuationPolicy') },
   { id: 'actions' },
 ])
 </script>
@@ -250,7 +172,6 @@ const targetColumns = computed<
                   label-key="label"
                   value-key="value"
                   :placeholder="t('endpoint')"
-                  @update:model-value="onTargetEndpointChange(row.original)"
                 />
                 <UInput
                   v-model="row.original.upstream_model"
@@ -266,20 +187,6 @@ const targetColumns = computed<
                   row.original.enabled ? t('active') : t('disabled')
                 }}</label
               >
-            </template>
-            <template #continuation-cell="{ row }">
-              <USelect
-                v-model="row.original.responses_continuation_policy"
-                class="w-full"
-                :items="
-                  continuationPolicyOptionsFor(
-                    row.original.endpoint_id,
-                    row.original.responses_continuation_policy,
-                  )
-                "
-                label-key="label"
-                value-key="value"
-              />
             </template>
             <template #actions-cell="{ row }">
               <UButton

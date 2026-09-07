@@ -4422,7 +4422,6 @@ components:
       - endpoint_enabled
       - position
       - enabled
-      - responses_continuation_policy
       - created_at
       - updated_at
       properties:
@@ -4443,8 +4442,6 @@ components:
         position:
           type: integer
           format: int32
-        responses_continuation_policy:
-          $ref: '#/components/schemas/ResponsesContinuationPolicy'
         rule_id:
           type: string
           format: uuid
@@ -4470,10 +4467,6 @@ components:
         endpoint_id:
           type: string
           format: uuid
-        responses_continuation_policy:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/ResponsesContinuationPolicy'
         upstream_model:
           type:
           - string
@@ -6213,11 +6206,6 @@ components:
       properties:
         password:
           type: string
-    ResponsesContinuationPolicy:
-      type: string
-      enum:
-      - force_passthrough
-      - force_replay
     ReviewFailurePolicy:
       type: string
       enum:

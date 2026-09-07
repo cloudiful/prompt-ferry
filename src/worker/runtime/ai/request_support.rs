@@ -3,18 +3,11 @@ use super::super::{
     request_assembly::BufferedBridgeRequest,
 };
 use crate::{
-    anthropic_compat::responses_request_to_anthropic_messages,
-    chat_replay::prepare_responses_replay_request,
     db,
-    openai_compat::{
-        CompatError, NormalizedResponsesRequest, conversation_key, previous_response_id,
-    },
+    openai_compat::CompatError,
     redact,
     redact_upstream::{UpstreamRedactionSession, decrypt_upstream_session},
-    upstream_adapter::{
-        PreparedRequestBody, PreparedUpstreamRequest, ResponseAdapter, prepare_upstream_request,
-    },
-    usage::upstream_body,
+    upstream_adapter::{PreparedUpstreamRequest, prepare_upstream_request},
     worker_admin::AdminState,
     worker_usage::UsageLog,
 };
@@ -113,24 +106,12 @@ pub(super) async fn mark_function_call_outputs_received(
     }
 }
 
-pub(super) async fn prepare_upstream_request_with_replay(
+pub(super) async fn prepare_upstream_request_for_route(
     admin_state: Option<&AdminState>,
     route: &db::RouteConfig,
     request: &BufferedBridgeRequest,
     conversation_id: Option<uuid::Uuid>,
-    parent_event_id: Option<i64>,
-    replay_unavailable: bool,
 ) -> Result<PreparedUpstreamRequest, CompatError> {
-    if replay_unavailable
-        && route.responses_continuation_policy == db::ResponsesContinuationPolicy::ForceReplay
-        && (request.path == "/v1/responses" || previous_response_id(&request.body).is_some())
-    {
-        return Err(CompatError::new(
-            StatusCode::BAD_REQUEST,
-            "replay_unavailable",
-            "stored conversation content has expired or is unavailable",
-        ));
-    }
     let effective_request_body = effective_request_body(route, request.body.as_slice());
     let redaction_enabled =
         redact::redaction_enabled_for_user(request.user_id.filter(|id| *id > 0));
@@ -157,113 +138,11 @@ pub(super) async fn prepare_upstream_request_with_replay(
         .map(|prepared| prepared.body.as_slice())
         .or(plain_request_body.as_deref())
         .expect("plain or redacted request body");
-    let needs_replay = should_replay_request(route, request, parent_event_id);
-    let mut prepared = if !needs_replay {
-        if requires_local_conversation_state(route, request) && admin_state.is_none() {
-            return Err(CompatError::new(
-                StatusCode::BAD_REQUEST,
-                "replay_unavailable",
-                "conversation continuations require stored replay state",
-            ));
-        }
-        if should_strip_responses_state_fields_without_replay(route, request) {
-            let normalized = NormalizedResponsesRequest::from_body(prepared_body)?;
-            normalized.validate_for_raw_responses_passthrough()?;
-            let translated = normalized.to_responses_request_with_prefix(&[], false, true)?;
-            PreparedUpstreamRequest {
-                path: crate::config::NativeApi::Responses.path().to_string(),
-                body: PreparedRequestBody::BufferedBytes(upstream_body(
-                    crate::config::NativeApi::Responses.path(),
-                    &translated,
-                )),
-                response_adapter: ResponseAdapter::Passthrough,
-                upstream_redacted_request_json: None,
-                upstream_restore_session: None,
-            }
-        } else {
-            prepare_upstream_request(
-                &request.path,
-                prepared_body,
-                route.native_api,
-                should_passthrough_responses(route),
-            )?
-        }
-    } else {
-        let Some(state) = admin_state else {
-            return Err(CompatError::new(
-                StatusCode::BAD_REQUEST,
-                "replay_unavailable",
-                "previous_response_id for chat-native continuations requires stored replay state",
-            ));
-        };
-        if !state.usage_retention.read().await.replay_enabled {
-            return Err(CompatError::new(
-                StatusCode::BAD_REQUEST,
-                "replay_unavailable",
-                "stored replay state is disabled",
-            ));
-        }
-        let translated =
-            prepare_responses_replay_request(crate::chat_replay::ResponsesReplayRequest {
-                pool: &state.pool,
-                replay_cache: &state.replay_cache,
-                user_id: request.user_id.filter(|id| *id > 0),
-                resolved_parent_event_id: parent_event_id,
-                request_body: prepared_body,
-                native_api: route.native_api,
-                route_base_url: &route.base_url,
-                current_request_model: route.upstream_model.as_deref(),
-            })
-            .await?;
-        match route.native_api {
-            crate::config::NativeApi::Chat => PreparedUpstreamRequest {
-                path: crate::config::NativeApi::Chat.path().to_string(),
-                body: PreparedRequestBody::BufferedBytes(upstream_body(
-                    crate::config::NativeApi::Chat.path(),
-                    &translated,
-                )),
-                response_adapter: ResponseAdapter::ChatToResponses,
-                upstream_redacted_request_json: None,
-                upstream_restore_session: None,
-            },
-            crate::config::NativeApi::Responses => PreparedUpstreamRequest {
-                path: crate::config::NativeApi::Responses.path().to_string(),
-                body: PreparedRequestBody::BufferedBytes(upstream_body(
-                    crate::config::NativeApi::Responses.path(),
-                    &translated,
-                )),
-                response_adapter: ResponseAdapter::Passthrough,
-                upstream_redacted_request_json: None,
-                upstream_restore_session: None,
-            },
-            crate::config::NativeApi::AnthropicMessages => PreparedUpstreamRequest {
-                path: crate::config::NativeApi::AnthropicMessages
-                    .path()
-                    .to_string(),
-                body: PreparedRequestBody::BufferedBytes(upstream_body(
-                    crate::config::NativeApi::AnthropicMessages.path(),
-                    &responses_request_to_anthropic_messages(&translated)?,
-                )),
-                response_adapter: ResponseAdapter::AnthropicMessagesToResponses,
-                upstream_redacted_request_json: None,
-                upstream_restore_session: None,
-            },
-            crate::config::NativeApi::Realtime => {
-                return Err(CompatError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_native_api",
-                    "Realtime endpoints are not compatible with HTTP request translation",
-                ));
-            }
-            crate::config::NativeApi::Auto => {
-                return Err(CompatError::new(
-                    StatusCode::BAD_REQUEST,
-                    "unsupported_auto_protocol",
-                    "automatic endpoints must resolve to Chat or Responses before replay",
-                ));
-            }
-        }
-    };
+    // Responses requests only route to Responses-native targets. Cross-protocol
+    // routing (Responses -> Chat/Anthropic) is rejected explicitly inside
+    // `prepare_upstream_request`; state fields such as previous_response_id or
+    // conversation are never silently stripped or converted here.
+    let mut prepared = prepare_upstream_request(&request.path, prepared_body, route.native_api)?;
     prepared.upstream_redacted_request_json = redacted_request
         .as_ref()
         .and_then(|value| value.redacted_request_json.clone());
@@ -326,49 +205,6 @@ fn effective_request_body(route: &db::RouteConfig, request_body: &[u8]) -> Vec<u
         .as_deref()
         .map(|model| crate::usage::rewrite_model_in_body(request_body, model))
         .unwrap_or_else(|| request_body.to_vec())
-}
-
-fn should_passthrough_responses(route: &db::RouteConfig) -> bool {
-    route.native_api == crate::config::NativeApi::Responses
-        && route.responses_continuation_policy == db::ResponsesContinuationPolicy::ForcePassthrough
-}
-
-fn should_replay_request(
-    route: &db::RouteConfig,
-    request: &BufferedBridgeRequest,
-    parent_event_id: Option<i64>,
-) -> bool {
-    if request.path != "/v1/responses" {
-        return false;
-    }
-    match route.responses_continuation_policy {
-        db::ResponsesContinuationPolicy::ForcePassthrough => false,
-        db::ResponsesContinuationPolicy::ForceReplay => {
-            previous_response_id(&request.body).is_some() || parent_event_id.is_some()
-        }
-    }
-}
-
-fn should_strip_responses_state_fields_without_replay(
-    route: &db::RouteConfig,
-    request: &BufferedBridgeRequest,
-) -> bool {
-    request.path == "/v1/responses"
-        && matches!(
-            route.native_api,
-            crate::config::NativeApi::Responses | crate::config::NativeApi::AnthropicMessages
-        )
-        && route.responses_continuation_policy == db::ResponsesContinuationPolicy::ForceReplay
-        && !should_passthrough_responses(route)
-}
-
-fn requires_local_conversation_state(
-    route: &db::RouteConfig,
-    request: &BufferedBridgeRequest,
-) -> bool {
-    request.path == "/v1/responses"
-        && route.responses_continuation_policy == db::ResponsesContinuationPolicy::ForceReplay
-        && conversation_key(&request.body).is_some()
 }
 
 fn extract_function_call_output_ids(input: &[Value]) -> Vec<String> {

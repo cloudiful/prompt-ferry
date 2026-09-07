@@ -69,7 +69,6 @@ fn test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
         key_lb_enabled: false,
         native_api,
         upstream_model: None,
-        responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForcePassthrough,
         route_selection_reason: crate::db::RouteSelectionReason::Default,
         provider: crate::db::EndpointProvider::Generic,
         service_tier: crate::db::MinimaxServiceTier::Standard,
@@ -557,7 +556,7 @@ async fn does_not_retry_oversized_non_stream_response() {
 }
 
 #[tokio::test]
-async fn does_not_retry_adapter_translation_failure() {
+async fn does_not_retry_cross_protocol_responses() {
     let count = Arc::new(AtomicUsize::new(0));
     let counter = count.clone();
     let app = Router::new().route(
@@ -587,8 +586,11 @@ async fn does_not_retry_adapter_translation_failure() {
     let outcome = forward_test_request(&services, &route)
         .await
         .expect("forward");
-    assert!(matches!(outcome, ForwardOutcome::Handled));
-    assert_eq!(count.load(Ordering::SeqCst), 1);
+    let ForwardOutcome::CompatError(err) = outcome else {
+        panic!("cross-protocol responses must fail closed without retry, got {outcome:?}");
+    };
+    assert_eq!(err.code, "responses_cross_protocol_unsupported");
+    assert_eq!(count.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

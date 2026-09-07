@@ -1,11 +1,10 @@
 use http::StatusCode;
 
 use crate::{
-    anthropic_compat::{responses_request_to_anthropic_messages, validate_messages_request_body},
+    anthropic_compat::validate_messages_request_body,
     config::NativeApi,
     openai_compat::{
-        CompatError, NormalizedResponsesRequest, chat_request_to_responses,
-        normalize_chat_request_for_native, responses_request_to_chat,
+        CompatError, chat_request_to_responses, normalize_chat_request_for_native,
         validate_raw_responses_request_body,
     },
     redact_upstream::UpstreamRedactionSession,
@@ -39,7 +38,6 @@ pub fn prepare_upstream_request(
     request_path: &str,
     request_body: &[u8],
     native_api: NativeApi,
-    responses_passthrough: bool,
 ) -> Result<PreparedUpstreamRequest, CompatError> {
     match (request_path, native_api) {
         ("/v1/messages", NativeApi::AnthropicMessages) => {
@@ -57,7 +55,7 @@ pub fn prepare_upstream_request(
             "unsupported_upstream",
             "Anthropic /v1/messages requests require an anthropic-native endpoint",
         )),
-        ("/v1/responses", NativeApi::Responses) if responses_passthrough => {
+        ("/v1/responses", NativeApi::Responses) => {
             validate_raw_responses_request_body(request_body)?;
             Ok(PreparedUpstreamRequest {
                 path: request_path.to_string(),
@@ -67,43 +65,14 @@ pub fn prepare_upstream_request(
                 upstream_restore_session: None,
             })
         }
-        ("/v1/responses", NativeApi::Responses) => {
-            let normalized = NormalizedResponsesRequest::from_body(request_body)?;
-            normalized.validate_for_raw_responses_passthrough()?;
-            let translated = normalized.to_responses_request_with_prefix(&[], false, false)?;
-            Ok(PreparedUpstreamRequest {
-                path: request_path.to_string(),
-                body: PreparedRequestBody::BufferedBytes(translated),
-                response_adapter: ResponseAdapter::Passthrough,
-                upstream_redacted_request_json: None,
-                upstream_restore_session: None,
-            })
-        }
-        ("/v1/responses", NativeApi::AnthropicMessages) => {
-            let translated = responses_request_to_anthropic_messages(request_body)?;
-            Ok(PreparedUpstreamRequest {
-                path: NativeApi::AnthropicMessages.path().to_string(),
-                body: PreparedRequestBody::BufferedBytes(upstream_body(
-                    NativeApi::AnthropicMessages.path(),
-                    &translated,
-                )),
-                response_adapter: ResponseAdapter::AnthropicMessagesToResponses,
-                upstream_redacted_request_json: None,
-                upstream_restore_session: None,
-            })
-        }
-        ("/v1/responses", NativeApi::Chat) => {
-            let translated = responses_request_to_chat(request_body)?;
-            Ok(PreparedUpstreamRequest {
-                path: NativeApi::Chat.path().to_string(),
-                body: PreparedRequestBody::BufferedBytes(upstream_body(
-                    NativeApi::Chat.path(),
-                    &translated,
-                )),
-                response_adapter: ResponseAdapter::ChatToResponses,
-                upstream_redacted_request_json: None,
-                upstream_restore_session: None,
-            })
+        ("/v1/responses", NativeApi::Chat | NativeApi::AnthropicMessages | NativeApi::Auto) => {
+            Err(CompatError::new(
+                StatusCode::BAD_REQUEST,
+                "responses_cross_protocol_unsupported",
+                "POST /v1/responses requires a responses-native endpoint target; \
+                 responses requests are passed through unchanged and are never converted \
+                 to chat or anthropic protocols",
+            ))
         }
         ("/v1/chat/completions", NativeApi::Chat) => Ok(PreparedUpstreamRequest {
             path: request_path.to_string(),
@@ -162,7 +131,6 @@ mod tests {
                 "stream":false
             }"#,
             NativeApi::Responses,
-            false,
         )
         .unwrap();
 
@@ -194,7 +162,6 @@ mod tests {
                 "reasoning_effort":"max"
             }"#,
             NativeApi::Chat,
-            false,
         )
         .unwrap();
 
@@ -225,8 +192,7 @@ mod tests {
             ]
         }"#;
         let prepared =
-            prepare_upstream_request("/v1/messages", body, NativeApi::AnthropicMessages, false)
-                .unwrap();
+            prepare_upstream_request("/v1/messages", body, NativeApi::AnthropicMessages).unwrap();
         assert_eq!(prepared.path, "/v1/messages");
         assert_eq!(prepared.response_adapter, ResponseAdapter::Passthrough);
         let PreparedRequestBody::PassthroughStream(forwarded) = prepared.body else {
@@ -241,7 +207,6 @@ mod tests {
             "/v1/messages",
             br#"{"model":"claude-sonnet","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}"#,
             NativeApi::Responses,
-            false,
         )
         .unwrap_err();
         assert_eq!(error.code, "unsupported_upstream");

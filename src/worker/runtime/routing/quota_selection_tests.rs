@@ -30,7 +30,6 @@ async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
         key_lb_enabled: true,
         native_api: crate::config::NativeApi::Responses,
         upstream_model: None,
-        responses_continuation_policy: crate::db::ResponsesContinuationPolicy::ForceReplay,
         route_selection_reason: db::RouteSelectionReason::Default,
         provider: db::EndpointProvider::Minimax,
         service_tier: db::MinimaxServiceTier::Standard,
