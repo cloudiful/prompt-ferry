@@ -18,12 +18,13 @@ const minimaxBaseUrls = {
   },
 } as const
 type MinimaxProtocol = 'openai' | 'anthropic'
+const COMMAND_CODE_BASE_URL = 'https://api.commandcode.ai/provider/v1' as const
 const hasVersionPath = computed(() =>
   /\/v1\/?$/.test(form.value.base_url.trim()),
 )
 const providerSelection = computed({
   get: () => form.value.provider,
-  set(value: 'generic' | 'minimax') {
+  set(value: 'generic' | 'minimax' | 'command_code') {
     form.value.provider = value
     if (value === 'generic') {
       form.value.provider_region = null
@@ -34,6 +35,16 @@ const providerSelection = computed({
       // rejects an explicit `mcp_enabled: true` for generic providers, so
       // collapse to false here as well to keep the UI in sync.
       form.value.mcp_enabled = false
+      return
+    }
+    if (value === 'command_code') {
+      // CommandCode carries no region (NULL); hide the region control and
+      // keep service tier/MCP at generic defaults. Inference accepts both
+      // Anthropic Messages and Chat on the same provider-compatible base.
+      form.value.provider_region = null
+      form.value.service_tier = 'standard'
+      form.value.mcp_enabled = false
+      setCommandCodeBaseUrl()
       return
     }
     const region = form.value.provider_region ?? 'cn'
@@ -60,6 +71,7 @@ const providerRegionSelection = computed({
   },
 })
 const isMinimax = computed(() => form.value.provider === 'minimax')
+const isCommandCode = computed(() => form.value.provider === 'command_code')
 const serviceTierSelection = computed({
   get: () => (form.value.service_tier === 'priority' ? 'priority' : 'standard'),
   set(value: 'standard' | 'priority') {
@@ -109,6 +121,9 @@ const baseUrlHintText = computed(() => {
   if (isMinimax.value && protocolSelection.value === 'anthropic_messages') {
     hints.push(props.t('providerMinimaxAnthropicBaseUrlHint'))
   }
+  if (isCommandCode.value) {
+    hints.push(props.t('providerCommandCodeBaseUrlHint'))
+  }
   if (usesCustomMinimaxBaseUrl.value) {
     hints.push(props.t('providerCustomBaseUrlHint'))
   }
@@ -134,6 +149,21 @@ function setMinimaxBaseUrl(
     form.value.base_url = minimaxBaseUrls[region][protocol]
   }
 }
+
+function setCommandCodeBaseUrl(): void {
+  const current = form.value.base_url.trim().replace(/\/+$/, '')
+  if (!current) {
+    form.value.base_url = COMMAND_CODE_BASE_URL
+    return
+  }
+  const knownMinimax = Object.values(minimaxBaseUrls).flatMap((urls) =>
+    Object.values(urls).map((url) => url.replace(/\/+$/, '')),
+  )
+  const commandCode = COMMAND_CODE_BASE_URL.replace(/\/+$/, '')
+  if (knownMinimax.includes(current) || current === commandCode) {
+    form.value.base_url = COMMAND_CODE_BASE_URL
+  }
+}
 </script>
 
 <template>
@@ -145,6 +175,7 @@ function setMinimaxBaseUrl(
       :items="[
         { label: t('providerGeneric'), value: 'generic' },
         { label: t('providerMinimax'), value: 'minimax' },
+        { label: t('providerCommandCode'), value: 'command_code' },
       ]"
       label-key="label"
       value-key="value"

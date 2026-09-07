@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import type {
+  CommandCodeWindowUsage,
   TokenPlanKeyUsage,
   TokenPlanUsageResponse,
   TokenPlanWindowUsage,
@@ -114,6 +115,51 @@ function formatRemaining(window: TokenPlanWindowUsage): string {
   }
   return props.t('tokenPlanResetExpiresSeconds', { seconds: totalSeconds })
 }
+
+// CommandCode USD windows reuse MiniMax percent/countdown rendering by
+// adapting reset_at onto the TokenPlanWindowUsage end_at shape.
+function ccAsWindow(
+  window: CommandCodeWindowUsage | null | undefined,
+): TokenPlanWindowUsage | null {
+  if (!window) return null
+  return {
+    end_at: window.reset_at,
+    remaining_percent: window.remaining_percent,
+  }
+}
+
+type CcEntry = {
+  adapted: TokenPlanWindowUsage
+  labelKey: string
+  raw: CommandCodeWindowUsage
+}
+
+function ccEntries(key: TokenPlanKeyUsage): CcEntry[] {
+  const entries: CcEntry[] = []
+  const five = ccAsWindow(key.five_hour)
+  if (key.five_hour && five)
+    entries.push({
+      adapted: five,
+      labelKey: 'tokenPlanFiveHour',
+      raw: key.five_hour,
+    })
+  const weekly = ccAsWindow(key.weekly)
+  if (key.weekly && weekly)
+    entries.push({
+      adapted: weekly,
+      labelKey: 'tokenPlanWeeklyUsd',
+      raw: key.weekly,
+    })
+  return entries
+}
+
+function ccMinRemaining(key: TokenPlanKeyUsage): number | null {
+  const adapted = [ccAsWindow(key.five_hour), ccAsWindow(key.weekly)].filter(
+    (window): window is TokenPlanWindowUsage => window != null,
+  )
+  if (adapted.length === 0) return null
+  return Math.min(...adapted.map(remainingPercent))
+}
 </script>
 
 <template>
@@ -166,18 +212,23 @@ function formatRemaining(window: TokenPlanWindowUsage): string {
                       />
                     </span>
                     <span
-                      v-if="key.ok && keyWindowCount(key) > 0"
+                      v-if="
+                        key.ok &&
+                        keyWindowCount(key) + ccEntries(key).length > 0
+                      "
                       class="shrink-0 text-xs text-dimmed"
                     >
                       {{
                         t('tokenPlanMinRemaining', {
-                          percent: minimumRemainingPercent(key)?.toFixed(1),
+                          percent: (
+                            minimumRemainingPercent(key) ?? ccMinRemaining(key)
+                          )?.toFixed(1),
                         })
                       }}
                       ·
                       {{
                         t('tokenPlanWindowCount', {
-                          count: keyWindowCount(key),
+                          count: keyWindowCount(key) + ccEntries(key).length,
                         })
                       }}
                     </span>
@@ -190,7 +241,74 @@ function formatRemaining(window: TokenPlanWindowUsage): string {
                     {{ key.error_message ?? t('tokenPlanUsageFailed') }}
                   </p>
                   <template v-else>
-                    <div class="grid gap-3 sm:grid-cols-2">
+                    <div
+                      v-if="key.balances"
+                      class="grid gap-1 rounded-md border border-default p-3"
+                    >
+                      <div class="break-words font-medium text-highlighted">
+                        {{ t('tokenPlanBalances') }}
+                      </div>
+                      <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                        <span
+                          >{{ t('tokenPlanMonthlyCredits') }}:
+                          {{ key.balances.monthly_credits.toFixed(2) }}</span
+                        >
+                        <span
+                          >{{ t('tokenPlanPurchasedCredits') }}:
+                          {{ key.balances.purchased_credits.toFixed(2) }}</span
+                        >
+                        <span
+                          >{{ t('tokenPlanFreeCredits') }}:
+                          {{ key.balances.free_credits.toFixed(2) }}</span
+                        >
+                        <span class="font-semibold"
+                          >{{ t('tokenPlanRemainingCredits') }}:
+                          {{ key.balances.remaining_credits.toFixed(2) }}</span
+                        >
+                      </div>
+                    </div>
+                    <div
+                      v-for="entry in ccEntries(key)"
+                      :key="entry.labelKey"
+                      class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
+                    >
+                      <span class="text-dimmed">{{ t(entry.labelKey) }}</span>
+                      <UProgress
+                        class="token-plan-progress h-1.5"
+                        :model-value="usedPercent(entry.adapted)"
+                        :style="{
+                          '--token-plan-progress-color': progressColor(
+                            entry.adapted,
+                          ),
+                        }"
+                      />
+                      <div
+                        class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
+                      >
+                        <span class="text-dimmed">{{
+                          formatRemaining(entry.adapted)
+                        }}</span>
+                        <span class="shrink-0 font-semibold"
+                          >{{
+                            remainingPercent(entry.adapted).toFixed(1)
+                          }}%</span
+                        >
+                      </div>
+                      <span class="text-dimmed sm:col-span-2 sm:col-start-2"
+                        >{{ entry.raw.used.toFixed(2) }} /
+                        {{ entry.raw.cap.toFixed(2) }} USD</span
+                      >
+                    </div>
+                    <p
+                      v-if="key.balances && !key.five_hour && !key.weekly"
+                      class="text-dimmed"
+                    >
+                      {{ t('tokenPlanPaygNoWindow') }}
+                    </p>
+                    <div
+                      v-if="key.model_remains.length > 0"
+                      class="grid gap-3 sm:grid-cols-2"
+                    >
                       <div
                         v-for="model in key.model_remains"
                         :key="model.model_name"

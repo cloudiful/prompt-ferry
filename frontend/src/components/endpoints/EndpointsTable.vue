@@ -82,7 +82,10 @@ defineEmits<{
       <template #actions-cell="{ row }">
         <div class="flex justify-end gap-2">
           <UTooltip
-            v-if="row.original.provider === 'minimax'"
+            v-if="
+              row.original.provider === 'minimax' ||
+              row.original.provider === 'command_code'
+            "
             :text="t('tokenPlanUsage')"
           >
             <UButton

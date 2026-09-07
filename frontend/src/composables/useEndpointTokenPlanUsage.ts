@@ -16,7 +16,11 @@ export function useEndpointTokenPlanUsage(
 
   async function open(nextEndpointId: string): Promise<void> {
     const endpoint = findEndpointById(nextEndpointId)
-    if (!endpoint || endpoint.provider !== 'minimax') return
+    if (
+      !endpoint ||
+      (endpoint.provider !== 'minimax' && endpoint.provider !== 'command_code')
+    )
+      return
     endpointId.value = nextEndpointId
     usage.value = null
     visible.value = true
