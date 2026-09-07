@@ -199,5 +199,8 @@ pub(crate) async fn fetch_command_code_key_usage(
         balances,
         five_hour,
         weekly,
+        opencodego_rolling: None,
+        opencodego_weekly: None,
+        opencodego_monthly: None,
     }
 }

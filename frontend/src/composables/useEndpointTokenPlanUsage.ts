@@ -18,7 +18,9 @@ export function useEndpointTokenPlanUsage(
     const endpoint = findEndpointById(nextEndpointId)
     if (
       !endpoint ||
-      (endpoint.provider !== 'minimax' && endpoint.provider !== 'command_code')
+      (endpoint.provider !== 'minimax' &&
+        endpoint.provider !== 'command_code' &&
+        endpoint.provider !== 'opencode_go')
     )
       return
     endpointId.value = nextEndpointId

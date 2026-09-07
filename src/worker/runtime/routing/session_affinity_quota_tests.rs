@@ -140,6 +140,9 @@ fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
                 balances: None,
                 five_hour: None,
                 weekly: None,
+                opencodego_rolling: None,
+                opencodego_weekly: None,
+                opencodego_monthly: None,
             })
             .collect(),
     }
@@ -193,6 +196,9 @@ fn command_code_key(
         }),
         five_hour: five_hour.map(command_code_window),
         weekly: weekly.map(command_code_window),
+        opencodego_rolling: None,
+        opencodego_weekly: None,
+        opencodego_monthly: None,
     }
 }
 

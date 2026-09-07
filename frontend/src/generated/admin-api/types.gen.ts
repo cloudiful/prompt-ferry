@@ -719,6 +719,12 @@ export type ModelRouteWhitelistResponse = {
 
 export type NativeApi = 'auto' | 'anthropic_messages' | 'chat' | 'responses' | 'realtime';
 
+export type OpencodeGoWindowUsage = {
+    percent?: number | null;
+    resets_at?: string | null;
+    status?: number | null;
+};
+
 export type ProviderEndpoint = {
     api_keys?: Array<EndpointApiKey>;
     base_url: string;
@@ -1306,6 +1312,9 @@ export type TokenPlanKeyUsage = {
     key_label: string;
     model_remains: Array<TokenPlanModelUsage>;
     ok: boolean;
+    opencodego_monthly?: null | OpencodeGoWindowUsage;
+    opencodego_rolling?: null | OpencodeGoWindowUsage;
+    opencodego_weekly?: null | OpencodeGoWindowUsage;
     status?: number | null;
     weekly?: null | CommandCodeWindowUsage;
 };

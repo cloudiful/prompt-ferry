@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import type {
   CommandCodeWindowUsage,
+  OpencodeGoWindowUsage,
   TokenPlanKeyUsage,
   TokenPlanUsageResponse,
   TokenPlanWindowUsage,
@@ -160,6 +161,53 @@ function ccMinRemaining(key: TokenPlanKeyUsage): number | null {
   if (adapted.length === 0) return null
   return Math.min(...adapted.map(remainingPercent))
 }
+
+// OpencodeGo windows carry a `percent` (used share) plus a `resets_at`
+// anchor. We adapt them onto the shared progress/countdown rendering by
+// folding the used percent into a remaining percent (100 - used) and reusing
+// `resets_at` as the end_at reset anchor.
+function opencodeGoAsWindow(
+  window: OpencodeGoWindowUsage | null | undefined,
+): TokenPlanWindowUsage | null {
+  if (!window) return null
+  const raw = window.percent
+  const used = raw == null || !Number.isFinite(raw) ? null : raw
+  return {
+    end_at: window.resets_at,
+    remaining_percent: used == null ? null : Math.max(0, Math.min(100, 100 - used)),
+  }
+}
+
+type OpencodeGoEntry = {
+  adapted: TokenPlanWindowUsage
+  labelKey: string
+  raw: OpencodeGoWindowUsage
+}
+
+function opencodeGoEntries(key: TokenPlanKeyUsage): OpencodeGoEntry[] {
+  const entries: OpencodeGoEntry[] = []
+  const byKey = [
+    ['tokenPlanRolling', key.opencodego_rolling],
+    ['tokenPlanWeekly', key.opencodego_weekly],
+    ['tokenPlanMonthly', key.opencodego_monthly],
+  ] as const
+  for (const [labelKey, window] of byKey) {
+    const adapted = opencodeGoAsWindow(window)
+    if (window && adapted)
+      entries.push({ adapted, labelKey, raw: window })
+  }
+  return entries
+}
+
+function opencodeGoMinRemaining(key: TokenPlanKeyUsage): number | null {
+  const adapted = [
+    opencodeGoAsWindow(key.opencodego_rolling),
+    opencodeGoAsWindow(key.opencodego_weekly),
+    opencodeGoAsWindow(key.opencodego_monthly),
+  ].filter((window): window is TokenPlanWindowUsage => window != null)
+  if (adapted.length === 0) return null
+  return Math.min(...adapted.map(remainingPercent))
+}
 </script>
 
 <template>
@@ -214,21 +262,29 @@ function ccMinRemaining(key: TokenPlanKeyUsage): number | null {
                     <span
                       v-if="
                         key.ok &&
-                        keyWindowCount(key) + ccEntries(key).length > 0
+                        keyWindowCount(key) +
+                          ccEntries(key).length +
+                          opencodeGoEntries(key).length >
+                          0
                       "
                       class="shrink-0 text-xs text-dimmed"
                     >
                       {{
                         t('tokenPlanMinRemaining', {
                           percent: (
-                            minimumRemainingPercent(key) ?? ccMinRemaining(key)
+                            minimumRemainingPercent(key) ??
+                            ccMinRemaining(key) ??
+                            opencodeGoMinRemaining(key)
                           )?.toFixed(1),
                         })
                       }}
                       ·
                       {{
                         t('tokenPlanWindowCount', {
-                          count: keyWindowCount(key) + ccEntries(key).length,
+                          count:
+                            keyWindowCount(key) +
+                            ccEntries(key).length +
+                            opencodeGoEntries(key).length,
                         })
                       }}
                     </span>
@@ -298,6 +354,34 @@ function ccMinRemaining(key: TokenPlanKeyUsage): number | null {
                         >{{ entry.raw.used.toFixed(2) }} /
                         {{ entry.raw.cap.toFixed(2) }} USD</span
                       >
+                    </div>
+                    <div
+                      v-for="entry in opencodeGoEntries(key)"
+                      :key="entry.labelKey"
+                      class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
+                    >
+                      <span class="text-dimmed">{{ t(entry.labelKey) }}</span>
+                      <UProgress
+                        class="token-plan-progress h-1.5"
+                        :model-value="usedPercent(entry.adapted)"
+                        :style="{
+                          '--token-plan-progress-color': progressColor(
+                            entry.adapted,
+                          ),
+                        }"
+                      />
+                      <div
+                        class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
+                      >
+                        <span class="text-dimmed">{{
+                          formatRemaining(entry.adapted)
+                        }}</span>
+                        <span class="shrink-0 font-semibold"
+                          >{{
+                            remainingPercent(entry.adapted).toFixed(1)
+                          }}%</span
+                        >
+                      </div>
                     </div>
                     <p
                       v-if="key.balances && !key.five_hour && !key.weekly"

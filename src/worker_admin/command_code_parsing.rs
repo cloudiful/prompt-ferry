@@ -272,6 +272,9 @@ mod tests {
                 balances: None,
                 five_hour: five.map(window),
                 weekly: weekly.map(window),
+                opencodego_rolling: None,
+                opencodego_weekly: None,
+                opencodego_monthly: None,
             }
         }
         fn pct(five: Option<f64>, weekly: Option<f64>) -> Option<f64> {

@@ -4602,6 +4602,24 @@ components:
       - chat
       - responses
       - realtime
+    OpencodeGoWindowUsage:
+      type: object
+      properties:
+        percent:
+          type:
+          - number
+          - 'null'
+          format: double
+        resets_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        status:
+          type:
+          - integer
+          - 'null'
+          format: int32
     ProviderEndpoint:
       type: object
       required:
@@ -6462,6 +6480,21 @@ components:
             $ref: '#/components/schemas/TokenPlanModelUsage'
         ok:
           type: boolean
+        opencodego_monthly:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OpencodeGoWindowUsage'
+            description: OpencodeGo monthly window usage. None when missing — degraded.
+        opencodego_rolling:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OpencodeGoWindowUsage'
+            description: OpencodeGo rolling window usage. None when missing — degraded.
+        opencodego_weekly:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OpencodeGoWindowUsage'
+            description: OpencodeGo weekly window usage. None when missing — degraded.
         status:
           type:
           - integer

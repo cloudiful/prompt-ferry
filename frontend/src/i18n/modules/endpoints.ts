@@ -14,6 +14,8 @@ export const endpointMessages = {
     providerCommandCode: 'CommandCode',
     providerCommandCodeBaseUrlHint:
       'CommandCode 使用官方 Provider 兼容地址；Anthropic Messages 与 Chat 均可直通。',
+    providerOpencodeGo: 'OpencodeGo',
+    providerOpencodeGoBaseUrlHint: 'OpencodeGo 使用官方 Zen /v1 兼容地址。',
     providerRegion: '区域',
     providerRegionCn: '中国区',
     providerRegionGlobal: '国际区',
@@ -103,6 +105,8 @@ export const endpointMessages = {
     tokenPlanNoUsage: '暂无用量数据',
     tokenPlanInterval: '5 小时窗口',
     tokenPlanWeekly: '周窗口',
+    tokenPlanRolling: '滚动窗口',
+    tokenPlanMonthly: '月窗口',
     tokenPlanFiveHour: '5 小时窗口 (USD)',
     tokenPlanWeeklyUsd: '周窗口 (USD)',
     tokenPlanBalances: '信用余额',
@@ -136,6 +140,9 @@ export const endpointMessages = {
     providerCommandCode: 'CommandCode',
     providerCommandCodeBaseUrlHint:
       'CommandCode uses the official provider-compatible endpoint; both Anthropic Messages and Chat work.',
+    providerOpencodeGo: 'OpencodeGo',
+    providerOpencodeGoBaseUrlHint:
+      'OpencodeGo uses the official Zen /v1 compatible endpoint.',
     providerRegion: 'Region',
     providerRegionCn: 'China',
     providerRegionGlobal: 'Global',
@@ -226,6 +233,8 @@ export const endpointMessages = {
     tokenPlanNoUsage: 'No usage data',
     tokenPlanInterval: '5-hour window',
     tokenPlanWeekly: 'Weekly window',
+    tokenPlanRolling: 'Rolling window',
+    tokenPlanMonthly: 'Monthly window',
     tokenPlanFiveHour: '5-hour window (USD)',
     tokenPlanWeeklyUsd: 'Weekly window (USD)',
     tokenPlanBalances: 'Credit balances',

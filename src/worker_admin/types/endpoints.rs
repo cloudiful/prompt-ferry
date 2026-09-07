@@ -163,6 +163,15 @@ pub struct TokenPlanKeyUsage {
     /// CommandCode weekly USD window. None when missing — degraded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weekly: Option<CommandCodeWindowUsage>,
+    /// OpencodeGo rolling window usage. None when missing — degraded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencodego_rolling: Option<OpencodeGoWindowUsage>,
+    /// OpencodeGo weekly window usage. None when missing — degraded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencodego_weekly: Option<OpencodeGoWindowUsage>,
+    /// OpencodeGo monthly window usage. None when missing — degraded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencodego_monthly: Option<OpencodeGoWindowUsage>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -199,6 +208,13 @@ pub struct CommandCodeWindowUsage {
     pub used_percent: Option<f64>,
     pub remaining_percent: Option<f64>,
     pub reset_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OpencodeGoWindowUsage {
+    pub status: Option<i32>,
+    pub percent: Option<f64>,
+    pub resets_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]

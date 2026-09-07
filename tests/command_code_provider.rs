@@ -170,6 +170,9 @@ fn key_usage_serde_omits_absent_command_code_sections() {
             balances,
             five_hour,
             weekly,
+            opencodego_rolling: None,
+            opencodego_weekly: None,
+            opencodego_monthly: None,
         }
     }
     fn window(remaining_percent: f64) -> CommandCodeWindowUsage {

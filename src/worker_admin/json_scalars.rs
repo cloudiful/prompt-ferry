@@ -58,5 +58,8 @@ pub(crate) fn failed_key(
         balances: None,
         five_hour: None,
         weekly: None,
+        opencodego_rolling: None,
+        opencodego_weekly: None,
+        opencodego_monthly: None,
     }
 }

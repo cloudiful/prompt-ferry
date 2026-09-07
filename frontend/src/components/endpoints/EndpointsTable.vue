@@ -84,7 +84,8 @@ defineEmits<{
           <UTooltip
             v-if="
               row.original.provider === 'minimax' ||
-              row.original.provider === 'command_code'
+              row.original.provider === 'command_code' ||
+              row.original.provider === 'opencode_go'
             "
             :text="t('tokenPlanUsage')"
           >

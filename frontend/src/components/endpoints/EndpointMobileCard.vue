@@ -85,7 +85,9 @@ defineEmits<{
     >
       <UButton
         v-if="
-          item.provider === 'minimax' || item.provider === 'command_code'
+          item.provider === 'minimax' ||
+          item.provider === 'command_code' ||
+          item.provider === 'opencode_go'
         "
         size="sm"
         color="neutral"
