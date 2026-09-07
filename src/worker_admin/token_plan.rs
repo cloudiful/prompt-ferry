@@ -1,12 +1,15 @@
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, TimeZone, Utc};
 use futures::{StreamExt, stream};
 use reqwest::Client;
 use serde_json::Value;
 use uuid::Uuid;
 
+use super::command_code_usage::{COMMAND_CODE_BASE, fetch_command_code_key_usage};
+use super::json_scalars::{
+    epoch_millis, failed_key, truncate_message, value_as_f64, value_as_i64, value_as_string,
+};
 use crate::{
     db::{EndpointProvider, EndpointRegion, ProviderEndpoint},
     worker_admin_types::{
@@ -19,28 +22,34 @@ const MINIMAX_GLOBAL_USAGE_URL: &str = "https://www.minimax.io/v1/token_plan/rem
 const MAX_CONCURRENT_KEY_REQUESTS: usize = 4;
 
 pub async fn fetch_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPlanUsageResponse> {
-    let region = match endpoint.provider {
-        EndpointProvider::Minimax => endpoint
-            .provider_region
-            .ok_or_else(|| anyhow!("MiniMax endpoint has no provider region"))?,
-        // P3 (issue #184) implements the CommandCode billing fetcher; until
-        // then it shares the generic "no token plan API" path.
-        EndpointProvider::Generic | EndpointProvider::CommandCode => {
-            return Err(anyhow!("endpoint provider has no token plan API"));
-        }
-    };
+    match endpoint.provider {
+        EndpointProvider::Minimax => fetch_minimax_endpoint_usage(endpoint).await,
+        EndpointProvider::CommandCode => fetch_command_code_endpoint_usage(endpoint).await,
+        EndpointProvider::Generic => Err(anyhow!("endpoint provider has no token plan API")),
+    }
+}
 
+fn enabled_keys(endpoint: &ProviderEndpoint) -> Vec<(Uuid, String, String)> {
     let keys = endpoint
         .api_keys
         .iter()
         .filter(|key| key.enabled && !key.api_key.trim().is_empty())
         .map(|key| (key.key_id, key.key_label.clone(), key.api_key.clone()))
         .collect::<Vec<_>>();
-    let keys = if keys.is_empty() && !endpoint.api_key.trim().is_empty() {
+    if keys.is_empty() && !endpoint.api_key.trim().is_empty() {
         vec![(Uuid::nil(), endpoint.name.clone(), endpoint.api_key.clone())]
     } else {
         keys
-    };
+    }
+}
+
+async fn fetch_minimax_endpoint_usage(
+    endpoint: &ProviderEndpoint,
+) -> Result<TokenPlanUsageResponse> {
+    let region = endpoint
+        .provider_region
+        .ok_or_else(|| anyhow!("MiniMax endpoint has no provider region"))?;
+    let keys = enabled_keys(endpoint);
     if keys.is_empty() {
         return Err(anyhow!("endpoint has no enabled API key"));
     }
@@ -48,7 +57,7 @@ pub async fn fetch_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
     let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
     let url = usage_url(region);
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
-        fetch_key_usage(client.clone(), url, key_id, key_label, secret)
+        fetch_minimax_key_usage(client.clone(), url, key_id, key_label, secret)
     }))
     .buffer_unordered(MAX_CONCURRENT_KEY_REQUESTS)
     .collect::<Vec<_>>()
@@ -61,6 +70,29 @@ pub async fn fetch_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
     })
 }
 
+async fn fetch_command_code_endpoint_usage(
+    endpoint: &ProviderEndpoint,
+) -> Result<TokenPlanUsageResponse> {
+    let keys = enabled_keys(endpoint);
+    if keys.is_empty() {
+        return Err(anyhow!("endpoint has no enabled API key"));
+    }
+
+    let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
+    let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
+        fetch_command_code_key_usage(client.clone(), COMMAND_CODE_BASE, key_id, key_label, secret)
+    }))
+    .buffer_unordered(MAX_CONCURRENT_KEY_REQUESTS)
+    .collect::<Vec<_>>()
+    .await;
+
+    Ok(TokenPlanUsageResponse {
+        provider: endpoint.provider,
+        provider_region: endpoint.provider_region,
+        keys: key_results,
+    })
+}
+
 fn usage_url(region: EndpointRegion) -> &'static str {
     match region {
         EndpointRegion::Cn => MINIMAX_CN_USAGE_URL,
@@ -68,7 +100,7 @@ fn usage_url(region: EndpointRegion) -> &'static str {
     }
 }
 
-async fn fetch_key_usage(
+async fn fetch_minimax_key_usage(
     client: Client,
     url: &'static str,
     key_id: Uuid,
@@ -291,61 +323,6 @@ fn response_error(body: &Value) -> (Option<String>, Option<String>) {
         .or_else(|| body.get("message").and_then(value_as_string))
         .or_else(|| body.get("error").and_then(value_as_string));
     (error_code, message.map(truncate_message))
-}
-
-fn failed_key(
-    key_id: Uuid,
-    key_label: String,
-    status: Option<u16>,
-    error_code: Option<String>,
-    error_message: String,
-) -> TokenPlanKeyUsage {
-    TokenPlanKeyUsage {
-        key_id,
-        key_label,
-        ok: false,
-        status,
-        error_code,
-        error_message: Some(error_message),
-        model_remains: Vec::new(),
-        balances: None,
-        five_hour: None,
-        weekly: None,
-    }
-}
-
-fn value_as_i64(value: &Value) -> Option<i64> {
-    value
-        .as_i64()
-        .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))
-        .or_else(|| value.as_f64().map(|value| value as i64))
-        .or_else(|| value.as_str()?.parse().ok())
-}
-
-fn value_as_f64(value: &Value) -> Option<f64> {
-    value
-        .as_f64()
-        .or_else(|| value.as_i64().map(|value| value as f64))
-        .or_else(|| value.as_str()?.parse().ok())
-}
-
-fn value_as_string(value: &Value) -> Option<String> {
-    value
-        .as_str()
-        .map(ToOwned::to_owned)
-        .or_else(|| value_as_i64(value).map(|value| value.to_string()))
-}
-
-fn epoch_millis(value: i64) -> Option<DateTime<Utc>> {
-    Utc.timestamp_millis_opt(value).single()
-}
-
-fn truncate_message(message: String) -> String {
-    const MAX_MESSAGE_LENGTH: usize = 300;
-    if message.chars().count() <= MAX_MESSAGE_LENGTH {
-        return message;
-    }
-    message.chars().take(MAX_MESSAGE_LENGTH).collect::<String>() + "..."
 }
 
 #[cfg(test)]

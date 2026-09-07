@@ -65,7 +65,10 @@ impl TokenPlanQuotaCache {
         let Some(endpoint) = db::get_endpoint(pool, endpoint_id).await? else {
             return Ok(None);
         };
-        if endpoint.provider != db::EndpointProvider::Minimax {
+        if !matches!(
+            endpoint.provider,
+            db::EndpointProvider::Minimax | db::EndpointProvider::CommandCode
+        ) {
             return Ok(None);
         }
 
@@ -121,6 +124,12 @@ impl TokenPlanQuotaCache {
             .keys
             .iter()
             .find(|key| key.key_id == key_id && key.ok)?;
+        // CommandCode keys carry no `model_remains`; weight by the tighter
+        // of the 5-hour/weekly USD windows instead. Token reservations are
+        // MiniMax token-count based and do not apply to USD caps.
+        if let Some(remaining) = super::command_code_usage::command_code_remaining_percent(key) {
+            return Some(remaining.clamp(0.0, 100.0));
+        }
         let usage = model_usage(key, model)?;
         let remaining = effective_remaining_percent(usage)?;
         let reserved_tokens = self

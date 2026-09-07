@@ -13,14 +13,20 @@ pub(super) async fn token_plan_usage(
         Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
         Err(err) => return internal(&state, err),
     };
-    if endpoint.provider != db::EndpointProvider::Minimax {
-        return error(
-            StatusCode::BAD_REQUEST,
-            "unsupported_provider",
-            "token plan usage is only available for MiniMax endpoints",
-        );
-    }
-    if endpoint.provider_region.is_none() {
+    let provider_label = match endpoint.provider {
+        db::EndpointProvider::Minimax => "MiniMax",
+        db::EndpointProvider::CommandCode => "CommandCode",
+        db::EndpointProvider::Generic => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "unsupported_provider",
+                "token plan usage is only available for MiniMax and CommandCode endpoints",
+            );
+        }
+    };
+    // Region stays mandatory only for MiniMax; CommandCode carries no region
+    // (NULL) and must not be rejected here.
+    if endpoint.provider == db::EndpointProvider::Minimax && endpoint.provider_region.is_none() {
         return error(
             StatusCode::BAD_REQUEST,
             "invalid_provider_region",
@@ -36,7 +42,7 @@ pub(super) async fn token_plan_usage(
         return error(
             StatusCode::BAD_REQUEST,
             "missing_api_key",
-            "MiniMax endpoint has no enabled API key",
+            &format!("{provider_label} endpoint has no enabled API key"),
         );
     }
 
@@ -49,7 +55,7 @@ pub(super) async fn token_plan_usage(
         Ok(None) => error(
             StatusCode::BAD_REQUEST,
             "unsupported_provider",
-            "token plan usage is only available for MiniMax endpoints",
+            "token plan usage is only available for MiniMax and CommandCode endpoints",
         ),
         Err(err) => internal(&state, err),
     }
