@@ -3359,6 +3359,7 @@ components:
       - generic
       - minimax
       - command_code
+      - opencode_go
     EndpointRegion:
       type: string
       enum:

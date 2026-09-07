@@ -16,7 +16,9 @@ pub(super) async fn token_plan_usage(
     let provider_label = match endpoint.provider {
         db::EndpointProvider::Minimax => "MiniMax",
         db::EndpointProvider::CommandCode => "CommandCode",
-        db::EndpointProvider::Generic => {
+        // OpencodeGo has no billing fetcher yet (P3, issue #193), so it is
+        // rejected here exactly like generic until the fetcher lands.
+        db::EndpointProvider::Generic | db::EndpointProvider::OpencodeGo => {
             return error(
                 StatusCode::BAD_REQUEST,
                 "unsupported_provider",
@@ -24,8 +26,8 @@ pub(super) async fn token_plan_usage(
             );
         }
     };
-    // Region stays mandatory only for MiniMax; CommandCode carries no region
-    // (NULL) and must not be rejected here.
+    // Region stays mandatory only for MiniMax; CommandCode and OpencodeGo
+    // carry no region (NULL) and must not be rejected here.
     if endpoint.provider == db::EndpointProvider::Minimax && endpoint.provider_region.is_none() {
         return error(
             StatusCode::BAD_REQUEST,

@@ -98,6 +98,7 @@ pub enum EndpointProvider {
     Generic,
     Minimax,
     CommandCode,
+    OpencodeGo,
 }
 
 impl EndpointProvider {
@@ -106,6 +107,7 @@ impl EndpointProvider {
             Self::Generic => "generic",
             Self::Minimax => "minimax",
             Self::CommandCode => "command_code",
+            Self::OpencodeGo => "opencode_go",
         }
     }
 
@@ -114,6 +116,7 @@ impl EndpointProvider {
             "generic" => Ok(Self::Generic),
             "minimax" => Ok(Self::Minimax),
             "command_code" => Ok(Self::CommandCode),
+            "opencode_go" => Ok(Self::OpencodeGo),
             _ => Err(StandaloneConfigError::CorruptDatabase(format!(
                 "unknown endpoint provider {value:?}"
             ))),

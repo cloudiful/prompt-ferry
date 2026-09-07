@@ -96,7 +96,9 @@ pub(super) async fn resolve_endpoint_input(
         ));
     }
     match (body.provider, body.provider_region) {
-        (db::EndpointProvider::Generic, Some(_)) | (db::EndpointProvider::CommandCode, Some(_)) => {
+        (db::EndpointProvider::Generic, Some(_))
+        | (db::EndpointProvider::CommandCode, Some(_))
+        | (db::EndpointProvider::OpencodeGo, Some(_)) => {
             return Err(error(
                 StatusCode::BAD_REQUEST,
                 "invalid_provider_region",
@@ -286,9 +288,9 @@ pub(super) fn validate_mcp_provider(
     // MCP exposure is only valid for MiniMax endpoints; an explicit true on a
     // non-MiniMax provider must be rejected. None and Some(false) are
     // accepted for any provider (the caller will collapse them to false for
-    // non-MiniMax endpoints when persisting). CommandCode follows the generic
-    // path: it may be created with mcp_enabled=false but never gains the
-    // MiniMax builtin MCP privilege.
+    // non-MiniMax endpoints when persisting). CommandCode and OpencodeGo
+    // follow the generic path: they may be created with mcp_enabled=false but
+    // never gain the MiniMax builtin MCP privilege.
     if mcp_enabled.unwrap_or(provider == db::EndpointProvider::Minimax)
         && provider != db::EndpointProvider::Minimax
     {
@@ -353,5 +355,12 @@ mod tests {
         assert!(validate_mcp_provider(None, EndpointProvider::CommandCode).is_ok());
         assert!(validate_mcp_provider(Some(false), EndpointProvider::CommandCode).is_ok());
         assert!(validate_mcp_provider(Some(true), EndpointProvider::CommandCode).is_err());
+    }
+
+    #[test]
+    fn validate_mcp_provider_treats_opencode_go_like_generic() {
+        assert!(validate_mcp_provider(None, EndpointProvider::OpencodeGo).is_ok());
+        assert!(validate_mcp_provider(Some(false), EndpointProvider::OpencodeGo).is_ok());
+        assert!(validate_mcp_provider(Some(true), EndpointProvider::OpencodeGo).is_err());
     }
 }

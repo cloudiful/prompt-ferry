@@ -131,6 +131,9 @@ impl super::ConfigRepository {
                         crate::standalone_config::EndpointProvider::CommandCode => {
                             crate::db::EndpointProvider::CommandCode
                         }
+                        crate::standalone_config::EndpointProvider::OpencodeGo => {
+                            crate::db::EndpointProvider::OpencodeGo
+                        }
                         crate::standalone_config::EndpointProvider::Generic => {
                             crate::db::EndpointProvider::Generic
                         }

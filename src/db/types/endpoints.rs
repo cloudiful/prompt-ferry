@@ -11,6 +11,7 @@ pub enum EndpointProvider {
     Generic,
     Minimax,
     CommandCode,
+    OpencodeGo,
 }
 
 impl Default for EndpointProvider {
@@ -25,6 +26,7 @@ impl EndpointProvider {
             Self::Generic => "generic",
             Self::Minimax => "minimax",
             Self::CommandCode => "command_code",
+            Self::OpencodeGo => "opencode_go",
         }
     }
 
@@ -32,6 +34,7 @@ impl EndpointProvider {
         match value {
             "minimax" => Self::Minimax,
             "command_code" => Self::CommandCode,
+            "opencode_go" => Self::OpencodeGo,
             _ => Self::Generic,
         }
     }
@@ -40,6 +43,7 @@ impl EndpointProvider {
         match value {
             Some("minimax") => Self::Minimax,
             Some("command_code") => Self::CommandCode,
+            Some("opencode_go") => Self::OpencodeGo,
             _ => Self::Generic,
         }
     }
@@ -255,6 +259,32 @@ mod tests {
             serde_json::from_value(serde_json::json!("command_code"))
                 .expect("deserialize command_code provider");
         assert_eq!(deserialized, EndpointProvider::CommandCode);
+        // Unknown providers keep the legacy generic fallback.
+        assert_eq!(
+            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::Generic
+        );
+    }
+
+    #[test]
+    fn opencode_go_provider_round_trips_as_snake_case() {
+        assert_eq!(EndpointProvider::OpencodeGo.as_str(), "opencode_go");
+        assert_eq!(
+            EndpointProvider::from_str("opencode_go"),
+            EndpointProvider::OpencodeGo
+        );
+        assert_eq!(
+            EndpointProvider::from_optional(Some("opencode_go")),
+            EndpointProvider::OpencodeGo
+        );
+        // Serde uses snake_case, matching the admin API contract.
+        let serialized = serde_json::to_value(EndpointProvider::OpencodeGo)
+            .expect("serialize opencode_go provider");
+        assert_eq!(serialized, serde_json::json!("opencode_go"));
+        let deserialized: EndpointProvider =
+            serde_json::from_value(serde_json::json!("opencode_go"))
+                .expect("deserialize opencode_go provider");
+        assert_eq!(deserialized, EndpointProvider::OpencodeGo);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
             EndpointProvider::from_str("legacy-unknown"),
