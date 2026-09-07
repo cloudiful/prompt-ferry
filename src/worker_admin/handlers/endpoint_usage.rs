@@ -16,13 +16,12 @@ pub(super) async fn token_plan_usage(
     let provider_label = match endpoint.provider {
         db::EndpointProvider::Minimax => "MiniMax",
         db::EndpointProvider::CommandCode => "CommandCode",
-        // OpencodeGo has no billing fetcher yet (P3, issue #193), so it is
-        // rejected here exactly like generic until the fetcher lands.
-        db::EndpointProvider::Generic | db::EndpointProvider::OpencodeGo => {
+        db::EndpointProvider::OpencodeGo => "OpencodeGo",
+        db::EndpointProvider::Generic => {
             return error(
                 StatusCode::BAD_REQUEST,
                 "unsupported_provider",
-                "token plan usage is only available for MiniMax and CommandCode endpoints",
+                "token plan usage is only available for MiniMax, CommandCode and OpencodeGo endpoints",
             );
         }
     };
@@ -57,7 +56,7 @@ pub(super) async fn token_plan_usage(
         Ok(None) => error(
             StatusCode::BAD_REQUEST,
             "unsupported_provider",
-            "token plan usage is only available for MiniMax and CommandCode endpoints",
+            "token plan usage is only available for MiniMax, CommandCode and OpencodeGo endpoints",
         ),
         Err(err) => internal(&state, err),
     }

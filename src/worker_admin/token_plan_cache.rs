@@ -67,7 +67,9 @@ impl TokenPlanQuotaCache {
         };
         if !matches!(
             endpoint.provider,
-            db::EndpointProvider::Minimax | db::EndpointProvider::CommandCode
+            db::EndpointProvider::Minimax
+                | db::EndpointProvider::CommandCode
+                | db::EndpointProvider::OpencodeGo
         ) {
             return Ok(None);
         }
@@ -128,6 +130,11 @@ impl TokenPlanQuotaCache {
         // of the 5-hour/weekly USD windows instead. Token reservations are
         // MiniMax token-count based and do not apply to USD caps.
         if let Some(remaining) = super::command_code_usage::command_code_remaining_percent(key) {
+            return Some(remaining.clamp(0.0, 100.0));
+        }
+        // OpencodeGo keys carry percent windows but no model_remains; weight
+        // by the tightest (lowest remaining) of rolling/weekly/monthly.
+        if let Some(remaining) = super::opencode_go_usage::opencode_go_remaining_percent(key) {
             return Some(remaining.clamp(0.0, 100.0));
         }
         let usage = model_usage(key, model)?;
