@@ -265,4 +265,48 @@ mod tests {
         );
         assert_eq!(opencode_go_remaining_percent(&full_key(None, None, None)), None);
     }
+
+    #[test]
+    fn percent_ties_break_toward_the_first_window_with_the_same_remaining() {
+        // When two windows yield the same remaining, the min is stable and
+        // independent of presentation order.
+        assert_eq!(
+            opencode_go_remaining_percent(&full_key(Some(30.0), Some(30.0), None)),
+            Some(70.0)
+        );
+        assert_eq!(
+            opencode_go_remaining_percent(&full_key(None, Some(30.0), Some(30.0))),
+            Some(70.0)
+        );
+    }
+
+    #[test]
+    fn missing_or_empty_window_is_dropped_not_padded_empty() {
+        // A window with only a status and no percent/reset is still "present"
+        // (it carries a signal) but a fully empty object does not count.
+        let body = json!({
+            "usage": {
+                "rolling": {"status": 1},
+                "weekly": {},
+                "monthly": {"percent": 5}
+            }
+        });
+        let usage = parse_opencode_go_usage(&body).expect("usage");
+        assert!(usage.rolling.is_some(), "status-only window is retained");
+        assert!(usage.weekly.is_none(), "empty object is dropped");
+        assert!(usage.monthly.is_some());
+    }
+
+    #[test]
+    fn clamp_applies_to_negative_and_oversized_percent_ticks() {
+        let body = json!({
+            "usage": {
+                "rolling": {"percent": -3, "resetsAt": "2026-08-22T14:00:00.000Z"},
+                "weekly": {"usagePercent": 140}
+            }
+        });
+        let usage = parse_opencode_go_usage(&body).expect("usage");
+        assert_eq!(usage.rolling.as_ref().unwrap().percent, Some(0.0));
+        assert_eq!(usage.weekly.as_ref().unwrap().percent, Some(100.0));
+    }
 }

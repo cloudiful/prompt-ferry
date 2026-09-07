@@ -100,7 +100,7 @@ async fn exhausted_bound_key_returns_target_unavailable() {
     );
 }
 
-fn request() -> BufferedBridgeRequest {
+pub(super) fn request() -> BufferedBridgeRequest {
     BufferedBridgeRequest {
         request_id: uuid::Uuid::new_v4().to_string(),
         method: "POST".to_string(),
@@ -215,7 +215,7 @@ fn command_code_usage(keys: &[(uuid::Uuid, &str, Option<f64>, Option<f64>)]) -> 
     }
 }
 
-async fn bind_key(
+pub(super) async fn bind_key(
     replay_cache: &ReplayCache,
     rule_id: uuid::Uuid,
     conversation_id: uuid::Uuid,
