@@ -99,6 +99,9 @@ fn target_from_endpoint(
         upstream_model: target.upstream_model.clone(),
         provider: match endpoint.provider {
             crate::standalone_config::EndpointProvider::Minimax => db::EndpointProvider::Minimax,
+            crate::standalone_config::EndpointProvider::CommandCode => {
+                db::EndpointProvider::CommandCode
+            }
             crate::standalone_config::EndpointProvider::Generic => db::EndpointProvider::Generic,
         },
         service_tier: match endpoint.service_tier {

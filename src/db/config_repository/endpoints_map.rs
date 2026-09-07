@@ -104,6 +104,7 @@ pub(super) fn parse_native_api(value: &str) -> NativeApi {
 pub(super) fn provider_from_sqlite(provider: ScEndpointProvider) -> EndpointProvider {
     match provider {
         ScEndpointProvider::Minimax => EndpointProvider::Minimax,
+        ScEndpointProvider::CommandCode => EndpointProvider::CommandCode,
         ScEndpointProvider::Generic => EndpointProvider::Generic,
     }
 }

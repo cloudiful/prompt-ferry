@@ -97,6 +97,7 @@ pub type Result<T> = std::result::Result<T, StandaloneConfigError>;
 pub enum EndpointProvider {
     Generic,
     Minimax,
+    CommandCode,
 }
 
 impl EndpointProvider {
@@ -104,6 +105,7 @@ impl EndpointProvider {
         match self {
             Self::Generic => "generic",
             Self::Minimax => "minimax",
+            Self::CommandCode => "command_code",
         }
     }
 
@@ -111,6 +113,7 @@ impl EndpointProvider {
         match value {
             "generic" => Ok(Self::Generic),
             "minimax" => Ok(Self::Minimax),
+            "command_code" => Ok(Self::CommandCode),
             _ => Err(StandaloneConfigError::CorruptDatabase(format!(
                 "unknown endpoint provider {value:?}"
             ))),

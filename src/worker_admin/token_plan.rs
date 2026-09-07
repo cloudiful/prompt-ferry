@@ -23,7 +23,9 @@ pub async fn fetch_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
         EndpointProvider::Minimax => endpoint
             .provider_region
             .ok_or_else(|| anyhow!("MiniMax endpoint has no provider region"))?,
-        EndpointProvider::Generic => {
+        // P3 (issue #184) implements the CommandCode billing fetcher; until
+        // then it shares the generic "no token plan API" path.
+        EndpointProvider::Generic | EndpointProvider::CommandCode => {
             return Err(anyhow!("endpoint provider has no token plan API"));
         }
     };

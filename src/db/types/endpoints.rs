@@ -10,6 +10,7 @@ use crate::config::{NativeApi, NativeApiSource};
 pub enum EndpointProvider {
     Generic,
     Minimax,
+    CommandCode,
 }
 
 impl Default for EndpointProvider {
@@ -23,12 +24,14 @@ impl EndpointProvider {
         match self {
             Self::Generic => "generic",
             Self::Minimax => "minimax",
+            Self::CommandCode => "command_code",
         }
     }
 
     pub fn from_str(value: &str) -> Self {
         match value {
             "minimax" => Self::Minimax,
+            "command_code" => Self::CommandCode,
             _ => Self::Generic,
         }
     }
@@ -36,6 +39,7 @@ impl EndpointProvider {
     pub fn from_optional(value: Option<&str>) -> Self {
         match value {
             Some("minimax") => Self::Minimax,
+            Some("command_code") => Self::CommandCode,
             _ => Self::Generic,
         }
     }
@@ -231,6 +235,32 @@ pub struct EndpointPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_code_provider_round_trips_as_snake_case() {
+        assert_eq!(EndpointProvider::CommandCode.as_str(), "command_code");
+        assert_eq!(
+            EndpointProvider::from_str("command_code"),
+            EndpointProvider::CommandCode
+        );
+        assert_eq!(
+            EndpointProvider::from_optional(Some("command_code")),
+            EndpointProvider::CommandCode
+        );
+        // Serde uses snake_case, matching the admin API contract.
+        let serialized = serde_json::to_value(EndpointProvider::CommandCode)
+            .expect("serialize command_code provider");
+        assert_eq!(serialized, serde_json::json!("command_code"));
+        let deserialized: EndpointProvider =
+            serde_json::from_value(serde_json::json!("command_code"))
+                .expect("deserialize command_code provider");
+        assert_eq!(deserialized, EndpointProvider::CommandCode);
+        // Unknown providers keep the legacy generic fallback.
+        assert_eq!(
+            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::Generic
+        );
+    }
 
     #[test]
     fn service_tier_defaults_to_standard_and_parses_priority() {

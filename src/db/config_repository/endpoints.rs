@@ -128,6 +128,9 @@ impl super::ConfigRepository {
                         crate::standalone_config::EndpointProvider::Minimax => {
                             crate::db::EndpointProvider::Minimax
                         }
+                        crate::standalone_config::EndpointProvider::CommandCode => {
+                            crate::db::EndpointProvider::CommandCode
+                        }
                         crate::standalone_config::EndpointProvider::Generic => {
                             crate::db::EndpointProvider::Generic
                         }
