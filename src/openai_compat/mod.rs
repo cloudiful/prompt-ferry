@@ -18,7 +18,10 @@ mod responses_state;
 use http::StatusCode;
 
 pub(crate) use request::normalize_chat_request_for_native;
-pub use request::{chat_request_to_responses, is_streaming_request, responses_request_to_chat};
+pub use request::{
+    chat_request_to_responses, is_streaming_request, responses_request_to_chat,
+    responses_stateless_request_to_chat,
+};
 pub(crate) use request::{conversation_key, previous_response_id};
 pub use response::{chat_response_to_responses, responses_response_to_chat};
 pub(crate) use response_items::{extract_text, reasoning_details_from_text};

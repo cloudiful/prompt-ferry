@@ -13,7 +13,7 @@ mod request_validate;
 pub(crate) use chat_native::normalize_chat_request_for_native;
 pub use chat_to_responses::chat_request_to_responses;
 pub use request_parse::{conversation_key, is_streaming_request, previous_response_id};
-pub use request_translate::responses_request_to_chat;
+pub use request_translate::{responses_request_to_chat, responses_stateless_request_to_chat};
 pub(crate) use request_validate::{
     has_meaningful_value, translate_reasoning, translate_text_format,
 };

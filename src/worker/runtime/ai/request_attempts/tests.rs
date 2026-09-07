@@ -556,7 +556,11 @@ async fn does_not_retry_oversized_non_stream_response() {
 }
 
 #[tokio::test]
-async fn does_not_retry_cross_protocol_responses() {
+async fn does_not_retry_stateless_responses_to_chat_on_adapter_error() {
+    // Stateless /v1/responses→Chat direct path reaches the chat upstream exactly
+    // once; an invalid chat payload is handled without retry. Stateful rejection
+    // (previous_response_id/conversation → invalid_responses_continuation) is covered
+    // by wrapper unit tests and bridge tests and is not masked here.
     let count = Arc::new(AtomicUsize::new(0));
     let counter = count.clone();
     let app = Router::new().route(
@@ -586,11 +590,11 @@ async fn does_not_retry_cross_protocol_responses() {
     let outcome = forward_test_request(&services, &route)
         .await
         .expect("forward");
-    let ForwardOutcome::CompatError(err) = outcome else {
-        panic!("cross-protocol responses must fail closed without retry, got {outcome:?}");
-    };
-    assert_eq!(err.code, "responses_cross_protocol_unsupported");
-    assert_eq!(count.load(Ordering::SeqCst), 0);
+    assert!(
+        matches!(outcome, ForwardOutcome::Handled),
+        "stateless responses→chat adapter error must be handled without retry, got {outcome:?}"
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

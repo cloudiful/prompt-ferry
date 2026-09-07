@@ -138,10 +138,13 @@ pub(super) async fn prepare_upstream_request_for_route(
         .map(|prepared| prepared.body.as_slice())
         .or(plain_request_body.as_deref())
         .expect("plain or redacted request body");
-    // Responses requests only route to Responses-native targets. Cross-protocol
-    // routing (Responses -> Chat/Anthropic) is rejected explicitly inside
-    // `prepare_upstream_request`; state fields such as previous_response_id or
-    // conversation are never silently stripped or converted here.
+    // Stateless Responses requests may route to Chat-native targets via
+    // `responses_stateless_request_to_chat` (`reasoning.summary="auto"` and
+    // `include` are accepted and dropped, `reasoning.effort` including `xhigh`
+    // is forwarded as `reasoning_effort`). Stateful fields such as
+    // previous_response_id or conversation are rejected with
+    // `invalid_responses_continuation` inside `prepare_upstream_request` and are
+    // never silently stripped here. Responses -> Anthropic/Auto remains rejected.
     let mut prepared = prepare_upstream_request(&request.path, prepared_body, route.native_api)?;
     prepared.upstream_redacted_request_json = redacted_request
         .as_ref()

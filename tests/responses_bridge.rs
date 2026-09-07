@@ -31,7 +31,7 @@ struct ResponsesRequestLog {
 }
 
 #[tokio::test]
-async fn rejects_responses_request_for_chat_native_upstream() {
+async fn forwards_stateless_responses_request_to_chat_native_upstream() {
     let upstream_log = Arc::new(ChatRequestLog::default());
     let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -57,21 +57,24 @@ async fn rejects_responses_request_for_chat_native_upstream() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
 
     let requests = upstream_log.bodies.lock().await;
-    assert!(
-        requests.is_empty(),
-        "rejected cross-protocol responses must not reach the chat upstream"
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["messages"][0]["role"].as_str(), Some("system"));
+    assert_eq!(
+        requests[0]["messages"][0]["content"].as_str(),
+        Some("be terse")
     );
+    assert_eq!(requests[0]["messages"][1]["role"].as_str(), Some("user"));
 
     worker_handle.abort();
 }
 
 #[tokio::test]
-async fn rejects_streaming_responses_request_for_chat_native_upstream() {
+async fn forwards_streaming_stateless_responses_request_to_chat_native_upstream() {
     let upstream_addr = spawn_chat_only_upstream(Arc::new(ChatRequestLog::default())).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
@@ -94,9 +97,9 @@ async fn rejects_streaming_responses_request_for_chat_native_upstream() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert!(body.contains("response.completed"), "body={body}");
 
     worker_handle.abort();
 }
@@ -480,7 +483,7 @@ async fn exhausts_retries_when_upstream_always_closes_before_headers() {
 }
 
 #[tokio::test]
-async fn rejects_reasoning_stream_for_chat_native_upstream() {
+async fn forwards_reasoning_stream_stateless_to_chat_native_upstream() {
     let upstream_addr = spawn_chat_only_upstream(Arc::new(ChatRequestLog::default())).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
@@ -503,15 +506,15 @@ async fn rejects_reasoning_stream_for_chat_native_upstream() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert!(body.contains("response.completed"), "body={body}");
 
     worker_handle.abort();
 }
 
 #[tokio::test]
-async fn rejects_stream_text_for_chat_native_upstream() {
+async fn forwards_stream_text_stateless_to_chat_native_upstream() {
     let upstream_addr = spawn_chat_only_upstream(Arc::new(ChatRequestLog::default())).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
@@ -534,15 +537,15 @@ async fn rejects_stream_text_for_chat_native_upstream() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert!(body.contains("response.completed"), "body={body}");
 
     worker_handle.abort();
 }
 
 #[tokio::test]
-async fn rejects_tool_calls_for_chat_native_upstream() {
+async fn forwards_tool_calls_stateless_to_chat_native_upstream() {
     let upstream_log = Arc::new(ChatRequestLog::default());
     let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -577,21 +580,19 @@ async fn rejects_tool_calls_for_chat_native_upstream() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
 
     let requests = upstream_log.bodies.lock().await;
-    assert!(
-        requests.is_empty(),
-        "rejected cross-protocol responses must not reach the chat upstream"
-    );
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].get("tools").is_some());
 
     worker_handle.abort();
 }
 
 #[tokio::test]
-async fn rejects_assistant_reasoning_parts_for_chat_native_upstream() {
+async fn forwards_assistant_reasoning_parts_stateless_to_chat_native_upstream() {
     let upstream_log = Arc::new(ChatRequestLog::default());
     let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -627,14 +628,15 @@ async fn rejects_assistant_reasoning_parts_for_chat_native_upstream() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
 
     let requests = upstream_log.bodies.lock().await;
-    assert!(
-        requests.is_empty(),
-        "rejected cross-protocol responses must not reach the chat upstream"
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0]["messages"][0]["reasoning_content"].as_str(),
+        Some("need tools first")
     );
 
     worker_handle.abort();
@@ -642,7 +644,8 @@ async fn rejects_assistant_reasoning_parts_for_chat_native_upstream() {
 
 #[tokio::test]
 async fn rejects_previous_response_id_for_chat_native_upstream() {
-    let upstream_addr = spawn_chat_only_upstream(Arc::new(ChatRequestLog::default())).await;
+    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
     let mut worker_handle = tokio::spawn(async move {
@@ -666,14 +669,24 @@ async fn rejects_previous_response_id_for_chat_native_upstream() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert!(
+        body.contains("invalid_responses_continuation"),
+        "body={body}"
+    );
+
+    let requests = upstream_log.bodies.lock().await;
+    assert!(
+        requests.is_empty(),
+        "stateful responses must not reach the chat upstream"
+    );
 
     worker_handle.abort();
 }
 
 #[tokio::test]
 async fn rejects_conversation_for_chat_native_upstream() {
-    let upstream_addr = spawn_chat_only_upstream(Arc::new(ChatRequestLog::default())).await;
+    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
     let mut worker_handle = tokio::spawn(async move {
@@ -697,7 +710,16 @@ async fn rejects_conversation_for_chat_native_upstream() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert!(
+        body.contains("invalid_responses_continuation"),
+        "body={body}"
+    );
+
+    let requests = upstream_log.bodies.lock().await;
+    assert!(
+        requests.is_empty(),
+        "stateful responses must not reach the chat upstream"
+    );
 
     worker_handle.abort();
 }
@@ -730,7 +752,7 @@ async fn rejects_input_file_for_chat_native_upstream() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert!(body.contains("unsupported_feature"), "body={body}");
 
     worker_handle.abort();
 }
@@ -763,7 +785,7 @@ async fn rejects_input_image_file_id_for_chat_native_upstream() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert!(body.contains("unsupported_feature"), "body={body}");
 
     worker_handle.abort();
 }
@@ -797,13 +819,13 @@ async fn rejects_non_text_function_call_output_for_chat_native_upstream() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert!(body.contains("unsupported_feature"), "body={body}");
 
     worker_handle.abort();
 }
 
 #[tokio::test]
-async fn rejects_json_schema_text_format_for_chat_native_upstream() {
+async fn forwards_json_schema_text_format_stateless_to_chat_native_upstream() {
     let upstream_log = Arc::new(ChatRequestLog::default());
     let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -841,21 +863,22 @@ async fn rejects_json_schema_text_format_for_chat_native_upstream() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
 
     let requests = upstream_log.bodies.lock().await;
-    assert!(
-        requests.is_empty(),
-        "rejected cross-protocol responses must not reach the chat upstream"
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0]["response_format"]["type"].as_str(),
+        Some("json_schema")
     );
 
     worker_handle.abort();
 }
 
 #[tokio::test]
-async fn rejects_json_object_text_format_for_chat_native_upstream() {
+async fn forwards_json_object_text_format_stateless_to_chat_native_upstream() {
     let upstream_log = Arc::new(ChatRequestLog::default());
     let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -883,21 +906,22 @@ async fn rejects_json_object_text_format_for_chat_native_upstream() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
 
     let requests = upstream_log.bodies.lock().await;
-    assert!(
-        requests.is_empty(),
-        "rejected cross-protocol responses must not reach the chat upstream"
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0]["response_format"]["type"].as_str(),
+        Some("json_object")
     );
 
     worker_handle.abort();
 }
 
 #[tokio::test]
-async fn rejects_include_and_prompt_cache_key_for_chat_native_upstream() {
+async fn forwards_include_and_prompt_cache_key_stateless_to_chat_native_upstream() {
     let upstream_log = Arc::new(ChatRequestLog::default());
     let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -925,21 +949,20 @@ async fn rejects_include_and_prompt_cache_key_for_chat_native_upstream() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
 
     let requests = upstream_log.bodies.lock().await;
-    assert!(
-        requests.is_empty(),
-        "rejected cross-protocol responses must not reach the chat upstream"
-    );
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["prompt_cache_key"].as_str(), Some("thread-123"));
+    assert!(requests[0].get("include").is_none());
 
     worker_handle.abort();
 }
 
 #[tokio::test]
-async fn rejects_reasoning_effort_for_chat_native_upstream() {
+async fn forwards_reasoning_effort_stateless_to_chat_native_upstream() {
     let upstream_log = Arc::new(ChatRequestLog::default());
     let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -965,15 +988,13 @@ async fn rejects_reasoning_effort_for_chat_native_upstream() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
 
     let requests = upstream_log.bodies.lock().await;
-    assert!(
-        requests.is_empty(),
-        "rejected cross-protocol responses must not reach the chat upstream"
-    );
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["reasoning_effort"].as_str(), Some("low"));
 
     worker_handle.abort();
 }
@@ -1071,7 +1092,7 @@ async fn forwards_reasoning_split_unchanged_for_generic_chat_upstream() {
 }
 
 #[tokio::test]
-async fn rejects_bare_reasoning_for_chat_native_upstream() {
+async fn forwards_bare_reasoning_stateless_to_chat_native_upstream() {
     let upstream_log = Arc::new(ChatRequestLog::default());
     let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -1098,14 +1119,15 @@ async fn rejects_bare_reasoning_for_chat_native_upstream() {
         .send()
         .await
         .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
     let requests = upstream_log.bodies.lock().await;
-    assert!(
-        requests.is_empty(),
-        "rejected cross-protocol responses must not reach the chat upstream"
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0]["messages"][0]["reasoning_content"].as_str(),
+        Some("check first")
     );
 
     worker_handle.abort();
@@ -1138,13 +1160,16 @@ async fn rejects_unpaired_function_call_output_for_chat_native_upstream() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert!(
+        body.contains("invalid_responses_continuation"),
+        "body={body}"
+    );
 
     worker_handle.abort();
 }
 
 #[tokio::test]
-async fn rejects_non_leading_instruction_messages_for_chat_native_upstream() {
+async fn forwards_non_leading_instruction_messages_stateless_to_chat_native_upstream() {
     let upstream_log = Arc::new(ChatRequestLog::default());
     let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -1173,15 +1198,53 @@ async fn rejects_non_leading_instruction_messages_for_chat_native_upstream() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = response.text().await.unwrap();
-    assert!(body.contains("responses_cross_protocol_unsupported"));
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
 
     let requests = upstream_log.bodies.lock().await;
-    assert!(
-        requests.is_empty(),
-        "rejected cross-protocol responses must not reach the chat upstream"
-    );
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["messages"][0]["role"].as_str(), Some("system"));
+
+    worker_handle.abort();
+}
+
+#[tokio::test]
+async fn forwards_stateless_three_piece_kit_to_chat_native_upstream() {
+    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "muse-spark",
+            "input": "hello",
+            "store": false,
+            "stream": false,
+            "reasoning": {"effort": "xhigh", "summary": "auto"},
+            "include": ["reasoning.encrypted_content"]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.json::<Value>().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("response"));
+
+    let requests = upstream_log.bodies.lock().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["reasoning_effort"].as_str(), Some("xhigh"));
+    assert!(requests[0].get("include").is_none());
+    assert!(requests[0].get("reasoning").is_none());
 
     worker_handle.abort();
 }

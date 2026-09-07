@@ -5,7 +5,7 @@ use crate::{
     config::NativeApi,
     openai_compat::{
         CompatError, chat_request_to_responses, normalize_chat_request_for_native,
-        validate_raw_responses_request_body,
+        responses_stateless_request_to_chat, validate_raw_responses_request_body,
     },
     redact_upstream::UpstreamRedactionSession,
     usage::upstream_body,
@@ -65,15 +65,26 @@ pub fn prepare_upstream_request(
                 upstream_restore_session: None,
             })
         }
-        ("/v1/responses", NativeApi::Chat | NativeApi::AnthropicMessages | NativeApi::Auto) => {
-            Err(CompatError::new(
-                StatusCode::BAD_REQUEST,
-                "responses_cross_protocol_unsupported",
-                "POST /v1/responses requires a responses-native endpoint target; \
-                 responses requests are passed through unchanged and are never converted \
-                 to chat or anthropic protocols",
-            ))
+        ("/v1/responses", NativeApi::Chat) => {
+            let translated = responses_stateless_request_to_chat(request_body)?;
+            Ok(PreparedUpstreamRequest {
+                path: NativeApi::Chat.path().to_string(),
+                body: PreparedRequestBody::BufferedBytes(upstream_body(
+                    NativeApi::Chat.path(),
+                    &translated,
+                )),
+                response_adapter: ResponseAdapter::ChatToResponses,
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+            })
         }
+        ("/v1/responses", NativeApi::AnthropicMessages | NativeApi::Auto) => Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "responses_cross_protocol_unsupported",
+            "POST /v1/responses requires a responses-native endpoint target; \
+                 stateless responses requests may target chat-native endpoints, \
+                 anthropic or auto targets remain unsupported",
+        )),
         ("/v1/chat/completions", NativeApi::Chat) => Ok(PreparedUpstreamRequest {
             path: request_path.to_string(),
             body: PreparedRequestBody::BufferedBytes(upstream_body(

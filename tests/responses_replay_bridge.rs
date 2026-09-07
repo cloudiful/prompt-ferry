@@ -574,7 +574,7 @@ async fn raw_passthrough_keeps_conversation_without_replay_state() -> anyhow::Re
 }
 
 #[tokio::test]
-async fn rejects_responses_routed_to_chat_native_target() -> anyhow::Result<()> {
+async fn rejects_stateful_responses_routed_to_chat_native_target() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
         return Ok(());
@@ -647,12 +647,12 @@ async fn rejects_responses_routed_to_chat_native_target() -> anyhow::Result<()> 
     let body = response.json::<Value>().await?;
     assert_eq!(
         body["error"]["code"].as_str(),
-        Some("responses_cross_protocol_unsupported")
+        Some("invalid_responses_continuation")
     );
 
     assert!(
         upstream_log.bodies.lock().await.is_empty(),
-        "rejected cross-protocol responses must not reach the chat upstream"
+        "stateful responses must not reach the chat upstream"
     );
 
     worker_handle.abort();

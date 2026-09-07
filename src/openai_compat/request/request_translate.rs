@@ -14,6 +14,23 @@ pub fn responses_request_to_chat(body: &[u8]) -> Result<Vec<u8>, CompatError> {
     request.to_chat_request_with_prefix(&[])
 }
 
+/// Stateless Responses→Chat translation for chat-native upstreams.
+///
+/// Rejects `previous_response_id`/`conversation` with
+/// `invalid_responses_continuation`; accepts and drops
+/// `reasoning.summary="auto"` and `include` (including
+/// `reasoning.encrypted_content`, never echoed back); forwards
+/// `reasoning.effort` (including `xhigh`) as `reasoning_effort`.
+/// Item references and orphan `function_call_output` reuse the existing
+/// `validate_for_chat_compat` continuation checks with no replay context.
+pub fn responses_stateless_request_to_chat(body: &[u8]) -> Result<Vec<u8>, CompatError> {
+    let object = request_parse::parse_request_object(body)?;
+    request_validate::reject_unsupported_root_fields_for_stateless(&object)?;
+    let request = NormalizedResponsesRequest::from_body(body)?;
+    request.validate_for_chat_compat(&std::collections::HashSet::new(), false)?;
+    request.to_chat_request_with_prefix(&[])
+}
+
 #[cfg(test)]
 pub fn responses_request_to_chat_with_prefix(
     body: &[u8],

@@ -50,6 +50,51 @@ pub(super) fn reject_unsupported_root_fields(
     reject_unknown_root_fields(object)
 }
 
+pub(super) fn reject_unsupported_root_fields_for_stateless(
+    object: &Map<String, Value>,
+) -> Result<(), CompatError> {
+    reject_present(
+        object,
+        "background",
+        "background mode is not supported for chat-native endpoints",
+    )?;
+    reject_present(
+        object,
+        "audio",
+        "audio input/output is not supported for chat-native endpoints",
+    )?;
+    reject_present(
+        object,
+        "truncation",
+        "truncation controls are not supported for chat-native endpoints",
+    )?;
+    reject_stateless_state_fields(object)?;
+    reject_stateless_reasoning_config(object)?;
+    reject_text_config(object)?;
+    reject_unknown_root_fields(object)
+}
+
+fn reject_stateless_state_fields(object: &Map<String, Value>) -> Result<(), CompatError> {
+    if object
+        .get("previous_response_id")
+        .is_some_and(has_meaningful_value)
+    {
+        return Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_responses_continuation",
+            "previous_response_id is not supported for stateless chat-native endpoints; send self-contained input without replay state",
+        ));
+    }
+    if object.get("conversation").is_some_and(has_meaningful_value) {
+        return Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_responses_continuation",
+            "conversation is not supported for stateless chat-native endpoints; send self-contained input without replay state",
+        ));
+    }
+    Ok(())
+}
+
 fn reject_mutually_exclusive_state_fields(object: &Map<String, Value>) -> Result<(), CompatError> {
     if object.get("conversation").is_some_and(has_meaningful_value)
         && object
@@ -209,6 +254,81 @@ fn reject_text_config(object: &Map<String, Value>) -> Result<(), CompatError> {
             ),
         )),
     }
+}
+
+fn reject_stateless_reasoning_config(object: &Map<String, Value>) -> Result<(), CompatError> {
+    let Some(reasoning) = object.get("reasoning") else {
+        return Ok(());
+    };
+    let reasoning_object = reasoning.as_object().ok_or_else(|| {
+        CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "unsupported_feature",
+            "responses reasoning config must be an object for chat-native endpoints",
+        )
+    })?;
+
+    let allowed_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+    if let Some(effort) = reasoning_object
+        .get("effort")
+        .filter(|value| has_meaningful_value(value))
+    {
+        let effort = effort.as_str().map(str::trim).filter(|value| !value.is_empty()).ok_or_else(
+            || {
+                CompatError::new(
+                    StatusCode::BAD_REQUEST,
+                    "unsupported_feature",
+                    "responses reasoning.effort must be a non-empty string for chat-native endpoints",
+                )
+            },
+        )?;
+        if !allowed_efforts.contains(&effort) {
+            return Err(CompatError::new(
+                StatusCode::BAD_REQUEST,
+                "unsupported_feature",
+                format!(
+                    "responses reasoning.effort `{effort}` is not supported for chat-native endpoints"
+                ),
+            ));
+        }
+    }
+
+    // Stateless direct path accepts `reasoning.summary="auto"` and drops it
+    // (no encrypted content is echoed back). Any other summary value stays rejected.
+    if let Some(summary) = reasoning_object
+        .get("summary")
+        .filter(|value| has_meaningful_value(value))
+    {
+        let summary = summary
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                CompatError::new(
+                    StatusCode::BAD_REQUEST,
+                    "unsupported_feature",
+                    "responses reasoning.summary must be a non-empty string for chat-native endpoints",
+                )
+            })?;
+        if summary != "auto" {
+            return Err(CompatError::new(
+                StatusCode::BAD_REQUEST,
+                "unsupported_feature",
+                format!(
+                    "responses reasoning.summary `{summary}` is not supported for chat-native endpoints; only `auto` is accepted and ignored"
+                ),
+            ));
+        }
+    }
+
+    // `include` (including `reasoning.encrypted_content`) is accepted at the root
+    // and silently dropped by the chat translation; see `translate.rs`.
+    reject_unknown_fields(
+        reasoning_object,
+        &["effort", "summary"],
+        "responses reasoning",
+        "chat-native endpoints",
+    )
 }
 
 fn reject_reasoning_config(object: &Map<String, Value>) -> Result<(), CompatError> {

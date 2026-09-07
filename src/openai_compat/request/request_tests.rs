@@ -5,6 +5,7 @@ mod tests {
     use super::super::{
         chat_request_to_responses, conversation_key, previous_response_id,
         request_translate::responses_request_to_chat_with_prefix, responses_request_to_chat,
+        responses_stateless_request_to_chat,
     };
 
     #[test]
@@ -828,6 +829,66 @@ mod tests {
     fn rejects_unsupported_reasoning_fields() {
         let err = responses_request_to_chat(br#"{"input":"hi","reasoning":{"summary":"auto"}}"#)
             .unwrap_err();
+        assert_eq!(err.code, "unsupported_feature");
+        assert!(err.message.contains("reasoning.summary"));
+    }
+
+    #[test]
+    fn stateless_accepts_reasoning_summary_auto_and_include_and_forwards_xhigh() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_stateless_request_to_chat(
+                br#"{
+                    "model":"muse-spark",
+                    "input":"hello",
+                    "store":false,
+                    "reasoning":{"effort":"xhigh","summary":"auto"},
+                    "include":["reasoning.encrypted_content"]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(value["messages"][0]["content"].as_str(), Some("hello"));
+        assert_eq!(value["reasoning_effort"].as_str(), Some("xhigh"));
+        assert!(value.get("include").is_none());
+        assert!(value.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn stateless_rejects_previous_response_id_with_continuation_error() {
+        let err = responses_stateless_request_to_chat(
+            br#"{"input":"hi","previous_response_id":"resp_123"}"#,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "invalid_responses_continuation");
+        assert!(err.message.contains("previous_response_id"));
+    }
+
+    #[test]
+    fn stateless_rejects_conversation_with_continuation_error() {
+        let err =
+            responses_stateless_request_to_chat(br#"{"input":"hi","conversation":"conv_123"}"#)
+                .unwrap_err();
+        assert_eq!(err.code, "invalid_responses_continuation");
+        assert!(err.message.contains("conversation"));
+    }
+
+    #[test]
+    fn stateless_rejects_orphan_function_call_output_with_continuation_error() {
+        let err = responses_stateless_request_to_chat(
+            br#"{"input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}"#,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "invalid_responses_continuation");
+    }
+
+    #[test]
+    fn stateless_rejects_non_auto_reasoning_summary() {
+        let err = responses_stateless_request_to_chat(
+            br#"{"input":"hi","reasoning":{"effort":"high","summary":"detailed"}}"#,
+        )
+        .unwrap_err();
         assert_eq!(err.code, "unsupported_feature");
         assert!(err.message.contains("reasoning.summary"));
     }
