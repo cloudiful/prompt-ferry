@@ -141,7 +141,7 @@ pub struct EndpointTestResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TokenPlanUsageResponse {
     pub provider: EndpointProvider,
-    pub provider_region: EndpointRegion,
+    pub provider_region: Option<EndpointRegion>,
     pub keys: Vec<TokenPlanKeyUsage>,
 }
 
@@ -154,6 +154,15 @@ pub struct TokenPlanKeyUsage {
     pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub model_remains: Vec<TokenPlanModelUsage>,
+    /// CommandCode credit balances (monthly/purchased/free). None for MiniMax.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub balances: Option<CommandCodeBalances>,
+    /// CommandCode 5-hour USD window. None when missing (e.g. PAYG) — degraded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub five_hour: Option<CommandCodeWindowUsage>,
+    /// CommandCode weekly USD window. None when missing — degraded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weekly: Option<CommandCodeWindowUsage>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -173,6 +182,23 @@ pub struct TokenPlanWindowUsage {
     pub start_at: Option<DateTime<Utc>>,
     pub end_at: Option<DateTime<Utc>>,
     pub remains_time_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct CommandCodeBalances {
+    pub monthly_credits: f64,
+    pub purchased_credits: f64,
+    pub free_credits: f64,
+    pub remaining_credits: f64,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct CommandCodeWindowUsage {
+    pub used: f64,
+    pub cap: f64,
+    pub used_percent: Option<f64>,
+    pub remaining_percent: Option<f64>,
+    pub reset_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]

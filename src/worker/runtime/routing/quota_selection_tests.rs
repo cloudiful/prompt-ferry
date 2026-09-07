@@ -40,7 +40,7 @@ async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
             endpoint_id,
             TokenPlanUsageResponse {
                 provider: db::EndpointProvider::Minimax,
-                provider_region: db::EndpointRegion::Cn,
+                provider_region: Some(db::EndpointRegion::Cn),
                 keys: vec![
                     token_plan_key_usage(exhausted_key_id, "exhausted", 0.0),
                     token_plan_key_usage(available_key_id, "available", 100.0),
@@ -111,6 +111,9 @@ fn token_plan_key_usage(
             interval: Some(window(remaining_percent)),
             weekly: Some(window(remaining_percent)),
         }],
+        balances: None,
+        five_hour: None,
+        weekly: None,
     }
 }
 

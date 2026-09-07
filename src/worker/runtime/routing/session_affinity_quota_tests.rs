@@ -121,7 +121,7 @@ fn request() -> BufferedBridgeRequest {
 fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
         provider: db::EndpointProvider::Minimax,
-        provider_region: db::EndpointRegion::Cn,
+        provider_region: Some(db::EndpointRegion::Cn),
         keys: keys
             .iter()
             .map(|(key_id, key_label, remaining_percent)| TokenPlanKeyUsage {
@@ -136,6 +136,9 @@ fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
                     interval: Some(window(*remaining_percent)),
                     weekly: Some(window(*remaining_percent)),
                 }],
+                balances: None,
+                five_hour: None,
+                weekly: None,
             })
             .collect(),
     }

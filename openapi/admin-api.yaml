@@ -3061,6 +3061,53 @@ components:
         total:
           type: integer
           format: int64
+    CommandCodeBalances:
+      type: object
+      required:
+      - monthly_credits
+      - purchased_credits
+      - free_credits
+      - remaining_credits
+      properties:
+        free_credits:
+          type: number
+          format: double
+        monthly_credits:
+          type: number
+          format: double
+        purchased_credits:
+          type: number
+          format: double
+        remaining_credits:
+          type: number
+          format: double
+    CommandCodeWindowUsage:
+      type: object
+      required:
+      - used
+      - cap
+      properties:
+        cap:
+          type: number
+          format: double
+        remaining_percent:
+          type:
+          - number
+          - 'null'
+          format: double
+        reset_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        used:
+          type: number
+          format: double
+        used_percent:
+          type:
+          - number
+          - 'null'
+          format: double
     ConversationEndpointOverride:
       type: object
       required:
@@ -3311,6 +3358,7 @@ components:
       enum:
       - generic
       - minimax
+      - command_code
     EndpointRegion:
       type: string
       enum:
@@ -6384,6 +6432,11 @@ components:
       - ok
       - model_remains
       properties:
+        balances:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/CommandCodeBalances'
+            description: CommandCode credit balances (monthly/purchased/free). None for MiniMax.
         error_code:
           type:
           - string
@@ -6392,6 +6445,11 @@ components:
           type:
           - string
           - 'null'
+        five_hour:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/CommandCodeWindowUsage'
+            description: CommandCode 5-hour USD window. None when missing (e.g. PAYG) — degraded.
         key_id:
           type: string
           format: uuid
@@ -6409,6 +6467,11 @@ components:
           - 'null'
           format: int32
           minimum: 0
+        weekly:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/CommandCodeWindowUsage'
+            description: CommandCode weekly USD window. None when missing — degraded.
     TokenPlanModelUsage:
       type: object
       required:
@@ -6428,7 +6491,6 @@ components:
       type: object
       required:
       - provider
-      - provider_region
       - keys
       properties:
         keys:
@@ -6438,7 +6500,9 @@ components:
         provider:
           $ref: '#/components/schemas/EndpointProvider'
         provider_region:
-          $ref: '#/components/schemas/EndpointRegion'
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/EndpointRegion'
     TokenPlanWindowUsage:
       type: object
       properties:

@@ -206,6 +206,21 @@ export type ClientKeyPageResponse = {
     total: number;
 };
 
+export type CommandCodeBalances = {
+    free_credits: number;
+    monthly_credits: number;
+    purchased_credits: number;
+    remaining_credits: number;
+};
+
+export type CommandCodeWindowUsage = {
+    cap: number;
+    remaining_percent?: number | null;
+    reset_at?: string | null;
+    used: number;
+    used_percent?: number | null;
+};
+
 export type ConversationEndpointOverride = {
     conversation_id: string;
     created_at: string;
@@ -298,7 +313,7 @@ export type EndpointPageResponse = {
 
 export type EndpointProtocolMode = 'auto' | 'manual';
 
-export type EndpointProvider = 'generic' | 'minimax';
+export type EndpointProvider = 'generic' | 'minimax' | 'command_code';
 
 export type EndpointRegion = 'cn' | 'global';
 
@@ -1283,13 +1298,16 @@ export type StreamDeltaBatchingSettings = {
 export type TlsMode = 'off' | 'server' | 'mtls';
 
 export type TokenPlanKeyUsage = {
+    balances?: null | CommandCodeBalances;
     error_code?: string | null;
     error_message?: string | null;
+    five_hour?: null | CommandCodeWindowUsage;
     key_id: string;
     key_label: string;
     model_remains: Array<TokenPlanModelUsage>;
     ok: boolean;
     status?: number | null;
+    weekly?: null | CommandCodeWindowUsage;
 };
 
 export type TokenPlanModelUsage = {
@@ -1301,7 +1319,7 @@ export type TokenPlanModelUsage = {
 export type TokenPlanUsageResponse = {
     keys: Array<TokenPlanKeyUsage>;
     provider: EndpointProvider;
-    provider_region: EndpointRegion;
+    provider_region?: null | EndpointRegion;
 };
 
 export type TokenPlanWindowUsage = {

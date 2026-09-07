@@ -55,8 +55,8 @@ pub async fn fetch_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
     .await;
 
     Ok(TokenPlanUsageResponse {
-        provider: EndpointProvider::Minimax,
-        provider_region: region,
+        provider: endpoint.provider,
+        provider_region: Some(region),
         keys: key_results,
     })
 }
@@ -128,6 +128,9 @@ async fn fetch_key_usage(
             error_code: None,
             error_message: None,
             model_remains,
+            balances: None,
+            five_hour: None,
+            weekly: None,
         },
         Err((error_code, error_message)) => {
             failed_key(key_id, key_label, Some(status), error_code, error_message)
@@ -305,6 +308,9 @@ fn failed_key(
         error_code,
         error_message: Some(error_message),
         model_remains: Vec::new(),
+        balances: None,
+        five_hour: None,
+        weekly: None,
     }
 }
 
