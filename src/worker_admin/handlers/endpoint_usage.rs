@@ -17,13 +17,13 @@ pub(super) async fn token_plan_usage(
         db::EndpointProvider::Minimax => "MiniMax",
         db::EndpointProvider::CommandCode => "CommandCode",
         db::EndpointProvider::OpencodeGo => "OpencodeGo",
-        // OpenRouter has no balance fetcher yet (P3, issue #203), so it is
-        // rejected here exactly like generic until the fetcher lands.
-        db::EndpointProvider::Generic | db::EndpointProvider::OpenRouter => {
+        db::EndpointProvider::OpenRouter => "OpenRouter",
+        // Generic still has no token plan API.
+        db::EndpointProvider::Generic => {
             return error(
                 StatusCode::BAD_REQUEST,
                 "unsupported_provider",
-                "token plan usage is only available for MiniMax, CommandCode and OpencodeGo endpoints",
+                "token plan usage is only available for MiniMax, CommandCode, OpencodeGo and OpenRouter endpoints",
             );
         }
     };
@@ -58,7 +58,7 @@ pub(super) async fn token_plan_usage(
         Ok(None) => error(
             StatusCode::BAD_REQUEST,
             "unsupported_provider",
-            "token plan usage is only available for MiniMax, CommandCode and OpencodeGo endpoints",
+            "token plan usage is only available for MiniMax, CommandCode, OpencodeGo and OpenRouter endpoints",
         ),
         Err(err) => internal(&state, err),
     }

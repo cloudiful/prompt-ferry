@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use super::command_code_usage::{COMMAND_CODE_BASE, fetch_command_code_key_usage};
 use super::opencode_go_usage::{OPENCODE_GO_BASE, fetch_opencode_go_key_usage};
+use super::openrouter_usage::fetch_openrouter_key_usage;
 use super::json_scalars::{
     epoch_millis, failed_key, truncate_message, value_as_f64, value_as_i64, value_as_string,
 };
@@ -30,11 +31,10 @@ pub async fn fetch_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
         // CommandCode has its own balance fetcher. Generic still has no
         // token plan API.
         EndpointProvider::OpencodeGo => fetch_opencode_go_endpoint_usage(endpoint).await,
-        // P3 (issue #203) implements the OpenRouter balance fetcher; until
-        // then it shares the generic "no token plan API" path.
-        EndpointProvider::Generic | EndpointProvider::OpenRouter => {
-            Err(anyhow!("endpoint provider has no token plan API"))
-        }
+        // OpenRouter (issue #203 P3) has its own balance fetcher; generic
+        // still has no token plan API.
+        EndpointProvider::OpenRouter => fetch_openrouter_endpoint_usage(endpoint).await,
+        EndpointProvider::Generic => Err(anyhow!("endpoint provider has no token plan API")),
     }
 }
 
@@ -113,6 +113,30 @@ async fn fetch_opencode_go_endpoint_usage(
     let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_opencode_go_key_usage(client.clone(), OPENCODE_GO_BASE, key_id, key_label, secret)
+    }))
+    .buffer_unordered(MAX_CONCURRENT_KEY_REQUESTS)
+    .collect::<Vec<_>>()
+    .await;
+
+    Ok(TokenPlanUsageResponse {
+        provider: endpoint.provider,
+        provider_region: endpoint.provider_region,
+        keys: key_results,
+    })
+}
+
+async fn fetch_openrouter_endpoint_usage(
+    endpoint: &ProviderEndpoint,
+) -> Result<TokenPlanUsageResponse> {
+    let keys = enabled_keys(endpoint);
+    if keys.is_empty() {
+        return Err(anyhow!("endpoint has no enabled API key"));
+    }
+
+    let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
+    let base = endpoint.base_url.clone();
+    let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
+        fetch_openrouter_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
     }))
     .buffer_unordered(MAX_CONCURRENT_KEY_REQUESTS)
     .collect::<Vec<_>>()

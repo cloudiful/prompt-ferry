@@ -4,6 +4,8 @@ mod handlers;
 pub(crate) mod json_scalars;
 pub(crate) mod opencode_go_parsing;
 pub(crate) mod opencode_go_usage;
+pub(crate) mod openrouter_parsing;
+pub(crate) mod openrouter_usage;
 pub mod state;
 mod token_plan;
 pub(crate) mod token_plan_cache;

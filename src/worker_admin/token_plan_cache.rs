@@ -70,6 +70,7 @@ impl TokenPlanQuotaCache {
             db::EndpointProvider::Minimax
                 | db::EndpointProvider::CommandCode
                 | db::EndpointProvider::OpencodeGo
+                | db::EndpointProvider::OpenRouter
         ) {
             return Ok(None);
         }
@@ -137,6 +138,12 @@ impl TokenPlanQuotaCache {
         if let Some(remaining) = super::opencode_go_usage::opencode_go_remaining_percent(key) {
             return Some(remaining.clamp(0.0, 100.0));
         }
+        // OpenRouter keys carry a credit balance, not windows; weight by the
+        // key cap (or full weight when unlimited). Token reservations are
+        // MiniMax token-count based and do not apply to credit caps.
+        if let Some(remaining) = openrouter_remaining_percent(key) {
+            return Some(remaining.clamp(0.0, 100.0));
+        }
         let usage = model_usage(key, model)?;
         let remaining = effective_remaining_percent(usage)?;
         let reserved_tokens = self
@@ -189,6 +196,25 @@ fn model_usage<'a>(
                 .find(|usage| usage.model_name.eq_ignore_ascii_case("general"))
         })
         .or_else(|| (key.model_remains.len() == 1).then(|| &key.model_remains[0]))
+}
+
+// OpenRouter remaining percent (issue #203 P3): a finite key-level cap
+// (`limit`) weights by `limit_remaining/limit`; an unlimited key (`limit`
+// null) has no cap, so a present spend snapshot means full weight (ratio
+// capped at 1). Missing numbers degrade to `None` (no quota signal).
+pub(crate) fn openrouter_remaining_percent(key: &TokenPlanKeyUsage) -> Option<f64> {
+    let balance = key.openrouter_balance.as_ref()?;
+    match balance.limit {
+        Some(limit) if limit.is_finite() && limit > 0.0 => {
+            let remaining = balance.limit_remaining?;
+            Some((remaining / limit * 100.0).clamp(0.0, 100.0))
+        }
+        // A zero (or negative) cap cannot spend: fully exhausted.
+        Some(limit) if limit.is_finite() => Some(0.0),
+        // Unlimited (or non-finite) cap: full weight when the key shows a
+        // spend snapshot, otherwise no signal.
+        _ => key.openrouter_spend.as_ref().map(|_| 100.0),
+    }
 }
 
 fn effective_remaining_percent(usage: &TokenPlanModelUsage) -> Option<f64> {
@@ -303,5 +329,62 @@ mod tests {
         };
         assert_eq!(reserved_percent(&model, 100), 10.0);
         assert_eq!(reserved_percent(&model, 2_000), 100.0);
+    }
+
+    fn openrouter_key(
+        limit: Option<f64>,
+        limit_remaining: Option<f64>,
+        spend: bool,
+    ) -> TokenPlanKeyUsage {
+        use crate::worker_admin_types::{OpenRouterBalance, OpenRouterSpend};
+        TokenPlanKeyUsage {
+            key_id: Uuid::nil(),
+            key_label: "k".into(),
+            ok: true,
+            status: Some(200),
+            error_code: None,
+            error_message: None,
+            model_remains: Vec::new(),
+            balances: None,
+            five_hour: None,
+            weekly: None,
+            opencodego_rolling: None,
+            opencodego_weekly: None,
+            opencodego_monthly: None,
+            openrouter_balance: Some(OpenRouterBalance {
+                limit,
+                limit_remaining,
+                limit_reset: None,
+                is_free_tier: false,
+                total_credits: None,
+                total_usage: None,
+            }),
+            openrouter_spend: spend.then_some(OpenRouterSpend {
+                usage: 1.0,
+                daily: 0.5,
+                weekly: 0.75,
+                monthly: 1.0,
+            }),
+        }
+    }
+
+    #[test]
+    fn openrouter_remaining_shares_limit_or_falls_back_to_spend() {
+        let pct = |limit, remaining, spend| {
+            openrouter_remaining_percent(&openrouter_key(limit, remaining, spend))
+        };
+        assert_eq!(pct(Some(100.0), Some(74.5), true), Some(74.5));
+        // Over-full remaining clamps at 100; zero caps are exhausted.
+        assert_eq!(pct(Some(100.0), Some(120.0), true), Some(100.0));
+        assert_eq!(pct(Some(100.0), Some(0.0), true), Some(0.0));
+        assert_eq!(pct(Some(0.0), Some(0.0), true), Some(0.0));
+        // Unlimited keys carry full weight once a spend snapshot exists.
+        assert_eq!(pct(None, None, true), Some(100.0));
+        // Missing numbers degrade to no quota signal.
+        assert_eq!(pct(Some(100.0), None, true), None);
+        assert_eq!(pct(None, None, false), None);
+        let mut key = openrouter_key(None, None, true);
+        key.openrouter_balance = None;
+        assert_eq!(openrouter_remaining_percent(&key), None);
     }
 }
