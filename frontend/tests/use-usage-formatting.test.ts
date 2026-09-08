@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import type { RequestRecordTiming } from '../src/models/request-record-formatting'
 import {
   formatRequestRecordOutputTokensPerSecond,
+  formatRequestRecordPercent,
   hasOutputRate,
 } from '../src/composables/useUsageFormatting'
 
@@ -89,6 +90,14 @@ test('output rate shows dash for incomplete data', () => {
       record({ request_category: 'mcp', output_tokens: 250, duration_ms: 100 }),
     ),
   ).toBe('-')
+})
+
+test('cache rate renders one decimal place, matching the trend tooltip', () => {
+  // P1 (issue #228): fold-row cache_rate ~0.997 must not round up to 100%.
+  expect(formatRequestRecordPercent(0.997)).toBe('99.7%')
+  expect(formatRequestRecordPercent(0.9858144214571402)).toBe('98.6%')
+  expect(formatRequestRecordPercent(0.423)).toBe('42.3%')
+  expect(formatRequestRecordPercent(null)).toBe('-')
 })
 
 function avgOutputTokensPerSecond(

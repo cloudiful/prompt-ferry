@@ -65,6 +65,10 @@ WITH normalized AS (
                    + normalized_cache_write_tokens
                    + output_tokens
            ), 0)::BIGINT AS total_tokens,
+           -- P1 (issue #226): aggregated `cache_rate` denominator is
+           -- SUM(normalized_full_input_tokens) computed row-by-row (fold-aware),
+           -- not the raw `input_tokens` SUM which double-counts the cache.
+           COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens,
            AVG(
                CASE
                    WHEN request_state = 'completed'
@@ -146,8 +150,9 @@ SELECT label AS "label!",
        cache_read_tokens AS "cache_read_tokens!",
        cache_write_tokens AS "cache_write_tokens!",
        output_tokens AS "output_tokens!",
-        grouped.total_tokens AS "total_tokens!",
-        grouped.avg_output_tokens_per_second AS avg_output_tokens_per_second,
+       grouped.total_tokens AS "total_tokens!",
+       grouped.full_input_tokens AS "full_input_tokens!",
+       grouped.avg_output_tokens_per_second AS avg_output_tokens_per_second,
        COALESCE(upstream_agg.upstream_count, 0)::BIGINT AS "upstream_count!",
        upstream_agg.upstream_breakdown AS upstream_breakdown
 FROM grouped

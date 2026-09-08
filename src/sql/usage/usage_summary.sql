@@ -1,4 +1,7 @@
 WITH normalized AS (
+    -- TODO(#228): cache_rate here still uses the legacy GREATEST(input, cache_sum)
+    -- denominator. Sync to the sum+CASE guard (usage_events_page.sql:29-69) once this
+    -- consumer has regression coverage; not force-synced this phase.
     SELECT
         request_state,
         duration_ms,

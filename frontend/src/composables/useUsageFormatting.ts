@@ -72,7 +72,7 @@ export function formatTokensPerSecondValue(value?: number | null): string {
 
 export function formatRequestRecordPercent(value?: number | null): string {
   if (value == null) return '-'
-  return `${Math.round(value * 100)}%`
+  return `${Math.round(value * 1000) / 10}%`
 }
 
 export function formatRequestRecordMs(value?: number | null): string {

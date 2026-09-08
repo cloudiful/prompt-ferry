@@ -6,6 +6,9 @@ buckets AS (
     SELECT generate_series(start_at, end_at, INTERVAL '1 minute') AS bucket_at FROM bounds
 ),
 normalized AS (
+    -- TODO(#228): cache_rate here still uses the legacy GREATEST(input, cache_sum)
+    -- denominator. Sync to the sum+CASE guard (usage_events_page.sql:29-69) once this
+    -- consumer has regression coverage; not force-synced this phase.
     SELECT date_trunc('minute', rr.created_at) AS bucket_at,
            rr.request_state,
            rr.duration_ms,

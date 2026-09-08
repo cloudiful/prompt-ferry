@@ -33,20 +33,42 @@ SELECT
     ue.cache_read_tokens,
     ue.cache_write_tokens,
     CASE
-        WHEN GREATEST(
-            COALESCE(ue.input_tokens, 0),
-            GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)
-                + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0),
-            0
+        WHEN (
+            CASE
+                WHEN COALESCE(COALESCE(ue.cache_read_tokens, ue.cached_tokens), 0) > 0
+                    AND COALESCE(ue.total_tokens, 0) >= COALESCE(ue.output_tokens, 0)
+                    AND COALESCE(ue.input_tokens, 0)
+                        >= COALESCE(ue.total_tokens, 0) - COALESCE(ue.output_tokens, 0)
+                THEN GREATEST(
+                    COALESCE(ue.input_tokens, 0),
+                    GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)
+                        + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0),
+                    0
+                )
+                ELSE GREATEST(COALESCE(ue.input_tokens, 0), 0)
+                    + GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)
+                    + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0)
+            END
         ) > 0
         THEN LEAST(
             1.0::DOUBLE PRECISION,
             GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)::DOUBLE PRECISION
-            / GREATEST(
-                COALESCE(ue.input_tokens, 0),
-                GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)
-                    + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0),
-                0
+            / (
+                CASE
+                    WHEN COALESCE(COALESCE(ue.cache_read_tokens, ue.cached_tokens), 0) > 0
+                        AND COALESCE(ue.total_tokens, 0) >= COALESCE(ue.output_tokens, 0)
+                        AND COALESCE(ue.input_tokens, 0)
+                            >= COALESCE(ue.total_tokens, 0) - COALESCE(ue.output_tokens, 0)
+                    THEN GREATEST(
+                        COALESCE(ue.input_tokens, 0),
+                        GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)
+                            + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0),
+                        0
+                    )
+                    ELSE GREATEST(COALESCE(ue.input_tokens, 0), 0)
+                        + GREATEST(COALESCE(ue.cache_read_tokens, ue.cached_tokens, 0), 0)
+                        + GREATEST(COALESCE(ue.cache_write_tokens, 0), 0)
+                END
             )::DOUBLE PRECISION
         )
         ELSE NULL

@@ -52,12 +52,17 @@ SELECT COUNT(*)::BIGINT AS "request_count!",
        COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS "cache_read_tokens!",
        COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS "cache_write_tokens!",
        COALESCE(SUM(output_tokens), 0)::BIGINT AS "output_tokens!",
-       COALESCE(SUM(
-           normalized_input_tokens
-               + normalized_cache_read_tokens
-               + normalized_cache_write_tokens
-               + COALESCE(output_tokens, 0)
-       ), 0)::BIGINT AS "total_tokens!",
+        COALESCE(SUM(
+            normalized_input_tokens
+                + normalized_cache_read_tokens
+                + normalized_cache_write_tokens
+                + COALESCE(output_tokens, 0)
+        ), 0)::BIGINT AS "total_tokens!",
+        -- P1 (issue #226): the aggregated `cache_rate` denominator must be
+        -- SUM(normalized_full_input_tokens) — computed row-by-row in the CTE
+        -- so still-folded rows use the `max` fallback — not the raw
+        -- `input_tokens` SUM, which double-counts the cache (49% vs 98.58%).
+        COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS "full_input_tokens!",
        AVG(
            CASE
                WHEN request_category = 'ai'

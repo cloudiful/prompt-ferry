@@ -31,6 +31,11 @@ pub(super) struct MetricsRow {
     pub(super) cache_write_tokens: i64,
     pub(super) output_tokens: i64,
     pub(super) total_tokens: i64,
+    /// Per-row-summed full-input denominator `ordinary+read+write` (or the
+    /// still-folded `max` fallback), carried through from `metrics.sql` so the
+    /// overview `cache_rate` is `SUM(cache_read) / SUM(full_input)` and never
+    /// re-derives the fold guard on the aggregate SUM.
+    pub(super) full_input_tokens: i64,
     pub(super) avg_output_tokens_per_second: Option<f64>,
     pub(super) p95_total_ms: Option<f64>,
     pub(super) p95_first_token_ms: Option<f64>,
@@ -86,6 +91,9 @@ struct AiBreakdownRow {
     cache_write_tokens: i64,
     output_tokens: i64,
     total_tokens: i64,
+    /// Per-row-summed full-input denominator carried from `breakdown_ai_model.sql`
+    /// so the breakdown `cache_rate` is `SUM(cache_read) / SUM(full_input)`.
+    full_input_tokens: i64,
     avg_output_tokens_per_second: Option<f64>,
     upstream_count: i64,
     upstream_breakdown: Option<serde_json::Value>,
@@ -184,6 +192,9 @@ pub async fn query_trend(
                 row.total_tokens,
                 row.cache_hit_count,
                 row.request_count,
+                row.input_tokens
+                    .saturating_add(row.cache_read_tokens)
+                    .saturating_add(row.cache_write_tokens),
             ),
         })
         .collect())
@@ -232,6 +243,7 @@ pub async fn query_breakdown(
                             row.total_tokens,
                             row.cache_hit_count,
                             row.request_count,
+                            row.full_input_tokens,
                         ),
                         model: row.model,
                         mcp_server_id: row.mcp_server_id,
@@ -273,6 +285,9 @@ pub async fn query_breakdown(
                         row.total_tokens,
                         row.cache_hit_count,
                         row.request_count,
+                        row.input_tokens
+                            .saturating_add(row.cache_read_tokens)
+                            .saturating_add(row.cache_write_tokens),
                     ),
                     model: row.model,
                     mcp_server_id: row.mcp_server_id,

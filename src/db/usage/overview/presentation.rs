@@ -20,10 +20,16 @@ pub(super) fn summary_from_metrics(row: MetricsRow) -> RequestRecordOverviewSumm
             row.total_tokens,
             row.cache_hit_count,
             row.request_count,
+            row.full_input_tokens,
         ),
     }
 }
 
+/// Build the aggregate token-usage presentation from a metrics row. The
+/// `full_input_tokens` is the fold-aware denominator (`SUM(normalized_full_input_tokens)`)
+/// carried through from SQL, used only for `cache_rate`; it cannot be derived here
+/// because still-folded rows must fall back to `max(input, read+write)` per-row.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn token_usage(
     input_tokens: i64,
     cache_read_tokens: i64,
@@ -32,6 +38,7 @@ pub(super) fn token_usage(
     total_tokens: i64,
     cache_hit_count: i64,
     request_count: i64,
+    full_input_tokens: i64,
 ) -> RequestRecordOverviewTokenUsage {
     RequestRecordOverviewTokenUsage {
         input_tokens,
@@ -39,13 +46,7 @@ pub(super) fn token_usage(
         cache_write_tokens,
         output_tokens,
         total_tokens,
-        cache_rate: overview_cache_rate(
-            input_tokens,
-            cache_read_tokens,
-            cache_write_tokens,
-            output_tokens,
-            total_tokens,
-        ),
+        cache_rate: overview_cache_rate(full_input_tokens, cache_read_tokens),
         cache_hit_rate: ratio_option(cache_hit_count, request_count),
     }
 }
@@ -77,43 +78,22 @@ pub(super) fn opt_error_rate(error_count: Option<i64>, request_count: i64) -> Op
     error_count.map(|count| error_rate(count, request_count))
 }
 
-/// Compute the overview cache-read rate from aggregate token sums.
+/// Compute the overview cache-read rate from the per-row `full_input` sum.
 ///
-/// P2 (issue #205): the denominator is the full input
-/// `ordinary + read + write` — 真 0.49, not the old
-/// `max(input, read+write)` which dropped the ordinary part and reported
-/// 1.0 for ordinary≈cache rows (e.g. 9728/18144≈0.536 报 1.0). A still-folded
-/// `input` already contains the cache, so a `CASE` guard (same as
-/// 0072/0073 `cache>0 AND total>=output AND input>=total-output`) falls back
-/// to `max(input, read+write)` to avoid the ≈1.9x double-count. Clamped to
-/// `[0, 1]`. Returns `None` when the denominator is non-positive, matching
-/// the SQL `NULL` semantics. Non-negative clamping is applied defensively.
-pub(super) fn overview_cache_rate(
-    input_tokens: i64,
-    cache_read_tokens: i64,
-    cache_write_tokens: i64,
-    output_tokens: i64,
-    total_tokens: i64,
-) -> Option<f64> {
-    let ordinary = input_tokens.max(0);
+/// P1 (issue #226): the aggregate denominator must be `SUM(normalized_full_input_tokens)`,
+/// not a guard re-derived on the raw `input_tokens` SUM. The per-row `CASE` guard
+/// (0072/0073 `cache>0 AND total>=output AND input>=total-output`) is applied row-by-row
+/// in SQL so still-folded rows fall back to `max(input, read+write)`; re-deriving that
+/// guard on the aggregate SUM was always false and double-counted (49% instead of 98.58%).
+/// Here we only divide `cache_read / full_input`, clamped to `[0, 1]`. Returns `None`
+/// when the denominator is non-positive, matching the SQL `NULL` semantics.
+pub(super) fn overview_cache_rate(full_input_tokens: i64, cache_read_tokens: i64) -> Option<f64> {
+    let full_input = full_input_tokens.max(0);
     let read = cache_read_tokens.max(0);
-    let write = cache_write_tokens.max(0);
-    let output = output_tokens.max(0);
-    let total = total_tokens.max(0);
-    let cache_sum = read.saturating_add(write);
-    let sum = ordinary.saturating_add(cache_sum);
-    let is_still_folded =
-        cache_sum > 0 && total >= output && ordinary >= total.saturating_sub(output);
-    let denominator = if is_still_folded {
-        ordinary.max(cache_sum)
-    } else {
-        sum
-    };
-    if denominator <= 0 {
+    if full_input <= 0 {
         None
     } else {
-        let raw = read as f64 / denominator as f64;
-        Some(raw.clamp(0.0, 1.0))
+        Some((read as f64 / full_input as f64).clamp(0.0, 1.0))
     }
 }
 
@@ -142,7 +122,8 @@ mod tests {
     #[test]
     fn cache_rate_uses_normalized_input_and_stays_bounded() {
         // Old row shape: ordinary=0, cache_read=80_000, write=0, output=64.
-        let usage = token_usage(0, 80_000, 0, 64, 80_064, 1, 1);
+        // full_input = ordinary + read + write = 0 + 80_000 + 0 = 80_000.
+        let usage = token_usage(0, 80_000, 0, 64, 80_064, 1, 1, 80_000);
 
         assert_eq!(usage.cache_rate, Some(1.0));
         assert_eq!(usage.cache_hit_rate, Some(1.0));
@@ -150,7 +131,7 @@ mod tests {
 
     #[test]
     fn cache_rate_is_not_available_without_input_tokens() {
-        let usage = token_usage(0, 0, 0, 64, 64, 0, 1);
+        let usage = token_usage(0, 0, 0, 64, 64, 0, 1, 0);
 
         assert_eq!(usage.cache_rate, None);
         assert_eq!(usage.cache_hit_rate, Some(0.0));
@@ -158,19 +139,19 @@ mod tests {
 
     #[test]
     fn overview_cache_rate_caps_legacy_rows_at_full_when_input_is_ordinary_only() {
-        // Mirrors the historic bug: ordinary (0 after clamp) + read (80_000)
-        // drives the rate to the bounded 1.0 cap.
-        let rate = overview_cache_rate(0, 82_793, 0, 64, 82_857);
+        // Legacy ordinary-only row (0 after clamp + 82_793 read): NOT still-folded
+        // (0 >= 82_793 total-output is false), so full_input = ordinary + read = 82_793
+        // and the rate caps at 1.0.
+        let rate = overview_cache_rate(82_793, 82_793);
 
         assert_eq!(rate, Some(1.0));
     }
 
     #[test]
     fn overview_cache_rate_uses_full_canonical_input_after_phase_3_backfill() {
-        // P2 (issue #205): denominator is `ordinary+read+write` — 真 0.49 —
-        // so 176+82793+7=82976 picks the sum, not `max(176, 82800)=82800`.
-        // Still-folded rows fall back to `max` via the total guard.
-        let rate = overview_cache_rate(176, 82_793, 7, 42, 83_018);
+        // P2 (issue #205): denominator is `ordinary+read+write` — 真 0.49 — so
+        // 176+82793+7=82976. Still-folded rows fall back to `max` via the guard.
+        let rate = overview_cache_rate(82_976, 82_793);
 
         let value = rate.expect("rate must be present when denominator is positive");
         assert!((value - (82_793.0 / 82_976.0)).abs() < 1e-9);
@@ -179,25 +160,24 @@ mod tests {
 
     #[test]
     fn overview_cache_rate_clamps_negative_meters_without_panicking() {
-        // Defensive: negative meters from a future schema must not invert the
-        // sign; clamping should yield a bounded non-negative ratio.
-        let rate = overview_cache_rate(120, -30, -7, 20, 140);
+        // Defensive: negative cache_read from a future schema must clamp to 0 and
+        // not invert the sign, yielding a bounded non-negative ratio.
+        let rate = overview_cache_rate(120, -30);
 
         assert_eq!(rate, Some(0.0));
     }
 
     #[test]
     fn overview_cache_rate_returns_none_when_denominator_is_zero() {
-        assert_eq!(overview_cache_rate(0, 0, 0, 0, 0), None);
-        assert_eq!(overview_cache_rate(-5, 0, 0, 0, 0), None);
+        assert_eq!(overview_cache_rate(0, 0), None);
+        assert_eq!(overview_cache_rate(-5, 0), None);
     }
 
     #[test]
     fn overview_cache_rate_matches_old_behavior_for_new_openai_rows() {
-        // P2 (issue #205): OpenAI Responses ordinary=83, read=30, write=7,
-        // output=20, total=140 uses `83+37=120` — 与 usage_events_page
-        // `LEAST(1.0, read/sum)` 一致 — so rate is 30/120, not 30/83.
-        let rate = overview_cache_rate(83, 30, 7, 20, 140);
+        // P2 (issue #205): OpenAI Responses ordinary=83, read=30, write=7 uses
+        // full_input = 83+37 = 120, so rate is 30/120, not 30/83.
+        let rate = overview_cache_rate(120, 30);
 
         let value = rate.expect("rate must be present");
         assert!((value - (30.0 / 120.0)).abs() < 1e-9);
@@ -205,10 +185,10 @@ mod tests {
 
     #[test]
     fn overview_cache_rate_falls_back_to_max_for_still_folded_rows() {
-        // Still-folded Anthropic: input already holds the cache
-        // (82976 == 83018-42), so the CASE guard picks `max`, not the
-        // double-counted sum 82976+82800.
-        let rate = overview_cache_rate(82_976, 82_793, 7, 42, 83_018);
+        // Still-folded Anthropic: input already holds the cache (82976 == 83018-42),
+        // so full_input = max(82976, 82793+7=82800) = 82976, not the double-counted
+        // 82976+82800.
+        let rate = overview_cache_rate(82_976, 82_793);
 
         let value = rate.expect("rate must be present");
         assert!((value - (82_793.0 / 82_976.0)).abs() < 1e-9);
@@ -217,11 +197,24 @@ mod tests {
     #[test]
     fn overview_cache_rate_reports_half_for_balanced_ordinary_rows() {
         // P1 真 0.49 case: ordinary≈cache (8416 vs 9728) must report ~0.53,
-        // not the old `max` 1.0.
-        let rate = overview_cache_rate(8_416, 9_728, 0, 1_895, 20_039);
+        // not the old `max` 1.0. full_input = 8416+9728 = 18144.
+        let rate = overview_cache_rate(18_144, 9_728);
 
         let value = rate.expect("rate must be present");
         assert!((value - (9_728.0 / 18_144.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn overview_cache_rate_aggregate_sum_matches_fixture_gold() {
+        // P1 (issue #226): aggregate SUM(full_input) over the still-folded fixture
+        // yields ≈ 0.9858 (fixture GOLD 0.985037 ± 0.005), not the 0.49 double-count.
+        let full_input = 102_608_716;
+        let cache_read = 101_153_152;
+        let rate = overview_cache_rate(full_input, cache_read);
+
+        let value = rate.expect("rate must be present");
+        assert!((value - (101_153_152.0 / 102_608_716.0)).abs() < 1e-9);
+        assert!((value - 0.985).abs() < 0.005);
     }
 
     fn fixture_metrics_row(avg_output_tokens_per_second: Option<f64>) -> MetricsRow {
@@ -236,6 +229,7 @@ mod tests {
             cache_write_tokens: 0,
             output_tokens: 200,
             total_tokens: 300,
+            full_input_tokens: 100,
             avg_output_tokens_per_second,
             p95_total_ms: Some(1_500.0),
             p95_first_token_ms: Some(120.0),
