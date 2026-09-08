@@ -1,0 +1,12 @@
+-- Reverse 0075_openrouter_provider_9_8_unfold (best-effort, 9/8-only).
+--
+-- The up migration rewrites only 2026-09-08 rows (`created_at >= DATE
+-- '2026-09-08' AND created_at < DATE '2026-09-09'`): input unfold to the
+-- ordinary value plus total closed-loop rewrite. The ordinary value is not
+-- recoverable in-place (original folded input == ordinary + cache, same
+-- irreversibility as 0072/0073), and the prior halved total is not
+-- recoverable without a backup. A reverse UPDATE would therefore corrupt
+-- rows or touch dates outside 9/8, so the down migration is an explicit
+-- irreversible no-op scoped to 9/8 (best-effort): restore from a backup or a
+-- pre-migration snapshot if the 9/8 originals are required.
+SELECT 1;

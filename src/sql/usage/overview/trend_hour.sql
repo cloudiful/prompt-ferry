@@ -11,18 +11,28 @@ WITH normalized AS (
            GREATEST(COALESCE(rr.input_tokens, 0), 0)::BIGINT AS normalized_input_tokens,
            COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,
            COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,
-           -- P2 (issue #200): full-input denominator `max(input, read+write)`,
-           -- 仿 usage_buckets_day:33-44 + usage_events_page LEAST, 仅供分母参考
-           -- （presentation用max）；total保持基线闭环
-           -- ordinary+read+write+output，不用max以免少min(ordinary,cache)。
-           -- A still-folded input already contains the cache, so the presentation
-           -- `max` denominator avoids the ≈1.9x double-count (47-50%).
-           GREATEST(
-               COALESCE(rr.input_tokens, 0),
-               GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                   + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-               0
-           )::BIGINT AS normalized_full_input_tokens,
+            -- P2 (issue #205): full-input denominator `ordinary+read+write`,
+            -- 真 0.49 (e.g. 9728/18144) vs old `max` 1.0 which dropped the
+            -- ordinary part. Still-folded rows (0072/0073 guard:
+            -- cache>0 AND total>=output AND input>=total-output, input already
+            -- holds the cache) fall back to `max(input, read+write)` to avoid
+            -- the ≈1.9x double-count; total keeps closed-loop
+            -- ordinary+read+write+output.
+            CASE
+                WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
+                    AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
+                    AND COALESCE(rr.input_tokens, 0)
+                        >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
+                THEN GREATEST(
+                    COALESCE(rr.input_tokens, 0),
+                    GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
+                        + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
+                    0
+                )
+                ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
+                    + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
+                    + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
+            END::BIGINT AS normalized_full_input_tokens,
            COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens
     FROM request_records rr
     LEFT JOIN users u ON u.user_id = rr.user_id

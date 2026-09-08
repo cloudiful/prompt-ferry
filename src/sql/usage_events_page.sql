@@ -24,21 +24,45 @@ SELECT
     rr.cached_tokens,
     rr.cache_read_tokens,
     rr.cache_write_tokens,
+    -- P2 (issue #205): denominator `ordinary+read+write` (真 0.49) with
+    -- still-folded `max` fallback (same guard as overview/SQL 0072/0073).
     CASE
-        WHEN GREATEST(
-            COALESCE(rr.input_tokens, 0),
-            GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-            0
+        WHEN (
+            CASE
+                WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
+                    AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
+                    AND COALESCE(rr.input_tokens, 0)
+                        >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
+                THEN GREATEST(
+                    COALESCE(rr.input_tokens, 0),
+                    GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
+                        + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
+                    0
+                )
+                ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
+                    + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
+                    + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
+            END
         ) > 0
         THEN LEAST(
             1.0::DOUBLE PRECISION,
             GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)::DOUBLE PRECISION
-            / GREATEST(
-                COALESCE(rr.input_tokens, 0),
-                GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
-                    + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-                0
+            / (
+                CASE
+                    WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
+                        AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
+                        AND COALESCE(rr.input_tokens, 0)
+                            >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
+                    THEN GREATEST(
+                        COALESCE(rr.input_tokens, 0),
+                        GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
+                            + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
+                        0
+                    )
+                    ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
+                        + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
+                        + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
+                END
             )::DOUBLE PRECISION
         )
         ELSE NULL
