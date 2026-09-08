@@ -62,8 +62,8 @@ pub fn extract_usage(value: &Value) -> Option<TokenUsage> {
     // block but still reports an explicit total that equals input+output, which
     // proves the input already includes the cache. Folding would double-count in
     // every one of these cases.
-    let has_details = usage.get("input_tokens_details").is_some()
-        || usage.get("prompt_tokens_details").is_some();
+    let has_details =
+        usage.get("input_tokens_details").is_some() || usage.get("prompt_tokens_details").is_some();
     let explicit_total_matches = usage
         .get("total_tokens")
         .and_then(Value::as_i64)

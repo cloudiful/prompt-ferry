@@ -20,13 +20,19 @@ use crate::worker_admin_types::TokenPlanKeyUsage;
 // defensively so the URL never doubles the segment.
 fn key_url(base: &str) -> String {
     let base = base.trim().trim_end_matches('/');
-    let base = base.strip_suffix("/v1").unwrap_or(base).trim_end_matches('/');
+    let base = base
+        .strip_suffix("/v1")
+        .unwrap_or(base)
+        .trim_end_matches('/');
     format!("{base}/v1/key")
 }
 
 fn credits_url(base: &str) -> String {
     let base = base.trim().trim_end_matches('/');
-    let base = base.strip_suffix("/v1").unwrap_or(base).trim_end_matches('/');
+    let base = base
+        .strip_suffix("/v1")
+        .unwrap_or(base)
+        .trim_end_matches('/');
     format!("{base}/v1/credits")
 }
 
@@ -82,14 +88,12 @@ pub(crate) async fn fetch_openrouter_key_usage(
     let mut parsed = match parse_openrouter_key(&body) {
         Some(parsed) => parsed,
         None => {
-            let message = openrouter_error_message(&body).unwrap_or_else(|| {
-                "OpenRouter returned an unrecognized key response".to_string()
-            });
+            let message = openrouter_error_message(&body)
+                .unwrap_or_else(|| "OpenRouter returned an unrecognized key response".to_string());
             return failed_key(key_id, key_label, Some(status), None, message);
         }
     };
-    if let Ok((credits_status, credits_body)) =
-        get_json(&client, credits_url(&base), &secret).await
+    if let Ok((credits_status, credits_body)) = get_json(&client, credits_url(&base), &secret).await
         && (200..300).contains(&credits_status)
         && let Some((total_credits, total_usage)) = parse_openrouter_credits(&credits_body)
     {

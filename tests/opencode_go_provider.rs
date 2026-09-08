@@ -31,7 +31,8 @@ fn provider_wire_values_match_minimax_convention() {
     assert_eq!(EndpointProvider::Generic.as_str(), "generic");
     assert_eq!(EndpointProvider::default(), EndpointProvider::Generic);
     // Serde uses snake_case, matching the admin API contract.
-    let serialized = serde_json::to_value(EndpointProvider::OpencodeGo).expect("serialize provider");
+    let serialized =
+        serde_json::to_value(EndpointProvider::OpencodeGo).expect("serialize provider");
     assert_eq!(serialized, json!("opencode_go"));
     let deserialized: EndpointProvider =
         serde_json::from_value(json!("opencode_go")).expect("deserialize provider");
@@ -58,10 +59,10 @@ fn standalone_provider_round_trips_opencode_go() {
         deserialized,
         standalone_config::EndpointProvider::OpencodeGo
     );
-    assert!(serde_json::from_value::<standalone_config::EndpointProvider>(
-        json!("legacy-unknown")
-    )
-    .is_err());
+    assert!(
+        serde_json::from_value::<standalone_config::EndpointProvider>(json!("legacy-unknown"))
+            .is_err()
+    );
 }
 
 fn opencode_go_window(percent: f64) -> OpencodeGoWindowUsage {
@@ -74,11 +75,7 @@ fn opencode_go_window(percent: f64) -> OpencodeGoWindowUsage {
 
 #[test]
 fn key_usage_serde_omits_absent_opencode_go_sections() {
-    fn key(
-        rolling: Option<f64>,
-        weekly: Option<f64>,
-        monthly: Option<f64>,
-    ) -> TokenPlanKeyUsage {
+    fn key(rolling: Option<f64>, weekly: Option<f64>, monthly: Option<f64>) -> TokenPlanKeyUsage {
         TokenPlanKeyUsage {
             key_id: Uuid::nil(),
             key_label: "k".to_string(),
@@ -103,8 +100,8 @@ fn key_usage_serde_omits_absent_opencode_go_sections() {
     assert!(absent.get("opencodego_weekly").is_none());
     assert!(absent.get("opencodego_monthly").is_none());
     // A key with all three percent windows serializes each under its field.
-    let present = serde_json::to_value(&key(Some(12.0), Some(34.0), Some(56.0)))
-        .expect("serialize key");
+    let present =
+        serde_json::to_value(&key(Some(12.0), Some(34.0), Some(56.0))).expect("serialize key");
     assert_eq!(present["opencodego_rolling"]["percent"], json!(12.0));
     assert_eq!(present["opencodego_weekly"]["percent"], json!(34.0));
     assert_eq!(present["opencodego_monthly"]["percent"], json!(56.0));

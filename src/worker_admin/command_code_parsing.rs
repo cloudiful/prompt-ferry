@@ -311,10 +311,15 @@ mod tests {
         assert_eq!(plan_monthly_credits(""), None);
         assert_eq!(plan_monthly_credits("custom"), None);
         let with_plan = json!({"data": {"planId": "goat", "status": "active"}});
-        assert_eq!(parse_subscription_plan(&with_plan), Some(Some("goat".into())));
+        assert_eq!(
+            parse_subscription_plan(&with_plan),
+            Some(Some("goat".into()))
+        );
         assert!(parse_subscription_plan(&json!({"data": {}})).is_none());
         assert!(parse_subscription_plan(&json!({})).is_none());
-        assert!(parse_summary_present(&json!({"totalCost": 1.0, "totalCount": 2})));
+        assert!(parse_summary_present(
+            &json!({"totalCost": 1.0, "totalCount": 2})
+        ));
         assert!(!parse_summary_present(&json!({"totalCost": 1.0})));
         assert!(!parse_summary_present(&json!([1])));
     }
@@ -337,12 +342,18 @@ mod tests {
         let (used, cap, reset) = parse_window_entry(&windows, "stringy").expect("window");
         assert_eq!((used, cap), (8.0, 16.0));
         assert!(reset.is_some());
-        assert_eq!(build_window_usage(120.0, 100.0, None).used_percent, Some(100.0));
+        assert_eq!(
+            build_window_usage(120.0, 100.0, None).used_percent,
+            Some(100.0)
+        );
         assert_eq!(
             build_window_usage(120.0, 100.0, None).remaining_percent,
             Some(0.0)
         );
-        assert_eq!(build_window_usage(-5.0, 100.0, None).used_percent, Some(0.0));
+        assert_eq!(
+            build_window_usage(-5.0, 100.0, None).used_percent,
+            Some(0.0)
+        );
         assert!(build_window_usage(1.0, 0.0, None).used_percent.is_none());
     }
 

@@ -188,10 +188,7 @@ mod tests {
     #[test]
     fn credits_shape_parses_totals_and_missing_degrades() {
         let body = json!({"data": {"total_credits": 100.5, "total_usage": 25.75}});
-        assert_eq!(
-            parse_openrouter_credits(&body),
-            Some((100.5, 25.75))
-        );
+        assert_eq!(parse_openrouter_credits(&body), Some((100.5, 25.75)));
         assert!(parse_openrouter_credits(&json!({"data": {}})).is_none());
         assert!(parse_openrouter_credits(&json!({"data": {"total_credits": 1}})).is_none());
         assert!(
@@ -204,7 +201,10 @@ mod tests {
     fn business_errors_distinguish_status_codes() {
         let body = json!({"error": {"code": 401, "message": "Missing Authentication header"}});
         assert_eq!(
-            openrouter_http_business_error(401, &body).unwrap().0.as_deref(),
+            openrouter_http_business_error(401, &body)
+                .unwrap()
+                .0
+                .as_deref(),
             Some("401")
         );
         let (code, message) = openrouter_http_business_error(402, &body).expect("402");
@@ -222,8 +222,7 @@ mod tests {
         let (code, message) = openrouter_http_business_error(429, &limited).expect("429");
         assert_eq!(code.as_deref(), Some("429"));
         assert_eq!(message, "Rate limit exceeded");
-        let (code, message) =
-            openrouter_http_business_error(429, &json!({})).expect("429 default");
+        let (code, message) = openrouter_http_business_error(429, &json!({})).expect("429 default");
         assert_eq!(code.as_deref(), Some("429"));
         assert!(message.contains("retry"));
         assert!(openrouter_http_business_error(500, &body).is_none());
@@ -270,7 +269,8 @@ mod tests {
     fn credits_stringy_totals_coerce_and_limit_reset_numeric_coerces() {
         let credits = json!({"data": {"total_credits": "100.5", "total_usage": "25"}});
         assert_eq!(parse_openrouter_credits(&credits), Some((100.5, 25.0)));
-        let key = json!({"data": {"limit": 10, "limit_remaining": 4, "limit_reset": 7, "usage": 1}});
+        let key =
+            json!({"data": {"limit": 10, "limit_remaining": 4, "limit_reset": 7, "usage": 1}});
         let parsed = parse_openrouter_key(&key).expect("key");
         assert_eq!(parsed.balance.limit_reset.as_deref(), Some("7"));
     }

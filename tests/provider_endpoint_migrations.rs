@@ -199,10 +199,11 @@ async fn migrate_0070_down_folds_command_code_back_to_generic() -> anyhow::Resul
     .execute(&schema.pool)
     .await?;
 
-    let row =
-        sqlx::query("SELECT provider, provider_region FROM provider_endpoints WHERE name = 'cc-row'")
-            .fetch_one(&schema.pool)
-            .await?;
+    let row = sqlx::query(
+        "SELECT provider, provider_region FROM provider_endpoints WHERE name = 'cc-row'",
+    )
+    .fetch_one(&schema.pool)
+    .await?;
     assert_eq!(row.try_get::<String, _>("provider")?, "generic");
     assert!(
         row.try_get::<Option<String>, _>("provider_region")?
@@ -273,7 +274,8 @@ async fn insert_standalone_endpoint(
 // Standalone 0014 fresh path: a new store migrates to schema 14 with the
 // provider CHECK widened to command_code, opencode_go and openrouter.
 #[tokio::test]
-async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_openrouter() -> anyhow::Result<()> {
+async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_openrouter()
+-> anyhow::Result<()> {
     let path = standalone_temp_path("fresh");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
@@ -318,19 +320,71 @@ async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_o
 async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -> anyhow::Result<()>
 {
     const APPLIED: [(i64, &str, &str); 13] = [
-        (1, "0001_initial", include_str!("../migrations/standalone/0001_initial.sql")),
-        (2, "0002_storage_contract", include_str!("../migrations/standalone/0002_storage_contract.sql")),
-        (3, "0003_user_auth_compatibility", include_str!("../migrations/standalone/0003_user_auth_compatibility.sql")),
-        (4, "0004_coordinator_state", include_str!("../migrations/standalone/0004_coordinator_state.sql")),
-        (5, "0005_mcp_configuration", include_str!("../migrations/standalone/0005_mcp_configuration.sql")),
-        (6, "0006_request_ledger", include_str!("../migrations/standalone/0006_request_ledger.sql")),
-        (7, "0007_request_metadata", include_str!("../migrations/standalone/0007_request_metadata.sql")),
-        (8, "0008_replay_snapshots", include_str!("../migrations/standalone/0008_replay_snapshots.sql")),
-        (9, "0009_request_leases", include_str!("../migrations/standalone/0009_request_leases.sql")),
-        (10, "0010_mcp_basic_auth", include_str!("../migrations/standalone/0010_mcp_basic_auth.sql")),
-        (11, "0011_minimax_service_tier", include_str!("../migrations/standalone/0011_minimax_service_tier.sql")),
-        (12, "0012_command_code_provider", include_str!("../migrations/standalone/0012_command_code_provider.sql")),
-        (13, "0013_opencode_go_provider", include_str!("../migrations/standalone/0013_opencode_go_provider.sql")),
+        (
+            1,
+            "0001_initial",
+            include_str!("../migrations/standalone/0001_initial.sql"),
+        ),
+        (
+            2,
+            "0002_storage_contract",
+            include_str!("../migrations/standalone/0002_storage_contract.sql"),
+        ),
+        (
+            3,
+            "0003_user_auth_compatibility",
+            include_str!("../migrations/standalone/0003_user_auth_compatibility.sql"),
+        ),
+        (
+            4,
+            "0004_coordinator_state",
+            include_str!("../migrations/standalone/0004_coordinator_state.sql"),
+        ),
+        (
+            5,
+            "0005_mcp_configuration",
+            include_str!("../migrations/standalone/0005_mcp_configuration.sql"),
+        ),
+        (
+            6,
+            "0006_request_ledger",
+            include_str!("../migrations/standalone/0006_request_ledger.sql"),
+        ),
+        (
+            7,
+            "0007_request_metadata",
+            include_str!("../migrations/standalone/0007_request_metadata.sql"),
+        ),
+        (
+            8,
+            "0008_replay_snapshots",
+            include_str!("../migrations/standalone/0008_replay_snapshots.sql"),
+        ),
+        (
+            9,
+            "0009_request_leases",
+            include_str!("../migrations/standalone/0009_request_leases.sql"),
+        ),
+        (
+            10,
+            "0010_mcp_basic_auth",
+            include_str!("../migrations/standalone/0010_mcp_basic_auth.sql"),
+        ),
+        (
+            11,
+            "0011_minimax_service_tier",
+            include_str!("../migrations/standalone/0011_minimax_service_tier.sql"),
+        ),
+        (
+            12,
+            "0012_command_code_provider",
+            include_str!("../migrations/standalone/0012_command_code_provider.sql"),
+        ),
+        (
+            13,
+            "0013_opencode_go_provider",
+            include_str!("../migrations/standalone/0013_opencode_go_provider.sql"),
+        ),
     ];
     let path = standalone_temp_path("upgrade");
     let pool = db::connect_sqlite(&path).await?;
@@ -378,24 +432,31 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
     assert_eq!(standalone_schema_version(&pool).await?, 14);
-    let preserved: i64 =
-        sqlx::query("SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'")
-            .fetch_one(&pool)
-            .await?
-            .try_get(0)?;
+    let preserved: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'",
+    )
+    .fetch_one(&pool)
+    .await?
+    .try_get(0)?;
     assert_eq!(preserved, 1, "v13 rows must survive the 0014 rebuild");
     let preserved_cc: i64 =
         sqlx::query("SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-cc'")
             .fetch_one(&pool)
             .await?
             .try_get(0)?;
-    assert_eq!(preserved_cc, 1, "command_code rows must survive the v13->v14 rebuild");
+    assert_eq!(
+        preserved_cc, 1,
+        "command_code rows must survive the v13->v14 rebuild"
+    );
     let preserved_og: i64 =
         sqlx::query("SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-og'")
             .fetch_one(&pool)
             .await?
             .try_get(0)?;
-    assert_eq!(preserved_og, 1, "opencode_go rows must survive the v13->v14 rebuild");
+    assert_eq!(
+        preserved_og, 1,
+        "opencode_go rows must survive the v13->v14 rebuild"
+    );
     insert_standalone_endpoint(&pool, "cc-upgraded", "command_code", None).await?;
     insert_standalone_endpoint(&pool, "og-upgraded", "opencode_go", None).await?;
     insert_standalone_endpoint(&pool, "or-upgraded", "openrouter", None).await?;

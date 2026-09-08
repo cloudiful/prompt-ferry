@@ -206,7 +206,9 @@ fn command_code_key(
     }
 }
 
-fn command_code_usage(keys: &[(uuid::Uuid, &str, Option<f64>, Option<f64>)]) -> TokenPlanUsageResponse {
+fn command_code_usage(
+    keys: &[(uuid::Uuid, &str, Option<f64>, Option<f64>)],
+) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
         provider: db::EndpointProvider::CommandCode,
         provider_region: None,
@@ -227,11 +229,8 @@ pub(super) async fn bind_key(
     key_id: uuid::Uuid,
     fingerprint_secret: &str,
 ) {
-    let cache_key = ResponseAffinityStore::cache_key(
-        1,
-        rule_id,
-        &format!("conversation:{conversation_id}"),
-    );
+    let cache_key =
+        ResponseAffinityStore::cache_key(1, rule_id, &format!("conversation:{conversation_id}"));
     replay_cache
         .response_affinity()
         .get_or_create(

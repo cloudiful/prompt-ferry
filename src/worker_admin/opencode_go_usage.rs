@@ -39,7 +39,13 @@ pub(crate) async fn fetch_opencode_go_key_usage(
     let response = match response {
         Ok(response) => response,
         Err(error) => {
-            return failed_key(key_id, key_label, None, None, truncate_message(error.to_string()));
+            return failed_key(
+                key_id,
+                key_label,
+                None,
+                None,
+                truncate_message(error.to_string()),
+            );
         }
     };
     let status = response.status().as_u16();
@@ -114,7 +120,10 @@ mod tests {
 
     #[test]
     fn usage_url_appends_once_and_trims_trailing_slash() {
-        assert_eq!(usage_url("https://opencode.ai/zen/go/v1"), "https://opencode.ai/zen/go/v1/usage");
+        assert_eq!(
+            usage_url("https://opencode.ai/zen/go/v1"),
+            "https://opencode.ai/zen/go/v1/usage"
+        );
         assert_eq!(
             usage_url("https://opencode.ai/zen/go/v1/"),
             "https://opencode.ai/zen/go/v1/usage"

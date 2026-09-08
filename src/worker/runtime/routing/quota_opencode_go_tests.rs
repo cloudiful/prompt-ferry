@@ -101,7 +101,10 @@ fn opencode_go_route(endpoint_id: Uuid, keys: Vec<db::EndpointApiKey>) -> db::Ro
         user_id: 1,
         model_route_rule_id: None,
         base_url: "https://opencode.ai/zen/go/v1".to_string(),
-        api_key: keys.first().map(|key| key.api_key.clone()).unwrap_or_default(),
+        api_key: keys
+            .first()
+            .map(|key| key.api_key.clone())
+            .unwrap_or_default(),
         endpoint_key_id: None,
         endpoint_key_label: None,
         api_keys: keys,
@@ -133,7 +136,13 @@ async fn quota_key_lb_uses_tighter_opencode_go_window_and_single_arm() {
             opencode_go_usage_response(vec![
                 // Tightest remaining is 0% (rolling at 100% used): skipped
                 // even though weekly/monthly are far from exhausted.
-                opencode_go_key_usage(tight_key_id, "exhausted", Some(100.0), Some(25.0), Some(10.0)),
+                opencode_go_key_usage(
+                    tight_key_id,
+                    "exhausted",
+                    Some(100.0),
+                    Some(25.0),
+                    Some(10.0),
+                ),
                 // Single weekly arm still weights the key (20% remaining).
                 opencode_go_key_usage(single_arm_key_id, "available", None, Some(80.0), None),
             ]),
@@ -206,9 +215,13 @@ async fn quota_key_lb_still_routes_payg_opencode_go_key_without_windows() {
     cache
         .store_for_test(
             endpoint_id,
-            opencode_go_usage_response(vec![
-                opencode_go_key_usage(payg_key_id, "payg", None, None, None),
-            ]),
+            opencode_go_usage_response(vec![opencode_go_key_usage(
+                payg_key_id,
+                "payg",
+                None,
+                None,
+                None,
+            )]),
         )
         .await;
 

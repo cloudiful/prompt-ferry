@@ -347,13 +347,23 @@ mod tests {
             ("https://api.openai.com/v1/v1", "https://api.openai.com"),
             ("https://api.openai.com/v1/v1/", "https://api.openai.com"),
             ("  https://api.openai.com/v1  ", "https://api.openai.com"),
-            ("https://api.commandcode.ai/provider/v1", "https://api.commandcode.ai/provider"),
+            (
+                "https://api.commandcode.ai/provider/v1",
+                "https://api.commandcode.ai/provider",
+            ),
             ("https://openrouter.ai/api/v1", "https://openrouter.ai/api"),
-            ("https://api.commandcode.ai/provider", "https://api.commandcode.ai/provider"),
+            (
+                "https://api.commandcode.ai/provider",
+                "https://api.commandcode.ai/provider",
+            ),
             ("https://api.openai.com/V1", "https://api.openai.com/V1"),
             ("https://api.openai.com/v10", "https://api.openai.com/v10"),
         ] {
-            assert_eq!(normalize_endpoint_base_url(input), expected, "input {input:?}");
+            assert_eq!(
+                normalize_endpoint_base_url(input),
+                expected,
+                "input {input:?}"
+            );
         }
     }
 

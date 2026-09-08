@@ -195,17 +195,12 @@ mod tests {
     /// Replays the exact `route_prefixed` tools/call prefix steps verbatim:
     /// `pointer("/params/name")` -> `parse_prefixed_name` ->
     /// `tools_call_gate_error` (the same helper production calls).
-    fn gate_for_prefixed_request(
-        server: &McpServer,
-        request: &Value,
-        id: Value,
-    ) -> Option<Value> {
+    fn gate_for_prefixed_request(server: &McpServer, request: &Value, id: Value) -> Option<Value> {
         let name = request
             .pointer("/params/name")
             .and_then(Value::as_str)
             .expect("synthesized tools/call request must carry params.name");
-        let target =
-            parse_prefixed_name(name).expect("prefixed tool name must be server__tool");
+        let target = parse_prefixed_name(name).expect("prefixed tool name must be server__tool");
         tools_call_gate_error(server, &target.upstream_name, id)
     }
 

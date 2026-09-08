@@ -110,15 +110,19 @@ pub(crate) fn parse_opencode_go_usage(body: &Value) -> Option<OpencodeGoUsage> {
 // Tightest (lowest) remaining percent across the present OpencodeGo windows,
 // where remaining = 100 - clamp(used). Use for cache reservation weighting.
 pub(crate) fn opencode_go_remaining_percent(key: &TokenPlanKeyUsage) -> Option<f64> {
-    [&key.opencodego_rolling, &key.opencodego_weekly, &key.opencodego_monthly]
-        .into_iter()
-        .filter_map(|window| {
-            window
-                .as_ref()
-                .and_then(|window| window.percent.map(|used| 100.0 - used))
-        })
-        .min_by(|a, b| a.total_cmp(b))
-        .map(|value| value.clamp(0.0, 100.0))
+    [
+        &key.opencodego_rolling,
+        &key.opencodego_weekly,
+        &key.opencodego_monthly,
+    ]
+    .into_iter()
+    .filter_map(|window| {
+        window
+            .as_ref()
+            .and_then(|window| window.percent.map(|used| 100.0 - used))
+    })
+    .min_by(|a, b| a.total_cmp(b))
+    .map(|value| value.clamp(0.0, 100.0))
 }
 
 #[cfg(test)]
@@ -127,7 +131,11 @@ mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
-    fn full_key(rolling: Option<f64>, weekly: Option<f64>, monthly: Option<f64>) -> TokenPlanKeyUsage {
+    fn full_key(
+        rolling: Option<f64>,
+        weekly: Option<f64>,
+        monthly: Option<f64>,
+    ) -> TokenPlanKeyUsage {
         let window = |percent: f64| OpencodeGoWindowUsage {
             status: None,
             percent: Some(percent),
@@ -187,7 +195,8 @@ mod tests {
 
     #[test]
     fn missing_window_is_dropped_not_padded() {
-        let body = json!({"usage": {"rolling": {"percent": 10, "resetsAt": "2026-08-22T14:00:00.000Z"}}});
+        let body =
+            json!({"usage": {"rolling": {"percent": 10, "resetsAt": "2026-08-22T14:00:00.000Z"}}});
         let usage = parse_opencode_go_usage(&body).expect("usage");
         assert!(usage.rolling.is_some());
         assert!(usage.weekly.is_none());
@@ -205,7 +214,8 @@ mod tests {
 
     #[test]
     fn percent_is_clamped_and_empty_windows_rejected() {
-        let body = json!({"usage": {"rolling": {"percent": 130, "resetsAt": "2026-08-22T14:00:00.000Z"}}});
+        let body =
+            json!({"usage": {"rolling": {"percent": 130, "resetsAt": "2026-08-22T14:00:00.000Z"}}});
         assert_eq!(
             parse_opencode_go_usage(&body)
                 .unwrap()
@@ -265,7 +275,10 @@ mod tests {
             opencode_go_remaining_percent(&full_key(None, Some(100.0), None)),
             Some(0.0)
         );
-        assert_eq!(opencode_go_remaining_percent(&full_key(None, None, None)), None);
+        assert_eq!(
+            opencode_go_remaining_percent(&full_key(None, None, None)),
+            None
+        );
     }
 
     #[test]

@@ -49,9 +49,7 @@ impl StandaloneConfig {
             required("endpoint name", &endpoint.name)?;
             required("endpoint base_url", &endpoint.base_url)?;
             let normalized_base = normalize_endpoint_base_url(&endpoint.base_url);
-            if !normalized_base.starts_with("http://")
-                && !normalized_base.starts_with("https://")
-            {
+            if !normalized_base.starts_with("http://") && !normalized_base.starts_with("https://") {
                 return invalid("base_url", "must use http:// or https://");
             }
             required("endpoint api_key", &endpoint.api_key)?;
@@ -231,7 +229,11 @@ mod tests {
                 "https://api.commandcode.ai/provider",
             ),
         ] {
-            assert_eq!(normalize_endpoint_base_url(input), expected, "input {input:?}");
+            assert_eq!(
+                normalize_endpoint_base_url(input),
+                expected,
+                "input {input:?}"
+            );
         }
         assert_eq!(
             normalize_endpoint_base_url("https://api.openai.com/V1"),

@@ -106,7 +106,13 @@ async fn exhausted_opencode_go_bound_key_returns_target_unavailable() {
         .store_for_test(
             endpoint_id,
             opencode_go_usage(&[
-                (bound_key_id, "primary", Some(100.0), Some(100.0), Some(100.0)),
+                (
+                    bound_key_id,
+                    "primary",
+                    Some(100.0),
+                    Some(100.0),
+                    Some(100.0),
+                ),
                 (alternate_key_id, "alternate", Some(50.0), None, None),
             ]),
         )

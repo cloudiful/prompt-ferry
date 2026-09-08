@@ -69,10 +69,7 @@ fn command_code_shares_generic_null_region_shape() {
         (EndpointProvider::CommandCode, None)
     ));
     assert!(matches!(
-        (
-            EndpointProvider::Minimax,
-            Some(EndpointRegion::Global)
-        ),
+        (EndpointProvider::Minimax, Some(EndpointRegion::Global)),
         (EndpointProvider::Minimax, Some(_))
     ));
 }
@@ -88,10 +85,10 @@ fn standalone_provider_round_trips_command_code() {
         deserialized,
         standalone_config::EndpointProvider::CommandCode
     );
-    assert!(serde_json::from_value::<standalone_config::EndpointProvider>(
-        json!("legacy-unknown")
-    )
-    .is_err());
+    assert!(
+        serde_json::from_value::<standalone_config::EndpointProvider>(json!("legacy-unknown"))
+            .is_err()
+    );
 }
 
 #[test]
@@ -140,9 +137,7 @@ fn window_percent_math_clamps_like_handler() {
     fn tighter(five: Option<f64>, weekly: Option<f64>) -> Option<f64> {
         match (five, weekly) {
             (Some(five), Some(weekly)) => Some(five.min(weekly).clamp(0.0, 100.0)),
-            (Some(remaining), None) | (None, Some(remaining)) => {
-                Some(remaining.clamp(0.0, 100.0))
-            }
+            (Some(remaining), None) | (None, Some(remaining)) => Some(remaining.clamp(0.0, 100.0)),
             (None, None) => None,
         }
     }
@@ -230,12 +225,10 @@ fn key_usage_serde_omits_absent_command_code_sections() {
 fn alpha_fixture_shapes_hold() {
     let personal: Value = json!({"user": {"userName": "alice"}, "org": null});
     assert!(personal.get("org").is_some());
-    assert_eq!(
-        personal["user"]["userName"].as_str(),
-        Some("alice")
-    );
+    assert_eq!(personal["user"]["userName"].as_str(), Some("alice"));
 
-    let team: Value = json!({"user": {"userName": "alice"}, "org": {"id": "org_1", "login": "acme"}});
+    let team: Value =
+        json!({"user": {"userName": "alice"}, "org": {"id": "org_1", "login": "acme"}});
     assert_eq!(team["org"]["id"].as_str(), Some("org_1"));
 
     let credits: Value = json!({
@@ -246,12 +239,12 @@ fn alpha_fixture_shapes_hold() {
         }
     });
     assert_eq!(credits["credits"]["monthlyCredits"].as_f64(), Some(80.0));
-    assert_eq!(
-        credits["credits"]["purchasedCredits"].as_f64(),
-        Some(5.0)
-    );
+    assert_eq!(credits["credits"]["purchasedCredits"].as_f64(), Some(5.0));
     assert_eq!(credits["credits"]["freeCredits"].as_f64(), Some(2.5));
-    assert_eq!(credits["windowLimits"]["fiveHour"]["used"].as_f64(), Some(8.0));
+    assert_eq!(
+        credits["windowLimits"]["fiveHour"]["used"].as_f64(),
+        Some(8.0)
+    );
     assert!(credits["windowLimits"]["weekly"]["resetAt"].is_string());
 
     let subscriptions: Value = json!({"data": {"planId": "pro", "status": "active"}});
@@ -277,7 +270,10 @@ fn handler_dispatch_inputs_reject_generic_and_require_minimax_region() {
     // Token-plan usage is only served for minimax and command_code;
     // generic has no usage API. The dispatch inputs locked here are what
     // the handler branches on: provider variant plus region presence.
-    assert!(!matches!(EndpointProvider::Generic, EndpointProvider::Minimax | EndpointProvider::CommandCode));
+    assert!(!matches!(
+        EndpointProvider::Generic,
+        EndpointProvider::Minimax | EndpointProvider::CommandCode
+    ));
     assert!(matches!(
         EndpointProvider::CommandCode,
         EndpointProvider::Minimax | EndpointProvider::CommandCode
