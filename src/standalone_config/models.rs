@@ -99,6 +99,9 @@ pub enum EndpointProvider {
     Minimax,
     CommandCode,
     OpencodeGo,
+    // Matches the admin API contract (`openrouter`, not `open_router`).
+    #[serde(rename = "openrouter")]
+    OpenRouter,
 }
 
 impl EndpointProvider {
@@ -108,6 +111,7 @@ impl EndpointProvider {
             Self::Minimax => "minimax",
             Self::CommandCode => "command_code",
             Self::OpencodeGo => "opencode_go",
+            Self::OpenRouter => "openrouter",
         }
     }
 
@@ -117,6 +121,7 @@ impl EndpointProvider {
             "minimax" => Ok(Self::Minimax),
             "command_code" => Ok(Self::CommandCode),
             "opencode_go" => Ok(Self::OpencodeGo),
+            "openrouter" => Ok(Self::OpenRouter),
             _ => Err(StandaloneConfigError::CorruptDatabase(format!(
                 "unknown endpoint provider {value:?}"
             ))),

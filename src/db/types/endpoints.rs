@@ -12,6 +12,11 @@ pub enum EndpointProvider {
     Minimax,
     CommandCode,
     OpencodeGo,
+    // `OpenRouter` snake_cases to `open_router` by default; the admin API
+    // contract (issue #203) uses the single-token `openrouter`, so rename
+    // explicitly while keeping snake_case for the other variants.
+    #[serde(rename = "openrouter")]
+    OpenRouter,
 }
 
 impl Default for EndpointProvider {
@@ -27,6 +32,7 @@ impl EndpointProvider {
             Self::Minimax => "minimax",
             Self::CommandCode => "command_code",
             Self::OpencodeGo => "opencode_go",
+            Self::OpenRouter => "openrouter",
         }
     }
 
@@ -35,6 +41,7 @@ impl EndpointProvider {
             "minimax" => Self::Minimax,
             "command_code" => Self::CommandCode,
             "opencode_go" => Self::OpencodeGo,
+            "openrouter" => Self::OpenRouter,
             _ => Self::Generic,
         }
     }
@@ -44,6 +51,7 @@ impl EndpointProvider {
             Some("minimax") => Self::Minimax,
             Some("command_code") => Self::CommandCode,
             Some("opencode_go") => Self::OpencodeGo,
+            Some("openrouter") => Self::OpenRouter,
             _ => Self::Generic,
         }
     }
@@ -285,6 +293,32 @@ mod tests {
             serde_json::from_value(serde_json::json!("opencode_go"))
                 .expect("deserialize opencode_go provider");
         assert_eq!(deserialized, EndpointProvider::OpencodeGo);
+        // Unknown providers keep the legacy generic fallback.
+        assert_eq!(
+            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::Generic
+        );
+    }
+
+    #[test]
+    fn openrouter_provider_round_trips_as_snake_case() {
+        assert_eq!(EndpointProvider::OpenRouter.as_str(), "openrouter");
+        assert_eq!(
+            EndpointProvider::from_str("openrouter"),
+            EndpointProvider::OpenRouter
+        );
+        assert_eq!(
+            EndpointProvider::from_optional(Some("openrouter")),
+            EndpointProvider::OpenRouter
+        );
+        // Serde uses snake_case, matching the admin API contract.
+        let serialized = serde_json::to_value(EndpointProvider::OpenRouter)
+            .expect("serialize openrouter provider");
+        assert_eq!(serialized, serde_json::json!("openrouter"));
+        let deserialized: EndpointProvider =
+            serde_json::from_value(serde_json::json!("openrouter"))
+                .expect("deserialize openrouter provider");
+        assert_eq!(deserialized, EndpointProvider::OpenRouter);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
             EndpointProvider::from_str("legacy-unknown"),

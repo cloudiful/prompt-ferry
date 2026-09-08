@@ -313,7 +313,7 @@ export type EndpointPageResponse = {
 
 export type EndpointProtocolMode = 'auto' | 'manual';
 
-export type EndpointProvider = 'generic' | 'minimax' | 'command_code' | 'opencode_go';
+export type EndpointProvider = 'generic' | 'minimax' | 'command_code' | 'opencode_go' | 'openrouter';
 
 export type EndpointRegion = 'cn' | 'global';
 

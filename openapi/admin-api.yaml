@@ -3360,6 +3360,7 @@ components:
       - minimax
       - command_code
       - opencode_go
+      - openrouter
     EndpointRegion:
       type: string
       enum:

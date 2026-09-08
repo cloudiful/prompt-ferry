@@ -88,6 +88,7 @@ pub(super) fn sqlite_endpoint_from_create(
         crate::db::EndpointProvider::Minimax => ScEndpointProvider::Minimax,
         crate::db::EndpointProvider::CommandCode => ScEndpointProvider::CommandCode,
         crate::db::EndpointProvider::OpencodeGo => ScEndpointProvider::OpencodeGo,
+        crate::db::EndpointProvider::OpenRouter => ScEndpointProvider::OpenRouter,
         crate::db::EndpointProvider::Generic => ScEndpointProvider::Generic,
     };
     let provider_region = match input.provider_region {

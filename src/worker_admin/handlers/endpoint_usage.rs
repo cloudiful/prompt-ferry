@@ -17,7 +17,9 @@ pub(super) async fn token_plan_usage(
         db::EndpointProvider::Minimax => "MiniMax",
         db::EndpointProvider::CommandCode => "CommandCode",
         db::EndpointProvider::OpencodeGo => "OpencodeGo",
-        db::EndpointProvider::Generic => {
+        // OpenRouter has no balance fetcher yet (P3, issue #203), so it is
+        // rejected here exactly like generic until the fetcher lands.
+        db::EndpointProvider::Generic | db::EndpointProvider::OpenRouter => {
             return error(
                 StatusCode::BAD_REQUEST,
                 "unsupported_provider",
@@ -25,8 +27,8 @@ pub(super) async fn token_plan_usage(
             );
         }
     };
-    // Region stays mandatory only for MiniMax; CommandCode and OpencodeGo
-    // carry no region (NULL) and must not be rejected here.
+    // Region stays mandatory only for MiniMax; CommandCode, OpencodeGo and
+    // OpenRouter carry no region (NULL) and must not be rejected here.
     if endpoint.provider == db::EndpointProvider::Minimax && endpoint.provider_region.is_none() {
         return error(
             StatusCode::BAD_REQUEST,

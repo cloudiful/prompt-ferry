@@ -106,6 +106,7 @@ pub(super) fn provider_from_sqlite(provider: ScEndpointProvider) -> EndpointProv
         ScEndpointProvider::Minimax => EndpointProvider::Minimax,
         ScEndpointProvider::CommandCode => EndpointProvider::CommandCode,
         ScEndpointProvider::OpencodeGo => EndpointProvider::OpencodeGo,
+        ScEndpointProvider::OpenRouter => EndpointProvider::OpenRouter,
         ScEndpointProvider::Generic => EndpointProvider::Generic,
     }
 }

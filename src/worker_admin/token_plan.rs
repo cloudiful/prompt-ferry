@@ -26,10 +26,15 @@ pub async fn fetch_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
     match endpoint.provider {
         EndpointProvider::Minimax => fetch_minimax_endpoint_usage(endpoint).await,
         EndpointProvider::CommandCode => fetch_command_code_endpoint_usage(endpoint).await,
-        // OpencodeGo (issue #193 P3) has its own Zen usage fetcher; Generic
-        // still has no token plan API.
+        // OpencodeGo (issue #193 P3) has its own Zen usage fetcher;
+        // CommandCode has its own balance fetcher. Generic still has no
+        // token plan API.
         EndpointProvider::OpencodeGo => fetch_opencode_go_endpoint_usage(endpoint).await,
-        EndpointProvider::Generic => Err(anyhow!("endpoint provider has no token plan API")),
+        // P3 (issue #203) implements the OpenRouter balance fetcher; until
+        // then it shares the generic "no token plan API" path.
+        EndpointProvider::Generic | EndpointProvider::OpenRouter => {
+            Err(anyhow!("endpoint provider has no token plan API"))
+        }
     }
 }
 

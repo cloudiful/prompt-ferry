@@ -105,6 +105,9 @@ fn target_from_endpoint(
             crate::standalone_config::EndpointProvider::OpencodeGo => {
                 db::EndpointProvider::OpencodeGo
             }
+            crate::standalone_config::EndpointProvider::OpenRouter => {
+                db::EndpointProvider::OpenRouter
+            }
             crate::standalone_config::EndpointProvider::Generic => db::EndpointProvider::Generic,
         },
         service_tier: match endpoint.service_tier {
