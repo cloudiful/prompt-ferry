@@ -48,8 +48,9 @@ impl StandaloneConfig {
             }
             required("endpoint name", &endpoint.name)?;
             required("endpoint base_url", &endpoint.base_url)?;
-            if !endpoint.base_url.starts_with("http://")
-                && !endpoint.base_url.starts_with("https://")
+            let normalized_base = normalize_endpoint_base_url(&endpoint.base_url);
+            if !normalized_base.starts_with("http://")
+                && !normalized_base.starts_with("https://")
             {
                 return invalid("base_url", "must use http:// or https://");
             }
@@ -152,7 +153,7 @@ impl BootstrapSeed {
                 provider: EndpointProvider::Generic,
                 provider_region: None,
                 service_tier: crate::standalone_config::MinimaxServiceTier::Standard,
-                base_url: self.upstream_base_url.trim_end_matches('/').to_string(),
+                base_url: normalize_endpoint_base_url(&self.upstream_base_url),
                 native_api: self.upstream_native_api,
                 native_api_source: NativeApiSource::Manual,
                 key_lb_enabled: false,
@@ -179,6 +180,19 @@ impl BootstrapSeed {
     }
 }
 
+pub(crate) fn normalize_endpoint_base_url(base_url: &str) -> String {
+    let mut normalized = base_url.trim().to_string();
+    loop {
+        normalized = normalized.trim_end_matches('/').to_string();
+        if let Some(stripped) = normalized.strip_suffix("/v1") {
+            normalized = stripped.to_string();
+        } else {
+            break;
+        }
+    }
+    normalized
+}
+
 fn required(field: &'static str, value: &str) -> Result<()> {
     if value.trim().is_empty() {
         invalid(field, "must not be empty")
@@ -192,4 +206,40 @@ fn invalid<T>(field: &'static str, message: impl Into<String>) -> Result<T> {
         field,
         message: message.into(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_endpoint_base_url;
+
+    #[test]
+    fn normalize_strips_trailing_v1_chain_but_keeps_case_variants() {
+        for (input, expected) in [
+            ("https://api.openai.com", "https://api.openai.com"),
+            ("https://api.openai.com/", "https://api.openai.com"),
+            ("https://api.openai.com/v1", "https://api.openai.com"),
+            ("https://api.openai.com/v1/", "https://api.openai.com"),
+            ("https://api.openai.com/v1/v1", "https://api.openai.com"),
+            ("  https://api.openai.com/v1  ", "https://api.openai.com"),
+            (
+                "https://api.commandcode.ai/provider/v1",
+                "https://api.commandcode.ai/provider",
+            ),
+            ("https://openrouter.ai/api/v1", "https://openrouter.ai/api"),
+            (
+                "https://api.commandcode.ai/provider",
+                "https://api.commandcode.ai/provider",
+            ),
+        ] {
+            assert_eq!(normalize_endpoint_base_url(input), expected, "input {input:?}");
+        }
+        assert_eq!(
+            normalize_endpoint_base_url("https://api.openai.com/V1"),
+            "https://api.openai.com/V1"
+        );
+        assert_eq!(
+            normalize_endpoint_base_url("https://api.openai.com/v10"),
+            "https://api.openai.com/v10"
+        );
+    }
 }

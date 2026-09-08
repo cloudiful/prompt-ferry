@@ -8,7 +8,7 @@ export const endpointMessages = {
     baseUrl: '基础地址',
     baseUrlHint:
       '只填 API 根地址，例如 https://api.openai.com；系统会自动追加 /v1 路径。',
-    baseUrlVersionWarning: '这里不要包含 /v1，否则请求会变成 /v1/v1。',
+    baseUrlVersionWarning: '检测到尾部 /v1，后端保存时会自动去除，无需手动删除。',
     providerGeneric: '通用',
     providerMinimax: 'MiniMax',
     providerCommandCode: 'CommandCode',
@@ -134,7 +134,7 @@ export const endpointMessages = {
     baseUrlHint:
       'Use only the API base URL, for example https://api.openai.com. /v1 is appended automatically.',
     baseUrlVersionWarning:
-      'Do not include /v1 here, or requests become /v1/v1.',
+      'Trailing /v1 detected; the backend trims it automatically on save.',
     providerGeneric: 'Generic',
     providerMinimax: 'MiniMax',
     providerCommandCode: 'CommandCode',

@@ -18,8 +18,27 @@ const minimaxBaseUrls = {
   },
 } as const
 type MinimaxProtocol = 'openai' | 'anthropic'
-const COMMAND_CODE_BASE_URL = 'https://api.commandcode.ai/provider/v1' as const
-const OPENCODE_GO_BASE_URL = 'https://opencode.ai/zen/go/v1' as const
+const COMMAND_CODE_BASE_URL = 'https://api.commandcode.ai/provider' as const
+const OPENCODE_GO_BASE_URL = 'https://opencode.ai/zen/go' as const
+function stripVersionSuffix(value: string): string {
+  let normalized = value.trim()
+  for (;;) {
+    const withoutSlash = normalized.replace(/\/+$/, '')
+    if (withoutSlash.endsWith('/v1')) {
+      normalized = withoutSlash.slice(0, -3)
+      continue
+    }
+    normalized = withoutSlash
+    break
+  }
+  return normalized
+}
+function sanitizeBaseUrlField(): void {
+  const sanitized = stripVersionSuffix(form.value.base_url)
+  if (sanitized !== form.value.base_url) {
+    form.value.base_url = sanitized
+  }
+}
 const hasVersionPath = computed(() =>
   /\/v1\/?$/.test(form.value.base_url.trim()),
 )
@@ -96,7 +115,7 @@ const serviceTierOptions = computed(() => [
 ])
 const usesCustomMinimaxBaseUrl = computed(() => {
   if (!isMinimax.value) return false
-  const current = form.value.base_url.trim().replace(/\/+$/, '')
+  const current = stripVersionSuffix(form.value.base_url)
   const known = Object.values(minimaxBaseUrls).flatMap((urls) =>
     Object.values(urls),
   )
@@ -156,7 +175,7 @@ function setMinimaxBaseUrl(
   region: 'cn' | 'global',
   protocol: MinimaxProtocol,
 ): void {
-  const current = form.value.base_url.trim().replace(/\/+$/, '')
+  const current = stripVersionSuffix(form.value.base_url)
   const known = Object.values(minimaxBaseUrls).flatMap((urls) =>
     Object.values(urls),
   )
@@ -166,31 +185,31 @@ function setMinimaxBaseUrl(
 }
 
 function setCommandCodeBaseUrl(): void {
-  const current = form.value.base_url.trim().replace(/\/+$/, '')
+  const current = stripVersionSuffix(form.value.base_url)
   if (!current) {
     form.value.base_url = COMMAND_CODE_BASE_URL
     return
   }
   const knownMinimax = Object.values(minimaxBaseUrls).flatMap((urls) =>
-    Object.values(urls).map((url) => url.replace(/\/+$/, '')),
+    Object.values(urls).map((url) => stripVersionSuffix(url)),
   )
-  const commandCode = COMMAND_CODE_BASE_URL.replace(/\/+$/, '')
+  const commandCode = stripVersionSuffix(COMMAND_CODE_BASE_URL)
   if (knownMinimax.includes(current) || current === commandCode) {
     form.value.base_url = COMMAND_CODE_BASE_URL
   }
 }
 
 function setOpencodeGoBaseUrl(): void {
-  const current = form.value.base_url.trim().replace(/\/+$/, '')
+  const current = stripVersionSuffix(form.value.base_url)
   if (!current) {
     form.value.base_url = OPENCODE_GO_BASE_URL
     return
   }
   const knownMinimax = Object.values(minimaxBaseUrls).flatMap((urls) =>
-    Object.values(urls).map((url) => url.replace(/\/+$/, '')),
+    Object.values(urls).map((url) => stripVersionSuffix(url)),
   )
-  const commandCode = COMMAND_CODE_BASE_URL.replace(/\/+$/, '')
-  const opencodeGo = OPENCODE_GO_BASE_URL.replace(/\/+$/, '')
+  const commandCode = stripVersionSuffix(COMMAND_CODE_BASE_URL)
+  const opencodeGo = stripVersionSuffix(OPENCODE_GO_BASE_URL)
   if (
     knownMinimax.includes(current) ||
     current === commandCode ||
@@ -297,6 +316,7 @@ function setOpencodeGoBaseUrl(): void {
       v-model="form.base_url"
       class="w-full"
       :placeholder="t('baseUrl')"
+      @blur="sanitizeBaseUrlField"
     />
     <p
       v-if="hasVersionPath"

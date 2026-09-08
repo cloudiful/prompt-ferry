@@ -26,13 +26,6 @@ pub(super) async fn create_endpoint(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response;
     }
-    if endpoint_base_url_has_version_path(&body.base_url) {
-        return error(
-            StatusCode::BAD_REQUEST,
-            "invalid_base_url",
-            "base_url must be the provider base URL without /v1",
-        );
-    }
     let mcp_enabled = body
         .mcp_enabled
         .unwrap_or(body.provider == db::EndpointProvider::Minimax);
@@ -83,13 +76,6 @@ pub(super) async fn update_endpoint(
         Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
         Err(err) => return internal(&state, err),
     };
-    if endpoint_base_url_has_version_path(&body.base_url) {
-        return error(
-            StatusCode::BAD_REQUEST,
-            "invalid_base_url",
-            "base_url must be the provider base URL without /v1",
-        );
-    }
     let provider_is_minimax = body.provider == db::EndpointProvider::Minimax;
     let mcp_enabled = if provider_is_minimax {
         body.mcp_enabled.unwrap_or(existing.mcp_enabled)

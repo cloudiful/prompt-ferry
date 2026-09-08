@@ -251,7 +251,7 @@ pub(super) async fn resolve_endpoint_input(
         provider: body.provider,
         provider_region: body.provider_region,
         service_tier: body.service_tier,
-        base_url: body.base_url,
+        base_url: normalize_endpoint_base_url(&body.base_url),
         native_api,
         native_api_source,
         daily_max_requests: body.daily_max_requests,
@@ -263,8 +263,16 @@ pub(super) async fn resolve_endpoint_input(
     })
 }
 
-pub(super) fn endpoint_base_url_has_version_path(base_url: &str) -> bool {
-    base_url.trim().trim_end_matches('/').ends_with("/v1")
+pub(super) fn normalize_endpoint_base_url(base_url: &str) -> String {
+    let mut v = base_url.trim().to_string();
+    loop {
+        v = v.trim_end_matches('/').to_string();
+        match v.strip_suffix("/v1") {
+            Some(s) => v = s.to_string(),
+            None => break,
+        }
+    }
+    v
 }
 
 pub(super) fn validate_request_budget_limit(
@@ -325,8 +333,28 @@ pub(super) fn truncate_message(message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_mcp_provider;
+    use super::{normalize_endpoint_base_url, validate_mcp_provider};
     use crate::db::EndpointProvider;
+
+    #[test]
+    fn normalize_endpoint_base_url_strips_trailing_v1_chain() {
+        for (input, expected) in [
+            ("https://api.openai.com", "https://api.openai.com"),
+            ("https://api.openai.com/", "https://api.openai.com"),
+            ("https://api.openai.com/v1", "https://api.openai.com"),
+            ("https://api.openai.com/v1/", "https://api.openai.com"),
+            ("https://api.openai.com/v1/v1", "https://api.openai.com"),
+            ("https://api.openai.com/v1/v1/", "https://api.openai.com"),
+            ("  https://api.openai.com/v1  ", "https://api.openai.com"),
+            ("https://api.commandcode.ai/provider/v1", "https://api.commandcode.ai/provider"),
+            ("https://openrouter.ai/api/v1", "https://openrouter.ai/api"),
+            ("https://api.commandcode.ai/provider", "https://api.commandcode.ai/provider"),
+            ("https://api.openai.com/V1", "https://api.openai.com/V1"),
+            ("https://api.openai.com/v10", "https://api.openai.com/v10"),
+        ] {
+            assert_eq!(normalize_endpoint_base_url(input), expected, "input {input:?}");
+        }
+    }
 
     #[test]
     fn validate_mcp_provider_accepts_explicit_false_for_generic() {
