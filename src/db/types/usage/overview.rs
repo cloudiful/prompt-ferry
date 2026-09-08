@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -44,6 +44,17 @@ pub struct RequestRecordOverviewTrendBucket {
     pub tokens: RequestRecordOverviewTokenUsage,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RequestRecordOverviewUpstreamBreakdown {
+    pub endpoint_id: Option<Uuid>,
+    pub endpoint_name: Option<String>,
+    pub request_count: i64,
+    pub error_count: i64,
+    pub error_rate: f64,
+    pub total_tokens: i64,
+    pub avg_output_tokens_per_second: Option<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RequestRecordOverviewBreakdownRow {
     pub label: String,
@@ -51,6 +62,17 @@ pub struct RequestRecordOverviewBreakdownRow {
     pub request_share: f64,
     pub success_count: i64,
     pub success_rate: f64,
+    /// Number of failed requests (`ok IS FALSE` or terminal failure state).
+    /// `None` for rows that do not report errors (e.g. MCP breakdown).
+    pub error_count: Option<i64>,
+    /// `error_count / request_count`, `None` when the row does not report errors.
+    pub error_rate: Option<f64>,
+    /// Number of distinct upstreams (`endpoint_id`) observed for this row.
+    /// `None` for rows without upstream breakdown (e.g. MCP breakdown).
+    pub upstream_count: Option<i64>,
+    /// Per-upstream metrics for AI model rows, ordered by `total_tokens` desc.
+    /// `None` or empty when the row has a single upstream.
+    pub upstream_breakdown: Option<Vec<RequestRecordOverviewUpstreamBreakdown>>,
     pub token_share: Option<f64>,
     pub tokens: RequestRecordOverviewTokenUsage,
     pub model: Option<String>,

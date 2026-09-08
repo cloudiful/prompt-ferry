@@ -3265,3 +3265,222 @@ async fn overview_breakdown_mcp_rows_have_null_avg_and_compatibility() -> anyhow
     schema.cleanup().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn overview_breakdown_reports_error_rate_and_upstream_breakdown() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-breakdown-upstream", true).await?;
+    let state = admin_state(schema.pool.clone(), &admin).await;
+
+    async fn create_upstream(pool: &PgPool, name: &str) -> anyhow::Result<db::ProviderEndpoint> {
+        db::create_endpoint(
+            pool,
+            db::EndpointCreate {
+                scope: "admin".to_string(),
+                owner_user_id: None,
+                name: name.to_string(),
+                provider: db::EndpointProvider::Generic,
+                provider_region: None,
+                service_tier: Default::default(),
+                base_url: format!("http://{name}.example.test"),
+                native_api: NativeApi::Chat,
+                native_api_source: NativeApiSource::Manual,
+                daily_max_requests: None,
+                monthly_max_requests: None,
+                api_key: format!("{name}-key"),
+                api_keys: vec![],
+                key_lb_enabled: false,
+                enabled: true,
+            },
+        )
+        .await
+    }
+
+    async fn insert_ai_record(
+        pool: &PgPool,
+        user_id: i64,
+        model: &str,
+        endpoint_id: Option<Uuid>,
+        ok: bool,
+        failure_family: Option<db::RequestFailureFamily>,
+    ) -> anyhow::Result<()> {
+        let (record_state, status) = if ok {
+            (db::RequestRecordState::Completed, 200)
+        } else {
+            (db::RequestRecordState::Failed, 500)
+        };
+        db::record_request_record(
+            pool,
+            db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+                .with_state(db::UsageEventKind::Request, record_state)
+                .with_request_actor(Some(user_id), None, None, None)
+                .with_route(endpoint_id, None)
+                .with_model(Some(model.to_string()))
+                .with_timing(Some(status), Some(ok), Some(1000), Some(50))
+                .with_usage(Some(10), Some(100), Some(110), Some(0), None, None)
+                .with_failure_family(failure_family),
+        )
+        .await?;
+        Ok(())
+    }
+
+    let endpoint_a = create_upstream(&schema.pool, "upstream-a-207").await?;
+    let endpoint_b = create_upstream(&schema.pool, "upstream-b-207").await?;
+
+    // Multi-upstream model: A has 2 success + 1 error, B has 1 success + 1 error.
+    // Total 5 requests, 2 errors => error_rate 0.4, upstream_count 2.
+    let multi_model = "gpt-breakdown-multi-207";
+    insert_ai_record(
+        &schema.pool,
+        admin.user_id,
+        multi_model,
+        Some(endpoint_a.endpoint_id),
+        true,
+        None,
+    )
+    .await?;
+    insert_ai_record(
+        &schema.pool,
+        admin.user_id,
+        multi_model,
+        Some(endpoint_a.endpoint_id),
+        true,
+        None,
+    )
+    .await?;
+    insert_ai_record(
+        &schema.pool,
+        admin.user_id,
+        multi_model,
+        Some(endpoint_a.endpoint_id),
+        false,
+        Some(db::RequestFailureFamily::Upstream5xx),
+    )
+    .await?;
+    insert_ai_record(
+        &schema.pool,
+        admin.user_id,
+        multi_model,
+        Some(endpoint_b.endpoint_id),
+        true,
+        None,
+    )
+    .await?;
+    insert_ai_record(
+        &schema.pool,
+        admin.user_id,
+        multi_model,
+        Some(endpoint_b.endpoint_id),
+        false,
+        Some(db::RequestFailureFamily::Timeout),
+    )
+    .await?;
+
+    // Single-upstream model: 2 success on endpoint A only.
+    let single_model = "gpt-breakdown-single-207";
+    insert_ai_record(
+        &schema.pool,
+        admin.user_id,
+        single_model,
+        Some(endpoint_a.endpoint_id),
+        true,
+        None,
+    )
+    .await?;
+    insert_ai_record(
+        &schema.pool,
+        admin.user_id,
+        single_model,
+        Some(endpoint_a.endpoint_id),
+        true,
+        None,
+    )
+    .await?;
+
+    let response = worker_admin::router(state)
+        .oneshot(auth_request(
+            "GET",
+            format!(
+                "/api/v1/admin/request-records/overview?request_category=ai&range=24h&user={}",
+                urlencoding(&admin.login_name)
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    let breakdown = body["breakdown"]
+        .as_array()
+        .expect("breakdown must be array");
+
+    let multi = breakdown
+        .iter()
+        .find(|row| row["label"] == multi_model)
+        .expect("multi-upstream model row must exist");
+    assert_eq!(multi["request_count"], 5);
+    assert_eq!(multi["error_count"], 2);
+    let multi_rate = multi["error_rate"]
+        .as_f64()
+        .expect("multi error_rate must be number");
+    assert!(
+        (multi_rate - 0.4).abs() < 1e-9,
+        "expected multi error_rate 0.4, got {multi_rate}"
+    );
+    assert_eq!(
+        multi["upstream_count"], 2,
+        "multi-upstream model must report 2 upstreams"
+    );
+    let multi_breakdown = multi["upstream_breakdown"]
+        .as_array()
+        .expect("multi upstream_breakdown must be array");
+    assert_eq!(multi_breakdown.len(), 2);
+    for entry in multi_breakdown {
+        assert!(entry.get("endpoint_id").is_some());
+        assert!(entry.get("endpoint_name").is_some());
+        assert!(entry["request_count"].as_i64().unwrap_or(0) > 0);
+        assert!(entry["error_rate"].as_f64().is_some());
+        assert!(entry["total_tokens"].as_i64().unwrap_or(0) > 0);
+        assert!(entry.get("avg_output_tokens_per_second").is_some());
+    }
+    let names: Vec<String> = multi_breakdown
+        .iter()
+        .filter_map(|entry| entry["endpoint_name"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        names.contains(&"upstream-a-207".to_string()),
+        "upstream breakdown must contain endpoint A, got {names:?}"
+    );
+    assert!(
+        names.contains(&"upstream-b-207".to_string()),
+        "upstream breakdown must contain endpoint B, got {names:?}"
+    );
+
+    let single = breakdown
+        .iter()
+        .find(|row| row["label"] == single_model)
+        .expect("single-upstream model row must exist");
+    assert_eq!(single["request_count"], 2);
+    assert_eq!(single["error_count"], 0);
+    let single_rate = single["error_rate"]
+        .as_f64()
+        .expect("single error_rate must be number");
+    assert!(
+        (single_rate - 0.0).abs() < 1e-12,
+        "expected single error_rate 0.0, got {single_rate}"
+    );
+    assert_eq!(
+        single["upstream_count"], 1,
+        "single-upstream model must report 1 upstream so the frontend hides the info icon"
+    );
+    let single_breakdown = single["upstream_breakdown"]
+        .as_array()
+        .expect("single upstream_breakdown must be array");
+    assert_eq!(single_breakdown.len(), 1);
+
+    schema.cleanup().await?;
+    Ok(())
+}

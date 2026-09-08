@@ -6,6 +6,9 @@ Object.defineProperty(globalThis, 'localStorage', {
     getItem: (key: string) => storage.get(key) ?? null,
     setItem: (key: string, value: string) => storage.set(key, value),
   },
+  // Keep the property configurable so the whole suite can run in one bun process
+  // alongside other tests that redefine `globalThis.localStorage`.
+  configurable: true,
 })
 
 const endpointTest = mock(async (endpointId: string) => ({

@@ -62,6 +62,21 @@ fn ratio_option(numerator: i64, denominator: i64) -> Option<f64> {
     (denominator > 0).then(|| ratio(numerator, denominator))
 }
 
+/// P1 (issue #207): model-breakdown error rate helper.
+///
+/// Mirrors `success_rate = ratio(success_count, request_count)` so the new
+/// 错误率 column stays consistent with the trend `error_rate`. Returns `0.0`
+/// for empty rows instead of `NaN`, matching `ratio` semantics.
+pub(super) fn error_rate(error_count: i64, request_count: i64) -> f64 {
+    ratio(error_count, request_count)
+}
+
+/// Nullable variant for `Option` breakdown columns: `None` propagates so MCP
+/// rows (which never report `error_count`) stay `None` instead of `0.0`.
+pub(super) fn opt_error_rate(error_count: Option<i64>, request_count: i64) -> Option<f64> {
+    error_count.map(|count| error_rate(count, request_count))
+}
+
 /// Compute the overview cache-read rate from aggregate token sums.
 ///
 /// P2 (issue #205): the denominator is the full input
@@ -119,7 +134,9 @@ pub(super) fn failure_family_label(key: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{overview_cache_rate, summary_from_metrics, token_usage};
+    use super::{
+        error_rate, opt_error_rate, overview_cache_rate, summary_from_metrics, token_usage,
+    };
     use crate::db::usage::overview::queries::MetricsRow;
 
     #[test]
@@ -254,5 +271,20 @@ mod tests {
         assert_eq!(summary.p95_first_token_ms, Some(120.0));
         assert_eq!(summary.tokens.output_tokens, 200);
         assert_eq!(summary.tokens.total_tokens, 300);
+    }
+
+    #[test]
+    fn breakdown_error_rate_matches_ratio_and_handles_empty_rows() {
+        // P1 (issue #207): 1/4 -> 0.25, empty denominator stays 0.0.
+        assert!((error_rate(1, 4) - 0.25).abs() < 1e-12);
+        assert_eq!(error_rate(0, 4), 0.0);
+        assert_eq!(error_rate(3, 0), 0.0);
+    }
+
+    #[test]
+    fn breakdown_opt_error_rate_keeps_mcp_rows_null() {
+        assert_eq!(opt_error_rate(None, 4), None);
+        let value = opt_error_rate(Some(1), 4).expect("must be present");
+        assert!((value - 0.25).abs() < 1e-12);
     }
 }

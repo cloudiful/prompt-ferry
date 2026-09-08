@@ -1127,6 +1127,15 @@ export type RequestRecordOverviewBreakdownRow = {
      * when the row is not an AI model row.
      */
     avg_output_tokens_per_second?: number | null;
+    /**
+     * Number of failed requests (`ok IS FALSE` or terminal failure state).
+     * `None` for rows that do not report errors (e.g. MCP breakdown).
+     */
+    error_count?: number | null;
+    /**
+     * `error_count / request_count`, `None` when the row does not report errors.
+     */
+    error_rate?: number | null;
     label: string;
     mcp_server_id?: string | null;
     model?: string | null;
@@ -1136,6 +1145,16 @@ export type RequestRecordOverviewBreakdownRow = {
     success_rate: number;
     token_share?: number | null;
     tokens: RequestRecordOverviewTokenUsage;
+    /**
+     * Per-upstream metrics for AI model rows, ordered by `total_tokens` desc.
+     * `None` or empty when the row has a single upstream.
+     */
+    upstream_breakdown?: Array<RequestRecordOverviewUpstreamBreakdown> | null;
+    /**
+     * Number of distinct upstreams (`endpoint_id`) observed for this row.
+     * `None` for rows without upstream breakdown (e.g. MCP breakdown).
+     */
+    upstream_count?: number | null;
 };
 
 export type RequestRecordOverviewErrorRow = {
@@ -1192,6 +1211,16 @@ export type RequestRecordOverviewTrendBucket = {
     success_count: number;
     success_rate: number;
     tokens: RequestRecordOverviewTokenUsage;
+};
+
+export type RequestRecordOverviewUpstreamBreakdown = {
+    avg_output_tokens_per_second?: number | null;
+    endpoint_id?: string | null;
+    endpoint_name?: string | null;
+    error_count: number;
+    error_rate: number;
+    request_count: number;
+    total_tokens: number;
 };
 
 export type RequestRecordPage = {

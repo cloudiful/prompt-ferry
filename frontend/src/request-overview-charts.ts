@@ -1,5 +1,4 @@
 import type {
-  RequestRecordOverviewBreakdownRow,
   RequestRecordOverviewErrorRow,
   RequestRecordOverviewTrendBucket,
 } from './generated/admin-api'
@@ -167,66 +166,6 @@ export function createTrendOption(input: {
         : []),
     ],
     series,
-  }
-}
-
-export function createBreakdownOption(input: {
-  category: 'ai' | 'mcp'
-  labels: ChartLabels
-  rows: RequestRecordOverviewBreakdownRow[]
-  formatCompact: (value?: number | null) => string
-  formatPercent: (value?: number | null) => string
-}) {
-  const theme = getChartTheme()
-  const isAi = input.category === 'ai'
-  const rows = input.rows.slice(0, 12)
-  const formatAxisValue = (value: string | number): string => {
-    const numeric = typeof value === 'string' ? Number(value) : value
-    if (Number.isNaN(numeric)) return '-'
-    return input.formatCompact(numeric)
-  }
-  return {
-    backgroundColor: 'transparent',
-    grid: { left: 112, right: 32, top: 12, bottom: 24 },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      backgroundColor: theme.bg,
-      borderColor: theme.border,
-      textStyle: { color: theme.text },
-      formatter: (params: Array<{ dataIndex: number }>) => {
-        const row = rows[params[0]?.dataIndex ?? 0]
-        if (!row) return ''
-        const value = isAi ? row.tokens.total_tokens : row.request_count
-        const share = isAi ? row.token_share : row.request_share
-        return `${row.label}<br/>${input.formatCompact(value)} / ${input.formatPercent(share)}`
-      },
-    },
-    xAxis: {
-      type: 'value',
-      axisLabel: {
-        color: theme.muted,
-        fontSize: 10,
-        formatter: formatAxisValue,
-      },
-      splitLine: { lineStyle: { color: theme.grid, type: 'dashed' } },
-    },
-    yAxis: {
-      type: 'category',
-      data: rows.map((row) => row.label),
-      axisLabel: { color: theme.text, fontSize: 11 },
-      axisLine: { lineStyle: { color: theme.axis } },
-    },
-    series: [
-      {
-        type: 'bar',
-        data: rows.map((row) =>
-          isAi ? row.tokens.total_tokens : row.request_count,
-        ),
-        itemStyle: { color: isAi ? theme.accent : theme.info, borderRadius: 3 },
-        barMaxWidth: 20,
-      },
-    ],
   }
 }
 

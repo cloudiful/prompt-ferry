@@ -5906,6 +5906,20 @@ components:
             positive output tokens and positive duration, averaged per request
             within the breakdown row. `None` when no valid samples exist or
             when the row is not an AI model row.
+        error_count:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: |-
+            Number of failed requests (`ok IS FALSE` or terminal failure state).
+            `None` for rows that do not report errors (e.g. MCP breakdown).
+        error_rate:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: '`error_count / request_count`, `None` when the row does not report errors.'
         label:
           type: string
         mcp_server_id:
@@ -5936,6 +5950,23 @@ components:
           format: double
         tokens:
           $ref: '#/components/schemas/RequestRecordOverviewTokenUsage'
+        upstream_breakdown:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/RequestRecordOverviewUpstreamBreakdown'
+          description: |-
+            Per-upstream metrics for AI model rows, ordered by `total_tokens` desc.
+            `None` or empty when the row has a single upstream.
+        upstream_count:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: |-
+            Number of distinct upstreams (`endpoint_id`) observed for this row.
+            `None` for rows without upstream breakdown (e.g. MCP breakdown).
     RequestRecordOverviewErrorRow:
       type: object
       required:
@@ -6106,6 +6137,40 @@ components:
           format: double
         tokens:
           $ref: '#/components/schemas/RequestRecordOverviewTokenUsage'
+    RequestRecordOverviewUpstreamBreakdown:
+      type: object
+      required:
+      - request_count
+      - error_count
+      - error_rate
+      - total_tokens
+      properties:
+        avg_output_tokens_per_second:
+          type:
+          - number
+          - 'null'
+          format: double
+        endpoint_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        endpoint_name:
+          type:
+          - string
+          - 'null'
+        error_count:
+          type: integer
+          format: int64
+        error_rate:
+          type: number
+          format: double
+        request_count:
+          type: integer
+          format: int64
+        total_tokens:
+          type: integer
+          format: int64
     RequestRecordPage:
       type: object
       required:

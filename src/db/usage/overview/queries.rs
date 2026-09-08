@@ -5,10 +5,13 @@ use sqlx::FromRow;
 use crate::db::{
     RequestRecordCategory, RequestRecordOverviewBreakdownRow, RequestRecordOverviewErrorRow,
     RequestRecordOverviewSummary, RequestRecordOverviewTrendBucket,
+    RequestRecordOverviewUpstreamBreakdown,
 };
 
 use super::OverviewWindow;
-use super::presentation::{failure_family_label, ratio, summary_from_metrics, token_usage};
+use super::presentation::{
+    error_rate, failure_family_label, opt_error_rate, ratio, summary_from_metrics, token_usage,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum OverviewBucket {
@@ -65,6 +68,37 @@ struct BreakdownRow {
     output_tokens: i64,
     total_tokens: i64,
     avg_output_tokens_per_second: Option<f64>,
+}
+
+#[derive(Debug, FromRow)]
+struct AiBreakdownRow {
+    label: String,
+    model: Option<String>,
+    mcp_server_id: Option<uuid::Uuid>,
+    request_count: i64,
+    request_share: f64,
+    success_count: i64,
+    error_count: i64,
+    token_share: Option<f64>,
+    cache_hit_count: i64,
+    input_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+    output_tokens: i64,
+    total_tokens: i64,
+    avg_output_tokens_per_second: Option<f64>,
+    upstream_count: i64,
+    upstream_breakdown: Option<serde_json::Value>,
+}
+
+fn parse_upstream_breakdown(
+    value: Option<serde_json::Value>,
+) -> Option<Vec<RequestRecordOverviewUpstreamBreakdown>> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    serde_json::from_value(value).ok()
 }
 
 #[derive(Debug, FromRow)]
@@ -162,10 +196,10 @@ pub async fn query_breakdown(
     window: OverviewWindow,
     user: Option<&str>,
 ) -> Result<Vec<RequestRecordOverviewBreakdownRow>> {
-    let rows = match request_category {
+    match request_category {
         RequestRecordCategory::Ai => {
-            sqlx::query_file_as!(
-                BreakdownRow,
+            let rows = sqlx::query_file_as!(
+                AiBreakdownRow,
                 "src/sql/usage/overview/breakdown_ai_model.sql",
                 visible_user_id,
                 request_category.as_str(),
@@ -174,10 +208,40 @@ pub async fn query_breakdown(
                 user,
             )
             .fetch_all(pool)
-            .await?
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    let row_error_rate = error_rate(row.error_count, row.request_count);
+                    RequestRecordOverviewBreakdownRow {
+                        label: row.label,
+                        request_count: row.request_count,
+                        request_share: row.request_share,
+                        success_count: row.success_count,
+                        success_rate: ratio(row.success_count, row.request_count),
+                        error_count: Some(row.error_count),
+                        error_rate: Some(row_error_rate),
+                        upstream_count: Some(row.upstream_count),
+                        upstream_breakdown: parse_upstream_breakdown(row.upstream_breakdown),
+                        token_share: row.token_share,
+                        tokens: token_usage(
+                            row.input_tokens,
+                            row.cache_read_tokens,
+                            row.cache_write_tokens,
+                            row.output_tokens,
+                            row.total_tokens,
+                            row.cache_hit_count,
+                            row.request_count,
+                        ),
+                        model: row.model,
+                        mcp_server_id: row.mcp_server_id,
+                        avg_output_tokens_per_second: row.avg_output_tokens_per_second,
+                    }
+                })
+                .collect())
         }
         RequestRecordCategory::Mcp => {
-            sqlx::query_file_as!(
+            let rows = sqlx::query_file_as!(
                 BreakdownRow,
                 "src/sql/usage/overview/breakdown_mcp_server.sql",
                 visible_user_id,
@@ -187,33 +251,36 @@ pub async fn query_breakdown(
                 user,
             )
             .fetch_all(pool)
-            .await?
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| RequestRecordOverviewBreakdownRow {
+                    label: row.label,
+                    request_count: row.request_count,
+                    request_share: row.request_share,
+                    success_count: row.success_count,
+                    success_rate: ratio(row.success_count, row.request_count),
+                    error_count: None,
+                    error_rate: opt_error_rate(None, row.request_count),
+                    upstream_count: None,
+                    upstream_breakdown: None,
+                    token_share: row.token_share,
+                    tokens: token_usage(
+                        row.input_tokens,
+                        row.cache_read_tokens,
+                        row.cache_write_tokens,
+                        row.output_tokens,
+                        row.total_tokens,
+                        row.cache_hit_count,
+                        row.request_count,
+                    ),
+                    model: row.model,
+                    mcp_server_id: row.mcp_server_id,
+                    avg_output_tokens_per_second: row.avg_output_tokens_per_second,
+                })
+                .collect())
         }
-    };
-
-    Ok(rows
-        .into_iter()
-        .map(|row| RequestRecordOverviewBreakdownRow {
-            label: row.label,
-            request_count: row.request_count,
-            request_share: row.request_share,
-            success_count: row.success_count,
-            success_rate: ratio(row.success_count, row.request_count),
-            token_share: row.token_share,
-            tokens: token_usage(
-                row.input_tokens,
-                row.cache_read_tokens,
-                row.cache_write_tokens,
-                row.output_tokens,
-                row.total_tokens,
-                row.cache_hit_count,
-                row.request_count,
-            ),
-            model: row.model,
-            mcp_server_id: row.mcp_server_id,
-            avg_output_tokens_per_second: row.avg_output_tokens_per_second,
-        })
-        .collect())
+    }
 }
 
 pub async fn query_error_breakdown(

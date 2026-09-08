@@ -214,6 +214,10 @@ export const usageMessages = {
     overviewTotalTokens: '总 token',
     overviewObject: '对象',
     overviewTrend: '趋势',
+    overviewErrorRate: '错误率',
+    overviewUpstreamBreakdown: '上游明细',
+    overviewUpstreamEndpoint: '上游节点',
+    overviewUpstreamEmpty: '暂无上游明细',
   },
   'en-US': {
     currentSlice: 'Current slice',
@@ -436,5 +440,9 @@ export const usageMessages = {
     overviewTotalTokens: 'Total tokens',
     overviewObject: 'Object',
     overviewTrend: 'Trend',
+    overviewErrorRate: 'Error rate',
+    overviewUpstreamBreakdown: 'Upstream breakdown',
+    overviewUpstreamEndpoint: 'Upstream endpoint',
+    overviewUpstreamEmpty: 'No upstream details',
   },
 } as const

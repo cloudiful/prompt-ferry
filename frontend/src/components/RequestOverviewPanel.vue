@@ -8,12 +8,14 @@ import { useLocale } from '@/composables/useLocale'
 import type { RequestRecordFormatting } from '../models/request-record-formatting'
 import type { RequestOverviewDrilldown } from '../request-overview'
 import {
-  createBreakdownOption,
   createErrorOption,
   createTrendOption,
 } from '../request-overview-charts'
 
 const UsageChart = defineAsyncComponent(() => import('./usage/UsageChart.vue'))
+const BreakdownUpstreamPopover = defineAsyncComponent(
+  () => import('./BreakdownUpstreamPopover.vue'),
+)
 
 const props = defineProps<{
   overview: RequestRecordOverviewResponse | null
@@ -82,16 +84,6 @@ const trendOption = computed(() =>
     trend: props.overview?.trend ?? [],
     formatTime: formatBucket,
     formatCompact: props.formatting.formatTokenQuantity,
-  }),
-)
-
-const breakdownOption = computed(() =>
-  createBreakdownOption({
-    category: props.category,
-    labels: chartLabels.value,
-    rows: breakdownRows.value,
-    formatCompact: props.formatting.formatTokenQuantity,
-    formatPercent: props.formatting.formatPercent,
   }),
 )
 
@@ -167,24 +159,12 @@ function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
         <UsageChart :option="trendOption" />
       </section>
 
-      <div class="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-        <section class="rounded-lg border border-default bg-default p-4">
-          <div class="mb-2 text-sm font-semibold text-highlighted">
-            {{
-              category === 'ai'
-                ? t('overviewModelDistribution')
-                : t('overviewMcpServerDistribution')
-            }}
-          </div>
-          <UsageChart :option="breakdownOption" />
-        </section>
-        <section class="rounded-lg border border-default bg-default p-4">
-          <div class="mb-2 text-sm font-semibold text-highlighted">
-            {{ t('overviewErrorBreakdown') }}
-          </div>
-          <UsageChart :option="errorOption" />
-        </section>
-      </div>
+      <section class="rounded-lg border border-default bg-default p-4">
+        <div class="mb-2 text-sm font-semibold text-highlighted">
+          {{ t('overviewErrorBreakdown') }}
+        </div>
+        <UsageChart :option="errorOption" />
+      </section>
 
       <section
         class="overflow-hidden rounded-lg border border-default bg-default"
@@ -219,6 +199,9 @@ function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
                   {{ t('overviewCacheRate') }}
                 </th>
                 <th v-if="category === 'ai'" class="px-4 py-2">
+                  {{ t('overviewErrorRate') }}
+                </th>
+                <th v-if="category === 'ai'" class="px-4 py-2">
                   {{ t('overviewAvgOutputRate') }}
                 </th>
               </tr>
@@ -231,7 +214,14 @@ function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
                 @click="emitBreakdownDrilldown(row)"
               >
                 <td class="px-4 py-2 font-medium text-highlighted">
-                  {{ row.label }}
+                  <span class="inline-flex items-center gap-1">
+                    <span>{{ row.label }}</span>
+                    <BreakdownUpstreamPopover
+                      v-if="category === 'ai'"
+                      :row="row"
+                      :formatting="formatting"
+                    />
+                  </span>
                 </td>
                 <td class="px-4 py-2">
                   {{ formatting.formatCount(row.request_count) }}
@@ -251,6 +241,9 @@ function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
                 </td>
                 <td v-if="category === 'ai'" class="px-4 py-2">
                   {{ formatting.formatPercent(row.tokens.cache_rate) }}
+                </td>
+                <td v-if="category === 'ai'" class="px-4 py-2">
+                  {{ formatting.formatPercent(row.error_rate) }}
                 </td>
                 <td v-if="category === 'ai'" class="px-4 py-2">
                   {{

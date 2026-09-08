@@ -1,8 +1,5 @@
 import { expect, test } from 'bun:test'
-import type {
-  RequestRecordOverviewBreakdownRow,
-  RequestRecordOverviewTrendBucket,
-} from '../src/generated/admin-api'
+import type { RequestRecordOverviewTrendBucket } from '../src/generated/admin-api'
 import { formatTokenQuantity } from '../src/composables/useUsageFormatting'
 
 const storage = new Map<string, string>()
@@ -22,7 +19,7 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
 })
 
-const { createBreakdownOption, createErrorOption, createTrendOption } =
+const { createErrorOption, createTrendOption } =
   await import('../src/request-overview-charts')
 
 const labels = {
@@ -51,29 +48,6 @@ function trendBucket(
     request_count: 0,
     success_count: 0,
     success_rate: 1,
-    tokens: {
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
-      input_tokens: 0,
-      output_tokens: 0,
-      total_tokens: 0,
-    },
-    ...overrides,
-  }
-}
-
-function breakdownRow(
-  overrides: Partial<RequestRecordOverviewBreakdownRow> = {},
-): RequestRecordOverviewBreakdownRow {
-  return {
-    label: 'gpt-4o',
-    model: 'gpt-4o',
-    mcp_server_id: null,
-    request_count: 0,
-    request_share: 0,
-    success_count: 0,
-    success_rate: 1,
-    token_share: 0,
     tokens: {
       cache_read_tokens: 0,
       cache_write_tokens: 0,
@@ -217,53 +191,6 @@ test('trend MCP axis and tooltip compact request counts', () => {
   const series = (option as unknown as { series: Array<{ data: unknown[] }> })
     .series
   expect(series[0]?.data).toEqual([2_500_000])
-})
-
-test('model breakdown axis and tooltip compact tokens while share stays percent', () => {
-  const option = createBreakdownOption({
-    category: 'ai',
-    labels,
-    rows: [
-      breakdownRow({
-        tokens: {
-          cache_read_tokens: 0,
-          cache_write_tokens: 0,
-          input_tokens: 10_000_000,
-          output_tokens: 2_345_678,
-          total_tokens: 12_345_678,
-        },
-        token_share: 0.42,
-      }),
-    ],
-    formatCompact: formatTokenQuantity,
-    formatPercent,
-  })
-  expect(axisFormatterOf(option, 'x')(12_345_678)).toBe('12.3M')
-  const text = tooltipOf(option)([{ dataIndex: 0 }])
-  expect(text).toContain('12.3M')
-  expect(text).toContain('42%')
-  const series = (option as unknown as { series: Array<{ data: unknown[] }> })
-    .series
-  expect(series[0]?.data).toEqual([12_345_678])
-})
-
-test('mcp breakdown tooltip compacts request counts', () => {
-  const option = createBreakdownOption({
-    category: 'mcp',
-    labels,
-    rows: [
-      breakdownRow({
-        label: 'server-a',
-        request_count: 1_500_000,
-        request_share: 0.75,
-      }),
-    ],
-    formatCompact: formatTokenQuantity,
-    formatPercent,
-  })
-  const text = tooltipOf(option)([{ dataIndex: 0 }])
-  expect(text).toContain('1.5M')
-  expect(text).toContain('75%')
 })
 
 test('error breakdown axis and tooltip compact counts while rate stays percent', () => {
