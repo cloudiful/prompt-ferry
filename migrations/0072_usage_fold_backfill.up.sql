@@ -14,6 +14,13 @@
 -- meter is read as `COALESCE(cache_read_tokens, cached_tokens, 0)` to honour the
 -- legacy `cached_tokens` column used by older records, matching the bucket SQL.
 --
+-- NOTE (issue #200 P2): the strict `>` above misses the equality shape
+-- `input_tokens == total_tokens - output_tokens` with `cache_read > 0`
+-- (P1 observed 342410 folded rows in this shape). Those rows stay folded until
+-- 0073 rewrites them with `>=`; the `cache > 0` and `total >= output` guards
+-- are preserved there, and already-backfilled ordinary rows stay untouched
+-- because `ordinary == total - output - cache < total - output` fails `>=`.
+--
 -- Guard: `total_tokens >= output_tokens` is required because when
 -- `total_tokens < output_tokens` the difference `total_tokens - output_tokens`
 -- is negative, which would make `input_tokens > (total_tokens - output_tokens)`

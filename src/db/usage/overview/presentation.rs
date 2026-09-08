@@ -58,11 +58,14 @@ fn ratio_option(numerator: i64, denominator: i64) -> Option<f64> {
 
 /// Compute the overview cache-read rate from aggregate token sums.
 ///
-/// `input_tokens` here is the ordinary-only input (post overview normalization).
-/// The rate is `cache_read / (ordinary + cache_read + cache_write)`, clamped to
-/// `[0, 1]`. Returns `None` when the denominator is non-positive, matching the
-/// SQL `NULL` semantics on list/detail/summary/buckets. Non-negative clamping
-/// is applied defensively to keep the result bounded even if a future schema
+/// P2 (issue #200): the denominator is `max(input, read+write)` — 仿
+/// usage_buckets_day:33-44 + usage_events_page `LEAST(1.0, read/max)` — clamped
+/// to `[0, 1]`. A still-folded `input` already contains the cache, so the old
+/// `input+read+write` double-counted it (≈1.9x, 47-50% vs 记录 96%); `max`
+/// keeps folded rows at `input` without inflating ordinary rows via the cache
+/// sum. Returns `None` when the denominator is non-positive, matching the SQL
+/// `NULL` semantics on list/detail/summary/buckets. Non-negative clamping is
+/// applied defensively to keep the result bounded even if a future schema
 /// allows negative meter values.
 pub(super) fn overview_cache_rate(
     input_tokens: i64,
@@ -72,7 +75,7 @@ pub(super) fn overview_cache_rate(
     let ordinary = input_tokens.max(0);
     let read = cache_read_tokens.max(0);
     let write = cache_write_tokens.max(0);
-    let denominator = ordinary + read + write;
+    let denominator = ordinary.max(read.saturating_add(write));
     if denominator <= 0 {
         None
     } else {
@@ -129,12 +132,12 @@ mod tests {
 
     #[test]
     fn overview_cache_rate_uses_full_canonical_input_after_phase_3_backfill() {
-        // After Phase 3 backfill the ordinary-only aggregate reflects the
-        // canonical post-normalization split; rate must be < 1.0 and exact.
+        // P2 (issue #200): denominator is `max(input, read+write)` — 仿
+        // usage_events_page LEAST — so 176 vs 82800 picks 82800.
         let rate = overview_cache_rate(176, 82_793, 7);
 
         let value = rate.expect("rate must be present when denominator is positive");
-        assert!((value - (82_793.0 / 82_976.0)).abs() < 1e-9);
+        assert!((value - (82_793.0 / 82_800.0)).abs() < 1e-9);
         assert!((0.0..=1.0).contains(&value));
     }
 
@@ -155,12 +158,13 @@ mod tests {
 
     #[test]
     fn overview_cache_rate_matches_old_behavior_for_new_openai_rows() {
-        // OpenAI Responses: input=83 (ordinary), cache_read=30, cache_write=7;
-        // total canonical input is 120, so rate must be 30/120 = 0.25.
+        // P2 (issue #200): OpenAI Responses input=83 (ordinary), read=30, write=7
+        // uses `max(83, 37) = 83` — 与 usage_events_page `LEAST(1.0, read/max)`
+        // 一致 — so rate is 30/83, not 30/120.
         let rate = overview_cache_rate(83, 30, 7);
 
         let value = rate.expect("rate must be present");
-        assert!((value - 0.25).abs() < 1e-9);
+        assert!((value - (30.0 / 83.0)).abs() < 1e-9);
     }
 
     fn fixture_metrics_row(avg_output_tokens_per_second: Option<f64>) -> MetricsRow {
