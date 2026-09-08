@@ -85,7 +85,8 @@ defineEmits<{
             v-if="
               row.original.provider === 'minimax' ||
               row.original.provider === 'command_code' ||
-              row.original.provider === 'opencode_go'
+              row.original.provider === 'opencode_go' ||
+              row.original.provider === 'openrouter'
             "
             :text="t('tokenPlanUsage')"
           >

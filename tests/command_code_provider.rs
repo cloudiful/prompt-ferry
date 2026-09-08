@@ -173,6 +173,8 @@ fn key_usage_serde_omits_absent_command_code_sections() {
             opencodego_rolling: None,
             opencodego_weekly: None,
             opencodego_monthly: None,
+            openrouter_balance: None,
+            openrouter_spend: None,
         }
     }
     fn window(remaining_percent: f64) -> CommandCodeWindowUsage {

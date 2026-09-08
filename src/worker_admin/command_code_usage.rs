@@ -202,5 +202,7 @@ pub(crate) async fn fetch_command_code_key_usage(
         opencodego_rolling: None,
         opencodego_weekly: None,
         opencodego_monthly: None,
+        openrouter_balance: None,
+        openrouter_spend: None,
     }
 }

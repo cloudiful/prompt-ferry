@@ -4603,6 +4603,57 @@ components:
       - chat
       - responses
       - realtime
+    OpenRouterBalance:
+      type: object
+      required:
+      - is_free_tier
+      properties:
+        is_free_tier:
+          type: boolean
+        limit:
+          type:
+          - number
+          - 'null'
+          format: double
+        limit_remaining:
+          type:
+          - number
+          - 'null'
+          format: double
+        limit_reset:
+          type:
+          - string
+          - 'null'
+        total_credits:
+          type:
+          - number
+          - 'null'
+          format: double
+        total_usage:
+          type:
+          - number
+          - 'null'
+          format: double
+    OpenRouterSpend:
+      type: object
+      required:
+      - usage
+      - daily
+      - weekly
+      - monthly
+      properties:
+        daily:
+          type: number
+          format: double
+        monthly:
+          type: number
+          format: double
+        usage:
+          type: number
+          format: double
+        weekly:
+          type: number
+          format: double
     OpencodeGoWindowUsage:
       type: object
       properties:
@@ -6496,6 +6547,20 @@ components:
           - type: 'null'
           - $ref: '#/components/schemas/OpencodeGoWindowUsage'
             description: OpencodeGo weekly window usage. None when missing — degraded.
+        openrouter_balance:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OpenRouterBalance'
+            description: |-
+              OpenRouter credit balance (`GET /api/v1/key` limit fields plus
+              `GET /api/v1/credits` totals). None when missing — degraded.
+        openrouter_spend:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OpenRouterSpend'
+            description: |-
+              OpenRouter spend (`GET /api/v1/key` usage fields). None when missing
+              — degraded.
         status:
           type:
           - integer

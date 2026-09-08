@@ -87,7 +87,8 @@ defineEmits<{
         v-if="
           item.provider === 'minimax' ||
           item.provider === 'command_code' ||
-          item.provider === 'opencode_go'
+          item.provider === 'opencode_go' ||
+          item.provider === 'openrouter'
         "
         size="sm"
         color="neutral"

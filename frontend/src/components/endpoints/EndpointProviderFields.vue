@@ -20,6 +20,7 @@ const minimaxBaseUrls = {
 type MinimaxProtocol = 'openai' | 'anthropic'
 const COMMAND_CODE_BASE_URL = 'https://api.commandcode.ai/provider' as const
 const OPENCODE_GO_BASE_URL = 'https://opencode.ai/zen/go' as const
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api' as const
 function stripVersionSuffix(value: string): string {
   let normalized = value.trim()
   for (;;) {
@@ -44,7 +45,10 @@ const hasVersionPath = computed(() =>
 )
 const providerSelection = computed({
   get: () => form.value.provider,
-  set(value: 'generic' | 'minimax' | 'command_code' | 'opencode_go') {
+  set(
+    value:
+      'generic' | 'minimax' | 'command_code' | 'opencode_go' | 'openrouter',
+  ) {
     form.value.provider = value
     if (value === 'generic') {
       form.value.provider_region = null
@@ -77,6 +81,16 @@ const providerSelection = computed({
       setOpencodeGoBaseUrl()
       return
     }
+    if (value === 'openrouter') {
+      // OpenRouter carries no region (NULL); hide the region control and
+      // keep service tier/MCP at generic defaults. Inference goes through
+      // the official /api base (stored without the /v1 suffix).
+      form.value.provider_region = null
+      form.value.service_tier = 'standard'
+      form.value.mcp_enabled = false
+      setOpenRouterBaseUrl()
+      return
+    }
     const region = form.value.provider_region ?? 'cn'
     form.value.provider_region = region
     // Preserve an explicit priority selection across provider switches;
@@ -103,6 +117,7 @@ const providerRegionSelection = computed({
 const isMinimax = computed(() => form.value.provider === 'minimax')
 const isCommandCode = computed(() => form.value.provider === 'command_code')
 const isOpencodeGo = computed(() => form.value.provider === 'opencode_go')
+const isOpenRouter = computed(() => form.value.provider === 'openrouter')
 const serviceTierSelection = computed({
   get: () => (form.value.service_tier === 'priority' ? 'priority' : 'standard'),
   set(value: 'standard' | 'priority') {
@@ -157,6 +172,9 @@ const baseUrlHintText = computed(() => {
   }
   if (isOpencodeGo.value) {
     hints.push(props.t('providerOpencodeGoBaseUrlHint'))
+  }
+  if (isOpenRouter.value) {
+    hints.push(props.t('providerOpenRouterBaseUrlHint'))
   }
   if (usesCustomMinimaxBaseUrl.value) {
     hints.push(props.t('providerCustomBaseUrlHint'))
@@ -218,6 +236,28 @@ function setOpencodeGoBaseUrl(): void {
     form.value.base_url = OPENCODE_GO_BASE_URL
   }
 }
+
+function setOpenRouterBaseUrl(): void {
+  const current = stripVersionSuffix(form.value.base_url)
+  if (!current) {
+    form.value.base_url = OPENROUTER_BASE_URL
+    return
+  }
+  const knownMinimax = Object.values(minimaxBaseUrls).flatMap((urls) =>
+    Object.values(urls).map((url) => stripVersionSuffix(url)),
+  )
+  const commandCode = stripVersionSuffix(COMMAND_CODE_BASE_URL)
+  const opencodeGo = stripVersionSuffix(OPENCODE_GO_BASE_URL)
+  const openRouter = stripVersionSuffix(OPENROUTER_BASE_URL)
+  if (
+    knownMinimax.includes(current) ||
+    current === commandCode ||
+    current === opencodeGo ||
+    current === openRouter
+  ) {
+    form.value.base_url = OPENROUTER_BASE_URL
+  }
+}
 </script>
 
 <template>
@@ -231,6 +271,7 @@ function setOpencodeGoBaseUrl(): void {
         { label: t('providerMinimax'), value: 'minimax' },
         { label: t('providerCommandCode'), value: 'command_code' },
         { label: t('providerOpencodeGo'), value: 'opencode_go' },
+        { label: t('providerOpenRouter'), value: 'openrouter' },
       ]"
       label-key="label"
       value-key="value"

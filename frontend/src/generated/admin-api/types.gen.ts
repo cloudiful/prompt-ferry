@@ -719,6 +719,22 @@ export type ModelRouteWhitelistResponse = {
 
 export type NativeApi = 'auto' | 'anthropic_messages' | 'chat' | 'responses' | 'realtime';
 
+export type OpenRouterBalance = {
+    is_free_tier: boolean;
+    limit?: number | null;
+    limit_remaining?: number | null;
+    limit_reset?: string | null;
+    total_credits?: number | null;
+    total_usage?: number | null;
+};
+
+export type OpenRouterSpend = {
+    daily: number;
+    monthly: number;
+    usage: number;
+    weekly: number;
+};
+
 export type OpencodeGoWindowUsage = {
     percent?: number | null;
     resets_at?: string | null;
@@ -1315,6 +1331,8 @@ export type TokenPlanKeyUsage = {
     opencodego_monthly?: null | OpencodeGoWindowUsage;
     opencodego_rolling?: null | OpencodeGoWindowUsage;
     opencodego_weekly?: null | OpencodeGoWindowUsage;
+    openrouter_balance?: null | OpenRouterBalance;
+    openrouter_spend?: null | OpenRouterSpend;
     status?: number | null;
     weekly?: null | CommandCodeWindowUsage;
 };

@@ -172,6 +172,14 @@ pub struct TokenPlanKeyUsage {
     /// OpencodeGo monthly window usage. None when missing — degraded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opencodego_monthly: Option<OpencodeGoWindowUsage>,
+    /// OpenRouter credit balance (`GET /api/v1/key` limit fields plus
+    /// `GET /api/v1/credits` totals). None when missing — degraded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openrouter_balance: Option<OpenRouterBalance>,
+    /// OpenRouter spend (`GET /api/v1/key` usage fields). None when missing
+    /// — degraded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openrouter_spend: Option<OpenRouterSpend>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -215,6 +223,24 @@ pub struct OpencodeGoWindowUsage {
     pub status: Option<i32>,
     pub percent: Option<f64>,
     pub resets_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OpenRouterBalance {
+    pub limit: Option<f64>,
+    pub limit_remaining: Option<f64>,
+    pub limit_reset: Option<String>,
+    pub is_free_tier: bool,
+    pub total_credits: Option<f64>,
+    pub total_usage: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OpenRouterSpend {
+    pub usage: f64,
+    pub daily: f64,
+    pub weekly: f64,
+    pub monthly: f64,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]

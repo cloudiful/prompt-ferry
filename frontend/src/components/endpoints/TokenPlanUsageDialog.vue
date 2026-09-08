@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
-import type {
-  CommandCodeWindowUsage,
-  OpencodeGoWindowUsage,
-  TokenPlanKeyUsage,
-  TokenPlanUsageResponse,
-  TokenPlanWindowUsage,
-} from '@/generated/admin-api'
+import type { TokenPlanUsageResponse } from '@/generated/admin-api'
+import {
+  useTokenPlanTicker,
+  useTokenPlanWindowEntries,
+} from '@/composables/useTokenPlanWindowEntries'
 
 const props = defineProps<{
   endpointName: string
@@ -17,197 +14,22 @@ const props = defineProps<{
 
 const visible = defineModel<boolean>('visible', { required: true })
 
-// Live "now" anchor used by the reset countdown. It only ticks while the
-// dialog is open so the rendered text stays fresh without leaking background
-// timers after the user closes the modal.
-const nowMs = ref<number>(Date.now())
-let ticker: ReturnType<typeof setInterval> | null = null
+const nowMs = useTokenPlanTicker(visible)
 
-function startTicker(): void {
-  if (ticker !== null) return
-  nowMs.value = Date.now()
-  ticker = setInterval(() => {
-    nowMs.value = Date.now()
-  }, 1000)
-}
-
-function stopTicker(): void {
-  if (ticker === null) return
-  clearInterval(ticker)
-  ticker = null
-}
-
-watch(
-  () => visible.value,
-  (open) => {
-    if (open) startTicker()
-    else stopTicker()
-  },
-  { immediate: true },
-)
-
-onBeforeUnmount(stopTicker)
-
-function remainingPercent(window: TokenPlanWindowUsage): number {
-  const raw = window.remaining_percent
-  if (raw == null || !Number.isFinite(raw)) return 0
-  return Math.max(0, Math.min(100, raw))
-}
-
-function usedPercent(window: TokenPlanWindowUsage): number {
-  return 100 - remainingPercent(window)
-}
-
-function keyWindows(key: TokenPlanKeyUsage): TokenPlanWindowUsage[] {
-  return key.model_remains.flatMap((model) =>
-    [model.interval, model.weekly].filter(
-      (window): window is TokenPlanWindowUsage => window != null,
-    ),
-  )
-}
-
-function keyWindowCount(key: TokenPlanKeyUsage): number {
-  return keyWindows(key).length
-}
-
-function minimumRemainingPercent(key: TokenPlanKeyUsage): number | null {
-  const windows = keyWindows(key)
-  if (windows.length === 0) return null
-  return Math.min(...windows.map(remainingPercent))
-}
-
-function progressColor(window: TokenPlanWindowUsage): string {
-  const used = usedPercent(window)
-  const hue = 120 - used * 1.2
-  return `hsl(${hue} 80% 45%)`
-}
-
-function endTimeMs(window: TokenPlanWindowUsage): number | null {
-  const value = window.end_at
-  if (typeof value !== 'string' || value.length === 0) return null
-  const ts = Date.parse(value)
-  return Number.isNaN(ts) ? null : ts
-}
-
-function remainingMs(window: TokenPlanWindowUsage): number | null {
-  // Prefer end_at so the countdown tracks wall-clock time; fall back to the
-  // snapshot value when no parseable end_at is available.
-  const end = endTimeMs(window)
-  if (end !== null) return end - nowMs.value
-  const snapshot = window.remains_time_ms
-  if (typeof snapshot === 'number' && Number.isFinite(snapshot)) {
-    return snapshot
-  }
-  return null
-}
-
-function formatRemaining(window: TokenPlanWindowUsage): string {
-  const ms = remainingMs(window)
-  if (ms === null) return '-'
-  if (ms <= 0) return props.t('tokenPlanExpired')
-  const totalSeconds = Math.floor(ms / 1000)
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  if (hours > 0) {
-    return props.t('tokenPlanResetExpiresHoursMinutes', { hours, minutes })
-  }
-  if (minutes > 0) {
-    return props.t('tokenPlanResetExpiresMinutes', { minutes })
-  }
-  return props.t('tokenPlanResetExpiresSeconds', { seconds: totalSeconds })
-}
-
-// CommandCode USD windows reuse MiniMax percent/countdown rendering by
-// adapting reset_at onto the TokenPlanWindowUsage end_at shape.
-function ccAsWindow(
-  window: CommandCodeWindowUsage | null | undefined,
-): TokenPlanWindowUsage | null {
-  if (!window) return null
-  return {
-    end_at: window.reset_at,
-    remaining_percent: window.remaining_percent,
-  }
-}
-
-type CcEntry = {
-  adapted: TokenPlanWindowUsage
-  labelKey: string
-  raw: CommandCodeWindowUsage
-}
-
-function ccEntries(key: TokenPlanKeyUsage): CcEntry[] {
-  const entries: CcEntry[] = []
-  const five = ccAsWindow(key.five_hour)
-  if (key.five_hour && five)
-    entries.push({
-      adapted: five,
-      labelKey: 'tokenPlanFiveHour',
-      raw: key.five_hour,
-    })
-  const weekly = ccAsWindow(key.weekly)
-  if (key.weekly && weekly)
-    entries.push({
-      adapted: weekly,
-      labelKey: 'tokenPlanWeeklyUsd',
-      raw: key.weekly,
-    })
-  return entries
-}
-
-function ccMinRemaining(key: TokenPlanKeyUsage): number | null {
-  const adapted = [ccAsWindow(key.five_hour), ccAsWindow(key.weekly)].filter(
-    (window): window is TokenPlanWindowUsage => window != null,
-  )
-  if (adapted.length === 0) return null
-  return Math.min(...adapted.map(remainingPercent))
-}
-
-// OpencodeGo windows carry a `percent` (used share) plus a `resets_at`
-// anchor. We adapt them onto the shared progress/countdown rendering by
-// folding the used percent into a remaining percent (100 - used) and reusing
-// `resets_at` as the end_at reset anchor.
-function opencodeGoAsWindow(
-  window: OpencodeGoWindowUsage | null | undefined,
-): TokenPlanWindowUsage | null {
-  if (!window) return null
-  const raw = window.percent
-  const used = raw == null || !Number.isFinite(raw) ? null : raw
-  return {
-    end_at: window.resets_at,
-    remaining_percent: used == null ? null : Math.max(0, Math.min(100, 100 - used)),
-  }
-}
-
-type OpencodeGoEntry = {
-  adapted: TokenPlanWindowUsage
-  labelKey: string
-  raw: OpencodeGoWindowUsage
-}
-
-function opencodeGoEntries(key: TokenPlanKeyUsage): OpencodeGoEntry[] {
-  const entries: OpencodeGoEntry[] = []
-  const byKey = [
-    ['tokenPlanRolling', key.opencodego_rolling],
-    ['tokenPlanWeekly', key.opencodego_weekly],
-    ['tokenPlanMonthly', key.opencodego_monthly],
-  ] as const
-  for (const [labelKey, window] of byKey) {
-    const adapted = opencodeGoAsWindow(window)
-    if (window && adapted)
-      entries.push({ adapted, labelKey, raw: window })
-  }
-  return entries
-}
-
-function opencodeGoMinRemaining(key: TokenPlanKeyUsage): number | null {
-  const adapted = [
-    opencodeGoAsWindow(key.opencodego_rolling),
-    opencodeGoAsWindow(key.opencodego_weekly),
-    opencodeGoAsWindow(key.opencodego_monthly),
-  ].filter((window): window is TokenPlanWindowUsage => window != null)
-  if (adapted.length === 0) return null
-  return Math.min(...adapted.map(remainingPercent))
-}
+const {
+  remainingPercent,
+  usedPercent,
+  keyWindowCount,
+  minimumRemainingPercent,
+  progressColor,
+  formatRemaining,
+  ccEntries,
+  ccMinRemaining,
+  opencodeGoEntries,
+  opencodeGoMinRemaining,
+  openrouterEntries,
+  formatOpenRouterCredits,
+} = useTokenPlanWindowEntries(props.t, nowMs)
 </script>
 
 <template>
@@ -256,6 +78,12 @@ function opencodeGoMinRemaining(key: TokenPlanKeyUsage): number | null {
                             : t('tokenPlanUnavailable')
                         "
                         :color="key.ok ? 'success' : 'error'"
+                        variant="subtle"
+                      />
+                      <UBadge
+                        v-if="key.openrouter_balance?.is_free_tier"
+                        :label="t('tokenPlanFreeTier')"
+                        color="neutral"
                         variant="subtle"
                       />
                     </span>
@@ -320,6 +148,74 @@ function opencodeGoMinRemaining(key: TokenPlanKeyUsage): number | null {
                         <span class="font-semibold"
                           >{{ t('tokenPlanRemainingCredits') }}:
                           {{ key.balances.remaining_credits.toFixed(2) }}</span
+                        >
+                      </div>
+                    </div>
+                    <div
+                      v-if="key.openrouter_balance"
+                      class="grid gap-1 rounded-md border border-default p-3"
+                    >
+                      <div class="break-words font-medium text-highlighted">
+                        {{ t('tokenPlanOpenRouterBalance') }}
+                      </div>
+                      <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                        <span
+                          >{{ t('tokenPlanLimit') }}:
+                          {{
+                            formatOpenRouterCredits(
+                              key.openrouter_balance.limit,
+                            )
+                          }}</span
+                        >
+                        <span
+                          >{{ t('tokenPlanLimitRemaining') }}:
+                          {{
+                            formatOpenRouterCredits(
+                              key.openrouter_balance.limit_remaining,
+                            )
+                          }}</span
+                        >
+                        <span v-if="key.openrouter_balance.limit_reset"
+                          >{{ t('tokenPlanLimitReset') }}:
+                          {{ key.openrouter_balance.limit_reset }}</span
+                        >
+                        <span
+                          >{{ t('tokenPlanTotalCredits') }}:
+                          {{
+                            formatOpenRouterCredits(
+                              key.openrouter_balance.total_credits,
+                            )
+                          }}</span
+                        >
+                        <span
+                          >{{ t('tokenPlanTotalUsage') }}:
+                          {{
+                            formatOpenRouterCredits(
+                              key.openrouter_balance.total_usage,
+                            )
+                          }}</span
+                        >
+                      </div>
+                      <p
+                        v-if="key.openrouter_balance.is_free_tier"
+                        class="text-dimmed"
+                      >
+                        {{ t('tokenPlanFreeTierHint') }}
+                      </p>
+                    </div>
+                    <div
+                      v-if="key.openrouter_spend"
+                      class="grid gap-1 rounded-md border border-default p-3"
+                    >
+                      <div class="break-words font-medium text-highlighted">
+                        {{ t('tokenPlanOpenRouterSpend') }}
+                      </div>
+                      <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                        <span
+                          v-for="entry in openrouterEntries(key)"
+                          :key="entry.labelKey"
+                          >{{ t(entry.labelKey) }}:
+                          {{ entry.value.toFixed(2) }}</span
                         >
                       </div>
                     </div>

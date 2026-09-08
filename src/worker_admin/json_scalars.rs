@@ -61,5 +61,7 @@ pub(crate) fn failed_key(
         opencodego_rolling: None,
         opencodego_weekly: None,
         opencodego_monthly: None,
+        openrouter_balance: None,
+        openrouter_spend: None,
     }
 }

@@ -46,6 +46,8 @@ fn opencode_go_key(
         opencodego_rolling: rolling.map(opencode_go_window),
         opencodego_weekly: weekly.map(opencode_go_window),
         opencodego_monthly: monthly.map(opencode_go_window),
+        openrouter_balance: None,
+        openrouter_spend: None,
     }
 }
 

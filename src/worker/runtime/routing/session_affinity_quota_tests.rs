@@ -143,6 +143,8 @@ fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
                 opencodego_rolling: None,
                 opencodego_weekly: None,
                 opencodego_monthly: None,
+                openrouter_balance: None,
+                openrouter_spend: None,
             })
             .collect(),
     }
@@ -199,6 +201,8 @@ fn command_code_key(
         opencodego_rolling: None,
         opencodego_weekly: None,
         opencodego_monthly: None,
+        openrouter_balance: None,
+        openrouter_spend: None,
     }
 }
 

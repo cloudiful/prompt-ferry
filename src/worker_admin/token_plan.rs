@@ -198,6 +198,8 @@ async fn fetch_minimax_key_usage(
             opencodego_rolling: None,
             opencodego_weekly: None,
             opencodego_monthly: None,
+            openrouter_balance: None,
+            openrouter_spend: None,
         },
         Err((error_code, error_message)) => {
             failed_key(key_id, key_label, Some(status), error_code, error_message)

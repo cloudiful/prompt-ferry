@@ -147,6 +147,8 @@ mod tests {
             opencodego_rolling: rolling.map(window),
             opencodego_weekly: weekly.map(window),
             opencodego_monthly: monthly.map(window),
+            openrouter_balance: None,
+            openrouter_spend: None,
         }
     }
 

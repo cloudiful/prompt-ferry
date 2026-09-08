@@ -84,6 +84,8 @@ pub(crate) async fn fetch_opencode_go_key_usage(
             opencodego_rolling: usage.rolling,
             opencodego_weekly: usage.weekly,
             opencodego_monthly: usage.monthly,
+            openrouter_balance: None,
+            openrouter_spend: None,
         },
         None => failed_key(
             key_id,

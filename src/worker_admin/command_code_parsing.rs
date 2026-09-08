@@ -275,6 +275,8 @@ mod tests {
                 opencodego_rolling: None,
                 opencodego_weekly: None,
                 opencodego_monthly: None,
+                openrouter_balance: None,
+                openrouter_spend: None,
             }
         }
         fn pct(five: Option<f64>, weekly: Option<f64>) -> Option<f64> {
