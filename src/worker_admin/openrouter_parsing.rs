@@ -242,4 +242,36 @@ mod tests {
         assert!(openrouter_error_message(&json!({"error": {"message": "  "}})).is_none());
         assert!(openrouter_error_message(&json!({"data": {}})).is_none());
     }
+
+    #[test]
+    fn zero_limit_preserved_for_cache_exhaustion_mapping() {
+        // Parsing keeps a zero cap verbatim; the quota cache maps it to
+        // exhausted (no normalization here).
+        let body = json!({"data": {"limit": 0, "limit_remaining": 0, "usage": 0}});
+        let parsed = parse_openrouter_key(&body).expect("key");
+        assert_eq!(parsed.balance.limit, Some(0.0));
+        assert_eq!(parsed.balance.limit_remaining, Some(0.0));
+    }
+
+    #[test]
+    fn usage_only_key_parses_as_unlimited_with_spend() {
+        // No limit keys but a usage signal still yields an unlimited shape
+        // (limit None) with the spend snapshot attached.
+        let body = json!({"data": {"usage": 3.5, "usage_daily": 0.5}});
+        let parsed = parse_openrouter_key(&body).expect("key");
+        assert_eq!(parsed.balance.limit, None);
+        assert_eq!(parsed.spend.usage, 3.5);
+        assert_eq!(parsed.spend.daily, 0.5);
+        // A lone limit_reset carries no numeric signal and is rejected.
+        assert!(parse_openrouter_key(&json!({"data": {"limit_reset": "monthly"}})).is_none());
+    }
+
+    #[test]
+    fn credits_stringy_totals_coerce_and_limit_reset_numeric_coerces() {
+        let credits = json!({"data": {"total_credits": "100.5", "total_usage": "25"}});
+        assert_eq!(parse_openrouter_credits(&credits), Some((100.5, 25.0)));
+        let key = json!({"data": {"limit": 10, "limit_remaining": 4, "limit_reset": 7, "usage": 1}});
+        let parsed = parse_openrouter_key(&key).expect("key");
+        assert_eq!(parsed.balance.limit_reset.as_deref(), Some("7"));
+    }
 }
