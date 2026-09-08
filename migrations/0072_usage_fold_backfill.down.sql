@@ -1,0 +1,15 @@
+-- Reverse 0072_usage_fold_backfill.
+--
+-- This migration only rewrites the stored `input_tokens` of a narrow subset of
+-- rows (those with `cache_read_tokens > 0` AND `total_tokens >= output_tokens`
+-- AND `input_tokens > total_tokens - output_tokens`). The rewritten value is the
+-- ordinary non-cache input, which is not recoverable from the surviving columns
+-- alone: the original folded `input_tokens` equals the ordinary value plus the
+-- cache meters, but the cache meters are `cache_read_tokens`/`cached_tokens` and
+-- `cache_write_tokens`, not the per-row lost original. Rolling the rewrite back
+-- without the source value would corrupt the row, so the down migration is an
+-- explicit, irreversible no-op.
+--
+-- Restore from a backup or a pre-backfill snapshot if the folded values are
+-- required; this migration cannot be reversed in-place.
+SELECT 1;

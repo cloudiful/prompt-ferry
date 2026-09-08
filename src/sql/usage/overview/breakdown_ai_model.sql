@@ -4,12 +4,11 @@ WITH normalized AS (
            rr.request_state,
            rr.output_tokens AS raw_output_tokens,
            rr.duration_ms,
-           GREATEST(
-               COALESCE(rr.input_tokens, 0)
-                   - COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)
-                   - COALESCE(rr.cache_write_tokens, 0),
-               0
-           )::BIGINT AS normalized_input_tokens,
+           -- Post-0072 the stored `input_tokens` is already the ordinary
+           -- (non-cache) value, so use it directly; the cache must not be
+           -- subtracted again (double-subtract of backfilled rows).
+           -- Closed loop: ordinary + cache_read + cache_write + output == total.
+           GREATEST(COALESCE(rr.input_tokens, 0), 0)::BIGINT AS normalized_input_tokens,
            COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,
            COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,
            COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens

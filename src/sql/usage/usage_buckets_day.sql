@@ -10,7 +10,12 @@ normalized AS (
            rr.request_state,
            rr.duration_ms,
            rr.ttft_ms,
-           GREATEST(COALESCE(rr.input_tokens, 0), 0)::BIGINT AS input_tokens,
+            -- Post-0072 the stored `input_tokens` is already the ordinary
+            -- (non-cache) value, so expose it directly to stay consistent with
+            -- the unchanged hour/minute/summary consumers; the cache is not
+            -- subtracted again here (which would double-subtract the backfilled
+            -- rows).
+            GREATEST(COALESCE(rr.input_tokens, 0), 0)::BIGINT AS input_tokens,
            GREATEST(COALESCE(rr.output_tokens, 0), 0)::BIGINT AS output_tokens,
            GREATEST(COALESCE(rr.total_tokens, 0), 0)::BIGINT AS total_tokens,
            GREATEST(
@@ -19,12 +24,24 @@ normalized AS (
            )::BIGINT AS normalized_cache_read_tokens,
            GREATEST(COALESCE(rr.cached_tokens, 0), 0)::BIGINT AS normalized_cached_tokens,
            GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)::BIGINT AS normalized_cache_write_tokens,
-           GREATEST(
-               COALESCE(rr.input_tokens, 0),
-               GREATEST(COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0), 0)
-                   + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-               0
-           )::BIGINT AS normalized_full_input_tokens
+            -- Full-input denominator for `cache_rate` = cache_read / full_input.
+            -- Only the Anthropic raw shape (stored `input_tokens` already holds
+            -- the cache, i.e. input_tokens > cache_total) may use the defensive
+            -- GREATEST against the cache sum; any other shape keeps the raw
+            -- input instead of substituting the inflated cache total, so the
+            -- cache meters can never inflate the denominator.
+            CASE
+                WHEN COALESCE(rr.input_tokens, 0)
+                    > GREATEST(COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0), 0)
+                        + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
+                THEN GREATEST(
+                    COALESCE(rr.input_tokens, 0),
+                    GREATEST(COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0), 0)
+                        + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
+                    0
+                )
+                ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
+            END::BIGINT AS normalized_full_input_tokens
     FROM request_records rr, bounds
     WHERE rr.event_kind = 'request'
       AND rr.created_at >= bounds.start_at AND rr.created_at < bounds.end_at + INTERVAL '1 day'
