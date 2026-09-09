@@ -1,4 +1,4 @@
-use super::super::{REQUEST_RECORD_LEASE_SECONDS, elapsed_ms, upstream_url};
+use super::super::{REQUEST_RECORD_LEASE_SECONDS, elapsed_ms};
 use crate::{
     db,
     protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseStart},
@@ -63,7 +63,12 @@ pub(super) async fn process_models_request(
     let mut requests = futures::stream::iter(routes.into_iter().map(|route| {
         let client = client.clone();
         async move {
-            let request = client.get(upstream_url(&route.base_url, "/v1/models"));
+            // GLM (issue #230 P2) lists models at `{base}/models`; every
+            // other provider keeps the plain `/v1/models` join.
+            let request = client.get(crate::endpoint_models::models_url(
+                &route.base_url,
+                route.provider,
+            ));
             let request = match route.native_api {
                 crate::config::NativeApi::AnthropicMessages => {
                     super::upstream::with_anthropic_headers(

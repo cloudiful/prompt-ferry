@@ -313,7 +313,7 @@ export type EndpointPageResponse = {
 
 export type EndpointProtocolMode = 'auto' | 'manual';
 
-export type EndpointProvider = 'generic' | 'minimax' | 'command_code' | 'opencode_go' | 'openrouter';
+export type EndpointProvider = 'generic' | 'minimax' | 'command_code' | 'opencode_go' | 'openrouter' | 'glm';
 
 export type EndpointRegion = 'cn' | 'global';
 
@@ -361,6 +361,26 @@ export type ErrorBody = {
 
 export type ErrorEnvelope = {
     error: ErrorBody;
+};
+
+/**
+ * One GLM quota window (`TOKENS_LIMIT` or `CREDIT_LIMIT` row in the
+ * `/api/monitor/usage/quota/limit` response). `percentage` is the used
+ * share 0..=100 as reported by the API; cache weighting derives
+ * `100 - percentage` to keep the schema symmetric with the other
+ * providers. `next_reset_at` is normalized to `DateTime<Utc>`.
+ */
+export type GlmWindowUsage = {
+    current_value: number;
+    limit: number;
+    next_reset_at?: string | null;
+    /**
+     * Used share 0..=100 (matches Zhipu's `percentage` field). Derived
+     * from `currentValue / limit` when the API omits the field, and
+     * clamped to the closed interval.
+     */
+    percentage?: number | null;
+    remaining: number;
 };
 
 export type LlmReviewSettings = {
@@ -1353,6 +1373,8 @@ export type TokenPlanKeyUsage = {
     error_code?: string | null;
     error_message?: string | null;
     five_hour?: null | CommandCodeWindowUsage;
+    glm_five_hour?: null | GlmWindowUsage;
+    glm_weekly?: null | GlmWindowUsage;
     key_id: string;
     key_label: string;
     model_remains: Array<TokenPlanModelUsage>;

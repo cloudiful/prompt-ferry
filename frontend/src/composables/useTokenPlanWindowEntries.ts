@@ -1,16 +1,20 @@
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import type {
   CommandCodeWindowUsage,
+  GlmWindowUsage,
   OpencodeGoWindowUsage,
   TokenPlanKeyUsage,
   TokenPlanWindowUsage,
 } from '@/generated/admin-api'
 
 // Window entries shared by the token-plan dialog (issues #184 P4, #193 P2,
-// #203 P2). MiniMax windows reuse percent/countdown rendering directly;
-// CommandCode USD windows and OpencodeGo percent windows are adapted onto
-// the same TokenPlanWindowUsage shape; OpenRouter spend is a static
-// balance/spend display with no countdown window.
+// #203 P2, #230 P3). MiniMax windows reuse percent/countdown rendering
+// directly; CommandCode USD windows and OpencodeGo percent windows are
+// adapted onto the same TokenPlanWindowUsage shape; GLM (Zhipu Coding
+// Plan) token/credit windows follow the same adapt-then-render pattern
+// as OpencodeGo (the API reports the used share as `percentage`, so we
+// fold it into the shared `remaining_percent` rendering); OpenRouter
+// spend is a static balance/spend display with no countdown window.
 export function useTokenPlanTicker(visible: Ref<boolean>): Ref<number> {
   // Live "now" anchor for the reset countdown; ticks only while open.
   const nowMs = ref<number>(Date.now())
@@ -49,6 +53,23 @@ export type OpencodeGoEntry = {
   adapted: TokenPlanWindowUsage
   labelKey: string
   raw: OpencodeGoWindowUsage
+}
+
+export type GlmEntry = {
+  adapted: TokenPlanWindowUsage
+  labelKey: string
+  raw: GlmWindowUsage
+}
+
+// Unified progress-window row: opencodeGo + GLM share the same 3-column
+// rendering template. `subline` is the optional `used / total` caption
+// shown below the row (null for opencodeGo, `${current} / ${limit}` for
+// GLM). Exposed at module scope so dialog callers can type the v-for
+// iterator without re-declaring the shape.
+export type ProgressWindowEntry = {
+  adapted: TokenPlanWindowUsage
+  labelKey: string
+  subline: string | null
 }
 
 export type OpenRouterSpendEntry = {
@@ -208,6 +229,78 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
     return Math.min(...adapted.map(remainingPercent))
   }
 
+  // GLM (Zhipu Coding Plan) windows report the *used* share as
+  // `percentage` and the reset anchor as `next_reset_at`. We adapt them
+  // onto the shared progress/countdown rendering by folding the used
+  // percent into a remaining percent (100 - used) and reusing
+  // `next_reset_at` as the end_at reset anchor — same adapt pattern as
+  // OpencodeGo so the dialog can share the same progress bar.
+  function glmAsWindow(
+    window: GlmWindowUsage | null | undefined,
+  ): TokenPlanWindowUsage | null {
+    if (!window) return null
+    const raw = window.percentage
+    const used = raw == null || !Number.isFinite(raw) ? null : raw
+    return {
+      end_at: window.next_reset_at,
+      remaining_percent:
+        used == null ? null : Math.max(0, Math.min(100, 100 - used)),
+    }
+  }
+
+  function glmEntries(key: TokenPlanKeyUsage): GlmEntry[] {
+    const entries: GlmEntry[] = []
+    const byKey = [
+      ['tokenPlanInterval', key.glm_five_hour],
+      ['tokenPlanWeekly', key.glm_weekly],
+    ] as const
+    for (const [labelKey, window] of byKey) {
+      const adapted = glmAsWindow(window)
+      if (window && adapted) entries.push({ adapted, labelKey, raw: window })
+    }
+    return entries
+  }
+
+  function glmMinRemaining(key: TokenPlanKeyUsage): number | null {
+    const adapted = [
+      glmAsWindow(key.glm_five_hour),
+      glmAsWindow(key.glm_weekly),
+    ].filter((window): window is TokenPlanWindowUsage => window != null)
+    if (adapted.length === 0) return null
+    return Math.min(...adapted.map(remainingPercent))
+  }
+
+  // Unified progress-window entries: opencodeGo + GLM rendered on the
+  // same 3-column row template. GLM adds a used/total subline because
+  // its raw payload carries `current_value` + `limit`; OpencodeGo
+  // payload has no used/total so its subline is null. Keeping both
+  // providers on one entry list lets the dialog render them with a
+  // single v-for instead of two parallel blocks.
+  function progressWindowEntries(key: TokenPlanKeyUsage): ProgressWindowEntry[] {
+    const entries: ProgressWindowEntry[] = []
+    for (const raw of opencodeGoEntries(key)) {
+      entries.push({ adapted: raw.adapted, labelKey: raw.labelKey, subline: null })
+    }
+    for (const raw of glmEntries(key)) {
+      entries.push({
+        adapted: raw.adapted,
+        labelKey: raw.labelKey,
+        subline: `${raw.raw.current_value.toFixed(2)} / ${raw.raw.limit.toFixed(2)}`,
+      })
+    }
+    return entries
+  }
+
+  function progressWindowMinRemaining(key: TokenPlanKeyUsage): number | null {
+    const values: number[] = []
+    const oc = opencodeGoMinRemaining(key)
+    if (oc !== null) values.push(oc)
+    const glm = glmMinRemaining(key)
+    if (glm !== null) values.push(glm)
+    if (values.length === 0) return null
+    return Math.min(...values)
+  }
+
   function formatOpenRouterCredits(value: number | null | undefined): string {
     if (value == null || !Number.isFinite(value)) return t('tokenPlanNoLimit')
     return value.toFixed(2)
@@ -239,6 +332,10 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
     ccMinRemaining,
     opencodeGoEntries,
     opencodeGoMinRemaining,
+    glmEntries,
+    glmMinRemaining,
+    progressWindowEntries,
+    progressWindowMinRemaining,
     openrouterEntries,
     formatOpenRouterCredits,
   }

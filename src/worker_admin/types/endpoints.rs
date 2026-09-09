@@ -180,6 +180,14 @@ pub struct TokenPlanKeyUsage {
     /// — degraded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub openrouter_spend: Option<OpenRouterSpend>,
+    /// GLM 5-hour token/credit window. None when missing — degraded or the
+    /// configured key is not on a Coding Plan that exposes that window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glm_five_hour: Option<GlmWindowUsage>,
+    /// GLM weekly token/credit window. None when missing — degraded or the
+    /// configured key is not on a Coding Plan that exposes that window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glm_weekly: Option<GlmWindowUsage>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -241,6 +249,23 @@ pub struct OpenRouterSpend {
     pub daily: f64,
     pub weekly: f64,
     pub monthly: f64,
+}
+
+/// One GLM quota window (`TOKENS_LIMIT` or `CREDIT_LIMIT` row in the
+/// `/api/monitor/usage/quota/limit` response). `percentage` is the used
+/// share 0..=100 as reported by the API; cache weighting derives
+/// `100 - percentage` to keep the schema symmetric with the other
+/// providers. `next_reset_at` is normalized to `DateTime<Utc>`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct GlmWindowUsage {
+    pub limit: f64,
+    pub current_value: f64,
+    pub remaining: f64,
+    /// Used share 0..=100 (matches Zhipu's `percentage` field). Derived
+    /// from `currentValue / limit` when the API omits the field, and
+    /// clamped to the closed interval.
+    pub percentage: Option<f64>,
+    pub next_reset_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]

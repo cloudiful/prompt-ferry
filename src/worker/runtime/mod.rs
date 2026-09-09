@@ -55,7 +55,7 @@ use self::request_assembly::{
 };
 use self::routing::{
     discover_dynamic_model_route, materialize_route_api_key_selection_with_quota,
-    select_route_for_candidate, upstream_url,
+    select_route_for_candidate,
 };
 use self::standalone::StandaloneRuntimeState;
 
@@ -187,6 +187,13 @@ pub async fn connect_for_test_with_admin(
 ) -> anyhow::Result<()> {
     connect::connect_for_test_with_admin(config, client).await
 }
+
+// P4 (issue #230): the model-route test probe and the Realtime
+// WebSocket join are single-sourced on the same provider-aware URL
+// composition helper as the runtime HTTP path. The helper is re-
+// exported here so the admin layer can reach it without exposing the
+// private `ai::upstream` module.
+pub use ai::upstream::upstream_url_for_route_parts;
 
 fn elapsed_ms(started: Instant) -> i64 {
     started.elapsed().as_millis().try_into().unwrap_or(i64::MAX)

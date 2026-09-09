@@ -48,6 +48,8 @@ fn opencode_go_key(
         opencodego_monthly: monthly.map(opencode_go_window),
         openrouter_balance: None,
         openrouter_spend: None,
+        glm_five_hour: None,
+        glm_weekly: None,
     }
 }
 

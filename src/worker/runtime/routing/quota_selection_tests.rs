@@ -120,6 +120,8 @@ fn token_plan_key_usage(
         opencodego_monthly: None,
         openrouter_balance: None,
         openrouter_spend: None,
+        glm_five_hour: None,
+        glm_weekly: None,
     }
 }
 
@@ -176,6 +178,8 @@ fn command_code_key_usage(
         opencodego_monthly: None,
         openrouter_balance: None,
         openrouter_spend: None,
+        glm_five_hour: None,
+        glm_weekly: None,
     }
 }
 

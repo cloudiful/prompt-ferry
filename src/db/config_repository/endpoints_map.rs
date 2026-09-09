@@ -107,6 +107,7 @@ pub(super) fn provider_from_sqlite(provider: ScEndpointProvider) -> EndpointProv
         ScEndpointProvider::CommandCode => EndpointProvider::CommandCode,
         ScEndpointProvider::OpencodeGo => EndpointProvider::OpencodeGo,
         ScEndpointProvider::OpenRouter => EndpointProvider::OpenRouter,
+        ScEndpointProvider::Glm => EndpointProvider::Glm,
         ScEndpointProvider::Generic => EndpointProvider::Generic,
     }
 }
@@ -115,6 +116,36 @@ pub(super) fn region_from_sqlite(region: ScEndpointRegion) -> EndpointRegion {
     match region {
         ScEndpointRegion::Cn => EndpointRegion::Cn,
         ScEndpointRegion::Global => EndpointRegion::Global,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::EndpointProvider;
+    use crate::standalone_config::EndpointProvider as ScEndpointProvider;
+
+    #[test]
+    fn provider_round_trip_preserves_glm() {
+        // P4 (issue #230): every OpenRouter-parity site must carry a
+        // `Glm` arm; the SQLite→db mapper is the one the standalone
+        // 0015 migration feeds, so the round-trip is the contract
+        // that ties the migration CHECKs to the runtime provider
+        // enum. Pin the five non-Generic providers so a future
+        // addition cannot silently drop `Glm` (or any sibling).
+        for (sc, expected) in [
+            (ScEndpointProvider::Minimax, EndpointProvider::Minimax),
+            (
+                ScEndpointProvider::CommandCode,
+                EndpointProvider::CommandCode,
+            ),
+            (ScEndpointProvider::OpencodeGo, EndpointProvider::OpencodeGo),
+            (ScEndpointProvider::OpenRouter, EndpointProvider::OpenRouter),
+            (ScEndpointProvider::Glm, EndpointProvider::Glm),
+            (ScEndpointProvider::Generic, EndpointProvider::Generic),
+        ] {
+            assert_eq!(provider_from_sqlite(sc), expected);
+        }
     }
 }
 

@@ -17,6 +17,12 @@ pub enum EndpointProvider {
     // explicitly while keeping snake_case for the other variants.
     #[serde(rename = "openrouter")]
     OpenRouter,
+    // `Glm` is a non-MiniMax provider (issue #230) — same as the
+    // CommandCode/OpencodeGo/OpenRouter snake_case convention. It carries no
+    // `provider_region` (the 0076 region CHECK rejects any non-NULL value)
+    // and never gains the MiniMax builtin MCP privilege.
+    #[serde(rename = "glm")]
+    Glm,
 }
 
 impl Default for EndpointProvider {
@@ -33,6 +39,7 @@ impl EndpointProvider {
             Self::CommandCode => "command_code",
             Self::OpencodeGo => "opencode_go",
             Self::OpenRouter => "openrouter",
+            Self::Glm => "glm",
         }
     }
 
@@ -42,6 +49,7 @@ impl EndpointProvider {
             "command_code" => Self::CommandCode,
             "opencode_go" => Self::OpencodeGo,
             "openrouter" => Self::OpenRouter,
+            "glm" => Self::Glm,
             _ => Self::Generic,
         }
     }
@@ -52,6 +60,7 @@ impl EndpointProvider {
             Some("command_code") => Self::CommandCode,
             Some("opencode_go") => Self::OpencodeGo,
             Some("openrouter") => Self::OpenRouter,
+            Some("glm") => Self::Glm,
             _ => Self::Generic,
         }
     }
@@ -322,6 +331,35 @@ mod tests {
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
             EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::Generic
+        );
+    }
+
+    #[test]
+    fn glm_provider_round_trips_as_snake_case() {
+        // Issue #230: GLM is the Zhipu Coding Plan provider. It serializes
+        // to the single-token `glm` (matching the 0076/0015 migration
+        // CHECKs and the admin API contract), and `from_optional(None)`
+        // must keep the legacy generic fallback for legacy rows.
+        assert_eq!(EndpointProvider::Glm.as_str(), "glm");
+        assert_eq!(EndpointProvider::from_str("glm"), EndpointProvider::Glm);
+        assert_eq!(
+            EndpointProvider::from_optional(Some("glm")),
+            EndpointProvider::Glm
+        );
+        let serialized =
+            serde_json::to_value(EndpointProvider::Glm).expect("serialize glm provider");
+        assert_eq!(serialized, serde_json::json!("glm"));
+        let deserialized: EndpointProvider =
+            serde_json::from_value(serde_json::json!("glm")).expect("deserialize glm provider");
+        assert_eq!(deserialized, EndpointProvider::Glm);
+        // Unknown providers keep the legacy generic fallback.
+        assert_eq!(
+            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::Generic
+        );
+        assert_eq!(
+            EndpointProvider::from_optional(None),
             EndpointProvider::Generic
         );
     }

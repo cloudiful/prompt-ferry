@@ -116,6 +116,8 @@ pub(crate) async fn fetch_openrouter_key_usage(
         opencodego_monthly: None,
         openrouter_balance: Some(parsed.balance),
         openrouter_spend: Some(parsed.spend),
+        glm_five_hour: None,
+        glm_weekly: None,
     }
 }
 

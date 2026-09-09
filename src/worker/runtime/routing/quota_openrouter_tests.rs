@@ -59,6 +59,8 @@ fn openrouter_key(
             weekly: 0.75,
             monthly: 1.0,
         }),
+        glm_five_hour: None,
+        glm_weekly: None,
     }
 }
 

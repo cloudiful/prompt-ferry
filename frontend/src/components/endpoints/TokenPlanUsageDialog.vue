@@ -25,8 +25,8 @@ const {
   formatRemaining,
   ccEntries,
   ccMinRemaining,
-  opencodeGoEntries,
-  opencodeGoMinRemaining,
+  progressWindowEntries,
+  progressWindowMinRemaining,
   openrouterEntries,
   formatOpenRouterCredits,
 } = useTokenPlanWindowEntries(props.t, nowMs)
@@ -92,7 +92,7 @@ const {
                         key.ok &&
                         keyWindowCount(key) +
                           ccEntries(key).length +
-                          opencodeGoEntries(key).length >
+                          progressWindowEntries(key).length >
                           0
                       "
                       class="shrink-0 text-xs text-dimmed"
@@ -102,7 +102,7 @@ const {
                           percent: (
                             minimumRemainingPercent(key) ??
                             ccMinRemaining(key) ??
-                            opencodeGoMinRemaining(key)
+                            progressWindowMinRemaining(key)
                           )?.toFixed(1),
                         })
                       }}
@@ -112,7 +112,7 @@ const {
                           count:
                             keyWindowCount(key) +
                             ccEntries(key).length +
-                            opencodeGoEntries(key).length,
+                            progressWindowEntries(key).length,
                         })
                       }}
                     </span>
@@ -252,7 +252,7 @@ const {
                       >
                     </div>
                     <div
-                      v-for="entry in opencodeGoEntries(key)"
+                      v-for="entry in progressWindowEntries(key)"
                       :key="entry.labelKey"
                       class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
                     >
@@ -278,6 +278,11 @@ const {
                           }}%</span
                         >
                       </div>
+                      <span
+                        v-if="entry.subline"
+                        class="text-dimmed sm:col-span-2 sm:col-start-2"
+                        >{{ entry.subline }}</span
+                      >
                     </div>
                     <p
                       v-if="key.balances && !key.five_hour && !key.weekly"

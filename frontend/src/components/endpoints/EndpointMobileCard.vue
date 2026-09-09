@@ -88,7 +88,8 @@ defineEmits<{
           item.provider === 'minimax' ||
           item.provider === 'command_code' ||
           item.provider === 'opencode_go' ||
-          item.provider === 'openrouter'
+          item.provider === 'openrouter' ||
+          item.provider === 'glm'
         "
         size="sm"
         color="neutral"

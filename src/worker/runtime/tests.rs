@@ -23,7 +23,7 @@ use super::ai::upstream::upstream_url_for_route;
 use super::connect::is_expected_relay_disconnect;
 use super::routing::{
     RouteAffinityError, materialize_route_api_key_selection, rendezvous_target,
-    select_route_for_candidate,
+    select_route_for_candidate, upstream_url,
 };
 
 #[test]

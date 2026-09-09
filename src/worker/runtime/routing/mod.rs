@@ -29,6 +29,12 @@ pub(in crate::worker::runtime) use selection::{
 };
 pub(in crate::worker::runtime) use session_affinity::RouteAffinityError;
 
+/// Plain base+path join used by tests and the legacy plain-JSON callers.
+/// The runtime HTTP path goes through `worker::runtime::ai::upstream::
+/// upstream_url_for_route` (and the P4 minimum-field sibling
+/// `upstream_url_for_route_parts`), which apply the GLM `/v1` strip and
+/// the MiniMax `/anthropic` prefix remap. This helper remains for tests
+/// that only need to assert the joiner behavior in isolation.
 pub(in crate::worker::runtime) fn upstream_url(base: &str, path: &str) -> String {
     format!("{}{}", base.trim_end_matches('/'), path)
 }

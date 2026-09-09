@@ -180,8 +180,15 @@ async fn run_model_route_test(
     let routing_key = model_route_test_routing_key(candidate);
     let target = choose_preferred_target(candidate, routing_key)
         .expect("validated model route has at least one target");
-    let base = target.base_url.trim_end_matches('/');
-    let models_request = client.get(format!("{base}/v1/models"));
+    // GLM (issue #230 P2) lists models at `{base}/models` (the Coding
+    // Plan base already encodes the protocol root); every other provider
+    // keeps the plain `/v1/models` join. The probe URL composition
+    // further down is routed through `upstream_url_for_route_parts`
+    // so the per-`native_api` `/v1` strip applies uniformly.
+    let models_request = client.get(crate::endpoint_models::models_url(
+        &target.base_url,
+        target.provider,
+    ));
     let models_request = match target.native_api {
         NativeApi::AnthropicMessages => models_request
             .header("x-api-key", &target.api_key)
@@ -229,11 +236,19 @@ async fn run_model_route_test(
         ));
     }
     if target.native_api == NativeApi::Realtime {
+        // P4 (issue #230): route the probe through the runtime helper so
+        // the GLM `/v1` strip applies; a GLM Realtime base
+        // (`.../api/coding/paas/v4`) joins `/realtime` not `/v1/realtime`.
         let url = format!(
             "{}?model={}",
-            format!("{}/v1/realtime", base)
-                .replace("https://", "wss://")
-                .replace("http://", "ws://"),
+            crate::worker::upstream_url_for_route_parts(
+                &target.base_url,
+                target.provider,
+                target.native_api,
+                NativeApi::Realtime.path(),
+            )
+            .replace("https://", "wss://")
+            .replace("http://", "ws://"),
             urlencoding::encode(&model)
         );
         let mut request =
@@ -328,7 +343,18 @@ async fn run_model_route_test(
             serde_json::Value::String(target.service_tier.as_str().to_string()),
         );
     }
-    let request = client.post(format!("{base}{path}")).json(&payload);
+    // P4 (issue #230): route the probe through the runtime helper so the
+    // GLM `/v1` strip applies (a GLM Chat base
+    // `.../api/coding/paas/v4` joins `/chat/completions`, not
+    // `/v1/chat/completions`).
+    let request = client
+        .post(crate::worker::upstream_url_for_route_parts(
+            &target.base_url,
+            target.provider,
+            target.native_api,
+            path,
+        ))
+        .json(&payload);
     let request = match target.native_api {
         NativeApi::AnthropicMessages => request
             .header("x-api-key", &target.api_key)

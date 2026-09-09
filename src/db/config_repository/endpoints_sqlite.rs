@@ -89,6 +89,7 @@ pub(super) fn sqlite_endpoint_from_create(
         crate::db::EndpointProvider::CommandCode => ScEndpointProvider::CommandCode,
         crate::db::EndpointProvider::OpencodeGo => ScEndpointProvider::OpencodeGo,
         crate::db::EndpointProvider::OpenRouter => ScEndpointProvider::OpenRouter,
+        crate::db::EndpointProvider::Glm => ScEndpointProvider::Glm,
         crate::db::EndpointProvider::Generic => ScEndpointProvider::Generic,
     };
     let provider_region = match input.provider_region {
@@ -114,4 +115,77 @@ pub(super) fn sqlite_endpoint_from_create(
         api_key,
         api_keys,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::EndpointProvider as DbEndpointProvider;
+    use crate::standalone_config::EndpointProvider as ScEndpointProvider;
+
+    fn provider_round_trip(provider: DbEndpointProvider) -> ScEndpointProvider {
+        // P4 (issue #230): every OpenRouter-parity site must carry a
+        // `Glm` arm. The db→standalone mapper feeds the standalone
+        // 0015 rebuild, so the round-trip is the contract that ties
+        // the runtime provider enum to the 0015 CHECKs. Pin the five
+        // non-Generic providers so a future addition cannot silently
+        // drop `Glm` (or any sibling).
+        let now = Utc::now();
+        let created = sqlite_endpoint_from_create(
+            Uuid::new_v4(),
+            EndpointCreate {
+                scope: "admin".to_string(),
+                owner_user_id: None,
+                name: "round-trip".to_string(),
+                provider,
+                provider_region: None,
+                service_tier: crate::db::MinimaxServiceTier::Standard,
+                base_url: "https://example.test".to_string(),
+                native_api: crate::config::NativeApi::Chat,
+                native_api_source: crate::config::NativeApiSource::Manual,
+                daily_max_requests: None,
+                monthly_max_requests: None,
+                api_key: "secret".to_string(),
+                api_keys: vec![],
+                key_lb_enabled: false,
+                enabled: true,
+            },
+            false,
+            EndpointTimestamps {
+                endpoint_created_at: Some(now),
+                endpoint_updated_at: Some(now),
+                api_key_timestamps: vec![],
+            },
+        )
+        .expect("map endpoint");
+        created.provider
+    }
+
+    #[test]
+    fn sqlite_endpoint_from_create_maps_glm_provider() {
+        assert_eq!(
+            provider_round_trip(DbEndpointProvider::Minimax),
+            ScEndpointProvider::Minimax
+        );
+        assert_eq!(
+            provider_round_trip(DbEndpointProvider::CommandCode),
+            ScEndpointProvider::CommandCode
+        );
+        assert_eq!(
+            provider_round_trip(DbEndpointProvider::OpencodeGo),
+            ScEndpointProvider::OpencodeGo
+        );
+        assert_eq!(
+            provider_round_trip(DbEndpointProvider::OpenRouter),
+            ScEndpointProvider::OpenRouter
+        );
+        assert_eq!(
+            provider_round_trip(DbEndpointProvider::Glm),
+            ScEndpointProvider::Glm
+        );
+        assert_eq!(
+            provider_round_trip(DbEndpointProvider::Generic),
+            ScEndpointProvider::Generic
+        );
+    }
 }

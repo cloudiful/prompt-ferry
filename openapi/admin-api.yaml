@@ -3361,6 +3361,7 @@ components:
       - command_code
       - opencode_go
       - openrouter
+      - glm
     EndpointRegion:
       type: string
       enum:
@@ -3493,6 +3494,42 @@ components:
       properties:
         error:
           $ref: '#/components/schemas/ErrorBody'
+    GlmWindowUsage:
+      type: object
+      description: |-
+        One GLM quota window (`TOKENS_LIMIT` or `CREDIT_LIMIT` row in the
+        `/api/monitor/usage/quota/limit` response). `percentage` is the used
+        share 0..=100 as reported by the API; cache weighting derives
+        `100 - percentage` to keep the schema symmetric with the other
+        providers. `next_reset_at` is normalized to `DateTime<Utc>`.
+      required:
+      - limit
+      - current_value
+      - remaining
+      properties:
+        current_value:
+          type: number
+          format: double
+        limit:
+          type: number
+          format: double
+        next_reset_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        percentage:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: |-
+            Used share 0..=100 (matches Zhipu's `percentage` field). Derived
+            from `currentValue / limit` when the API omits the field, and
+            clamped to the closed interval.
+        remaining:
+          type: number
+          format: double
     LlmReviewSettings:
       type: object
       required:
@@ -6586,6 +6623,20 @@ components:
           - type: 'null'
           - $ref: '#/components/schemas/CommandCodeWindowUsage'
             description: CommandCode 5-hour USD window. None when missing (e.g. PAYG) — degraded.
+        glm_five_hour:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/GlmWindowUsage'
+            description: |-
+              GLM 5-hour token/credit window. None when missing — degraded or the
+              configured key is not on a Coding Plan that exposes that window.
+        glm_weekly:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/GlmWindowUsage'
+            description: |-
+              GLM weekly token/credit window. None when missing — degraded or the
+              configured key is not on a Coding Plan that exposes that window.
         key_id:
           type: string
           format: uuid

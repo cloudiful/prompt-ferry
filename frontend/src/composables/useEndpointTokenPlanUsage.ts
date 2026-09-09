@@ -21,7 +21,8 @@ export function useEndpointTokenPlanUsage(
       (endpoint.provider !== 'minimax' &&
         endpoint.provider !== 'command_code' &&
         endpoint.provider !== 'opencode_go' &&
-        endpoint.provider !== 'openrouter')
+        endpoint.provider !== 'openrouter' &&
+        endpoint.provider !== 'glm')
     )
       return
     endpointId.value = nextEndpointId

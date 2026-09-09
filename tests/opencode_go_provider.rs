@@ -92,6 +92,8 @@ fn key_usage_serde_omits_absent_opencode_go_sections() {
             opencodego_monthly: monthly.map(opencode_go_window),
             openrouter_balance: None,
             openrouter_spend: None,
+            glm_five_hour: None,
+            glm_weekly: None,
         }
     }
     // A key carrying no opencode_go windows must not serialize them.

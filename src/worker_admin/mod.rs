@@ -1,5 +1,9 @@
 pub(crate) mod command_code_parsing;
 pub(crate) mod command_code_usage;
+pub(crate) mod glm_parsing;
+#[cfg(test)]
+mod glm_parsing_tests;
+pub(crate) mod glm_usage;
 mod handlers;
 pub(crate) mod json_scalars;
 pub(crate) mod opencode_go_parsing;

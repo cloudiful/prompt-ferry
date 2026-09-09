@@ -86,7 +86,8 @@ defineEmits<{
               row.original.provider === 'minimax' ||
               row.original.provider === 'command_code' ||
               row.original.provider === 'opencode_go' ||
-              row.original.provider === 'openrouter'
+              row.original.provider === 'openrouter' ||
+              row.original.provider === 'glm'
             "
             :text="t('tokenPlanUsage')"
           >

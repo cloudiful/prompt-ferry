@@ -99,7 +99,8 @@ pub(super) async fn resolve_endpoint_input(
         (db::EndpointProvider::Generic, Some(_))
         | (db::EndpointProvider::CommandCode, Some(_))
         | (db::EndpointProvider::OpencodeGo, Some(_))
-        | (db::EndpointProvider::OpenRouter, Some(_)) => {
+        | (db::EndpointProvider::OpenRouter, Some(_))
+        | (db::EndpointProvider::Glm, Some(_)) => {
             return Err(error(
                 StatusCode::BAD_REQUEST,
                 "invalid_provider_region",
@@ -408,5 +409,17 @@ mod tests {
         assert!(validate_mcp_provider(None, EndpointProvider::OpenRouter).is_ok());
         assert!(validate_mcp_provider(Some(false), EndpointProvider::OpenRouter).is_ok());
         assert!(validate_mcp_provider(Some(true), EndpointProvider::OpenRouter).is_err());
+    }
+
+    #[test]
+    fn validate_mcp_provider_treats_glm_like_generic() {
+        // GLM (issue #230 P1) follows the generic path: mcp_enabled must
+        // collapse to false because GLM never gains the MiniMax builtin
+        // MCP privilege. The DB CHECKs (0076) and the 401/400 handlers
+        // already reject a true value for non-MiniMax providers; this test
+        // pins the contract for the GLM variant specifically.
+        assert!(validate_mcp_provider(None, EndpointProvider::Glm).is_ok());
+        assert!(validate_mcp_provider(Some(false), EndpointProvider::Glm).is_ok());
+        assert!(validate_mcp_provider(Some(true), EndpointProvider::Glm).is_err());
     }
 }

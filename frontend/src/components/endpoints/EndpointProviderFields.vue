@@ -21,6 +21,7 @@ type MinimaxProtocol = 'openai' | 'anthropic'
 const COMMAND_CODE_BASE_URL = 'https://api.commandcode.ai/provider' as const
 const OPENCODE_GO_BASE_URL = 'https://opencode.ai/zen/go' as const
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api' as const
+const GLM_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4' as const
 function stripVersionSuffix(value: string): string {
   let normalized = value.trim()
   for (;;) {
@@ -47,7 +48,12 @@ const providerSelection = computed({
   get: () => form.value.provider,
   set(
     value:
-      'generic' | 'minimax' | 'command_code' | 'opencode_go' | 'openrouter',
+      | 'generic'
+      | 'minimax'
+      | 'command_code'
+      | 'opencode_go'
+      | 'openrouter'
+      | 'glm',
   ) {
     form.value.provider = value
     if (value === 'generic') {
@@ -91,6 +97,26 @@ const providerSelection = computed({
       setOpenRouterBaseUrl()
       return
     }
+    if (value === 'glm') {
+      // GLM (issue #230 P1) is a non-MiniMax provider: no region, no
+      // service tier, no MiniMax builtin MCP privilege. The official
+      // Zhipu Coding Plan Chat base is `/v4` and is used verbatim — the
+      // generic /v1 append is incompatible with it, so the form defaults
+      // to manual Chat. Per-protocol official bases:
+      //   Chat/Completion  https://open.bigmodel.cn/api/coding/paas/v4
+      //   Anthropic        https://open.bigmodel.cn/api/anthropic
+      //   Responses        https://open.bigmodel.cn/api/v1
+      // P1 only ships the provider contract + base; the per-`native_api`
+      // path mapping for GLM lands in P2, so until then the form
+      // intentionally pins protocol to manual Chat.
+      form.value.provider_region = null
+      form.value.service_tier = 'standard'
+      form.value.mcp_enabled = false
+      form.value.protocol_mode = 'manual'
+      form.value.native_api_override = 'chat'
+      setGlmBaseUrl()
+      return
+    }
     const region = form.value.provider_region ?? 'cn'
     form.value.provider_region = region
     // Preserve an explicit priority selection across provider switches;
@@ -118,6 +144,7 @@ const isMinimax = computed(() => form.value.provider === 'minimax')
 const isCommandCode = computed(() => form.value.provider === 'command_code')
 const isOpencodeGo = computed(() => form.value.provider === 'opencode_go')
 const isOpenRouter = computed(() => form.value.provider === 'openrouter')
+const isGlm = computed(() => form.value.provider === 'glm')
 const serviceTierSelection = computed({
   get: () => (form.value.service_tier === 'priority' ? 'priority' : 'standard'),
   set(value: 'standard' | 'priority') {
@@ -175,6 +202,9 @@ const baseUrlHintText = computed(() => {
   }
   if (isOpenRouter.value) {
     hints.push(props.t('providerOpenRouterBaseUrlHint'))
+  }
+  if (isGlm.value) {
+    hints.push(props.t('providerGlmBaseUrlHint'))
   }
   if (usesCustomMinimaxBaseUrl.value) {
     hints.push(props.t('providerCustomBaseUrlHint'))
@@ -258,6 +288,32 @@ function setOpenRouterBaseUrl(): void {
     form.value.base_url = OPENROUTER_BASE_URL
   }
 }
+
+function setGlmBaseUrl(): void {
+  const current = stripVersionSuffix(form.value.base_url)
+  if (!current) {
+    form.value.base_url = GLM_BASE_URL
+    return
+  }
+  const knownMinimax = Object.values(minimaxBaseUrls).flatMap((urls) =>
+    Object.values(urls).map((url) => stripVersionSuffix(url)),
+  )
+  const commandCode = stripVersionSuffix(COMMAND_CODE_BASE_URL)
+  const opencodeGo = stripVersionSuffix(OPENCODE_GO_BASE_URL)
+  const openRouter = stripVersionSuffix(OPENROUTER_BASE_URL)
+  // The configured GLM base keeps its `/v4` path (the only provider
+  // where the official base intentionally ends with a non-`/v1` version
+  // segment) — only re-pick the default when the existing value is a
+  // known upstream base for a different provider.
+  if (
+    knownMinimax.includes(current) ||
+    current === commandCode ||
+    current === opencodeGo ||
+    current === openRouter
+  ) {
+    form.value.base_url = GLM_BASE_URL
+  }
+}
 </script>
 
 <template>
@@ -272,6 +328,7 @@ function setOpenRouterBaseUrl(): void {
         { label: t('providerCommandCode'), value: 'command_code' },
         { label: t('providerOpencodeGo'), value: 'opencode_go' },
         { label: t('providerOpenRouter'), value: 'openrouter' },
+        { label: t('providerGlm'), value: 'glm' },
       ]"
       label-key="label"
       value-key="value"

@@ -157,6 +157,8 @@ mod tests {
             opencodego_monthly: monthly.map(window),
             openrouter_balance: None,
             openrouter_spend: None,
+            glm_five_hour: None,
+            glm_weekly: None,
         }
     }
 

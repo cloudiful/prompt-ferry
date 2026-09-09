@@ -18,12 +18,16 @@ pub(super) async fn token_plan_usage(
         db::EndpointProvider::CommandCode => "CommandCode",
         db::EndpointProvider::OpencodeGo => "OpencodeGo",
         db::EndpointProvider::OpenRouter => "OpenRouter",
-        // Generic still has no token plan API.
+        // GLM (issue #230 P2): now has its own Coding Plan usage fetcher
+        // (quota/limit); the cache allowlist lets the request flow through
+        // the same way as the other four providers. Generic still has no
+        // token plan API.
+        db::EndpointProvider::Glm => "GLM",
         db::EndpointProvider::Generic => {
             return error(
                 StatusCode::BAD_REQUEST,
                 "unsupported_provider",
-                "token plan usage is only available for MiniMax, CommandCode, OpencodeGo and OpenRouter endpoints",
+                "token plan usage is only available for MiniMax, CommandCode, OpencodeGo, OpenRouter and GLM endpoints",
             );
         }
     };
@@ -58,7 +62,7 @@ pub(super) async fn token_plan_usage(
         Ok(None) => error(
             StatusCode::BAD_REQUEST,
             "unsupported_provider",
-            "token plan usage is only available for MiniMax, CommandCode, OpencodeGo and OpenRouter endpoints",
+            "token plan usage is only available for MiniMax, CommandCode, OpencodeGo, OpenRouter and GLM endpoints",
         ),
         Err(err) => internal(&state, err),
     }

@@ -207,7 +207,7 @@ pub(super) async fn test_endpoint(
     };
 
     let client = endpoint_protocol_client();
-    let url = format!("{}/v1/models", endpoint.base_url.trim_end_matches('/'));
+    let url = crate::endpoint_models::models_url(&endpoint.base_url, endpoint.provider);
     let started = Instant::now();
     let request = client.get(url);
     let request = if endpoint.native_api == NativeApi::AnthropicMessages {

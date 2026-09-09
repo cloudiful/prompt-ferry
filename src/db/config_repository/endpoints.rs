@@ -137,6 +137,9 @@ impl super::ConfigRepository {
                         crate::standalone_config::EndpointProvider::OpenRouter => {
                             crate::db::EndpointProvider::OpenRouter
                         }
+                        crate::standalone_config::EndpointProvider::Glm => {
+                            crate::db::EndpointProvider::Glm
+                        }
                         crate::standalone_config::EndpointProvider::Generic => {
                             crate::db::EndpointProvider::Generic
                         }

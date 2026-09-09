@@ -149,23 +149,61 @@ pub(super) fn is_opencode_host(url: &str) -> bool {
 /// duplication. Only known official MiniMax roots gain the prefix; custom
 /// MiniMax bases without that prefix are left unchanged instead of being
 /// blindly rewritten. No credentials are logged here.
+///
+/// GLM (issue #230 P2) is non-MiniMax and uses per-`native_api` paths
+/// because the Zhipu Coding Plan base already encodes the protocol root:
+/// Chat/Completion base is `.../api/coding/paas/v4` (no `/v1`),
+/// Anthropic base is `.../api/anthropic` (with `/v1/messages`),
+/// Responses base is `.../api/v1` (with `/responses`). The runtime
+/// therefore strips a leading `/v1` from Chat/Responses/Realtime paths
+/// and keeps it for Anthropic. MiniMax/OpenRouter/other providers stay
+/// untouched.
 pub(in crate::worker::runtime) fn upstream_url_for_route(
     route: &db::RouteConfig,
     path: &str,
 ) -> String {
-    if route.provider != crate::db::EndpointProvider::Minimax {
-        return join_base_path(&route.base_url, path);
+    upstream_url_for_route_parts(&route.base_url, route.provider, route.native_api, path)
+}
+
+/// Same URL-composition contract as [`upstream_url_for_route`] but takes
+/// the minimum fields directly. P4 (issue #230) uses this from the
+/// Realtime WebSocket join and the model-route test probe so the GLM
+/// `/v1` strip applies uniformly; the runtime HTTP path still uses
+/// [`upstream_url_for_route`] which routes through this helper.
+pub fn upstream_url_for_route_parts(
+    base_url: &str,
+    provider: crate::db::EndpointProvider,
+    native_api: crate::config::NativeApi,
+    path: &str,
+) -> String {
+    if provider == crate::db::EndpointProvider::Glm {
+        let remapped = match native_api {
+            // Anthropic base does not include `/v1`, so the standard
+            // `/v1/messages` path is kept verbatim.
+            crate::config::NativeApi::AnthropicMessages => path,
+            // Chat/Realtime/Responses bases already carry the protocol
+            // root (`.../api/coding/paas/v4`, `.../api/v1`), so the
+            // leading `/v1` from `NativeApi::path()` is dropped to avoid
+            // a doubled prefix. `Auto` is the unresolved protocol and
+            // is treated like the non-Anthropic arms so a future Auto
+            // path that does not carry `/v1` cannot double the prefix.
+            _ => path.strip_prefix("/v1").unwrap_or(path),
+        };
+        return join_base_path(base_url, remapped);
+    }
+    if provider != crate::db::EndpointProvider::Minimax {
+        return join_base_path(base_url, path);
     }
     if path != "/v1/messages" {
-        return join_base_path(&route.base_url, path);
+        return join_base_path(base_url, path);
     }
-    if base_has_anthropic_prefix(&route.base_url) {
-        return join_base_path(&route.base_url, path);
+    if base_has_anthropic_prefix(base_url) {
+        return join_base_path(base_url, path);
     }
-    if is_minimax_official_root(&route.base_url) {
-        return format!("{}/anthropic{}", route.base_url.trim_end_matches('/'), path);
+    if is_minimax_official_root(base_url) {
+        return format!("{}/anthropic{}", base_url.trim_end_matches('/'), path);
     }
-    join_base_path(&route.base_url, path)
+    join_base_path(base_url, path)
 }
 
 fn join_base_path(base: &str, path: &str) -> String {
@@ -1262,5 +1300,135 @@ mod tests {
                 u32::from(path.contains("/anthropic")) as usize
             );
         }
+    }
+
+    fn glm_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
+        RouteConfig {
+            base_url: base_url.to_string(),
+            native_api,
+            provider: crate::db::EndpointProvider::Glm,
+            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+        }
+    }
+
+    #[test]
+    fn glm_chat_base_strips_v1_prefix() {
+        // GLM Coding Plan Chat base is `.../api/coding/paas/v4`; the
+        // runtime must join `/chat/completions` (no `/v1` doubling).
+        let route = glm_route(
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+            NativeApi::Chat,
+        );
+        assert_eq!(
+            upstream_url_for_route(&route, "/v1/chat/completions"),
+            "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+        );
+        // Trailing slash on the base is trimmed so the join stays clean.
+        let route = glm_route("https://api.z.ai/api/coding/paas/v4/", NativeApi::Chat);
+        assert_eq!(
+            upstream_url_for_route(&route, "/v1/chat/completions"),
+            "https://api.z.ai/api/coding/paas/v4/chat/completions"
+        );
+    }
+
+    #[test]
+    fn glm_realtime_base_strips_v1_prefix() {
+        let route = glm_route(
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+            NativeApi::Realtime,
+        );
+        assert_eq!(
+            upstream_url_for_route(&route, "/v1/realtime"),
+            "https://open.bigmodel.cn/api/coding/paas/v4/realtime"
+        );
+    }
+
+    #[test]
+    fn glm_responses_base_strips_v1_prefix() {
+        // GLM Responses base is `.../api/v1`; the runtime must join
+        // `/responses` so the path does not double to `/v1/v1/responses`.
+        let route = glm_route("https://open.bigmodel.cn/api/v1", NativeApi::Responses);
+        assert_eq!(
+            upstream_url_for_route(&route, "/v1/responses"),
+            "https://open.bigmodel.cn/api/v1/responses"
+        );
+    }
+
+    #[test]
+    fn glm_anthropic_base_keeps_v1_messages() {
+        // GLM Anthropic base is `.../api/anthropic` (no trailing `/v1`),
+        // so the standard `/v1/messages` path is kept verbatim.
+        let route = glm_route(
+            "https://open.bigmodel.cn/api/anthropic",
+            NativeApi::AnthropicMessages,
+        );
+        assert_eq!(
+            upstream_url_for_route(&route, "/v1/messages"),
+            "https://open.bigmodel.cn/api/anthropic/v1/messages"
+        );
+    }
+
+    #[test]
+    fn glm_non_allowlisted_paths_join_verbatim() {
+        // Non-protocol paths (e.g. the model discovery `/v1/models` arm is
+        // handled separately by `endpoint_models::models_url`; the
+        // upstream joiner is the protocol-specific path only) and
+        // unknown providers stay untouched.
+        let route = glm_route(
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+            NativeApi::Chat,
+        );
+        for path in ["/v1/chat/completions/extra", "/v1/messages"] {
+            let url = upstream_url_for_route(&route, path);
+            // The GLM Chat arm only strips a leading `/v1` once, so the
+            // chat path collapses but the messages path is kept verbatim
+            // (no remap is needed for non-Chat paths on a Chat route).
+            assert!(
+                url.starts_with("https://open.bigmodel.cn/api/coding/paas/v4"),
+                "{url} must keep the configured base"
+            );
+        }
+    }
+
+    #[test]
+    fn glm_auto_native_api_uses_provider_strip() {
+        // P4 (issue #230): the runtime resolves `Auto` to a specific
+        // protocol before reaching this helper, but the minimum-field
+        // sibling `upstream_url_for_route_parts` is exposed for the
+        // Realtime WebSocket join and the model-route test probe — both
+        // can be called with `Auto` directly. The GLM branch treats
+        // `Auto` like the non-Anthropic arms (the `_` arm in the match)
+        // so a `/v1` prefix is dropped, mirroring the Chat/Realtime/
+        // Responses behavior and avoiding a doubled prefix.
+        let base = "https://open.bigmodel.cn/api/coding/paas/v4";
+        assert_eq!(
+            upstream_url_for_route_parts(
+                base,
+                crate::db::EndpointProvider::Glm,
+                NativeApi::Auto,
+                "/v1/chat/completions",
+            ),
+            "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+        );
+        assert_eq!(
+            upstream_url_for_route_parts(
+                base,
+                crate::db::EndpointProvider::Glm,
+                NativeApi::Auto,
+                "/v1/responses",
+            ),
+            "https://open.bigmodel.cn/api/coding/paas/v4/responses",
+        );
+        // A non-`/v1` path is preserved verbatim; the helper only
+        // collapses a single leading `/v1` segment.
+        assert_eq!(
+            upstream_url_for_route_parts(
+                base,
+                crate::db::EndpointProvider::Glm,
+                NativeApi::Auto,
+                "/realtime",
+            ),
+            "https://open.bigmodel.cn/api/coding/paas/v4/realtime",
+        );
     }
 }

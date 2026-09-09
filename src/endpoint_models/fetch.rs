@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use reqwest::Client;
 
-use crate::db::RouteConfig;
+use crate::db::{EndpointProvider, RouteConfig};
 
 use super::EndpointModelSnapshot;
 
@@ -10,7 +10,7 @@ pub async fn fetch_endpoint_model_ids(
     route: &RouteConfig,
 ) -> Result<EndpointModelSnapshot> {
     let response = client
-        .get(models_url(&route.base_url))
+        .get(models_url(&route.base_url, route.provider))
         .bearer_auth(&route.api_key)
         .send()
         .await
@@ -49,8 +49,17 @@ pub async fn fetch_endpoint_model_ids(
     ))
 }
 
-fn models_url(base_url: &str) -> String {
-    format!("{}/v1/models", base_url.trim_end_matches('/'))
+/// Build the upstream model-listing URL. GLM (issue #230 P2) lists its
+/// models at `{base}/models` rather than the OpenAI-style `{base}/v1/models`
+/// because the Zhipu Coding Plan base (`.../api/coding/paas/v4`) already
+/// encodes the protocol root. Every other provider keeps the plain
+/// `{base}/v1/models` join.
+pub fn models_url(base_url: &str, provider: EndpointProvider) -> String {
+    let base = base_url.trim_end_matches('/');
+    match provider {
+        EndpointProvider::Glm => format!("{base}/models"),
+        _ => format!("{base}/v1/models"),
+    }
 }
 
 fn truncate_message(message: &str) -> String {
@@ -64,4 +73,41 @@ fn truncate_message(message: &str) -> String {
     }
     truncated.push_str("...");
     truncated
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::EndpointProvider;
+
+    #[test]
+    fn models_url_keeps_v1_for_non_glm_and_drops_for_glm() {
+        // Every non-GLM provider joins the OpenAI-style `/v1/models`; GLM
+        // (issue #230 P2) lists models at `/models` because the Coding
+        // Plan base already encodes the protocol root. The non-GLM join
+        // is intentionally plain (no `/v1` strip) so existing bases like
+        // `https://example.com/api` keep their `/v1/models` convention.
+        assert_eq!(
+            models_url("https://example.com/api", EndpointProvider::Generic),
+            "https://example.com/api/v1/models"
+        );
+        assert_eq!(
+            models_url("https://api.openai.com/v1", EndpointProvider::Generic),
+            "https://api.openai.com/v1/v1/models"
+        );
+        assert_eq!(
+            models_url(
+                "https://open.bigmodel.cn/api/coding/paas/v4",
+                EndpointProvider::Glm
+            ),
+            "https://open.bigmodel.cn/api/coding/paas/v4/models"
+        );
+        assert_eq!(
+            models_url(
+                "https://api.z.ai/api/coding/paas/v4/",
+                EndpointProvider::Glm
+            ),
+            "https://api.z.ai/api/coding/paas/v4/models"
+        );
+    }
 }

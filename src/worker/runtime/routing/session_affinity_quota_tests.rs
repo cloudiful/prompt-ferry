@@ -145,6 +145,8 @@ fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
                 opencodego_monthly: None,
                 openrouter_balance: None,
                 openrouter_spend: None,
+                glm_five_hour: None,
+                glm_weekly: None,
             })
             .collect(),
     }
@@ -203,6 +205,8 @@ fn command_code_key(
         opencodego_monthly: None,
         openrouter_balance: None,
         openrouter_spend: None,
+        glm_five_hour: None,
+        glm_weekly: None,
     }
 }
 

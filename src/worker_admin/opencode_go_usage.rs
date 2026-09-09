@@ -92,6 +92,8 @@ pub(crate) async fn fetch_opencode_go_key_usage(
             opencodego_monthly: usage.monthly,
             openrouter_balance: None,
             openrouter_spend: None,
+            glm_five_hour: None,
+            glm_weekly: None,
         },
         None => failed_key(
             key_id,

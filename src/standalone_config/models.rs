@@ -102,6 +102,11 @@ pub enum EndpointProvider {
     // Matches the admin API contract (`openrouter`, not `open_router`).
     #[serde(rename = "openrouter")]
     OpenRouter,
+    // Issue #230: GLM is a non-MiniMax provider (Zhipu Coding Plan); same
+    // single-token `glm` shape used by the admin API contract and the
+    // 0015 standalone rebuild migration.
+    #[serde(rename = "glm")]
+    Glm,
 }
 
 impl EndpointProvider {
@@ -112,6 +117,7 @@ impl EndpointProvider {
             Self::CommandCode => "command_code",
             Self::OpencodeGo => "opencode_go",
             Self::OpenRouter => "openrouter",
+            Self::Glm => "glm",
         }
     }
 
@@ -122,6 +128,7 @@ impl EndpointProvider {
             "command_code" => Ok(Self::CommandCode),
             "opencode_go" => Ok(Self::OpencodeGo),
             "openrouter" => Ok(Self::OpenRouter),
+            "glm" => Ok(Self::Glm),
             _ => Err(StandaloneConfigError::CorruptDatabase(format!(
                 "unknown endpoint provider {value:?}"
             ))),

@@ -14,6 +14,9 @@ use crate::{
     worker_admin_types::{TokenPlanKeyUsage, TokenPlanModelUsage, TokenPlanUsageResponse},
 };
 
+// Keep the cache call path stable after the parser split.
+pub(crate) use super::glm_parsing::glm_remaining_percent;
+
 const REFRESH_AFTER: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
@@ -71,6 +74,7 @@ impl TokenPlanQuotaCache {
                 | db::EndpointProvider::CommandCode
                 | db::EndpointProvider::OpencodeGo
                 | db::EndpointProvider::OpenRouter
+                | db::EndpointProvider::Glm
         ) {
             return Ok(None);
         }
@@ -142,6 +146,11 @@ impl TokenPlanQuotaCache {
         // key cap (or full weight when unlimited). Token reservations are
         // MiniMax token-count based and do not apply to credit caps.
         if let Some(remaining) = openrouter_remaining_percent(key) {
+            return Some(remaining.clamp(0.0, 100.0));
+        }
+        // GLM Coding Plan keys carry 5-hour / weekly token-or-credit
+        // windows; weight by the tightest (lowest remaining) window.
+        if let Some(remaining) = glm_remaining_percent(key) {
             return Some(remaining.clamp(0.0, 100.0));
         }
         let usage = model_usage(key, model)?;
@@ -365,6 +374,8 @@ mod tests {
                 weekly: 0.75,
                 monthly: 1.0,
             }),
+            glm_five_hour: None,
+            glm_weekly: None,
         }
     }
 

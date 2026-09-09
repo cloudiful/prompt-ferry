@@ -20,6 +20,9 @@ export const endpointMessages = {
     providerOpenRouter: 'OpenRouter',
     providerOpenRouterBaseUrlHint:
       'OpenRouter 使用官方 /api 兼容地址；系统会自动追加 /v1 路径。',
+    providerGlm: 'GLM',
+    providerGlmBaseUrlHint:
+      'GLM（智谱 Coding Plan）默认使用国内 Coding Plan 的 /v4 兼容地址（https://open.bigmodel.cn/api/coding/paas/v4），该地址直接使用，不再追加 /v1；按所选协议手动指定原生接口。各协议官方地址：Chat/Completion .../api/coding/paas/v4，Anthropic Messages .../api/anthropic，Responses .../api/v1。',
     providerRegion: '区域',
     providerRegionCn: '中国区',
     providerRegionGlobal: '国际区',
@@ -164,6 +167,9 @@ export const endpointMessages = {
     providerOpenRouter: 'OpenRouter',
     providerOpenRouterBaseUrlHint:
       'OpenRouter uses the official /api compatible endpoint; /v1 is appended automatically.',
+    providerGlm: 'GLM',
+    providerGlmBaseUrlHint:
+      'GLM (Zhipu Coding Plan) defaults to the domestic /v4 Coding Plan base (https://open.bigmodel.cn/api/coding/paas/v4); the base is used verbatim and /v1 is NOT appended. Select the native API manually for the protocol you need. Per-protocol official bases: Chat/Completion .../api/coding/paas/v4, Anthropic Messages .../api/anthropic, Responses .../api/v1.',
     providerRegion: 'Region',
     providerRegionCn: 'China',
     providerRegionGlobal: 'Global',

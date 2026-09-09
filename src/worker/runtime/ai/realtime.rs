@@ -60,11 +60,19 @@ async fn run_realtime_session(
 ) -> anyhow::Result<()> {
     let route = resolve_realtime_route(request, config, services).await?;
     let effective_model = route.upstream_model.as_deref().unwrap_or(&request.model);
+    // P4 (issue #230): route the WebSocket URL through the runtime
+    // helper so the GLM `/v1` strip applies; a GLM Realtime base
+    // (`.../api/coding/paas/v4`) joins `/realtime`, not `/v1/realtime`.
     let upstream = format!(
         "{}?model={}",
-        crate::worker::runtime::routing::upstream_url(&route.base_url, NativeApi::Realtime.path())
-            .replace("https://", "wss://")
-            .replace("http://", "ws://"),
+        super::upstream::upstream_url_for_route_parts(
+            &route.base_url,
+            route.provider,
+            route.native_api,
+            NativeApi::Realtime.path(),
+        )
+        .replace("https://", "wss://")
+        .replace("http://", "ws://"),
         urlencoding::encode(effective_model)
     );
 
