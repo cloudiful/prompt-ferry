@@ -28,11 +28,15 @@ pub(crate) struct GlmQuotaUsage {
     pub(crate) weekly: Option<GlmWindowUsage>,
 }
 
-/// JSON envelope business error. Zhipu returns `{code, msg}` even on
-/// HTTP 200; `code != 0` is always a rejection.
+/// JSON envelope business error. Zhipu returns `{code, msg, success}`
+/// even on HTTP 200. The official monitor API and the third-party SDK
+/// docs both treat `code` 0 and 200 as success; anything else is a
+/// rejection. The legacy `code == 0`-only check misread every live
+/// success envelope as a failure and surfaced the success message
+/// ("操作成功") as the user-facing error.
 pub(crate) fn glm_envelope_error(body: &Value) -> Option<(Option<String>, String)> {
     if let Some(code) = body.get("code").and_then(value_as_i64) {
-        if code == 0 {
+        if code == 0 || code == 200 {
             return None;
         }
         let message = body

@@ -7,7 +7,7 @@
 
 use serde_json::json;
 
-use crate::worker_admin::glm_parsing::parse_glm_quota;
+use crate::worker_admin::glm_parsing::{glm_envelope_error, parse_glm_quota};
 
 #[test]
 fn weekly_vs_5h_boundary_deltas() {
@@ -67,4 +67,42 @@ fn weekly_vs_5h_boundary_deltas() {
     let parsed = parse_glm_quota(&just_inside_weekly, pinned_now).expect("13d23h");
     assert!(parsed.five_hour.is_none());
     assert!(parsed.weekly.is_some());
+}
+
+#[test]
+fn live_code_200_envelope_is_treated_as_success() {
+    // Live monitor response (issue #238): the official API returns
+    // `code: 200 + msg: "操作成功" + success: true` for healthy keys
+    // alongside a populated `data.limits[]`. The pre-fix envelope
+    // check (`code == 0` only) misread every live success as a
+    // rejection and surfaced "操作成功" as the user-facing error.
+    let body = json!({
+        "code": 200,
+        "msg": "操作成功",
+        "success": true,
+        "data": {"limits": [
+            {"type": "TOKENS_LIMIT", "unit": 5, "number": 1,
+             "currentValue": 1000.0, "limit": 50000.0, "remaining": 49000.0,
+             "percentage": 2.0, "nextResetTime": pinned_now().timestamp() + 5 * 3600},
+            {"type": "CREDIT_LIMIT", "unit": 3, "number": 7,
+             "currentValue": 5.0, "limit": 100.0, "remaining": 95.0,
+             "percentage": 5.0, "nextResetTime": pinned_now().timestamp() + 7 * 24 * 3600}
+        ]}
+    });
+    assert!(
+        glm_envelope_error(&body).is_none(),
+        "live code 200 envelope must be treated as success",
+    );
+    let usage = parse_glm_quota(&body, pinned_now()).expect("live quota");
+    let five = usage.five_hour.expect("5h window from live envelope");
+    assert_eq!(five.limit, 50000.0);
+    assert_eq!(five.current_value, 1000.0);
+    assert_eq!(five.percentage, Some(2.0));
+    let weekly = usage.weekly.expect("weekly window from live envelope");
+    assert_eq!(weekly.limit, 100.0);
+    assert_eq!(weekly.percentage, Some(5.0));
+}
+
+fn pinned_now() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc::now()
 }
