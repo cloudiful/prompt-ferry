@@ -16,6 +16,7 @@ use crate::{
 use anyhow::{Context, anyhow};
 use futures::StreamExt;
 
+use super::super::glm_envelope::check_glm_envelope_error;
 use super::super::upstream_restore::restore_ai_response_json_blocking;
 use super::ResponseForwardContext;
 
@@ -110,6 +111,15 @@ pub(super) async fn forward_non_stream_chat_response(
     if let Some(capture) = assistant_capture.as_mut() {
         capture.observe_chunk(&body);
         capture.finish();
+    }
+    // Issue #241: GLM Chat responses that arrive as a 2xx envelope
+    // failure (the same `code/success` shape the Responses arm
+    // guards against) must surface the upstream reason instead of
+    // being translated as a malformed OpenAI Chat payload.
+    if let Some(err) =
+        check_glm_envelope_error(&body, route_ctx.route.provider, route_ctx.route.native_api)
+    {
+        return respond_with_client_error(services, request, request_ctx, route_ctx, err).await;
     }
     let transformed = match chat_response_to_responses(&body) {
         Ok(transformed) => transformed,
@@ -257,6 +267,16 @@ pub(super) async fn forward_non_stream_responses_response(
     .map_err(map_body_read_error)?;
     responses_capture.observe_chunk(&body);
     responses_capture.finish();
+    // Issue #241: a 2xx body shaped like the Zhipu business envelope
+    // (`success == false` or non-0/200 `code`) is an upstream
+    // failure even though the HTTP status is success. Surface it
+    // through the standard compat-error path so the operator sees
+    // the envelope `msg` instead of a silent empty success.
+    if let Some(err) =
+        check_glm_envelope_error(&body, route_ctx.route.provider, route_ctx.route.native_api)
+    {
+        return respond_with_client_error(services, request, request_ctx, route_ctx, err).await;
+    }
     let restored_body = if let Some(session) = upstream_restore_session.clone() {
         restore_ai_response_json_blocking(request.path.clone(), body.to_vec(), session).await?
     } else {

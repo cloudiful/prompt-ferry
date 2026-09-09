@@ -1,6 +1,9 @@
 pub(super) mod artifact;
 pub(super) mod errors;
 pub(super) mod forward;
+pub(super) mod glm_envelope;
+#[cfg(test)]
+mod glm_envelope_tests;
 pub(super) mod glm_responses_base;
 pub(super) mod models;
 pub(super) mod realtime;

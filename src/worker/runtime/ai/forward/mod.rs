@@ -8,7 +8,12 @@ use super::super::{
     request_assembly::BufferedBridgeRequest,
 };
 use super::{
-    request_support::ai_route_usage_log, streaming::forward_streaming_response,
+    errors::respond_with_client_error,
+    glm_envelope::{
+        EnvelopePreflightOutcome, consume_envelope_preflight, envelope_preflight_eligible,
+    },
+    request_support::ai_route_usage_log,
+    streaming::forward_streaming_response,
     upstream::read_response_sample,
 };
 use crate::{
@@ -65,6 +70,7 @@ pub(super) async fn forward_upstream_response(
     response: reqwest::Response,
     context: ResponseForwardContext<'_>,
 ) -> anyhow::Result<()> {
+    let mut response = response;
     let route_ctx = context.route_ctx;
     let request = context.request;
     let request_ctx = context.request_ctx;
@@ -161,6 +167,44 @@ pub(super) async fn forward_upstream_response(
             assistant_capture.as_mut(),
         )
         .await;
+    }
+
+    // Issue #241 P1: centralized envelope preflight for the Passthrough
+    // + non-SSE + GLM Chat/Responses + JSON path. Guarding only the
+    // ChatToResponses and Responses non-stream forwarders was not
+    // enough: a 2xx envelope on `POST /v1/chat/completions` + GLM Chat
+    // native (live Codex streaming) fell through to
+    // `forward_streaming_response` with the envelope bytes and HTTP 200,
+    // recorded as an empty success. The preflight buffers the small JSON
+    // body here and either fails loudly or rebuilds the response for the
+    // existing branches.
+    if envelope_preflight_eligible(
+        route_ctx.route.provider,
+        route_ctx.route.native_api,
+        upstream_content_type.as_deref(),
+        is_sse,
+        response_adapter,
+    ) {
+        match consume_envelope_preflight(
+            response,
+            route_ctx.route.provider,
+            route_ctx.route.native_api,
+            services.response_limits.max_upstream_response_bytes,
+        )
+        .await?
+        {
+            EnvelopePreflightOutcome::Fail(err) => {
+                return respond_with_client_error(services, request, request_ctx, route_ctx, err)
+                    .await;
+            }
+            EnvelopePreflightOutcome::Pass(rebuilt) => {
+                // `consume_envelope_preflight` has already passed the
+                // envelope check; hand the rebuilt response to the
+                // existing branches (`forward_streaming_response` or
+                // `forward_buffered_non_sse_response`).
+                response = rebuilt;
+            }
+        }
     }
 
     if let Some(capture) = responses_capture.as_mut()

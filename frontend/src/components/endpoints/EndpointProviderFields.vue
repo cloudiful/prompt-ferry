@@ -1,41 +1,34 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { EndpointForm } from '@/models'
+import EndpointProviderFieldsGlm from './EndpointProviderFieldsGlm.vue'
+import {
+  COMMAND_CODE_BASE_URL,
+  MINIMAX_BASE_URLS,
+  OPENCODE_GO_BASE_URL,
+  OPENROUTER_BASE_URL,
+  stripVersionSuffix,
+  type MinimaxProtocol,
+} from './endpointBaseUrls'
 
 const props = defineProps<{
   t: TranslateFn
 }>()
 
 const form = defineModel<EndpointForm>('form', { required: true })
-const minimaxBaseUrls = {
-  cn: {
-    openai: 'https://api.minimaxi.com',
-    anthropic: 'https://api.minimaxi.com/anthropic',
-  },
-  global: {
-    openai: 'https://api.minimax.io',
-    anthropic: 'https://api.minimax.io/anthropic',
-  },
-} as const
-type MinimaxProtocol = 'openai' | 'anthropic'
-const COMMAND_CODE_BASE_URL = 'https://api.commandcode.ai/provider' as const
-const OPENCODE_GO_BASE_URL = 'https://opencode.ai/zen/go' as const
-const OPENROUTER_BASE_URL = 'https://openrouter.ai/api' as const
-const GLM_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4' as const
-function stripVersionSuffix(value: string): string {
-  let normalized = value.trim()
-  for (;;) {
-    const withoutSlash = normalized.replace(/\/+$/, '')
-    if (withoutSlash.endsWith('/v1')) {
-      normalized = withoutSlash.slice(0, -3)
-      continue
-    }
-    normalized = withoutSlash
-    break
-  }
-  return normalized
-}
+const glmFields = ref<InstanceType<typeof EndpointProviderFieldsGlm> | null>(
+  null,
+)
 function sanitizeBaseUrlField(): void {
+  // Issue #241 P2: GLM bases are exempt from the runtime's
+  // trailing-`/v1` strip (backend `normalize_endpoint_base_url`),
+  // and the official Responses preset (`https://open.bigmodel.cn/api/v1`)
+  // intentionally ends with `/v1`. Without this early-return the
+  // blur handler would rewrite the saved value to `.../api` and
+  // the form's response would diverge from the documented table.
+  if (isGlm.value) {
+    return
+  }
   const sanitized = stripVersionSuffix(form.value.base_url)
   if (sanitized !== form.value.base_url) {
     form.value.base_url = sanitized
@@ -99,16 +92,14 @@ const providerSelection = computed({
     }
     if (value === 'glm') {
       // GLM (issue #230 P1) is a non-MiniMax provider: no region, no
-      // service tier, no MiniMax builtin MCP privilege. The official
-      // Zhipu Coding Plan Chat base is `/v4` and is used verbatim — the
-      // generic /v1 append is incompatible with it, so the form defaults
-      // to manual Chat. Per-protocol official bases:
-      //   Chat/Completion  https://open.bigmodel.cn/api/coding/paas/v4
-      //   Anthropic        https://open.bigmodel.cn/api/anthropic
-      //   Responses        https://open.bigmodel.cn/api/v1
-      // P1 only ships the provider contract + base; the per-`native_api`
-      // path mapping for GLM lands in P2, so until then the form
-      // intentionally pins protocol to manual Chat.
+      // service tier, no MiniMax builtin MCP privilege. The runtime
+      // smart join (issue #241) handles all three per-`native_api`
+      // bases — Anthropic `.../api/anthropic`, Chat
+      // `.../api/coding/paas/v4`, Responses `.../api/v1` — so the
+      // form defaults to manual Chat and lets the GLM preset
+      // selector child pick the right base URL. The trailing-`/v1`
+      // auto-strip is intentionally disabled for GLM (the runtime
+      // exempts the provider).
       form.value.provider_region = null
       form.value.service_tier = 'standard'
       form.value.mcp_enabled = false
@@ -158,7 +149,7 @@ const serviceTierOptions = computed(() => [
 const usesCustomMinimaxBaseUrl = computed(() => {
   if (!isMinimax.value) return false
   const current = stripVersionSuffix(form.value.base_url)
-  const known = Object.values(minimaxBaseUrls).flatMap((urls) =>
+  const known = Object.values(MINIMAX_BASE_URLS).flatMap((urls) =>
     Object.values(urls),
   )
   return Boolean(current) && !known.includes(current as (typeof known)[number])
@@ -224,95 +215,76 @@ function setMinimaxBaseUrl(
   protocol: MinimaxProtocol,
 ): void {
   const current = stripVersionSuffix(form.value.base_url)
-  const known = Object.values(minimaxBaseUrls).flatMap((urls) =>
+  const known = Object.values(MINIMAX_BASE_URLS).flatMap((urls) =>
     Object.values(urls),
   )
   if (!current || known.includes(current as (typeof known)[number])) {
-    form.value.base_url = minimaxBaseUrls[region][protocol]
+    form.value.base_url = MINIMAX_BASE_URLS[region][protocol]
   }
+}
+
+/// `baseUrl` is intentionally only set to `defaultUrl` when the
+/// current value is empty or matches a known upstream base for a
+/// different provider. The known-bases list is supplied by the
+/// caller so the helper does not have to know about every provider.
+function setDefaultIfUnrelated(
+  defaultUrl: string,
+  otherKnownUrls: readonly string[],
+): void {
+  const current = stripVersionSuffix(form.value.base_url)
+  if (!current) {
+    form.value.base_url = defaultUrl
+    return
+  }
+  if (otherKnownUrls.includes(current)) {
+    form.value.base_url = defaultUrl
+  }
+}
+
+function knownMinimaxStripped(): string[] {
+  return Object.values(MINIMAX_BASE_URLS).flatMap((urls) =>
+    Object.values(urls).map((url) => stripVersionSuffix(url)),
+  )
 }
 
 function setCommandCodeBaseUrl(): void {
-  const current = stripVersionSuffix(form.value.base_url)
-  if (!current) {
-    form.value.base_url = COMMAND_CODE_BASE_URL
-    return
-  }
-  const knownMinimax = Object.values(minimaxBaseUrls).flatMap((urls) =>
-    Object.values(urls).map((url) => stripVersionSuffix(url)),
-  )
-  const commandCode = stripVersionSuffix(COMMAND_CODE_BASE_URL)
-  if (knownMinimax.includes(current) || current === commandCode) {
-    form.value.base_url = COMMAND_CODE_BASE_URL
-  }
+  setDefaultIfUnrelated(COMMAND_CODE_BASE_URL, [...knownMinimaxStripped()])
 }
 
 function setOpencodeGoBaseUrl(): void {
-  const current = stripVersionSuffix(form.value.base_url)
-  if (!current) {
-    form.value.base_url = OPENCODE_GO_BASE_URL
-    return
-  }
-  const knownMinimax = Object.values(minimaxBaseUrls).flatMap((urls) =>
-    Object.values(urls).map((url) => stripVersionSuffix(url)),
-  )
-  const commandCode = stripVersionSuffix(COMMAND_CODE_BASE_URL)
-  const opencodeGo = stripVersionSuffix(OPENCODE_GO_BASE_URL)
-  if (
-    knownMinimax.includes(current) ||
-    current === commandCode ||
-    current === opencodeGo
-  ) {
-    form.value.base_url = OPENCODE_GO_BASE_URL
-  }
+  setDefaultIfUnrelated(OPENCODE_GO_BASE_URL, [
+    ...knownMinimaxStripped(),
+    stripVersionSuffix(COMMAND_CODE_BASE_URL),
+  ])
 }
 
 function setOpenRouterBaseUrl(): void {
-  const current = stripVersionSuffix(form.value.base_url)
-  if (!current) {
-    form.value.base_url = OPENROUTER_BASE_URL
-    return
-  }
-  const knownMinimax = Object.values(minimaxBaseUrls).flatMap((urls) =>
-    Object.values(urls).map((url) => stripVersionSuffix(url)),
-  )
-  const commandCode = stripVersionSuffix(COMMAND_CODE_BASE_URL)
-  const opencodeGo = stripVersionSuffix(OPENCODE_GO_BASE_URL)
-  const openRouter = stripVersionSuffix(OPENROUTER_BASE_URL)
-  if (
-    knownMinimax.includes(current) ||
-    current === commandCode ||
-    current === opencodeGo ||
-    current === openRouter
-  ) {
-    form.value.base_url = OPENROUTER_BASE_URL
-  }
+  setDefaultIfUnrelated(OPENROUTER_BASE_URL, [
+    ...knownMinimaxStripped(),
+    stripVersionSuffix(COMMAND_CODE_BASE_URL),
+    stripVersionSuffix(OPENCODE_GO_BASE_URL),
+  ])
 }
 
 function setGlmBaseUrl(): void {
-  const current = stripVersionSuffix(form.value.base_url)
-  if (!current) {
-    form.value.base_url = GLM_BASE_URL
-    return
-  }
-  const knownMinimax = Object.values(minimaxBaseUrls).flatMap((urls) =>
-    Object.values(urls).map((url) => stripVersionSuffix(url)),
-  )
-  const commandCode = stripVersionSuffix(COMMAND_CODE_BASE_URL)
-  const opencodeGo = stripVersionSuffix(OPENCODE_GO_BASE_URL)
-  const openRouter = stripVersionSuffix(OPENROUTER_BASE_URL)
   // The configured GLM base keeps its `/v4` path (the only provider
   // where the official base intentionally ends with a non-`/v1` version
-  // segment) — only re-pick the default when the existing value is a
-  // known upstream base for a different provider.
-  if (
-    knownMinimax.includes(current) ||
-    current === commandCode ||
-    current === opencodeGo ||
-    current === openRouter
-  ) {
-    form.value.base_url = GLM_BASE_URL
-  }
+  // segment). The child owns the reset semantics and only overwrites
+  // the live value when the existing one is empty or a known
+  // upstream base for a different provider.
+  glmFields.value?.applyDefaultIfNonGlmBase(knownNonGlmBaseUrls())
+}
+
+function knownNonGlmBaseUrls(): string[] {
+  const minimax = Object.values(MINIMAX_BASE_URLS).flatMap((urls) =>
+    Object.values(urls).map((url) => stripVersionSuffix(url)),
+  )
+  return [
+    ...minimax,
+    stripVersionSuffix(COMMAND_CODE_BASE_URL),
+    stripVersionSuffix(OPENCODE_GO_BASE_URL),
+    stripVersionSuffix(OPENROUTER_BASE_URL),
+  ]
 }
 </script>
 
@@ -417,10 +389,16 @@ function setGlmBaseUrl(): void {
       @blur="sanitizeBaseUrlField"
     />
     <p
-      v-if="hasVersionPath"
+      v-if="hasVersionPath && !isGlm"
       class="text-xs leading-snug text-warning md:col-start-2"
     >
       {{ t('baseUrlVersionWarning') }}
     </p>
   </div>
+  <EndpointProviderFieldsGlm
+    v-if="isGlm"
+    ref="glmFields"
+    v-model:base-url="form.base_url"
+    :t="props.t"
+  />
 </template>

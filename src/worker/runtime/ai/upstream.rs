@@ -150,14 +150,19 @@ pub(super) fn is_opencode_host(url: &str) -> bool {
 /// MiniMax bases without that prefix are left unchanged instead of being
 /// blindly rewritten. No credentials are logged here.
 ///
-/// GLM (issue #230 P2) is non-MiniMax and uses per-`native_api` paths
-/// because the Zhipu Coding Plan base already encodes the protocol root:
-/// Chat/Completion base is `.../api/coding/paas/v4` (no `/v1`),
-/// Anthropic base is `.../api/anthropic` (with `/v1/messages`),
-/// Responses base is `.../api/v1` (with `/responses`). The runtime
-/// therefore strips a leading `/v1` from Chat/Responses/Realtime paths
-/// and keeps it for Anthropic. MiniMax/OpenRouter/other providers stay
-/// untouched.
+/// GLM (issue #230 P2 / #241) is non-MiniMax and uses per-`native_api`
+/// paths because the Zhipu Coding Plan base already encodes the protocol
+/// root. The runtime URL composer strips the leading `/v1` from
+/// Chat/Responses/Realtime paths only when the configured base is a
+/// "version-bearing" root (path ends with `/v1`, contains
+/// `/api/coding/paas`, or ends with `/api/anthropic`). A bare API root
+/// like `https://open.bigmodel.cn/api` (no version segment) is preserved
+/// verbatim so both spellings land on the same
+/// `.../api/v1/<protocol-path>` URL — the bare form joins to
+/// `.../api/v1/responses`, the official Responses base joins to the
+/// same. Anthropic-typed paths on an Anthropic base keep `/v1/messages`
+/// because the base does not include `/v1`. MiniMax/OpenRouter/other
+/// providers stay untouched.
 pub(in crate::worker::runtime) fn upstream_url_for_route(
     route: &db::RouteConfig,
     path: &str,
@@ -177,17 +182,26 @@ pub fn upstream_url_for_route_parts(
     path: &str,
 ) -> String {
     if provider == crate::db::EndpointProvider::Glm {
+        let strip_v1 = matches!(
+            native_api,
+            crate::config::NativeApi::Chat
+                | crate::config::NativeApi::Responses
+                | crate::config::NativeApi::Realtime
+                | crate::config::NativeApi::Auto
+        ) && is_glm_versioned_base(base_url);
         let remapped = match native_api {
             // Anthropic base does not include `/v1`, so the standard
-            // `/v1/messages` path is kept verbatim.
+            // `/v1/messages` path is kept verbatim regardless of the
+            // base's version-bearing shape.
             crate::config::NativeApi::AnthropicMessages => path,
-            // Chat/Realtime/Responses bases already carry the protocol
-            // root (`.../api/coding/paas/v4`, `.../api/v1`), so the
-            // leading `/v1` from `NativeApi::path()` is dropped to avoid
-            // a doubled prefix. `Auto` is the unresolved protocol and
-            // is treated like the non-Anthropic arms so a future Auto
-            // path that does not carry `/v1` cannot double the prefix.
-            _ => path.strip_prefix("/v1").unwrap_or(path),
+            // Chat/Responses/Realtime (and the unresolved `Auto` arm
+            // shared with the Realtime WebSocket join and the model-
+            // route test probe) drop the leading `/v1` only when the
+            // base already carries the protocol root; a bare
+            // `…/api` base keeps the full path so the join lands on
+            // the same `<base>/v1/<path>` URL.
+            _ if strip_v1 => path.strip_prefix("/v1").unwrap_or(path),
+            _ => path,
         };
         return join_base_path(base_url, remapped);
     }
@@ -204,6 +218,58 @@ pub fn upstream_url_for_route_parts(
         return format!("{}/anthropic{}", base_url.trim_end_matches('/'), path);
     }
     join_base_path(base_url, path)
+}
+
+/// True when the configured GLM base already encodes the API version
+/// or protocol root the runtime joiner needs to deduplicate against the
+/// leading `/v1` of `NativeApi::path()`. Matches the three official
+/// GLM families:
+///
+/// - Chat/Realtime: path contains `/api/coding/paas` (e.g.
+///   `…/api/coding/paas/v4`).
+/// - Responses: last path segment is `v1` (e.g. `…/api/v1`).
+/// - Anthropic: last path segment is `anthropic` (e.g.
+///   `…/api/anthropic` or a bare `…/anthropic` root).
+///
+/// A bare `https://open.bigmodel.cn/api` style base returns false so
+/// the joiner keeps the full path and lands on the same
+/// `…/api/v1/<path>` URL as the official Responses base.
+fn is_glm_versioned_base(base_url: &str) -> bool {
+    let path = glm_base_path(base_url);
+    let segments: Vec<&str> = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    if segments.is_empty() {
+        return false;
+    }
+    let last = *segments.last().expect("non-empty");
+    if last == "v1" || last == "anthropic" {
+        return true;
+    }
+    segments.iter().any(|segment| *segment == "coding")
+        && segments.iter().any(|segment| *segment == "paas")
+}
+
+/// Path-only extraction for the GLM base detector. Uses URL parsing
+/// when possible and falls back to a manual host/path split so unparsed
+/// or scheme-less inputs are still classified.
+fn glm_base_path(base_url: &str) -> String {
+    if let Ok(parsed) = reqwest::Url::parse(base_url.trim()) {
+        return parsed.path().to_string();
+    }
+    let trimmed = base_url.trim();
+    let without_scheme = if let Some(idx) = trimmed.find("://") {
+        &trimmed[idx + 3..]
+    } else {
+        trimmed
+    };
+    let path_start = without_scheme.find('/').unwrap_or(without_scheme.len());
+    without_scheme[path_start..]
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .to_string()
 }
 
 fn join_base_path(base: &str, path: &str) -> String {
@@ -1430,5 +1496,107 @@ mod tests {
             ),
             "https://open.bigmodel.cn/api/coding/paas/v4/realtime",
         );
+    }
+
+    #[test]
+    fn glm_bare_api_base_keeps_full_v1_path() {
+        // Issue #241: a bare `…/api` base (no `/v1` suffix, no
+        // `coding/paas` segment, no `/anthropic` segment) is not
+        // version-bearing, so the runtime keeps the full path and
+        // lands on the same `…/api/v1/<protocol>` URL as the official
+        // Responses base. The legacy strip would have built
+        // `…/api/responses` and 404'd.
+        for raw in [
+            "https://open.bigmodel.cn/api",
+            "https://open.bigmodel.cn/api/",
+            "https://api.z.ai/api",
+            "https://example.com/api",
+        ] {
+            let base = raw.trim_end_matches('/');
+            let chat = glm_route(raw, NativeApi::Chat);
+            assert_eq!(
+                upstream_url_for_route(&chat, "/v1/chat/completions"),
+                format!("{base}/v1/chat/completions"),
+                "Chat on bare api base {raw} must keep /v1 prefix",
+            );
+            let responses = glm_route(raw, NativeApi::Responses);
+            assert_eq!(
+                upstream_url_for_route(&responses, "/v1/responses"),
+                format!("{base}/v1/responses"),
+                "Responses on bare api base {raw} must keep /v1 prefix",
+            );
+            let realtime = glm_route(raw, NativeApi::Realtime);
+            assert_eq!(
+                upstream_url_for_route(&realtime, "/v1/realtime"),
+                format!("{base}/v1/realtime"),
+                "Realtime on bare api base {raw} must keep /v1 prefix",
+            );
+        }
+    }
+
+    #[test]
+    fn glm_bare_and_versioned_responses_bases_converge_on_same_url() {
+        // Regression: both spellings (bare `…/api` and official
+        // `…/api/v1`) must land on the same final Responses URL so an
+        // operator can save either base spelling and get the same
+        // upstream behavior.
+        let bare = glm_route("https://open.bigmodel.cn/api", NativeApi::Responses);
+        let official = glm_route("https://open.bigmodel.cn/api/v1", NativeApi::Responses);
+        assert_eq!(
+            upstream_url_for_route(&bare, "/v1/responses"),
+            upstream_url_for_route(&official, "/v1/responses"),
+        );
+        assert_eq!(
+            upstream_url_for_route(&bare, "/v1/responses"),
+            "https://open.bigmodel.cn/api/v1/responses",
+        );
+    }
+
+    #[test]
+    fn glm_anthropic_base_keeps_v1_messages_even_for_bare_api() {
+        // The Anthropic arm always keeps `/v1/messages` regardless of
+        // whether the base is version-bearing; on a bare `…/api` base
+        // the join stays at `…/api/v1/messages` (the standard OpenAI-
+        // shape Anthropic path the GLM Anthropic endpoint accepts).
+        let route = glm_route("https://open.bigmodel.cn/api", NativeApi::AnthropicMessages);
+        assert_eq!(
+            upstream_url_for_route(&route, "/v1/messages"),
+            "https://open.bigmodel.cn/api/v1/messages",
+        );
+    }
+
+    #[test]
+    fn is_glm_versioned_base_recognises_protocol_roots() {
+        // The detector powers the strip decision: it must accept the
+        // three official shapes and reject bare `…/api` plus
+        // adversarial spellings.
+        for base in [
+            "https://open.bigmodel.cn/api/v1",
+            "https://open.bigmodel.cn/api/v1/",
+            "https://api.z.ai/api/v1",
+            "https://open.bigmodel.cn/api/anthropic",
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+            "https://api.z.ai/api/coding/paas/v4",
+            "https://example.com/v1",
+            "https://example.com/anthropic",
+        ] {
+            assert!(
+                is_glm_versioned_base(base),
+                "version-bearing base {base} must be detected"
+            );
+        }
+        for base in [
+            "https://open.bigmodel.cn/api",
+            "https://open.bigmodel.cn/api/",
+            "https://api.z.ai/api",
+            "https://example.com",
+            "https://example.com/v1x",
+            "https://example.com/anthroponic",
+        ] {
+            assert!(
+                !is_glm_versioned_base(base),
+                "non-version-bearing base {base} must not be detected"
+            );
+        }
     }
 }

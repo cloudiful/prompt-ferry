@@ -747,3 +747,358 @@ async fn glm_responses_on_v1_base_does_not_fail_fast() {
         "GLM Responses on /api/v1 must not trip the fail-fast, got {outcome:?}",
     );
 }
+
+const GLM_ENVELOPE_404_BODY: &[u8] =
+    br#"{"code":500,"msg":"404 NOT_FOUND","success":false,"data":null}"#;
+
+async fn spawn_fixed_body_upstream(body: &'static [u8]) -> (SocketAddr, Arc<AtomicUsize>) {
+    let count = Arc::new(AtomicUsize::new(0));
+    let counter = count.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((sock, _)) = listener.accept().await else {
+                break;
+            };
+            counter.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                let mut sock = sock;
+                let mut buf = [0u8; 8192];
+                let _ = sock.read(&mut buf).await;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = sock.write_all(response.as_bytes()).await;
+                let _ = sock.write_all(body).await;
+                let _ = sock.shutdown().await;
+            });
+        }
+    });
+    (addr, count)
+}
+
+#[tokio::test]
+async fn glm_responses_envelope_body_surfaces_bad_gateway_to_bridge() {
+    // Issue #241: a Zhipu 2xx envelope body
+    // (`{"code":500,"msg":"404 NOT_FOUND","success":false}`) used to be
+    // recorded as an empty success because the runtime HTTP path
+    // trusted the status code. The envelope check now fails the
+    // request loudly: the forwarder sends a 502 with the envelope
+    // message and records a failed usage event, instead of passing
+    // the envelope bytes to the client.
+    let (addr, count) = spawn_fixed_body_upstream(GLM_ENVELOPE_404_BODY).await;
+    let (out_tx, bridge_log) = spawn_bridge_log();
+    let services = test_services(out_tx);
+    let route = glm_test_route(&format!("http://{addr}"), NativeApi::Responses);
+
+    let outcome = forward_test_request(&services, &route)
+        .await
+        .expect("forward");
+    assert!(
+        matches!(outcome, ForwardOutcome::Handled),
+        "envelope body must be handled (not retried) as a 502 response, got {outcome:?}",
+    );
+    wait_for_count(&count, 1).await;
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "envelope must not trigger retry"
+    );
+    wait_for_bridge(&bridge_log, 3).await;
+    let messages = bridge_log.lock().await;
+    let start = messages
+        .iter()
+        .find_map(|message| match message {
+            BridgeMessage::ResponseStart(start) => Some(start),
+            _ => None,
+        })
+        .expect("bridge must receive a response start");
+    assert_eq!(
+        start.status, 502,
+        "envelope must surface as 502 (Bad Gateway), got {}",
+        start.status,
+    );
+    let chunk: Vec<u8> = messages
+        .iter()
+        .filter_map(|message| match message {
+            BridgeMessage::ResponseChunk(chunk) => Some(chunk.data.clone()),
+            _ => None,
+        })
+        .next()
+        .expect("bridge must receive a response chunk");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&chunk).expect("envelope error response must be JSON");
+    assert_eq!(
+        payload["error"]["code"], "glm_envelope_error",
+        "error code must identify the GLM envelope failure, got {payload}",
+    );
+    let message = payload["error"]["message"]
+        .as_str()
+        .expect("error message must be a string");
+    assert!(
+        message.contains("404 NOT_FOUND"),
+        "message must surface the envelope reason, got {message}",
+    );
+    assert!(
+        message.contains("500"),
+        "message must surface the envelope code, got {message}",
+    );
+}
+
+#[tokio::test]
+async fn glm_responses_normal_body_passes_envelope_check() {
+    // A normal Responses body must pass the envelope check unchanged
+    // and reach the client as the original 2xx payload — the helper
+    // is a no-op for OpenAI-shape responses (no `success`/`code`).
+    let (addr, count) = spawn_fixed_body_upstream(RESPONSES_JSON_BODY.as_bytes()).await;
+    let (out_tx, bridge_log) = spawn_bridge_log();
+    let services = test_services(out_tx);
+    let route = glm_test_route(&format!("http://{addr}"), NativeApi::Responses);
+
+    let outcome = forward_test_request(&services, &route)
+        .await
+        .expect("forward");
+    assert!(matches!(outcome, ForwardOutcome::Handled));
+    wait_for_count(&count, 1).await;
+    wait_for_bridge(&bridge_log, 3).await;
+    let messages = bridge_log.lock().await;
+    let start = messages
+        .iter()
+        .find_map(|message| match message {
+            BridgeMessage::ResponseStart(start) => Some(start),
+            _ => None,
+        })
+        .expect("bridge must receive a response start");
+    assert_eq!(start.status, 200, "normal body must keep HTTP 200");
+    let chunk: Vec<u8> = messages
+        .iter()
+        .filter_map(|message| match message {
+            BridgeMessage::ResponseChunk(chunk) => Some(chunk.data.clone()),
+            _ => None,
+        })
+        .next()
+        .expect("bridge must receive a response chunk");
+    assert_eq!(
+        chunk,
+        RESPONSES_JSON_BODY.as_bytes(),
+        "normal body must be forwarded verbatim to the client",
+    );
+}
+
+const CHAT_COMPLETIONS_JSON_BODY: &[u8] =
+    br#"{"id":"chatcmpl-1","object":"chat.completion","choices":[],"usage":{"total_tokens":7}}"#;
+
+fn chat_completions_request(stream: bool) -> BufferedBridgeRequest {
+    BufferedBridgeRequest {
+        request_id: uuid::Uuid::new_v4().to_string(),
+        method: "POST".to_string(),
+        path: "/v1/chat/completions".to_string(),
+        headers: Vec::new(),
+        body: if stream {
+            br#"{"model":"gpt-test","messages":[{"role":"user","content":"hi"}],"stream":true}"#
+                .to_vec()
+        } else {
+            br#"{"model":"gpt-test","messages":[{"role":"user","content":"hi"}],"stream":false}"#
+                .to_vec()
+        },
+        request_deadline_unix_ms: 0,
+        user_id: Some(1),
+        client_key_hash: None,
+        request_user_agent: None,
+        http_request_content_encoding: None,
+        http_request_compressed: false,
+        http_request_compressed_bytes: None,
+        http_request_decompressed_bytes: None,
+        http_request_compression_ratio: None,
+    }
+}
+
+async fn forward_chat_completions_request(
+    services: &RuntimeServices,
+    route: &RouteConfig,
+    stream: bool,
+) -> anyhow::Result<ForwardOutcome> {
+    let request = chat_completions_request(stream);
+    let request_ctx = test_request_ctx(&services.runtime_state);
+    Box::pin(forward_route_request(RouteForwardRequest {
+        services,
+        request: &request,
+        request_ctx: &request_ctx,
+        route,
+        method: &http::Method::POST,
+        redact_content: false,
+        content_logging_enabled: false,
+        raw_content_logging_enabled: false,
+    }))
+    .await
+}
+
+async fn assert_envelope_502_on_bridge(
+    bridge_log: &Arc<tokio::sync::Mutex<Vec<BridgeMessage>>>,
+    upstream_count: &AtomicUsize,
+    expected_count: usize,
+) {
+    wait_for_count(upstream_count, expected_count).await;
+    assert_eq!(
+        upstream_count.load(Ordering::SeqCst),
+        expected_count,
+        "envelope must not trigger retry",
+    );
+    wait_for_bridge(bridge_log, 3).await;
+    let messages = bridge_log.lock().await;
+    let start = messages
+        .iter()
+        .find_map(|message| match message {
+            BridgeMessage::ResponseStart(start) => Some(start),
+            _ => None,
+        })
+        .expect("bridge must receive a response start");
+    assert_eq!(
+        start.status, 502,
+        "envelope must surface as 502 (Bad Gateway), got {}",
+        start.status,
+    );
+    let chunk: Vec<u8> = messages
+        .iter()
+        .filter_map(|message| match message {
+            BridgeMessage::ResponseChunk(chunk) => Some(chunk.data.clone()),
+            _ => None,
+        })
+        .next()
+        .expect("bridge must receive a response chunk");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&chunk).expect("envelope error response must be JSON");
+    assert_eq!(
+        payload["error"]["code"], "glm_envelope_error",
+        "error code must identify the GLM envelope failure, got {payload}",
+    );
+    let message = payload["error"]["message"]
+        .as_str()
+        .expect("error message must be a string");
+    assert!(
+        message.contains("404 NOT_FOUND"),
+        "message must surface the envelope reason, got {message}",
+    );
+    assert!(
+        message.contains("500"),
+        "message must surface the envelope code, got {message}",
+    );
+}
+
+#[tokio::test]
+async fn glm_chat_passthrough_envelope_fails_loudly_for_stream_false() {
+    // Issue #241 P1: guarding only the ChatToResponses + Responses
+    // non-stream forwarders was not enough — a dead-route 200
+    // envelope on `POST /v1/chat/completions` + GLM Chat native
+    // (response_adapter == Passthrough, non-SSE) used to fall through
+    // to `forward_streaming_response` / the buffered restore path and
+    // reach the client as HTTP 200 with the envelope bytes (the
+    // original live Codex streaming failure). The centralized
+    // preflight in `forward_upstream_response` now buffers the JSON
+    // body and surfaces 502 glm_envelope_error before any forwarder
+    // sees the envelope bytes. Pin `stream: false` first.
+    let (addr, count) = spawn_fixed_body_upstream(GLM_ENVELOPE_404_BODY).await;
+    let (out_tx, bridge_log) = spawn_bridge_log();
+    let services = test_services(out_tx);
+    let route = glm_test_route(&format!("http://{addr}"), NativeApi::Chat);
+
+    let outcome = forward_chat_completions_request(&services, &route, false)
+        .await
+        .expect("forward");
+    assert!(
+        matches!(outcome, ForwardOutcome::Handled),
+        "envelope body must be handled (not retried) as a 502 response, got {outcome:?}",
+    );
+    assert_envelope_502_on_bridge(&bridge_log, &count, 1).await;
+}
+
+#[tokio::test]
+async fn glm_chat_passthrough_envelope_fails_loudly_for_stream_true() {
+    // Same live failure as the `stream: false` case but with the
+    // client requesting `stream: true`. The runtime preflight runs
+    // off the upstream's `Content-Type` (not the client's `stream`
+    // flag), so both client shapes must surface 502 instead of
+    // silently emitting the envelope bytes as the first SSE /
+    // non-SSE chunk.
+    let (addr, count) = spawn_fixed_body_upstream(GLM_ENVELOPE_404_BODY).await;
+    let (out_tx, bridge_log) = spawn_bridge_log();
+    let services = test_services(out_tx);
+    let route = glm_test_route(&format!("http://{addr}"), NativeApi::Chat);
+
+    let outcome = forward_chat_completions_request(&services, &route, true)
+        .await
+        .expect("forward");
+    assert!(
+        matches!(outcome, ForwardOutcome::Handled),
+        "envelope body must be handled (not retried) as a 502 response, got {outcome:?}",
+    );
+    assert_envelope_502_on_bridge(&bridge_log, &count, 1).await;
+}
+
+#[tokio::test]
+async fn glm_chat_passthrough_normal_body_is_forwarded_verbatim() {
+    // Happy-path regression for the centralized preflight: a
+    // normal Chat body on the Passthrough + non-SSE + GLM Chat +
+    // JSON path must reach the client unchanged (HTTP 200, body
+    // verbatim) — the preflight is a no-op for OpenAI-shape
+    // responses (no `success`/`code`).
+    let (addr, count) = spawn_fixed_body_upstream(CHAT_COMPLETIONS_JSON_BODY).await;
+    let (out_tx, bridge_log) = spawn_bridge_log();
+    let services = test_services(out_tx);
+    let route = glm_test_route(&format!("http://{addr}"), NativeApi::Chat);
+
+    let outcome = forward_chat_completions_request(&services, &route, false)
+        .await
+        .expect("forward");
+    assert!(matches!(outcome, ForwardOutcome::Handled));
+    wait_for_count(&count, 1).await;
+    wait_for_bridge(&bridge_log, 3).await;
+    let messages = bridge_log.lock().await;
+    let start = messages
+        .iter()
+        .find_map(|message| match message {
+            BridgeMessage::ResponseStart(start) => Some(start),
+            _ => None,
+        })
+        .expect("bridge must receive a response start");
+    assert_eq!(start.status, 200, "normal Chat body must keep HTTP 200");
+    let chunk: Vec<u8> = messages
+        .iter()
+        .filter_map(|message| match message {
+            BridgeMessage::ResponseChunk(chunk) => Some(chunk.data.clone()),
+            _ => None,
+        })
+        .next()
+        .expect("bridge must receive a response chunk");
+    assert_eq!(
+        chunk, CHAT_COMPLETIONS_JSON_BODY,
+        "normal Chat body must be forwarded verbatim to the client",
+    );
+}
+
+#[tokio::test]
+async fn glm_responses_to_chat_envelope_fails_loudly() {
+    // Issue #241 P1: the centralized preflight only
+    // covers the Passthrough branch; the ResponsesToChat branch
+    // (`POST /v1/chat/completions` + GLM Responses native) gets
+    // its own envelope check at the top of
+    // `forward_non_stream_responses_to_chat_response`. Without
+    // it, the translator mapped a Zhipu envelope's missing
+    // `output` to `[]` and synthesized a 200 Chat payload with
+    // null content, silently recording an empty success.
+    let (addr, count) = spawn_fixed_body_upstream(GLM_ENVELOPE_404_BODY).await;
+    let (out_tx, bridge_log) = spawn_bridge_log();
+    let services = test_services(out_tx);
+    let route = glm_test_route(&format!("http://{addr}"), NativeApi::Responses);
+
+    let outcome = forward_chat_completions_request(&services, &route, false)
+        .await
+        .expect("forward");
+    assert!(
+        matches!(outcome, ForwardOutcome::Handled),
+        "ResponsesToChat envelope must be handled (not retried) as a 502 response, got {outcome:?}",
+    );
+    assert_envelope_502_on_bridge(&bridge_log, &count, 1).await;
+}

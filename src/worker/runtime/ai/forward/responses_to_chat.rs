@@ -1,6 +1,7 @@
 use super::super::super::{context::RuntimeServices, error_handling::maybe_redact_text};
 use super::super::{
     artifact::{persist_assistant_artifact, resolve_assistant_artifact},
+    glm_envelope::check_glm_envelope_error,
     request_support::ai_route_usage_log,
 };
 use super::ResponseForwardContext;
@@ -35,6 +36,29 @@ pub(super) async fn forward_non_stream_responses_to_chat_response(
     .map_err(map_body_read_error)?;
     responses_capture.observe_chunk(&body);
     responses_capture.finish();
+
+    // Issue #241 P1: the centralized preflight only covers the
+    // Passthrough branch (response_adapter == Passthrough) so the
+    // envelope check stays out of translation paths where the
+    // upstream restore/normalize layer must run first. The
+    // ResponsesToChat branch (`POST /v1/chat/completions` + GLM
+    // Responses native) was the live silent-empty-success path; the
+    // translator would otherwise map a Zhipu envelope's missing
+    // `output` to `[]` and synthesize a Chat 200 with null content.
+    // Surface envelope failures as 502 glm_envelope_error before any
+    // translation.
+    if let Some(err) =
+        check_glm_envelope_error(&body, route_ctx.route.provider, route_ctx.route.native_api)
+    {
+        return super::super::errors::respond_with_client_error(
+            services,
+            request,
+            request_ctx,
+            route_ctx,
+            err,
+        )
+        .await;
+    }
 
     let translated = match responses_response_to_chat(&body) {
         Ok(translated) => translated,

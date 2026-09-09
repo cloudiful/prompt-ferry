@@ -48,7 +48,8 @@ impl StandaloneConfig {
             }
             required("endpoint name", &endpoint.name)?;
             required("endpoint base_url", &endpoint.base_url)?;
-            let normalized_base = normalize_endpoint_base_url(&endpoint.base_url);
+            let normalized_base =
+                normalize_endpoint_base_url(&endpoint.base_url, endpoint.provider);
             if !normalized_base.starts_with("http://") && !normalized_base.starts_with("https://") {
                 return invalid("base_url", "must use http:// or https://");
             }
@@ -151,7 +152,10 @@ impl BootstrapSeed {
                 provider: EndpointProvider::Generic,
                 provider_region: None,
                 service_tier: crate::standalone_config::MinimaxServiceTier::Standard,
-                base_url: normalize_endpoint_base_url(&self.upstream_base_url),
+                base_url: normalize_endpoint_base_url(
+                    &self.upstream_base_url,
+                    EndpointProvider::Generic,
+                ),
                 native_api: self.upstream_native_api,
                 native_api_source: NativeApiSource::Manual,
                 key_lb_enabled: false,
@@ -178,7 +182,16 @@ impl BootstrapSeed {
     }
 }
 
-pub(crate) fn normalize_endpoint_base_url(base_url: &str) -> String {
+/// Normalize an endpoint `base_url` for the standalone config mirror.
+///
+/// Strips trailing `/v1` segments (and a chained `…/v1/v1`) so the saved
+/// value matches the canonical API root. The Zhipu GLM family is exempt
+/// for the same reason as the admin-side normalizer (issue #241): the
+/// runtime URL composer relies on the protocol root being present.
+pub(crate) fn normalize_endpoint_base_url(base_url: &str, provider: EndpointProvider) -> String {
+    if provider == EndpointProvider::Glm {
+        return base_url.trim().trim_end_matches('/').to_string();
+    }
     let mut normalized = base_url.trim().to_string();
     loop {
         normalized = normalized.trim_end_matches('/').to_string();
@@ -208,7 +221,7 @@ fn invalid<T>(field: &'static str, message: impl Into<String>) -> Result<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_endpoint_base_url;
+    use super::{EndpointProvider, normalize_endpoint_base_url};
 
     #[test]
     fn normalize_strips_trailing_v1_chain_but_keeps_case_variants() {
@@ -229,19 +242,62 @@ mod tests {
                 "https://api.commandcode.ai/provider",
             ),
         ] {
+            for provider in [
+                EndpointProvider::Generic,
+                EndpointProvider::Minimax,
+                EndpointProvider::CommandCode,
+                EndpointProvider::OpencodeGo,
+                EndpointProvider::OpenRouter,
+            ] {
+                assert_eq!(
+                    normalize_endpoint_base_url(input, provider),
+                    expected,
+                    "input {input:?} provider {provider:?}"
+                );
+            }
+        }
+        assert_eq!(
+            normalize_endpoint_base_url("https://api.openai.com/V1", EndpointProvider::Generic),
+            "https://api.openai.com/V1"
+        );
+        assert_eq!(
+            normalize_endpoint_base_url("https://api.openai.com/v10", EndpointProvider::Generic),
+            "https://api.openai.com/v10"
+        );
+    }
+
+    #[test]
+    fn normalize_exempts_glm_from_v1_strip() {
+        // The standalone mirror must preserve the same GLM exemption as
+        // the admin handler so the bootstrap path can save an
+        // `/api/v1` Responses base (issue #241).
+        for (input, expected) in [
+            (
+                "https://open.bigmodel.cn/api/v1",
+                "https://open.bigmodel.cn/api/v1",
+            ),
+            (
+                "https://open.bigmodel.cn/api/v1/",
+                "https://open.bigmodel.cn/api/v1",
+            ),
+            (
+                "https://open.bigmodel.cn/api/v1/v1",
+                "https://open.bigmodel.cn/api/v1/v1",
+            ),
+            (
+                "https://open.bigmodel.cn/api/anthropic",
+                "https://open.bigmodel.cn/api/anthropic",
+            ),
+            (
+                "https://open.bigmodel.cn/api/coding/paas/v4",
+                "https://open.bigmodel.cn/api/coding/paas/v4",
+            ),
+        ] {
             assert_eq!(
-                normalize_endpoint_base_url(input),
+                normalize_endpoint_base_url(input, EndpointProvider::Glm),
                 expected,
                 "input {input:?}"
             );
         }
-        assert_eq!(
-            normalize_endpoint_base_url("https://api.openai.com/V1"),
-            "https://api.openai.com/V1"
-        );
-        assert_eq!(
-            normalize_endpoint_base_url("https://api.openai.com/v10"),
-            "https://api.openai.com/v10"
-        );
     }
 }

@@ -173,6 +173,25 @@ mod tests {
     }
 
     #[test]
+    fn bare_api_base_responses_passes_through() {
+        // Issue #241: the bare `…/api` Responses base joins to
+        // `…/api/v1/responses` (correct) once the smart join keeps the
+        // full path, so the fail-fast must not fire on it. The chat
+        // family detector must report this base as not chat-family.
+        for base in [
+            "https://open.bigmodel.cn/api",
+            "https://open.bigmodel.cn/api/",
+            "https://api.z.ai/api",
+        ] {
+            let err = check_glm_responses_base(base, EndpointProvider::Glm, NativeApi::Responses);
+            assert!(
+                err.is_none(),
+                "bare api base {base} must not trip the fail-fast: {err:?}",
+            );
+        }
+    }
+
+    #[test]
     fn auto_resolved_responses_is_covered_by_native_api_check() {
         // Auto is resolved to a concrete `NativeApi` (Chat / Responses /
         // AnthropicMessages) before reaching the validator via
@@ -202,6 +221,12 @@ mod tests {
         assert!(!is_glm_chat_family_base(
             "https://open.bigmodel.cn/api/anthropic"
         ));
+        // Issue #241: the bare `…/api` Responses base is a valid
+        // spelling now that the runtime keeps the full path; it must
+        // not be misclassified as a Chat family base.
+        assert!(!is_glm_chat_family_base("https://open.bigmodel.cn/api"));
+        assert!(!is_glm_chat_family_base("https://open.bigmodel.cn/api/"));
+        assert!(!is_glm_chat_family_base("https://api.z.ai/api"));
     }
 
     #[test]
