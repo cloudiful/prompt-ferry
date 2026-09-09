@@ -1,10 +1,10 @@
 use rmcp::{
     ErrorData,
     model::{
-        CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult,
+        CacheScope, CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult,
         GetPromptRequestParams, GetPromptResponse, ListPromptsResult, ListResourceTemplatesResult,
-        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-        ReadResourceResponse, Reference, RequestId, RequestMetaObject,
+        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
+        ReadResourceRequestParams, ReadResourceResponse, Reference, RequestId, RequestMetaObject,
     },
 };
 use serde::de::DeserializeOwned;
@@ -38,10 +38,15 @@ impl ProxyService {
         scope: &RequestScope,
         request_id: &RequestId,
         params: Option<PaginatedRequestParams>,
+        protocol_version: Option<&ProtocolVersion>,
     ) -> Result<ListToolsResult, ErrorData> {
-        self.list_result(scope, request_id, "tools/list", "tools", params)
-            .await
-            .map(ListToolsResult::with_all_items)
+        let items = self
+            .list_result(scope, request_id, "tools/list", "tools", params)
+            .await?;
+        Ok(apply_cache_metadata(
+            ListToolsResult::with_all_items(items),
+            protocol_version,
+        ))
     }
 
     pub(super) async fn list_resources_for_scope(
@@ -49,10 +54,15 @@ impl ProxyService {
         scope: &RequestScope,
         request_id: &RequestId,
         params: Option<PaginatedRequestParams>,
+        protocol_version: Option<&ProtocolVersion>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        self.list_result(scope, request_id, "resources/list", "resources", params)
-            .await
-            .map(ListResourcesResult::with_all_items)
+        let items = self
+            .list_result(scope, request_id, "resources/list", "resources", params)
+            .await?;
+        Ok(apply_cache_metadata(
+            ListResourcesResult::with_all_items(items),
+            protocol_version,
+        ))
     }
 
     pub(super) async fn list_resource_templates_for_scope(
@@ -60,16 +70,21 @@ impl ProxyService {
         scope: &RequestScope,
         request_id: &RequestId,
         params: Option<PaginatedRequestParams>,
+        protocol_version: Option<&ProtocolVersion>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        self.list_result(
-            scope,
-            request_id,
-            "resources/templates/list",
-            "resourceTemplates",
-            params,
-        )
-        .await
-        .map(ListResourceTemplatesResult::with_all_items)
+        let items = self
+            .list_result(
+                scope,
+                request_id,
+                "resources/templates/list",
+                "resourceTemplates",
+                params,
+            )
+            .await?;
+        Ok(apply_cache_metadata(
+            ListResourceTemplatesResult::with_all_items(items),
+            protocol_version,
+        ))
     }
 
     pub(super) async fn list_prompts_for_scope(
@@ -77,10 +92,15 @@ impl ProxyService {
         scope: &RequestScope,
         request_id: &RequestId,
         params: Option<PaginatedRequestParams>,
+        protocol_version: Option<&ProtocolVersion>,
     ) -> Result<ListPromptsResult, ErrorData> {
-        self.list_result(scope, request_id, "prompts/list", "prompts", params)
-            .await
-            .map(ListPromptsResult::with_all_items)
+        let items = self
+            .list_result(scope, request_id, "prompts/list", "prompts", params)
+            .await?;
+        Ok(apply_cache_metadata(
+            ListPromptsResult::with_all_items(items),
+            protocol_version,
+        ))
     }
 
     pub(super) async fn call_tool_for_scope(
@@ -134,9 +154,10 @@ impl ProxyService {
         request_id: &RequestId,
         params: ReadResourceRequestParams,
         meta: RequestMetaObject,
+        protocol_version: Option<&ProtocolVersion>,
     ) -> Result<ReadResourceResponse, ErrorData> {
         if scope.server_name.is_some() {
-            return self
+            let response = self
                 .dispatch_result(
                     scope,
                     request_id,
@@ -144,7 +165,11 @@ impl ProxyService {
                     with_meta(params, meta),
                     parse_read_resource_response,
                 )
-                .await;
+                .await?;
+            return Ok(apply_cache_metadata_to_read_response(
+                response,
+                protocol_version,
+            ));
         }
 
         let Some(target) = parse_resource_target(&params.uri).map_err(super::internal_error)?
@@ -154,27 +179,32 @@ impl ProxyService {
                 None,
             ));
         };
-        self.forward_aggregate_call(
-            AggregateCallContext {
-                user_id: scope.user_id,
-                conversation_id: scope.conversation_id.as_deref(),
-                request_id,
-                method: "resources/read",
-                storage: &scope.storage,
-                selected_credential: scope.selected_credential.clone(),
-            },
-            with_meta(params, meta),
-            target,
-            |params, upstream_name| params.uri = upstream_name,
-            |server, upstream_name| {
-                if filtering::is_disabled_item(server, "resources", upstream_name) {
-                    return Err(ErrorData::invalid_params("resource is disabled", None));
-                }
-                Ok(())
-            },
-            parse_read_resource_response,
-        )
-        .await
+        let response = self
+            .forward_aggregate_call(
+                AggregateCallContext {
+                    user_id: scope.user_id,
+                    conversation_id: scope.conversation_id.as_deref(),
+                    request_id,
+                    method: "resources/read",
+                    storage: &scope.storage,
+                    selected_credential: scope.selected_credential.clone(),
+                },
+                with_meta(params, meta),
+                target,
+                |params, upstream_name| params.uri = upstream_name,
+                |server, upstream_name| {
+                    if filtering::is_disabled_item(server, "resources", upstream_name) {
+                        return Err(ErrorData::invalid_params("resource is disabled", None));
+                    }
+                    Ok(())
+                },
+                parse_read_resource_response,
+            )
+            .await?;
+        Ok(apply_cache_metadata_to_read_response(
+            response,
+            protocol_version,
+        ))
     }
 
     pub(super) async fn get_prompt_for_scope(
@@ -417,5 +447,202 @@ impl ProxyService {
         .await
         .map_err(super::internal_error)?;
         parse(response)
+    }
+}
+
+/// Apply SEP-2549 cache metadata (`ttlMs`/`cacheScope`) to a freshly built
+/// paginated result when the downstream peer negotiated `2026-07-28` (or a
+/// newer ISO-date version). Older peers (e.g. `2025-11-25`) must NOT receive
+/// these fields: rmcp 3.2.0 only strips the `resultType` discriminator for
+/// legacy peers, leaving the cache fields on the wire, which strict Zod
+/// validators reject as unknown properties.
+fn apply_cache_metadata<T>(mut result: T, protocol_version: Option<&ProtocolVersion>) -> T
+where
+    T: CacheMetadataSettable,
+{
+    if peer_expects_cache_metadata(protocol_version) {
+        result.set_ttl_ms_if_absent(0);
+        result.set_cache_scope_if_absent(CacheScope::Private);
+    }
+    result
+}
+
+/// Patch a `resources/read` response so a single-service upstream that
+/// predates SEP-2549 still satisfies a downstream peer on `2026-07-28`. If
+/// the upstream already supplied `ttlMs`/`cacheScope`, they are preserved
+/// untouched.
+fn apply_cache_metadata_to_read_response(
+    response: ReadResourceResponse,
+    protocol_version: Option<&ProtocolVersion>,
+) -> ReadResourceResponse {
+    if !peer_expects_cache_metadata(protocol_version) {
+        return response;
+    }
+    match response {
+        ReadResourceResponse::Complete(mut result) => {
+            if result.ttl_ms.is_none() {
+                result.ttl_ms = Some(0);
+            }
+            if result.cache_scope.is_none() {
+                result.cache_scope = Some(CacheScope::Private);
+            }
+            ReadResourceResponse::Complete(result)
+        }
+        // MRTR intermediates are not cached; nothing to patch.
+        other => other,
+    }
+}
+
+/// `2026-07-28` is the first version where the spec schema makes
+/// `CacheableResult` mandatory, so ISO `YYYY-MM-DD` lex order matches
+/// chronological order and any version `>= 2026-07-28` requires the fields.
+fn peer_expects_cache_metadata(protocol_version: Option<&ProtocolVersion>) -> bool {
+    protocol_version
+        .map(|version| version.as_str() >= ProtocolVersion::V_2026_07_28.as_str())
+        .unwrap_or(false)
+}
+
+/// Tiny trait shim so `apply_cache_metadata` can serve the four paginated
+/// result types (`ListToolsResult`, `ListResourcesResult`,
+/// `ListResourceTemplatesResult`, `ListPromptsResult`) without duplicating
+/// the version check. Implementations are gated on the existing
+/// `with_ttl_ms`/`with_cache_scope` builders; the `_if_absent` methods only
+/// fire when the field is `None`, which is exactly what `with_all_items`
+/// produces, so the builders are safe to invoke unconditionally.
+trait CacheMetadataSettable {
+    fn set_ttl_ms_if_absent(&mut self, ttl_ms: u64);
+    fn set_cache_scope_if_absent(&mut self, scope: CacheScope);
+}
+
+impl CacheMetadataSettable for ListToolsResult {
+    fn set_ttl_ms_if_absent(&mut self, ttl_ms: u64) {
+        if self.ttl_ms.is_none() {
+            self.ttl_ms = Some(ttl_ms);
+        }
+    }
+    fn set_cache_scope_if_absent(&mut self, scope: CacheScope) {
+        if self.cache_scope.is_none() {
+            self.cache_scope = Some(scope);
+        }
+    }
+}
+
+impl CacheMetadataSettable for ListResourcesResult {
+    fn set_ttl_ms_if_absent(&mut self, ttl_ms: u64) {
+        if self.ttl_ms.is_none() {
+            self.ttl_ms = Some(ttl_ms);
+        }
+    }
+    fn set_cache_scope_if_absent(&mut self, scope: CacheScope) {
+        if self.cache_scope.is_none() {
+            self.cache_scope = Some(scope);
+        }
+    }
+}
+
+impl CacheMetadataSettable for ListResourceTemplatesResult {
+    fn set_ttl_ms_if_absent(&mut self, ttl_ms: u64) {
+        if self.ttl_ms.is_none() {
+            self.ttl_ms = Some(ttl_ms);
+        }
+    }
+    fn set_cache_scope_if_absent(&mut self, scope: CacheScope) {
+        if self.cache_scope.is_none() {
+            self.cache_scope = Some(scope);
+        }
+    }
+}
+
+impl CacheMetadataSettable for ListPromptsResult {
+    fn set_ttl_ms_if_absent(&mut self, ttl_ms: u64) {
+        if self.ttl_ms.is_none() {
+            self.ttl_ms = Some(ttl_ms);
+        }
+    }
+    fn set_cache_scope_if_absent(&mut self, scope: CacheScope) {
+        if self.cache_scope.is_none() {
+            self.cache_scope = Some(scope);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rmcp::model::{ReadResourceResult, ResourceContents};
+
+    #[test]
+    fn peer_expects_cache_metadata_accepts_2026_07_28() {
+        assert!(peer_expects_cache_metadata(Some(
+            &ProtocolVersion::V_2026_07_28
+        )));
+    }
+
+    #[test]
+    fn peer_expects_cache_metadata_rejects_legacy_versions() {
+        assert!(!peer_expects_cache_metadata(Some(
+            &ProtocolVersion::V_2025_11_25
+        )));
+        assert!(!peer_expects_cache_metadata(None));
+    }
+
+    fn complete_read_response(
+        ttl_ms: Option<u64>,
+        scope: Option<CacheScope>,
+    ) -> ReadResourceResponse {
+        let mut result = ReadResourceResult::new(vec![ResourceContents::text("hi", "mcp://x/y")]);
+        result.ttl_ms = ttl_ms;
+        result.cache_scope = scope;
+        ReadResourceResponse::Complete(result)
+    }
+
+    #[test]
+    fn apply_cache_metadata_to_read_response_supplements_for_2026_07_28() {
+        let response = complete_read_response(None, None);
+        match apply_cache_metadata_to_read_response(response, Some(&ProtocolVersion::V_2026_07_28))
+        {
+            ReadResourceResponse::Complete(result) => {
+                assert_eq!(result.ttl_ms, Some(0));
+                assert_eq!(result.cache_scope, Some(CacheScope::Private));
+            }
+            other => panic!("expected Complete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_cache_metadata_to_read_response_preserves_existing_values() {
+        let response = complete_read_response(Some(60), Some(CacheScope::Private));
+        match apply_cache_metadata_to_read_response(response, Some(&ProtocolVersion::V_2026_07_28))
+        {
+            ReadResourceResponse::Complete(result) => {
+                assert_eq!(result.ttl_ms, Some(60));
+                assert_eq!(result.cache_scope, Some(CacheScope::Private));
+            }
+            other => panic!("expected Complete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_cache_metadata_to_read_response_skips_for_legacy_or_none() {
+        let legacy_input = complete_read_response(None, None);
+        match apply_cache_metadata_to_read_response(
+            legacy_input,
+            Some(&ProtocolVersion::V_2025_11_25),
+        ) {
+            ReadResourceResponse::Complete(result) => {
+                assert_eq!(result.ttl_ms, None);
+                assert_eq!(result.cache_scope, None);
+            }
+            other => panic!("expected Complete, got {other:?}"),
+        }
+
+        let none_input = complete_read_response(None, None);
+        match apply_cache_metadata_to_read_response(none_input, None) {
+            ReadResourceResponse::Complete(result) => {
+                assert_eq!(result.ttl_ms, None);
+                assert_eq!(result.cache_scope, None);
+            }
+            other => panic!("expected Complete, got {other:?}"),
+        }
     }
 }

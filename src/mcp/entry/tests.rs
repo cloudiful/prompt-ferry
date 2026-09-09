@@ -726,6 +726,10 @@ async fn stateless_request_is_served_without_session_header() {
     let value = last_sse_json(&body);
     assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
     assert!(value["result"]["resourceTemplates"].is_array());
+    // SEP-2549: 2026-07-28 peers must receive the cache metadata even for
+    // paginated list variants other than tools/list.
+    assert_eq!(value["result"]["ttlMs"].as_u64(), Some(0));
+    assert_eq!(value["result"]["cacheScope"].as_str(), Some("private"));
 }
 
 #[tokio::test]
@@ -787,6 +791,11 @@ async fn stateless_tools_list_aggregates_visible_servers() {
     let value = last_sse_json(&body);
     assert_eq!(value["result"]["resultType"].as_str(), Some("complete"));
     assert!(value["result"]["tools"].is_array());
+    // SEP-2549: the 2026-07-28 spec schema makes `CacheableResult` mandatory,
+    // so the proxy must emit `ttlMs` and `cacheScope` even when the upstream
+    // omits them. Strict Zod clients reject the response otherwise.
+    assert_eq!(value["result"]["ttlMs"].as_u64(), Some(0));
+    assert_eq!(value["result"]["cacheScope"].as_str(), Some("private"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1260,6 +1269,86 @@ async fn legacy_downstream_session_still_negotiates_2026_upstream() {
     let echoed: Value =
         serde_json::from_str(value["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(echoed["text"], "legacy");
+}
+
+#[tokio::test]
+async fn legacy_2025_11_25_tools_list_omits_ttl_and_cache_scope() {
+    let Some(pool) = test_database_pool() else {
+        eprintln!("skipping legacy tools/list DB test: PROMPT_FERRY_TEST_DATABASE_URL is not set");
+        return;
+    };
+    let upstream_url = spawn_entry_upstream().await;
+    let server_name = format!("github-{}", uuid::Uuid::new_v4().simple());
+    insert_test_mcp_server(&pool, &server_name, &upstream_url).await;
+    let cache = McpCatalogCache::new();
+
+    // Bootstrap a legacy session via the named-server path.
+    let (_, _, headers, _) = collect_response(
+        handle_stream(
+            &pool,
+            &cache,
+            named_request(
+                &server_name,
+                "POST",
+                &format!("/mcp/{server_name}"),
+                &[],
+                br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            ),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    let session_id = headers
+        .iter()
+        .find(|(name, _)| name == "mcp-session-id")
+        .map(|(_, value)| value.clone())
+        .unwrap();
+
+    // Reuse the same session with a 2025-11-25 protocol version. SEP-2549
+    // did not exist for that spec, so the proxy must not emit `ttlMs` or
+    // `cacheScope` on the wire.
+    let (status, _, _, body) = collect_response(
+        handle_stream(
+            &pool,
+            &cache,
+            named_request(
+                &server_name,
+                "POST",
+                &format!("/mcp/{server_name}"),
+                &[
+                    ("mcp-session-id".to_string(), session_id),
+                    ("mcp-protocol-version".to_string(), "2025-11-25".to_string()),
+                ],
+                br#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+            ),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "response body: {}",
+        String::from_utf8_lossy(&body)
+    );
+    let value = last_sse_json(&body);
+    assert_eq!(
+        value["result"].get("resultType"),
+        None,
+        "legacy peers must not see SEP-2549 discriminator: {value:?}"
+    );
+    assert_eq!(
+        value["result"].get("ttlMs"),
+        None,
+        "legacy peers must not see SEP-2549 fields: {value:?}"
+    );
+    assert_eq!(
+        value["result"].get("cacheScope"),
+        None,
+        "legacy peers must not see SEP-2549 fields: {value:?}"
+    );
 }
 
 #[tokio::test]

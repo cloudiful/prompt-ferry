@@ -162,8 +162,13 @@ impl ServerHandler for ProxyService {
         context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         let scope = self.bind_scope(&context.extensions)?;
-        self.list_tools_for_scope(&scope, &context.id, request)
-            .await
+        self.list_tools_for_scope(
+            &scope,
+            &context.id,
+            request,
+            context.protocol_version().as_ref(),
+        )
+        .await
     }
 
     async fn call_tool(
@@ -182,8 +187,13 @@ impl ServerHandler for ProxyService {
         context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
         let scope = self.bind_scope(&context.extensions)?;
-        self.list_resources_for_scope(&scope, &context.id, request)
-            .await
+        self.list_resources_for_scope(
+            &scope,
+            &context.id,
+            request,
+            context.protocol_version().as_ref(),
+        )
+        .await
     }
 
     async fn list_resource_templates(
@@ -192,8 +202,13 @@ impl ServerHandler for ProxyService {
         context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
         let scope = self.bind_scope(&context.extensions)?;
-        self.list_resource_templates_for_scope(&scope, &context.id, request)
-            .await
+        self.list_resource_templates_for_scope(
+            &scope,
+            &context.id,
+            request,
+            context.protocol_version().as_ref(),
+        )
+        .await
     }
 
     async fn read_resource(
@@ -202,8 +217,15 @@ impl ServerHandler for ProxyService {
         context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
         let scope = self.bind_scope(&context.extensions)?;
-        self.read_resource_for_scope(&scope, &context.id, request, context.meta)
-            .await
+        let protocol_version = context.protocol_version();
+        self.read_resource_for_scope(
+            &scope,
+            &context.id,
+            request,
+            context.meta,
+            protocol_version.as_ref(),
+        )
+        .await
     }
 
     async fn complete(
@@ -222,8 +244,13 @@ impl ServerHandler for ProxyService {
         context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, ErrorData> {
         let scope = self.bind_scope(&context.extensions)?;
-        self.list_prompts_for_scope(&scope, &context.id, request)
-            .await
+        self.list_prompts_for_scope(
+            &scope,
+            &context.id,
+            request,
+            context.protocol_version().as_ref(),
+        )
+        .await
     }
 
     async fn get_prompt(
