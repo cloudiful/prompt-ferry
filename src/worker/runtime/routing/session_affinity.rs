@@ -16,7 +16,10 @@ use super::super::{
     request_assembly::BufferedBridgeRequest,
 };
 use super::selection::{endpoint_key_stickiness_value, rendezvous_target, select_endpoint_api_key};
-use super::session_affinity_quota::{binding_for_selection, selection_for_binding};
+use super::session_affinity_quota::{
+    BindingSelection, binding_for_selection, log_quota_failover, quota_failover_selection,
+    selection_for_binding,
+};
 use crate::routing::candidate_target_by_endpoint;
 
 #[derive(Debug, Clone)]
@@ -119,23 +122,78 @@ pub(super) async fn select<'a>(
     }
 
     for _ in 0..2 {
-        if let Some(current_binding) = binding.as_ref() {
-            let audit = binding_audit(candidate.rule_id, Some(current_binding), request_prompt_log);
-            if override_conflicts_with_binding(current_binding, request_prompt_log) {
+        if let Some(current_binding) = binding.clone() {
+            let audit = binding_audit(
+                candidate.rule_id,
+                Some(&current_binding),
+                request_prompt_log,
+            );
+            if override_conflicts_with_binding(&current_binding, request_prompt_log) {
                 return Err(anyhow::Error::new(RouteAffinityError::conflict(audit)));
             }
-            if let Some(selection) = selection_for_binding(
+            match selection_for_binding(
                 candidate,
-                current_binding,
+                &current_binding,
                 request,
                 Some(&admin_state.token_plan_quota),
             ) {
-                heal_stale_binding(&store, &cache_key, current_binding, &selection).await;
-                return Ok(selection);
+                BindingSelection::Selected(selection) => {
+                    heal_stale_binding(&store, &cache_key, &current_binding, &selection).await;
+                    return Ok(selection);
+                }
+                BindingSelection::QuotaExhausted => {
+                    let Some((selection, replacement)) = quota_failover_selection(
+                        candidate,
+                        &current_binding,
+                        request,
+                        request_prompt_log,
+                        &admin_state.token_plan_quota,
+                    ) else {
+                        return Err(anyhow::Error::new(RouteAffinityError::target_unavailable(
+                            audit,
+                        )));
+                    };
+                    match store
+                        .replace_if_current(&cache_key, &current_binding, &replacement)
+                        .await
+                    {
+                        Ok(true) => {
+                            log_quota_failover(
+                                candidate.rule_id,
+                                &current_binding,
+                                &replacement,
+                                request_prompt_log,
+                            );
+                            return Ok(selection);
+                        }
+                        Ok(false) => {
+                            // A concurrent worker rebound the session first;
+                            // reload and re-evaluate on the next pass.
+                            binding = match store.get(&cache_key).await {
+                                Ok(binding) => binding,
+                                Err(err) => {
+                                    log_unavailable(&err);
+                                    return Err(anyhow::Error::new(
+                                        RouteAffinityError::backend_unavailable(),
+                                    ));
+                                }
+                            };
+                        }
+                        Err(err) => {
+                            log_unavailable(&err);
+                            return Err(anyhow::Error::new(
+                                RouteAffinityError::backend_unavailable(),
+                            ));
+                        }
+                    }
+                }
+                BindingSelection::Unavailable => {
+                    return Err(anyhow::Error::new(RouteAffinityError::target_unavailable(
+                        audit,
+                    )));
+                }
             }
-            return Err(anyhow::Error::new(RouteAffinityError::target_unavailable(
-                audit,
-            )));
+            continue;
         }
 
         let (selection, candidate_binding) = select_new_binding(

@@ -1,9 +1,9 @@
 //! OpenRouter session-affinity routing consumption (issue #203 P4).
-//! Bound-key gating via the real quota cache: exhausted returns unavailable.
+//! Bound-key gating via the real quota cache: exhausted keys migrate.
 
+use super::select_route_for_candidate;
 use super::session_affinity_quota_tests::{bind_key, request};
 use super::session_affinity_tests::request_context;
-use super::{RouteAffinityError, select_route_for_candidate};
 use crate::{
     db,
     replay_cache::ReplayCache,
@@ -63,7 +63,7 @@ fn openrouter_usage(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
 }
 
 #[tokio::test]
-async fn exhausted_openrouter_bound_key_returns_target_unavailable() {
+async fn exhausted_openrouter_bound_key_migrates_to_alternate_key() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
     let services =
@@ -115,7 +115,7 @@ async fn exhausted_openrouter_bound_key_returns_target_unavailable() {
             ..RequestPromptLog::default()
         },
     );
-    let error = match select_route_for_candidate(
+    let selected = select_route_for_candidate(
         &services,
         &request_ctx,
         &candidate,
@@ -124,15 +124,13 @@ async fn exhausted_openrouter_bound_key_returns_target_unavailable() {
         Some("key-a"),
     )
     .await
-    {
-        Ok(_) => panic!("exhausted openrouter bound key must not fail over"),
-        Err(error) => error,
-    };
+    .expect("exhausted openrouter bound key must migrate within the candidate")
+    .expect("migration must select a route");
+    assert_eq!(selected.route.endpoint_key_id, Some(alternate_key_id));
+    assert_eq!(selected.route.api_key, "alternate-key");
     assert_eq!(
-        error
-            .downcast_ref::<RouteAffinityError>()
-            .map(|error| error.code),
-        Some("responses_session_affinity_target_unavailable")
+        selected.route.route_selection_reason,
+        db::RouteSelectionReason::QuotaFailover
     );
 }
 

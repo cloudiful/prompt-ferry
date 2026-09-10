@@ -1,4 +1,4 @@
-import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
+import { onBeforeUnmount, reactive, ref, watch, type Ref } from 'vue'
 import type {
   CommandCodeWindowUsage,
   GlmWindowUsage,
@@ -47,6 +47,7 @@ export type CcEntry = {
   adapted: TokenPlanWindowUsage
   labelKey: string
   raw: CommandCodeWindowUsage
+  subline: string
 }
 
 export type OpencodeGoEntry = {
@@ -201,21 +202,20 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
 
   function ccEntries(key: TokenPlanKeyUsage): CcEntry[] {
     const entries: CcEntry[] = []
-    const five = ccAsWindow(key.five_hour)
-    if (key.five_hour && five) {
-      entries.push({
-        adapted: five,
-        labelKey: 'tokenPlanFiveHour',
-        raw: key.five_hour,
-      })
-    }
-    const weekly = ccAsWindow(key.weekly)
-    if (key.weekly && weekly) {
-      entries.push({
-        adapted: weekly,
-        labelKey: 'tokenPlanWeeklyUsd',
-        raw: key.weekly,
-      })
+    const byKey = [
+      ['tokenPlanFiveHour', key.five_hour],
+      ['tokenPlanWeeklyUsd', key.weekly],
+    ] as const
+    for (const [labelKey, window] of byKey) {
+      const adapted = ccAsWindow(window)
+      if (window && adapted) {
+        entries.push({
+          adapted,
+          labelKey,
+          raw: window,
+          subline: `${window.used.toFixed(2)} / ${window.cap.toFixed(2)} USD`,
+        })
+      }
     }
     return entries
   }
@@ -349,4 +349,52 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
     openrouterEntries,
     formatOpenRouterCredits,
   }
+}
+
+const KEY_ROTATION_MS = 4000
+
+// #277 P1 single-card carousel: 4s autoplay over `ok` keys, hover pauses.
+export function useTokenPlanKeyCarousel(
+  keys: Ref<TokenPlanKeyUsage[]>,
+  visible: Ref<boolean>,
+) {
+  const index = ref(0)
+  let timer: ReturnType<typeof setInterval> | null = null
+
+  function stop(): void {
+    if (timer !== null) clearInterval(timer)
+    timer = null
+  }
+  function start(): void {
+    stop()
+    const list = keys.value
+    if (index.value >= list.length) index.value = 0
+    if (!visible.value || list.length < 2 || !list.some((k) => k.ok)) return
+    timer = setInterval(() => {
+      for (let offset = 1; offset <= keys.value.length; offset += 1) {
+        const candidate = (index.value + offset) % keys.value.length
+        if (keys.value[candidate]?.ok) {
+          index.value = candidate
+          return
+        }
+      }
+    }, KEY_ROTATION_MS)
+  }
+  function go(target: number): void {
+    const total = keys.value.length
+    if (total === 0) return
+    index.value = (target + total) % total
+    start()
+  }
+  function setPaused(value: boolean): void {
+    if (value) stop()
+    else start()
+  }
+
+  watch([() => visible.value, () => keys.value.length], start, {
+    immediate: true,
+  })
+  onBeforeUnmount(stop)
+
+  return reactive({ index, go, setPaused })
 }

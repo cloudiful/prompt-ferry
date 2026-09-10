@@ -49,6 +49,10 @@ pub(super) struct ResponseForwardContext<'a> {
     pub(super) logging: ResponseLoggingContext,
     pub(super) response_adapter: ResponseAdapter,
     pub(super) services: &'a RuntimeServices,
+    /// When true, a non-stream upstream quota-exhaustion response is handed
+    /// back to the retry loop instead of being written to the client so the
+    /// caller can re-select another key on the same endpoint.
+    pub(super) quota_failover_enabled: bool,
 }
 
 impl ResponseForwardContext<'_> {
@@ -62,9 +66,28 @@ impl ResponseForwardContext<'_> {
             logging: self.logging,
             response_adapter: self.response_adapter,
             services: self.services,
+            quota_failover_enabled: self.quota_failover_enabled,
         }
     }
 }
+
+/// A non-stream upstream quota-exhaustion response buffered by
+/// `forward_upstream_response` so the retry loop can attempt another key
+/// before the error is surfaced.
+#[derive(Debug)]
+pub(super) struct QuotaFailoverSignal {
+    pub(super) status: http::StatusCode,
+    pub(super) body: Vec<u8>,
+    pub(super) response_headers: Vec<(String, String)>,
+}
+
+impl std::fmt::Display for QuotaFailoverSignal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "upstream quota exhaustion")
+    }
+}
+
+impl std::error::Error for QuotaFailoverSignal {}
 
 pub(super) async fn forward_upstream_response(
     response: reqwest::Response,
@@ -74,9 +97,6 @@ pub(super) async fn forward_upstream_response(
     let route_ctx = context.route_ctx;
     let request = context.request;
     let request_ctx = context.request_ctx;
-    let upstream_redacted_request_json = context.upstream_redacted_request_json.clone();
-    let upstream_restore_session = context.upstream_restore_session.clone();
-    let redact_content = context.logging.redact_content;
     let response_adapter = context.response_adapter;
     let services = context.services;
     let route = &route_ctx.route;
@@ -104,60 +124,18 @@ pub(super) async fn forward_upstream_response(
     if !status.is_success() {
         let body = read_response_sample(response, ERROR_BODY_SAMPLE_BYTES).await;
         let body_text = String::from_utf8_lossy(&body).to_string();
-        if is_quota_exhaustion(&body_text)
-            && let Some(state) = services.admin_state()
-        {
+        let quota_exhausted = is_quota_exhaustion(&body_text);
+        if quota_exhausted && let Some(state) = services.admin_state() {
             state.token_plan_quota.invalidate(route.route_id).await;
         }
-        let client_status = client_status_for_upstream_error(status, &body_text);
-        let error_body = (!body_text.trim().is_empty())
-            .then(|| maybe_redact_text(&body_text, redact_content, request_ctx.user_id));
-        let normalized_error = if request.path == "/v1/messages" {
-            anthropic_error_body(&body_text, client_status)
-        } else {
-            normalize_response_error(&body_text)
-        };
-        let normalized_bytes =
-            serde_json::to_vec(&normalized_error).unwrap_or_else(|_| body.to_vec());
-        send_json_response_with_headers(
-            services,
-            &request.request_id,
-            client_status.as_u16(),
-            normalized_bytes,
-            upstream_response_headers,
-        )
-        .await?;
-        services
-            .record_usage_event(
-                ai_route_usage_log(request_ctx, request, route_ctx)
-                    .with_upstream_redaction(
-                        upstream_restore_session.is_some(),
-                        upstream_redacted_request_json.clone(),
-                        upstream_restore_session.clone(),
-                    )
-                    .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
-                    .with_status(
-                        Some(client_status.as_u16() as i32),
-                        Some(false),
-                        Some(request_ctx.elapsed_ms()),
-                        None,
-                    )
-                    .with_error(
-                        Some("http_error".to_string()),
-                        Some(http_error_message(status.as_u16(), error_body.as_deref())),
-                        error_body.clone(),
-                    ),
-            )
-            .await;
-        warn!(
-            endpoint_id = %route.route_id,
-            base_url = %route.base_url,
-            native_api = %route.native_api.as_str(),
-            path = %request.path,
-            status = status.as_u16(),
-            "upstream returned non-success status"
-        );
-        return Ok(());
+        if quota_exhausted && !is_sse && context.quota_failover_enabled {
+            return Err(anyhow::Error::new(QuotaFailoverSignal {
+                status,
+                body,
+                response_headers: upstream_response_headers,
+            }));
+        }
+        return respond_upstream_error(&context, status, body, upstream_response_headers).await;
     }
 
     if response_adapter == ResponseAdapter::ChatToResponses && !is_sse {
@@ -237,6 +215,72 @@ pub(super) async fn forward_upstream_response(
         is_sse,
     ))
     .await
+}
+
+/// Render a buffered non-success upstream response (or a quota-exhaustion
+/// signal that could not be failed over) to the client and record the
+/// failed usage event.
+pub(super) async fn respond_upstream_error(
+    context: &ResponseForwardContext<'_>,
+    status: http::StatusCode,
+    body: Vec<u8>,
+    upstream_response_headers: Vec<(String, String)>,
+) -> anyhow::Result<()> {
+    let route_ctx = context.route_ctx;
+    let request = context.request;
+    let request_ctx = context.request_ctx;
+    let services = context.services;
+    let redact_content = context.logging.redact_content;
+    let route = &route_ctx.route;
+    let body_text = String::from_utf8_lossy(&body).to_string();
+    let client_status = client_status_for_upstream_error(status, &body_text);
+    let error_body = (!body_text.trim().is_empty())
+        .then(|| maybe_redact_text(&body_text, redact_content, request_ctx.user_id));
+    let normalized_error = if request.path == "/v1/messages" {
+        anthropic_error_body(&body_text, client_status)
+    } else {
+        normalize_response_error(&body_text)
+    };
+    let normalized_bytes = serde_json::to_vec(&normalized_error).unwrap_or_else(|_| body.clone());
+    send_json_response_with_headers(
+        services,
+        &request.request_id,
+        client_status.as_u16(),
+        normalized_bytes,
+        upstream_response_headers,
+    )
+    .await?;
+    services
+        .record_usage_event(
+            ai_route_usage_log(request_ctx, request, route_ctx)
+                .with_upstream_redaction(
+                    context.upstream_restore_session.is_some(),
+                    context.upstream_redacted_request_json.clone(),
+                    context.upstream_restore_session.clone(),
+                )
+                .with_state(db::UsageEventKind::Request, db::RequestRecordState::Failed)
+                .with_status(
+                    Some(client_status.as_u16() as i32),
+                    Some(false),
+                    Some(request_ctx.elapsed_ms()),
+                    None,
+                )
+                .with_error(
+                    Some("http_error".to_string()),
+                    Some(http_error_message(status.as_u16(), error_body.as_deref())),
+                    error_body.clone(),
+                ),
+        )
+        .await;
+    warn!(
+        endpoint_id = %route.route_id,
+        base_url = %route.base_url,
+        native_api = %route.native_api.as_str(),
+        path = %request.path,
+        status = status.as_u16(),
+        "upstream returned non-success status"
+    );
+    Ok(())
 }
 
 fn should_capture_responses_artifact(

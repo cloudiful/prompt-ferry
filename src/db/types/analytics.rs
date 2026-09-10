@@ -74,6 +74,7 @@ pub enum RouteSelectionReason {
     SessionAffinity,
     SessionLoadBalance,
     ConversationOverride,
+    QuotaFailover,
 }
 
 impl RouteSelectionReason {
@@ -83,6 +84,26 @@ impl RouteSelectionReason {
             Self::SessionAffinity => "session_affinity",
             Self::SessionLoadBalance => "session_load_balance",
             Self::ConversationOverride => "conversation_override",
+            Self::QuotaFailover => "quota_failover",
         }
+    }
+}
+
+#[cfg(test)]
+mod route_selection_reason_tests {
+    use super::RouteSelectionReason;
+
+    #[test]
+    fn quota_failover_uses_the_db_wire_name() {
+        let reason: RouteSelectionReason = serde_json::from_str("\"quota_failover\"").unwrap();
+        assert_eq!(reason, RouteSelectionReason::QuotaFailover);
+        assert_eq!(
+            serde_json::to_string(&RouteSelectionReason::QuotaFailover).unwrap(),
+            "\"quota_failover\""
+        );
+        assert_eq!(
+            RouteSelectionReason::QuotaFailover.as_str(),
+            "quota_failover"
+        );
     }
 }

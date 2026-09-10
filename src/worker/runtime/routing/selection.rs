@@ -5,6 +5,7 @@ use super::super::{
 use super::quota_selection::{
     refresh_quota_if_due, request_model, select_quota_key, stable_endpoint_api_key_score,
 };
+use super::session_affinity_quota::quota_scoped_candidate;
 use crate::{
     db, endpoint_models,
     routing::stable_candidate_order,
@@ -105,7 +106,16 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
         }));
     }
 
-    let preferred = preferred_target(candidate, &request_ctx.request_prompt_log, routing_key);
+    let request_model = request_model(request);
+    let quota_cache = services.admin_state().map(|state| &state.token_plan_quota);
+    let scoped = quota_cache
+        .and_then(|cache| quota_scoped_candidate(candidate, cache, request_model.as_deref()));
+    let preferred = preferred_target(
+        candidate,
+        scoped.as_ref(),
+        &request_ctx.request_prompt_log,
+        routing_key,
+    );
     let Some(preferred) = preferred else {
         return Ok(None);
     };
@@ -121,7 +131,7 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
         target,
         request,
         &request_ctx.request_prompt_log,
-        services.admin_state().map(|state| &state.token_plan_quota),
+        quota_cache,
     );
     clear_invalid_conversation_endpoint_key_override(
         services,
@@ -167,6 +177,7 @@ fn route_from_target(
 
 fn preferred_target<'a>(
     candidate: &'a db::ModelRouteCandidate,
+    scoped: Option<&'a db::ModelRouteCandidate>,
     request_prompt_log: &RequestPromptLog,
     routing_key: Option<&str>,
 ) -> Option<PreferredRoute<'a>> {
@@ -181,7 +192,7 @@ fn preferred_target<'a>(
             reason: PreferredRouteReason::ConversationOverride,
         });
     }
-    rendezvous_target(candidate, routing_key).map(|target| PreferredRoute {
+    rendezvous_target(scoped.unwrap_or(candidate), routing_key).map(|target| PreferredRoute {
         target,
         reason: PreferredRouteReason::Rendezvous,
     })

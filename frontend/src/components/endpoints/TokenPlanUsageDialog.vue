@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { TokenPlanUsageResponse } from '@/generated/admin-api'
 import {
+  useTokenPlanKeyCarousel,
   useTokenPlanTicker,
   useTokenPlanWindowEntries,
 } from '@/composables/useTokenPlanWindowEntries'
@@ -15,6 +17,9 @@ const props = defineProps<{
 const visible = defineModel<boolean>('visible', { required: true })
 
 const nowMs = useTokenPlanTicker(visible)
+
+const usageKeys = computed(() => props.usage?.keys ?? [])
+const carousel = useTokenPlanKeyCarousel(usageKeys, visible)
 
 const {
   remainingPercent,
@@ -41,6 +46,8 @@ const {
     <template #body>
       <div
         class="grid max-h-[min(70vh,42rem)] gap-4 overflow-y-auto pr-1 text-xs"
+        @mouseenter="carousel.setPaused(true)"
+        @mouseleave="carousel.setPaused(false)"
       >
         <div v-if="loading" class="grid gap-2">
           <UProgress animation="carousel" />
@@ -49,9 +56,16 @@ const {
 
         <template v-else-if="usage">
           <div
-            v-for="key in usage.keys"
+            v-for="(key, index) in usage.keys"
             :key="key.key_id"
-            class="border-b border-default last:border-b-0"
+            class="col-start-1 row-start-1 border-b border-default transition-opacity duration-500 last:border-b-0"
+            :class="[
+              index === carousel.index
+                ? 'opacity-100'
+                : 'pointer-events-none opacity-0',
+              { grayscale: usageKeys.length > 1 && !key.ok },
+            ]"
+            :aria-hidden="index !== carousel.index"
           >
             <UCollapsible :default-open="true">
               <template #default="{ open }">
@@ -220,40 +234,11 @@ const {
                       </div>
                     </div>
                     <div
-                      v-for="entry in ccEntries(key)"
-                      :key="entry.labelKey"
-                      class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
-                    >
-                      <span class="text-dimmed">{{ t(entry.labelKey) }}</span>
-                      <UProgress
-                        class="token-plan-progress h-1.5"
-                        :model-value="usedPercent(entry.adapted)"
-                        :style="{
-                          '--token-plan-progress-color': progressColor(
-                            entry.adapted,
-                          ),
-                        }"
-                      />
-                      <div
-                        class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
-                      >
-                        <span class="text-dimmed">{{
-                          formatRemaining(entry.adapted)
-                        }}</span>
-                        <span class="shrink-0 font-semibold"
-                          >{{
-                            remainingPercent(entry.adapted).toFixed(1)
-                          }}%</span
-                        >
-                      </div>
-                      <span class="text-dimmed sm:col-span-2 sm:col-start-2"
-                        >{{ entry.raw.used.toFixed(2) }} /
-                        {{ entry.raw.cap.toFixed(2) }} USD</span
-                      >
-                    </div>
-                    <div
-                      v-for="entry in progressWindowEntries(key)"
-                      :key="entry.labelKey"
+                      v-for="(entry, rowIndex) in [
+                        ...ccEntries(key),
+                        ...progressWindowEntries(key),
+                      ]"
+                      :key="rowIndex"
                       class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
                     >
                       <span class="text-dimmed">{{ t(entry.labelKey) }}</span>
@@ -366,6 +351,34 @@ const {
                 </div>
               </template>
             </UCollapsible>
+          </div>
+          <div
+            v-if="usageKeys.length > 1"
+            class="col-start-1 row-start-2 flex items-center justify-center gap-2"
+          >
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              icon="i-lucide-chevron-left"
+              @click="carousel.go(carousel.index - 1)"
+            />
+            <button
+              v-for="(key, index) in usageKeys"
+              :key="key.key_id"
+              type="button"
+              :aria-label="key.key_label"
+              class="h-2 w-2 cursor-pointer rounded-full p-0"
+              :class="index === carousel.index ? 'bg-primary' : 'bg-elevated'"
+              @click="carousel.go(index)"
+            />
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              icon="i-lucide-chevron-right"
+              @click="carousel.go(carousel.index + 1)"
+            />
           </div>
           <p v-if="usage.keys.length === 0" class="text-dimmed">
             {{ t('tokenPlanNoUsage') }}

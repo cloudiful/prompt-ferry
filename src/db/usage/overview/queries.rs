@@ -13,7 +13,7 @@ use super::presentation::{
     error_rate, failure_family_label, opt_error_rate, ratio, summary_from_metrics, token_usage,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverviewBucket {
     Hour,
     Day,

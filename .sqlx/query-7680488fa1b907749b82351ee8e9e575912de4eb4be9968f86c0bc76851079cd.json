@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- P0 (issue #277): the facet dropdowns used to GROUP BY every row of\n-- `request_records` with no bound, which scanned 569k rows (2.27s). Bound the\n-- scan to a recent window ($3) and cap each facet branch ($4); together with\n-- `idx_request_records_usage_covering` this keeps the branches index-only.\n-- Branch-level ORDER BY/LIMIT requires the parentheses around each SELECT.\nSELECT \"facet!\" AS \"facet!\", \"value!\" AS \"value!\", \"key_id?\" AS \"key_id?\", \"label?\" AS \"label?\", \"user_login_name?\" AS \"user_login_name?\"\nFROM (\n    (\n        SELECT 'user' AS \"facet!\", COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') AS \"value!\", NULL::BIGINT AS \"key_id?\", NULL::TEXT AS \"label?\", NULL::TEXT AS \"user_login_name?\"\n        FROM request_records rr\n        LEFT JOIN users u ON u.user_id = rr.user_id\n        WHERE rr.event_kind = 'request'\n          AND ($1::BIGINT IS NULL OR rr.user_id = $1)\n          AND rr.request_category = $2\n          AND rr.created_at >= $3\n        GROUP BY COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-')\n        ORDER BY \"value!\" DESC\n        LIMIT $4\n    )\n    UNION ALL\n    (\n        SELECT 'model' AS \"facet!\", COALESCE(model, '-') AS \"value!\", NULL::BIGINT AS \"key_id?\", NULL::TEXT AS \"label?\", NULL::TEXT AS \"user_login_name?\"\n        FROM request_records\n        WHERE event_kind = 'request'\n          AND ($1::BIGINT IS NULL OR user_id = $1)\n          AND request_category = 'ai'\n          AND $2 = 'ai'\n          AND created_at >= $3\n        GROUP BY COALESCE(model, '-')\n        ORDER BY \"value!\" DESC\n        LIMIT $4\n    )\n    UNION ALL\n    (\n        SELECT 'target' AS \"facet!\", COALESCE(mcp_server_name, '-') AS \"value!\", NULL::BIGINT AS \"key_id?\", NULL::TEXT AS \"label?\", NULL::TEXT AS \"user_login_name?\"\n        FROM request_records\n        WHERE event_kind = 'request'\n          AND ($1::BIGINT IS NULL OR user_id = $1)\n          AND request_category = 'mcp'\n          AND $2 = 'mcp'\n          AND created_at >= $3\n        GROUP BY COALESCE(mcp_server_name, '-')\n        ORDER BY \"value!\" DESC\n        LIMIT $4\n    )\n    UNION ALL\n    (\n        SELECT 'date' AS \"facet!\", to_char(created_at, 'YYYY-MM-DD') AS \"value!\", NULL::BIGINT AS \"key_id?\", NULL::TEXT AS \"label?\", NULL::TEXT AS \"user_login_name?\"\n        FROM request_records\n        WHERE event_kind = 'request'\n          AND ($1::BIGINT IS NULL OR user_id = $1)\n          AND request_category = $2\n          AND created_at >= $3\n        GROUP BY to_char(created_at, 'YYYY-MM-DD')\n        ORDER BY \"value!\" DESC\n        LIMIT $4\n    )\n    UNION ALL\n    (\n        SELECT 'client_key' AS \"facet!\", COALESCE(rr.client_key_label, '-') AS \"value!\", rr.client_key_id AS \"key_id?\", COALESCE(rr.client_key_label, '-') AS \"label?\", u.login_name AS \"user_login_name?\"\n        FROM request_records rr\n        LEFT JOIN users u ON u.user_id = rr.user_id\n        WHERE rr.event_kind = 'request'\n          AND ($1::BIGINT IS NULL OR rr.user_id = $1)\n          AND rr.request_category = $2\n          AND rr.client_key_id IS NOT NULL\n          AND rr.created_at >= $3\n        GROUP BY rr.client_key_id, COALESCE(rr.client_key_label, '-'), u.login_name\n        ORDER BY \"value!\" DESC\n        LIMIT $4\n    )\n) facets\nORDER BY \"facet!\" ASC, \"value!\" DESC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "facet!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "value!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "key_id?",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "label?",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "user_login_name?",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "7680488fa1b907749b82351ee8e9e575912de4eb4be9968f86c0bc76851079cd"
+}

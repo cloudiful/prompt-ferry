@@ -1006,3 +1006,167 @@ async fn glm_responses_to_chat_envelope_fails_loudly() {
     );
     assert_envelope_502_on_bridge(&bridge_log, &count, 1).await;
 }
+
+async fn spawn_quota_then_success_upstream(
+    quota_body: &'static [u8],
+) -> (
+    SocketAddr,
+    Arc<AtomicUsize>,
+    Arc<tokio::sync::Mutex<Vec<String>>>,
+) {
+    let count = Arc::new(AtomicUsize::new(0));
+    let counter = count.clone();
+    let auths = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let auth_log = auths.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((sock, _)) = listener.accept().await else {
+                break;
+            };
+            let n = counter.fetch_add(1, Ordering::SeqCst);
+            let auth_log = auth_log.clone();
+            tokio::spawn(async move {
+                let mut sock = sock;
+                let mut buf = [0u8; 8192];
+                let read = sock.read(&mut buf).await.unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..read]);
+                let authorization = head
+                    .lines()
+                    .find_map(|line| line.strip_prefix("authorization: "))
+                    .map(|value| value.trim().to_string())
+                    .unwrap_or_default();
+                auth_log.lock().await.push(authorization);
+                if n == 0 {
+                    let response = format!(
+                        "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        quota_body.len()
+                    );
+                    let _ = sock.write_all(response.as_bytes()).await;
+                    let _ = sock.write_all(quota_body).await;
+                } else {
+                    let body = RESPONSES_JSON_BODY.as_bytes();
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = sock.write_all(response.as_bytes()).await;
+                    let _ = sock.write_all(body).await;
+                }
+                let _ = sock.shutdown().await;
+            });
+        }
+    });
+    (addr, count, auths)
+}
+
+fn quota_failover_route(base_url: &str) -> RouteConfig {
+    let endpoint_id = uuid::Uuid::new_v4();
+    let primary_key_id = uuid::Uuid::new_v4();
+    let secondary_key_id = uuid::Uuid::new_v4();
+    let key =
+        |key_id: uuid::Uuid, label: &str, secret: &str, position: i32| crate::db::EndpointApiKey {
+            key_id,
+            endpoint_id,
+            key_label: label.to_string(),
+            api_key: secret.to_string(),
+            position,
+            enabled: true,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+    RouteConfig {
+        route_id: endpoint_id,
+        user_id: 1,
+        model_route_rule_id: None,
+        base_url: base_url.to_string(),
+        api_key: "key-a".to_string(),
+        endpoint_key_id: Some(primary_key_id),
+        endpoint_key_label: Some("primary".to_string()),
+        api_keys: vec![
+            key(primary_key_id, "primary", "key-a", 0),
+            key(secondary_key_id, "secondary", "key-b", 1),
+        ],
+        key_lb_enabled: true,
+        native_api: NativeApi::Responses,
+        upstream_model: None,
+        route_selection_reason: crate::db::RouteSelectionReason::Default,
+        provider: crate::db::EndpointProvider::Generic,
+        service_tier: crate::db::MinimaxServiceTier::Standard,
+    }
+}
+
+#[tokio::test]
+async fn non_stream_quota_exhaustion_retries_with_another_endpoint_key() {
+    const QUOTA_BODY: &[u8] = br#"{"error":{"message":"insufficient_quota"}}"#;
+    let (addr, count, auths) = spawn_quota_then_success_upstream(QUOTA_BODY).await;
+    let (out_tx, bridge_log) = spawn_bridge_log();
+    let services = test_services(out_tx);
+    let route = quota_failover_route(&format!("http://{addr}"));
+
+    let outcome = forward_test_request(&services, &route)
+        .await
+        .expect("forward");
+    assert!(matches!(outcome, ForwardOutcome::Handled));
+    wait_for_count(&count, 2).await;
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        2,
+        "non-stream quota exhaustion must retry once with the alternate key",
+    );
+
+    let auths = auths.lock().await;
+    assert_eq!(auths.len(), 2, "expected exactly two upstream requests");
+    assert_eq!(auths[0], "Bearer key-a");
+    assert_eq!(auths[1], "Bearer key-b");
+
+    wait_for_bridge(&bridge_log, 3).await;
+    let messages = bridge_log.lock().await;
+    let start = messages
+        .iter()
+        .find_map(|message| match message {
+            BridgeMessage::ResponseStart(start) => Some(start),
+            _ => None,
+        })
+        .expect("bridge must receive a response start");
+    assert_eq!(
+        start.status, 200,
+        "retry must surface the successful response"
+    );
+}
+
+#[tokio::test]
+async fn non_stream_quota_exhaustion_without_an_alternate_key_surfaces_the_error() {
+    const QUOTA_BODY: &[u8] = br#"{"error":{"message":"insufficient_quota"}}"#;
+    let (addr, count, _auths) = spawn_quota_then_success_upstream(QUOTA_BODY).await;
+    let (out_tx, bridge_log) = spawn_bridge_log();
+    let services = test_services(out_tx);
+    let mut route = quota_failover_route(&format!("http://{addr}"));
+    route.api_keys.truncate(1);
+
+    let outcome = forward_test_request(&services, &route)
+        .await
+        .expect("forward");
+    assert!(matches!(outcome, ForwardOutcome::Handled));
+    wait_for_count(&count, 1).await;
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        1,
+        "a single key cannot fail over and must not be retried",
+    );
+
+    wait_for_bridge(&bridge_log, 3).await;
+    let messages = bridge_log.lock().await;
+    let start = messages
+        .iter()
+        .find_map(|message| match message {
+            BridgeMessage::ResponseStart(start) => Some(start),
+            _ => None,
+        })
+        .expect("bridge must receive a response start");
+    assert_eq!(
+        start.status, 429,
+        "quota exhaustion without an alternate key must surface as 429",
+    );
+}
