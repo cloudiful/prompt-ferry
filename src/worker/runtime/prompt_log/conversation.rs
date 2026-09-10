@@ -99,16 +99,14 @@ pub(super) async fn resolve_prompt_conversation(
             return Ok(Some(resolution));
         }
 
-        if let Some(codex_thread_key) = codex_thread_key
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
+        if let Some(codex_thread_key) = codex_thread_key.filter(|value| !value.is_empty()) {
+            // Chat session headers and chat prompt cache keys share the "chat:"
+            // namespace, so the same value intentionally joins one conversation.
+            // Prefixing also keeps them from colliding with the raw session-header
+            // conversation of /v1/responses.
             let resolution = resolve_session_header_conversation(
                 state,
                 user_id,
-                // Chat cache keys share the chat namespace so a Codex prompt cache
-                // key can never collide with the raw session-header conversation of
-                // /v1/responses.
                 &format!("{CHAT_SESSION_NAMESPACE}{codex_thread_key}"),
                 CHAT_PROMPT_CACHE_KEY_SOURCE,
             )

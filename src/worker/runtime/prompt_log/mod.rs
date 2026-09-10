@@ -127,7 +127,7 @@ pub(super) struct ReconstructedPromptChain {
     pub(super) depth: usize,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct ReplayParentOutcome {
     parent_event_id: Option<i64>,
     replay_unavailable: bool,
@@ -144,11 +144,15 @@ fn reconcile_replay_parent(
             replay_unavailable: false,
         };
     }
+    let reason = match parent_conversation_id {
+        None => "discarding replay parent without a conversation",
+        Some(_) => "discarding replay parent from a different conversation",
+    };
     warn!(
         parent_event_id,
         ?parent_conversation_id,
         %conversation_id,
-        "discarding replay parent from a different conversation"
+        "{reason}"
     );
     ReplayParentOutcome {
         parent_event_id: None,
