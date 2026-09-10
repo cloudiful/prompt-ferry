@@ -5,6 +5,7 @@ use anyhow::Result;
 use super::super::request_assembly::BufferedBridgeRequest;
 
 const CHAT_SESSION_NAMESPACE: &str = "chat:";
+const CHAT_PROMPT_CACHE_KEY_SOURCE: &str = "chat_prompt_cache_key";
 
 async fn resolve_session_header_conversation(
     state: &AdminState,
@@ -93,6 +94,23 @@ pub(super) async fn resolve_prompt_conversation(
                 // values with a "chat:" prefix on the responses side.
                 &format!("{CHAT_SESSION_NAMESPACE}{session_header_id}"),
                 "chat_session_header",
+            )
+            .await?;
+            return Ok(Some(resolution));
+        }
+
+        if let Some(codex_thread_key) = codex_thread_key
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let resolution = resolve_session_header_conversation(
+                state,
+                user_id,
+                // Chat cache keys share the chat namespace so a Codex prompt cache
+                // key can never collide with the raw session-header conversation of
+                // /v1/responses.
+                &format!("{CHAT_SESSION_NAMESPACE}{codex_thread_key}"),
+                CHAT_PROMPT_CACHE_KEY_SOURCE,
             )
             .await?;
             return Ok(Some(resolution));

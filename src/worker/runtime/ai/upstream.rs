@@ -3,6 +3,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use http::header;
 use reqwest::{Client, Method};
+use std::borrow::Cow;
 
 #[cfg(test)]
 pub(super) async fn send_upstream_request(
@@ -41,64 +42,96 @@ pub(super) fn build_upstream_request(
     } else {
         request_builder
     };
-    match body {
-        PreparedRequestBody::PassthroughStream(bytes) => request_builder.body(
-            apply_minimax_reasoning_split(route, &apply_minimax_service_tier(route, bytes)),
-        ),
-        PreparedRequestBody::BufferedBytes(bytes) => request_builder.body(
-            apply_minimax_reasoning_split(route, &apply_minimax_service_tier(route, bytes)),
-        ),
-    }
+    let raw = match body {
+        PreparedRequestBody::PassthroughStream(bytes)
+        | PreparedRequestBody::BufferedBytes(bytes) => bytes.as_slice(),
+    };
+    // Each transform borrows the bytes when nothing needs rewriting, so an
+    // unchanged body is forwarded byte-for-byte (prefix-cache stable) and the
+    // only owned allocation is the final one reqwest takes ownership of.
+    let body = apply_minimax_service_tier(route, raw);
+    let body = apply_minimax_reasoning_split(route, body.as_ref());
+    let body = apply_anthropic_cache_control(route, body);
+    request_builder.body(body.into_owned())
 }
 
 /// Inject the endpoint-configured MiniMax `service_tier` into an upstream
 /// JSON request body. Only MiniMax endpoints are modified; generic
 /// endpoints return the body unchanged so client-supplied values are
 /// never forwarded or overridden. The configured value overwrites any
-/// existing `service_tier` field. Non-JSON or non-object bodies are
-/// returned unchanged.
-pub(super) fn apply_minimax_service_tier(route: &db::RouteConfig, body: &[u8]) -> Vec<u8> {
+/// existing `service_tier` field. When the field already carries the
+/// configured value the parsed body is discarded and the original bytes are
+/// borrowed, so an already-correct request is forwarded byte-for-byte
+/// instead of being needlessly re-serialized. Non-JSON or non-object bodies
+/// are likewise returned unchanged.
+pub(super) fn apply_minimax_service_tier<'a>(
+    route: &db::RouteConfig,
+    body: &'a [u8],
+) -> Cow<'a, [u8]> {
     if route.provider != crate::db::EndpointProvider::Minimax {
-        return body.to_vec();
+        return Cow::Borrowed(body);
     }
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return body.to_vec();
+        return Cow::Borrowed(body);
     };
     let Some(object) = value.as_object_mut() else {
-        return body.to_vec();
+        return Cow::Borrowed(body);
     };
+    let requested = route.service_tier.as_str();
+    if object
+        .get("service_tier")
+        .and_then(serde_json::Value::as_str)
+        == Some(requested)
+    {
+        return Cow::Borrowed(body);
+    }
     object.insert(
         "service_tier".to_string(),
-        serde_json::Value::String(route.service_tier.as_str().to_string()),
+        serde_json::Value::String(requested.to_string()),
     );
-    serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
+    Cow::Owned(serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec()))
+}
+
+/// Reserved injection seam for Anthropic `cache_control` breakpoints
+/// (issue #259). Phase 1 deliberately keeps this disabled — rewriting the
+/// forwarded request bytes needs business confirmation — so the body is
+/// always returned untouched. Phase 2 will insert the system/tools
+/// ephemeral breakpoints here.
+fn apply_anthropic_cache_control<'a>(
+    _route: &db::RouteConfig,
+    body: Cow<'a, [u8]>,
+) -> Cow<'a, [u8]> {
+    body
 }
 
 /// Default MiniMax `reasoning_split` to `true` for OpenAI Chat-native
 /// forwarding. Only MiniMax Chat endpoints are modified and only when the
 /// JSON object omits the field; any caller-supplied value (including
-/// `false`, `null`, or non-boolean) is preserved byte-for-byte. Generic
-/// endpoints, non-Chat MiniMax routes (`AnthropicMessages`/`Responses`),
-/// and non-JSON/non-object bodies are returned unchanged. The `thinking`
-/// switch is never touched here.
-pub(super) fn apply_minimax_reasoning_split(route: &db::RouteConfig, body: &[u8]) -> Vec<u8> {
+/// `false`, `null`, or non-boolean) is preserved byte-for-byte, borrowing the
+/// original bytes instead of re-serializing. Generic endpoints, non-Chat
+/// MiniMax routes (`AnthropicMessages`/`Responses`), and non-JSON/non-object
+/// bodies are returned unchanged. The `thinking` switch is never touched here.
+pub(super) fn apply_minimax_reasoning_split<'a>(
+    route: &db::RouteConfig,
+    body: &'a [u8],
+) -> Cow<'a, [u8]> {
     if route.provider != crate::db::EndpointProvider::Minimax {
-        return body.to_vec();
+        return Cow::Borrowed(body);
     }
     if route.native_api != crate::config::NativeApi::Chat {
-        return body.to_vec();
+        return Cow::Borrowed(body);
     }
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return body.to_vec();
+        return Cow::Borrowed(body);
     };
     let Some(object) = value.as_object_mut() else {
-        return body.to_vec();
+        return Cow::Borrowed(body);
     };
     if object.contains_key("reasoning_split") {
-        return body.to_vec();
+        return Cow::Borrowed(body);
     }
     object.insert("reasoning_split".to_string(), serde_json::Value::Bool(true));
-    serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
+    Cow::Owned(serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec()))
 }
 
 pub(super) fn is_opencode_host(url: &str) -> bool {
@@ -825,16 +858,17 @@ mod tests {
         let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
         let body = br#"{"model":"MiniMax-M2","service_tier":"standard"}"#;
         let injected = apply_minimax_service_tier(&route, body);
-        let value: serde_json::Value = serde_json::from_slice(&injected).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(injected.as_ref()).unwrap();
         assert_eq!(value["service_tier"], "priority");
         assert_eq!(value["model"], "MiniMax-M2");
+        assert!(matches!(&injected, Cow::Owned(_)));
     }
 
     #[test]
     fn minimax_defaults_to_standard_when_body_omits_tier() {
         let route = minimax_route(crate::db::MinimaxServiceTier::Standard);
         let injected = apply_minimax_service_tier(&route, br#"{"model":"MiniMax-M2"}"#);
-        let value: serde_json::Value = serde_json::from_slice(&injected).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(injected.as_ref()).unwrap();
         assert_eq!(value["service_tier"], "standard");
     }
 
@@ -842,16 +876,48 @@ mod tests {
     fn generic_endpoints_leave_body_unchanged() {
         let route = generic_route();
         let body = br#"{"model":"gpt-5","service_tier":"priority"}"#;
-        assert_eq!(apply_minimax_service_tier(&route, body), body);
+        let injected = apply_minimax_service_tier(&route, body);
+        assert!(matches!(&injected, Cow::Borrowed(_)));
+        assert_eq!(injected.as_ref(), body);
     }
 
     #[test]
     fn non_json_bodies_pass_through_unchanged() {
         let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
         let body = b"not-json";
-        assert_eq!(apply_minimax_service_tier(&route, body), body);
+        assert_eq!(apply_minimax_service_tier(&route, body).as_ref(), body);
         let array_body = b"[1,2,3]";
-        assert_eq!(apply_minimax_service_tier(&route, array_body), array_body);
+        assert_eq!(
+            apply_minimax_service_tier(&route, array_body).as_ref(),
+            array_body
+        );
+    }
+
+    #[test]
+    fn minimax_service_tier_skips_reserialization_when_already_configured() {
+        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
+        // Deliberately non-canonical key order/whitespace: an already-correct
+        // tier must be forwarded byte-for-byte, not re-serialized (issue #259
+        // prefix-cache stability).
+        let body = br#"{ "service_tier" : "priority" , "model" : "m" }"#;
+        let injected = apply_minimax_service_tier(&route, body);
+        assert!(matches!(&injected, Cow::Borrowed(_)));
+        assert_eq!(injected.as_ref(), body);
+    }
+
+    #[test]
+    fn minimax_reserialization_is_deterministic_and_key_sorted() {
+        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
+        // serde_json's default Map is a BTreeMap (no `preserve_order` feature
+        // in Cargo.toml), so keys are emitted in sorted order deterministically.
+        let body = br#"{"z":1,"model":"m","a":{"b":1,"a":2}}"#;
+        let first = apply_minimax_service_tier(&route, body);
+        let second = apply_minimax_service_tier(&route, body);
+        assert_eq!(first.as_ref(), second.as_ref());
+        assert_eq!(
+            first.as_ref(),
+            br#"{"a":{"a":2,"b":1},"model":"m","service_tier":"priority","z":1}"#
+        );
     }
 
     #[test]
@@ -921,29 +987,45 @@ mod tests {
             br#"{"model":"m","reasoning_split":"yes"}"#.as_slice(),
             br#"{"model":"m","reasoning_split":{}}"#.as_slice(),
         ] {
+            let split = apply_minimax_reasoning_split(&route, body);
+            assert!(matches!(&split, Cow::Borrowed(_)));
             assert_eq!(
-                apply_minimax_reasoning_split(&route, body),
+                split.as_ref(),
                 body,
                 "explicit reasoning_split must stay unchanged"
             );
         }
         let thinking_body = br#"{"model":"m","thinking":{"type":"enabled"}}"#;
         let injected = apply_minimax_reasoning_split(&route, thinking_body);
-        let value: serde_json::Value = serde_json::from_slice(&injected).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(injected.as_ref()).unwrap();
         assert_eq!(value["reasoning_split"], true);
         assert_eq!(value["thinking"]["type"], "enabled");
+        assert!(matches!(&injected, Cow::Owned(_)));
     }
 
     #[test]
     fn minimax_reasoning_split_leaves_generic_and_unsupported_bodies_unchanged() {
         let generic = generic_route();
         let body = br#"{"model":"gpt-5"}"#;
-        assert_eq!(apply_minimax_reasoning_split(&generic, body), body);
+        assert_eq!(apply_minimax_reasoning_split(&generic, body).as_ref(), body);
 
         let minimax = minimax_route(crate::db::MinimaxServiceTier::Standard);
         for body in [b"not-json".as_slice(), b"[1,2,3]".as_slice()] {
-            assert_eq!(apply_minimax_reasoning_split(&minimax, body), body);
+            assert_eq!(apply_minimax_reasoning_split(&minimax, body).as_ref(), body);
         }
+    }
+
+    #[test]
+    fn anthropic_cache_control_seam_is_disabled_and_byte_identical() {
+        let route = minimax_anthropic_route("https://api.minimaxi.com");
+        let body = br#"{"model":"m","system":"s","messages":[]}"#;
+        let out = apply_anthropic_cache_control(&route, Cow::Borrowed(body));
+        assert!(matches!(&out, Cow::Borrowed(_)));
+        assert_eq!(out.as_ref(), body);
+        // The seam must also forward an owned body untouched.
+        let owned = apply_anthropic_cache_control(&route, Cow::Owned(body.to_vec()));
+        assert!(matches!(&owned, Cow::Owned(_)));
+        assert_eq!(owned.as_ref(), body);
     }
 
     #[test]
@@ -955,7 +1037,7 @@ mod tests {
                 ..minimax_route(crate::db::MinimaxServiceTier::Standard)
             };
             assert_eq!(
-                apply_minimax_reasoning_split(&route, body),
+                apply_minimax_reasoning_split(&route, body).as_ref(),
                 body,
                 "MiniMax {native_api:?} must not gain a reasoning_split default"
             );

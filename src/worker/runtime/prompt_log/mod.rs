@@ -14,6 +14,7 @@ use crate::{
 };
 use anyhow::Result;
 use serde_json::Value;
+use tracing::warn;
 
 use super::request_assembly::BufferedBridgeRequest;
 
@@ -124,6 +125,35 @@ pub(super) struct CodexRequestMetadata {
 pub(super) struct ReconstructedPromptChain {
     pub(super) refs: Vec<PromptMessageRef>,
     pub(super) depth: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ReplayParentOutcome {
+    parent_event_id: Option<i64>,
+    replay_unavailable: bool,
+}
+
+fn reconcile_replay_parent(
+    conversation_id: uuid::Uuid,
+    parent_event_id: i64,
+    parent_conversation_id: Option<uuid::Uuid>,
+) -> ReplayParentOutcome {
+    if parent_conversation_id == Some(conversation_id) {
+        return ReplayParentOutcome {
+            parent_event_id: Some(parent_event_id),
+            replay_unavailable: false,
+        };
+    }
+    warn!(
+        parent_event_id,
+        ?parent_conversation_id,
+        %conversation_id,
+        "discarding replay parent from a different conversation"
+    );
+    ReplayParentOutcome {
+        parent_event_id: None,
+        replay_unavailable: true,
+    }
 }
 
 pub(super) async fn prepare_request_prompt_log(
@@ -252,7 +282,21 @@ pub(super) async fn prepare_request_prompt_log(
         || resolution.conversation_seq == 1
         || resolution.conversation_seq % REQUEST_CHAIN_DEPTH_LIMIT as i32 == 0;
     let parent_entry = if let Some(parent_event_id) = resolution.parent_event_id {
-        db::get_usage_event_chain_entry(&state.pool, parent_event_id).await?
+        match db::get_usage_event_chain_entry(&state.pool, parent_event_id).await? {
+            Some(parent) => {
+                let outcome = reconcile_replay_parent(
+                    resolution.conversation_id,
+                    parent.event_id,
+                    parent.conversation_id,
+                );
+                if outcome.replay_unavailable {
+                    log.parent_event_id = None;
+                    log.replay_unavailable = true;
+                }
+                outcome.parent_event_id.and(Some(parent))
+            }
+            None => None,
+        }
     } else {
         None
     };
@@ -406,7 +450,25 @@ pub(super) fn resolve_mcp_conversation_log() -> RequestPromptLog {
 
 #[cfg(test)]
 mod tests {
-    use super::{codex_request_metadata, codex_thread_key, session_header_id};
+    use super::{
+        codex_request_metadata, codex_thread_key, reconcile_replay_parent, session_header_id,
+    };
+
+    #[test]
+    fn same_conversation_replay_parent_is_kept() {
+        let conversation_id = uuid::Uuid::new_v4();
+        let outcome = reconcile_replay_parent(conversation_id, 42, Some(conversation_id));
+        assert_eq!(outcome.parent_event_id, Some(42));
+        assert!(!outcome.replay_unavailable);
+    }
+
+    #[test]
+    fn foreign_replay_parent_is_discarded() {
+        let conversation_id = uuid::Uuid::new_v4();
+        let outcome = reconcile_replay_parent(conversation_id, 42, Some(uuid::Uuid::new_v4()));
+        assert_eq!(outcome.parent_event_id, None);
+        assert!(outcome.replay_unavailable);
+    }
 
     #[test]
     fn codex_thread_identity_precedes_prompt_cache_key() {

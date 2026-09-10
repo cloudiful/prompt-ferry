@@ -141,6 +141,20 @@ impl ChatSessionHarness {
             .expect("chat request should send")
     }
 
+    async fn post_chat_without_session(&self, prompt_cache_key: &str) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(format!("http://{}/v1/chat/completions", self.relay_addr))
+            .bearer_auth("client-token")
+            .json(&serde_json::json!({
+                "model": "gpt-test",
+                "prompt_cache_key": prompt_cache_key,
+                "messages": [{"role": "user", "content": "hello"}]
+            }))
+            .send()
+            .await
+            .expect("chat request should send")
+    }
+
     async fn post_chat_with_assert(&self, session_id: &str) -> anyhow::Result<()> {
         let response = self.post_chat(session_id).await;
         let status = response.status();
@@ -170,6 +184,34 @@ impl Drop for ChatSessionHarness {
     fn drop(&mut self) {
         self.worker_handle.abort();
     }
+}
+
+#[tokio::test]
+async fn chat_prompt_cache_key_derives_stable_conversation() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let harness = ChatSessionHarness::spawn().await?;
+
+    let first = harness.post_chat_without_session("guardian-thread").await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let second = harness.post_chat_without_session("guardian-thread").await;
+    assert_eq!(second.status(), StatusCode::OK);
+
+    wait_for_persisted_requests(&harness.schema, 2).await?;
+    let rows = latest_rows(&harness.schema, 2).await?;
+    assert_eq!(rows.len(), 2);
+    let first = &rows[1];
+    let second = &rows[0];
+    assert_eq!(first.conversation_source, "chat_prompt_cache_key");
+    assert_eq!(second.conversation_source, "chat_prompt_cache_key");
+    assert_eq!(first.conversation_id, second.conversation_id);
+    assert_eq!(first.conversation_seq, Some(1));
+    assert_eq!(second.conversation_seq, Some(2));
+
+    harness.shutdown().await?;
+    Ok(())
 }
 
 #[tokio::test]
