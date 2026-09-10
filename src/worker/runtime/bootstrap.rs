@@ -9,6 +9,7 @@ use crate::{
     runtime_env,
     standalone_config::{BootstrapSeed, StandaloneConfigStore},
     tls,
+    worker::runtime::WorkerShutdown,
     worker_admin::{self, AdminState},
 };
 use anyhow::anyhow;
@@ -186,12 +187,15 @@ pub(super) async fn build_standalone_state(
         store.pool().clone(),
     )
     .await;
-    crate::mcp::McpCatalogService::new_with_repository(
+    let mcp_catalog_service = crate::mcp::McpCatalogService::new_with_repository(
         mcp_repository,
         mcp_runtime.catalog_cache.clone(),
-    )
-    .warm_enabled_servers()
-    .await;
+    );
+    spawn_mcp_warmup(
+        config.mcp_warmup,
+        mcp_runtime.catalog_cache.clone(),
+        mcp_catalog_service,
+    );
     let state =
         crate::worker::runtime::standalone::StandaloneRuntimeState::new(store, manager, snapshot)
             .with_mcp_runtime(mcp_runtime);
@@ -208,10 +212,43 @@ fn optional_file_pem(path: &str) -> anyhow::Result<Option<String>> {
     }
 }
 
+/// Schedule the MCP startup warmup according to [`crate::config::McpWarmupMode`]:
+/// * `All` (default) — warm every enabled server in the background, like
+///   the historical behaviour.
+/// * `Lazy` — skip the bulk warmup; the first cold request pays the
+///   per-server connect cost.
+/// * `Off` — disable startup warmup entirely.
+fn spawn_mcp_warmup(
+    mode: crate::config::McpWarmupMode,
+    _cache: crate::mcp::McpCatalogCache,
+    service: crate::mcp::McpCatalogService,
+) {
+    match mode {
+        crate::config::McpWarmupMode::All => {
+            tokio::spawn(async move {
+                service.warm_enabled_servers().await;
+            });
+        }
+        crate::config::McpWarmupMode::Lazy => {
+            tracing::info!(
+                mode = "lazy",
+                "MCP startup warmup skipped; first request per server will lazy-load"
+            );
+        }
+        crate::config::McpWarmupMode::Off => {
+            tracing::info!(
+                mode = "off",
+                "MCP startup warmup disabled by configuration"
+            );
+        }
+    }
+}
+
 pub(super) async fn build_admin_state(
     config: &WorkerConfig,
     spawn_admin_server: bool,
     secrets_dir: Option<&Path>,
+    worker_shutdown: Option<&WorkerShutdown>,
 ) -> anyhow::Result<Option<AdminState>> {
     let relay_secret_manager = relay_secrets::load_or_create_worker_config_key_for(
         config.effective_encryption_key(),
@@ -276,12 +313,18 @@ pub(super) async fn build_admin_state(
         .await?;
 
     if !is_postgres {
-        let mcp_catalog_cache =
-            crate::mcp::McpCatalogCache::from_config_with_sqlite(config, sqlite_pool.clone()).await;
+        // The SQLite path has no Valkey backend; each `from_config_with_sqlite`
+        // call only touches the embedded store so they can run together
+        // without changing semantics.
+        let (mcp_catalog_cache, replay_cache, mcp_session_store) = tokio::join!(
+            crate::mcp::McpCatalogCache::from_config_with_sqlite(config, sqlite_pool.clone()),
+            ReplayCache::from_config_with_sqlite(config, sqlite_pool.clone()),
+            crate::mcp::McpSessionStore::from_config_with_sqlite(config, sqlite_pool),
+        );
         let state = AdminState::new(crate::worker_admin_state::AdminStateInit {
             pool: pool.clone(),
             lease_pool,
-            replay_cache: ReplayCache::from_config_with_sqlite(config, sqlite_pool.clone()).await,
+            replay_cache,
             configured_relays: config.relay_urls.clone(),
             managed_mode: false,
             relay_secret_manager: Some(relay_secret_manager),
@@ -300,11 +343,7 @@ pub(super) async fn build_admin_state(
                 config_repository.clone(),
                 mcp_catalog_cache,
             ),
-            mcp_session_store: crate::mcp::McpSessionStore::from_config_with_sqlite(
-                config,
-                sqlite_pool,
-            )
-            .await,
+            mcp_session_store,
             mcp_allowed_origins: config.mcp_allowed_origins.clone(),
             mcp_quota_valkey: crate::mcp::McpQuotaValkey::new(),
             endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
@@ -316,9 +355,11 @@ pub(super) async fn build_admin_state(
         if spawn_admin_server {
             let admin_config = config.clone();
             let admin_state = state.clone();
+            let shutdown_rx = worker_shutdown.map(WorkerShutdown::subscribe);
             tokio::spawn(async move {
                 if let Err(err) =
-                    worker_admin::run_admin_server(admin_state, &admin_config.admin_bind).await
+                    worker_admin::run_admin_server(admin_state, &admin_config.admin_bind, shutdown_rx)
+                        .await
                 {
                     error!(error = %err, "worker admin server stopped");
                 }
@@ -352,18 +393,43 @@ pub(super) async fn build_admin_state(
             }
         }
     };
-    let redaction_config = db::get_redaction_config(&pool).await?;
-    let user_redaction_configs = db::list_user_redaction_configs(&pool).await?;
+    // These settings live on independent rows so their reads are safe to
+    // overlap; previously they ran one after another and added several
+    // round-trips of cold-start latency.
+    let (
+        redaction_config,
+        user_redaction_configs,
+        llm_review_settings,
+        model_route_whitelist_enabled,
+        request_content_logging,
+        stream_delta_batching,
+    ) = tokio::join!(
+        db::get_redaction_config(&pool),
+        db::list_user_redaction_configs(&pool),
+        async {
+            Ok::<_, anyhow::Error>(
+                db::get_json_setting(&pool, llm_review::LLM_REVIEW_SETTINGS_KEY)
+                    .await?
+                    .unwrap_or_default(),
+            )
+        },
+        async {
+            Ok::<_, anyhow::Error>(
+                db::get_bool_setting(&pool, "model_route_whitelist_enabled", true).await?,
+            )
+        },
+        db::get_request_content_logging(&pool),
+        db::get_stream_delta_batching(&pool),
+    );
+    let redaction_config = redaction_config?;
+    let user_redaction_configs = user_redaction_configs?;
+    let llm_review_settings = llm_review_settings?;
+    let model_route_whitelist_enabled = model_route_whitelist_enabled?;
+    let mut request_content_logging = request_content_logging?;
+    request_content_logging.raw_retention_days = usage_retention.raw_retention_days;
+    let stream_delta_batching = stream_delta_batching?;
     redact::apply_configs(&redaction_config, user_redaction_configs)?;
     let redaction_enabled = redact::has_any_enabled();
-    let llm_review_settings = db::get_json_setting(&pool, llm_review::LLM_REVIEW_SETTINGS_KEY)
-        .await?
-        .unwrap_or_default();
-    let model_route_whitelist_enabled =
-        db::get_bool_setting(&pool, "model_route_whitelist_enabled", true).await?;
-    let mut request_content_logging = db::get_request_content_logging(&pool).await?;
-    request_content_logging.raw_retention_days = usage_retention.raw_retention_days;
-    let stream_delta_batching = db::get_stream_delta_batching(&pool).await?;
     let aborted_count = db::abort_pending_approval_requests(&pool).await?;
     if aborted_count > 0 {
         warn!(
@@ -371,13 +437,25 @@ pub(super) async fn build_admin_state(
             "aborted stale pending approval requests on startup"
         );
     }
-    let mcp_catalog_cache = crate::mcp::McpCatalogCache::from_config(config).await;
+    // Valkey-backed components all talk to the same broker but with
+    // different keys/connections; spin them up concurrently so a slow
+    // handshake to one does not serialise the others.
+    let (mcp_catalog_cache, replay_cache, mcp_session_store, mcp_quota_valkey) = tokio::join!(
+        crate::mcp::McpCatalogCache::from_config(config),
+        ReplayCache::from_config(config),
+        crate::mcp::McpSessionStore::from_config(config),
+        crate::mcp::McpQuotaValkey::from_config(config),
+    );
+    let mcp_catalog_cache = mcp_catalog_cache;
+    let replay_cache = replay_cache;
+    let mcp_session_store = mcp_session_store;
+    let mcp_quota_valkey = mcp_quota_valkey;
     let mcp_catalog_service =
         crate::mcp::McpCatalogService::new(pool.clone(), mcp_catalog_cache.clone());
     let state = AdminState::new(crate::worker_admin_state::AdminStateInit {
         pool,
         lease_pool,
-        replay_cache: ReplayCache::from_config(config).await,
+        replay_cache,
         configured_relays: Vec::new(),
         managed_mode: true,
         relay_secret_manager: Some(relay_secret_manager),
@@ -390,9 +468,9 @@ pub(super) async fn build_admin_state(
         llm_review_settings,
         mcp_catalog_cache,
         mcp_catalog_service,
-        mcp_session_store: crate::mcp::McpSessionStore::from_config(config).await,
+        mcp_session_store,
         mcp_allowed_origins: config.mcp_allowed_origins.clone(),
-        mcp_quota_valkey: crate::mcp::McpQuotaValkey::from_config(config).await,
+        mcp_quota_valkey,
         endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(Duration::from_secs(
             config.endpoint_model_cache_ttl_seconds.max(1),
         )),
@@ -401,18 +479,18 @@ pub(super) async fn build_admin_state(
     if spawn_admin_server {
         let admin_config = config.clone();
         let admin_state = state.clone();
+        let shutdown_rx = worker_shutdown.map(WorkerShutdown::subscribe);
         tokio::spawn(async move {
             if let Err(err) =
-                worker_admin::run_admin_server(admin_state, &admin_config.admin_bind).await
+                worker_admin::run_admin_server(admin_state, &admin_config.admin_bind, shutdown_rx)
+                    .await
             {
                 error!(error = %err, "worker admin server stopped");
             }
         });
 
         let mcp_catalog_service = state.mcp_catalog_service.clone();
-        tokio::spawn(async move {
-            mcp_catalog_service.warm_enabled_servers().await;
-        });
+        spawn_mcp_warmup(config.mcp_warmup, state.mcp_catalog_cache.clone(), mcp_catalog_service);
 
         let quota_pool = state.pool.clone();
         tokio::spawn(async move {
@@ -651,7 +729,7 @@ mod tests {
             ..WorkerConfig::default()
         };
 
-        let state = build_admin_state(&config, false, Some(&secrets_dir))
+        let state = build_admin_state(&config, false, Some(&secrets_dir), None)
             .await
             .expect("SQLite admin state")
             .expect("admin state");
@@ -704,7 +782,7 @@ mod tests {
             ..WorkerConfig::default()
         };
 
-        let state = build_admin_state(&config, false, Some(&secrets_dir))
+        let state = build_admin_state(&config, false, Some(&secrets_dir), None)
             .await
             .expect("SQLite admin state")
             .expect("admin state");
@@ -735,7 +813,7 @@ mod tests {
             ..WorkerConfig::default()
         };
 
-        let error = match build_admin_state(&config, false, Some(&secrets_dir)).await {
+        let error = match build_admin_state(&config, false, Some(&secrets_dir), None).await {
             Ok(_) => panic!("empty login must be rejected"),
             Err(error) => error,
         };

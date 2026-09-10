@@ -126,3 +126,28 @@ impl NativeApiSource {
         }
     }
 }
+
+/// MCP startup warmup policy. `all` warms every enabled server in the
+/// background after the admin state is built; `lazy` skips the bulk
+/// warmup so the first cold request pays the per-server cost; `off`
+/// disables startup warmup entirely.
+#[derive(
+    Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ValueEnum, ToSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum McpWarmupMode {
+    #[default]
+    All,
+    Lazy,
+    Off,
+}
+
+impl McpWarmupMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Lazy => "lazy",
+            Self::Off => "off",
+        }
+    }
+}

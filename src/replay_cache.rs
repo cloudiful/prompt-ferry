@@ -18,6 +18,11 @@ use crate::{
     usage_prompt::PromptMessageRef, worker_admin_types::SessionUser,
 };
 
+/// Bounded wait for the initial Valkey handshake. Without this wrapper
+/// `get_connection_manager` follows the OS TCP timeout (~60-120s) and
+/// the worker startup hangs even though PostgreSQL is already ready.
+const VALKEY_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub const REPLAY_VALKEY_KEY_PREFIX: &str = "pfy:replay:snapshot:";
 pub const SESSION_VALKEY_KEY_PREFIX: &str = "pfy:session:";
 pub const REQUEST_LEASE_VALKEY_KEY_PREFIX: &str = "pfy:req-lease:";
@@ -187,9 +192,14 @@ impl ReplayCache {
                 );
             }
         };
-        let manager = match client.get_connection_manager().await {
-            Ok(manager) => manager,
-            Err(err) => {
+        let manager = match tokio::time::timeout(
+            VALKEY_CONNECT_TIMEOUT,
+            client.get_connection_manager(),
+        )
+        .await
+        {
+            Ok(Ok(manager)) => manager,
+            Ok(Err(err)) => {
                 warn!(error = %err, "failed to connect valkey");
                 if let Some(pool) = sqlite_pool {
                     return Self::sqlite(config, pool, "valkey_connection_failed");
@@ -197,6 +207,19 @@ impl ReplayCache {
                 return Self::unavailable_sessions_only(
                     config,
                     "valkey_connection_failed_without_durable_store",
+                );
+            }
+            Err(_) => {
+                warn!(
+                    timeout_seconds = VALKEY_CONNECT_TIMEOUT.as_secs(),
+                    "timed out connecting to valkey for replay cache; falling back",
+                );
+                if let Some(pool) = sqlite_pool {
+                    return Self::sqlite(config, pool, "valkey_connection_timeout");
+                }
+                return Self::unavailable_sessions_only(
+                    config,
+                    "valkey_connection_timeout_without_durable_store",
                 );
             }
         };

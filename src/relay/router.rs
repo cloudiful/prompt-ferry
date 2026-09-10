@@ -11,15 +11,26 @@ use axum::{Router, body::Body, response::Response};
 use futures::StreamExt;
 use std::{
     collections::HashMap,
+    future::Future,
     net::SocketAddr,
     sync::{Arc, atomic::AtomicUsize},
+    time::Duration,
 };
 use tokio::{
     net::TcpListener,
     sync::{Mutex, watch},
 };
 use tokio_rustls::TlsAcceptor;
-use tracing::info;
+use tracing::{info, warn};
+
+/// Grace given to the public listener *after* shutdown is signalled. Long-lived
+/// SSE / Realtime streams that outlast it are dropped so the process still exits
+/// inside the orchestrator stop grace period.
+const RELAY_PUBLIC_DRAIN_BUDGET: Duration = Duration::from_secs(8);
+/// Extra headroom on top of the public budget for the worker bridge, so pending
+/// relay -> worker reply frames get a chance to flush after the public side has
+/// stopped accepting new client traffic.
+const RELAY_WORKER_BRIDGE_EXTRA_DRAIN: Duration = Duration::from_secs(4);
 
 pub async fn run(config: RelayConfig) -> anyhow::Result<()> {
     run_inner(config).await
@@ -80,6 +91,9 @@ async fn run_inner(config: RelayConfig) -> anyhow::Result<()> {
     let worker_listener = TcpListener::bind(worker_bind).await?;
     let public_shutdown_rx = shutdown_rx.clone();
     let worker_shutdown_rx = shutdown_rx.clone();
+    // The public side aborts first so new client traffic stops getting
+    // accepted; the worker bridge gets a brief extra budget to flush any
+    // pending relay -> worker reply frames before it is also forced.
     let public_server = async move {
         let shutdown = wait_for_shutdown_signal(public_shutdown_rx);
         if let Some(acceptor) = public_acceptor {
@@ -89,6 +103,7 @@ async fn run_inner(config: RelayConfig) -> anyhow::Result<()> {
             )
             .with_graceful_shutdown(shutdown)
             .await
+            .map_err(anyhow::Error::from)
         } else {
             axum::serve(
                 public_listener,
@@ -96,6 +111,7 @@ async fn run_inner(config: RelayConfig) -> anyhow::Result<()> {
             )
             .with_graceful_shutdown(shutdown)
             .await
+            .map_err(anyhow::Error::from)
         }
     };
     let worker_server = async move {
@@ -107,6 +123,7 @@ async fn run_inner(config: RelayConfig) -> anyhow::Result<()> {
             )
             .with_graceful_shutdown(shutdown)
             .await
+            .map_err(anyhow::Error::from)
         } else {
             axum::serve(
                 worker_listener,
@@ -114,10 +131,59 @@ async fn run_inner(config: RelayConfig) -> anyhow::Result<()> {
             )
             .with_graceful_shutdown(shutdown)
             .await
+            .map_err(anyhow::Error::from)
         }
     };
-    tokio::try_join!(public_server, worker_server)?;
+    // Both listeners run concurrently for the whole life of the process. The
+    // budgets below do not start counting until shutdown has been signalled,
+    // so a healthy relay is never interrupted by them.
+    tokio::try_join!(
+        drain_within(
+            "public",
+            public_server,
+            shutdown_rx.clone(),
+            RELAY_PUBLIC_DRAIN_BUDGET,
+        ),
+        drain_within(
+            "worker-bridge",
+            worker_server,
+            shutdown_rx.clone(),
+            RELAY_PUBLIC_DRAIN_BUDGET + RELAY_WORKER_BRIDGE_EXTRA_DRAIN,
+        ),
+    )?;
     Ok(())
+}
+
+/// Drive one listener for the lifetime of the process, capping only the
+/// post-shutdown drain. `grace` starts when the shutdown signal fires; dropping
+/// the listener future on expiry aborts whatever is still in flight.
+async fn drain_within<F>(
+    listener: &'static str,
+    serve: F,
+    shutdown_rx: watch::Receiver<bool>,
+    grace: Duration,
+) -> anyhow::Result<()>
+where
+    F: Future<Output = anyhow::Result<()>>,
+{
+    tokio::select! {
+        result = serve => result,
+        _ = drain_deadline(shutdown_rx, grace) => {
+            warn!(
+                listener,
+                grace_seconds = grace.as_secs(),
+                "relay listener did not drain within grace; forcing abort"
+            );
+            Ok(())
+        }
+    }
+}
+
+/// Resolves `grace` after shutdown is signalled, and never before — while the
+/// relay serves normally this stays parked on the watch channel.
+async fn drain_deadline(shutdown_rx: watch::Receiver<bool>, grace: Duration) {
+    wait_for_shutdown_signal(shutdown_rx).await;
+    tokio::time::sleep(grace).await;
 }
 
 async fn wait_for_shutdown_signal(mut shutdown_rx: watch::Receiver<bool>) {

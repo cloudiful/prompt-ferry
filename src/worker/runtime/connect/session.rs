@@ -12,7 +12,9 @@ use tracing::{error, info, warn};
 
 use super::{
     RelayConnectionConfig,
-    backoff::{relay_reconnect_base_delay, relay_reconnect_delay_with_jitter},
+    backoff::{
+        relay_reconnect_base_delay, relay_reconnect_delay_with_jitter, wait_for_relay_ready,
+    },
     handshake::negotiate_bridge_encryption,
     is_expected_relay_disconnect,
     support::{format_error_chain, ws_connect_error_detail},
@@ -24,10 +26,7 @@ use crate::{
     tls,
     worker::runtime::context::{BridgeSender, ResponseLimits},
     worker::runtime::standalone::StandaloneRuntimeState,
-    worker::runtime::{
-        RELAY_RECONNECT_DELAY_SECONDS, SHUTDOWN_DRAIN_TIMEOUT_SECONDS, WorkerRuntimeState,
-        handle_relay_bridge_message,
-    },
+    worker::runtime::{RELAY_RECONNECT_DELAY_SECONDS, WorkerRuntimeState, handle_relay_bridge_message},
     worker_admin,
 };
 
@@ -40,6 +39,10 @@ pub(super) async fn run_relay_loop(
     runtime_state: WorkerRuntimeState,
 ) {
     let mut consecutive_failures = 0_u32;
+    // The first attempt is usually made immediately after the relay
+    // container has come up; poll for a TCP accept before paying the
+    // exponential backoff to keep the worker in lock-step.
+    wait_for_relay_ready(&relay.relay_url).await;
     loop {
         if runtime_state.is_shutting_down() {
             break;
@@ -291,12 +294,6 @@ pub(super) async fn connect_once(
             }
             _ => {}
         }
-    }
-
-    if runtime_state.is_shutting_down() {
-        runtime_state
-            .wait_for_drain(Duration::from_secs(SHUTDOWN_DRAIN_TIMEOUT_SECONDS))
-            .await;
     }
 
     write_task.abort();

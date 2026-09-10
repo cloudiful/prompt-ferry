@@ -6,7 +6,7 @@ mod supervisor;
 mod support;
 
 use super::{
-    SHUTDOWN_DRAIN_TIMEOUT_SECONDS, STALE_REQUEST_SWEEP_SECONDS, WorkerRuntimeState,
+    STALE_REQUEST_SWEEP_SECONDS, WorkerRuntimeState, WorkerShutdown,
     ai::abort_waiting_approvals, build_admin_state, build_standalone_state,
     lifecycle_standalone::spawn_standalone_stale_lease_reconciler, validate_config,
 };
@@ -17,7 +17,7 @@ use std::time::Duration;
 pub(super) use support::is_expected_relay_disconnect;
 use support::shutdown_signal;
 use tokio::task::JoinSet;
-use tracing::info;
+use tracing::{info, warn};
 
 use self::{
     config::{RelayConnectionConfig, first_simple_relay_connection_config},
@@ -52,7 +52,8 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
         .connect_timeout(Duration::from_secs(config.connect_timeout_seconds))
         .build()
         .context("failed to build upstream HTTP client")?;
-    let admin_state = build_admin_state(&config, true, None).await?;
+    let worker_shutdown = WorkerShutdown::new();
+    let admin_state = build_admin_state(&config, true, None, Some(&worker_shutdown)).await?;
     let runtime_admin_state = if contract.backend.is_postgres() {
         admin_state.clone()
     } else {
@@ -86,9 +87,11 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
         None
     };
     let shutdown_state = runtime_state.clone();
+    let admin_shutdown = worker_shutdown.clone();
     tokio::spawn(async move {
         shutdown_signal().await;
         shutdown_state.begin_shutdown();
+        admin_shutdown.trigger();
     });
 
     let mut relay_tasks = JoinSet::new();
@@ -123,13 +126,28 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
     relay_tasks.abort_all();
     while relay_tasks.join_next().await.is_some() {}
 
-    if let Some(task) = raw_maintenance_task {
-        let _ = task.await;
-    }
-
-    runtime_state
-        .wait_for_drain(Duration::from_secs(SHUTDOWN_DRAIN_TIMEOUT_SECONDS))
-        .await;
+    // Bound the in-flight drain so the process exits inside the compose
+    // stop grace even when individual requests are slow. The abort calls
+    // above already cancelled anything still being processed; this just
+    // waits for the worker bookkeeping to settle. Run both pieces under
+    // the same budget so neither blocks the other.
+    let drain_budget = Duration::from_secs(config.shutdown_drain_seconds.max(1));
+    let maintenance_wait = async {
+        if let Some(task) = raw_maintenance_task {
+            match tokio::time::timeout(drain_budget, task).await {
+                Ok(Ok(())) => {}
+                Ok(Err(join_error)) => warn!(
+                    error = %join_error,
+                    "raw maintenance task join failed during shutdown",
+                ),
+                Err(_) => warn!(
+                    budget_seconds = drain_budget.as_secs(),
+                    "raw maintenance task did not stop within drain budget; exiting anyway",
+                ),
+            }
+        }
+    };
+    tokio::join!(maintenance_wait, runtime_state.wait_for_drain(drain_budget));
     Ok(())
 }
 
@@ -150,7 +168,7 @@ pub(super) async fn connect_for_test_with_admin(
     config: WorkerConfig,
     client: Client,
 ) -> anyhow::Result<()> {
-    let admin_state = build_admin_state(&config, false, None).await?;
+    let admin_state = build_admin_state(&config, false, None, None).await?;
     let runtime_admin_state = if config.storage_backend().is_postgres() {
         admin_state.clone()
     } else {

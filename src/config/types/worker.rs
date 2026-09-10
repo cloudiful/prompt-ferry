@@ -5,7 +5,7 @@ use crate::{
     storage::{StorageBackend, StorageContract},
 };
 
-use super::{BridgeEncryptionMode, NativeApi, WorkerTlsMode};
+use super::{BridgeEncryptionMode, McpWarmupMode, NativeApi, WorkerTlsMode};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -43,6 +43,21 @@ pub struct WorkerConfig {
     pub valkey_ttl_seconds: u64,
     pub session_ttl_seconds: u64,
     pub local_session_max_entries: usize,
+    /// Hard ceiling on the relay drain that runs on shutdown. The runtime
+    /// blocks the in-flight requests for at most this duration before
+    /// returning a synthetic shutdown response. Keep this below the
+    /// `docker stop --time` grace period so the process exits cleanly
+    /// without a SIGKILL from the orchestrator. Defaults to 6 seconds to
+    /// match the common 10s compose stop with headroom for socket teardown.
+    pub shutdown_drain_seconds: u64,
+    /// MCP startup warmup strategy.
+    /// * `all` (default) — eagerly warm every enabled MCP server in the
+    ///   background, like the historical behaviour.
+    /// * `lazy` — skip the bulk warmup; only the first cold request pays
+    ///   the per-server connect cost. Useful when startup latency matters
+    ///   more than first-call latency.
+    /// * `off` — disable startup warmup entirely.
+    pub mcp_warmup: McpWarmupMode,
     pub max_upstream_response_bytes: usize,
     pub max_raw_response_capture_bytes: usize,
     pub max_response_text_capture_bytes: usize,
@@ -91,6 +106,8 @@ impl Default for WorkerConfig {
             valkey_ttl_seconds: 24 * 60 * 60,
             session_ttl_seconds: 7 * 24 * 60 * 60,
             local_session_max_entries: 10_000,
+            shutdown_drain_seconds: 6,
+            mcp_warmup: McpWarmupMode::All,
             max_upstream_response_bytes: 64 * 1024 * 1024,
             max_raw_response_capture_bytes: 4 * 1024 * 1024,
             max_response_text_capture_bytes: 1024 * 1024,
@@ -197,6 +214,12 @@ impl WorkerConfig {
         }
         if let Some(max_entries) = args.local_session_max_entries {
             self.local_session_max_entries = max_entries.max(1);
+        }
+        if let Some(timeout) = args.shutdown_drain_seconds {
+            self.shutdown_drain_seconds = timeout;
+        }
+        if let Some(mode) = args.mcp_warmup {
+            self.mcp_warmup = mode;
         }
         if let Some(bytes) = args.max_upstream_response_bytes {
             self.max_upstream_response_bytes = bytes.max(1);

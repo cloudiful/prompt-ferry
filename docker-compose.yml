@@ -1,3 +1,13 @@
+# Recreate procedure:
+# 1. Stop the worker first so in-flight requests drain and the worker
+#    breaks its relay WebSocket before the relay closes its listener.
+# 2. Stop the relay once the worker is gone (no more inbound traffic).
+# 3. `docker compose up -d --timeout 25 worker relay` brings them back in
+#    the order they should be re-healthy.
+#
+# stop_grace_period lines up with PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS
+# plus a small headroom; raise them together if you raise the drain budget.
+
 services:
   postgres:
     image: postgres:17
@@ -17,6 +27,8 @@ services:
   relay:
     image: ${PROMPT_FERRY_IMAGE:?set PROMPT_FERRY_IMAGE in .env}
     restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 20s
     command: ["relay"]
     environment:
       PROMPT_FERRY_LOGGING__LEVEL: ${PROMPT_FERRY_LOGGING__LEVEL:-info}
@@ -25,18 +37,26 @@ services:
       PROMPT_FERRY_RELAY__CLIENT_TOKEN: ${PROMPT_FERRY_RELAY__CLIENT_TOKEN:?set PROMPT_FERRY_RELAY__CLIENT_TOKEN in .env}
       PROMPT_FERRY_RELAY__WORKER_TOKEN: ${PROMPT_FERRY_WORKER_TOKEN:?set PROMPT_FERRY_WORKER_TOKEN in .env}
       PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS: ${PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS:-300}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8787/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     ports:
       - "127.0.0.1:${PROMPT_FERRY_RELAY_PORT:-8787}:8787"
 
   worker:
     image: ${PROMPT_FERRY_IMAGE:?set PROMPT_FERRY_IMAGE in .env}
     restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
     command: ["worker"]
     depends_on:
       postgres:
         condition: service_healthy
       relay:
-        condition: service_started
+        condition: service_healthy
     environment:
       PROMPT_FERRY_LOGGING__LEVEL: ${PROMPT_FERRY_LOGGING__LEVEL:-info}
       PROMPT_FERRY_WORKER__RELAY_URLS: '["ws://relay:8788/ws/worker"]'
@@ -47,6 +67,8 @@ services:
       PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD: ${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD:?set PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD in .env}
       PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY: ${PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY:?set PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY in .env}
       PROMPT_FERRY_WORKER__VALKEY_URL: ${PROMPT_FERRY_WORKER__VALKEY_URL:-}
+      PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS: ${PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS:-6}
+      PROMPT_FERRY_WORKER__MCP_WARMUP: ${PROMPT_FERRY_WORKER__MCP_WARMUP:-all}
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ENDPOINT: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ENDPOINT:-}
       PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_BUCKET: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_BUCKET:-}
@@ -56,6 +78,14 @@ services:
       PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PREFIX: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PREFIX:-prompt-ferry/raw}
       PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ALLOW_HTTP: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ALLOW_HTTP:-false}
       PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PATH_STYLE: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PATH_STYLE:-true}
+    # `/api/v1/ready` runs a `SELECT 1` against the database; once that returns
+    # the admin state has been built and the worker can answer relay traffic.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/api/v1/ready >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
     ports:
       - "127.0.0.1:${PROMPT_FERRY_WORKER_ADMIN_PORT:-8789}:80"
 

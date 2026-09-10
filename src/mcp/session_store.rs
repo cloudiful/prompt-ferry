@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use redis::{AsyncCommands, aio::ConnectionManager};
 use rmcp::transport::streamable_http_server::session::{
@@ -9,6 +9,13 @@ use tracing::warn;
 use crate::config::WorkerConfig;
 
 pub const MCP_SESSION_VALKEY_KEY_PREFIX: &str = "pfy:mcp-session:";
+
+/// Bounded wait for the initial Valkey handshake. Without this wrapper
+/// `get_connection_manager` follows the OS TCP timeout (~60-120s) and
+/// the worker startup hangs even though the rest of the admin state is
+/// already ready; on timeout we fall back to the process-local rmcp
+/// session store so the first request can still proceed.
+const VALKEY_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub struct McpSessionStore {
@@ -76,9 +83,14 @@ impl McpSessionStore {
                 return None;
             }
         };
-        let manager = match client.get_connection_manager().await {
-            Ok(manager) => manager,
-            Err(err) => {
+        let manager = match tokio::time::timeout(
+            VALKEY_CONNECT_TIMEOUT,
+            client.get_connection_manager(),
+        )
+        .await
+        {
+            Ok(Ok(manager)) => manager,
+            Ok(Err(err)) => {
                 warn!(error = %err, valkey_url = url, "failed to connect valkey for MCP sessions");
                 if let Some(pool) = sqlite_pool {
                     return Some(Arc::new(Self {
@@ -93,6 +105,28 @@ impl McpSessionStore {
                     scope = "single-process",
                     capability = "mcp_session_cache",
                     "Valkey unavailable; using rmcp process-local MCP sessions"
+                );
+                return None;
+            }
+            Err(_) => {
+                warn!(
+                    timeout_seconds = VALKEY_CONNECT_TIMEOUT.as_secs(),
+                    valkey_url = url,
+                    "timed out connecting to valkey for MCP sessions; falling back",
+                );
+                if let Some(pool) = sqlite_pool {
+                    return Some(Arc::new(Self {
+                        backend: McpSessionBackend::Sqlite(
+                            crate::standalone_config::StandaloneCoordinatorStore::new(pool),
+                        ),
+                        ttl_seconds: config.session_ttl_seconds.max(1),
+                    }));
+                }
+                warn!(
+                    backend = "memory",
+                    scope = "single-process",
+                    capability = "mcp_session_cache",
+                    "Valkey timed out; using rmcp process-local MCP sessions"
                 );
                 return None;
             }

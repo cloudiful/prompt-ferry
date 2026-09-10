@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::Duration,
 };
 
 use chrono::{DateTime, Utc};
@@ -14,6 +15,13 @@ use uuid::Uuid;
 use crate::{config::WorkerConfig, db::McpServer};
 
 pub const MCP_CATALOG_VALKEY_KEY_PREFIX: &str = "pfy:mcp-catalog:";
+
+/// Bounded wait for the initial Valkey handshake. Without this wrapper
+/// `get_connection_manager` follows the OS TCP timeout (~60-120s) and
+/// the worker startup hangs even though the rest of the admin state
+/// is already ready; on timeout we fall back to the local cache so
+/// requests still drain.
+const VALKEY_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ServerCatalogSnapshot {
@@ -95,15 +103,35 @@ impl McpCatalogCache {
                 return Self::new();
             }
         };
-        let manager = match client.get_connection_manager().await {
-            Ok(manager) => manager,
-            Err(err) => {
+        let manager = match tokio::time::timeout(
+            VALKEY_CONNECT_TIMEOUT,
+            client.get_connection_manager(),
+        )
+        .await
+        {
+            Ok(Ok(manager)) => manager,
+            Ok(Err(err)) => {
                 warn!(error = %err, valkey_url = url, "failed to connect valkey for MCP catalog");
                 if let Some(pool) = sqlite_pool {
                     return Self::sqlite(
                         pool,
                         config.valkey_ttl_seconds,
                         "valkey_connection_failed",
+                    );
+                }
+                return Self::new();
+            }
+            Err(_) => {
+                warn!(
+                    timeout_seconds = VALKEY_CONNECT_TIMEOUT.as_secs(),
+                    valkey_url = url,
+                    "timed out connecting to valkey for MCP catalog; falling back to local cache",
+                );
+                if let Some(pool) = sqlite_pool {
+                    return Self::sqlite(
+                        pool,
+                        config.valkey_ttl_seconds,
+                        "valkey_connection_timeout",
                     );
                 }
                 return Self::new();

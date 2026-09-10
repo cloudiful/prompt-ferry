@@ -5,15 +5,90 @@ use axum::{
     middleware::{self, Next},
 };
 use std::{env, path::PathBuf};
+use std::time::Duration;
+use tokio::sync::watch;
 use tower_http::services::{ServeDir, ServeFile};
 
-pub async fn run_admin_server(state: AdminState, bind: &str) -> anyhow::Result<()> {
+/// Hard ceiling on how long the admin HTTP server waits for in-flight
+/// requests to drain before forcing shutdown. Sized to fit inside the
+/// worker container's `stop_grace_period` (30s) alongside the rest of
+/// the worker shutdown bookkeeping.
+pub const ADMIN_SHUTDOWN_BUDGET: Duration = Duration::from_secs(10);
+
+/// Run the admin HTTP server for the full lifetime of the worker process.
+/// The `ADMIN_SHUTDOWN_BUDGET` only caps the drain phase *after* shutdown
+/// has been signalled — a healthy worker is never cut off by the timeout.
+/// When `shutdown_rx` is `None` the server falls back to listening for OS
+/// signals directly (handy for `cargo run`).
+pub async fn run_admin_server(
+    state: AdminState,
+    bind: &str,
+    shutdown_rx: Option<watch::Receiver<bool>>,
+) -> anyhow::Result<()> {
     let bind: SocketAddr = bind.parse()?;
     let app = router(state);
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(%bind, "worker admin listening");
-    axum::serve(listener, app).await?;
-    Ok(())
+    // Both the graceful-shutdown future and the drain budget need to watch
+    // the same fired signal. A single watch channel keeps them in sync.
+    let (fired_tx, fired_rx) = watch::channel(false);
+    let mut shutdown_watcher = shutdown_rx;
+    tokio::spawn(async move {
+        match shutdown_watcher.as_mut() {
+            Some(rx) => {
+                if !*rx.borrow() {
+                    let _ = rx.changed().await;
+                }
+            }
+            None => admin_shutdown_signal().await,
+        }
+        let _ = fired_tx.send(true);
+    });
+    let serve_shutdown = fired_rx.clone();
+    let serve = axum::serve(listener, app).with_graceful_shutdown(async move {
+        wait_for_fired(serve_shutdown).await;
+    });
+    let drain_rx = fired_rx.clone();
+    tokio::select! {
+        result = serve => result.map_err(anyhow::Error::from),
+        _ = drain_deadline(drain_rx, ADMIN_SHUTDOWN_BUDGET) => {
+            tracing::warn!(
+                budget_seconds = ADMIN_SHUTDOWN_BUDGET.as_secs(),
+                "admin server exceeded graceful shutdown budget; forcing exit"
+            );
+            Ok(())
+        }
+    }
+}
+
+async fn wait_for_fired(mut rx: watch::Receiver<bool>) {
+    if *rx.borrow() {
+        return;
+    }
+    let _ = rx.changed().await;
+}
+
+/// Resolves `budget` after shutdown is signalled, and never before.
+async fn drain_deadline(rx: watch::Receiver<bool>, budget: Duration) {
+    wait_for_fired(rx).await;
+    tokio::time::sleep(budget).await;
+}
+
+async fn admin_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = terminate.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 pub fn router(state: AdminState) -> Router {
@@ -22,6 +97,8 @@ pub fn router(state: AdminState) -> Router {
 
 fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Router {
     let api = Router::new()
+        .route("/healthz", get(admin_healthz))
+        .route("/ready", get(admin_ready))
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
@@ -265,6 +342,32 @@ async fn admin_api_fallback(State(state): State<AdminState>) -> Response {
             "not_found",
             "Admin API route not found",
         )
+    }
+}
+
+/// Cheap liveness probe — returns 200 as soon as the admin HTTP server
+/// is accepting connections. Does not check downstream dependencies so
+/// Kubernetes / compose can keep the pod in the load balancer while a
+/// cold DB warms up.
+async fn admin_healthz() -> &'static str {
+    "ok"
+}
+
+/// Readiness probe — verifies the worker can talk to its database. A
+/// successful round-trip means migrations ran and the admin state was
+/// built, which is exactly what the docker-compose healthcheck waits on
+/// before letting the worker accept relay traffic.
+async fn admin_ready(State(state): State<AdminState>) -> Response {
+    let probe = sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(&state.pool)
+        .await;
+    match probe {
+        Ok(_) => (StatusCode::OK, "ok").into_response(),
+        Err(err) => error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "not_ready",
+            &format!("database probe failed: {err}"),
+        ),
     }
 }
 
@@ -566,5 +669,25 @@ mod tests {
         sqlite_pool.close().await;
         let _ = fs::remove_dir_all(frontend_dir);
         let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn router_healthz_endpoint_returns_ok_without_database() {
+        let frontend_dir = temp_frontend_dir();
+        let app = router_with_frontend_dist(test_state(), frontend_dir.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(std::str::from_utf8(&body).unwrap(), "ok");
+        let _ = fs::remove_dir_all(frontend_dir);
     }
 }

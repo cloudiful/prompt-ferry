@@ -1,4 +1,4 @@
-use crate::config::{BridgeEncryptionMode, NativeApi, TlsMode, WorkerTlsMode};
+use crate::config::{BridgeEncryptionMode, McpWarmupMode, NativeApi, TlsMode, WorkerTlsMode};
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -128,6 +128,10 @@ pub struct WorkerArgs {
     pub max_response_text_capture_bytes: Option<usize>,
     #[arg(long)]
     pub endpoint_model_cache_ttl_seconds: Option<u64>,
+    #[arg(long)]
+    pub shutdown_drain_seconds: Option<u64>,
+    #[arg(long)]
+    pub mcp_warmup: Option<McpWarmupMode>,
     #[arg(long)]
     pub mcp_allowed_origins: Vec<String>,
 }

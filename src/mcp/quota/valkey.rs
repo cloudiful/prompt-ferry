@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use chrono::{DateTime, Utc};
 use redis::{AsyncCommands, aio::ConnectionManager};
 use tracing::warn;
@@ -7,6 +9,12 @@ use crate::config::WorkerConfig;
 pub const MCP_QUOTA_VALKEY_KEY_PREFIX: &str = "pfy:mcp-quota:";
 const COOLDOWN_SUFFIX: &str = ":cooldown";
 const REMAINING_SUFFIX: &str = ":remaining";
+
+/// Bounded wait for the initial Valkey handshake. Without this wrapper
+/// `get_connection_manager` follows the OS TCP timeout (~60-120s) and
+/// the worker startup hangs even though PostgreSQL alone is enough to
+/// keep quota consistent.
+const VALKEY_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Valkey-backed hot state for MCP credential quota. This is an acceleration
 /// layer only: PostgreSQL remains the authoritative budget ledger, so a
@@ -40,10 +48,23 @@ impl McpQuotaValkey {
                 return Self::new();
             }
         };
-        let manager = match client.get_connection_manager().await {
-            Ok(manager) => manager,
-            Err(err) => {
+        let manager = match tokio::time::timeout(
+            VALKEY_CONNECT_TIMEOUT,
+            client.get_connection_manager(),
+        )
+        .await
+        {
+            Ok(Ok(manager)) => manager,
+            Ok(Err(err)) => {
                 warn!(error = %err, valkey_url = url, "failed to connect valkey for MCP quota");
+                return Self::new();
+            }
+            Err(_) => {
+                warn!(
+                    timeout_seconds = VALKEY_CONNECT_TIMEOUT.as_secs(),
+                    valkey_url = url,
+                    "timed out connecting to valkey for MCP quota; running without Valkey acceleration",
+                );
                 return Self::new();
             }
         };

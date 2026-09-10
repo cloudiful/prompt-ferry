@@ -65,10 +65,44 @@ const MCP_RESPONSE_BODY_CAPTURE_BYTES: usize = 64 * 1024;
 const REQUEST_RECORD_LEASE_SECONDS: i64 = 90;
 const REQUEST_RECORD_HEARTBEAT_SECONDS: i64 = 30;
 const STALE_REQUEST_SWEEP_SECONDS: i64 = 30;
-const SHUTDOWN_DRAIN_TIMEOUT_SECONDS: u64 = 20;
 const REQUEST_STREAM_BUFFER: usize = 16;
 const REALTIME_INBOUND_BUFFER: usize = 128;
 const ERROR_BODY_SAMPLE_BYTES: usize = 32 * 1024;
+
+/// Shared shutdown broadcast surfaced to long-running child tasks (admin
+/// HTTP server, raw maintenance scheduler, ...). The runtime triggers
+/// it from [`crate::worker::runtime::connect::run_embedded`] once the
+/// OS-level signal arrives; every subscriber observes the transition
+/// and runs its own bounded graceful path.
+#[derive(Clone)]
+pub struct WorkerShutdown {
+    tx: tokio::sync::watch::Sender<bool>,
+}
+
+impl Default for WorkerShutdown {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WorkerShutdown {
+    pub fn new() -> Self {
+        let (tx, _rx) = tokio::sync::watch::channel(false);
+        Self { tx }
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.tx.subscribe()
+    }
+
+    pub fn trigger(&self) {
+        let _ = self.tx.send(true);
+    }
+
+    pub fn is_triggered(&self) -> bool {
+        *self.tx.borrow()
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct WorkerRuntimeState {
