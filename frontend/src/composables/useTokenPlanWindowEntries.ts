@@ -77,17 +77,75 @@ export type OpenRouterSpendEntry = {
   value: number
 }
 
+// Pure adapt helpers exposed at module scope so the badge composable
+// (which only needs remaining-percent math, no t/nowMs) can reuse the
+// same provider-specific folding logic without instantiating the full
+// dialog composable.
+export function remainingPercent(window: TokenPlanWindowUsage): number {
+  const raw = window.remaining_percent
+  if (raw == null || !Number.isFinite(raw)) return 0
+  return Math.max(0, Math.min(100, raw))
+}
+
+export function usedPercent(window: TokenPlanWindowUsage): number {
+  return 100 - remainingPercent(window)
+}
+
+// CommandCode USD windows reuse MiniMax percent/countdown rendering by
+// adapting reset_at onto the TokenPlanWindowUsage end_at shape.
+export function ccAsWindow(
+  window: CommandCodeWindowUsage | null | undefined,
+): TokenPlanWindowUsage | null {
+  if (!window) return null
+  return {
+    end_at: window.reset_at,
+    remaining_percent: window.remaining_percent,
+  }
+}
+
+// OpencodeGo windows carry a `percent` (used share) plus a `resets_at`
+// anchor. We adapt them onto the shared progress/countdown rendering by
+// folding the used percent into a remaining percent (100 - used) and
+// reusing `resets_at` as the end_at reset anchor.
+export function opencodeGoAsWindow(
+  window: OpencodeGoWindowUsage | null | undefined,
+): TokenPlanWindowUsage | null {
+  if (!window) return null
+  const raw = window.percent
+  const used = raw == null || !Number.isFinite(raw) ? null : raw
+  return {
+    end_at: window.resets_at,
+    remaining_percent:
+      used == null ? null : Math.max(0, Math.min(100, 100 - used)),
+  }
+}
+
+// GLM (Zhipu Coding Plan) windows report the *used* share as
+// `percentage` and the reset anchor as `next_reset_at`. We adapt them
+// onto the shared progress/countdown rendering by folding the used
+// percent into a remaining percent (100 - used) and reusing
+// `next_reset_at` as the end_at reset anchor — same adapt pattern as
+// OpencodeGo so the dialog can share the same progress bar.
+export function glmAsWindow(
+  window: GlmWindowUsage | null | undefined,
+): TokenPlanWindowUsage | null {
+  if (!window) return null
+  const raw = window.percentage
+  const used = raw == null || !Number.isFinite(raw) ? null : raw
+  return {
+    end_at: window.next_reset_at,
+    remaining_percent:
+      used == null ? null : Math.max(0, Math.min(100, 100 - used)),
+  }
+}
+
+export function progressColor(window: TokenPlanWindowUsage): string {
+  const used = usedPercent(window)
+  const hue = 120 - used * 1.2
+  return `hsl(${hue} 80% 45%)`
+}
+
 export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
-  function remainingPercent(window: TokenPlanWindowUsage): number {
-    const raw = window.remaining_percent
-    if (raw == null || !Number.isFinite(raw)) return 0
-    return Math.max(0, Math.min(100, raw))
-  }
-
-  function usedPercent(window: TokenPlanWindowUsage): number {
-    return 100 - remainingPercent(window)
-  }
-
   function keyWindows(key: TokenPlanKeyUsage): TokenPlanWindowUsage[] {
     return key.model_remains.flatMap((model) =>
       [model.interval, model.weekly].filter(
@@ -104,12 +162,6 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
     const windows = keyWindows(key)
     if (windows.length === 0) return null
     return Math.min(...windows.map(remainingPercent))
-  }
-
-  function progressColor(window: TokenPlanWindowUsage): string {
-    const used = usedPercent(window)
-    const hue = 120 - used * 1.2
-    return `hsl(${hue} 80% 45%)`
   }
 
   function endTimeMs(window: TokenPlanWindowUsage): number | null {
@@ -147,18 +199,6 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
     return t('tokenPlanResetExpiresSeconds', { seconds: totalSeconds })
   }
 
-  // CommandCode USD windows reuse MiniMax percent/countdown rendering by
-  // adapting reset_at onto the TokenPlanWindowUsage end_at shape.
-  function ccAsWindow(
-    window: CommandCodeWindowUsage | null | undefined,
-  ): TokenPlanWindowUsage | null {
-    if (!window) return null
-    return {
-      end_at: window.reset_at,
-      remaining_percent: window.remaining_percent,
-    }
-  }
-
   function ccEntries(key: TokenPlanKeyUsage): CcEntry[] {
     const entries: CcEntry[] = []
     const five = ccAsWindow(key.five_hour)
@@ -188,23 +228,6 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
     return Math.min(...adapted.map(remainingPercent))
   }
 
-  // OpencodeGo windows carry a `percent` (used share) plus a `resets_at`
-  // anchor. We adapt them onto the shared progress/countdown rendering by
-  // folding the used percent into a remaining percent (100 - used) and
-  // reusing `resets_at` as the end_at reset anchor.
-  function opencodeGoAsWindow(
-    window: OpencodeGoWindowUsage | null | undefined,
-  ): TokenPlanWindowUsage | null {
-    if (!window) return null
-    const raw = window.percent
-    const used = raw == null || !Number.isFinite(raw) ? null : raw
-    return {
-      end_at: window.resets_at,
-      remaining_percent:
-        used == null ? null : Math.max(0, Math.min(100, 100 - used)),
-    }
-  }
-
   function opencodeGoEntries(key: TokenPlanKeyUsage): OpencodeGoEntry[] {
     const entries: OpencodeGoEntry[] = []
     const byKey = [
@@ -227,25 +250,6 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
     ].filter((window): window is TokenPlanWindowUsage => window != null)
     if (adapted.length === 0) return null
     return Math.min(...adapted.map(remainingPercent))
-  }
-
-  // GLM (Zhipu Coding Plan) windows report the *used* share as
-  // `percentage` and the reset anchor as `next_reset_at`. We adapt them
-  // onto the shared progress/countdown rendering by folding the used
-  // percent into a remaining percent (100 - used) and reusing
-  // `next_reset_at` as the end_at reset anchor — same adapt pattern as
-  // OpencodeGo so the dialog can share the same progress bar.
-  function glmAsWindow(
-    window: GlmWindowUsage | null | undefined,
-  ): TokenPlanWindowUsage | null {
-    if (!window) return null
-    const raw = window.percentage
-    const used = raw == null || !Number.isFinite(raw) ? null : raw
-    return {
-      end_at: window.next_reset_at,
-      remaining_percent:
-        used == null ? null : Math.max(0, Math.min(100, 100 - used)),
-    }
   }
 
   function glmEntries(key: TokenPlanKeyUsage): GlmEntry[] {
@@ -276,10 +280,16 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
   // payload has no used/total so its subline is null. Keeping both
   // providers on one entry list lets the dialog render them with a
   // single v-for instead of two parallel blocks.
-  function progressWindowEntries(key: TokenPlanKeyUsage): ProgressWindowEntry[] {
+  function progressWindowEntries(
+    key: TokenPlanKeyUsage,
+  ): ProgressWindowEntry[] {
     const entries: ProgressWindowEntry[] = []
     for (const raw of opencodeGoEntries(key)) {
-      entries.push({ adapted: raw.adapted, labelKey: raw.labelKey, subline: null })
+      entries.push({
+        adapted: raw.adapted,
+        labelKey: raw.labelKey,
+        subline: null,
+      })
     }
     for (const raw of glmEntries(key)) {
       entries.push({

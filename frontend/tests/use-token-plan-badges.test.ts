@@ -1,0 +1,414 @@
+import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
+import { computed, nextTick, ref } from 'vue'
+import type { TokenPlanUsageResponse } from '../src/generated/admin-api'
+
+const storage = new Map<string, string>()
+Object.defineProperty(globalThis, 'localStorage', {
+  value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+  },
+  configurable: true,
+})
+
+const fetchTokenPlanUsage = mock(
+  async (_endpointId: string): Promise<TokenPlanUsageResponse> => ({
+    keys: [],
+    provider: 'minimax',
+    provider_region: null,
+  }),
+)
+
+mock.module('../src/stores/endpoints-api', () => ({
+  createEndpoint: mock(async () => ({})),
+  createModelRoute: mock(async () => ({})),
+  deleteEndpoint: mock(async () => undefined),
+  deleteEndpointById: mock(async () => undefined),
+  deleteModelRoute: mock(async () => undefined),
+  deleteModelRouteById: mock(async () => undefined),
+  endpointFormToRequest: mock((form: unknown) => form),
+  endpointToForm: mock((endpoint: unknown) => endpoint),
+  expectData: mock((value: unknown) => value),
+  fetchEndpointsPage: mock(async () => ({
+    endpoints: [],
+    first: 0,
+    rows: 10,
+    total: 0,
+  })),
+  fetchModelRoutesPage: mock(async () => ({
+    first: 0,
+    routes: [],
+    rows: 10,
+    total: 0,
+  })),
+  fetchTokenPlanUsage,
+  listEndpoints: mock(async () => undefined),
+  listModelRoutes: mock(async () => undefined),
+  modelRouteFormToRequest: mock((form: unknown) => form),
+  modelRouteToForm: mock((route: unknown) => route),
+  persistEndpoint: mock(async () => ({})),
+  persistModelRoute: mock(async () => ({})),
+  runEndpointTest: mock(async () => ({
+    duration_ms: 0,
+    message: '',
+    ok: true,
+    status: 200,
+  })),
+  runModelRouteProbe: mock(async () => ({
+    duration_ms: 0,
+    endpoint_name: '',
+    message: '',
+    model: null,
+    model_pattern: '',
+    ok: true,
+    preferred_endpoint_name: '',
+    status: 200,
+  })),
+  testEndpoint: mock(async () => undefined),
+  testModelRoute: mock(async () => undefined),
+  tokenPlanUsage: mock(async () => undefined),
+  updateEndpoint: mock(async () => ({})),
+  updateEndpointEnabled: mock(async () => ({})),
+  updateModelRoute: mock(async () => ({})),
+  updateModelRouteEnabled: mock(async () => ({})),
+  withData: mock((value: unknown) => value),
+}))
+
+const { __resetTokenPlanCacheForTests, prefetchTokenPlanUsage } =
+  await import('../src/composables/useTokenPlanUsageCache')
+const { useTokenPlanBadges } =
+  await import('../src/composables/useTokenPlanBadges')
+
+beforeEach(() => {
+  __resetTokenPlanCacheForTests()
+  fetchTokenPlanUsage.mockReset()
+  fetchTokenPlanUsage.mockImplementation(
+    async (_endpointId: string): Promise<TokenPlanUsageResponse> => ({
+      keys: [],
+      provider: 'minimax',
+      provider_region: null,
+    }),
+  )
+})
+
+afterEach(() => {
+  __resetTokenPlanCacheForTests()
+})
+
+function emptyUsage(): TokenPlanUsageResponse {
+  return {
+    keys: [],
+    provider: 'minimax',
+    provider_region: null,
+  }
+}
+
+test('empty usage renders empty badges', () => {
+  const badges = useTokenPlanBadges('ep-empty')
+  expect(badges.value).toEqual({
+    short: null,
+    long: null,
+    openrouterRemaining: null,
+    openrouterLimit: null,
+    openrouterLimitRemaining: null,
+    usage: null,
+  })
+})
+
+test('MiniMax window: short = min(interval), long = min(weekly) across models and keys', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'minimax',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k1',
+        key_label: 'k1',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'g',
+            interval: { remaining_percent: 50 },
+            weekly: { remaining_percent: 80 },
+          },
+        ],
+      },
+      {
+        key_id: 'k2',
+        key_label: 'k2',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'g',
+            interval: { remaining_percent: 30 },
+            weekly: { remaining_percent: 60 },
+          },
+        ],
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-mm')
+  const badges = useTokenPlanBadges('ep-mm')
+  expect(badges.value.short).toBe(30)
+  expect(badges.value.long).toBe(60)
+  expect(badges.value.openrouterRemaining).toBeNull()
+})
+
+test('CommandCode USD: short = five_hour, long = weekly', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'command_code',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [],
+        five_hour: { remaining_percent: 75, reset_at: null },
+        weekly: { remaining_percent: 40, reset_at: null },
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-cc')
+  const badges = useTokenPlanBadges('ep-cc')
+  expect(badges.value.short).toBe(75)
+  expect(badges.value.long).toBe(40)
+})
+
+test('OpencodeGo uses USED percent: short = 100 - rolling.used, long = min(100 - weekly.used, 100 - monthly.used)', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'opencode_go',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [],
+        opencodego_rolling: { percent: 30, resets_at: null },
+        opencodego_weekly: { percent: 40, resets_at: null },
+        opencodego_monthly: { percent: 20, resets_at: null },
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-ocg')
+  const badges = useTokenPlanBadges('ep-ocg')
+  expect(badges.value.short).toBe(70)
+  expect(badges.value.long).toBe(60) // min(60, 80)
+})
+
+test('GLM Coding Plan uses USED percent: short = 100 - glm_five_hour.percentage, long = 100 - glm_weekly.percentage', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'glm',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [],
+        glm_five_hour: {
+          percentage: 25,
+          current_value: 1,
+          limit: 4,
+          next_reset_at: null,
+        },
+        glm_weekly: {
+          percentage: 60,
+          current_value: 6,
+          limit: 10,
+          next_reset_at: null,
+        },
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-glm')
+  const badges = useTokenPlanBadges('ep-glm')
+  expect(badges.value.short).toBe(75)
+  expect(badges.value.long).toBe(40)
+})
+
+test('OpenRouter: no short/long, instead openrouterRemaining = limit_remaining / limit * 100', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'openrouter',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [],
+        openrouter_balance: {
+          limit: 100,
+          limit_remaining: 42.5,
+          limit_reset: null,
+          is_free_tier: false,
+          total_credits: null,
+          total_usage: null,
+        },
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-or')
+  const badges = useTokenPlanBadges('ep-or')
+  expect(badges.value.short).toBeNull()
+  expect(badges.value.long).toBeNull()
+  expect(badges.value.openrouterLimit).toBe(100)
+  expect(badges.value.openrouterLimitRemaining).toBe(42.5)
+  expect(badges.value.openrouterRemaining).toBeCloseTo(42.5, 5)
+})
+
+test('OpenRouter with null limit returns null remaining (no quota signal)', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'openrouter',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [],
+        openrouter_balance: {
+          limit: null,
+          limit_remaining: null,
+          limit_reset: null,
+          is_free_tier: true,
+          total_credits: null,
+          total_usage: null,
+        },
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-or-free')
+  const badges = useTokenPlanBadges('ep-or-free')
+  expect(badges.value.short).toBeNull()
+  expect(badges.value.long).toBeNull()
+  expect(badges.value.openrouterRemaining).toBeNull()
+  expect(badges.value.openrouterLimit).toBeNull()
+})
+
+test('non-ok keys are skipped when aggregating', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'minimax',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k1',
+        key_label: 'k1',
+        ok: false,
+        error_message: 'rate limited',
+        model_remains: [
+          {
+            model_name: 'g',
+            interval: { remaining_percent: 5 },
+            weekly: { remaining_percent: 5 },
+          },
+        ],
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-err')
+  const badges = useTokenPlanBadges('ep-err')
+  expect(badges.value.short).toBeNull()
+  expect(badges.value.long).toBeNull()
+})
+
+test('useTokenPlanBadges reacts when the cache is populated after mount', async () => {
+  // The composable auto-prefetches on setup, so configure the mock
+  // *before* invoking it. We then explicitly await it so the test
+  // doesn't race the auto-prefetch (it would coalesce onto the same
+  // in-flight promise and return only after resolution).
+  const populated = {
+    provider: 'minimax' as const,
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'g',
+            interval: { remaining_percent: 91 },
+            weekly: { remaining_percent: 92 },
+          },
+        ],
+      },
+    ],
+  }
+  fetchTokenPlanUsage.mockReset()
+  fetchTokenPlanUsage.mockImplementation(async () => populated)
+
+  const badges = useTokenPlanBadges('ep-late')
+  // Await the in-flight prefetch so the reactive cache update has
+  // landed before the first computed read.
+  await prefetchTokenPlanUsage('ep-late')
+  expect(badges.value.short).toBe(91)
+  expect(badges.value.long).toBe(92)
+})
+
+// P1: the inline badge subcomponents (`EndpointUsageBadges`,
+// `EndpointMobileUsageBadges`) wrap `props.endpointId` in a `computed`
+// before handing it to `useTokenPlanBadges`. The composable must track
+// that ref so the badges re-evaluate when the row's endpoint id swaps
+// underneath the same mounted component (e.g. after an inline edit,
+// when UTable's `getRowId` keeps the component instance alive).
+test('useTokenPlanBadges tracks a computed ref of endpointId across swaps', async () => {
+  const epA: TokenPlanUsageResponse = {
+    provider: 'minimax',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'g',
+            interval: { remaining_percent: 50 },
+            weekly: { remaining_percent: 60 },
+          },
+        ],
+      },
+    ],
+  }
+  const epB: TokenPlanUsageResponse = {
+    provider: 'command_code',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [],
+        five_hour: { remaining_percent: 11, reset_at: null },
+        weekly: { remaining_percent: 22, reset_at: null },
+      },
+    ],
+  }
+  fetchTokenPlanUsage.mockImplementation(async (id: string) => {
+    if (id === 'ep-a') return epA
+    if (id === 'ep-b') return epB
+    throw new Error(`unexpected id ${id}`)
+  })
+
+  const idRef = ref('ep-a')
+  const badges = useTokenPlanBadges(computed(() => idRef.value))
+  // Drain the auto-prefetch so the first endpoint is cached.
+  await prefetchTokenPlanUsage('ep-a')
+
+  expect(badges.value.short).toBe(50)
+  expect(badges.value.long).toBe(60)
+  expect(badges.value.usage?.provider).toBe('minimax')
+
+  // Swap to a different endpoint without remounting. A reactive `props`
+  // proxy on the consumer side drives this — the composable must pick
+  // up the change because it received a computed ref, not a static
+  // string snapshot.
+  idRef.value = 'ep-b'
+  await prefetchTokenPlanUsage('ep-b')
+  await nextTick()
+
+  expect(badges.value.short).toBe(11)
+  expect(badges.value.long).toBe(22)
+  expect(badges.value.usage?.provider).toBe('command_code')
+})
