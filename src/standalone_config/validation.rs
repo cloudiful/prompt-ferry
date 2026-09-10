@@ -47,9 +47,25 @@ impl StandaloneConfig {
                 return invalid("endpoint_id", "must be unique");
             }
             required("endpoint name", &endpoint.name)?;
-            required("endpoint base_url", &endpoint.base_url)?;
-            let normalized_base =
-                normalize_endpoint_base_url(&endpoint.base_url, endpoint.provider);
+            // Issue #248: preset providers derive their official base
+            // server-side and ignore any stored value; Generic keeps the
+            // normalized stored base.
+            let provider = crate::db::EndpointProvider::from_str(endpoint.provider.as_str());
+            let region = endpoint.provider_region.map(|region| match region {
+                super::models::EndpointRegion::Cn => crate::db::EndpointRegion::Cn,
+                super::models::EndpointRegion::Global => crate::db::EndpointRegion::Global,
+            });
+            let normalized_base = match crate::upstream_presets::preset_base_url(
+                provider,
+                region,
+                endpoint.native_api,
+            ) {
+                Some(derived) => derived.to_string(),
+                None => {
+                    required("endpoint base_url", &endpoint.base_url)?;
+                    normalize_endpoint_base_url(&endpoint.base_url)
+                }
+            };
             if !normalized_base.starts_with("http://") && !normalized_base.starts_with("https://") {
                 return invalid("base_url", "must use http:// or https://");
             }
@@ -152,10 +168,7 @@ impl BootstrapSeed {
                 provider: EndpointProvider::Generic,
                 provider_region: None,
                 service_tier: crate::standalone_config::MinimaxServiceTier::Standard,
-                base_url: normalize_endpoint_base_url(
-                    &self.upstream_base_url,
-                    EndpointProvider::Generic,
-                ),
+                base_url: normalize_endpoint_base_url(&self.upstream_base_url),
                 native_api: self.upstream_native_api,
                 native_api_source: NativeApiSource::Manual,
                 key_lb_enabled: false,
@@ -182,16 +195,12 @@ impl BootstrapSeed {
     }
 }
 
-/// Normalize an endpoint `base_url` for the standalone config mirror.
+/// Normalize a Generic endpoint `base_url` for the standalone config mirror.
 ///
 /// Strips trailing `/v1` segments (and a chained `…/v1/v1`) so the saved
-/// value matches the canonical API root. The Zhipu GLM family is exempt
-/// for the same reason as the admin-side normalizer (issue #241): the
-/// runtime URL composer relies on the protocol root being present.
-pub(crate) fn normalize_endpoint_base_url(base_url: &str, provider: EndpointProvider) -> String {
-    if provider == EndpointProvider::Glm {
-        return base_url.trim().trim_end_matches('/').to_string();
-    }
+/// value matches the canonical API root. Preset providers derive their base
+/// instead (issue #248), so the GLM exemption from issue #241 is gone.
+pub(crate) fn normalize_endpoint_base_url(base_url: &str) -> String {
     let mut normalized = base_url.trim().to_string();
     loop {
         normalized = normalized.trim_end_matches('/').to_string();
@@ -242,62 +251,35 @@ mod tests {
                 "https://api.commandcode.ai/provider",
             ),
         ] {
-            for provider in [
-                EndpointProvider::Generic,
-                EndpointProvider::Minimax,
-                EndpointProvider::CommandCode,
-                EndpointProvider::OpencodeGo,
-                EndpointProvider::OpenRouter,
-            ] {
-                assert_eq!(
-                    normalize_endpoint_base_url(input, provider),
-                    expected,
-                    "input {input:?} provider {provider:?}"
-                );
-            }
+            assert_eq!(
+                normalize_endpoint_base_url(input),
+                expected,
+                "input {input:?}"
+            );
         }
         assert_eq!(
-            normalize_endpoint_base_url("https://api.openai.com/V1", EndpointProvider::Generic),
+            normalize_endpoint_base_url("https://api.openai.com/V1"),
             "https://api.openai.com/V1"
         );
         assert_eq!(
-            normalize_endpoint_base_url("https://api.openai.com/v10", EndpointProvider::Generic),
+            normalize_endpoint_base_url("https://api.openai.com/v10"),
             "https://api.openai.com/v10"
         );
     }
 
     #[test]
-    fn normalize_exempts_glm_from_v1_strip() {
-        // The standalone mirror must preserve the same GLM exemption as
-        // the admin handler so the bootstrap path can save an
-        // `/api/v1` Responses base (issue #241).
-        for (input, expected) in [
-            (
-                "https://open.bigmodel.cn/api/v1",
-                "https://open.bigmodel.cn/api/v1",
-            ),
-            (
-                "https://open.bigmodel.cn/api/v1/",
-                "https://open.bigmodel.cn/api/v1",
-            ),
-            (
-                "https://open.bigmodel.cn/api/v1/v1",
-                "https://open.bigmodel.cn/api/v1/v1",
-            ),
-            (
-                "https://open.bigmodel.cn/api/anthropic",
-                "https://open.bigmodel.cn/api/anthropic",
-            ),
-            (
-                "https://open.bigmodel.cn/api/coding/paas/v4",
-                "https://open.bigmodel.cn/api/coding/paas/v4",
-            ),
-        ] {
-            assert_eq!(
-                normalize_endpoint_base_url(input, EndpointProvider::Glm),
-                expected,
-                "input {input:?}"
-            );
-        }
+    fn preset_providers_derive_a_valid_base_without_a_stored_one() {
+        // Issue #248: a preset row with an empty stored base still validates
+        // because the base is derived from the provider/protocol.
+        let provider = crate::db::EndpointProvider::from_str(EndpointProvider::Glm.as_str());
+        let derived = crate::upstream_presets::preset_base_url(
+            provider,
+            None,
+            crate::config::NativeApi::Responses,
+        );
+        assert_eq!(
+            derived,
+            Some(crate::upstream_presets::GLM_RESPONSES_BASE_URL)
+        );
     }
 }

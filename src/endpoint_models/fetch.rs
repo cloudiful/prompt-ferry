@@ -49,13 +49,20 @@ pub async fn fetch_endpoint_model_ids(
     ))
 }
 
-/// Build the upstream model-listing URL. GLM (issue #230 P2) lists its
-/// models at `{base}/models` rather than the OpenAI-style `{base}/v1/models`
-/// because the Zhipu Coding Plan base (`.../api/coding/paas/v4`) already
-/// encodes the protocol root. Every other provider keeps the plain
-/// `{base}/v1/models` join.
+/// Build the upstream model-listing URL.
+///
+/// Preset providers derive their official base (issue #248), so a stored
+/// base mangled by the legacy trailing-`/v1` strip self-heals. GLM lists its
+/// models at `{base}/models` because the Chat family root already encodes the
+/// protocol version; every other provider (including Generic) keeps the
+/// plain `{base}/v1/models` join.
 pub fn models_url(base_url: &str, provider: EndpointProvider) -> String {
-    let base = base_url.trim_end_matches('/');
+    let base = crate::upstream_presets::route_base_or_stored(
+        provider,
+        base_url,
+        crate::config::NativeApi::Chat,
+    );
+    let base = base.trim_end_matches('/');
     match provider {
         EndpointProvider::Glm => format!("{base}/models"),
         _ => format!("{base}/v1/models"),
@@ -81,12 +88,10 @@ mod tests {
     use crate::db::EndpointProvider;
 
     #[test]
-    fn models_url_keeps_v1_for_non_glm_and_drops_for_glm() {
-        // Every non-GLM provider joins the OpenAI-style `/v1/models`; GLM
-        // (issue #230 P2) lists models at `/models` because the Coding
-        // Plan base already encodes the protocol root. The non-GLM join
-        // is intentionally plain (no `/v1` strip) so existing bases like
-        // `https://example.com/api` keep their `/v1/models` convention.
+    fn models_url_keeps_v1_for_generic_and_derives_for_presets() {
+        // Generic joins the OpenAI-style `/v1/models` from the stored base;
+        // a stored `/api` base intentionally keeps its `/v1/models`
+        // convention (the base is not normalized for models listing).
         assert_eq!(
             models_url("https://example.com/api", EndpointProvider::Generic),
             "https://example.com/api/v1/models"
@@ -95,19 +100,35 @@ mod tests {
             models_url("https://api.openai.com/v1", EndpointProvider::Generic),
             "https://api.openai.com/v1/v1/models"
         );
+        // GLM (issue #230 P2 / #248) derives the Chat family root and lists
+        // at `{base}/models`; the api.z.ai mirror is dropped for the
+        // domestic open.bigmodel.cn root.
+        for stored in [
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+            "https://api.z.ai/api/coding/paas/v4/",
+            "https://open.bigmodel.cn/api",
+        ] {
+            assert_eq!(
+                models_url(stored, EndpointProvider::Glm),
+                "https://open.bigmodel.cn/api/coding/paas/v4/models",
+                "stored GLM base {stored}"
+            );
+        }
+        // Other presets self-heal a mangled stored `/v1` suffix.
         assert_eq!(
-            models_url(
-                "https://open.bigmodel.cn/api/coding/paas/v4",
-                EndpointProvider::Glm
-            ),
-            "https://open.bigmodel.cn/api/coding/paas/v4/models"
+            models_url("https://openrouter.ai/api/v1", EndpointProvider::OpenRouter),
+            "https://openrouter.ai/api/v1/models"
         );
         assert_eq!(
             models_url(
-                "https://api.z.ai/api/coding/paas/v4/",
-                EndpointProvider::Glm
+                "https://api.commandcode.ai/provider/v1",
+                EndpointProvider::CommandCode
             ),
-            "https://api.z.ai/api/coding/paas/v4/models"
+            "https://api.commandcode.ai/provider/v1/models"
+        );
+        assert_eq!(
+            models_url("https://api.minimaxi.com", EndpointProvider::Minimax),
+            "https://api.minimaxi.com/v1/models"
         );
     }
 }

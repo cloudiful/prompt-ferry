@@ -246,6 +246,17 @@ pub(super) async fn resolve_endpoint_input(
         ));
     }
     let api_key = api_keys[0].api_key.clone();
+    // Issue #248: preset providers ignore the client-sent base entirely and
+    // persist the derived official root; Generic keeps the normalized
+    // client-sent base byte-for-byte.
+    let base_url = match crate::upstream_presets::preset_base_url(
+        body.provider,
+        body.provider_region,
+        native_api,
+    ) {
+        Some(derived) => derived.to_string(),
+        None => normalize_endpoint_base_url(&body.base_url),
+    };
     Ok(EndpointCreate {
         scope: body.scope,
         owner_user_id: body.owner_user_id,
@@ -253,7 +264,7 @@ pub(super) async fn resolve_endpoint_input(
         provider: body.provider,
         provider_region: body.provider_region,
         service_tier: body.service_tier,
-        base_url: normalize_endpoint_base_url(&body.base_url, body.provider),
+        base_url,
         native_api,
         native_api_source,
         daily_max_requests: body.daily_max_requests,
@@ -265,23 +276,13 @@ pub(super) async fn resolve_endpoint_input(
     })
 }
 
-/// Normalize an endpoint `base_url` for persistence.
+/// Normalize a Generic endpoint `base_url` for persistence.
 ///
 /// Strips trailing `/v1` segments (and a chained `…/v1/v1`) so the stored
 /// value matches the canonical API root that the upstream URL composer
-/// uses. The Zhipu GLM family is exempt: the official Responses base
-/// (`https://open.bigmodel.cn/api/v1`) and other GLM roots (`/api/anthropic`,
-/// `/api/coding/paas/v4`) all carry a meaningful version or protocol
-/// segment that the runtime joiner relies on, so the strip would corrupt
-/// the saved value (issue #241). Every other provider keeps the existing
-/// byte-for-byte behavior.
-pub(super) fn normalize_endpoint_base_url(
-    base_url: &str,
-    provider: db::EndpointProvider,
-) -> String {
-    if provider == db::EndpointProvider::Glm {
-        return base_url.trim().trim_end_matches('/').to_string();
-    }
+/// uses. Preset providers no longer call this: their base is derived
+/// server-side (issue #248), so the GLM exemption from issue #241 is gone.
+pub(super) fn normalize_endpoint_base_url(base_url: &str) -> String {
     let mut v = base_url.trim().to_string();
     loop {
         v = v.trim_end_matches('/').to_string();
@@ -376,62 +377,8 @@ mod tests {
             ("https://api.openai.com/V1", "https://api.openai.com/V1"),
             ("https://api.openai.com/v10", "https://api.openai.com/v10"),
         ] {
-            for provider in [
-                EndpointProvider::Generic,
-                EndpointProvider::Minimax,
-                EndpointProvider::CommandCode,
-                EndpointProvider::OpencodeGo,
-                EndpointProvider::OpenRouter,
-            ] {
-                assert_eq!(
-                    normalize_endpoint_base_url(input, provider),
-                    expected,
-                    "input {input:?} provider {provider:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn normalize_endpoint_base_url_exempts_glm_from_v1_strip() {
-        // The official GLM Responses base carries a meaningful `/v1`
-        // segment that the runtime joiner relies on; stripping it would
-        // corrupt the saved value and the runtime would build
-        // `<base>/<path>` from a root that no longer contains the API
-        // version (issue #241). The Anthropic and Chat family bases are
-        // also preserved verbatim so the runtime can match them.
-        for (input, expected) in [
-            (
-                "https://open.bigmodel.cn/api/v1",
-                "https://open.bigmodel.cn/api/v1",
-            ),
-            (
-                "https://open.bigmodel.cn/api/v1/",
-                "https://open.bigmodel.cn/api/v1",
-            ),
-            (
-                "https://open.bigmodel.cn/api/v1/v1",
-                "https://open.bigmodel.cn/api/v1/v1",
-            ),
-            (
-                "https://open.bigmodel.cn/api/anthropic",
-                "https://open.bigmodel.cn/api/anthropic",
-            ),
-            (
-                "https://open.bigmodel.cn/api/anthropic/",
-                "https://open.bigmodel.cn/api/anthropic",
-            ),
-            (
-                "https://open.bigmodel.cn/api/coding/paas/v4",
-                "https://open.bigmodel.cn/api/coding/paas/v4",
-            ),
-            (
-                "  https://open.bigmodel.cn/api/v1  ",
-                "https://open.bigmodel.cn/api/v1",
-            ),
-        ] {
             assert_eq!(
-                normalize_endpoint_base_url(input, EndpointProvider::Glm),
+                normalize_endpoint_base_url(input),
                 expected,
                 "input {input:?}"
             );

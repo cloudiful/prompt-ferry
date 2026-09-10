@@ -11,7 +11,6 @@ use super::super::{
 };
 use super::{
     forward::{ResponseForwardContext, ResponseLoggingContext, forward_upstream_response},
-    glm_responses_base::check_glm_responses_base,
     request_logging::log_prepared_upstream_summary,
     request_support::prepare_upstream_request_for_route,
     upstream::{build_upstream_request, upstream_url_for_route},
@@ -141,14 +140,6 @@ pub(super) async fn forward_route_request(
         Err(err) => return Ok(ForwardOutcome::CompatError(err)),
     };
     let upstream_url = upstream_url_for_route(route, &prepared.path);
-    // GLM Responses must never be joined to the Chat family base; that
-    // would build a guaranteed-404 URL. Fail fast with a clear operator
-    // message before any network I/O so the operator can register a
-    // dedicated Responses upstream row (`.../api/v1`) without chasing
-    // an opaque upstream 404. See issue #238 for the live failure.
-    if let Some(err) = check_glm_responses_base(&route.base_url, route.provider, route.native_api) {
-        return Ok(ForwardOutcome::CompatError(err));
-    }
     if let Some(state) = services.admin_state() {
         let _ = db::record_request_state(
             &state.pool,

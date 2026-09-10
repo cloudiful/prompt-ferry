@@ -1,42 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { EndpointForm } from '@/models'
-import EndpointProviderFieldsGlm from './EndpointProviderFieldsGlm.vue'
-import {
-  COMMAND_CODE_BASE_URL,
-  MINIMAX_BASE_URLS,
-  OPENCODE_GO_BASE_URL,
-  OPENROUTER_BASE_URL,
-  stripVersionSuffix,
-  type MinimaxProtocol,
-} from './endpointBaseUrls'
 
 const props = defineProps<{
   t: TranslateFn
 }>()
 
 const form = defineModel<EndpointForm>('form', { required: true })
-const glmFields = ref<InstanceType<typeof EndpointProviderFieldsGlm> | null>(
-  null,
-)
-function sanitizeBaseUrlField(): void {
-  // Issue #241 P2: GLM bases are exempt from the runtime's
-  // trailing-`/v1` strip (backend `normalize_endpoint_base_url`),
-  // and the official Responses preset (`https://open.bigmodel.cn/api/v1`)
-  // intentionally ends with `/v1`. Without this early-return the
-  // blur handler would rewrite the saved value to `.../api` and
-  // the form's response would diverge from the documented table.
-  if (isGlm.value) {
-    return
-  }
-  const sanitized = stripVersionSuffix(form.value.base_url)
-  if (sanitized !== form.value.base_url) {
-    form.value.base_url = sanitized
-  }
-}
-const hasVersionPath = computed(() =>
-  /\/v1\/?$/.test(form.value.base_url.trim()),
-)
+
 const providerSelection = computed({
   get: () => form.value.provider,
   set(
@@ -49,93 +20,33 @@ const providerSelection = computed({
       | 'glm',
   ) {
     form.value.provider = value
-    if (value === 'generic') {
-      form.value.provider_region = null
-      // Service tier only applies to MiniMax upstreams; reset to the default
-      // so a later switch back starts from standard behavior.
-      form.value.service_tier = 'standard'
-      // MCP exposure is only valid for MiniMax endpoints; backend validation
-      // rejects an explicit `mcp_enabled: true` for generic providers, so
-      // collapse to false here as well to keep the UI in sync.
-      form.value.mcp_enabled = false
-      return
-    }
-    if (value === 'command_code') {
-      // CommandCode carries no region (NULL); hide the region control and
-      // keep service tier/MCP at generic defaults. Inference accepts both
-      // Anthropic Messages and Chat on the same provider-compatible base.
+    if (value !== 'minimax') {
+      // Preset providers other than MiniMax carry no region, no service
+      // tier, and no MiniMax builtin MCP privilege. Their base URL is
+      // derived server-side, so the form no longer tracks one.
       form.value.provider_region = null
       form.value.service_tier = 'standard'
       form.value.mcp_enabled = false
-      setCommandCodeBaseUrl()
       return
     }
-    if (value === 'opencode_go') {
-      // OpencodeGo carries no region (NULL); hide the region control and
-      // keep service tier/MCP at generic defaults. Inference goes through
-      // the official Zen /v1 base.
-      form.value.provider_region = null
-      form.value.service_tier = 'standard'
-      form.value.mcp_enabled = false
-      setOpencodeGoBaseUrl()
-      return
-    }
-    if (value === 'openrouter') {
-      // OpenRouter carries no region (NULL); hide the region control and
-      // keep service tier/MCP at generic defaults. Inference goes through
-      // the official /api base (stored without the /v1 suffix).
-      form.value.provider_region = null
-      form.value.service_tier = 'standard'
-      form.value.mcp_enabled = false
-      setOpenRouterBaseUrl()
-      return
-    }
-    if (value === 'glm') {
-      // GLM (issue #230 P1) is a non-MiniMax provider: no region, no
-      // service tier, no MiniMax builtin MCP privilege. The runtime
-      // smart join (issue #241) handles all three per-`native_api`
-      // bases — Anthropic `.../api/anthropic`, Chat
-      // `.../api/coding/paas/v4`, Responses `.../api/v1` — so the
-      // form defaults to manual Chat and lets the GLM preset
-      // selector child pick the right base URL. The trailing-`/v1`
-      // auto-strip is intentionally disabled for GLM (the runtime
-      // exempts the provider).
-      form.value.provider_region = null
-      form.value.service_tier = 'standard'
-      form.value.mcp_enabled = false
-      form.value.protocol_mode = 'manual'
-      form.value.native_api_override = 'chat'
-      setGlmBaseUrl()
-      return
-    }
-    const region = form.value.provider_region ?? 'cn'
-    form.value.provider_region = region
-    // Preserve an explicit priority selection across provider switches;
-    // normalize legacy/unknown values to the standard default.
+    form.value.provider_region = form.value.provider_region ?? 'cn'
+    // Preserve an explicit priority selection; normalize legacy/unknown
+    // values to the standard default.
     form.value.service_tier =
       form.value.service_tier === 'priority' ? 'priority' : 'standard'
     if (!form.value.endpoint_id) {
       form.value.mcp_enabled = true
     }
-    if (form.value.protocol_mode === 'auto') {
-      form.value.protocol_mode = 'manual'
-      form.value.native_api_override = 'anthropic_messages'
-    }
-    setMinimaxBaseUrl(region, activeMinimaxProtocol())
   },
 })
 const providerRegionSelection = computed({
   get: () => form.value.provider_region ?? 'cn',
   set(value: 'cn' | 'global') {
     form.value.provider_region = value
-    setMinimaxBaseUrl(value, activeMinimaxProtocol())
   },
 })
+const isGeneric = computed(() => form.value.provider === 'generic')
 const isMinimax = computed(() => form.value.provider === 'minimax')
-const isCommandCode = computed(() => form.value.provider === 'command_code')
-const isOpencodeGo = computed(() => form.value.provider === 'opencode_go')
-const isOpenRouter = computed(() => form.value.provider === 'openrouter')
-const isGlm = computed(() => form.value.provider === 'glm')
 const serviceTierSelection = computed({
   get: () => (form.value.service_tier === 'priority' ? 'priority' : 'standard'),
   set(value: 'standard' | 'priority') {
@@ -146,14 +57,6 @@ const serviceTierOptions = computed(() => [
   { label: props.t('serviceTierStandard'), value: 'standard' },
   { label: props.t('serviceTierPriority'), value: 'priority' },
 ])
-const usesCustomMinimaxBaseUrl = computed(() => {
-  if (!isMinimax.value) return false
-  const current = stripVersionSuffix(form.value.base_url)
-  const known = Object.values(MINIMAX_BASE_URLS).flatMap((urls) =>
-    Object.values(urls),
-  )
-  return Boolean(current) && !known.includes(current as (typeof known)[number])
-})
 const protocolSelection = computed({
   get(): 'auto' | 'anthropic_messages' | 'responses' | 'chat' | 'realtime' {
     if (form.value.protocol_mode === 'auto') return 'auto'
@@ -165,127 +68,15 @@ const protocolSelection = computed({
     if (value === 'auto') {
       form.value.protocol_mode = 'auto'
       form.value.native_api_override = null
-      if (isMinimax.value) {
-        setMinimaxBaseUrl(form.value.provider_region ?? 'cn', 'openai')
-      }
       return
     }
     form.value.protocol_mode = 'manual'
     form.value.native_api_override = value
-    if (isMinimax.value) {
-      setMinimaxBaseUrl(
-        form.value.provider_region ?? 'cn',
-        value === 'anthropic_messages' ? 'anthropic' : 'openai',
-      )
-    }
   },
 })
-const baseUrlHintText = computed(() => {
-  const hints = [props.t('baseUrlHint')]
-  if (isMinimax.value && protocolSelection.value === 'anthropic_messages') {
-    hints.push(props.t('providerMinimaxAnthropicBaseUrlHint'))
-  }
-  if (isCommandCode.value) {
-    hints.push(props.t('providerCommandCodeBaseUrlHint'))
-  }
-  if (isOpencodeGo.value) {
-    hints.push(props.t('providerOpencodeGoBaseUrlHint'))
-  }
-  if (isOpenRouter.value) {
-    hints.push(props.t('providerOpenRouterBaseUrlHint'))
-  }
-  if (isGlm.value) {
-    hints.push(props.t('providerGlmBaseUrlHint'))
-  }
-  if (usesCustomMinimaxBaseUrl.value) {
-    hints.push(props.t('providerCustomBaseUrlHint'))
-  }
-  return hints.join(' ')
-})
-
-function activeMinimaxProtocol(): MinimaxProtocol {
-  return form.value.protocol_mode === 'manual' &&
-    form.value.native_api_override === 'anthropic_messages'
-    ? 'anthropic'
-    : 'openai'
-}
-
-function setMinimaxBaseUrl(
-  region: 'cn' | 'global',
-  protocol: MinimaxProtocol,
-): void {
-  const current = stripVersionSuffix(form.value.base_url)
-  const known = Object.values(MINIMAX_BASE_URLS).flatMap((urls) =>
-    Object.values(urls),
-  )
-  if (!current || known.includes(current as (typeof known)[number])) {
-    form.value.base_url = MINIMAX_BASE_URLS[region][protocol]
-  }
-}
-
-/// `baseUrl` is intentionally only set to `defaultUrl` when the
-/// current value is empty or matches a known upstream base for a
-/// different provider. The known-bases list is supplied by the
-/// caller so the helper does not have to know about every provider.
-function setDefaultIfUnrelated(
-  defaultUrl: string,
-  otherKnownUrls: readonly string[],
-): void {
-  const current = stripVersionSuffix(form.value.base_url)
-  if (!current) {
-    form.value.base_url = defaultUrl
-    return
-  }
-  if (otherKnownUrls.includes(current)) {
-    form.value.base_url = defaultUrl
-  }
-}
-
-function knownMinimaxStripped(): string[] {
-  return Object.values(MINIMAX_BASE_URLS).flatMap((urls) =>
-    Object.values(urls).map((url) => stripVersionSuffix(url)),
-  )
-}
-
-function setCommandCodeBaseUrl(): void {
-  setDefaultIfUnrelated(COMMAND_CODE_BASE_URL, [...knownMinimaxStripped()])
-}
-
-function setOpencodeGoBaseUrl(): void {
-  setDefaultIfUnrelated(OPENCODE_GO_BASE_URL, [
-    ...knownMinimaxStripped(),
-    stripVersionSuffix(COMMAND_CODE_BASE_URL),
-  ])
-}
-
-function setOpenRouterBaseUrl(): void {
-  setDefaultIfUnrelated(OPENROUTER_BASE_URL, [
-    ...knownMinimaxStripped(),
-    stripVersionSuffix(COMMAND_CODE_BASE_URL),
-    stripVersionSuffix(OPENCODE_GO_BASE_URL),
-  ])
-}
-
-function setGlmBaseUrl(): void {
-  // The configured GLM base keeps its `/v4` path (the only provider
-  // where the official base intentionally ends with a non-`/v1` version
-  // segment). The child owns the reset semantics and only overwrites
-  // the live value when the existing one is empty or a known
-  // upstream base for a different provider.
-  glmFields.value?.applyDefaultIfNonGlmBase(knownNonGlmBaseUrls())
-}
-
-function knownNonGlmBaseUrls(): string[] {
-  const minimax = Object.values(MINIMAX_BASE_URLS).flatMap((urls) =>
-    Object.values(urls).map((url) => stripVersionSuffix(url)),
-  )
-  return [
-    ...minimax,
-    stripVersionSuffix(COMMAND_CODE_BASE_URL),
-    stripVersionSuffix(OPENCODE_GO_BASE_URL),
-    stripVersionSuffix(OPENROUTER_BASE_URL),
-  ]
-}
+const hasVersionPath = computed(() =>
+  /\/v1\/?$/.test(form.value.base_url.trim()),
+)
 </script>
 
 <template>
@@ -365,19 +156,22 @@ function knownNonGlmBaseUrls(): string[] {
       />
     </div>
   </div>
-  <div class="grid gap-1 md:grid-cols-[9rem_minmax(0,1fr)] md:items-center">
+  <div
+    v-if="isGeneric"
+    class="grid gap-1 md:grid-cols-[9rem_minmax(0,1fr)] md:items-center"
+  >
     <div class="flex items-center gap-1">
       <label class="text-xs text-muted" for="endpoint-base-url">
         {{ t('baseUrl') }}
       </label>
-      <UTooltip :text="baseUrlHintText">
+      <UTooltip :text="t('baseUrlHint')">
         <UButton
           type="button"
           size="xs"
           color="neutral"
           variant="ghost"
           icon="i-lucide-info"
-          :aria-label="baseUrlHintText"
+          :aria-label="t('baseUrlHint')"
         />
       </UTooltip>
     </div>
@@ -386,19 +180,12 @@ function knownNonGlmBaseUrls(): string[] {
       v-model="form.base_url"
       class="w-full"
       :placeholder="t('baseUrl')"
-      @blur="sanitizeBaseUrlField"
     />
     <p
-      v-if="hasVersionPath && !isGlm"
+      v-if="hasVersionPath"
       class="text-xs leading-snug text-warning md:col-start-2"
     >
       {{ t('baseUrlVersionWarning') }}
     </p>
   </div>
-  <EndpointProviderFieldsGlm
-    v-if="isGlm"
-    ref="glmFields"
-    v-model:base-url="form.base_url"
-    :t="props.t"
-  />
 </template>

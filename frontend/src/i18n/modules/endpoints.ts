@@ -13,31 +13,12 @@ export const endpointMessages = {
     providerGeneric: '通用',
     providerMinimax: 'MiniMax',
     providerCommandCode: 'CommandCode',
-    providerCommandCodeBaseUrlHint:
-      'CommandCode 使用官方 Provider 兼容地址；Anthropic Messages 与 Chat 均可直通。',
     providerOpencodeGo: 'OpencodeGo',
-    providerOpencodeGoBaseUrlHint: 'OpencodeGo 使用官方 Zen /v1 兼容地址。',
     providerOpenRouter: 'OpenRouter',
-    providerOpenRouterBaseUrlHint:
-      'OpenRouter 使用官方 /api 兼容地址；系统会自动追加 /v1 路径。',
     providerGlm: 'GLM',
-    providerGlmBaseUrlHint:
-      'GLM（智谱 Coding Plan）默认使用国内 Coding Plan 的 /v4 兼容地址（https://open.bigmodel.cn/api/coding/paas/v4），该地址直接使用，不再追加 /v1；按所选协议手动指定原生接口。各协议官方地址：Chat/Completion .../api/coding/paas/v4，Anthropic Messages .../api/anthropic，Responses .../api/v1。',
-    providerGlmBaseUrlPreset: '基础地址预设',
-    providerGlmBaseUrlPresetAnthropic:
-      'Anthropic Messages（.../api/anthropic）',
-    providerGlmBaseUrlPresetChatCn: 'Chat 国内（.../api/coding/paas/v4）',
-    providerGlmBaseUrlPresetChatMirror:
-      'Chat 镜像（api.z.ai/api/coding/paas/v4）',
-    providerGlmBaseUrlPresetResponses: 'Responses（.../api/v1）',
-    providerGlmBaseUrlPresetCustom: '自定义地址',
     providerRegion: '区域',
     providerRegionCn: '中国区',
     providerRegionGlobal: '国际区',
-    providerCustomBaseUrlHint:
-      '模型请求使用此自定义地址；套餐用量仍查询所选区域的 MiniMax 官方地址。',
-    providerMinimaxAnthropicBaseUrlHint:
-      'Anthropic Messages 使用 MiniMax 的 /anthropic 地址；系统会自动追加 /v1/messages。',
     serviceTier: '服务等级',
     serviceTierStandard: '标准',
     serviceTierPriority: '优先',
@@ -167,31 +148,12 @@ export const endpointMessages = {
     providerGeneric: 'Generic',
     providerMinimax: 'MiniMax',
     providerCommandCode: 'CommandCode',
-    providerCommandCodeBaseUrlHint:
-      'CommandCode uses the official provider-compatible endpoint; both Anthropic Messages and Chat work.',
     providerOpencodeGo: 'OpencodeGo',
-    providerOpencodeGoBaseUrlHint:
-      'OpencodeGo uses the official Zen /v1 compatible endpoint.',
     providerOpenRouter: 'OpenRouter',
-    providerOpenRouterBaseUrlHint:
-      'OpenRouter uses the official /api compatible endpoint; /v1 is appended automatically.',
     providerGlm: 'GLM',
-    providerGlmBaseUrlHint:
-      'GLM (Zhipu Coding Plan) defaults to the domestic /v4 Coding Plan base (https://open.bigmodel.cn/api/coding/paas/v4); the base is used verbatim and /v1 is NOT appended. Select the native API manually for the protocol you need. Per-protocol official bases: Chat/Completion .../api/coding/paas/v4, Anthropic Messages .../api/anthropic, Responses .../api/v1.',
-    providerGlmBaseUrlPreset: 'Base URL preset',
-    providerGlmBaseUrlPresetAnthropic: 'Anthropic Messages (.../api/anthropic)',
-    providerGlmBaseUrlPresetChatCn: 'Chat (CN) (.../api/coding/paas/v4)',
-    providerGlmBaseUrlPresetChatMirror:
-      'Chat mirror (api.z.ai/api/coding/paas/v4)',
-    providerGlmBaseUrlPresetResponses: 'Responses (.../api/v1)',
-    providerGlmBaseUrlPresetCustom: 'Custom URL',
     providerRegion: 'Region',
     providerRegionCn: 'China',
     providerRegionGlobal: 'Global',
-    providerCustomBaseUrlHint:
-      'Model requests use this custom URL; token plan usage still uses the official MiniMax URL for the selected region.',
-    providerMinimaxAnthropicBaseUrlHint:
-      "Anthropic Messages uses MiniMax's /anthropic base URL; /v1/messages is appended automatically.",
     serviceTier: 'Service tier',
     serviceTierStandard: 'Standard',
     serviceTierPriority: 'Priority',

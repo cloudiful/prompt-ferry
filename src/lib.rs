@@ -37,6 +37,7 @@ pub(crate) mod stream_text;
 pub mod tls;
 pub mod upstream_adapter;
 pub(crate) mod upstream_error;
+pub(crate) mod upstream_presets;
 pub mod usage;
 pub mod worker;
 pub mod worker_admin;

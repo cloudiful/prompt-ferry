@@ -139,7 +139,13 @@ async fn fetch_openrouter_endpoint_usage(
     }
 
     let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
-    let base = endpoint.base_url.clone();
+    // Issue #248: preset providers derive their official base; the stored
+    // base is only a fallback for a legacy/custom host.
+    let base = crate::upstream_presets::route_base_or_stored(
+        EndpointProvider::OpenRouter,
+        &endpoint.base_url,
+        crate::config::NativeApi::Chat,
+    );
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_openrouter_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
     }))
@@ -161,7 +167,13 @@ async fn fetch_glm_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
     }
 
     let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
-    let base = endpoint.base_url.clone();
+    // Issue #248: derive the GLM origin from the official Chat family root
+    // instead of trusting a stored base that may carry a stale path.
+    let base = crate::upstream_presets::route_base_or_stored(
+        EndpointProvider::Glm,
+        &endpoint.base_url,
+        crate::config::NativeApi::Chat,
+    );
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_glm_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
     }))
