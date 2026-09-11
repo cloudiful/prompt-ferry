@@ -57,6 +57,12 @@ export type ModelRouteListItemView = {
   test_severity: 'success' | 'error' | null
 }
 
+// Endpoint picker option: the label/value pair plus the provider token so
+// consumers can render a provider mark next to the endpoint name.
+export type EndpointOption = Option<string> & {
+  provider: ProviderEndpoint['provider']
+}
+
 export type EndpointsWorkspaceView = {
   busy: boolean
   endpoint_first: number
@@ -67,7 +73,7 @@ export type EndpointsWorkspaceView = {
   model_route_rows: number
   model_route_total: number
   model_route_items: ModelRouteListItemView[]
-  endpoint_options: Option<string>[]
+  endpoint_options: EndpointOption[]
 }
 
 type EndpointViewLabels = {
@@ -170,6 +176,7 @@ export function createEndpointsWorkspaceView(options: {
     endpoint_options: options.data.endpoints.items.map((endpoint) => ({
       label: endpoint.name,
       value: endpoint.endpoint_id,
+      provider: endpoint.provider,
     })),
   }
 }

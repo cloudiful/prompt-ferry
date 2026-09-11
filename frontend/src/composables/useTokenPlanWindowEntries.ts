@@ -77,6 +77,28 @@ export type OpenRouterSpendEntry = {
   value: number
 }
 
+// Currency glyph for a DeepSeek balance entry (issue #287). Unknown codes
+// fall back to the code plus a space so the amount is never ambiguous.
+export function currencySymbol(currency: string | null | undefined): string {
+  switch ((currency ?? '').toUpperCase()) {
+    case 'CNY':
+      return '¥'
+    case 'USD':
+      return '$'
+    case '':
+      return ''
+    default:
+      return `${currency} `
+  }
+}
+
+export function formatMoney(
+  currency: string | null | undefined,
+  value: number,
+): string {
+  return `${currencySymbol(currency)}${value.toFixed(2)}`
+}
+
 // Pure adapt helpers exposed at module scope so the badge composable
 // (which only needs remaining-percent math, no t/nowMs) can reuse the
 // same provider-specific folding logic without instantiating the full

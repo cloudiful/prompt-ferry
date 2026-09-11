@@ -8,10 +8,11 @@ import {
   watch,
   type PropType,
 } from 'vue'
+import EndpointNameCell from '@/components/endpoints/EndpointNameCell.vue'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import {
-  progressColor,
+  tokenPlanBadgePills,
   useTokenPlanBadges,
 } from '@/composables/useTokenPlanBadges'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
@@ -37,6 +38,7 @@ const QUOTA_PROVIDERS = new Set<EndpointListItemView['provider']>([
   'opencode_go',
   'openrouter',
   'glm',
+  'deepseek',
 ])
 
 function isQuotaProvider(provider: EndpointListItemView['provider']): boolean {
@@ -97,17 +99,6 @@ watch(
   },
 )
 
-// `progressColor` expects a TokenPlanWindowUsage; the badge already
-// holds the remaining percent, so we synthesize one with
-// `remaining_percent = percent` and let progressColor fold used =
-// 100 - remaining internally to drive the hue ramp.
-function badgeColorForPercent(percent: number): string {
-  return progressColor({
-    end_at: null,
-    remaining_percent: percent,
-  })
-}
-
 // Inline usage-badge subcomponent. Lives in the same SFC so we don't
 // have to introduce a brand-new file: the table is the only consumer
 // on desktop. The mobile card renders its own compact variant inline.
@@ -125,76 +116,19 @@ const EndpointUsageBadges = defineComponent({
     // shift (e.g. after an inline edit) and the badge must re-evaluate
     // against the new endpoint id without a remount.
     const badges = useTokenPlanBadges(computed(() => props.endpointId))
-    const isOpenRouter = computed(
-      () =>
-        badges.value.openrouterLimit !== null ||
-        badges.value.openrouterLimitRemaining !== null,
-    )
-    const openrouterLabel = computed(() => {
-      const lim = badges.value.openrouterLimitRemaining
-      const cap = badges.value.openrouterLimit
-      if (lim === null || cap === null) return ''
-      return `${lim.toFixed(2)} / ${cap.toFixed(2)}`
-    })
+    const pillBase =
+      'inline-flex items-center rounded-full border border-default bg-elevated px-1.5 py-px text-[0.7rem] font-semibold whitespace-nowrap'
+
     return () => {
-      const t = props.t
-      const pillBase =
-        'inline-flex items-center rounded-full border border-default bg-elevated px-1.5 py-px text-[0.7rem] font-semibold whitespace-nowrap'
-      // OpenRouter path: balance pill with percent, falls back to "—"
-      // when the key has no finite cap (free tier / missing numbers).
-      if (isOpenRouter.value) {
-        const label =
-          badges.value.openrouterRemaining !== null
-            ? `${t('tokenPlanOpenRouterRemaining')} ${badges.value.openrouterRemaining.toFixed(0)}%`
-            : t('tokenPlanNoQuota')
-        return h(
+      const nodes = tokenPlanBadgePills(badges.value, props.t).map((pill) =>
+        h(
           'span',
-          { class: 'inline-flex items-center gap-1' },
-          h(
-            'span',
-            {
-              class: pillBase,
-              style: {
-                color:
-                  badges.value.openrouterRemaining !== null
-                    ? badgeColorForPercent(badges.value.openrouterRemaining)
-                    : '',
-              },
-              title: openrouterLabel.value,
-            },
-            label,
-          ),
-        )
-      }
-      // Quota-bearing providers: dual pill row (short + long); each
-      // slot degrades to empty so a provider reporting only one window
-      // still renders the row.
-      const children = [
-        badges.value.short !== null
-          ? h(
-              'span',
-              {
-                class: pillBase,
-                style: { color: badgeColorForPercent(badges.value.short) },
-                title: t('tokenPlanShortBadgeHint'),
-              },
-              `${t('tokenPlanShortBadge')} ${badges.value.short.toFixed(0)}%`,
-            )
-          : null,
-        badges.value.long !== null
-          ? h(
-              'span',
-              {
-                class: pillBase,
-                style: { color: badgeColorForPercent(badges.value.long) },
-                title: t('tokenPlanLongBadgeHint'),
-              },
-              `${t('tokenPlanLongBadge')} ${badges.value.long.toFixed(0)}%`,
-            )
-          : null,
-      ]
-      if (children[0] || children[1]) {
-        return h('span', { class: 'inline-flex items-center gap-1' }, children)
+          { class: pillBase, style: { color: pill.color }, title: pill.title },
+          pill.label,
+        ),
+      )
+      if (nodes.length > 0) {
+        return h('span', { class: 'inline-flex items-center gap-1' }, nodes)
       }
       // Cache not yet populated: render a dash so the row height stays
       // stable while the lazy prefetch resolves.
@@ -214,14 +148,11 @@ const EndpointUsageBadges = defineComponent({
       class="min-w-0"
     >
       <template #name-cell="{ row }">
-        <div class="min-w-0 max-w-40">
-          <div class="truncate font-semibold text-highlighted">
-            {{ row.original.name }}
-          </div>
-          <div class="truncate text-xs text-muted">
-            {{ row.original.base_url }}
-          </div>
-        </div>
+        <EndpointNameCell
+          :name="row.original.name"
+          :base-url="row.original.base_url"
+          :provider="row.original.provider"
+        />
       </template>
       <template #status-cell="{ row }">
         <div

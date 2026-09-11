@@ -3256,6 +3256,32 @@ components:
       enum:
       - text
       - line
+    DeepSeekBalance:
+      type: object
+      description: |-
+        DeepSeek account balance (`GET /user/balance`). The API reports amounts as
+        decimal strings, so the parser coerces both strings and numbers. A balance
+        carries no quota window: `is_available` alone drives routing weight.
+      required:
+      - is_available
+      - currency
+      - total_balance
+      - granted_balance
+      - topped_up_balance
+      properties:
+        currency:
+          type: string
+        granted_balance:
+          type: number
+          format: double
+        is_available:
+          type: boolean
+        topped_up_balance:
+          type: number
+          format: double
+        total_balance:
+          type: number
+          format: double
     EndpointApiKey:
       type: object
       required:
@@ -3362,6 +3388,7 @@ components:
       - opencode_go
       - openrouter
       - glm
+      - deepseek
     EndpointRegion:
       type: string
       enum:
@@ -6439,6 +6466,7 @@ components:
       - session_affinity
       - session_load_balance
       - conversation_override
+      - quota_failover
     SessionAffinityResetResponse:
       type: object
       required:
@@ -6610,6 +6638,14 @@ components:
           - type: 'null'
           - $ref: '#/components/schemas/CommandCodeBalances'
             description: CommandCode credit balances (monthly/purchased/free). None for MiniMax.
+        deepseek_balance:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/DeepSeekBalance'
+            description: |-
+              DeepSeek balance (`GET /user/balance`). `is_available=false` means the
+              account cannot spend: the key is weighted 0 and excluded from routing.
+              None when missing — degraded.
         error_code:
           type:
           - string
@@ -6713,6 +6749,17 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TokenPlanKeyUsage'
+        local_today_tokens:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: |-
+            AI tokens recorded for this endpoint since the start of the UTC day,
+            aggregated locally from `request_records`. Populated for balance
+            providers without a provider-reported spend figure (OpenRouter
+            fallback, DeepSeek) so the badge can pair the balance with a
+            "today usage" pill. `None` when not computed/applicable.
         provider:
           $ref: '#/components/schemas/EndpointProvider'
         provider_region:

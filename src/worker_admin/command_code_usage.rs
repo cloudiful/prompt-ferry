@@ -206,5 +206,6 @@ pub(crate) async fn fetch_command_code_key_usage(
         openrouter_spend: None,
         glm_five_hour: None,
         glm_weekly: None,
+        deepseek_balance: None,
     }
 }

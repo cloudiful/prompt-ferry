@@ -4,6 +4,9 @@ pub(crate) fn is_quota_exhaustion(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
     normalized.contains("insufficient_quota")
         || normalized.contains("insufficient quota")
+        // DeepSeek returns HTTP 402 with `{"error":{"message":"Insufficient
+        // Balance"}}`, which carries no quota keyword of its own (issue #287).
+        || normalized.contains("insufficient balance")
         || normalized.contains("quota")
         || normalized.contains("credit")
         || normalized.contains("billing")
@@ -63,6 +66,8 @@ mod tests {
             "当前额度不足",
             r#"{"error":{"code":2056,"message":"provider limit"}}"#,
             "provider code: 2056",
+            // DeepSeek 402: the raw upstream body has no quota keyword.
+            r#"{"error":{"message":"Insufficient Balance","type":"unknown_error"}}"#,
         ] {
             assert!(is_quota_exhaustion(body), "expected quota marker in {body}");
         }

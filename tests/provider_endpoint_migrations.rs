@@ -218,6 +218,103 @@ async fn migrate_0070_down_folds_command_code_back_to_generic() -> anyhow::Resul
     Ok(())
 }
 
+// 0079 up: deepseek behaves like generic (NULL region) while minimax keeps
+// its cn/global requirement (issue #287).
+#[tokio::test]
+async fn migrate_0079_deepseek_provider_up_enforces_region_shape() -> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    schema
+        .pool
+        .execute(
+            r#"
+            CREATE TABLE provider_endpoints (
+                endpoint_id UUID PRIMARY KEY DEFAULT (md5(random()::text || clock_timestamp()::text)::uuid),
+                scope TEXT NOT NULL CHECK (scope IN ('admin', 'user')),
+                owner_user_id BIGINT,
+                name TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                api_key TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .await?;
+
+    db::migrate(&schema.pool).await?;
+
+    insert_provider_endpoint(&schema.pool, "ds-null", "deepseek", None).await?;
+    insert_provider_endpoint(&schema.pool, "ds-region", "deepseek", Some("cn"))
+        .await
+        .expect_err("deepseek must not carry a provider region");
+    insert_provider_endpoint(&schema.pool, "mm-cn", "minimax", Some("cn")).await?;
+    insert_provider_endpoint(&schema.pool, "gen-null", "generic", None).await?;
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+// 0079 down: deepseek rows fold back to generic and the narrower CHECKs apply
+// again (issue #287).
+#[tokio::test]
+async fn migrate_0079_down_folds_deepseek_back_to_generic() -> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    schema
+        .pool
+        .execute(
+            r#"
+            CREATE TABLE provider_endpoints (
+                endpoint_id UUID PRIMARY KEY DEFAULT (md5(random()::text || clock_timestamp()::text)::uuid),
+                scope TEXT NOT NULL CHECK (scope IN ('admin', 'user')),
+                owner_user_id BIGINT,
+                name TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                api_key TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .await?;
+
+    db::migrate(&schema.pool).await?;
+    insert_provider_endpoint(&schema.pool, "ds-row", "deepseek", None).await?;
+
+    sqlx::raw_sql(include_str!(
+        "../migrations/0079_deepseek_provider.down.sql"
+    ))
+    .execute(&schema.pool)
+    .await?;
+
+    let row = sqlx::query(
+        "SELECT provider, provider_region FROM provider_endpoints WHERE name = 'ds-row'",
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    assert_eq!(row.try_get::<String, _>("provider")?, "generic");
+    assert!(
+        row.try_get::<Option<String>, _>("provider_region")?
+            .is_none()
+    );
+    insert_provider_endpoint(&schema.pool, "ds-after-down", "deepseek", None)
+        .await
+        .expect_err("deepseek is rejected after the 0079 down migration");
+    insert_provider_endpoint(&schema.pool, "gen-after-down", "generic", None).await?;
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
 fn standalone_temp_path(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
         "pfy-cmdcode-{}-{}-{}.sqlite",
@@ -271,17 +368,18 @@ async fn insert_standalone_endpoint(
     .map(|_| ())
 }
 
-// Standalone 0014 fresh path: a new store migrates to schema 14 with the
-// provider CHECK widened to command_code, opencode_go and openrouter.
-// 0015 (issue #230) widens the CHECK further to add `glm`; a fresh open()
-// applies both, so the final schema version is 15.
+// Standalone 0014 fresh path: a new store migrates to schema 16 with the
+// provider CHECK widened to command_code, opencode_go, openrouter, glm and
+// deepseek. 0015 (issue #230) adds `glm` and 0016 (issue #287) adds
+// `deepseek`; a fresh open() applies all three, so the final schema version
+// is 16.
 #[tokio::test]
 async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_openrouter()
 -> anyhow::Result<()> {
     let path = standalone_temp_path("fresh");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 15);
+    assert_eq!(standalone_schema_version(&pool).await?, 16);
 
     let ddl: String = sqlx::query(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'standalone_provider_endpoints'",
@@ -302,11 +400,16 @@ async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_o
         "provider CHECK must list openrouter: {ddl}"
     );
     assert!(ddl.contains("glm"), "provider CHECK must list glm: {ddl}");
+    assert!(
+        ddl.contains("deepseek"),
+        "provider CHECK must list deepseek: {ddl}"
+    );
 
     insert_standalone_endpoint(&pool, "cc-fresh", "command_code", None).await?;
     insert_standalone_endpoint(&pool, "og-fresh", "opencode_go", None).await?;
     insert_standalone_endpoint(&pool, "or-fresh", "openrouter", None).await?;
     insert_standalone_endpoint(&pool, "glm-fresh", "glm", None).await?;
+    insert_standalone_endpoint(&pool, "ds-fresh", "deepseek", None).await?;
     insert_standalone_endpoint(&pool, "bogus-fresh", "legacy-unknown", None)
         .await
         .expect_err("unknown providers stay rejected");
@@ -435,9 +538,9 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
 
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    // 0015 (issue #230) widens the CHECK further; the final schema version
-    // is 15 after both pending migrations apply.
-    assert_eq!(standalone_schema_version(&pool).await?, 15);
+    // 0015 (issue #230) adds `glm` and 0016 (issue #287) adds `deepseek`;
+    // the final schema version is 16 after the pending migrations apply.
+    assert_eq!(standalone_schema_version(&pool).await?, 16);
     let preserved: i64 = sqlx::query(
         "SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'",
     )
@@ -467,6 +570,7 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     insert_standalone_endpoint(&pool, "og-upgraded", "opencode_go", None).await?;
     insert_standalone_endpoint(&pool, "or-upgraded", "openrouter", None).await?;
     insert_standalone_endpoint(&pool, "glm-upgraded", "glm", None).await?;
+    insert_standalone_endpoint(&pool, "ds-upgraded", "deepseek", None).await?;
 
     pool.close().await;
     store.close().await;

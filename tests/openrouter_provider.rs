@@ -111,6 +111,7 @@ fn key_usage_serde_omits_absent_openrouter_sections() {
             openrouter_spend: spend,
             glm_five_hour: None,
             glm_weekly: None,
+            deepseek_balance: None,
         }
     }
     // A key carrying no OpenRouter sections must not serialize them.

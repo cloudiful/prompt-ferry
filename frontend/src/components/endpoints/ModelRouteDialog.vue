@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import { computed } from 'vue'
+import ProviderIcon from '@/components/providers/ProviderIcon.vue'
 import type { ModelRouteForm } from '@/models'
 import type { ProviderEndpoint, User } from '@/generated/admin-api'
+import type { EndpointOption } from '@/models/endpoints'
 
 const props = defineProps<{
   busy: boolean
   endpoints: ProviderEndpoint[]
-  endpointOptions: Array<{ label: string; value: string }>
+  endpointOptions: EndpointOption[]
   header: string
   t: TranslateFn
   users: User[]
@@ -172,7 +174,11 @@ const targetColumns = computed<
                   label-key="label"
                   value-key="value"
                   :placeholder="t('endpoint')"
-                />
+                >
+                  <template #item-leading="{ item }">
+                    <ProviderIcon :provider="item.provider" size="sm" />
+                  </template>
+                </USelect>
                 <UInput
                   v-model="row.original.upstream_model"
                   class="w-full"

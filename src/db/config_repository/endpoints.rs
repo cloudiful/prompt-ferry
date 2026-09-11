@@ -140,6 +140,9 @@ impl super::ConfigRepository {
                         crate::standalone_config::EndpointProvider::Glm => {
                             crate::db::EndpointProvider::Glm
                         }
+                        crate::standalone_config::EndpointProvider::DeepSeek => {
+                            crate::db::EndpointProvider::DeepSeek
+                        }
                         crate::standalone_config::EndpointProvider::Generic => {
                             crate::db::EndpointProvider::Generic
                         }

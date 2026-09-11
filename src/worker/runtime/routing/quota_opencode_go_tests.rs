@@ -67,11 +67,13 @@ fn opencode_go_key_usage(
         openrouter_spend: None,
         glm_five_hour: None,
         glm_weekly: None,
+        deepseek_balance: None,
     }
 }
 
 fn opencode_go_usage_response(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: db::EndpointProvider::OpencodeGo,
         provider_region: None,
         keys,

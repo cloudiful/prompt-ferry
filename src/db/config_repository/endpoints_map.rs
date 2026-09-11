@@ -108,6 +108,7 @@ pub(super) fn provider_from_sqlite(provider: ScEndpointProvider) -> EndpointProv
         ScEndpointProvider::OpencodeGo => EndpointProvider::OpencodeGo,
         ScEndpointProvider::OpenRouter => EndpointProvider::OpenRouter,
         ScEndpointProvider::Glm => EndpointProvider::Glm,
+        ScEndpointProvider::DeepSeek => EndpointProvider::DeepSeek,
         ScEndpointProvider::Generic => EndpointProvider::Generic,
     }
 }
@@ -142,6 +143,7 @@ mod tests {
             (ScEndpointProvider::OpencodeGo, EndpointProvider::OpencodeGo),
             (ScEndpointProvider::OpenRouter, EndpointProvider::OpenRouter),
             (ScEndpointProvider::Glm, EndpointProvider::Glm),
+            (ScEndpointProvider::DeepSeek, EndpointProvider::DeepSeek),
             (ScEndpointProvider::Generic, EndpointProvider::Generic),
         ] {
             assert_eq!(provider_from_sqlite(sc), expected);

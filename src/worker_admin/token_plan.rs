@@ -7,6 +7,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::command_code_usage::{COMMAND_CODE_BASE, fetch_command_code_key_usage};
+use super::deepseek_usage::fetch_deepseek_key_usage;
 use super::glm_usage::fetch_glm_key_usage;
 use super::json_scalars::{
     epoch_millis, failed_key, truncate_message, value_as_f64, value_as_i64, value_as_string,
@@ -39,6 +40,9 @@ pub async fn fetch_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
         // (`/api/monitor/usage/quota/limit` against the configured base).
         // The region stays NULL for GLM, matching the P1 contract.
         EndpointProvider::Glm => fetch_glm_endpoint_usage(endpoint).await,
+        // DeepSeek (issue #287 P0) has its own account-balance fetcher
+        // (`/user/balance`); the flag alone drives routing weight.
+        EndpointProvider::DeepSeek => fetch_deepseek_endpoint_usage(endpoint).await,
         EndpointProvider::Generic => Err(anyhow!("endpoint provider has no token plan API")),
     }
 }
@@ -78,6 +82,7 @@ async fn fetch_minimax_endpoint_usage(
     .await;
 
     Ok(TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: endpoint.provider,
         provider_region: Some(region),
         keys: key_results,
@@ -101,6 +106,7 @@ async fn fetch_command_code_endpoint_usage(
     .await;
 
     Ok(TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: endpoint.provider,
         provider_region: endpoint.provider_region,
         keys: key_results,
@@ -124,6 +130,7 @@ async fn fetch_opencode_go_endpoint_usage(
     .await;
 
     Ok(TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: endpoint.provider,
         provider_region: endpoint.provider_region,
         keys: key_results,
@@ -154,6 +161,7 @@ async fn fetch_openrouter_endpoint_usage(
     .await;
 
     Ok(TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: endpoint.provider,
         provider_region: endpoint.provider_region,
         keys: key_results,
@@ -182,6 +190,38 @@ async fn fetch_glm_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
     .await;
 
     Ok(TokenPlanUsageResponse {
+        local_today_tokens: None,
+        provider: endpoint.provider,
+        provider_region: endpoint.provider_region,
+        keys: key_results,
+    })
+}
+
+async fn fetch_deepseek_endpoint_usage(
+    endpoint: &ProviderEndpoint,
+) -> Result<TokenPlanUsageResponse> {
+    let keys = enabled_keys(endpoint);
+    if keys.is_empty() {
+        return Err(anyhow!("endpoint has no enabled API key"));
+    }
+
+    let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
+    // Issue #248: preset providers derive their official base; the stored
+    // base is only a fallback for a legacy/custom host.
+    let base = crate::upstream_presets::route_base_or_stored(
+        EndpointProvider::DeepSeek,
+        &endpoint.base_url,
+        crate::config::NativeApi::Chat,
+    );
+    let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
+        fetch_deepseek_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
+    }))
+    .buffer_unordered(MAX_CONCURRENT_KEY_REQUESTS)
+    .collect::<Vec<_>>()
+    .await;
+
+    Ok(TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: endpoint.provider,
         provider_region: endpoint.provider_region,
         keys: key_results,
@@ -265,6 +305,7 @@ async fn fetch_minimax_key_usage(
             openrouter_spend: None,
             glm_five_hour: None,
             glm_weekly: None,
+            deepseek_balance: None,
         },
         Err((error_code, error_message)) => {
             failed_key(key_id, key_label, Some(status), error_code, error_message)

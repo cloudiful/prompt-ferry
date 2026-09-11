@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TokenPlanUsageResponse } from '@/generated/admin-api'
 import {
+  formatMoney,
   useTokenPlanTicker,
   useTokenPlanWindowEntries,
 } from '@/composables/useTokenPlanWindowEntries'
@@ -202,6 +203,51 @@ const {
                       >
                         {{ t('tokenPlanFreeTierHint') }}
                       </p>
+                    </div>
+                    <div
+                      v-if="key.deepseek_balance"
+                      class="grid gap-1 rounded-md border border-default p-3"
+                    >
+                      <div class="break-words font-medium text-highlighted">
+                        {{ t('tokenPlanDeepSeekBalance') }}
+                      </div>
+                      <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                        <span
+                          >{{ t('status') }}:
+                          {{
+                            key.deepseek_balance.is_available
+                              ? t('tokenPlanAvailable')
+                              : t('tokenPlanUnavailable')
+                          }}</span
+                        >
+                        <span
+                          >{{ t('tokenPlanTotalBalance') }}:
+                          {{
+                            formatMoney(
+                              key.deepseek_balance.currency,
+                              key.deepseek_balance.total_balance,
+                            )
+                          }}</span
+                        >
+                        <span
+                          >{{ t('tokenPlanGrantedBalance') }}:
+                          {{
+                            formatMoney(
+                              key.deepseek_balance.currency,
+                              key.deepseek_balance.granted_balance,
+                            )
+                          }}</span
+                        >
+                        <span
+                          >{{ t('tokenPlanToppedUpBalance') }}:
+                          {{
+                            formatMoney(
+                              key.deepseek_balance.currency,
+                              key.deepseek_balance.topped_up_balance,
+                            )
+                          }}</span
+                        >
+                      </div>
                     </div>
                     <div
                       v-if="key.openrouter_spend"

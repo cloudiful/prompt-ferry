@@ -118,6 +118,7 @@ pub(crate) async fn fetch_openrouter_key_usage(
         openrouter_spend: Some(parsed.spend),
         glm_five_hour: None,
         glm_weekly: None,
+        deepseek_balance: None,
     }
 }
 

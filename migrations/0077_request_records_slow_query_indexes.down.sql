@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS idx_request_records_usage_covering;
+DROP INDEX IF EXISTS idx_request_records_inflight_request_id;

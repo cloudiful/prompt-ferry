@@ -16,6 +16,7 @@ mod buckets;
 mod cleanup;
 mod content_maintenance;
 mod detail;
+mod endpoint_usage;
 mod insert;
 mod metadata_maintenance;
 mod overview;
@@ -45,6 +46,7 @@ pub use detail::{
     latest_usage_event_locator_by_conversation,
     latest_usage_event_locator_by_provider_conversation_key,
 };
+pub use endpoint_usage::endpoint_today_tokens;
 pub use insert::{
     RequestRecordStateInput, record_request_record, record_request_record_with_raw_store,
     record_request_state,

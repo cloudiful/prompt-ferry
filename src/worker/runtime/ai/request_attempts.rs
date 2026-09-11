@@ -7,10 +7,14 @@ use crate::{db, openai_compat::CompatError};
 use super::super::{
     RequestExecutionContext, check_named_request_budget,
     context::{RouteExecutionContext, RuntimeServices},
+    materialize_route_api_key_selection_with_quota,
     request_assembly::{BufferedBridgeRequest, RequestCancellation},
 };
 use super::{
-    forward::{ResponseForwardContext, ResponseLoggingContext, forward_upstream_response},
+    forward::{
+        QuotaFailoverSignal, ResponseForwardContext, ResponseLoggingContext,
+        forward_upstream_response, respond_upstream_error,
+    },
     request_logging::log_prepared_upstream_summary,
     request_support::prepare_upstream_request_for_route,
     upstream::{build_upstream_request, upstream_url_for_route},
@@ -18,6 +22,9 @@ use super::{
 
 const MAX_UPSTREAM_ATTEMPTS: usize = 3;
 const RETRY_BACKOFF_MS: [u64; 2] = [250, 1000];
+/// Maximum number of same-endpoint API key rotations for a non-stream
+/// upstream quota-exhaustion response before the error is surfaced.
+const MAX_QUOTA_FAILOVERS: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UpstreamFailurePhase {
@@ -106,7 +113,7 @@ pub(super) async fn forward_route_request(
         content_logging_enabled,
         raw_content_logging_enabled,
     } = input;
-    let route_ctx = RouteExecutionContext::new(route);
+    let mut route = route.clone();
     if let Some(state) = services.admin_state()
         && !route.route_id.is_nil()
         && let Some(endpoint) = db::get_endpoint(&state.pool, route.route_id).await?
@@ -130,7 +137,7 @@ pub(super) async fn forward_route_request(
 
     let prepared = match prepare_upstream_request_for_route(
         services.admin_state(),
-        route,
+        &route,
         request,
         request_ctx.request_prompt_log.conversation_id,
     )
@@ -139,7 +146,7 @@ pub(super) async fn forward_route_request(
         Ok(prepared) => prepared,
         Err(err) => return Ok(ForwardOutcome::CompatError(err)),
     };
-    let upstream_url = upstream_url_for_route(route, &prepared.path);
+    let upstream_url = upstream_url_for_route(&route, &prepared.path);
     if let Some(state) = services.admin_state() {
         let _ = db::record_request_state(
             &state.pool,
@@ -155,21 +162,7 @@ pub(super) async fn forward_route_request(
         )
         .await;
     }
-    log_prepared_upstream_summary(route, &prepared);
-    let response_ctx = ResponseForwardContext {
-        route_ctx: &route_ctx,
-        request,
-        request_ctx,
-        upstream_redacted_request_json: prepared.upstream_redacted_request_json.clone(),
-        upstream_restore_session: prepared.upstream_restore_session.clone(),
-        logging: ResponseLoggingContext {
-            redact_content,
-            content_logging_enabled,
-            raw_content_logging_enabled,
-        },
-        response_adapter: prepared.response_adapter,
-        services,
-    };
+    log_prepared_upstream_summary(&route, &prepared);
     let cancellation = services
         .runtime_state
         .request_cancellation(request.request_id.as_str())
@@ -177,13 +170,30 @@ pub(super) async fn forward_route_request(
     let mut retried = false;
     let mut last_retried_phase = None;
     let mut attempt = 0usize;
+    let mut quota_failovers = 0usize;
     loop {
         let attempt_number = attempt + 1;
+        let route_ctx = RouteExecutionContext::new(&route);
+        let response_ctx = ResponseForwardContext {
+            route_ctx: &route_ctx,
+            request,
+            request_ctx,
+            upstream_redacted_request_json: prepared.upstream_redacted_request_json.clone(),
+            upstream_restore_session: prepared.upstream_restore_session.clone(),
+            logging: ResponseLoggingContext {
+                redact_content,
+                content_logging_enabled,
+                raw_content_logging_enabled,
+            },
+            response_adapter: prepared.response_adapter,
+            services,
+            quota_failover_enabled: !route.api_keys.is_empty(),
+        };
         let send_result = build_upstream_request(
             &services.client,
             method,
             &upstream_url,
-            route,
+            &route,
             &prepared.body,
             &request.headers,
             request_ctx.request_prompt_log.conversation_id,
@@ -199,7 +209,7 @@ pub(super) async fn forward_route_request(
                     retryable,
                 };
                 if failure.retryable && attempt_number < MAX_UPSTREAM_ATTEMPTS {
-                    if retry_after_backoff(request_ctx, route, attempt, &failure, &cancellation)
+                    if retry_after_backoff(request_ctx, &route, attempt, &failure, &cancellation)
                         .await
                     {
                         retried = true;
@@ -213,7 +223,7 @@ pub(super) async fn forward_route_request(
                     });
                 }
                 if failure.retryable {
-                    log_retry_exhausted(request_ctx, route, attempt_number, &failure);
+                    log_retry_exhausted(request_ctx, &route, attempt_number, &failure);
                 }
                 return Ok(ForwardOutcome::TransportError {
                     error: failure.error,
@@ -228,18 +238,41 @@ pub(super) async fn forward_route_request(
                         if retried {
                             log_retry_succeeded(
                                 request_ctx,
-                                route,
+                                &route,
                                 attempt_number,
                                 last_retried_phase,
                             );
                         }
                         return Ok(ForwardOutcome::Handled);
                     }
+                    AttemptOutcome::QuotaFailover(signal) => {
+                        if let Some(failover_route) = next_quota_failover_route(
+                            &route,
+                            request,
+                            request_ctx,
+                            services,
+                            quota_failovers,
+                        ) {
+                            log_quota_failover_retry(request_ctx, &route, &failover_route);
+                            quota_failovers += 1;
+                            route = failover_route;
+                            attempt += 1;
+                            continue;
+                        }
+                        respond_upstream_error(
+                            &response_ctx,
+                            signal.status,
+                            signal.body,
+                            signal.response_headers,
+                        )
+                        .await?;
+                        return Ok(ForwardOutcome::Handled);
+                    }
                     AttemptOutcome::Failure(failure) => {
                         if failure.retryable && attempt_number < MAX_UPSTREAM_ATTEMPTS {
                             if retry_after_backoff(
                                 request_ctx,
-                                route,
+                                &route,
                                 attempt,
                                 &failure,
                                 &cancellation,
@@ -257,7 +290,7 @@ pub(super) async fn forward_route_request(
                             });
                         }
                         if failure.retryable {
-                            log_retry_exhausted(request_ctx, route, attempt_number, &failure);
+                            log_retry_exhausted(request_ctx, &route, attempt_number, &failure);
                         }
                         return Ok(ForwardOutcome::TransportError {
                             error: failure.error,
@@ -274,6 +307,7 @@ pub(super) async fn forward_route_request(
 enum AttemptOutcome {
     Handled,
     Failure(UpstreamAttemptFailure),
+    QuotaFailover(QuotaFailoverSignal),
 }
 
 async fn handle_attempt_response(
@@ -284,20 +318,84 @@ async fn handle_attempt_response(
         Ok(()) => Ok(AttemptOutcome::Handled),
         Err(err) => match err.downcast::<UpstreamAttemptFailure>() {
             Ok(failure) => Ok(AttemptOutcome::Failure(failure)),
-            Err(err) => {
-                let phase = if super::super::context::is_bridge_send_error(&err) {
-                    UpstreamFailurePhase::RelayBridge
-                } else {
-                    UpstreamFailurePhase::LocalProcessing
-                };
-                Ok(AttemptOutcome::Failure(UpstreamAttemptFailure {
-                    phase,
-                    error: err,
-                    retryable: false,
-                }))
-            }
+            Err(err) => match err.downcast::<QuotaFailoverSignal>() {
+                Ok(signal) => Ok(AttemptOutcome::QuotaFailover(signal)),
+                Err(err) => {
+                    let phase = if super::super::context::is_bridge_send_error(&err) {
+                        UpstreamFailurePhase::RelayBridge
+                    } else {
+                        UpstreamFailurePhase::LocalProcessing
+                    };
+                    Ok(AttemptOutcome::Failure(UpstreamAttemptFailure {
+                        phase,
+                        error: err,
+                        retryable: false,
+                    }))
+                }
+            },
         },
     }
+}
+
+/// Re-select an API key on the same endpoint after a live quota-exhaustion
+/// response, excluding the key that just failed. Returns `None` when there
+/// is no other key to rotate to or the failover budget is exhausted.
+fn next_quota_failover_route(
+    route: &db::RouteConfig,
+    request: &BufferedBridgeRequest,
+    request_ctx: &RequestExecutionContext,
+    services: &RuntimeServices,
+    quota_failovers: usize,
+) -> Option<db::RouteConfig> {
+    if quota_failovers >= MAX_QUOTA_FAILOVERS {
+        return None;
+    }
+    let quota_cache = services.admin_state().map(|state| &state.token_plan_quota);
+    let failed_key_id = route.endpoint_key_id;
+    let failed_secret = route.api_key.as_str();
+    let mut candidate = route.clone();
+    candidate.api_keys.retain(|key| {
+        key.endpoint_id != route.route_id
+            || (Some(key.key_id) != failed_key_id && key.api_key.as_str() != failed_secret)
+    });
+    if candidate.api_keys.is_empty() {
+        return None;
+    }
+    let selection = materialize_route_api_key_selection_with_quota(
+        &candidate,
+        request,
+        &request_ctx.request_prompt_log,
+        quota_cache,
+    );
+    if selection.selection.secret == route.api_key {
+        return None;
+    }
+    candidate.api_key = selection.selection.secret;
+    candidate.endpoint_key_id = selection.selection.key_id;
+    candidate.endpoint_key_label = selection.selection.key_label;
+    candidate.route_selection_reason = db::RouteSelectionReason::QuotaFailover;
+    Some(candidate)
+}
+
+fn log_quota_failover_retry(
+    request_ctx: &RequestExecutionContext,
+    route: &db::RouteConfig,
+    failover_route: &db::RouteConfig,
+) {
+    tracing::warn!(
+        event = "quota_failover",
+        request_id = %request_ctx.request_id,
+        endpoint_id = %route.route_id,
+        from_endpoint_key_id = route
+            .endpoint_key_id
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
+        to_endpoint_key_id = failover_route
+            .endpoint_key_id
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
+        "rotating endpoint API key after live quota-exhaustion response"
+    );
 }
 
 async fn retry_after_backoff(

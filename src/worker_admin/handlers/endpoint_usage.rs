@@ -23,16 +23,19 @@ pub(super) async fn token_plan_usage(
         // the same way as the other four providers. Generic still has no
         // token plan API.
         db::EndpointProvider::Glm => "GLM",
+        // DeepSeek (issue #287 P0): account balance fetcher (`/user/balance`).
+        db::EndpointProvider::DeepSeek => "DeepSeek",
         db::EndpointProvider::Generic => {
             return error(
                 StatusCode::BAD_REQUEST,
                 "unsupported_provider",
-                "token plan usage is only available for MiniMax, CommandCode, OpencodeGo, OpenRouter and GLM endpoints",
+                "token plan usage is only available for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM and DeepSeek endpoints",
             );
         }
     };
-    // Region stays mandatory only for MiniMax; CommandCode, OpencodeGo and
-    // OpenRouter carry no region (NULL) and must not be rejected here.
+    // Region stays mandatory only for MiniMax; the other presets
+    // (CommandCode, OpencodeGo, OpenRouter, GLM, DeepSeek) carry no region
+    // (NULL) and must not be rejected here.
     if endpoint.provider == db::EndpointProvider::Minimax && endpoint.provider_region.is_none() {
         return error(
             StatusCode::BAD_REQUEST,
@@ -58,11 +61,33 @@ pub(super) async fn token_plan_usage(
         .refresh_if_due(&state.pool, endpoint_id)
         .await
     {
-        Ok(Some(usage)) => Json(usage).into_response(),
+        Ok(Some(mut usage)) => {
+            // Balance-based providers (issue #287 P2) pair the account balance
+            // with a locally aggregated "today usage" pill. OpenRouter reports
+            // its own spend so this is only a fallback there; DeepSeek has no
+            // spend endpoint and always relies on the local figure. The value
+            // is attached to the returned clone so the routing cache keeps the
+            // provider-only snapshot.
+            if matches!(
+                endpoint.provider,
+                db::EndpointProvider::OpenRouter | db::EndpointProvider::DeepSeek,
+            ) {
+                match db::endpoint_today_tokens(&state.pool, endpoint_id, chrono::Utc::now()).await
+                {
+                    Ok(tokens) => usage.local_today_tokens = Some(tokens),
+                    Err(err) => tracing::warn!(
+                        endpoint_id = %endpoint_id,
+                        error = %err,
+                        "failed to aggregate local today tokens for token-plan badge"
+                    ),
+                }
+            }
+            Json(usage).into_response()
+        }
         Ok(None) => error(
             StatusCode::BAD_REQUEST,
             "unsupported_provider",
-            "token plan usage is only available for MiniMax, CommandCode, OpencodeGo, OpenRouter and GLM endpoints",
+            "token plan usage is only available for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM and DeepSeek endpoints",
         ),
         Err(err) => internal(&state, err),
     }

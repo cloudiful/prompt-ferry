@@ -18,7 +18,7 @@ use crate::{
 use chrono::Utc;
 
 #[tokio::test]
-async fn exhausted_bound_key_returns_target_unavailable() {
+async fn exhausted_bound_key_migrates_to_alternate_key_on_same_endpoint() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
     let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
@@ -79,7 +79,7 @@ async fn exhausted_bound_key_returns_target_unavailable() {
             ..RequestPromptLog::default()
         },
     );
-    let error = match select_route_for_candidate(
+    let selected = select_route_for_candidate(
         &services,
         &request_ctx,
         &candidate,
@@ -88,16 +88,26 @@ async fn exhausted_bound_key_returns_target_unavailable() {
         Some("key-a"),
     )
     .await
-    {
-        Ok(_) => panic!("exhausted bound key must not fail over to another key"),
-        Err(error) => error,
-    };
-    assert_eq!(
-        error
-            .downcast_ref::<RouteAffinityError>()
-            .map(|error| error.code),
-        Some("responses_session_affinity_target_unavailable")
+    .expect("exhausted bound key must migrate within the candidate")
+    .expect("migration must select a route");
+    assert_ne!(
+        selected.route.endpoint_key_id,
+        Some(bound_key_id),
+        "the exhausted bound unit must be removed for the redraw"
     );
+    assert_ne!(selected.route.api_key, "key-a");
+    assert_eq!(
+        selected.route.route_selection_reason,
+        db::RouteSelectionReason::QuotaFailover
+    );
+
+    let stored = replay_cache
+        .response_affinity()
+        .get(&cache_key)
+        .await
+        .expect("affinity read")
+        .expect("binding exists");
+    assert_eq!(stored.endpoint_key_id, selected.route.endpoint_key_id);
 }
 
 pub(super) fn request() -> BufferedBridgeRequest {
@@ -121,6 +131,7 @@ pub(super) fn request() -> BufferedBridgeRequest {
 
 fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: db::EndpointProvider::Minimax,
         provider_region: Some(db::EndpointRegion::Cn),
         keys: keys
@@ -147,6 +158,7 @@ fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
                 openrouter_spend: None,
                 glm_five_hour: None,
                 glm_weekly: None,
+                deepseek_balance: None,
             })
             .collect(),
     }
@@ -207,6 +219,7 @@ fn command_code_key(
         openrouter_spend: None,
         glm_five_hour: None,
         glm_weekly: None,
+        deepseek_balance: None,
     }
 }
 
@@ -214,6 +227,7 @@ fn command_code_usage(
     keys: &[(uuid::Uuid, &str, Option<f64>, Option<f64>)],
 ) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: db::EndpointProvider::CommandCode,
         provider_region: None,
         keys: keys
@@ -250,7 +264,7 @@ pub(super) async fn bind_key(
 }
 
 #[tokio::test]
-async fn exhausted_command_code_bound_key_returns_target_unavailable() {
+async fn exhausted_command_code_bound_key_migrates_to_alternate_key() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
     let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
@@ -303,7 +317,7 @@ async fn exhausted_command_code_bound_key_returns_target_unavailable() {
             ..RequestPromptLog::default()
         },
     );
-    let error = match select_route_for_candidate(
+    let selected = select_route_for_candidate(
         &services,
         &request_ctx,
         &candidate,
@@ -312,15 +326,17 @@ async fn exhausted_command_code_bound_key_returns_target_unavailable() {
         Some("key-a"),
     )
     .await
-    {
-        Ok(_) => panic!("exhausted command_code bound key must not fail over to another key"),
-        Err(error) => error,
-    };
+    .expect("exhausted command_code bound key must migrate within the candidate")
+    .expect("migration must select a route");
+    assert_ne!(
+        selected.route.endpoint_key_id,
+        Some(bound_key_id),
+        "the exhausted command_code bound unit must be removed"
+    );
+    assert_ne!(selected.route.api_key, "key-a");
     assert_eq!(
-        error
-            .downcast_ref::<RouteAffinityError>()
-            .map(|error| error.code),
-        Some("responses_session_affinity_target_unavailable")
+        selected.route.route_selection_reason,
+        db::RouteSelectionReason::QuotaFailover
     );
 }
 
@@ -376,4 +392,239 @@ async fn payg_command_code_bound_key_without_windows_is_still_honored() {
     .expect("payg bound key without windows must still route")
     .expect("payg bound key must select a route");
     assert_eq!(selected.route.endpoint_key_id, Some(bound_key_id));
+}
+
+async fn bind_previous_response_key(
+    replay_cache: &ReplayCache,
+    rule_id: uuid::Uuid,
+    previous_response_id: &str,
+    endpoint_id: uuid::Uuid,
+    key_id: uuid::Uuid,
+    fingerprint_secret: &str,
+) {
+    let cache_key = ResponseAffinityStore::cache_key(
+        1,
+        rule_id,
+        &format!("previous_response_id:{previous_response_id}"),
+    );
+    replay_cache
+        .response_affinity()
+        .get_or_create(
+            &cache_key,
+            &ResponseAffinityBinding {
+                endpoint_id,
+                endpoint_key_id: Some(key_id),
+                endpoint_key_fingerprint: api_key_fingerprint(fingerprint_secret),
+            },
+        )
+        .await
+        .expect("binding should be stored");
+}
+
+#[tokio::test]
+async fn exhausted_bound_key_migrates_to_another_candidate_target_when_no_alternate_key() {
+    let replay_cache = ReplayCache::for_tests();
+    let runtime_state = super::super::WorkerRuntimeState::default();
+    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let candidate = session_affinity_candidate();
+    let bound_target = candidate.targets.first().expect("bound target exists");
+    let endpoint_id = bound_target.endpoint_id;
+    let bound_key_id = bound_target.api_keys[0].key_id;
+    let other_target = candidate.targets.get(1).expect("second target exists");
+    let other_endpoint_id = other_target.endpoint_id;
+    let other_key_id = other_target.api_keys[0].key_id;
+
+    let conversation_id = uuid::Uuid::new_v4();
+    let cache_key = ResponseAffinityStore::cache_key(
+        1,
+        candidate.rule_id,
+        &format!("conversation:{conversation_id}"),
+    );
+    replay_cache
+        .response_affinity()
+        .get_or_create(
+            &cache_key,
+            &ResponseAffinityBinding {
+                endpoint_id,
+                endpoint_key_id: Some(bound_key_id),
+                endpoint_key_fingerprint: api_key_fingerprint("key-a"),
+            },
+        )
+        .await
+        .expect("binding should be stored");
+    services
+        .admin_state()
+        .expect("admin state")
+        .token_plan_quota
+        .store_for_test(
+            endpoint_id,
+            usage_with_keys(&[(bound_key_id, "primary", 0.0)]),
+        )
+        .await;
+
+    let request_ctx = request_context(
+        runtime_state.worker_instance_id(),
+        RequestPromptLog {
+            conversation_id: Some(conversation_id),
+            conversation_seq: Some(1),
+            preferred_endpoint_id: Some(endpoint_id),
+            ..RequestPromptLog::default()
+        },
+    );
+    let selected = select_route_for_candidate(
+        &services,
+        &request_ctx,
+        &candidate,
+        &request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .expect("exhausted bound key must migrate to another candidate target")
+    .expect("migration must select a route");
+    assert_eq!(selected.route.route_id, other_endpoint_id);
+    assert_eq!(selected.route.endpoint_key_id, Some(other_key_id));
+    assert_eq!(
+        selected.route.route_selection_reason,
+        db::RouteSelectionReason::QuotaFailover
+    );
+
+    let stored = replay_cache
+        .response_affinity()
+        .get(&cache_key)
+        .await
+        .expect("affinity read")
+        .expect("binding exists");
+    assert_eq!(stored.endpoint_id, other_endpoint_id);
+    assert_eq!(stored.endpoint_key_id, Some(other_key_id));
+}
+
+#[tokio::test]
+async fn previous_response_chain_does_not_leave_the_bound_endpoint() {
+    let replay_cache = ReplayCache::for_tests();
+    let runtime_state = super::super::WorkerRuntimeState::default();
+    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let candidate = session_affinity_candidate();
+    let bound_target = candidate.targets.first().expect("bound target exists");
+    let endpoint_id = bound_target.endpoint_id;
+    let bound_key_id = bound_target.api_keys[0].key_id;
+
+    let previous_response_id = "resp_prev_1";
+    bind_previous_response_key(
+        &replay_cache,
+        candidate.rule_id,
+        previous_response_id,
+        endpoint_id,
+        bound_key_id,
+        "key-a",
+    )
+    .await;
+    services
+        .admin_state()
+        .expect("admin state")
+        .token_plan_quota
+        .store_for_test(
+            endpoint_id,
+            usage_with_keys(&[(bound_key_id, "primary", 0.0)]),
+        )
+        .await;
+
+    let request_ctx = request_context(
+        runtime_state.worker_instance_id(),
+        RequestPromptLog {
+            request_previous_response_id: Some(previous_response_id.to_string()),
+            preferred_endpoint_id: Some(endpoint_id),
+            ..RequestPromptLog::default()
+        },
+    );
+    let error = match select_route_for_candidate(
+        &services,
+        &request_ctx,
+        &candidate,
+        &request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    {
+        Ok(_) => panic!("previous_response_id chains must not migrate to another endpoint"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error
+            .downcast_ref::<RouteAffinityError>()
+            .map(|error| error.code),
+        Some("responses_session_affinity_target_unavailable")
+    );
+}
+
+#[tokio::test]
+async fn previous_response_chain_rotates_key_on_the_same_endpoint() {
+    let replay_cache = ReplayCache::for_tests();
+    let runtime_state = super::super::WorkerRuntimeState::default();
+    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let mut candidate = session_affinity_candidate();
+    let target = candidate.targets.first_mut().expect("target exists");
+    let endpoint_id = target.endpoint_id;
+    let bound_key_id = target.api_keys[0].key_id;
+    let alternate_key_id = uuid::Uuid::new_v4();
+    target.api_keys.push(db::EndpointApiKey {
+        key_id: alternate_key_id,
+        endpoint_id,
+        key_label: "alternate".to_string(),
+        api_key: "alternate-key".to_string(),
+        position: 1,
+        enabled: true,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    });
+
+    let previous_response_id = "resp_prev_2";
+    bind_previous_response_key(
+        &replay_cache,
+        candidate.rule_id,
+        previous_response_id,
+        endpoint_id,
+        bound_key_id,
+        "key-a",
+    )
+    .await;
+    services
+        .admin_state()
+        .expect("admin state")
+        .token_plan_quota
+        .store_for_test(
+            endpoint_id,
+            usage_with_keys(&[
+                (bound_key_id, "primary", 0.0),
+                (alternate_key_id, "alternate", 100.0),
+            ]),
+        )
+        .await;
+
+    let request_ctx = request_context(
+        runtime_state.worker_instance_id(),
+        RequestPromptLog {
+            request_previous_response_id: Some(previous_response_id.to_string()),
+            preferred_endpoint_id: Some(endpoint_id),
+            ..RequestPromptLog::default()
+        },
+    );
+    let selected = select_route_for_candidate(
+        &services,
+        &request_ctx,
+        &candidate,
+        &request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .expect("chain bound key must rotate within the endpoint")
+    .expect("migration must select a route");
+    assert_eq!(selected.route.route_id, endpoint_id);
+    assert_eq!(selected.route.endpoint_key_id, Some(alternate_key_id));
+    assert_eq!(
+        selected.route.route_selection_reason,
+        db::RouteSelectionReason::QuotaFailover
+    );
 }

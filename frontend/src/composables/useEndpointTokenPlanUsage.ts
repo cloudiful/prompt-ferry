@@ -22,7 +22,8 @@ export function useEndpointTokenPlanUsage(
         endpoint.provider !== 'command_code' &&
         endpoint.provider !== 'opencode_go' &&
         endpoint.provider !== 'openrouter' &&
-        endpoint.provider !== 'glm')
+        endpoint.provider !== 'glm' &&
+        endpoint.provider !== 'deepseek')
     )
       return
     endpointId.value = nextEndpointId

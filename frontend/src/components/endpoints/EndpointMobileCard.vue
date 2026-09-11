@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, type PropType } from 'vue'
+import ProviderIcon from '@/components/providers/ProviderIcon.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import {
-  progressColor,
+  tokenPlanBadgePills,
   useTokenPlanBadges,
 } from '@/composables/useTokenPlanBadges'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
@@ -30,6 +31,7 @@ const QUOTA_PROVIDERS = new Set<EndpointListItemView['provider']>([
   'opencode_go',
   'openrouter',
   'glm',
+  'deepseek',
 ])
 
 const isQuotaProvider = computed(() => QUOTA_PROVIDERS.has(props.item.provider))
@@ -39,17 +41,10 @@ const isQuotaProvider = computed(() => QUOTA_PROVIDERS.has(props.item.provider))
 // already dedupes against the table's prefetch, so this is free.
 prefetchTokenPlanBatch([props.item.endpoint_id], 4)
 
-function badgeColorForPercent(percent: number): string {
-  return progressColor({
-    end_at: null,
-    remaining_percent: percent,
-  })
-}
-
 // Inline usage-badge subcomponent for the mobile card. Compact pill
-// pair stacked vertically so the wider card surface can afford the
-// verbose "短窗 42% / 长窗 73%" labels; OpenRouter collapses to a
-// single balance pill + the "无额度" fallback when no cap is set.
+// pair wrapping across the row so the wider card surface can afford the
+// verbose "短窗 42% / 长窗 73%" labels; balance providers pair their
+// balance with a today-usage pill.
 const EndpointMobileUsageBadges = defineComponent({
   name: 'EndpointMobileUsageBadges',
   props: {
@@ -63,73 +58,19 @@ const EndpointMobileUsageBadges = defineComponent({
     // edit) the badge must re-evaluate against the new endpoint id
     // without a remount.
     const badges = useTokenPlanBadges(computed(() => props.endpointId))
-    const isOpenRouter = computed(
-      () =>
-        badges.value.openrouterLimit !== null ||
-        badges.value.openrouterLimitRemaining !== null,
-    )
-    const openrouterLabel = computed(() => {
-      const lim = badges.value.openrouterLimitRemaining
-      const cap = badges.value.openrouterLimit
-      if (lim === null || cap === null) return ''
-      return `${lim.toFixed(2)} / ${cap.toFixed(2)}`
-    })
+    const pillBase =
+      'inline-flex items-center rounded-full border border-default bg-elevated px-2 py-px text-[0.74rem] font-semibold whitespace-nowrap'
+
     return () => {
-      const t = props.t
-      const pillBase =
-        'inline-flex items-center rounded-full border border-default bg-elevated px-2 py-px text-[0.74rem] font-semibold whitespace-nowrap'
-      const shortPill =
-        badges.value.short !== null
-          ? h(
-              'span',
-              {
-                class: pillBase,
-                style: { color: badgeColorForPercent(badges.value.short) },
-                title: t('tokenPlanShortBadgeHint'),
-              },
-              `${t('tokenPlanShortBadge')} ${badges.value.short.toFixed(0)}%`,
-            )
-          : null
-      const longPill =
-        badges.value.long !== null
-          ? h(
-              'span',
-              {
-                class: pillBase,
-                style: { color: badgeColorForPercent(badges.value.long) },
-                title: t('tokenPlanLongBadgeHint'),
-              },
-              `${t('tokenPlanLongBadge')} ${badges.value.long.toFixed(0)}%`,
-            )
-          : null
-      if (isOpenRouter.value) {
-        const label =
-          badges.value.openrouterRemaining !== null
-            ? `${t('tokenPlanOpenRouterRemaining')} ${badges.value.openrouterRemaining.toFixed(0)}%`
-            : t('tokenPlanNoQuota')
-        const openrouterColor =
-          badges.value.openrouterRemaining !== null
-            ? badgeColorForPercent(badges.value.openrouterRemaining)
-            : ''
-        return h(
+      const nodes = tokenPlanBadgePills(badges.value, props.t).map((pill) =>
+        h(
           'span',
-          { class: 'inline-flex items-center gap-1' },
-          h(
-            'span',
-            {
-              class: pillBase,
-              style: { color: openrouterColor },
-              title: openrouterLabel.value,
-            },
-            label,
-          ),
-        )
-      }
-      if (shortPill || longPill) {
-        return h('span', { class: 'flex flex-wrap items-center gap-1' }, [
-          shortPill,
-          longPill,
-        ])
+          { class: pillBase, style: { color: pill.color }, title: pill.title },
+          pill.label,
+        ),
+      )
+      if (nodes.length > 0) {
+        return h('span', { class: 'flex flex-wrap items-center gap-1' }, nodes)
       }
       return h('span', { class: 'text-[0.74rem] text-muted' }, '—')
     }
@@ -140,12 +81,17 @@ const EndpointMobileUsageBadges = defineComponent({
 <template>
   <article class="grid gap-3 rounded-xl border border-default bg-default p-3">
     <div class="flex items-start justify-between gap-2">
-      <div class="min-w-0">
-        <div class="text-[0.88rem] leading-[1.2] font-bold text-highlighted">
-          {{ item.name }}
-        </div>
-        <div class="mt-px break-words text-[0.7rem] leading-[1.35] text-dimmed">
-          {{ item.base_url }}
+      <div class="flex min-w-0 items-center gap-1.5">
+        <ProviderIcon :provider="item.provider" size="md" />
+        <div class="min-w-0">
+          <div class="text-[0.88rem] leading-[1.2] font-bold text-highlighted">
+            {{ item.name }}
+          </div>
+          <div
+            class="mt-px break-words text-[0.7rem] leading-[1.35] text-dimmed"
+          >
+            {{ item.base_url }}
+          </div>
         </div>
       </div>
     </div>

@@ -2,30 +2,27 @@ use super::super::{
     RequestExecutionContext, context::RuntimeServices, prompt_log::RequestPromptLog,
     request_assembly::BufferedBridgeRequest,
 };
-use super::quota_selection::{
-    refresh_quota_if_due, request_model, select_quota_key, stable_endpoint_api_key_score,
-};
+use super::key_pool;
+use super::quota_selection::{refresh_candidate_quota, request_model};
 use crate::{
     db, endpoint_models,
-    routing::stable_candidate_order,
-    worker_admin::{AdminState, token_plan_cache::TokenPlanQuotaCache},
+    worker_admin::{
+        AdminState,
+        token_plan_cache::{TokenPlanQuotaCache, estimate_input_tokens},
+    },
 };
 use reqwest::Client;
 use tracing::{info, warn};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PreferredRouteReason {
-    ConversationOverride,
-    Rendezvous,
-}
-
-struct PreferredRoute<'a> {
-    target: &'a db::ModelRouteCandidateTarget,
-    reason: PreferredRouteReason,
-}
-
 pub(in crate::worker::runtime) struct SelectedRoute {
     pub(in crate::worker::runtime) route: db::RouteConfig,
+}
+
+struct CandidateSelection<'a> {
+    target: &'a db::ModelRouteCandidateTarget,
+    key: db::EndpointApiKeySelection,
+    reason: db::RouteSelectionReason,
+    invalid_override: bool,
 }
 
 pub(in crate::worker::runtime) async fn discover_dynamic_model_route(
@@ -79,6 +76,9 @@ pub(in crate::worker::runtime) async fn discover_dynamic_model_route(
     discovered
 }
 
+/// Unified routing entry: one eligibility filter and one deterministic
+/// weighted draw over the whole candidate key pool. Session affinity keeps
+/// its binding shape (`endpoint_id` + key) and pins the drawn unit.
 pub(in crate::worker::runtime) async fn select_route_for_candidate(
     services: &RuntimeServices,
     request_ctx: &RequestExecutionContext,
@@ -105,39 +105,113 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
         }));
     }
 
-    let preferred = preferred_target(candidate, &request_ctx.request_prompt_log, routing_key);
-    let Some(preferred) = preferred else {
-        return Ok(None);
-    };
-    let route_selection_reason = match preferred.reason {
-        PreferredRouteReason::ConversationOverride => {
-            db::RouteSelectionReason::ConversationOverride
-        }
-        PreferredRouteReason::Rendezvous => db::RouteSelectionReason::Default,
-    };
-    let target = preferred.target;
-    refresh_quota_if_due(services, target.endpoint_id).await;
-    let key_selection = select_endpoint_api_key(
-        target,
+    let request_model = request_model(request);
+    let quota_cache = services.admin_state().map(|state| &state.token_plan_quota);
+    refresh_candidate_quota(services, candidate).await;
+    let Some(selected) = select_unified_candidate(
+        candidate,
         request,
         &request_ctx.request_prompt_log,
-        services.admin_state().map(|state| &state.token_plan_quota),
-    );
+        quota_cache,
+        request_model.as_deref(),
+        routing_key,
+    ) else {
+        return Ok(None);
+    };
     clear_invalid_conversation_endpoint_key_override(
         services,
         &request_ctx.request_prompt_log,
-        key_selection.invalid_conversation_override,
+        selected.invalid_override,
     )
     .await;
     Ok(Some(SelectedRoute {
         route: route_from_target(
-            target,
+            selected.target,
             user_id,
             candidate.rule_id,
-            key_selection.selection,
-            route_selection_reason,
+            selected.key,
+            selected.reason,
         ),
     }))
+}
+
+fn select_unified_candidate<'a>(
+    candidate: &'a db::ModelRouteCandidate,
+    request: &BufferedBridgeRequest,
+    request_prompt_log: &RequestPromptLog,
+    quota_cache: Option<&TokenPlanQuotaCache>,
+    model: Option<&str>,
+    routing_key: Option<&str>,
+) -> Option<CandidateSelection<'a>> {
+    let stable_key = routing_stable_key(request, request_prompt_log, routing_key);
+    let estimated = estimate_input_tokens(&request.body);
+
+    if let Some(endpoint_id) = request_prompt_log.conversation_override_endpoint_id
+        && let Some(target) = candidate
+            .targets
+            .iter()
+            .find(|target| target.enabled && target.endpoint_id == endpoint_id)
+    {
+        let units = key_pool::target_units(target, quota_cache, model);
+        let drawn = key_pool::draw(&units, &stable_key, quota_cache, estimated);
+        let key = drawn
+            .map(|unit| unit.selection())
+            .unwrap_or_else(|| target_secret(target));
+        let (key, invalid_override) = key_pool::apply_override(
+            target,
+            key,
+            request_prompt_log.conversation_override_endpoint_key_id,
+        );
+        return Some(CandidateSelection {
+            target,
+            key,
+            reason: db::RouteSelectionReason::ConversationOverride,
+            invalid_override,
+        });
+    }
+
+    let mut units = key_pool::candidate_units(candidate, quota_cache, model, None);
+    if units.is_empty() {
+        units = key_pool::candidate_units_without_quota(candidate, None);
+    }
+    let unit = key_pool::draw(&units, &stable_key, quota_cache, estimated)?;
+    let (key, invalid_override) = key_pool::apply_override(
+        unit.target,
+        unit.selection(),
+        request_prompt_log.conversation_override_endpoint_key_id,
+    );
+    Some(CandidateSelection {
+        target: unit.target,
+        key,
+        reason: db::RouteSelectionReason::Default,
+        invalid_override,
+    })
+}
+
+fn target_secret(target: &db::ModelRouteCandidateTarget) -> db::EndpointApiKeySelection {
+    db::EndpointApiKeySelection {
+        key_id: None,
+        key_label: None,
+        secret: target.api_key.clone(),
+    }
+}
+
+/// Session identity first (conversation / previous response / provider
+/// conversation / session header), then the caller-supplied routing key
+/// (the client key for rendezvous routing), then a stable constant.
+fn routing_stable_key(
+    request: &BufferedBridgeRequest,
+    request_prompt_log: &RequestPromptLog,
+    routing_key: Option<&str>,
+) -> String {
+    endpoint_key_stickiness_value(request, request_prompt_log)
+        .or_else(|| {
+            routing_key
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "default".to_string())
 }
 
 fn route_from_target(
@@ -163,35 +237,6 @@ fn route_from_target(
         provider: target.provider,
         service_tier: target.service_tier,
     }
-}
-
-fn preferred_target<'a>(
-    candidate: &'a db::ModelRouteCandidate,
-    request_prompt_log: &RequestPromptLog,
-    routing_key: Option<&str>,
-) -> Option<PreferredRoute<'a>> {
-    if let Some(endpoint_id) = request_prompt_log.conversation_override_endpoint_id
-        && let Some(target) = candidate
-            .targets
-            .iter()
-            .find(|target| target.endpoint_id == endpoint_id)
-    {
-        return Some(PreferredRoute {
-            target,
-            reason: PreferredRouteReason::ConversationOverride,
-        });
-    }
-    rendezvous_target(candidate, routing_key).map(|target| PreferredRoute {
-        target,
-        reason: PreferredRouteReason::Rendezvous,
-    })
-}
-
-pub(in crate::worker::runtime) fn rendezvous_target<'a>(
-    candidate: &'a db::ModelRouteCandidate,
-    routing_key: Option<&str>,
-) -> Option<&'a db::ModelRouteCandidateTarget> {
-    crate::routing::rendezvous_target(candidate, routing_key)
 }
 
 pub(super) fn endpoint_key_stickiness_value(
@@ -248,15 +293,57 @@ pub(in crate::worker::runtime) fn materialize_route_api_key_selection_with_quota
     request_prompt_log: &RequestPromptLog,
     quota_cache: Option<&TokenPlanQuotaCache>,
 ) -> EndpointApiKeySelectionResult {
-    select_api_key(
-        route.route_id,
-        &route.api_key,
-        &route.api_keys,
-        route.key_lb_enabled,
-        request,
-        request_prompt_log,
-        quota_cache,
-    )
+    let model = request_model(request);
+    let model = model.as_deref();
+    if let Some(override_key_id) = request_prompt_log.conversation_override_endpoint_key_id {
+        if let Some(selection) = key_pool::override_route_key(route, override_key_id) {
+            return EndpointApiKeySelectionResult {
+                selection,
+                invalid_conversation_override: false,
+            };
+        }
+        let (selection, _) = draw_route_key(route, request, request_prompt_log, quota_cache, model);
+        return EndpointApiKeySelectionResult {
+            selection,
+            invalid_conversation_override: true,
+        };
+    }
+    let (selection, _) = draw_route_key(route, request, request_prompt_log, quota_cache, model);
+    EndpointApiKeySelectionResult {
+        selection,
+        invalid_conversation_override: false,
+    }
+}
+
+fn draw_route_key(
+    route: &db::RouteConfig,
+    request: &BufferedBridgeRequest,
+    request_prompt_log: &RequestPromptLog,
+    quota_cache: Option<&TokenPlanQuotaCache>,
+    model: Option<&str>,
+) -> (db::EndpointApiKeySelection, bool) {
+    let units = key_pool::route_units(route, quota_cache, model);
+    let stable_key = endpoint_key_stickiness_value(request, request_prompt_log);
+    let estimated = estimate_input_tokens(&request.body);
+    if let Some(stable_key) = stable_key
+        && let Some(unit) =
+            key_pool::draw_route(&units, &stable_key, route.route_id, quota_cache, estimated)
+    {
+        return (unit.key.clone(), false);
+    }
+    units
+        .first()
+        .map(|unit| (unit.key.clone(), false))
+        .unwrap_or_else(|| {
+            (
+                db::EndpointApiKeySelection {
+                    key_id: None,
+                    key_label: None,
+                    secret: route.api_key.clone(),
+                },
+                false,
+            )
+        })
 }
 
 pub(in crate::worker::runtime) async fn clear_invalid_conversation_endpoint_key_override(
@@ -283,115 +370,7 @@ pub(in crate::worker::runtime) async fn clear_invalid_conversation_endpoint_key_
     }
 }
 
-pub(super) fn select_endpoint_api_key(
-    target: &db::ModelRouteCandidateTarget,
-    request: &BufferedBridgeRequest,
-    request_prompt_log: &RequestPromptLog,
-    quota_cache: Option<&TokenPlanQuotaCache>,
-) -> EndpointApiKeySelectionResult {
-    select_api_key(
-        target.endpoint_id,
-        &target.api_key,
-        &target.api_keys,
-        target.key_lb_enabled,
-        request,
-        request_prompt_log,
-        quota_cache,
-    )
-}
-
 pub(in crate::worker::runtime) struct EndpointApiKeySelectionResult {
     pub(in crate::worker::runtime) selection: db::EndpointApiKeySelection,
     pub(in crate::worker::runtime) invalid_conversation_override: bool,
-}
-
-fn select_api_key(
-    endpoint_id: uuid::Uuid,
-    fallback_secret: &str,
-    api_keys: &[db::EndpointApiKey],
-    key_lb_enabled: bool,
-    request: &BufferedBridgeRequest,
-    request_prompt_log: &RequestPromptLog,
-    quota_cache: Option<&TokenPlanQuotaCache>,
-) -> EndpointApiKeySelectionResult {
-    let mut available_keys = api_keys
-        .iter()
-        .filter(|key| {
-            key.endpoint_id == endpoint_id && key.enabled && !key.api_key.trim().is_empty()
-        })
-        .collect::<Vec<_>>();
-    if let Some(override_key_id) = request_prompt_log.conversation_override_endpoint_key_id
-        && let Some(key) = available_keys
-            .iter()
-            .find(|key| key.key_id == override_key_id && key.endpoint_id == endpoint_id)
-    {
-        return EndpointApiKeySelectionResult {
-            selection: db::EndpointApiKeySelection {
-                key_id: (!key.key_id.is_nil()).then_some(key.key_id),
-                key_label: (!key.key_id.is_nil()).then(|| key.key_label.clone()),
-                secret: key.api_key.clone(),
-            },
-            invalid_conversation_override: false,
-        };
-    }
-    available_keys.sort_by(|left, right| {
-        left.position
-            .cmp(&right.position)
-            .then_with(|| left.key_label.cmp(&right.key_label))
-            .then_with(|| left.key_id.cmp(&right.key_id))
-    });
-    let request_model = request_model(request);
-    let stable_key = endpoint_key_stickiness_value(request, request_prompt_log);
-    let selected = if key_lb_enabled {
-        quota_cache
-            .and_then(|cache| {
-                select_quota_key(
-                    cache,
-                    endpoint_id,
-                    &available_keys,
-                    request_model.as_deref(),
-                    stable_key
-                        .clone()
-                        .unwrap_or_else(|| format!("request:{}", request.request_id)),
-                    crate::worker_admin::token_plan_cache::estimate_input_tokens(&request.body),
-                )
-            })
-            .or_else(|| {
-                stable_key.as_deref().and_then(|stable_key| {
-                    stable_candidate_order(
-                        &available_keys,
-                        |_, key| stable_endpoint_api_key_score(&stable_key, key),
-                        |left_index, left, right_index, right| {
-                            left.position
-                                .cmp(&right.position)
-                                .then_with(|| left.key_label.cmp(&right.key_label))
-                                .then_with(|| left_index.cmp(&right_index))
-                        },
-                    )
-                    .into_iter()
-                    .next()
-                    .and_then(|index| available_keys.get(index).copied())
-                })
-            })
-    } else {
-        None
-    }
-    .or_else(|| available_keys.first().copied());
-    let selection = selected
-        .map(|key| db::EndpointApiKeySelection {
-            key_id: (!key.key_id.is_nil()).then_some(key.key_id),
-            key_label: (!key.key_id.is_nil()).then(|| key.key_label.clone()),
-            secret: key.api_key.clone(),
-        })
-        .unwrap_or_else(|| db::EndpointApiKeySelection {
-            key_id: None,
-            key_label: None,
-            secret: fallback_secret.to_string(),
-        });
-    EndpointApiKeySelectionResult {
-        selection,
-        invalid_conversation_override: request_prompt_log
-            .conversation_override_endpoint_key_id
-            .is_some(),
-    }
 }

@@ -159,6 +159,7 @@ mod tests {
             openrouter_spend: None,
             glm_five_hour: None,
             glm_weekly: None,
+            deepseek_balance: None,
         }
     }
 

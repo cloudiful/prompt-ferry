@@ -1,5 +1,19 @@
 WITH normalized AS (
-    SELECT rr.*,
+    -- Project only the columns the response needs. `rr.*` also materialized
+    -- the JSONB request payloads, which forced wide heap reads and made the
+    -- `idx_request_records_usage_covering` Index Only Scan impossible.
+    SELECT rr.ok,
+           rr.request_state,
+           rr.duration_ms,
+           rr.ttft_ms,
+           rr.input_tokens,
+           rr.output_tokens,
+           rr.total_tokens,
+           rr.cached_tokens,
+           rr.cache_read_tokens,
+           rr.cache_write_tokens,
+           rr.request_category,
+           rr.mcp_protocol_method,
            -- Post-0072 the stored `input_tokens` is already the ordinary
            -- (non-cache) value, so use it directly; the cache must not be
            -- subtracted again (double-subtract of backfilled rows).
