@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, type PropType } from 'vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
+import { useTokenPlanBadgeRotation } from '@/composables/useTokenPlanBadgeRotation'
 import {
-  progressColor,
+  tokenPlanBadgePills,
   useTokenPlanBadges,
+  type TokenPlanKeyBadges,
 } from '@/composables/useTokenPlanBadges'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
 import type { EndpointListItemView } from '@/models/endpoints'
@@ -39,13 +41,6 @@ const isQuotaProvider = computed(() => QUOTA_PROVIDERS.has(props.item.provider))
 // already dedupes against the table's prefetch, so this is free.
 prefetchTokenPlanBatch([props.item.endpoint_id], 4)
 
-function badgeColorForPercent(percent: number): string {
-  return progressColor({
-    end_at: null,
-    remaining_percent: percent,
-  })
-}
-
 // Inline usage-badge subcomponent for the mobile card. Compact pill
 // pair stacked vertically so the wider card surface can afford the
 // verbose "短窗 42% / 长窗 73%" labels; OpenRouter collapses to a
@@ -63,73 +58,63 @@ const EndpointMobileUsageBadges = defineComponent({
     // edit) the badge must re-evaluate against the new endpoint id
     // without a remount.
     const badges = useTokenPlanBadges(computed(() => props.endpointId))
-    const isOpenRouter = computed(
-      () =>
-        badges.value.openrouterLimit !== null ||
-        badges.value.openrouterLimitRemaining !== null,
+    const keyBadges = computed(() => badges.value.keys)
+    const rotation = useTokenPlanBadgeRotation(keyBadges)
+    // Same rule as the desktop table: rotate only when at least two keys
+    // report usable numbers; otherwise keep the aggregate pill pair.
+    const rotating = computed(
+      () => keyBadges.value.filter((key) => key.ok).length > 1,
     )
-    const openrouterLabel = computed(() => {
-      const lim = badges.value.openrouterLimitRemaining
-      const cap = badges.value.openrouterLimit
-      if (lim === null || cap === null) return ''
-      return `${lim.toFixed(2)} / ${cap.toFixed(2)}`
-    })
-    return () => {
-      const t = props.t
-      const pillBase =
-        'inline-flex items-center rounded-full border border-default bg-elevated px-2 py-px text-[0.74rem] font-semibold whitespace-nowrap'
-      const shortPill =
-        badges.value.short !== null
-          ? h(
-              'span',
-              {
-                class: pillBase,
-                style: { color: badgeColorForPercent(badges.value.short) },
-                title: t('tokenPlanShortBadgeHint'),
-              },
-              `${t('tokenPlanShortBadge')} ${badges.value.short.toFixed(0)}%`,
-            )
-          : null
-      const longPill =
-        badges.value.long !== null
-          ? h(
-              'span',
-              {
-                class: pillBase,
-                style: { color: badgeColorForPercent(badges.value.long) },
-                title: t('tokenPlanLongBadgeHint'),
-              },
-              `${t('tokenPlanLongBadge')} ${badges.value.long.toFixed(0)}%`,
-            )
-          : null
-      if (isOpenRouter.value) {
-        const label =
-          badges.value.openrouterRemaining !== null
-            ? `${t('tokenPlanOpenRouterRemaining')} ${badges.value.openrouterRemaining.toFixed(0)}%`
-            : t('tokenPlanNoQuota')
-        const openrouterColor =
-          badges.value.openrouterRemaining !== null
-            ? badgeColorForPercent(badges.value.openrouterRemaining)
-            : ''
-        return h(
+    const pillBase =
+      'inline-flex items-center rounded-full border border-default bg-elevated px-2 py-px text-[0.74rem] font-semibold whitespace-nowrap'
+
+    function pillNodes(source: TokenPlanKeyBadges) {
+      return tokenPlanBadgePills(source, props.t).map((pill) =>
+        h(
           'span',
-          { class: 'inline-flex items-center gap-1' },
-          h(
+          { class: pillBase, style: { color: pill.color }, title: pill.title },
+          pill.label,
+        ),
+      )
+    }
+
+    return () => {
+      if (rotating.value) {
+        // #277 P3: crossfade across keys inside the usage row. Each key
+        // keeps its own wrapping pill pair; the active cell is visible,
+        // failed keys are skipped by the rotation and stay hidden.
+        const cells = keyBadges.value.map((key, index) => {
+          const nodes = pillNodes(key)
+          return h(
             'span',
             {
-              class: pillBase,
-              style: { color: openrouterColor },
-              title: openrouterLabel.value,
+              class: [
+                'col-start-1 row-start-1 flex flex-wrap items-center gap-1 transition-opacity duration-500',
+                index === rotation.index
+                  ? 'opacity-100'
+                  : 'pointer-events-none opacity-0',
+              ],
+              'aria-hidden': index !== rotation.index,
+              title: key.keyLabel,
             },
-            label,
-          ),
+            nodes.length > 0
+              ? nodes
+              : h('span', { class: 'text-[0.74rem] text-muted' }, '—'),
+          )
+        })
+        return h(
+          'span',
+          {
+            class: 'inline-grid items-center',
+            onMouseenter: () => rotation.setPaused(true),
+            onMouseleave: () => rotation.setPaused(false),
+          },
+          cells,
         )
       }
-      if (shortPill || longPill) {
-        return h('span', { class: 'flex flex-wrap items-center gap-1' }, [
-          shortPill,
-          longPill,
-        ])
+      const nodes = pillNodes(badges.value)
+      if (nodes.length > 0) {
+        return h('span', { class: 'flex flex-wrap items-center gap-1' }, nodes)
       }
       return h('span', { class: 'text-[0.74rem] text-muted' }, '—')
     }

@@ -10,9 +10,11 @@ import {
 } from 'vue'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
+import { useTokenPlanBadgeRotation } from '@/composables/useTokenPlanBadgeRotation'
 import {
-  progressColor,
+  tokenPlanBadgePills,
   useTokenPlanBadges,
+  type TokenPlanKeyBadges,
 } from '@/composables/useTokenPlanBadges'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
 import type { EndpointListItemView } from '@/models/endpoints'
@@ -97,17 +99,6 @@ watch(
   },
 )
 
-// `progressColor` expects a TokenPlanWindowUsage; the badge already
-// holds the remaining percent, so we synthesize one with
-// `remaining_percent = percent` and let progressColor fold used =
-// 100 - remaining internally to drive the hue ramp.
-function badgeColorForPercent(percent: number): string {
-  return progressColor({
-    end_at: null,
-    remaining_percent: percent,
-  })
-}
-
 // Inline usage-badge subcomponent. Lives in the same SFC so we don't
 // have to introduce a brand-new file: the table is the only consumer
 // on desktop. The mobile card renders its own compact variant inline.
@@ -125,76 +116,63 @@ const EndpointUsageBadges = defineComponent({
     // shift (e.g. after an inline edit) and the badge must re-evaluate
     // against the new endpoint id without a remount.
     const badges = useTokenPlanBadges(computed(() => props.endpointId))
-    const isOpenRouter = computed(
-      () =>
-        badges.value.openrouterLimit !== null ||
-        badges.value.openrouterLimitRemaining !== null,
+    const keyBadges = computed(() => badges.value.keys)
+    const rotation = useTokenPlanBadgeRotation(keyBadges)
+    // Rotate only once at least two keys report usable numbers; a lone
+    // healthy key (or an all-failed endpoint) keeps the aggregate cell.
+    const rotating = computed(
+      () => keyBadges.value.filter((key) => key.ok).length > 1,
     )
-    const openrouterLabel = computed(() => {
-      const lim = badges.value.openrouterLimitRemaining
-      const cap = badges.value.openrouterLimit
-      if (lim === null || cap === null) return ''
-      return `${lim.toFixed(2)} / ${cap.toFixed(2)}`
-    })
-    return () => {
-      const t = props.t
-      const pillBase =
-        'inline-flex items-center rounded-full border border-default bg-elevated px-1.5 py-px text-[0.7rem] font-semibold whitespace-nowrap'
-      // OpenRouter path: balance pill with percent, falls back to "—"
-      // when the key has no finite cap (free tier / missing numbers).
-      if (isOpenRouter.value) {
-        const label =
-          badges.value.openrouterRemaining !== null
-            ? `${t('tokenPlanOpenRouterRemaining')} ${badges.value.openrouterRemaining.toFixed(0)}%`
-            : t('tokenPlanNoQuota')
-        return h(
+    const pillBase =
+      'inline-flex items-center rounded-full border border-default bg-elevated px-1.5 py-px text-[0.7rem] font-semibold whitespace-nowrap'
+
+    function pillNodes(source: TokenPlanKeyBadges) {
+      return tokenPlanBadgePills(source, props.t).map((pill) =>
+        h(
           'span',
-          { class: 'inline-flex items-center gap-1' },
-          h(
+          { class: pillBase, style: { color: pill.color }, title: pill.title },
+          pill.label,
+        ),
+      )
+    }
+
+    return () => {
+      if (rotating.value) {
+        // #277 P3: stack every key in one grid cell and crossfade the
+        // active one. Failed keys stay hidden (the rotation skips them);
+        // each cell carries the key label as its title hint.
+        const cells = keyBadges.value.map((key, index) => {
+          const nodes = pillNodes(key)
+          return h(
             'span',
             {
-              class: pillBase,
-              style: {
-                color:
-                  badges.value.openrouterRemaining !== null
-                    ? badgeColorForPercent(badges.value.openrouterRemaining)
-                    : '',
-              },
-              title: openrouterLabel.value,
+              class: [
+                'col-start-1 row-start-1 transition-opacity duration-500',
+                index === rotation.index
+                  ? 'opacity-100'
+                  : 'pointer-events-none opacity-0',
+              ],
+              'aria-hidden': index !== rotation.index,
+              title: key.keyLabel,
             },
-            label,
-          ),
+            nodes.length > 0
+              ? nodes
+              : h('span', { class: 'text-xs text-muted' }, '—'),
+          )
+        })
+        return h(
+          'span',
+          {
+            class: 'inline-grid items-center',
+            onMouseenter: () => rotation.setPaused(true),
+            onMouseleave: () => rotation.setPaused(false),
+          },
+          cells,
         )
       }
-      // Quota-bearing providers: dual pill row (short + long); each
-      // slot degrades to empty so a provider reporting only one window
-      // still renders the row.
-      const children = [
-        badges.value.short !== null
-          ? h(
-              'span',
-              {
-                class: pillBase,
-                style: { color: badgeColorForPercent(badges.value.short) },
-                title: t('tokenPlanShortBadgeHint'),
-              },
-              `${t('tokenPlanShortBadge')} ${badges.value.short.toFixed(0)}%`,
-            )
-          : null,
-        badges.value.long !== null
-          ? h(
-              'span',
-              {
-                class: pillBase,
-                style: { color: badgeColorForPercent(badges.value.long) },
-                title: t('tokenPlanLongBadgeHint'),
-              },
-              `${t('tokenPlanLongBadge')} ${badges.value.long.toFixed(0)}%`,
-            )
-          : null,
-      ]
-      if (children[0] || children[1]) {
-        return h('span', { class: 'inline-flex items-center gap-1' }, children)
+      const nodes = pillNodes(badges.value)
+      if (nodes.length > 0) {
+        return h('span', { class: 'inline-flex items-center gap-1' }, nodes)
       }
       // Cache not yet populated: render a dash so the row height stays
       // stable while the lazy prefetch resolves.

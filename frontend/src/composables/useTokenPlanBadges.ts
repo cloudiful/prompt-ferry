@@ -33,6 +33,22 @@ export type TokenPlanBadges = {
   // Raw cached payload — exposed so the popover can re-render the
   // breakdown without re-fetching.
   usage: TokenPlanUsageResponse | null
+  // Per-key breakdown used by the endpoint list's crossfade rotation.
+  // Empty when no snapshot is cached.
+  keys: TokenPlanKeyBadges[]
+}
+
+// One key's derived badge values. `ok=false` keys carry no numbers so the
+// rotation can skip them without re-reading the raw payload.
+export type TokenPlanKeyBadges = {
+  keyId: string
+  keyLabel: string
+  ok: boolean
+  short: number | null
+  long: number | null
+  openrouterRemaining: number | null
+  openrouterLimit: number | null
+  openrouterLimitRemaining: number | null
 }
 
 const EMPTY_BADGES: TokenPlanBadges = {
@@ -42,6 +58,7 @@ const EMPTY_BADGES: TokenPlanBadges = {
   openrouterLimit: null,
   openrouterLimitRemaining: null,
   usage: null,
+  keys: [],
 }
 
 // Short window: min(5h / rolling / interval) across all keys. MiniMax
@@ -126,27 +143,54 @@ function openrouterPercent(key: TokenPlanKeyUsage): {
   }
 }
 
+function computeKeyBadges(key: TokenPlanKeyUsage): TokenPlanKeyBadges {
+  if (!key.ok) {
+    return {
+      keyId: key.key_id,
+      keyLabel: key.key_label,
+      ok: false,
+      short: null,
+      long: null,
+      openrouterRemaining: null,
+      openrouterLimit: null,
+      openrouterLimitRemaining: null,
+    }
+  }
+  const or = openrouterPercent(key)
+  return {
+    keyId: key.key_id,
+    keyLabel: key.key_label,
+    ok: true,
+    short: keyShortPercent(key),
+    long: keyLongPercent(key),
+    openrouterRemaining: or.remaining,
+    openrouterLimit: or.limit,
+    openrouterLimitRemaining: or.limitRemaining,
+  }
+}
+
 function computeBadges(usage: TokenPlanUsageResponse | null): TokenPlanBadges {
   if (!usage) return EMPTY_BADGES
+  const keys = usage.keys.map(computeKeyBadges)
   let short: number | null = null
   let long: number | null = null
   let orLimit: number | null = null
   let orRemaining: number | null = null
   let orRemainingPercent: number | null = null
-  for (const key of usage.keys) {
+  for (const key of keys) {
     if (!key.ok) continue
-    const ks = keyShortPercent(key)
-    if (ks !== null) short = short === null ? ks : Math.min(short, ks)
-    const kl = keyLongPercent(key)
-    if (kl !== null) long = long === null ? kl : Math.min(long, kl)
-    const or = openrouterPercent(key)
-    if (or.remaining !== null) {
+    if (key.short !== null)
+      short = short === null ? key.short : Math.min(short, key.short)
+    if (key.long !== null)
+      long = long === null ? key.long : Math.min(long, key.long)
+    if (key.openrouterRemaining !== null) {
       orRemainingPercent =
         orRemainingPercent === null
-          ? or.remaining
-          : Math.min(orRemainingPercent, or.remaining)
-      if (or.limit !== null) orLimit = or.limit
-      if (or.limitRemaining !== null) orRemaining = or.limitRemaining
+          ? key.openrouterRemaining
+          : Math.min(orRemainingPercent, key.openrouterRemaining)
+      if (key.openrouterLimit !== null) orLimit = key.openrouterLimit
+      if (key.openrouterLimitRemaining !== null)
+        orRemaining = key.openrouterLimitRemaining
     }
   }
   return {
@@ -156,6 +200,7 @@ function computeBadges(usage: TokenPlanUsageResponse | null): TokenPlanBadges {
     openrouterLimit: orLimit,
     openrouterLimitRemaining: orRemaining,
     usage,
+    keys,
   }
 }
 
@@ -180,3 +225,78 @@ export function useTokenPlanBadges(
 // Re-export the adapt helpers so the badge template can color its pills
 // the same way the dialog colors its progress bars.
 export { progressColor, remainingPercent }
+
+// `progressColor` expects a TokenPlanWindowUsage; the badge already holds
+// the remaining percent, so we synthesize one with
+// `remaining_percent = percent` and let progressColor fold used =
+// 100 - remaining internally to drive the hue ramp. Shared by the desktop
+// table and the mobile card.
+export function badgeColorForPercent(percent: number): string {
+  return progressColor({ end_at: null, remaining_percent: percent })
+}
+
+// Display descriptor for one badge pill. Keeping the label/color/title
+// construction here means the desktop table and the mobile card only own
+// their markup, not the provider-specific folding.
+export type TokenPlanBadgePill = {
+  label: string
+  color: string
+  title: string
+}
+
+// Build the pill descriptors for one key (or the aggregate). An
+// OpenRouter balance collapses to a single pill; quota-bearing providers
+// emit a short/long pair, each slot omitted when the provider reports no
+// such window.
+export function tokenPlanBadgePills(
+  source: Pick<
+    TokenPlanKeyBadges,
+    | 'short'
+    | 'long'
+    | 'openrouterRemaining'
+    | 'openrouterLimit'
+    | 'openrouterLimitRemaining'
+  >,
+  t: TranslateFn,
+): TokenPlanBadgePill[] {
+  if (
+    source.openrouterLimit !== null ||
+    source.openrouterLimitRemaining !== null
+  ) {
+    const label =
+      source.openrouterRemaining !== null
+        ? `${t('tokenPlanOpenRouterRemaining')} ${source.openrouterRemaining.toFixed(0)}%`
+        : t('tokenPlanNoQuota')
+    const title =
+      source.openrouterLimit !== null &&
+      source.openrouterLimitRemaining !== null
+        ? `${source.openrouterLimitRemaining.toFixed(2)} / ${source.openrouterLimit.toFixed(2)}`
+        : ''
+    return [
+      {
+        label,
+        color:
+          source.openrouterRemaining !== null
+            ? badgeColorForPercent(source.openrouterRemaining)
+            : '',
+        title,
+      },
+    ]
+  }
+  const pills: TokenPlanBadgePill[] = []
+  if (source.short !== null) {
+    pills.push({
+      label: `${t('tokenPlanShortBadge')} ${source.short.toFixed(0)}%`,
+      color: badgeColorForPercent(source.short),
+      title: t('tokenPlanShortBadgeHint'),
+    })
+  }
+  if (source.long !== null) {
+    pills.push({
+      label: `${t('tokenPlanLongBadge')} ${source.long.toFixed(0)}%`,
+      color: badgeColorForPercent(source.long),
+      title: t('tokenPlanLongBadgeHint'),
+    })
+  }
+  return pills
+}

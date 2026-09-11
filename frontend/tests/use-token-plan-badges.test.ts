@@ -76,8 +76,10 @@ mock.module('../src/stores/endpoints-api', () => ({
 
 const { __resetTokenPlanCacheForTests, prefetchTokenPlanUsage } =
   await import('../src/composables/useTokenPlanUsageCache')
-const { useTokenPlanBadges } =
+const { tokenPlanBadgePills, useTokenPlanBadges } =
   await import('../src/composables/useTokenPlanBadges')
+const { nextRotationIndex, rotationCandidates } =
+  await import('../src/composables/useTokenPlanBadgeRotation')
 
 beforeEach(() => {
   __resetTokenPlanCacheForTests()
@@ -112,6 +114,7 @@ test('empty usage renders empty badges', () => {
     openrouterLimit: null,
     openrouterLimitRemaining: null,
     usage: null,
+    keys: [],
   })
 })
 
@@ -411,4 +414,153 @@ test('useTokenPlanBadges tracks a computed ref of endpointId across swaps', asyn
   expect(badges.value.short).toBe(11)
   expect(badges.value.long).toBe(22)
   expect(badges.value.usage?.provider).toBe('command_code')
+})
+
+// P3: the endpoint list rotates the usage cell across each key. The
+// per-key breakdown must keep every key's own numbers distinct from the
+// aggregate (which stays the worst-case min) and must null out failed
+// keys so the rotation never parks on an error card.
+test('keys[] exposes each key independently and nulls failed keys', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'minimax',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k1',
+        key_label: 'alpha',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'g',
+            interval: { remaining_percent: 50 },
+            weekly: { remaining_percent: 80 },
+          },
+        ],
+      },
+      {
+        key_id: 'k2',
+        key_label: 'beta',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'g',
+            interval: { remaining_percent: 30 },
+            weekly: { remaining_percent: 60 },
+          },
+        ],
+      },
+      {
+        key_id: 'k3',
+        key_label: 'dead',
+        ok: false,
+        error_message: 'rate limited',
+        model_remains: [
+          {
+            model_name: 'g',
+            interval: { remaining_percent: 1 },
+            weekly: { remaining_percent: 1 },
+          },
+        ],
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-per-key')
+  const badges = useTokenPlanBadges('ep-per-key')
+  expect(badges.value.keys).toEqual([
+    {
+      keyId: 'k1',
+      keyLabel: 'alpha',
+      ok: true,
+      short: 50,
+      long: 80,
+      openrouterRemaining: null,
+      openrouterLimit: null,
+      openrouterLimitRemaining: null,
+    },
+    {
+      keyId: 'k2',
+      keyLabel: 'beta',
+      ok: true,
+      short: 30,
+      long: 60,
+      openrouterRemaining: null,
+      openrouterLimit: null,
+      openrouterLimitRemaining: null,
+    },
+    {
+      keyId: 'k3',
+      keyLabel: 'dead',
+      ok: false,
+      short: null,
+      long: null,
+      openrouterRemaining: null,
+      openrouterLimit: null,
+      openrouterLimitRemaining: null,
+    },
+  ])
+  // Aggregate stays the worst-case minimum across healthy keys.
+  expect(badges.value.short).toBe(30)
+  expect(badges.value.long).toBe(60)
+})
+
+test('rotation skips failed keys and wraps around', () => {
+  const keys = [true, false, true].map((ok, position) => ({
+    keyId: `k${position}`,
+    keyLabel: `k${position}`,
+    ok,
+    short: null,
+    long: null,
+    openrouterRemaining: null,
+    openrouterLimit: null,
+    openrouterLimitRemaining: null,
+  }))
+  expect(rotationCandidates(keys)).toEqual([0, 2])
+  expect(nextRotationIndex(keys, 0)).toBe(2)
+  expect(nextRotationIndex(keys, 2)).toBe(0)
+})
+
+test('rotation is a no-op with fewer than two ok keys', () => {
+  const keys = [true, false].map((ok, position) => ({
+    keyId: `k${position}`,
+    keyLabel: `k${position}`,
+    ok,
+    short: null,
+    long: null,
+    openrouterRemaining: null,
+    openrouterLimit: null,
+    openrouterLimitRemaining: null,
+  }))
+  expect(rotationCandidates(keys)).toEqual([0])
+  expect(nextRotationIndex(keys, 0)).toBeNull()
+})
+
+test('tokenPlanBadgePills derives quota and OpenRouter pills', () => {
+  const t = ((key: string) => key) as unknown as TranslateFn
+  const quota = tokenPlanBadgePills(
+    {
+      short: 30,
+      long: 60,
+      openrouterRemaining: null,
+      openrouterLimit: null,
+      openrouterLimitRemaining: null,
+    },
+    t,
+  )
+  expect(quota.map((pill) => pill.label)).toEqual([
+    'tokenPlanShortBadge 30%',
+    'tokenPlanLongBadge 60%',
+  ])
+  const openrouter = tokenPlanBadgePills(
+    {
+      short: null,
+      long: null,
+      openrouterRemaining: 42.5,
+      openrouterLimit: 100,
+      openrouterLimitRemaining: 42.5,
+    },
+    t,
+  )
+  expect(openrouter).toHaveLength(1)
+  expect(openrouter[0]?.label).toBe('tokenPlanOpenRouterRemaining 43%')
+  expect(openrouter[0]?.title).toBe('42.50 / 100.00')
 })
