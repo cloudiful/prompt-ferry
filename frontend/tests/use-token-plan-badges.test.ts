@@ -78,8 +78,6 @@ const { __resetTokenPlanCacheForTests, prefetchTokenPlanUsage } =
   await import('../src/composables/useTokenPlanUsageCache')
 const { tokenPlanBadgePills, useTokenPlanBadges } =
   await import('../src/composables/useTokenPlanBadges')
-const { nextRotationIndex, rotationCandidates } =
-  await import('../src/composables/useTokenPlanBadgeRotation')
 
 beforeEach(() => {
   __resetTokenPlanCacheForTests()
@@ -97,28 +95,24 @@ afterEach(() => {
   __resetTokenPlanCacheForTests()
 })
 
-function emptyUsage(): TokenPlanUsageResponse {
-  return {
-    keys: [],
-    provider: 'minimax',
-    provider_region: null,
-  }
-}
-
 test('empty usage renders empty badges', () => {
   const badges = useTokenPlanBadges('ep-empty')
   expect(badges.value).toEqual({
+    mode: 'window',
     short: null,
     long: null,
+    openrouterBalance: null,
     openrouterRemaining: null,
-    openrouterLimit: null,
-    openrouterLimitRemaining: null,
+    openrouterDailySpend: null,
+    deepseekTotal: null,
+    deepseekCurrency: null,
+    deepseekAvailable: null,
+    localTodayTokens: null,
     usage: null,
-    keys: [],
   })
 })
 
-test('MiniMax window: short = min(interval), long = min(weekly) across models and keys', async () => {
+test('MiniMax windows: short/long are the arithmetic mean across keys', async () => {
   fetchTokenPlanUsage.mockResolvedValueOnce({
     provider: 'minimax',
     provider_region: null,
@@ -151,9 +145,42 @@ test('MiniMax window: short = min(interval), long = min(weekly) across models an
   })
   await prefetchTokenPlanUsage('ep-mm')
   const badges = useTokenPlanBadges('ep-mm')
-  expect(badges.value.short).toBe(30)
-  expect(badges.value.long).toBe(60)
+  // mean(50, 30) = 40, mean(80, 60) = 70 — no longer the worst-case min.
+  expect(badges.value.short).toBe(40)
+  expect(badges.value.long).toBe(70)
+  expect(badges.value.mode).toBe('window')
   expect(badges.value.openrouterRemaining).toBeNull()
+})
+
+test('keys without a window are skipped, not averaged as zero', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'minimax',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k1',
+        key_label: 'k1',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'g',
+            interval: { remaining_percent: 60 },
+            weekly: { remaining_percent: 90 },
+          },
+        ],
+      },
+      {
+        key_id: 'k2',
+        key_label: 'k2',
+        ok: true,
+        model_remains: [],
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-mm-skip')
+  const badges = useTokenPlanBadges('ep-mm-skip')
+  expect(badges.value.short).toBe(60)
+  expect(badges.value.long).toBe(90)
 })
 
 test('CommandCode USD: short = five_hour, long = weekly', async () => {
@@ -230,7 +257,7 @@ test('GLM Coding Plan uses USED percent: short = 100 - glm_five_hour.percentage,
   expect(badges.value.long).toBe(40)
 })
 
-test('OpenRouter: no short/long, instead openrouterRemaining = limit_remaining / limit * 100', async () => {
+test('OpenRouter: balance + remaining ratio + provider daily spend', async () => {
   fetchTokenPlanUsage.mockResolvedValueOnce({
     provider: 'openrouter',
     provider_region: null,
@@ -248,19 +275,53 @@ test('OpenRouter: no short/long, instead openrouterRemaining = limit_remaining /
           total_credits: null,
           total_usage: null,
         },
+        openrouter_spend: {
+          usage: 10,
+          daily: 1.5,
+          weekly: 6,
+          monthly: 9,
+        },
       },
     ],
   })
   await prefetchTokenPlanUsage('ep-or')
   const badges = useTokenPlanBadges('ep-or')
+  expect(badges.value.mode).toBe('openrouter')
   expect(badges.value.short).toBeNull()
   expect(badges.value.long).toBeNull()
-  expect(badges.value.openrouterLimit).toBe(100)
-  expect(badges.value.openrouterLimitRemaining).toBe(42.5)
+  expect(badges.value.openrouterBalance).toBe(42.5)
   expect(badges.value.openrouterRemaining).toBeCloseTo(42.5, 5)
+  expect(badges.value.openrouterDailySpend).toBe(1.5)
 })
 
-test('OpenRouter with null limit returns null remaining (no quota signal)', async () => {
+test('OpenRouter without a limit falls back to the credit totals difference', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'openrouter',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [],
+        openrouter_balance: {
+          limit: null,
+          limit_remaining: null,
+          limit_reset: null,
+          is_free_tier: false,
+          total_credits: 100,
+          total_usage: 25.5,
+        },
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-or-credits')
+  const badges = useTokenPlanBadges('ep-or-credits')
+  expect(badges.value.openrouterBalance).toBe(74.5)
+  expect(badges.value.openrouterRemaining).toBeNull()
+})
+
+test('OpenRouter with no credit signal keeps null remaining and balance', async () => {
   fetchTokenPlanUsage.mockResolvedValueOnce({
     provider: 'openrouter',
     provider_region: null,
@@ -286,7 +347,37 @@ test('OpenRouter with null limit returns null remaining (no quota signal)', asyn
   expect(badges.value.short).toBeNull()
   expect(badges.value.long).toBeNull()
   expect(badges.value.openrouterRemaining).toBeNull()
-  expect(badges.value.openrouterLimit).toBeNull()
+  expect(badges.value.openrouterBalance).toBeNull()
+})
+
+test('DeepSeek exposes the balance and the backend local today tokens', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'deepseek',
+    provider_region: null,
+    local_today_tokens: 1234,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [],
+        deepseek_balance: {
+          is_available: true,
+          currency: 'CNY',
+          total_balance: 110,
+          granted_balance: 10,
+          topped_up_balance: 100,
+        },
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-ds')
+  const badges = useTokenPlanBadges('ep-ds')
+  expect(badges.value.mode).toBe('deepseek')
+  expect(badges.value.deepseekTotal).toBe(110)
+  expect(badges.value.deepseekCurrency).toBe('CNY')
+  expect(badges.value.deepseekAvailable).toBe(true)
+  expect(badges.value.localTodayTokens).toBe(1234)
 })
 
 test('non-ok keys are skipped when aggregating', async () => {
@@ -349,7 +440,7 @@ test('useTokenPlanBadges reacts when the cache is populated after mount', async 
   expect(badges.value.long).toBe(92)
 })
 
-// P1: the inline badge subcomponents (`EndpointUsageBadges`,
+// The inline badge subcomponents (`EndpointUsageBadges`,
 // `EndpointMobileUsageBadges`) wrap `props.endpointId` in a `computed`
 // before handing it to `useTokenPlanBadges`. The composable must track
 // that ref so the badges re-evaluate when the row's endpoint id swaps
@@ -416,151 +507,113 @@ test('useTokenPlanBadges tracks a computed ref of endpointId across swaps', asyn
   expect(badges.value.usage?.provider).toBe('command_code')
 })
 
-// P3: the endpoint list rotates the usage cell across each key. The
-// per-key breakdown must keep every key's own numbers distinct from the
-// aggregate (which stays the worst-case min) and must null out failed
-// keys so the rotation never parks on an error card.
-test('keys[] exposes each key independently and nulls failed keys', async () => {
-  fetchTokenPlanUsage.mockResolvedValueOnce({
-    provider: 'minimax',
-    provider_region: null,
-    keys: [
-      {
-        key_id: 'k1',
-        key_label: 'alpha',
-        ok: true,
-        model_remains: [
-          {
-            model_name: 'g',
-            interval: { remaining_percent: 50 },
-            weekly: { remaining_percent: 80 },
-          },
-        ],
-      },
-      {
-        key_id: 'k2',
-        key_label: 'beta',
-        ok: true,
-        model_remains: [
-          {
-            model_name: 'g',
-            interval: { remaining_percent: 30 },
-            weekly: { remaining_percent: 60 },
-          },
-        ],
-      },
-      {
-        key_id: 'k3',
-        key_label: 'dead',
-        ok: false,
-        error_message: 'rate limited',
-        model_remains: [
-          {
-            model_name: 'g',
-            interval: { remaining_percent: 1 },
-            weekly: { remaining_percent: 1 },
-          },
-        ],
-      },
-    ],
-  })
-  await prefetchTokenPlanUsage('ep-per-key')
-  const badges = useTokenPlanBadges('ep-per-key')
-  expect(badges.value.keys).toEqual([
-    {
-      keyId: 'k1',
-      keyLabel: 'alpha',
-      ok: true,
-      short: 50,
-      long: 80,
-      openrouterRemaining: null,
-      openrouterLimit: null,
-      openrouterLimitRemaining: null,
-    },
-    {
-      keyId: 'k2',
-      keyLabel: 'beta',
-      ok: true,
-      short: 30,
-      long: 60,
-      openrouterRemaining: null,
-      openrouterLimit: null,
-      openrouterLimitRemaining: null,
-    },
-    {
-      keyId: 'k3',
-      keyLabel: 'dead',
-      ok: false,
-      short: null,
-      long: null,
-      openrouterRemaining: null,
-      openrouterLimit: null,
-      openrouterLimitRemaining: null,
-    },
-  ])
-  // Aggregate stays the worst-case minimum across healthy keys.
-  expect(badges.value.short).toBe(30)
-  expect(badges.value.long).toBe(60)
-})
-
-test('rotation skips failed keys and wraps around', () => {
-  const keys = [true, false, true].map((ok, position) => ({
-    keyId: `k${position}`,
-    keyLabel: `k${position}`,
-    ok,
-    short: null,
-    long: null,
-    openrouterRemaining: null,
-    openrouterLimit: null,
-    openrouterLimitRemaining: null,
-  }))
-  expect(rotationCandidates(keys)).toEqual([0, 2])
-  expect(nextRotationIndex(keys, 0)).toBe(2)
-  expect(nextRotationIndex(keys, 2)).toBe(0)
-})
-
-test('rotation is a no-op with fewer than two ok keys', () => {
-  const keys = [true, false].map((ok, position) => ({
-    keyId: `k${position}`,
-    keyLabel: `k${position}`,
-    ok,
-    short: null,
-    long: null,
-    openrouterRemaining: null,
-    openrouterLimit: null,
-    openrouterLimitRemaining: null,
-  }))
-  expect(rotationCandidates(keys)).toEqual([0])
-  expect(nextRotationIndex(keys, 0)).toBeNull()
-})
-
-test('tokenPlanBadgePills derives quota and OpenRouter pills', () => {
+test('tokenPlanBadgePills derives the static quota pill pair', () => {
   const t = ((key: string) => key) as unknown as TranslateFn
-  const quota = tokenPlanBadgePills(
+  const pills = tokenPlanBadgePills(
     {
-      short: 30,
-      long: 60,
+      mode: 'window',
+      short: 40,
+      long: 70,
+      openrouterBalance: null,
       openrouterRemaining: null,
-      openrouterLimit: null,
-      openrouterLimitRemaining: null,
+      openrouterDailySpend: null,
+      deepseekTotal: null,
+      deepseekCurrency: null,
+      deepseekAvailable: null,
+      localTodayTokens: null,
     },
     t,
   )
-  expect(quota.map((pill) => pill.label)).toEqual([
-    'tokenPlanShortBadge 30%',
-    'tokenPlanLongBadge 60%',
+  expect(pills.map((pill) => pill.label)).toEqual([
+    'tokenPlanShortBadge 40%',
+    'tokenPlanLongBadge 70%',
   ])
-  const openrouter = tokenPlanBadgePills(
+})
+
+test('tokenPlanBadgePills pairs the OpenRouter balance with provider spend', () => {
+  const t = ((key: string) => key) as unknown as TranslateFn
+  const pills = tokenPlanBadgePills(
     {
+      mode: 'openrouter',
       short: null,
       long: null,
+      openrouterBalance: 42.5,
       openrouterRemaining: 42.5,
-      openrouterLimit: 100,
-      openrouterLimitRemaining: 42.5,
+      openrouterDailySpend: 1.5,
+      deepseekTotal: null,
+      deepseekCurrency: null,
+      deepseekAvailable: null,
+      localTodayTokens: null,
     },
     t,
   )
-  expect(openrouter).toHaveLength(1)
-  expect(openrouter[0]?.label).toBe('tokenPlanOpenRouterRemaining 43%')
-  expect(openrouter[0]?.title).toBe('42.50 / 100.00')
+  expect(pills.map((pill) => pill.label)).toEqual([
+    'tokenPlanOpenRouterRemaining $42.50',
+    'tokenPlanSpendDaily $1.50',
+  ])
+})
+
+test('tokenPlanBadgePills falls back to local tokens when OpenRouter has no spend', () => {
+  const t = ((key: string) => key) as unknown as TranslateFn
+  const pills = tokenPlanBadgePills(
+    {
+      mode: 'openrouter',
+      short: null,
+      long: null,
+      openrouterBalance: null,
+      openrouterRemaining: null,
+      openrouterDailySpend: null,
+      deepseekTotal: null,
+      deepseekCurrency: null,
+      deepseekAvailable: null,
+      localTodayTokens: 0,
+    },
+    t,
+  )
+  expect(pills.map((pill) => pill.label)).toEqual([
+    'tokenPlanOpenRouterRemaining tokenPlanNoQuota',
+    'tokenPlanLocalTodayTokens 0',
+  ])
+})
+
+test('tokenPlanBadgePills pairs the DeepSeek balance with local today tokens', () => {
+  const t = ((key: string) => key) as unknown as TranslateFn
+  const available = tokenPlanBadgePills(
+    {
+      mode: 'deepseek',
+      short: null,
+      long: null,
+      openrouterBalance: null,
+      openrouterRemaining: null,
+      openrouterDailySpend: null,
+      deepseekTotal: 110,
+      deepseekCurrency: 'CNY',
+      deepseekAvailable: true,
+      localTodayTokens: 1234,
+    },
+    t,
+  )
+  expect(available.map((pill) => pill.label)).toEqual([
+    'tokenPlanDeepSeekBalance ¥110.00',
+    'tokenPlanLocalTodayTokens 1.2K',
+  ])
+  const unavailable = tokenPlanBadgePills(
+    {
+      mode: 'deepseek',
+      short: null,
+      long: null,
+      openrouterBalance: null,
+      openrouterRemaining: null,
+      openrouterDailySpend: null,
+      deepseekTotal: 0,
+      deepseekCurrency: 'USD',
+      deepseekAvailable: false,
+      localTodayTokens: 0,
+    },
+    t,
+  )
+  expect(unavailable.map((pill) => pill.label)).toEqual([
+    'tokenPlanDeepSeekBalance $0.00',
+    'tokenPlanLocalTodayTokens 0',
+  ])
 })

@@ -92,7 +92,7 @@ pub use usage::{
     RequestRecordPruneReport, RequestRecordRouteLocator, RequestRecordStateInput,
     UsageContentMaintenanceReport, abort_request_record, abort_request_records_by_ids,
     abort_stale_request_records, allocate_conversation_seq, clear_usage_events,
-    decode_prompt_message_refs, delete_request_record_lease,
+    decode_prompt_message_refs, delete_request_record_lease, endpoint_today_tokens,
     find_request_record_tool_calls_by_call_ids, get_conversation_redaction_session,
     get_replayable_usage_event_by_provider_conversation_key,
     get_replayable_usage_event_locator_by_provider_conversation_key,

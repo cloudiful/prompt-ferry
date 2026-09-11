@@ -38,6 +38,7 @@ pub(crate) fn provider_remaining_percent(key: &TokenPlanKeyUsage) -> Option<f64>
         .or_else(|| opencode_go_remaining_percent(key))
         .or_else(|| openrouter_remaining_percent(key))
         .or_else(|| glm_remaining_percent(key))
+        .or_else(|| deepseek_remaining_percent(key))
         .map(clamp_percent)
 }
 
@@ -48,6 +49,7 @@ pub(crate) fn provider_weight_percent(key: &TokenPlanKeyUsage) -> Option<f64> {
         .or_else(|| opencode_go_weight_percent(key))
         .or_else(|| openrouter_remaining_percent(key))
         .or_else(|| glm_weight_percent(key))
+        .or_else(|| deepseek_remaining_percent(key))
         .map(clamp_percent)
 }
 
@@ -96,6 +98,15 @@ pub(crate) fn openrouter_remaining_percent(key: &TokenPlanKeyUsage) -> Option<f6
         // spend snapshot, otherwise no signal.
         _ => key.openrouter_spend.as_ref().map(|_| 100.0),
     }
+}
+
+// DeepSeek remaining percent (issue #287 P0): the balance API exposes no
+// quota window, so the flag alone decides. `is_available=true` keeps full
+// weight; `false` maps to 0 so the key drops out of the pool. Missing
+// balance degrades to `None` (no quota signal).
+pub(crate) fn deepseek_remaining_percent(key: &TokenPlanKeyUsage) -> Option<f64> {
+    let balance = key.deepseek_balance.as_ref()?;
+    Some(if balance.is_available { 100.0 } else { 0.0 })
 }
 
 fn effective_remaining_percent(usage: &TokenPlanModelUsage) -> Option<f64> {
@@ -154,7 +165,9 @@ pub(crate) fn model_weight_percent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worker_admin_types::{OpenRouterBalance, OpenRouterSpend, TokenPlanWindowUsage};
+    use crate::worker_admin_types::{
+        DeepSeekBalance, OpenRouterBalance, OpenRouterSpend, TokenPlanWindowUsage,
+    };
 
     fn usage(interval: Option<f64>, weekly: Option<f64>) -> TokenPlanModelUsage {
         TokenPlanModelUsage {
@@ -258,6 +271,7 @@ mod tests {
             }),
             glm_five_hour: None,
             glm_weekly: None,
+            deepseek_balance: None,
         }
     }
 
@@ -279,5 +293,30 @@ mod tests {
         let mut key = openrouter_key(None, None, true);
         key.openrouter_balance = None;
         assert_eq!(openrouter_remaining_percent(&key), None);
+    }
+
+    fn deepseek_key(is_available: bool) -> TokenPlanKeyUsage {
+        let mut key = openrouter_key(None, None, false);
+        key.openrouter_balance = None;
+        key.deepseek_balance = Some(DeepSeekBalance {
+            is_available,
+            currency: "CNY".to_string(),
+            total_balance: 110.0,
+            granted_balance: 10.0,
+            topped_up_balance: 100.0,
+        });
+        key
+    }
+
+    #[test]
+    fn deepseek_flag_maps_to_full_or_zero_weight() {
+        assert_eq!(deepseek_remaining_percent(&deepseek_key(true)), Some(100.0));
+        assert_eq!(deepseek_remaining_percent(&deepseek_key(false)), Some(0.0));
+        // Missing balance contributes no signal so the chain falls through.
+        let mut key = deepseek_key(true);
+        key.deepseek_balance = None;
+        assert_eq!(deepseek_remaining_percent(&key), None);
+        assert_eq!(provider_remaining_percent(&key), None);
+        assert_eq!(provider_weight_percent(&key), None);
     }
 }

@@ -1,6 +1,7 @@
 //! Official upstream base URLs for preset providers (issue #248).
 //!
-//! Preset providers (MiniMax, GLM, CommandCode, OpencodeGo, OpenRouter) no
+//! Preset providers (MiniMax, GLM, CommandCode, OpencodeGo, OpenRouter,
+//! DeepSeek) no
 //! longer expose a base URL in the admin form. The admin API derives the
 //! base from `(provider, provider_region, native_api)` on create/update, and
 //! the runtime, model discovery, quota and connectivity paths derive it
@@ -23,6 +24,8 @@ pub const COMMAND_CODE_BASE_URL: &str = "https://api.commandcode.ai/provider";
 pub const OPENCODE_GO_BASE_URL: &str = "https://opencode.ai/zen/go";
 /// OpenRouter inference root (the `/v1` segment is appended by the joiner).
 pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api";
+/// DeepSeek inference root (the `/v1` segment is appended by the joiner).
+pub const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 /// Zhipu Coding Plan Anthropic Messages root.
 pub const GLM_ANTHROPIC_BASE_URL: &str = "https://open.bigmodel.cn/api/anthropic";
 /// Zhipu Coding Plan Chat (and Realtime) root.
@@ -66,6 +69,7 @@ pub fn preset_base_url(
         EndpointProvider::CommandCode => Some(COMMAND_CODE_BASE_URL),
         EndpointProvider::OpencodeGo => Some(OPENCODE_GO_BASE_URL),
         EndpointProvider::OpenRouter => Some(OPENROUTER_BASE_URL),
+        EndpointProvider::DeepSeek => Some(DEEPSEEK_BASE_URL),
     }
 }
 
@@ -110,6 +114,7 @@ fn host_is_preset(provider: EndpointProvider, host: &str) -> bool {
         EndpointProvider::CommandCode => host == "api.commandcode.ai",
         EndpointProvider::OpencodeGo => host == "opencode.ai" || host.ends_with(".opencode.ai"),
         EndpointProvider::OpenRouter => host == "openrouter.ai" || host.ends_with(".openrouter.ai"),
+        EndpointProvider::DeepSeek => host == "api.deepseek.com" || host.ends_with(".deepseek.com"),
     }
 }
 
@@ -195,6 +200,10 @@ mod tests {
                 preset_base_url(EndpointProvider::OpenRouter, None, native_api),
                 Some(OPENROUTER_BASE_URL)
             );
+            assert_eq!(
+                preset_base_url(EndpointProvider::DeepSeek, None, native_api),
+                Some(DEEPSEEK_BASE_URL)
+            );
         }
     }
 
@@ -237,6 +246,15 @@ mod tests {
             .as_deref(),
             Some(COMMAND_CODE_BASE_URL)
         );
+        assert_eq!(
+            derive_route_base(
+                EndpointProvider::DeepSeek,
+                "https://api.deepseek.com/v1",
+                NativeApi::Chat
+            )
+            .as_deref(),
+            Some(DEEPSEEK_BASE_URL)
+        );
     }
 
     #[test]
@@ -268,6 +286,7 @@ mod tests {
             (EndpointProvider::Minimax, "https://proxy.example.test"),
             (EndpointProvider::Glm, "https://proxy.example.test"),
             (EndpointProvider::OpenRouter, "https://proxy.example.test"),
+            (EndpointProvider::DeepSeek, "https://proxy.example.test"),
         ] {
             assert_eq!(
                 derive_route_base(provider, base, NativeApi::Chat),

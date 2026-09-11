@@ -50,6 +50,7 @@ fn opencode_go_key(
         openrouter_spend: None,
         glm_five_hour: None,
         glm_weekly: None,
+        deepseek_balance: None,
     }
 }
 
@@ -57,6 +58,7 @@ fn opencode_go_usage(
     keys: &[(Uuid, &str, Option<f64>, Option<f64>, Option<f64>)],
 ) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: db::EndpointProvider::OpencodeGo,
         provider_region: None,
         keys: keys

@@ -143,6 +143,13 @@ pub struct TokenPlanUsageResponse {
     pub provider: EndpointProvider,
     pub provider_region: Option<EndpointRegion>,
     pub keys: Vec<TokenPlanKeyUsage>,
+    /// AI tokens recorded for this endpoint since the start of the UTC day,
+    /// aggregated locally from `request_records`. Populated for balance
+    /// providers without a provider-reported spend figure (OpenRouter
+    /// fallback, DeepSeek) so the badge can pair the balance with a
+    /// "today usage" pill. `None` when not computed/applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_today_tokens: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -188,6 +195,11 @@ pub struct TokenPlanKeyUsage {
     /// configured key is not on a Coding Plan that exposes that window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub glm_weekly: Option<GlmWindowUsage>,
+    /// DeepSeek balance (`GET /user/balance`). `is_available=false` means the
+    /// account cannot spend: the key is weighted 0 and excluded from routing.
+    /// None when missing — degraded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deepseek_balance: Option<DeepSeekBalance>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -249,6 +261,18 @@ pub struct OpenRouterSpend {
     pub daily: f64,
     pub weekly: f64,
     pub monthly: f64,
+}
+
+/// DeepSeek account balance (`GET /user/balance`). The API reports amounts as
+/// decimal strings, so the parser coerces both strings and numbers. A balance
+/// carries no quota window: `is_available` alone drives routing weight.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DeepSeekBalance {
+    pub is_available: bool,
+    pub currency: String,
+    pub total_balance: f64,
+    pub granted_balance: f64,
+    pub topped_up_balance: f64,
 }
 
 /// One GLM quota window (`TOKENS_LIMIT` or `CREDIT_LIMIT` row in the

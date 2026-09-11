@@ -172,6 +172,7 @@ fn key_usage_serde_omits_absent_command_code_sections() {
             openrouter_spend: None,
             glm_five_hour: None,
             glm_weekly: None,
+            deepseek_balance: None,
         }
     }
     fn window(remaining_percent: f64) -> CommandCodeWindowUsage {

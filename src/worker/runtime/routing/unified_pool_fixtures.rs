@@ -42,6 +42,7 @@ pub(super) fn opencode_go_window(percent: f64) -> OpencodeGoWindowUsage {
 /// the used percent, so it is inverted here.
 pub(super) fn opencode_go_usage(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: db::EndpointProvider::OpencodeGo,
         provider_region: None,
         keys: keys
@@ -64,6 +65,7 @@ pub(super) fn opencode_go_usage(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUs
                 openrouter_spend: None,
                 glm_five_hour: None,
                 glm_weekly: None,
+                deepseek_balance: None,
             })
             .collect(),
     }
@@ -103,11 +105,13 @@ pub(super) fn opencode_go_urgent_key(
         openrouter_spend: None,
         glm_five_hour: None,
         glm_weekly: None,
+        deepseek_balance: None,
     }
 }
 
 pub(super) fn opencode_go_urgent_usage(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: db::EndpointProvider::OpencodeGo,
         provider_region: None,
         keys,

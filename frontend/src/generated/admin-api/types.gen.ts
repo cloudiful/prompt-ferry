@@ -277,6 +277,19 @@ export type CustomStringRuleSchema = {
 
 export type CustomStringScopeSchema = 'text' | 'line';
 
+/**
+ * DeepSeek account balance (`GET /user/balance`). The API reports amounts as
+ * decimal strings, so the parser coerces both strings and numbers. A balance
+ * carries no quota window: `is_available` alone drives routing weight.
+ */
+export type DeepSeekBalance = {
+    currency: string;
+    granted_balance: number;
+    is_available: boolean;
+    topped_up_balance: number;
+    total_balance: number;
+};
+
 export type EndpointApiKey = {
     created_at: string;
     enabled: boolean;
@@ -313,7 +326,7 @@ export type EndpointPageResponse = {
 
 export type EndpointProtocolMode = 'auto' | 'manual';
 
-export type EndpointProvider = 'generic' | 'minimax' | 'command_code' | 'opencode_go' | 'openrouter' | 'glm';
+export type EndpointProvider = 'generic' | 'minimax' | 'command_code' | 'opencode_go' | 'openrouter' | 'glm' | 'deepseek';
 
 export type EndpointRegion = 'cn' | 'global';
 
@@ -1314,7 +1327,7 @@ export type ResetPasswordRequest = {
 
 export type ReviewFailurePolicy = 'fail_open' | 'fail_closed';
 
-export type RouteSelectionReason = 'default' | 'session_affinity' | 'session_load_balance' | 'conversation_override';
+export type RouteSelectionReason = 'default' | 'session_affinity' | 'session_load_balance' | 'conversation_override' | 'quota_failover';
 
 export type SessionAffinityResetResponse = {
     cleared: boolean;
@@ -1370,6 +1383,7 @@ export type TlsMode = 'off' | 'server' | 'mtls';
 
 export type TokenPlanKeyUsage = {
     balances?: null | CommandCodeBalances;
+    deepseek_balance?: null | DeepSeekBalance;
     error_code?: string | null;
     error_message?: string | null;
     five_hour?: null | CommandCodeWindowUsage;
@@ -1396,6 +1410,14 @@ export type TokenPlanModelUsage = {
 
 export type TokenPlanUsageResponse = {
     keys: Array<TokenPlanKeyUsage>;
+    /**
+     * AI tokens recorded for this endpoint since the start of the UTC day,
+     * aggregated locally from `request_records`. Populated for balance
+     * providers without a provider-reported spend figure (OpenRouter
+     * fallback, DeepSeek) so the badge can pair the balance with a
+     * "today usage" pill. `None` when not computed/applicable.
+     */
+    local_today_tokens?: number | null;
     provider: EndpointProvider;
     provider_region?: null | EndpointRegion;
 };

@@ -150,6 +150,7 @@ pub(crate) async fn fetch_glm_key_usage(
             openrouter_spend: None,
             glm_five_hour: parsed.five_hour,
             glm_weekly: parsed.weekly,
+            deepseek_balance: None,
         },
         None => failed_key(
             key_id,

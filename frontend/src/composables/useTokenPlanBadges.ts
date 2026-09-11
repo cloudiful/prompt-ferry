@@ -4,8 +4,10 @@ import type {
   TokenPlanUsageResponse,
   TokenPlanWindowUsage,
 } from '@/generated/admin-api'
+import { formatTokenQuantity } from './useUsageFormatting'
 import {
   ccAsWindow,
+  formatMoney,
   glmAsWindow,
   opencodeGoAsWindow,
   progressColor,
@@ -16,52 +18,87 @@ import {
   prefetchTokenPlanUsage,
 } from './useTokenPlanUsageCache'
 
-export type TokenPlanBadges = {
-  // Short-window remaining percent (0..100). Aggregated across all keys
-  // for the endpoint, taking the worst (minimum). `null` means no short
-  // window is reported (e.g. legacy / non-quota endpoint).
+// Badge rendering family: window providers average their per-key remaining
+// windows, balance providers pair an account balance with a today-usage
+// figure. Derived from the endpoint provider so the pill builder never has
+// to guess from numeric nullability.
+export type TokenPlanBadgeMode = 'window' | 'openrouter' | 'deepseek'
+
+// Fields the pill builder needs. Kept separate from `TokenPlanBadges` so the
+// aggregate and the tests can construct a source without the raw payload.
+export type TokenPlanPillSource = {
+  mode: TokenPlanBadgeMode
+  // Arithmetic mean across the ok keys' short-window remaining percent
+  // (0..100). `null` when no key reports a short window.
   short: number | null
-  // Long-window remaining percent (0..100). Same aggregation rule.
+  // Arithmetic mean across the ok keys' long-window remaining percent.
   long: number | null
-  // OpenRouter remaining-balance ratio (0..100). `null` when the key
-  // has no finite cap or the endpoint isn't OpenRouter.
+  // OpenRouter remaining credit in USD. `null` when neither the key limit
+  // nor the account credit totals are reported.
+  openrouterBalance: number | null
+  // OpenRouter remaining-limit ratio (0..100) used only for the pill color.
   openrouterRemaining: number | null
-  // Raw OpenRouter limit/remaining pair, surfaced for the badge label
-  // (e.g. "$4.21 / $10.00"). `null`/`null` when not applicable.
-  openrouterLimit: number | null
-  openrouterLimitRemaining: number | null
+  // OpenRouter provider-reported spend today (USD).
+  openrouterDailySpend: number | null
+  // DeepSeek account balance and its `is_available` routing flag.
+  deepseekTotal: number | null
+  deepseekCurrency: string | null
+  deepseekAvailable: boolean | null
+  // Locally aggregated AI tokens for the endpoint since UTC midnight.
+  localTodayTokens: number | null
+}
+
+export type TokenPlanBadges = TokenPlanPillSource & {
   // Raw cached payload — exposed so the popover can re-render the
   // breakdown without re-fetching.
   usage: TokenPlanUsageResponse | null
-  // Per-key breakdown used by the endpoint list's crossfade rotation.
-  // Empty when no snapshot is cached.
-  keys: TokenPlanKeyBadges[]
 }
 
-// One key's derived badge values. `ok=false` keys carry no numbers so the
-// rotation can skip them without re-reading the raw payload.
-export type TokenPlanKeyBadges = {
-  keyId: string
-  keyLabel: string
+// One key's derived values. Not exported: with the P3 rotation gone the
+// per-key breakdown is only an intermediate of the aggregate.
+type KeyBadges = {
   ok: boolean
   short: number | null
   long: number | null
   openrouterRemaining: number | null
-  openrouterLimit: number | null
-  openrouterLimitRemaining: number | null
+  openrouterBalance: number | null
+  openrouterDailySpend: number | null
+  deepseekTotal: number | null
+  deepseekCurrency: string | null
+  deepseekAvailable: boolean | null
 }
 
-const EMPTY_BADGES: TokenPlanBadges = {
+const EMPTY_SOURCE: TokenPlanPillSource = {
+  mode: 'window',
   short: null,
   long: null,
+  openrouterBalance: null,
   openrouterRemaining: null,
-  openrouterLimit: null,
-  openrouterLimitRemaining: null,
-  usage: null,
-  keys: [],
+  openrouterDailySpend: null,
+  deepseekTotal: null,
+  deepseekCurrency: null,
+  deepseekAvailable: null,
+  localTodayTokens: null,
 }
 
-// Short window: min(5h / rolling / interval) across all keys. MiniMax
+const EMPTY_BADGES: TokenPlanBadges = { ...EMPTY_SOURCE, usage: null }
+
+function finiteNumber(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function mean(values: number[]): number | null {
+  if (values.length === 0) return null
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function badgeMode(provider: string): TokenPlanBadgeMode {
+  if (provider === 'openrouter') return 'openrouter'
+  if (provider === 'deepseek') return 'deepseek'
+  return 'window'
+}
+
+// Short window: min(5h / rolling / interval) within one key. MiniMax
 // surfaces each model_remains entry separately so we iterate them;
 // CommandCode / OpencodeGo / GLM each carry a single short-window slot.
 // We deliberately exclude OpenRouter (credit-balance-only, handled
@@ -89,10 +126,8 @@ function keyShortPercent(key: TokenPlanKeyUsage): number | null {
   return candidates.length === 0 ? null : Math.min(...candidates)
 }
 
-// Long window: min(weekly, monthly) across all keys. MiniMax weekly,
+// Long window: min(weekly, monthly) within one key. MiniMax weekly,
 // CommandCode weekly (USD), OpencodeGo weekly+monthly, GLM weekly.
-// Monthly-only shapes fall back to a single-entry min so the badge
-// always renders something when the provider reports *any* long window.
 function keyLongPercent(key: TokenPlanKeyUsage): number | null {
   const candidates: number[] = []
   for (const model of key.model_remains) {
@@ -117,90 +152,101 @@ function keyLongPercent(key: TokenPlanKeyUsage): number | null {
   return candidates.length === 0 ? null : Math.min(...candidates)
 }
 
-function openrouterPercent(key: TokenPlanKeyUsage): {
+// OpenRouter's remaining credit and today spend. `limit_remaining` is the
+// remaining credit on the key cap; when the key is unlimited (limit null)
+// we fall back to the management-key credit totals difference.
+function openrouterSignal(key: TokenPlanKeyUsage): {
   remaining: number | null
-  limit: number | null
-  limitRemaining: number | null
+  balance: number | null
+  daily: number | null
 } {
   const bal = key.openrouter_balance
-  if (!bal) return { remaining: null, limit: null, limitRemaining: null }
-  const limit =
-    typeof bal.limit === 'number' && Number.isFinite(bal.limit)
-      ? bal.limit
-      : null
+  const spend = key.openrouter_spend
+  if (!bal && !spend) {
+    return { remaining: null, balance: null, daily: null }
+  }
+  const limit = finiteNumber(bal?.limit)
+  const limitRemaining = finiteNumber(bal?.limit_remaining)
+  const totalCredits = finiteNumber(bal?.total_credits)
+  const totalUsage = finiteNumber(bal?.total_usage)
+  const balance =
+    limitRemaining ??
+    (totalCredits !== null && totalUsage !== null
+      ? totalCredits - totalUsage
+      : null)
   const remaining =
-    typeof bal.limit_remaining === 'number' &&
-    Number.isFinite(bal.limit_remaining)
-      ? bal.limit_remaining
+    limit !== null && limitRemaining !== null && limit > 0
+      ? Math.max(0, Math.min(100, (limitRemaining / limit) * 100))
       : null
-  if (limit === null || remaining === null || limit <= 0) {
-    return { remaining: null, limit, limitRemaining: remaining }
-  }
-  return {
-    remaining: Math.max(0, Math.min(100, (remaining / limit) * 100)),
-    limit,
-    limitRemaining: remaining,
-  }
+  return { remaining, balance, daily: finiteNumber(spend?.daily) }
 }
 
-function computeKeyBadges(key: TokenPlanKeyUsage): TokenPlanKeyBadges {
+function computeKeyBadges(key: TokenPlanKeyUsage): KeyBadges {
   if (!key.ok) {
     return {
-      keyId: key.key_id,
-      keyLabel: key.key_label,
       ok: false,
       short: null,
       long: null,
       openrouterRemaining: null,
-      openrouterLimit: null,
-      openrouterLimitRemaining: null,
+      openrouterBalance: null,
+      openrouterDailySpend: null,
+      deepseekTotal: null,
+      deepseekCurrency: null,
+      deepseekAvailable: null,
     }
   }
-  const or = openrouterPercent(key)
+  const or = openrouterSignal(key)
+  const bal = key.deepseek_balance
   return {
-    keyId: key.key_id,
-    keyLabel: key.key_label,
     ok: true,
     short: keyShortPercent(key),
     long: keyLongPercent(key),
     openrouterRemaining: or.remaining,
-    openrouterLimit: or.limit,
-    openrouterLimitRemaining: or.limitRemaining,
+    openrouterBalance: or.balance,
+    openrouterDailySpend: or.daily,
+    deepseekTotal: finiteNumber(bal?.total_balance),
+    deepseekCurrency: bal?.currency ?? null,
+    deepseekAvailable: bal ? bal.is_available : null,
   }
 }
 
 function computeBadges(usage: TokenPlanUsageResponse | null): TokenPlanBadges {
   if (!usage) return EMPTY_BADGES
-  const keys = usage.keys.map(computeKeyBadges)
-  let short: number | null = null
-  let long: number | null = null
-  let orLimit: number | null = null
-  let orRemaining: number | null = null
-  let orRemainingPercent: number | null = null
-  for (const key of keys) {
+  const mode = badgeMode(usage.provider)
+  const shorts: number[] = []
+  const longs: number[] = []
+  let openrouter: KeyBadges | null = null
+  let deepseek: KeyBadges | null = null
+  for (const key of usage.keys.map(computeKeyBadges)) {
     if (!key.ok) continue
-    if (key.short !== null)
-      short = short === null ? key.short : Math.min(short, key.short)
-    if (key.long !== null)
-      long = long === null ? key.long : Math.min(long, key.long)
-    if (key.openrouterRemaining !== null) {
-      orRemainingPercent =
-        orRemainingPercent === null
-          ? key.openrouterRemaining
-          : Math.min(orRemainingPercent, key.openrouterRemaining)
-      if (key.openrouterLimit !== null) orLimit = key.openrouterLimit
-      if (key.openrouterLimitRemaining !== null)
-        orRemaining = key.openrouterLimitRemaining
+    // Window providers: arithmetic mean across every key that reports the
+    // window (missing windows are skipped, not treated as zero).
+    if (key.short !== null) shorts.push(key.short)
+    if (key.long !== null) longs.push(key.long)
+    // Balance providers keep the first ok key that carries a signal, matching
+    // the pre-P2 single-pill behavior (an account balance is not averaged).
+    if (
+      openrouter === null &&
+      (key.openrouterBalance !== null ||
+        key.openrouterRemaining !== null ||
+        key.openrouterDailySpend !== null)
+    ) {
+      openrouter = key
     }
+    if (deepseek === null && key.deepseekTotal !== null) deepseek = key
   }
   return {
-    short,
-    long,
-    openrouterRemaining: orRemainingPercent,
-    openrouterLimit: orLimit,
-    openrouterLimitRemaining: orRemaining,
+    mode,
+    short: mean(shorts),
+    long: mean(longs),
+    openrouterBalance: openrouter?.openrouterBalance ?? null,
+    openrouterRemaining: openrouter?.openrouterRemaining ?? null,
+    openrouterDailySpend: openrouter?.openrouterDailySpend ?? null,
+    deepseekTotal: deepseek?.deepseekTotal ?? null,
+    deepseekCurrency: deepseek?.deepseekCurrency ?? null,
+    deepseekAvailable: deepseek?.deepseekAvailable ?? null,
+    localTodayTokens: finiteNumber(usage.local_today_tokens),
     usage,
-    keys,
   }
 }
 
@@ -244,44 +290,54 @@ export type TokenPlanBadgePill = {
   title: string
 }
 
-// Build the pill descriptors for one key (or the aggregate). An
-// OpenRouter balance collapses to a single pill; quota-bearing providers
-// emit a short/long pair, each slot omitted when the provider reports no
-// such window.
+// Build the pill descriptors for one endpoint. Window providers emit a
+// short/long pair (each slot omitted when no key reports that window);
+// balance providers emit a balance + today-usage pair.
 export function tokenPlanBadgePills(
-  source: Pick<
-    TokenPlanKeyBadges,
-    | 'short'
-    | 'long'
-    | 'openrouterRemaining'
-    | 'openrouterLimit'
-    | 'openrouterLimitRemaining'
-  >,
+  source: TokenPlanPillSource,
   t: TranslateFn,
 ): TokenPlanBadgePill[] {
-  if (
-    source.openrouterLimit !== null ||
-    source.openrouterLimitRemaining !== null
-  ) {
-    const label =
-      source.openrouterRemaining !== null
-        ? `${t('tokenPlanOpenRouterRemaining')} ${source.openrouterRemaining.toFixed(0)}%`
-        : t('tokenPlanNoQuota')
-    const title =
-      source.openrouterLimit !== null &&
-      source.openrouterLimitRemaining !== null
-        ? `${source.openrouterLimitRemaining.toFixed(2)} / ${source.openrouterLimit.toFixed(2)}`
-        : ''
-    return [
+  if (source.mode === 'openrouter') {
+    const pills: TokenPlanBadgePill[] = [
       {
-        label,
+        label:
+          source.openrouterBalance !== null
+            ? `${t('tokenPlanOpenRouterRemaining')} ${formatMoney('USD', source.openrouterBalance)}`
+            : `${t('tokenPlanOpenRouterRemaining')} ${t('tokenPlanNoQuota')}`,
         color:
           source.openrouterRemaining !== null
             ? badgeColorForPercent(source.openrouterRemaining)
             : '',
-        title,
+        title: t('tokenPlanOpenRouterBalanceHint'),
       },
     ]
+    // Provider-reported spend wins; the local aggregate is the fallback.
+    if (source.openrouterDailySpend !== null) {
+      pills.push({
+        label: `${t('tokenPlanSpendDaily')} ${formatMoney('USD', source.openrouterDailySpend)}`,
+        color: '',
+        title: t('tokenPlanOpenRouterSpendHint'),
+      })
+    } else if (source.localTodayTokens !== null) {
+      pills.push(localTodayPill(source.localTodayTokens, t))
+    }
+    return pills
+  }
+  if (source.mode === 'deepseek') {
+    const pills: TokenPlanBadgePill[] = []
+    if (source.deepseekTotal !== null) {
+      pills.push({
+        label: `${t('tokenPlanDeepSeekBalance')} ${formatMoney(source.deepseekCurrency, source.deepseekTotal)}`,
+        color: badgeColorForPercent(
+          source.deepseekAvailable === false ? 0 : 100,
+        ),
+        title: t('tokenPlanDeepSeekBalanceHint'),
+      })
+    }
+    if (source.localTodayTokens !== null) {
+      pills.push(localTodayPill(source.localTodayTokens, t))
+    }
+    return pills
   }
   const pills: TokenPlanBadgePill[] = []
   if (source.short !== null) {
@@ -299,4 +355,12 @@ export function tokenPlanBadgePills(
     })
   }
   return pills
+}
+
+function localTodayPill(tokens: number, t: TranslateFn): TokenPlanBadgePill {
+  return {
+    label: `${t('tokenPlanLocalTodayTokens')} ${formatTokenQuantity(tokens)}`,
+    color: '',
+    title: t('tokenPlanLocalTodayTokensHint'),
+  }
 }

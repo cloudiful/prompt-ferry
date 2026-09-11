@@ -107,6 +107,11 @@ pub enum EndpointProvider {
     // 0015 standalone rebuild migration.
     #[serde(rename = "glm")]
     Glm,
+    // Issue #287: DeepSeek mirrors the admin API single-token `deepseek`
+    // (the snake_case default would be `deep_seek`); the 0016 standalone
+    // rebuild migration widens the provider CHECK to match.
+    #[serde(rename = "deepseek")]
+    DeepSeek,
 }
 
 impl EndpointProvider {
@@ -118,6 +123,7 @@ impl EndpointProvider {
             Self::OpencodeGo => "opencode_go",
             Self::OpenRouter => "openrouter",
             Self::Glm => "glm",
+            Self::DeepSeek => "deepseek",
         }
     }
 
@@ -129,6 +135,7 @@ impl EndpointProvider {
             "opencode_go" => Ok(Self::OpencodeGo),
             "openrouter" => Ok(Self::OpenRouter),
             "glm" => Ok(Self::Glm),
+            "deepseek" => Ok(Self::DeepSeek),
             _ => Err(StandaloneConfigError::CorruptDatabase(format!(
                 "unknown endpoint provider {value:?}"
             ))),

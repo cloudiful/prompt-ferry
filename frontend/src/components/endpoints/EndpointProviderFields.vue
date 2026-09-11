@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import ProviderIcon from '@/components/providers/ProviderIcon.vue'
 import type { EndpointForm } from '@/models'
 
 const props = defineProps<{
@@ -17,7 +18,8 @@ const providerSelection = computed({
       | 'command_code'
       | 'opencode_go'
       | 'openrouter'
-      | 'glm',
+      | 'glm'
+      | 'deepseek',
   ) {
     form.value.provider = value
     if (value !== 'minimax') {
@@ -92,10 +94,15 @@ const hasVersionPath = computed(() =>
         { label: t('providerOpencodeGo'), value: 'opencode_go' },
         { label: t('providerOpenRouter'), value: 'openrouter' },
         { label: t('providerGlm'), value: 'glm' },
+        { label: t('providerDeepSeek'), value: 'deepseek' },
       ]"
       label-key="label"
       value-key="value"
-    />
+    >
+      <template #item-leading="{ item }">
+        <ProviderIcon :provider="item.value" size="sm" />
+      </template>
+    </USelect>
     <UInput v-model="form.name" class="w-full" :placeholder="t('name')" />
     <USelect
       v-model="protocolSelection"

@@ -131,6 +131,7 @@ pub(super) fn request() -> BufferedBridgeRequest {
 
 fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: db::EndpointProvider::Minimax,
         provider_region: Some(db::EndpointRegion::Cn),
         keys: keys
@@ -157,6 +158,7 @@ fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
                 openrouter_spend: None,
                 glm_five_hour: None,
                 glm_weekly: None,
+                deepseek_balance: None,
             })
             .collect(),
     }
@@ -217,6 +219,7 @@ fn command_code_key(
         openrouter_spend: None,
         glm_five_hour: None,
         glm_weekly: None,
+        deepseek_balance: None,
     }
 }
 
@@ -224,6 +227,7 @@ fn command_code_usage(
     keys: &[(uuid::Uuid, &str, Option<f64>, Option<f64>)],
 ) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: db::EndpointProvider::CommandCode,
         provider_region: None,
         keys: keys

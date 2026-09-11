@@ -1,5 +1,7 @@
 pub(crate) mod command_code_parsing;
 pub(crate) mod command_code_usage;
+pub(crate) mod deepseek_parsing;
+pub(crate) mod deepseek_usage;
 pub(crate) mod glm_parsing;
 #[cfg(test)]
 mod glm_parsing_tests;

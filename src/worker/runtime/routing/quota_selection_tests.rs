@@ -44,6 +44,7 @@ async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
         .store_for_test(
             endpoint_id,
             TokenPlanUsageResponse {
+                local_today_tokens: None,
                 provider: db::EndpointProvider::Minimax,
                 provider_region: Some(db::EndpointRegion::Cn),
                 keys: vec![
@@ -126,6 +127,7 @@ fn token_plan_key_usage(
         openrouter_spend: None,
         glm_five_hour: None,
         glm_weekly: None,
+        deepseek_balance: None,
     }
 }
 
@@ -184,6 +186,7 @@ fn command_code_key_usage(
         openrouter_spend: None,
         glm_five_hour: None,
         glm_weekly: None,
+        deepseek_balance: None,
     }
 }
 
@@ -243,6 +246,7 @@ async fn quota_key_lb_skips_command_code_key_with_no_remaining_window() {
         .store_for_test(
             endpoint_id,
             TokenPlanUsageResponse {
+                local_today_tokens: None,
                 provider: db::EndpointProvider::CommandCode,
                 provider_region: None,
                 keys: vec![
@@ -275,6 +279,7 @@ async fn quota_key_lb_uses_tighter_command_code_window_and_single_arm() {
         .store_for_test(
             endpoint_id,
             TokenPlanUsageResponse {
+                local_today_tokens: None,
                 provider: db::EndpointProvider::CommandCode,
                 provider_region: None,
                 keys: vec![
@@ -325,6 +330,7 @@ async fn quota_key_lb_still_routes_payg_command_code_key_without_windows() {
         .store_for_test(
             endpoint_id,
             TokenPlanUsageResponse {
+                local_today_tokens: None,
                 provider: db::EndpointProvider::CommandCode,
                 provider_region: None,
                 keys: vec![command_code_key_usage(payg_key_id, "payg", None, None)],
@@ -359,6 +365,7 @@ async fn unified_pool_skips_a_target_with_no_remaining_quota() {
         .store_for_test(
             exhausted_endpoint,
             TokenPlanUsageResponse {
+                local_today_tokens: None,
                 provider: db::EndpointProvider::Minimax,
                 provider_region: Some(db::EndpointRegion::Cn),
                 keys: vec![token_plan_key_usage(exhausted_key_id, "primary", 0.0)],

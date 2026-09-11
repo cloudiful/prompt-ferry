@@ -8,13 +8,12 @@ import {
   watch,
   type PropType,
 } from 'vue'
+import EndpointNameCell from '@/components/endpoints/EndpointNameCell.vue'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
-import { useTokenPlanBadgeRotation } from '@/composables/useTokenPlanBadgeRotation'
 import {
   tokenPlanBadgePills,
   useTokenPlanBadges,
-  type TokenPlanKeyBadges,
 } from '@/composables/useTokenPlanBadges'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
 import type { EndpointListItemView } from '@/models/endpoints'
@@ -39,6 +38,7 @@ const QUOTA_PROVIDERS = new Set<EndpointListItemView['provider']>([
   'opencode_go',
   'openrouter',
   'glm',
+  'deepseek',
 ])
 
 function isQuotaProvider(provider: EndpointListItemView['provider']): boolean {
@@ -116,61 +116,17 @@ const EndpointUsageBadges = defineComponent({
     // shift (e.g. after an inline edit) and the badge must re-evaluate
     // against the new endpoint id without a remount.
     const badges = useTokenPlanBadges(computed(() => props.endpointId))
-    const keyBadges = computed(() => badges.value.keys)
-    const rotation = useTokenPlanBadgeRotation(keyBadges)
-    // Rotate only once at least two keys report usable numbers; a lone
-    // healthy key (or an all-failed endpoint) keeps the aggregate cell.
-    const rotating = computed(
-      () => keyBadges.value.filter((key) => key.ok).length > 1,
-    )
     const pillBase =
       'inline-flex items-center rounded-full border border-default bg-elevated px-1.5 py-px text-[0.7rem] font-semibold whitespace-nowrap'
 
-    function pillNodes(source: TokenPlanKeyBadges) {
-      return tokenPlanBadgePills(source, props.t).map((pill) =>
+    return () => {
+      const nodes = tokenPlanBadgePills(badges.value, props.t).map((pill) =>
         h(
           'span',
           { class: pillBase, style: { color: pill.color }, title: pill.title },
           pill.label,
         ),
       )
-    }
-
-    return () => {
-      if (rotating.value) {
-        // #277 P3: stack every key in one grid cell and crossfade the
-        // active one. Failed keys stay hidden (the rotation skips them);
-        // each cell carries the key label as its title hint.
-        const cells = keyBadges.value.map((key, index) => {
-          const nodes = pillNodes(key)
-          return h(
-            'span',
-            {
-              class: [
-                'col-start-1 row-start-1 transition-opacity duration-500',
-                index === rotation.index
-                  ? 'opacity-100'
-                  : 'pointer-events-none opacity-0',
-              ],
-              'aria-hidden': index !== rotation.index,
-              title: key.keyLabel,
-            },
-            nodes.length > 0
-              ? nodes
-              : h('span', { class: 'text-xs text-muted' }, '—'),
-          )
-        })
-        return h(
-          'span',
-          {
-            class: 'inline-grid items-center',
-            onMouseenter: () => rotation.setPaused(true),
-            onMouseleave: () => rotation.setPaused(false),
-          },
-          cells,
-        )
-      }
-      const nodes = pillNodes(badges.value)
       if (nodes.length > 0) {
         return h('span', { class: 'inline-flex items-center gap-1' }, nodes)
       }
@@ -192,14 +148,11 @@ const EndpointUsageBadges = defineComponent({
       class="min-w-0"
     >
       <template #name-cell="{ row }">
-        <div class="min-w-0 max-w-40">
-          <div class="truncate font-semibold text-highlighted">
-            {{ row.original.name }}
-          </div>
-          <div class="truncate text-xs text-muted">
-            {{ row.original.base_url }}
-          </div>
-        </div>
+        <EndpointNameCell
+          :name="row.original.name"
+          :base-url="row.original.base_url"
+          :provider="row.original.provider"
+        />
       </template>
       <template #status-cell="{ row }">
         <div

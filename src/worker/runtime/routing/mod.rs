@@ -1,5 +1,7 @@
 mod key_pool;
 #[cfg(test)]
+mod quota_deepseek_tests;
+#[cfg(test)]
 mod quota_opencode_go_tests;
 #[cfg(test)]
 mod quota_openrouter_tests;

@@ -23,6 +23,12 @@ pub enum EndpointProvider {
     // and never gains the MiniMax builtin MCP privilege.
     #[serde(rename = "glm")]
     Glm,
+    // DeepSeek (issue #287) is the seventh provider. Like the other
+    // non-MiniMax presets it carries no region and no builtin MCP privilege;
+    // `DeepSeek` snake_cases to `deep_seek`, so rename to the single-token
+    // `deepseek` used by the admin API contract and the 0079 CHECK.
+    #[serde(rename = "deepseek")]
+    DeepSeek,
 }
 
 impl Default for EndpointProvider {
@@ -40,6 +46,7 @@ impl EndpointProvider {
             Self::OpencodeGo => "opencode_go",
             Self::OpenRouter => "openrouter",
             Self::Glm => "glm",
+            Self::DeepSeek => "deepseek",
         }
     }
 
@@ -50,6 +57,7 @@ impl EndpointProvider {
             "opencode_go" => Self::OpencodeGo,
             "openrouter" => Self::OpenRouter,
             "glm" => Self::Glm,
+            "deepseek" => Self::DeepSeek,
             _ => Self::Generic,
         }
     }
@@ -61,6 +69,7 @@ impl EndpointProvider {
             Some("opencode_go") => Self::OpencodeGo,
             Some("openrouter") => Self::OpenRouter,
             Some("glm") => Self::Glm,
+            Some("deepseek") => Self::DeepSeek,
             _ => Self::Generic,
         }
     }
@@ -353,6 +362,37 @@ mod tests {
         let deserialized: EndpointProvider =
             serde_json::from_value(serde_json::json!("glm")).expect("deserialize glm provider");
         assert_eq!(deserialized, EndpointProvider::Glm);
+        // Unknown providers keep the legacy generic fallback.
+        assert_eq!(
+            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::Generic
+        );
+        assert_eq!(
+            EndpointProvider::from_optional(None),
+            EndpointProvider::Generic
+        );
+    }
+
+    #[test]
+    fn deepseek_provider_round_trips_as_single_token() {
+        // Issue #287: DeepSeek is the seventh provider; it serializes to the
+        // single-token `deepseek` (matching the 0079 CHECK and the admin API
+        // contract), not the derived `deep_seek`.
+        assert_eq!(EndpointProvider::DeepSeek.as_str(), "deepseek");
+        assert_eq!(
+            EndpointProvider::from_str("deepseek"),
+            EndpointProvider::DeepSeek
+        );
+        assert_eq!(
+            EndpointProvider::from_optional(Some("deepseek")),
+            EndpointProvider::DeepSeek
+        );
+        let serialized =
+            serde_json::to_value(EndpointProvider::DeepSeek).expect("serialize deepseek provider");
+        assert_eq!(serialized, serde_json::json!("deepseek"));
+        let deserialized: EndpointProvider = serde_json::from_value(serde_json::json!("deepseek"))
+            .expect("deserialize deepseek provider");
+        assert_eq!(deserialized, EndpointProvider::DeepSeek);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
             EndpointProvider::from_str("legacy-unknown"),

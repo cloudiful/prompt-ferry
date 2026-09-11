@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, type PropType } from 'vue'
+import ProviderIcon from '@/components/providers/ProviderIcon.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
-import { useTokenPlanBadgeRotation } from '@/composables/useTokenPlanBadgeRotation'
 import {
   tokenPlanBadgePills,
   useTokenPlanBadges,
-  type TokenPlanKeyBadges,
 } from '@/composables/useTokenPlanBadges'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
 import type { EndpointListItemView } from '@/models/endpoints'
@@ -32,6 +31,7 @@ const QUOTA_PROVIDERS = new Set<EndpointListItemView['provider']>([
   'opencode_go',
   'openrouter',
   'glm',
+  'deepseek',
 ])
 
 const isQuotaProvider = computed(() => QUOTA_PROVIDERS.has(props.item.provider))
@@ -42,9 +42,9 @@ const isQuotaProvider = computed(() => QUOTA_PROVIDERS.has(props.item.provider))
 prefetchTokenPlanBatch([props.item.endpoint_id], 4)
 
 // Inline usage-badge subcomponent for the mobile card. Compact pill
-// pair stacked vertically so the wider card surface can afford the
-// verbose "短窗 42% / 长窗 73%" labels; OpenRouter collapses to a
-// single balance pill + the "无额度" fallback when no cap is set.
+// pair wrapping across the row so the wider card surface can afford the
+// verbose "短窗 42% / 长窗 73%" labels; balance providers pair their
+// balance with a today-usage pill.
 const EndpointMobileUsageBadges = defineComponent({
   name: 'EndpointMobileUsageBadges',
   props: {
@@ -58,61 +58,17 @@ const EndpointMobileUsageBadges = defineComponent({
     // edit) the badge must re-evaluate against the new endpoint id
     // without a remount.
     const badges = useTokenPlanBadges(computed(() => props.endpointId))
-    const keyBadges = computed(() => badges.value.keys)
-    const rotation = useTokenPlanBadgeRotation(keyBadges)
-    // Same rule as the desktop table: rotate only when at least two keys
-    // report usable numbers; otherwise keep the aggregate pill pair.
-    const rotating = computed(
-      () => keyBadges.value.filter((key) => key.ok).length > 1,
-    )
     const pillBase =
       'inline-flex items-center rounded-full border border-default bg-elevated px-2 py-px text-[0.74rem] font-semibold whitespace-nowrap'
 
-    function pillNodes(source: TokenPlanKeyBadges) {
-      return tokenPlanBadgePills(source, props.t).map((pill) =>
+    return () => {
+      const nodes = tokenPlanBadgePills(badges.value, props.t).map((pill) =>
         h(
           'span',
           { class: pillBase, style: { color: pill.color }, title: pill.title },
           pill.label,
         ),
       )
-    }
-
-    return () => {
-      if (rotating.value) {
-        // #277 P3: crossfade across keys inside the usage row. Each key
-        // keeps its own wrapping pill pair; the active cell is visible,
-        // failed keys are skipped by the rotation and stay hidden.
-        const cells = keyBadges.value.map((key, index) => {
-          const nodes = pillNodes(key)
-          return h(
-            'span',
-            {
-              class: [
-                'col-start-1 row-start-1 flex flex-wrap items-center gap-1 transition-opacity duration-500',
-                index === rotation.index
-                  ? 'opacity-100'
-                  : 'pointer-events-none opacity-0',
-              ],
-              'aria-hidden': index !== rotation.index,
-              title: key.keyLabel,
-            },
-            nodes.length > 0
-              ? nodes
-              : h('span', { class: 'text-[0.74rem] text-muted' }, '—'),
-          )
-        })
-        return h(
-          'span',
-          {
-            class: 'inline-grid items-center',
-            onMouseenter: () => rotation.setPaused(true),
-            onMouseleave: () => rotation.setPaused(false),
-          },
-          cells,
-        )
-      }
-      const nodes = pillNodes(badges.value)
       if (nodes.length > 0) {
         return h('span', { class: 'flex flex-wrap items-center gap-1' }, nodes)
       }
@@ -125,12 +81,17 @@ const EndpointMobileUsageBadges = defineComponent({
 <template>
   <article class="grid gap-3 rounded-xl border border-default bg-default p-3">
     <div class="flex items-start justify-between gap-2">
-      <div class="min-w-0">
-        <div class="text-[0.88rem] leading-[1.2] font-bold text-highlighted">
-          {{ item.name }}
-        </div>
-        <div class="mt-px break-words text-[0.7rem] leading-[1.35] text-dimmed">
-          {{ item.base_url }}
+      <div class="flex min-w-0 items-center gap-1.5">
+        <ProviderIcon :provider="item.provider" size="md" />
+        <div class="min-w-0">
+          <div class="text-[0.88rem] leading-[1.2] font-bold text-highlighted">
+            {{ item.name }}
+          </div>
+          <div
+            class="mt-px break-words text-[0.7rem] leading-[1.35] text-dimmed"
+          >
+            {{ item.base_url }}
+          </div>
         </div>
       </div>
     </div>

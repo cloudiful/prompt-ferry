@@ -79,6 +79,7 @@ impl TokenPlanQuotaCache {
                 | db::EndpointProvider::OpencodeGo
                 | db::EndpointProvider::OpenRouter
                 | db::EndpointProvider::Glm
+                | db::EndpointProvider::DeepSeek
         ) {
             return Ok(None);
         }
@@ -227,6 +228,7 @@ mod tests {
 
     fn opencode_go_usage(key_id: Uuid, remaining: f64) -> TokenPlanUsageResponse {
         TokenPlanUsageResponse {
+            local_today_tokens: None,
             provider: db::EndpointProvider::OpencodeGo,
             provider_region: None,
             keys: vec![TokenPlanKeyUsage {
@@ -251,6 +253,7 @@ mod tests {
                 openrouter_spend: None,
                 glm_five_hour: None,
                 glm_weekly: None,
+                deepseek_balance: None,
             }],
         }
     }

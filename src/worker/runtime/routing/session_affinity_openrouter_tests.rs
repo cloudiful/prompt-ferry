@@ -51,11 +51,13 @@ fn openrouter_key(
         }),
         glm_five_hour: None,
         glm_weekly: None,
+        deepseek_balance: None,
     }
 }
 
 fn openrouter_usage(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
+        local_today_tokens: None,
         provider: db::EndpointProvider::OpenRouter,
         provider_region: None,
         keys,

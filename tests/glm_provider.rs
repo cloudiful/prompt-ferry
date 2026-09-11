@@ -46,6 +46,7 @@ fn key_usage_serde_omits_absent_glm_sections() {
             openrouter_spend: None,
             glm_five_hour: five_hour,
             glm_weekly: weekly,
+            deepseek_balance: None,
         }
     }
     // A key carrying no GLM sections must not serialize them (the

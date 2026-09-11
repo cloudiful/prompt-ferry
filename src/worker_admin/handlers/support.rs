@@ -100,7 +100,8 @@ pub(super) async fn resolve_endpoint_input(
         | (db::EndpointProvider::CommandCode, Some(_))
         | (db::EndpointProvider::OpencodeGo, Some(_))
         | (db::EndpointProvider::OpenRouter, Some(_))
-        | (db::EndpointProvider::Glm, Some(_)) => {
+        | (db::EndpointProvider::Glm, Some(_))
+        | (db::EndpointProvider::DeepSeek, Some(_)) => {
             return Err(error(
                 StatusCode::BAD_REQUEST,
                 "invalid_provider_region",
