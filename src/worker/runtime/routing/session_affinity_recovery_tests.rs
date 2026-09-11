@@ -3,9 +3,7 @@ use super::super::{
     prompt_log::RequestPromptLog,
     tests::{sample_request, session_affinity_candidate, session_affinity_services},
 };
-use super::{
-    rendezvous_target, select_route_for_candidate, session_affinity_tests::request_context,
-};
+use super::{select_route_for_candidate, session_affinity_tests::request_context};
 use crate::replay_cache::ReplayCache;
 
 #[tokio::test]
@@ -15,17 +13,18 @@ async fn ignores_preferred_endpoint_from_another_model_route() {
     let services = session_affinity_services(runtime_state.clone(), replay_cache);
     let candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
+    let foreign_endpoint_id = uuid::Uuid::new_v4();
     let request_ctx = request_context(
         runtime_state.worker_instance_id(),
         RequestPromptLog {
             conversation_id: Some(conversation_id),
             conversation_seq: Some(2),
-            preferred_endpoint_id: Some(uuid::Uuid::new_v4()),
+            preferred_endpoint_id: Some(foreign_endpoint_id),
             ..RequestPromptLog::default()
         },
     );
 
-    let selected = select_route_for_candidate(
+    let first = select_route_for_candidate(
         &services,
         &request_ctx,
         &candidate,
@@ -36,11 +35,27 @@ async fn ignores_preferred_endpoint_from_another_model_route() {
     .await
     .unwrap()
     .expect("current model route should still be selected");
-    let expected = rendezvous_target(&candidate, Some(&format!("conversation:{conversation_id}")))
-        .expect("candidate should have a target")
-        .endpoint_id;
+    let second = select_route_for_candidate(
+        &services,
+        &request_ctx,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .expect("current model route should still be selected");
 
-    assert_eq!(selected.route.route_id, expected);
+    assert_ne!(first.route.route_id, foreign_endpoint_id);
+    assert!(
+        candidate
+            .targets
+            .iter()
+            .any(|target| target.endpoint_id == first.route.route_id),
+        "route must come from the current candidate"
+    );
+    assert_eq!(first.route.route_id, second.route.route_id);
 }
 
 #[tokio::test]

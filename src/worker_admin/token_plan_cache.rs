@@ -9,21 +9,25 @@ use sqlx::PgPool;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
-use crate::{
-    db,
-    worker_admin_types::{TokenPlanKeyUsage, TokenPlanModelUsage, TokenPlanUsageResponse},
-};
-
-// Keep the cache call path stable after the parser split.
-pub(crate) use super::glm_parsing::glm_remaining_percent;
+use super::token_plan_weight;
+use crate::{db, worker_admin_types::TokenPlanUsageResponse};
 
 const REFRESH_AFTER: Duration = Duration::from_secs(60);
+
+/// Outstanding reservations for one (endpoint, key): the estimated tokens
+/// and the number of draws that produced them. Percent-only windows damp by
+/// draw count, MiniMax token windows convert the token share.
+#[derive(Default, Clone, Copy)]
+struct ReservationState {
+    tokens: u64,
+    draws: u64,
+}
 
 #[derive(Clone)]
 pub(crate) struct TokenPlanQuotaCache {
     entries: Arc<RwLock<HashMap<Uuid, CachedUsage>>>,
     refresh_locks: Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>,
-    reservations: Arc<std::sync::Mutex<HashMap<(Uuid, Uuid), u64>>>,
+    reservations: Arc<std::sync::Mutex<HashMap<(Uuid, Uuid), ReservationState>>>,
 }
 
 #[derive(Clone)]
@@ -118,51 +122,53 @@ impl TokenPlanQuotaCache {
         entry.fetched_at.elapsed() < REFRESH_AFTER
     }
 
+    /// Raw (urgency-free) remaining percent. Exhaustion checks use this so a
+    /// depleted window is never resurrected just because it resets soon.
     pub(crate) fn key_remaining_percent_now(
         &self,
         endpoint_id: Uuid,
         key_id: Uuid,
         model: Option<&str>,
     ) -> Option<f64> {
-        let usage = self.entries.try_read().ok()?;
-        let key = usage
+        let snapshot = self.entries.try_read().ok()?;
+        let key = snapshot
             .get(&endpoint_id)?
             .usage
             .keys
             .iter()
             .find(|key| key.key_id == key_id && key.ok)?;
-        // CommandCode keys carry no `model_remains`; weight by the tighter
-        // of the 5-hour/weekly USD windows instead. Token reservations are
-        // MiniMax token-count based and do not apply to USD caps.
-        if let Some(remaining) = super::command_code_usage::command_code_remaining_percent(key) {
-            return Some(remaining.clamp(0.0, 100.0));
+        if let Some(remaining) = token_plan_weight::provider_remaining_percent(key) {
+            return Some(remaining);
         }
-        // OpencodeGo keys carry percent windows but no model_remains; weight
-        // by the tightest (lowest remaining) of rolling/weekly/monthly.
-        if let Some(remaining) = super::opencode_go_usage::opencode_go_remaining_percent(key) {
-            return Some(remaining.clamp(0.0, 100.0));
+        let usage = token_plan_weight::model_usage(key, model)?;
+        let reserved_tokens = self.reservation_state(endpoint_id, key_id).0;
+        token_plan_weight::model_remaining_percent(usage, reserved_tokens)
+    }
+
+    /// Pool weight: remaining percent lifted by reset urgency, then damped by
+    /// outstanding reservations so a concurrent burst does not overshoot the
+    /// same key. Always clamped to a finite non-negative percent.
+    pub(crate) fn key_weight_percent_now(
+        &self,
+        endpoint_id: Uuid,
+        key_id: Uuid,
+        model: Option<&str>,
+    ) -> Option<f64> {
+        let snapshot = self.entries.try_read().ok()?;
+        let key = snapshot
+            .get(&endpoint_id)?
+            .usage
+            .keys
+            .iter()
+            .find(|key| key.key_id == key_id && key.ok)?;
+        let (reserved_tokens, draws) = self.reservation_state(endpoint_id, key_id);
+        if let Some(remaining) = token_plan_weight::provider_weight_percent(key) {
+            return Some(token_plan_weight::apply_reservation_backpressure(
+                remaining, draws,
+            ));
         }
-        // OpenRouter keys carry a credit balance, not windows; weight by the
-        // key cap (or full weight when unlimited). Token reservations are
-        // MiniMax token-count based and do not apply to credit caps.
-        if let Some(remaining) = openrouter_remaining_percent(key) {
-            return Some(remaining.clamp(0.0, 100.0));
-        }
-        // GLM Coding Plan keys carry 5-hour / weekly token-or-credit
-        // windows; weight by the tightest (lowest remaining) window.
-        if let Some(remaining) = glm_remaining_percent(key) {
-            return Some(remaining.clamp(0.0, 100.0));
-        }
-        let usage = model_usage(key, model)?;
-        let remaining = effective_remaining_percent(usage)?;
-        let reserved_tokens = self
-            .reservations
-            .lock()
-            .expect("quota reservation lock is not poisoned")
-            .get(&(endpoint_id, key_id))
-            .copied()
-            .unwrap_or_default();
-        Some((remaining - reserved_percent(usage, reserved_tokens)).max(0.0))
+        let usage = token_plan_weight::model_usage(key, model)?;
+        token_plan_weight::model_weight_percent(usage, reserved_tokens)
     }
 
     pub(crate) fn reserve_estimated_tokens(
@@ -176,7 +182,17 @@ impl TokenPlanQuotaCache {
             .lock()
             .expect("quota reservation lock is not poisoned");
         let entry = reservations.entry((endpoint_id, key_id)).or_default();
-        *entry = entry.saturating_add(estimated_tokens);
+        entry.tokens = entry.tokens.saturating_add(estimated_tokens);
+        entry.draws = entry.draws.saturating_add(1);
+    }
+
+    fn reservation_state(&self, endpoint_id: Uuid, key_id: Uuid) -> (u64, u64) {
+        self.reservations
+            .lock()
+            .expect("quota reservation lock is not poisoned")
+            .get(&(endpoint_id, key_id))
+            .map(|state| (state.tokens, state.draws))
+            .unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -191,76 +207,6 @@ impl TokenPlanQuotaCache {
     }
 }
 
-fn model_usage<'a>(
-    key: &'a TokenPlanKeyUsage,
-    model: Option<&str>,
-) -> Option<&'a TokenPlanModelUsage> {
-    let model = model?.trim();
-    key.model_remains
-        .iter()
-        .find(|usage| usage.model_name.eq_ignore_ascii_case(model))
-        .or_else(|| {
-            key.model_remains
-                .iter()
-                .find(|usage| usage.model_name.eq_ignore_ascii_case("general"))
-        })
-        .or_else(|| (key.model_remains.len() == 1).then(|| &key.model_remains[0]))
-}
-
-// OpenRouter remaining percent (issue #203 P3): a finite key-level cap
-// (`limit`) weights by `limit_remaining/limit`; an unlimited key (`limit`
-// null) has no cap, so a present spend snapshot means full weight (ratio
-// capped at 1). Missing numbers degrade to `None` (no quota signal).
-pub(crate) fn openrouter_remaining_percent(key: &TokenPlanKeyUsage) -> Option<f64> {
-    let balance = key.openrouter_balance.as_ref()?;
-    match balance.limit {
-        Some(limit) if limit.is_finite() && limit > 0.0 => {
-            let remaining = balance.limit_remaining?;
-            Some((remaining / limit * 100.0).clamp(0.0, 100.0))
-        }
-        // A zero (or negative) cap cannot spend: fully exhausted.
-        Some(limit) if limit.is_finite() => Some(0.0),
-        // Unlimited (or non-finite) cap: full weight when the key shows a
-        // spend snapshot, otherwise no signal.
-        _ => key.openrouter_spend.as_ref().map(|_| 100.0),
-    }
-}
-
-fn effective_remaining_percent(usage: &TokenPlanModelUsage) -> Option<f64> {
-    let interval = usage
-        .interval
-        .as_ref()
-        .and_then(|window| window.remaining_percent);
-    let weekly = usage
-        .weekly
-        .as_ref()
-        .and_then(|window| window.remaining_percent);
-    match (interval, weekly) {
-        (Some(interval), Some(weekly)) => Some(interval.min(weekly).clamp(0.0, 100.0)),
-        (Some(remaining), None) | (None, Some(remaining)) => Some(remaining.clamp(0.0, 100.0)),
-        (None, None) => None,
-    }
-}
-
-fn reserved_percent(usage: &TokenPlanModelUsage, reserved_tokens: u64) -> f64 {
-    let total_count = [
-        usage
-            .interval
-            .as_ref()
-            .and_then(|window| window.total_count),
-        usage.weekly.as_ref().and_then(|window| window.total_count),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|total| *total > 0)
-    .min()
-    .unwrap_or_default();
-    if total_count <= 0 {
-        return 0.0;
-    }
-    (reserved_tokens as f64 / total_count as f64 * 100.0).min(100.0)
-}
-
 pub(crate) fn estimate_input_tokens(body: &[u8]) -> u64 {
     let chars = String::from_utf8_lossy(body).chars().count() as u64;
     chars.saturating_add(3).saturating_div(4).max(1)
@@ -269,50 +215,9 @@ pub(crate) fn estimate_input_tokens(body: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worker_admin_types::{TokenPlanModelUsage, TokenPlanWindowUsage};
-
-    fn usage(interval: Option<f64>, weekly: Option<f64>) -> TokenPlanModelUsage {
-        TokenPlanModelUsage {
-            model_name: "general".to_string(),
-            interval: interval.map(|remaining_percent| TokenPlanWindowUsage {
-                status: Some(1),
-                remaining_percent: Some(remaining_percent),
-                total_count: None,
-                usage_count: None,
-                boost_permille: None,
-                start_at: None,
-                end_at: None,
-                remains_time_ms: None,
-            }),
-            weekly: weekly.map(|remaining_percent| TokenPlanWindowUsage {
-                status: Some(1),
-                remaining_percent: Some(remaining_percent),
-                total_count: None,
-                usage_count: None,
-                boost_permille: None,
-                start_at: None,
-                end_at: None,
-                remains_time_ms: None,
-            }),
-        }
-    }
-
-    #[test]
-    fn effective_remaining_uses_the_most_constrained_window() {
-        assert_eq!(
-            effective_remaining_percent(&usage(Some(0.0), Some(69.0))),
-            Some(0.0)
-        );
-        assert_eq!(
-            effective_remaining_percent(&usage(Some(42.0), Some(69.0))),
-            Some(42.0)
-        );
-        assert_eq!(
-            effective_remaining_percent(&usage(Some(42.0), None)),
-            Some(42.0)
-        );
-        assert_eq!(effective_remaining_percent(&usage(None, None)), None);
-    }
+    use crate::worker_admin_types::{
+        OpencodeGoWindowUsage, TokenPlanKeyUsage, TokenPlanUsageResponse,
+    };
 
     #[test]
     fn local_estimator_is_conservative_for_small_payloads() {
@@ -320,82 +225,88 @@ mod tests {
         assert!(estimate_input_tokens("中文请求".as_bytes()) >= 1);
     }
 
-    #[test]
-    fn reservation_is_converted_to_a_quota_percentage_when_total_is_known() {
-        let model = TokenPlanModelUsage {
-            model_name: "general".to_string(),
-            interval: Some(TokenPlanWindowUsage {
-                status: Some(1),
-                remaining_percent: Some(100.0),
-                total_count: Some(1_000),
-                usage_count: None,
-                boost_permille: None,
-                start_at: None,
-                end_at: None,
-                remains_time_ms: None,
-            }),
-            weekly: None,
-        };
-        assert_eq!(reserved_percent(&model, 100), 10.0);
-        assert_eq!(reserved_percent(&model, 2_000), 100.0);
-    }
-
-    fn openrouter_key(
-        limit: Option<f64>,
-        limit_remaining: Option<f64>,
-        spend: bool,
-    ) -> TokenPlanKeyUsage {
-        use crate::worker_admin_types::{OpenRouterBalance, OpenRouterSpend};
-        TokenPlanKeyUsage {
-            key_id: Uuid::nil(),
-            key_label: "k".into(),
-            ok: true,
-            status: Some(200),
-            error_code: None,
-            error_message: None,
-            model_remains: Vec::new(),
-            balances: None,
-            five_hour: None,
-            weekly: None,
-            opencodego_rolling: None,
-            opencodego_weekly: None,
-            opencodego_monthly: None,
-            openrouter_balance: Some(OpenRouterBalance {
-                limit,
-                limit_remaining,
-                limit_reset: None,
-                is_free_tier: false,
-                total_credits: None,
-                total_usage: None,
-            }),
-            openrouter_spend: spend.then_some(OpenRouterSpend {
-                usage: 1.0,
-                daily: 0.5,
-                weekly: 0.75,
-                monthly: 1.0,
-            }),
-            glm_five_hour: None,
-            glm_weekly: None,
+    fn opencode_go_usage(key_id: Uuid, remaining: f64) -> TokenPlanUsageResponse {
+        TokenPlanUsageResponse {
+            provider: db::EndpointProvider::OpencodeGo,
+            provider_region: None,
+            keys: vec![TokenPlanKeyUsage {
+                key_id,
+                key_label: "k".into(),
+                ok: true,
+                status: Some(200),
+                error_code: None,
+                error_message: None,
+                model_remains: Vec::new(),
+                balances: None,
+                five_hour: None,
+                weekly: None,
+                opencodego_rolling: Some(OpencodeGoWindowUsage {
+                    status: None,
+                    percent: Some(100.0 - remaining),
+                    resets_at: None,
+                }),
+                opencodego_weekly: None,
+                opencodego_monthly: None,
+                openrouter_balance: None,
+                openrouter_spend: None,
+                glm_five_hour: None,
+                glm_weekly: None,
+            }],
         }
     }
 
-    #[test]
-    fn openrouter_remaining_shares_limit_or_falls_back_to_spend() {
-        let pct = |limit, remaining, spend| {
-            openrouter_remaining_percent(&openrouter_key(limit, remaining, spend))
-        };
-        assert_eq!(pct(Some(100.0), Some(74.5), true), Some(74.5));
-        // Over-full remaining clamps at 100; zero caps are exhausted.
-        assert_eq!(pct(Some(100.0), Some(120.0), true), Some(100.0));
-        assert_eq!(pct(Some(100.0), Some(0.0), true), Some(0.0));
-        assert_eq!(pct(Some(0.0), Some(0.0), true), Some(0.0));
-        // Unlimited keys carry full weight once a spend snapshot exists.
-        assert_eq!(pct(None, None, true), Some(100.0));
-        // Missing numbers degrade to no quota signal.
-        assert_eq!(pct(Some(100.0), None, true), None);
-        assert_eq!(pct(None, None, false), None);
-        let mut key = openrouter_key(None, None, true);
-        key.openrouter_balance = None;
-        assert_eq!(openrouter_remaining_percent(&key), None);
+    #[tokio::test]
+    async fn reservations_damp_percent_windows_but_never_starve_them() {
+        let cache = TokenPlanQuotaCache::default();
+        let endpoint_id = Uuid::new_v4();
+        let key_id = Uuid::new_v4();
+        let other_key_id = Uuid::new_v4();
+        cache
+            .store_for_test(endpoint_id, opencode_go_usage(key_id, 80.0))
+            .await;
+
+        assert_eq!(
+            cache.key_weight_percent_now(endpoint_id, key_id, None),
+            Some(80.0)
+        );
+        for _ in 0..5 {
+            cache.reserve_estimated_tokens(endpoint_id, key_id, 1_000);
+        }
+        let damped = cache
+            .key_weight_percent_now(endpoint_id, key_id, None)
+            .expect("weighted key");
+        assert!(damped < 80.0, "reservations must damp the weight: {damped}");
+        assert!(damped > 0.0);
+
+        for _ in 0..1_000_000 {
+            cache.reserve_estimated_tokens(endpoint_id, key_id, 1);
+        }
+        let floor = cache
+            .key_weight_percent_now(endpoint_id, key_id, None)
+            .expect("weighted key");
+        assert!(floor.is_finite() && floor > 0.0, "floor={floor}");
+        // A key with no outstanding reservations is unaffected.
+        assert_eq!(
+            cache.key_weight_percent_now(endpoint_id, other_key_id, None),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn raw_remaining_ignores_urgency_and_reservations() {
+        let cache = TokenPlanQuotaCache::default();
+        let endpoint_id = Uuid::new_v4();
+        let key_id = Uuid::new_v4();
+        cache
+            .store_for_test(endpoint_id, opencode_go_usage(key_id, 30.0))
+            .await;
+        for _ in 0..50 {
+            cache.reserve_estimated_tokens(endpoint_id, key_id, 10_000);
+        }
+        assert_eq!(
+            cache.key_remaining_percent_now(endpoint_id, key_id, None),
+            Some(30.0),
+            "exhaustion checks must keep the raw window percent"
+        );
     }
 }

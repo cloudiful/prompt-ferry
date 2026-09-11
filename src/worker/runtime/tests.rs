@@ -22,8 +22,8 @@ use std::time::Duration;
 use super::ai::upstream::upstream_url_for_route;
 use super::connect::is_expected_relay_disconnect;
 use super::routing::{
-    RouteAffinityError, materialize_route_api_key_selection, rendezvous_target,
-    select_route_for_candidate, upstream_url,
+    RouteAffinityError, materialize_route_api_key_selection, select_route_for_candidate,
+    upstream_url,
 };
 
 #[test]
@@ -237,64 +237,80 @@ fn does_not_classify_protocol_decode_failure_as_expected_disconnect() {
 #[test]
 fn preferred_target_is_stable_for_same_key() {
     let candidate = sample_candidate();
-    let first = rendezvous_target(&candidate, Some("key-a")).unwrap();
-    let second = rendezvous_target(&candidate, Some("key-a")).unwrap();
+    let first = crate::routing::choose_preferred_target(&candidate, Some("key-a")).unwrap();
+    let second = crate::routing::choose_preferred_target(&candidate, Some("key-a")).unwrap();
     assert_eq!(first.endpoint_id, second.endpoint_id);
 }
 
 #[test]
-fn rendezvous_target_matches_full_order_for_empty_single_and_multiple_targets() {
+fn unified_pool_draw_handles_empty_single_and_multiple_units() {
+    assert!(crate::routing::unified_pool_draw(&[], "key-a").is_none());
+    assert!(
+        crate::routing::unified_pool_draw(&[(uuid::Uuid::new_v4(), 0.0)], "key-a").is_none(),
+        "an exhausted unit is ineligible"
+    );
+
     let empty = ModelRouteCandidate {
         targets: Vec::new(),
         ..sample_candidate()
     };
-    assert!(rendezvous_target(&empty, Some("key-a")).is_none());
     assert!(crate::routing::choose_preferred_target(&empty, Some("key-a")).is_none());
 
     let mut single = sample_candidate();
     single.targets.truncate(1);
-    let single_expected = crate::routing::ordered_route_targets(&single, Some("key-a"))
-        .first()
-        .map(|target| target.endpoint_id);
+    let single_expected = single.targets[0].target_id;
+    let single_entries = vec![(single_expected, 1.0_f64)];
+    let single_index = crate::routing::unified_pool_draw(&single_entries, "key-a").unwrap();
+    assert_eq!(single_entries[single_index].0, single_expected);
     assert_eq!(
-        rendezvous_target(&single, Some("key-a")).map(|target| target.endpoint_id),
-        single_expected
+        crate::routing::choose_preferred_target(&single, Some("key-a"))
+            .map(|target| target.endpoint_id),
+        Some(single.targets[0].endpoint_id)
     );
 
     let multiple = sample_candidate();
-    let multiple_expected = crate::routing::ordered_route_targets(&multiple, Some("key-a"))
-        .first()
-        .map(|target| target.endpoint_id);
-    assert_eq!(
-        rendezvous_target(&multiple, Some("key-a")).map(|target| target.endpoint_id),
-        multiple_expected
-    );
-    assert_eq!(
-        crate::routing::choose_preferred_target(&multiple, Some("key-a"))
-            .map(|target| target.endpoint_id),
-        multiple_expected
+    let chosen = crate::routing::choose_preferred_target(&multiple, Some("key-a"))
+        .expect("multiple targets should draw one");
+    assert!(
+        multiple
+            .targets
+            .iter()
+            .any(|target| target.endpoint_id == chosen.endpoint_id)
     );
 }
 
 #[test]
-fn rendezvous_target_preserves_position_and_input_order_ties() {
-    let mut by_position = sample_candidate();
-    by_position.targets[1].endpoint_id = by_position.targets[0].endpoint_id;
-    by_position.targets[1].position = by_position.targets[0].position + 1;
-    assert_eq!(
-        rendezvous_target(&by_position, Some("key-a"))
-            .unwrap()
-            .position,
-        by_position.targets[0].position
-    );
+fn unified_pool_draw_is_deterministic_and_order_independent() {
+    let first = uuid::Uuid::new_v4();
+    let second = uuid::Uuid::new_v4();
+    let forward = [(first, 2.0_f64), (second, 3.0_f64)];
+    let reversed = [(second, 3.0_f64), (first, 2.0_f64)];
+    let left = crate::routing::unified_pool_draw(&forward, "key-a").unwrap();
+    let right = crate::routing::unified_pool_draw(&reversed, "key-a").unwrap();
+    assert_eq!(forward[left].0, reversed[right].0);
+}
 
-    let mut by_input_order = by_position.clone();
-    by_input_order.targets[1].position = by_input_order.targets[0].position;
-    assert_eq!(
-        rendezvous_target(&by_input_order, Some("key-a"))
-            .unwrap()
-            .endpoint_id,
-        by_input_order.targets[0].endpoint_id
+#[test]
+fn unified_pool_draw_weights_shift_the_distribution() {
+    let heavy = uuid::Uuid::new_v4();
+    let light = uuid::Uuid::new_v4();
+    let entries = [(heavy, 90.0_f64), (light, 10.0_f64)];
+    let mut heavy_hits = 0;
+    let mut light_hits = 0;
+    for value in 1..=200_u128 {
+        let stable_key = format!("client:{value}");
+        let index = crate::routing::unified_pool_draw(&entries, &stable_key).unwrap();
+        if entries[index].0 == heavy {
+            heavy_hits += 1;
+        } else {
+            light_hits += 1;
+        }
+    }
+    assert!(heavy_hits > 0, "heavy unit must receive traffic");
+    assert!(light_hits > 0, "light unit must still receive traffic");
+    assert!(
+        heavy_hits > light_hits,
+        "a 90/10 split must favor the heavy unit (heavy={heavy_hits}, light={light_hits})"
     );
 }
 
@@ -340,7 +356,7 @@ async fn session_affinity_uses_preferred_endpoint() {
 }
 
 #[tokio::test]
-async fn session_affinity_uses_rendezvous_for_new_identity() {
+async fn session_affinity_draws_and_pins_a_new_identity() {
     let runtime_state = WorkerRuntimeState::default();
     let services = session_affinity_services(runtime_state.clone(), ReplayCache::for_tests());
     let candidate = session_affinity_candidate();
@@ -360,7 +376,18 @@ async fn session_affinity_uses_rendezvous_for_new_identity() {
         },
     );
 
-    let selected = select_route_for_candidate(
+    let first = select_route_for_candidate(
+        &services,
+        &request_ctx,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .expect("selected route");
+    let second = select_route_for_candidate(
         &services,
         &request_ctx,
         &candidate,
@@ -372,25 +399,28 @@ async fn session_affinity_uses_rendezvous_for_new_identity() {
     .unwrap()
     .expect("selected route");
 
-    let expected = rendezvous_target(&candidate, Some(&format!("conversation:{conversation_id}")))
-        .unwrap()
-        .endpoint_id;
-    assert_eq!(selected.route.route_id, expected);
+    assert_eq!(first.route.route_id, second.route.route_id);
+    assert_eq!(first.route.endpoint_key_id, second.route.endpoint_key_id);
     assert_eq!(
-        selected.route.route_selection_reason,
+        first.route.route_selection_reason,
         db::RouteSelectionReason::SessionAffinity
     );
 }
 
 #[test]
-fn session_affinity_rendezvous_distributes_independent_identities() {
+fn unified_pool_draw_distributes_independent_identities() {
     let candidate = session_affinity_candidate();
+    let entries = candidate
+        .targets
+        .iter()
+        .map(|target| (target.target_id, 1.0_f64))
+        .collect::<Vec<_>>();
     let endpoints = (1..=64)
         .map(|value| {
-            let conversation_id = uuid::Uuid::from_u128(value);
-            rendezvous_target(&candidate, Some(&format!("conversation:{conversation_id}")))
-                .expect("candidate should have a target")
-                .endpoint_id
+            let stable_key = format!("conversation:{}", uuid::Uuid::from_u128(value));
+            let index = crate::routing::unified_pool_draw(&entries, &stable_key)
+                .expect("candidate should have a unit");
+            candidate.targets[index].endpoint_id
         })
         .collect::<std::collections::HashSet<_>>();
 
@@ -459,15 +489,6 @@ async fn selected_route_carries_target_upstream_model_override() {
         ResponseLimits::default(),
     );
     let mut candidate = sample_candidate();
-    let preferred = rendezvous_target(&candidate, Some("key-a"))
-        .expect("preferred target")
-        .target_id;
-    let preferred_target = candidate
-        .targets
-        .iter_mut()
-        .find(|target| target.target_id == preferred)
-        .expect("preferred target exists");
-    preferred_target.upstream_model = Some("gpt-4.1-mini".to_string());
     let request_ctx = RequestExecutionContext::new(
         uuid::Uuid::new_v4(),
         Instant::now(),
@@ -478,7 +499,23 @@ async fn selected_route_carries_target_upstream_model_override() {
         runtime_state.worker_instance_id(),
         RequestPromptLog::default(),
     );
-
+    let first = select_route_for_candidate(
+        &services,
+        &request_ctx,
+        &candidate,
+        &sample_request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .unwrap()
+    .expect("selected route");
+    let drawn_target = candidate
+        .targets
+        .iter_mut()
+        .find(|target| target.endpoint_id == first.route.route_id)
+        .expect("drawn target exists");
+    drawn_target.upstream_model = Some("gpt-4.1-mini".to_string());
     let route = select_route_for_candidate(
         &services,
         &request_ctx,
@@ -491,6 +528,7 @@ async fn selected_route_carries_target_upstream_model_override() {
     .unwrap()
     .expect("selected route");
 
+    assert_eq!(route.route.route_id, first.route.route_id);
     assert_eq!(route.route.upstream_model.as_deref(), Some("gpt-4.1-mini"));
 }
 

@@ -1,3 +1,4 @@
+mod key_pool;
 #[cfg(test)]
 mod quota_opencode_go_tests;
 #[cfg(test)]
@@ -18,11 +19,15 @@ mod session_affinity_quota_tests;
 mod session_affinity_recovery_tests;
 #[cfg(test)]
 mod session_affinity_tests;
+#[cfg(test)]
+mod unified_pool_failover_tests;
+#[cfg(test)]
+mod unified_pool_fixtures;
+#[cfg(test)]
+mod unified_pool_selection_tests;
 
 #[cfg(test)]
 pub(in crate::worker::runtime) use selection::materialize_route_api_key_selection;
-#[cfg(test)]
-pub(in crate::worker::runtime) use selection::rendezvous_target;
 pub(in crate::worker::runtime) use selection::{
     clear_invalid_conversation_endpoint_key_override, discover_dynamic_model_route,
     materialize_route_api_key_selection_with_quota, select_route_for_candidate,

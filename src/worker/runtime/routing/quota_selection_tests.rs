@@ -344,21 +344,14 @@ async fn quota_key_lb_still_routes_payg_command_code_key_without_windows() {
 }
 
 #[tokio::test]
-async fn rendezvous_selection_skips_a_target_with_no_remaining_quota() {
+async fn unified_pool_skips_a_target_with_no_remaining_quota() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
     let services = session_affinity_services(runtime_state.clone(), replay_cache);
     let mut candidate = session_affinity_candidate();
     candidate.routing_strategy = db::ModelRouteRoutingStrategy::ClientKeyRendezvous;
-    let exhausted_endpoint = crate::routing::rendezvous_target(&candidate, Some("client-key"))
-        .expect("candidate has targets")
-        .endpoint_id;
-    let exhausted_target = candidate
-        .targets
-        .iter()
-        .find(|target| target.endpoint_id == exhausted_endpoint)
-        .expect("rendezvous target exists");
-    let exhausted_key_id = exhausted_target.api_keys[0].key_id;
+    let exhausted_endpoint = candidate.targets[0].endpoint_id;
+    let exhausted_key_id = candidate.targets[0].api_keys[0].key_id;
     services
         .admin_state()
         .expect("admin state")
@@ -390,7 +383,7 @@ async fn rendezvous_selection_skips_a_target_with_no_remaining_quota() {
     .expect("route must be selected");
     assert_ne!(
         selected.route.route_id, exhausted_endpoint,
-        "rendezvous target with no remaining quota must be skipped",
+        "a pool unit with no remaining quota must be skipped",
     );
     assert_eq!(
         selected.route.route_selection_reason,

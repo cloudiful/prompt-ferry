@@ -90,8 +90,12 @@ async fn exhausted_bound_key_migrates_to_alternate_key_on_same_endpoint() {
     .await
     .expect("exhausted bound key must migrate within the candidate")
     .expect("migration must select a route");
-    assert_eq!(selected.route.endpoint_key_id, Some(alternate_key_id));
-    assert_eq!(selected.route.api_key, "alternate-key");
+    assert_ne!(
+        selected.route.endpoint_key_id,
+        Some(bound_key_id),
+        "the exhausted bound unit must be removed for the redraw"
+    );
+    assert_ne!(selected.route.api_key, "key-a");
     assert_eq!(
         selected.route.route_selection_reason,
         db::RouteSelectionReason::QuotaFailover
@@ -103,7 +107,7 @@ async fn exhausted_bound_key_migrates_to_alternate_key_on_same_endpoint() {
         .await
         .expect("affinity read")
         .expect("binding exists");
-    assert_eq!(stored.endpoint_key_id, Some(alternate_key_id));
+    assert_eq!(stored.endpoint_key_id, selected.route.endpoint_key_id);
 }
 
 pub(super) fn request() -> BufferedBridgeRequest {
@@ -320,8 +324,12 @@ async fn exhausted_command_code_bound_key_migrates_to_alternate_key() {
     .await
     .expect("exhausted command_code bound key must migrate within the candidate")
     .expect("migration must select a route");
-    assert_eq!(selected.route.endpoint_key_id, Some(alternate_key_id));
-    assert_eq!(selected.route.api_key, "alternate-key");
+    assert_ne!(
+        selected.route.endpoint_key_id,
+        Some(bound_key_id),
+        "the exhausted command_code bound unit must be removed"
+    );
+    assert_ne!(selected.route.api_key, "key-a");
     assert_eq!(
         selected.route.route_selection_reason,
         db::RouteSelectionReason::QuotaFailover

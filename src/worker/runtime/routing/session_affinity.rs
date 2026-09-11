@@ -8,19 +8,22 @@ use crate::{
     response_affinity::{
         ResponseAffinityBinding, ResponseAffinityStore, api_key_fingerprint, log_unavailable,
     },
+    routing::candidate_target_by_endpoint,
     worker::runtime::context::AffinityFailureAudit,
+    worker_admin::token_plan_cache::{TokenPlanQuotaCache, estimate_input_tokens},
 };
 
 use super::super::{
     RequestExecutionContext, context::RuntimeServices, prompt_log::RequestPromptLog,
     request_assembly::BufferedBridgeRequest,
 };
-use super::selection::{endpoint_key_stickiness_value, rendezvous_target, select_endpoint_api_key};
+use super::key_pool;
+use super::quota_selection::{refresh_candidate_quota, request_model};
+use super::selection::endpoint_key_stickiness_value;
 use super::session_affinity_quota::{
     BindingSelection, binding_for_selection, log_quota_failover, quota_failover_selection,
     selection_for_binding,
 };
-use crate::routing::candidate_target_by_endpoint;
 
 #[derive(Debug, Clone)]
 pub(in crate::worker::runtime) struct RouteAffinityError {
@@ -82,6 +85,13 @@ pub(super) struct SessionAffinitySelection<'a> {
     pub(super) route_selection_reason: db::RouteSelectionReason,
 }
 
+struct NewSessionUnit<'a> {
+    target: &'a db::ModelRouteCandidateTarget,
+    key: db::EndpointApiKeySelection,
+    reason: db::RouteSelectionReason,
+    invalid_override: bool,
+}
+
 pub(super) async fn select<'a>(
     services: &RuntimeServices,
     request_ctx: &RequestExecutionContext,
@@ -107,19 +117,10 @@ pub(super) async fn select<'a>(
             return Err(anyhow::Error::new(RouteAffinityError::backend_unavailable()));
         }
     };
-    for target in &candidate.targets {
-        if let Err(err) = admin_state
-            .token_plan_quota
-            .refresh_if_due(&admin_state.pool, target.endpoint_id)
-            .await
-        {
-            tracing::warn!(
-                endpoint_id = %target.endpoint_id,
-                error = %err,
-                "MiniMax quota refresh failed during session-affinity selection"
-            );
-        }
-    }
+    let quota_cache = &admin_state.token_plan_quota;
+    refresh_candidate_quota(services, candidate).await;
+    let model = request_model(request);
+    let estimated = estimate_input_tokens(&request.body);
 
     for _ in 0..2 {
         if let Some(current_binding) = binding.clone() {
@@ -131,12 +132,7 @@ pub(super) async fn select<'a>(
             if override_conflicts_with_binding(&current_binding, request_prompt_log) {
                 return Err(anyhow::Error::new(RouteAffinityError::conflict(audit)));
             }
-            match selection_for_binding(
-                candidate,
-                &current_binding,
-                request,
-                Some(&admin_state.token_plan_quota),
-            ) {
+            match selection_for_binding(candidate, &current_binding, request, Some(quota_cache)) {
                 BindingSelection::Selected(selection) => {
                     heal_stale_binding(&store, &cache_key, &current_binding, &selection).await;
                     return Ok(selection);
@@ -147,7 +143,9 @@ pub(super) async fn select<'a>(
                         &current_binding,
                         request,
                         request_prompt_log,
-                        &admin_state.token_plan_quota,
+                        quota_cache,
+                        &stable_identity,
+                        estimated,
                     ) else {
                         return Err(anyhow::Error::new(RouteAffinityError::target_unavailable(
                             audit,
@@ -198,11 +196,12 @@ pub(super) async fn select<'a>(
 
         let (selection, candidate_binding) = select_new_binding(
             candidate,
-            request,
             request_prompt_log,
             &stable_identity,
             &AffinityFailureAudit::default(),
-            &admin_state.token_plan_quota,
+            quota_cache,
+            model.as_deref(),
+            estimated,
         )?;
         let created = match store.get_or_create(&cache_key, &candidate_binding).await {
             Ok(binding) => binding,
@@ -258,19 +257,69 @@ async fn heal_stale_binding(
     }
 }
 
-fn session_target_for_new_binding<'a>(
+fn select_new_binding<'a>(
     candidate: &'a db::ModelRouteCandidate,
     request_prompt_log: &RequestPromptLog,
     stable_identity: &str,
     audit: &AffinityFailureAudit,
-) -> Result<(&'a db::ModelRouteCandidateTarget, db::RouteSelectionReason)> {
+    quota_cache: &TokenPlanQuotaCache,
+    model: Option<&str>,
+    estimated_tokens: u64,
+) -> Result<(SessionAffinitySelection<'a>, ResponseAffinityBinding)> {
+    let selected = select_new_session_unit(
+        candidate,
+        request_prompt_log,
+        stable_identity,
+        quota_cache,
+        model,
+        estimated_tokens,
+        audit,
+    )?;
+    if selected.invalid_override {
+        return Err(anyhow::Error::new(RouteAffinityError::conflict(
+            audit.clone(),
+        )));
+    }
+    let binding = binding_for_selection(selected.target, &selected.key);
+    Ok((
+        SessionAffinitySelection {
+            target: selected.target,
+            key_selection: selected.key,
+            route_selection_reason: selected.reason,
+        },
+        binding,
+    ))
+}
+
+fn select_new_session_unit<'a>(
+    candidate: &'a db::ModelRouteCandidate,
+    request_prompt_log: &RequestPromptLog,
+    stable_identity: &str,
+    quota_cache: &TokenPlanQuotaCache,
+    model: Option<&str>,
+    estimated_tokens: u64,
+    audit: &AffinityFailureAudit,
+) -> Result<NewSessionUnit<'a>> {
     if let Some(endpoint_id) = request_prompt_log.conversation_override_endpoint_id {
         let target = candidate_target_by_endpoint(candidate, endpoint_id)
             .filter(|target| target.enabled)
             .ok_or_else(|| {
                 anyhow::Error::new(RouteAffinityError::target_unavailable(audit.clone()))
             })?;
-        return Ok((target, db::RouteSelectionReason::ConversationOverride));
+        let (key, invalid_override) = select_target_unit(
+            target,
+            request_prompt_log,
+            stable_identity,
+            quota_cache,
+            model,
+            estimated_tokens,
+        );
+        return Ok(NewSessionUnit {
+            target,
+            key,
+            reason: db::RouteSelectionReason::ConversationOverride,
+            invalid_override,
+        });
     }
 
     if let Some(target) = request_prompt_log
@@ -278,40 +327,62 @@ fn session_target_for_new_binding<'a>(
         .and_then(|endpoint_id| candidate_target_by_endpoint(candidate, endpoint_id))
         .filter(|target| target.enabled)
     {
-        return Ok((target, db::RouteSelectionReason::SessionAffinity));
+        let (key, invalid_override) = select_target_unit(
+            target,
+            request_prompt_log,
+            stable_identity,
+            quota_cache,
+            model,
+            estimated_tokens,
+        );
+        return Ok(NewSessionUnit {
+            target,
+            key,
+            reason: db::RouteSelectionReason::SessionAffinity,
+            invalid_override,
+        });
     }
 
-    rendezvous_target(candidate, Some(stable_identity))
-        .map(|target| (target, db::RouteSelectionReason::SessionAffinity))
-        .ok_or_else(|| anyhow::Error::new(RouteAffinityError::target_unavailable(audit.clone())))
+    let mut units = key_pool::candidate_units(candidate, Some(quota_cache), model, None);
+    if units.is_empty() {
+        units = key_pool::candidate_units_without_quota(candidate, None);
+    }
+    let unit = key_pool::draw(&units, stable_identity, Some(quota_cache), estimated_tokens)
+        .ok_or_else(|| anyhow::Error::new(RouteAffinityError::target_unavailable(audit.clone())))?;
+    let (key, invalid_override) = key_pool::apply_override(
+        unit.target,
+        unit.selection(),
+        request_prompt_log.conversation_override_endpoint_key_id,
+    );
+    Ok(NewSessionUnit {
+        target: unit.target,
+        key,
+        reason: db::RouteSelectionReason::SessionAffinity,
+        invalid_override,
+    })
 }
 
-fn select_new_binding<'a>(
-    candidate: &'a db::ModelRouteCandidate,
-    request: &BufferedBridgeRequest,
+fn select_target_unit(
+    target: &db::ModelRouteCandidateTarget,
     request_prompt_log: &RequestPromptLog,
     stable_identity: &str,
-    audit: &AffinityFailureAudit,
-    quota_cache: &crate::worker_admin::token_plan_cache::TokenPlanQuotaCache,
-) -> Result<(SessionAffinitySelection<'a>, ResponseAffinityBinding)> {
-    let (target, route_selection_reason) =
-        session_target_for_new_binding(candidate, request_prompt_log, stable_identity, audit)?;
-    let key_selection =
-        select_endpoint_api_key(target, request, request_prompt_log, Some(quota_cache));
-    if key_selection.invalid_conversation_override {
-        return Err(anyhow::Error::new(RouteAffinityError::conflict(
-            audit.clone(),
-        )));
-    }
-    let binding = binding_for_selection(target, &key_selection.selection);
-    Ok((
-        SessionAffinitySelection {
-            target,
-            key_selection: key_selection.selection,
-            route_selection_reason,
-        },
-        binding,
-    ))
+    quota_cache: &TokenPlanQuotaCache,
+    model: Option<&str>,
+    estimated_tokens: u64,
+) -> (db::EndpointApiKeySelection, bool) {
+    let units = key_pool::target_units(target, Some(quota_cache), model);
+    let drawn = key_pool::draw(&units, stable_identity, Some(quota_cache), estimated_tokens)
+        .map(|unit| unit.selection())
+        .unwrap_or_else(|| db::EndpointApiKeySelection {
+            key_id: None,
+            key_label: None,
+            secret: target.api_key.clone(),
+        });
+    key_pool::apply_override(
+        target,
+        drawn,
+        request_prompt_log.conversation_override_endpoint_key_id,
+    )
 }
 
 fn override_conflicts_with_binding(

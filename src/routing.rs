@@ -74,70 +74,68 @@ pub fn select_bound_api_key(
         })
 }
 
+/// Admin "preferred endpoint" preview: an equal-weight draw over the
+/// candidate targets through the same unified-pool algorithm the runtime
+/// uses. The quota cache is not available on this path, so every target
+/// carries weight 1.0.
 pub fn choose_preferred_target(
     candidate: &ModelRouteCandidate,
     routing_key: Option<&str>,
 ) -> Option<ModelRouteCandidateTarget> {
-    rendezvous_target(candidate, routing_key).cloned()
-}
-
-pub fn ordered_route_targets(
-    candidate: &ModelRouteCandidate,
-    routing_key: Option<&str>,
-) -> Vec<ModelRouteCandidateTarget> {
-    stable_candidate_order(
-        &candidate.targets,
-        |_, target| {
-            rendezvous_score(
-                routing_key.unwrap_or("default"),
-                candidate.rule_id,
-                target.endpoint_id,
-            )
-        },
-        |_, left, _, right| left.position.cmp(&right.position),
-    )
-    .into_iter()
-    .map(|index| candidate.targets[index].clone())
-    .collect()
-}
-
-pub fn rendezvous_target<'a>(
-    candidate: &'a ModelRouteCandidate,
-    routing_key: Option<&str>,
-) -> Option<&'a ModelRouteCandidateTarget> {
-    let routing_key = routing_key.unwrap_or("default");
-    candidate
+    let entries = candidate
         .targets
         .iter()
-        .enumerate()
-        .map(|(index, target)| {
-            (
-                index,
-                target,
-                rendezvous_score(routing_key, candidate.rule_id, target.endpoint_id),
-            )
-        })
-        .max_by(
-            |(left_index, left, left_score), (right_index, right, right_score)| {
-                left_score
-                    .cmp(right_score)
-                    .then_with(|| right.position.cmp(&left.position))
-                    .then_with(|| right_index.cmp(left_index))
-            },
-        )
-        .map(|(_, target, _)| target)
+        .map(|target| (target.target_id, 1.0_f64))
+        .collect::<Vec<_>>();
+    let index = unified_pool_draw(&entries, routing_key.unwrap_or("default"))?;
+    candidate.targets.get(index).cloned()
 }
 
-pub fn rendezvous_score(
-    routing_key: &str,
-    rule_id: uuid::Uuid,
-    endpoint_id: uuid::Uuid,
-) -> [u8; 32] {
+/// Deterministic weighted draw over a unified key pool.
+///
+/// `entries` pairs every eligible unit with its stable unit id (an
+/// `endpoint_api_keys.key_id`, or the target id for a secret-only unit)
+/// and its non-negative weight; non-positive or non-finite weights are
+/// ineligible. The digest is salted with `unified-key-pool` and the stable
+/// routing key, then folded over the sorted unit ids. `endpoint_id` is
+/// deliberately absent from the hash: units move between endpoints without
+/// reshuffling the draw. Selection then scans the cumulative weights
+/// exactly like the previous per-endpoint quota draw, so callers keep the
+/// same bucket -> point -> cumulative algorithm.
+pub fn unified_pool_draw(entries: &[(uuid::Uuid, f64)], stable_key: &str) -> Option<usize> {
+    let mut eligible = entries
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, weight))| weight.is_finite() && *weight > 0.0)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    if eligible.is_empty() {
+        return None;
+    }
+    eligible.sort_by_key(|index| entries[*index].0);
+    let total = eligible.iter().map(|index| entries[*index].1).sum::<f64>();
+    if !total.is_finite() || total <= 0.0 {
+        return None;
+    }
     let mut hasher = Sha256::new();
-    hasher.update(routing_key.as_bytes());
-    hasher.update(rule_id.as_bytes());
-    hasher.update(endpoint_id.as_bytes());
-    hasher.finalize().into()
+    hasher.update(b"unified-key-pool");
+    hasher.update(stable_key.as_bytes());
+    for index in &eligible {
+        hasher.update(entries[*index].0.as_bytes());
+    }
+    let digest = hasher.finalize();
+    let bucket = u64::from_be_bytes(digest[..8].try_into().expect("sha256 has eight bytes"));
+    let point = (bucket as f64 / u64::MAX as f64) * total;
+    let mut cumulative = 0.0_f64;
+    let mut last = eligible[0];
+    for index in eligible {
+        cumulative += entries[index].1;
+        last = index;
+        if point < cumulative {
+            return Some(index);
+        }
+    }
+    Some(last)
 }
 
 pub fn stable_candidate_order<T, Score, TieBreak>(

@@ -7,7 +7,7 @@ use crate::{
     worker_admin::token_plan_cache::TokenPlanQuotaCache,
 };
 
-use super::{quota_selection::request_model, session_affinity::SessionAffinitySelection};
+use super::{key_pool, quota_selection::request_model, session_affinity::SessionAffinitySelection};
 
 /// Outcome of resolving a session-affinity binding against the current
 /// candidate and quota snapshot.
@@ -15,7 +15,7 @@ pub(super) enum BindingSelection<'a> {
     /// The bound endpoint/key is usable as-is.
     Selected(SessionAffinitySelection<'a>),
     /// The bound key still exists but its quota window is exhausted; the
-    /// caller may migrate to another key/endpoint in the same candidate.
+    /// caller redraws from the unified pool with that unit removed.
     QuotaExhausted,
     /// The bound endpoint or key is gone/disabled; strict affinity applies.
     Unavailable,
@@ -77,99 +77,6 @@ pub(super) fn key_quota_exhausted(
         .is_some_and(|remaining| remaining <= 0.0)
 }
 
-/// Whether a candidate target still has at least one usable API key.
-pub(super) fn target_has_quota(
-    target: &db::ModelRouteCandidateTarget,
-    cache: &TokenPlanQuotaCache,
-    model: Option<&str>,
-) -> bool {
-    let mut has_keys = false;
-    for key in &target.api_keys {
-        if key.endpoint_id != target.endpoint_id || !key.enabled || key.api_key.trim().is_empty() {
-            continue;
-        }
-        has_keys = true;
-        if !key_quota_exhausted(cache, target.endpoint_id, key.key_id, model) {
-            return true;
-        }
-    }
-    // No per-key rows means the endpoint falls back to its single secret,
-    // which carries no quota signal and stays eligible.
-    !has_keys
-}
-
-/// Narrow a candidate to the targets that still have quota. Returns `None`
-/// when nothing is filtered out (or every target is exhausted) so callers
-/// keep their existing fallback behavior instead of dropping the route.
-pub(super) fn quota_scoped_candidate(
-    candidate: &db::ModelRouteCandidate,
-    cache: &TokenPlanQuotaCache,
-    model: Option<&str>,
-) -> Option<db::ModelRouteCandidate> {
-    let targets = candidate
-        .targets
-        .iter()
-        .filter(|target| target_has_quota(target, cache, model))
-        .cloned()
-        .collect::<Vec<_>>();
-    if targets.is_empty() || targets.len() == candidate.targets.len() {
-        return None;
-    }
-    Some(db::ModelRouteCandidate {
-        targets,
-        ..candidate.clone()
-    })
-}
-
-/// First key in deterministic position order that still has quota,
-/// optionally skipping the exhausted bound key.
-pub(super) fn usable_target_key(
-    target: &db::ModelRouteCandidateTarget,
-    cache: &TokenPlanQuotaCache,
-    model: Option<&str>,
-    exclude: Option<&ResponseAffinityBinding>,
-) -> Option<db::EndpointApiKeySelection> {
-    let mut keys = target
-        .api_keys
-        .iter()
-        .filter(|key| {
-            key.endpoint_id == target.endpoint_id && key.enabled && !key.api_key.trim().is_empty()
-        })
-        .collect::<Vec<_>>();
-    keys.sort_by(|left, right| {
-        left.position
-            .cmp(&right.position)
-            .then_with(|| left.key_label.cmp(&right.key_label))
-            .then_with(|| left.key_id.cmp(&right.key_id))
-    });
-    if keys.is_empty() {
-        return (!target.api_key.trim().is_empty()).then(|| db::EndpointApiKeySelection {
-            key_id: None,
-            key_label: None,
-            secret: target.api_key.clone(),
-        });
-    }
-    keys.into_iter()
-        .find(|key| {
-            if let Some(binding) = exclude {
-                if binding.endpoint_key_id == Some(key.key_id) {
-                    return false;
-                }
-                if binding.endpoint_key_id.is_none()
-                    && api_key_fingerprint(&key.api_key) == binding.endpoint_key_fingerprint
-                {
-                    return false;
-                }
-            }
-            !key_quota_exhausted(cache, target.endpoint_id, key.key_id, model)
-        })
-        .map(|key| db::EndpointApiKeySelection {
-            key_id: (!key.key_id.is_nil()).then_some(key.key_id),
-            key_label: (!key.key_id.is_nil()).then(|| key.key_label.clone()),
-            secret: key.api_key.clone(),
-        })
-}
-
 fn previous_response_chain(request_prompt_log: &RequestPromptLog) -> bool {
     request_prompt_log
         .request_previous_response_id
@@ -178,60 +85,57 @@ fn previous_response_chain(request_prompt_log: &RequestPromptLog) -> bool {
         .is_some_and(|value| !value.is_empty())
 }
 
-/// Pick a replacement binding once the bound key is quota-exhausted.
-///
-/// The key on the bound endpoint is rotated first so the upstream node
-/// (and any provider-side `previous_response_id` chain) stays put. Only
-/// when that is impossible and the request is not a `previous_response_id`
-/// continuation do we migrate to another target in the same candidate.
+/// Unit id of the currently bound selection so the redraw can exclude it.
+/// Keys use their key id; a target-level secret unit uses the target id.
+fn bound_unit_id(
+    candidate: &db::ModelRouteCandidate,
+    binding: &ResponseAffinityBinding,
+) -> Option<uuid::Uuid> {
+    if let Some(key_id) = binding.endpoint_key_id {
+        return Some(key_id);
+    }
+    candidate
+        .targets
+        .iter()
+        .find(|target| target.endpoint_id == binding.endpoint_id)
+        .map(|target| target.target_id)
+}
+
+/// Redraw after the bound key's quota is exhausted. The bound unit is
+/// removed from the pool and a fresh weighted unit is drawn. A
+/// `previous_response_id` continuation keeps the upstream node pinned: the
+/// pool is narrowed to the bound endpoint and no cross-endpoint migration
+/// is allowed.
 pub(super) fn quota_failover_selection<'a>(
     candidate: &'a db::ModelRouteCandidate,
     binding: &ResponseAffinityBinding,
     request: &BufferedBridgeRequest,
     request_prompt_log: &RequestPromptLog,
     quota_cache: &TokenPlanQuotaCache,
+    stable_key: &str,
+    estimated_tokens: u64,
 ) -> Option<(SessionAffinitySelection<'a>, ResponseAffinityBinding)> {
     let model = request_model(request);
     let model = model.as_deref();
-
-    if let Some(target) =
-        candidate_target_by_endpoint(candidate, binding.endpoint_id).filter(|target| target.enabled)
-        && let Some(key_selection) = usable_target_key(target, quota_cache, model, Some(binding))
-    {
-        return Some((
-            SessionAffinitySelection {
-                target,
-                key_selection: key_selection.clone(),
-                route_selection_reason: db::RouteSelectionReason::QuotaFailover,
-            },
-            binding_for_selection(target, &key_selection),
-        ));
+    let exclude = bound_unit_id(candidate, binding);
+    let chained = previous_response_chain(request_prompt_log);
+    let mut units =
+        key_pool::candidate_units_all_keys(candidate, Some(quota_cache), model, exclude);
+    if units.is_empty() {
+        units = key_pool::candidate_units_without_quota_all_keys(candidate, exclude);
     }
-
-    if previous_response_chain(request_prompt_log) {
-        return None;
+    if chained {
+        units.retain(|unit| unit.target.endpoint_id == binding.endpoint_id);
     }
-
-    for target in &candidate.targets {
-        if target.endpoint_id == binding.endpoint_id || !target.enabled {
-            continue;
-        }
-        if !target_has_quota(target, quota_cache, model) {
-            continue;
-        }
-        if let Some(key_selection) = usable_target_key(target, quota_cache, model, None) {
-            return Some((
-                SessionAffinitySelection {
-                    target,
-                    key_selection: key_selection.clone(),
-                    route_selection_reason: db::RouteSelectionReason::QuotaFailover,
-                },
-                binding_for_selection(target, &key_selection),
-            ));
-        }
-    }
-
-    None
+    let unit = key_pool::draw(&units, stable_key, Some(quota_cache), estimated_tokens)?;
+    Some((
+        SessionAffinitySelection {
+            target: unit.target,
+            key_selection: unit.key.clone(),
+            route_selection_reason: db::RouteSelectionReason::QuotaFailover,
+        },
+        binding_for_selection(unit.target, &unit.key),
+    ))
 }
 
 pub(super) fn log_quota_failover(

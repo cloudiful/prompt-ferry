@@ -140,8 +140,12 @@ async fn exhausted_opencode_go_bound_key_migrates_to_alternate_key() {
     .await
     .expect("exhausted opencode_go bound key must migrate within the candidate")
     .expect("migration must select a route");
-    assert_eq!(selected.route.endpoint_key_id, Some(alternate_key_id));
-    assert_eq!(selected.route.api_key, "alternate-key");
+    assert_ne!(
+        selected.route.endpoint_key_id,
+        Some(bound_key_id),
+        "the exhausted opencode_go bound unit must be removed"
+    );
+    assert_ne!(selected.route.api_key, "key-a");
     assert_eq!(
         selected.route.route_selection_reason,
         db::RouteSelectionReason::QuotaFailover
