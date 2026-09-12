@@ -160,6 +160,17 @@ fn reconcile_replay_parent(
     }
 }
 
+fn apply_conversation_resolution(
+    log: &mut RequestPromptLog,
+    resolution: &PromptConversationResolution,
+) {
+    log.conversation_id = Some(resolution.conversation_id);
+    log.parent_event_id = resolution.parent_event_id;
+    log.conversation_seq = Some(resolution.conversation_seq);
+    log.conversation_source = resolution.source.to_string();
+    log.preferred_endpoint_id = resolution.endpoint_id;
+}
+
 pub(super) async fn prepare_request_prompt_log(
     state: &AdminState,
     request: &BufferedBridgeRequest,
@@ -248,6 +259,8 @@ pub(super) async fn prepare_request_prompt_log(
     };
 
     log.replay_unavailable |= resolution.replay_unavailable;
+    apply_conversation_resolution(&mut log, &resolution);
+
     if !state.usage_retention.read().await.replay_enabled {
         return Ok(log);
     }
@@ -270,11 +283,6 @@ pub(super) async fn prepare_request_prompt_log(
     log.request_full_json = Some(serde_json::to_value(&current_refs)?);
     log.snapshot_prompt_refs_json = Some(serde_json::to_value(&current_refs)?);
 
-    log.conversation_id = Some(resolution.conversation_id);
-    log.parent_event_id = resolution.parent_event_id;
-    log.conversation_seq = Some(resolution.conversation_seq);
-    log.conversation_source = resolution.source.to_string();
-    log.preferred_endpoint_id = resolution.endpoint_id;
     if let Some(override_entry) =
         db::get_conversation_endpoint_override(&state.pool, resolution.conversation_id).await?
     {
@@ -455,6 +463,7 @@ pub(super) fn resolve_mcp_conversation_log() -> RequestPromptLog {
 #[cfg(test)]
 mod tests {
     use super::{
+        PromptConversationResolution, RequestPromptLog, apply_conversation_resolution,
         codex_request_metadata, codex_thread_key, reconcile_replay_parent, session_header_id,
     };
 
@@ -518,5 +527,30 @@ mod tests {
         ];
 
         assert_eq!(session_header_id(&headers).as_deref(), Some("session"));
+    }
+
+    #[test]
+    fn conversation_identity_survives_replay_gate() {
+        let conversation_id = uuid::Uuid::from_u128(1);
+        let mut log = RequestPromptLog::default();
+        let resolution = PromptConversationResolution {
+            conversation_id,
+            parent_event_id: Some(42),
+            replay_unavailable: false,
+            endpoint_id: Some(uuid::Uuid::from_u128(2)),
+            conversation_seq: 3,
+            source: "session_header",
+        };
+
+        apply_conversation_resolution(&mut log, &resolution);
+        let replay_enabled = false;
+
+        if !replay_enabled {
+            assert_eq!(log.conversation_id, Some(conversation_id));
+            assert_eq!(log.parent_event_id, Some(42));
+            assert_eq!(log.conversation_seq, Some(3));
+            assert_eq!(log.conversation_source, "session_header");
+            assert_eq!(log.preferred_endpoint_id, Some(uuid::Uuid::from_u128(2)));
+        }
     }
 }
