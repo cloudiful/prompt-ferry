@@ -66,12 +66,13 @@ SELECT COUNT(*)::BIGINT AS "request_count!",
        COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS "cache_read_tokens!",
        COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS "cache_write_tokens!",
        COALESCE(SUM(output_tokens), 0)::BIGINT AS "output_tokens!",
-        COALESCE(SUM(
-            normalized_input_tokens
-                + normalized_cache_read_tokens
-                + normalized_cache_write_tokens
-                + COALESCE(output_tokens, 0)
-        ), 0)::BIGINT AS "total_tokens!",
+        -- Issue #342: overview `total_tokens` must reconcile with the
+        -- persisted closed-loop value used by `usage_summary.sql` and the
+        -- bucket queries (`SUM(GREATEST(COALESCE(total_tokens, 0), 0))`).
+        -- Re-adding the cache meters per row double-counts still-folded
+        -- history, so use the provider fact directly; `full_input_tokens`
+        -- remains the fold-aware `cache_rate` denominator only.
+        COALESCE(SUM(GREATEST(COALESCE(total_tokens, 0), 0)), 0)::BIGINT AS "total_tokens!",
         -- P1 (issue #226): the aggregated `cache_rate` denominator must be
         -- SUM(normalized_full_input_tokens) — computed row-by-row in the CTE
         -- so still-folded rows use the `max` fallback — not the raw

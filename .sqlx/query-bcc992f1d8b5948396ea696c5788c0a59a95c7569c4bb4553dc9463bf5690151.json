@@ -1,0 +1,151 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH normalized AS (\n    SELECT rr.model,\n           rr.ok,\n           rr.request_state,\n           rr.endpoint_id,\n           rr.failure_family,\n           rr.output_tokens AS raw_output_tokens,\n           rr.duration_ms,\n           -- Post-0072 the stored `input_tokens` is already the ordinary\n           -- (non-cache) value, so use it directly; the cache must not be\n           -- subtracted again (double-subtract of backfilled rows).\n           -- Closed loop: ordinary + cache_read + cache_write + output == total.\n           GREATEST(COALESCE(rr.input_tokens, 0), 0)::BIGINT AS normalized_input_tokens,\n           COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,\n           COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,\n            -- P2 (issue #205): full-input denominator `ordinary+read+write`,\n            -- 真 0.49 (e.g. 9728/18144) vs old `max` 1.0 which dropped the\n            -- ordinary part. Still-folded rows (0072/0073 guard:\n            -- cache>0 AND total>=output AND input>=total-output, input already\n            -- holds the cache) fall back to `max(input, read+write)` to avoid\n            -- the ≈1.9x double-count; total keeps closed-loop\n            -- ordinary+read+write+output.\n            CASE\n                WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0\n                    AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)\n                    AND COALESCE(rr.input_tokens, 0)\n                        >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)\n                THEN GREATEST(\n                    COALESCE(rr.input_tokens, 0),\n                    GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)\n                        + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),\n                    0\n                )\n                ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)\n                    + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)\n                    + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)\n            END::BIGINT AS normalized_full_input_tokens,\n           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens,\n           COALESCE(rr.total_tokens, 0)::BIGINT AS total_tokens\n    FROM request_records rr\n    LEFT JOIN users u ON u.user_id = rr.user_id\n    WHERE rr.event_kind = 'request'\n      AND rr.request_category = $2\n      AND ($1::BIGINT IS NULL OR rr.user_id = $1)\n      AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)\n      AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)\n      AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)\n), grouped AS (\n    SELECT COALESCE(model, '(unknown)') AS label,\n           model,\n           COUNT(*)::BIGINT AS request_count,\n           COUNT(*) FILTER (WHERE ok IS TRUE)::BIGINT AS success_count,\n           COUNT(*) FILTER (\n               WHERE ok IS FALSE OR request_state IN ('failed', 'aborted')\n           )::BIGINT AS error_count,\n            COUNT(*) FILTER (\n                WHERE normalized_cache_read_tokens > 0\n            )::BIGINT AS cache_hit_count,\n           COALESCE(SUM(normalized_input_tokens), 0)::BIGINT AS input_tokens,\n           COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,\n           COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS cache_write_tokens,\n           COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,\n           -- Issue #342: persisted closed-loop total, so per-model\n           -- `token_share` and the ordering reconcile with `usage_summary`.\n           COALESCE(SUM(GREATEST(total_tokens, 0)), 0)::BIGINT AS total_tokens,\n           -- P1 (issue #226): aggregated `cache_rate` denominator is\n           -- SUM(normalized_full_input_tokens) computed row-by-row (fold-aware),\n           -- not the raw `input_tokens` SUM which double-counts the cache.\n           COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens,\n           AVG(\n               CASE\n                   WHEN request_state = 'completed'\n                       AND raw_output_tokens IS NOT NULL\n                       AND raw_output_tokens > 0\n                       AND duration_ms IS NOT NULL\n                       AND duration_ms > 0\n                   THEN raw_output_tokens::NUMERIC / duration_ms::NUMERIC * 1000.0\n                   ELSE NULL\n               END\n           )::DOUBLE PRECISION AS avg_output_tokens_per_second\n    FROM normalized\n    GROUP BY model\n), upstream AS (\n    -- P1 (issue #207): per (model x endpoint_id) aggregates for the hover\n    -- breakdown. Error predicate mirrors `metrics.sql`\n    -- (`ok IS FALSE OR request_state IN (...)`, `failure_family` kept for\n    -- observability) so the existing `ok` / `failure_family` / `endpoint_id`\n    -- indexes can serve the grouping without a new migration.\n    SELECT COALESCE(n.model, '(unknown)') AS model_key,\n           n.endpoint_id,\n           COALESCE(pe.name, n.endpoint_id::TEXT, '(direct)') AS endpoint_name,\n           COUNT(*)::BIGINT AS request_count,\n           COUNT(*) FILTER (\n               WHERE n.ok IS FALSE OR n.request_state IN ('failed', 'aborted')\n           )::BIGINT AS error_count,\n           COALESCE(SUM(GREATEST(n.total_tokens, 0)), 0)::BIGINT AS total_tokens,\n           AVG(\n               CASE\n                   WHEN n.request_state = 'completed'\n                       AND n.raw_output_tokens IS NOT NULL\n                       AND n.raw_output_tokens > 0\n                       AND n.duration_ms IS NOT NULL\n                       AND n.duration_ms > 0\n                   THEN n.raw_output_tokens::NUMERIC / n.duration_ms::NUMERIC * 1000.0\n                   ELSE NULL\n               END\n           )::DOUBLE PRECISION AS avg_output_tokens_per_second\n    FROM normalized n\n    LEFT JOIN provider_endpoints pe ON pe.endpoint_id = n.endpoint_id\n    GROUP BY COALESCE(n.model, '(unknown)'), n.endpoint_id, pe.name\n), upstream_agg AS (\n    SELECT model_key,\n           COUNT(*)::BIGINT AS upstream_count,\n           json_agg(\n               json_build_object(\n                   'endpoint_id', endpoint_id,\n                   'endpoint_name', endpoint_name,\n                   'request_count', request_count,\n                   'error_count', error_count,\n                   'error_rate', CASE WHEN request_count > 0 THEN error_count::DOUBLE PRECISION / request_count ELSE 0 END,\n                   'total_tokens', total_tokens,\n                   'avg_output_tokens_per_second', avg_output_tokens_per_second\n               )\n               ORDER BY total_tokens DESC, request_count DESC, endpoint_name ASC\n           ) AS upstream_breakdown\n    FROM upstream\n    GROUP BY model_key\n), totals AS (\n    SELECT SUM(request_count)::DOUBLE PRECISION AS request_count,\n           SUM(total_tokens)::DOUBLE PRECISION AS total_tokens\n    FROM grouped\n)\nSELECT label AS \"label!\",\n       model,\n       NULL::UUID AS mcp_server_id,\n       grouped.request_count AS \"request_count!\",\n       COALESCE(grouped.request_count::DOUBLE PRECISION / NULLIF(totals.request_count, 0), 0) AS \"request_share!\",\n       success_count AS \"success_count!\",\n       grouped.error_count AS \"error_count!\",\n       grouped.total_tokens::DOUBLE PRECISION / NULLIF(totals.total_tokens, 0) AS token_share,\n       cache_hit_count AS \"cache_hit_count!\",\n       input_tokens AS \"input_tokens!\",\n       cache_read_tokens AS \"cache_read_tokens!\",\n       cache_write_tokens AS \"cache_write_tokens!\",\n       output_tokens AS \"output_tokens!\",\n       grouped.total_tokens AS \"total_tokens!\",\n       grouped.full_input_tokens AS \"full_input_tokens!\",\n       grouped.avg_output_tokens_per_second AS avg_output_tokens_per_second,\n       COALESCE(upstream_agg.upstream_count, 0)::BIGINT AS \"upstream_count!\",\n       upstream_agg.upstream_breakdown AS upstream_breakdown\nFROM grouped\nCROSS JOIN totals\nLEFT JOIN upstream_agg ON upstream_agg.model_key = grouped.label\nORDER BY grouped.total_tokens DESC, grouped.request_count DESC, grouped.label ASC\nLIMIT 50\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "label!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "mcp_server_id",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "request_share!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "success_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "error_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "token_share",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "cache_hit_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 13,
+        "name": "total_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 14,
+        "name": "full_input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 15,
+        "name": "avg_output_tokens_per_second",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 16,
+        "name": "upstream_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 17,
+        "name": "upstream_breakdown",
+        "type_info": "Json",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "bcc992f1d8b5948396ea696c5788c0a59a95c7569c4bb4553dc9463bf5690151"
+}

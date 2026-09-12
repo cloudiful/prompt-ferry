@@ -35,7 +35,8 @@ WITH normalized AS (
                     + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
                     + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
             END::BIGINT AS normalized_full_input_tokens,
-           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens
+           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens,
+           COALESCE(rr.total_tokens, 0)::BIGINT AS total_tokens
     FROM request_records rr
     LEFT JOIN users u ON u.user_id = rr.user_id
     WHERE rr.event_kind = 'request'
@@ -59,12 +60,9 @@ WITH normalized AS (
            COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
            COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS cache_write_tokens,
            COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,
-           COALESCE(SUM(
-               normalized_input_tokens
-                   + normalized_cache_read_tokens
-                   + normalized_cache_write_tokens
-                   + output_tokens
-           ), 0)::BIGINT AS total_tokens,
+           -- Issue #342: persisted closed-loop total, so per-model
+           -- `token_share` and the ordering reconcile with `usage_summary`.
+           COALESCE(SUM(GREATEST(total_tokens, 0)), 0)::BIGINT AS total_tokens,
            -- P1 (issue #226): aggregated `cache_rate` denominator is
            -- SUM(normalized_full_input_tokens) computed row-by-row (fold-aware),
            -- not the raw `input_tokens` SUM which double-counts the cache.
@@ -95,12 +93,7 @@ WITH normalized AS (
            COUNT(*) FILTER (
                WHERE n.ok IS FALSE OR n.request_state IN ('failed', 'aborted')
            )::BIGINT AS error_count,
-           COALESCE(SUM(
-               n.normalized_input_tokens
-                   + n.normalized_cache_read_tokens
-                   + n.normalized_cache_write_tokens
-                   + n.output_tokens
-           ), 0)::BIGINT AS total_tokens,
+           COALESCE(SUM(GREATEST(n.total_tokens, 0)), 0)::BIGINT AS total_tokens,
            AVG(
                CASE
                    WHEN n.request_state = 'completed'

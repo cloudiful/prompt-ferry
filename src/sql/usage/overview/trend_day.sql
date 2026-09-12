@@ -33,7 +33,8 @@ WITH normalized AS (
                     + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
                     + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
             END::BIGINT AS normalized_full_input_tokens,
-           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens
+           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens,
+           COALESCE(rr.total_tokens, 0)::BIGINT AS total_tokens
     FROM request_records rr
     LEFT JOIN users u ON u.user_id = rr.user_id
     WHERE rr.event_kind = 'request'
@@ -56,12 +57,10 @@ SELECT bucket_at AS "bucket_at!",
        COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS "cache_read_tokens!",
        COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS "cache_write_tokens!",
        COALESCE(SUM(output_tokens), 0)::BIGINT AS "output_tokens!",
-       COALESCE(SUM(
-           normalized_input_tokens
-               + normalized_cache_read_tokens
-               + normalized_cache_write_tokens
-               + output_tokens
-       ), 0)::BIGINT AS "total_tokens!",
+       -- Issue #342: use the persisted closed-loop total so each trend bucket
+       -- reconciles with `usage_summary.sql`/bucket queries instead of
+       -- re-adding the cache meters for still-folded rows.
+       COALESCE(SUM(GREATEST(total_tokens, 0)), 0)::BIGINT AS "total_tokens!",
        -- Per-row-summed fold-aware denominator for `cache_rate`; still-folded
        -- rows use the `max(input, read+write)` fallback, so the aggregate must
        -- not re-derive the guard on the raw input SUM (issue #338).
