@@ -1,19 +1,14 @@
 use utoipa::OpenApi;
 
-#[allow(unused_imports)]
 use super::{
     approvals::{
-        __path_approve_approval, __path_get_approval, __path_list_approvals,
-        __path_reject_approval, approve_approval, get_approval, list_approvals, reject_approval,
+        __path_approve_approval, __path_get_approval, __path_list_approvals, __path_reject_approval,
     },
-    auth::{
-        __path_auth_login, __path_auth_logout, __path_auth_me, auth_login, auth_logout, auth_me,
-    },
-    bridge::{__path_bridge_status, bridge_status},
+    auth::{__path_auth_login, __path_auth_logout, __path_auth_me},
+    bridge::__path_bridge_status,
     endpoints::{
         __path_create_endpoint, __path_delete_endpoint, __path_list_endpoints,
-        __path_test_endpoint, __path_token_plan_usage, __path_update_endpoint, create_endpoint,
-        delete_endpoint, list_endpoints, test_endpoint, token_plan_usage, update_endpoint,
+        __path_test_endpoint, __path_token_plan_usage, __path_update_endpoint,
     },
     mcp::{
         __path_bind_credential_group, __path_create_mcp_server, __path_create_quota_group,
@@ -21,25 +16,19 @@ use super::{
         __path_list_mcp_providers, __path_list_mcp_servers, __path_list_quota_groups,
         __path_list_server_credentials, __path_quota_group_usage,
         __path_refresh_server_credential_balance, __path_test_mcp_server, __path_update_mcp_server,
-        __path_update_quota_group, bind_credential_group, create_mcp_server, create_quota_group,
-        delete_mcp_server, delete_quota_group, get_mcp_catalog, list_mcp_providers,
-        list_mcp_servers, list_quota_groups, list_server_credentials, quota_group_usage,
-        refresh_server_credential_balance, test_mcp_server, update_mcp_server, update_quota_group,
+        __path_update_quota_group,
     },
     me::{
         __path_me_create_client_key, __path_me_delete_client_key, __path_me_list_client_keys,
-        __path_me_list_models, __path_me_update_client_key, me_create_client_key,
-        me_delete_client_key, me_list_client_keys, me_list_models, me_update_client_key,
+        __path_me_list_models, __path_me_update_client_key,
     },
     model_routes::{
         __path_create_model_route, __path_delete_model_route, __path_list_model_routes,
-        __path_test_model_route, __path_update_model_route, create_model_route, delete_model_route,
-        list_model_routes, test_model_route, update_model_route,
+        __path_test_model_route, __path_update_model_route,
     },
     relays::{
         __path_create_relay, __path_delete_relay, __path_get_relay, __path_list_relays,
-        __path_reconnect_relay, __path_update_relay, create_relay, delete_relay, get_relay,
-        list_relays, reconnect_relay, update_relay,
+        __path_reconnect_relay, __path_update_relay,
     },
     schemas::*,
     settings::{
@@ -52,13 +41,7 @@ use super::{
         __path_set_model_route_whitelist, __path_set_raw_object_store,
         __path_set_redaction_setting, __path_set_relay_ip_whitelist,
         __path_set_request_content_logging, __path_set_stream_delta_batching,
-        __path_set_usage_retention, get_endpoint_setting, get_llm_review_setting,
-        get_model_route_whitelist, get_raw_object_store, get_redaction_setting,
-        get_relay_ip_whitelist, get_request_content_logging, get_stream_delta_batching,
-        get_usage_retention, list_redaction_custom_strings, preview_redaction,
-        set_endpoint_setting, set_llm_review_setting, set_model_route_whitelist,
-        set_raw_object_store, set_redaction_setting, set_relay_ip_whitelist,
-        set_request_content_logging, set_stream_delta_batching, set_usage_retention,
+        __path_set_usage_retention,
     },
     usage::{
         __path_clear_request_records, __path_delete_conversation_endpoint_override,
@@ -67,19 +50,12 @@ use super::{
         __path_request_record_full, __path_request_record_overview,
         __path_request_record_reset_session_affinity, __path_request_record_series,
         __path_request_record_session_route_options, __path_request_record_summary,
-        __path_set_conversation_endpoint_override, clear_request_records,
-        delete_conversation_endpoint_override, get_conversation_endpoint_override,
-        list_request_records, prune_request_records, request_record_detail, request_record_facets,
-        request_record_full, request_record_overview, request_record_reset_session_affinity,
-        request_record_series, request_record_session_route_options, request_record_summary,
-        set_conversation_endpoint_override,
+        __path_set_conversation_endpoint_override,
     },
     users::{
         __path_create_client_key, __path_create_user, __path_delete_client_key, __path_delete_user,
         __path_list_client_keys, __path_list_user_options, __path_list_users,
-        __path_reset_password, __path_update_client_key, __path_update_user, create_client_key,
-        create_user, delete_client_key, delete_user, list_client_keys, list_user_options,
-        list_users, reset_password, update_client_key, update_user,
+        __path_reset_password, __path_update_client_key, __path_update_user,
     },
 };
 use crate::{
