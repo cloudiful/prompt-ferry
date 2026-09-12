@@ -53,10 +53,10 @@ pub(crate) async fn wait_for_relay_ready_within(relay_url: &str, budget: Duratio
     };
     let deadline = tokio::time::Instant::now() + budget;
     loop {
-        let attempt = tokio::time::timeout(
-            RELAY_READY_PROBE_INTERVAL,
-            TcpStream::connect((host.as_str(), port)),
-        );
+        let probe_deadline =
+            (tokio::time::Instant::now() + RELAY_READY_PROBE_INTERVAL).min(deadline);
+        let attempt =
+            tokio::time::timeout_at(probe_deadline, TcpStream::connect((host.as_str(), port)));
         let Ok(Ok(stream)) = attempt.await else {
             if tokio::time::Instant::now() >= deadline {
                 return;
