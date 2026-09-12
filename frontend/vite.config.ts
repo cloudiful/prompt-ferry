@@ -92,6 +92,7 @@ export default defineConfig({
       icons: bundledLucideIcons.map((name) => `lucide:${name}`),
     }),
     ui({
+      experimental: { componentDetection: true },
       ui: {
         colors: {
           primary: 'blue',
