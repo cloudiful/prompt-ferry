@@ -3,6 +3,56 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use utoipa::ToSchema;
 
+use super::mcp::{
+    MCP_PROVIDER_CONTEXT7, MCP_PROVIDER_FIRECRAWL, MCP_PROVIDER_GENERIC, MCP_PROVIDER_MINIMAX,
+};
+
+/// Canonical persisted provider id derived from an owning MCP server. Generic,
+/// legacy (NULL/blank), and unknown values all resolve to `None`, so untyped
+/// servers never trigger a provider-specific flow such as a Firecrawl balance
+/// fetch (issue #296 Phase 3).
+pub fn canonical_mcp_provider_kind(value: Option<&str>) -> Option<&'static str> {
+    match value.map(str::trim) {
+        Some(MCP_PROVIDER_CONTEXT7) => Some(MCP_PROVIDER_CONTEXT7),
+        Some(MCP_PROVIDER_FIRECRAWL) => Some(MCP_PROVIDER_FIRECRAWL),
+        Some(MCP_PROVIDER_MINIMAX) => Some(MCP_PROVIDER_MINIMAX),
+        _ => None,
+    }
+}
+
+/// Canonicalize a quota-group provider input. Known presets are kept, while
+/// `generic`, blank, and NULL all collapse to NULL (the canonical untyped
+/// value). Unknown legacy strings are preserved so existing rows stay readable
+/// and do not silently change meaning.
+pub fn canonical_quota_group_provider_kind(value: Option<&str>) -> Option<String> {
+    let trimmed = value.map(str::trim).unwrap_or("");
+    if trimmed.is_empty() || trimmed == MCP_PROVIDER_GENERIC {
+        return None;
+    }
+    match canonical_mcp_provider_kind(Some(trimmed)) {
+        Some(known) => Some(known.to_string()),
+        None => Some(trimmed.to_string()),
+    }
+}
+
+/// Credential secret selected for an out-of-band provider API call. The type
+/// is never serialized and its `Debug` output redacts the secret.
+#[derive(Clone, FromRow)]
+pub struct McpProviderSecret {
+    pub credential_id: uuid::Uuid,
+    pub secret: String,
+}
+
+impl std::fmt::Debug for McpProviderSecret {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpProviderSecret")
+            .field("credential_id", &self.credential_id)
+            .field("secret", &"<redacted>")
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum QuotaUnit {
@@ -214,4 +264,56 @@ pub struct QuotaGrant {
     /// Additional account rows updated for the day dimension, when present.
     pub day_account: Option<McpQuotaAccountSnapshot>,
     pub month_account: Option<McpQuotaAccountSnapshot>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_credential_provider_never_triggers_on_generic_or_legacy() {
+        assert_eq!(canonical_mcp_provider_kind(None), None);
+        assert_eq!(canonical_mcp_provider_kind(Some("")), None);
+        assert_eq!(canonical_mcp_provider_kind(Some("  ")), None);
+        assert_eq!(canonical_mcp_provider_kind(Some("generic")), None);
+        assert_eq!(canonical_mcp_provider_kind(Some("legacy-unknown")), None);
+        assert_eq!(
+            canonical_mcp_provider_kind(Some(" firecrawl ")),
+            Some(MCP_PROVIDER_FIRECRAWL)
+        );
+        assert_eq!(
+            canonical_mcp_provider_kind(Some("context7")),
+            Some(MCP_PROVIDER_CONTEXT7)
+        );
+        assert_eq!(
+            canonical_mcp_provider_kind(Some("minimax")),
+            Some(MCP_PROVIDER_MINIMAX)
+        );
+    }
+
+    #[test]
+    fn quota_group_provider_collapses_generic_and_keeps_unknown() {
+        assert_eq!(canonical_quota_group_provider_kind(None), None);
+        assert_eq!(canonical_quota_group_provider_kind(Some("")), None);
+        assert_eq!(canonical_quota_group_provider_kind(Some("generic")), None);
+        assert_eq!(
+            canonical_quota_group_provider_kind(Some(" firecrawl ")),
+            Some("firecrawl".to_string())
+        );
+        assert_eq!(
+            canonical_quota_group_provider_kind(Some("custom-legacy")),
+            Some("custom-legacy".to_string())
+        );
+    }
+
+    #[test]
+    fn provider_secret_debug_redacts_the_secret() {
+        let secret = McpProviderSecret {
+            credential_id: uuid::Uuid::nil(),
+            secret: "fc-secret-value".to_string(),
+        };
+        let rendered = format!("{secret:?}");
+        assert!(!rendered.contains("fc-secret-value"), "{rendered}");
+        assert!(rendered.contains("<redacted>"), "{rendered}");
+    }
 }

@@ -1,6 +1,7 @@
 WITH normalized AS (
     SELECT COALESCE(rr.mcp_server_name, ms.name, '(unknown)') AS label,
            rr.mcp_server_id,
+           ms.provider_kind AS server_provider_kind,
            rr.ok,
            COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,
            COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,
@@ -44,6 +45,7 @@ WITH normalized AS (
 ), grouped AS (
     SELECT label,
            mcp_server_id,
+           server_provider_kind,
            COUNT(*)::BIGINT AS request_count,
            COUNT(*) FILTER (WHERE ok IS TRUE)::BIGINT AS success_count,
            COUNT(*) FILTER (
@@ -54,7 +56,7 @@ WITH normalized AS (
            COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS cache_write_tokens,
            COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens
     FROM normalized
-    GROUP BY label, mcp_server_id
+    GROUP BY label, mcp_server_id, server_provider_kind
 ), totals AS (
     SELECT SUM(request_count)::DOUBLE PRECISION AS request_count
     FROM grouped
@@ -62,6 +64,7 @@ WITH normalized AS (
 SELECT label AS "label!",
        NULL::TEXT AS model,
        mcp_server_id,
+       grouped.server_provider_kind AS "server_provider_kind",
        grouped.request_count AS "request_count!",
        COALESCE(grouped.request_count::DOUBLE PRECISION / NULLIF(totals.request_count, 0), 0) AS "request_share!",
        success_count AS "success_count!",

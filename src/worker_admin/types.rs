@@ -8,6 +8,7 @@ mod billing;
 mod endpoints;
 #[path = "types/mcp.rs"]
 mod mcp;
+mod mcp_provider;
 mod mcp_quota;
 #[path = "types/model_routes.rs"]
 mod model_routes;
@@ -26,6 +27,7 @@ pub use auth_users::*;
 pub use billing::*;
 pub use endpoints::*;
 pub use mcp::*;
+pub use mcp_provider::*;
 pub use mcp_quota::*;
 pub use model_routes::*;
 pub use relays::*;
@@ -61,10 +63,12 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
 
-    fn test_state() -> AdminState {
-        let pool = PgPoolOptions::new()
-            .connect_lazy("postgres://postgres:postgres@localhost/prompt_ferry")
-            .expect("lazy pool");
+    pub(super) fn test_state() -> AdminState {
+        test_state_with_pool_url("postgres://postgres:postgres@localhost/prompt_ferry")
+    }
+
+    pub(super) fn test_state_with_pool_url(url: &str) -> AdminState {
+        let pool = PgPoolOptions::new().connect_lazy(url).expect("lazy pool");
         AdminState::new(AdminStateInit {
             pool: pool.clone(),
             lease_pool: pool.clone(),
@@ -150,6 +154,7 @@ mod tests {
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "stdio".to_string(),
+            provider_kind: None,
             url: None,
             command: None,
             args: None,
@@ -189,6 +194,7 @@ mod tests {
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "stdio".to_string(),
+            provider_kind: None,
             url: None,
             command: None,
             args: None,
@@ -226,6 +232,7 @@ mod tests {
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "stdio".to_string(),
+            provider_kind: None,
             url: None,
             command: Some("mcpd".to_string()),
             args: None,
@@ -265,6 +272,7 @@ mod tests {
             name: "catalog".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("http://127.0.0.1:3000/mcp".to_string()),
             command: None,
             args: serde_json::json!([]),
@@ -299,6 +307,7 @@ mod tests {
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("http://127.0.0.1:3000/mcp".to_string()),
             command: None,
             args: None,
@@ -333,6 +342,7 @@ mod tests {
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("http://127.0.0.1:3000/mcp".to_string()),
             command: None,
             args: None,
@@ -362,6 +372,7 @@ mod tests {
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("http://127.0.0.1:3000/mcp".to_string()),
             command: None,
             args: None,
@@ -427,6 +438,7 @@ mod tests {
                 name: "reserved-header-server".to_string(),
                 aggregate_naming_mode: None,
                 transport: "http".to_string(),
+                provider_kind: None,
                 url: Some("http://127.0.0.1:3000/mcp".to_string()),
                 command: None,
                 args: None,
@@ -465,6 +477,7 @@ mod tests {
             name: "catalog".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("http://127.0.0.1:3000/mcp".to_string()),
             command: None,
             args: serde_json::json!([]),
@@ -500,6 +513,7 @@ mod tests {
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("http://127.0.0.1:3000/mcp".to_string()),
             command: None,
             args: None,
@@ -534,6 +548,7 @@ mod tests {
             name: "catalog".to_string(),
             aggregate_naming_mode: None,
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("http://127.0.0.1:3000/mcp".to_string()),
             command: None,
             args: None,

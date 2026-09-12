@@ -825,6 +825,7 @@ pub(super) async fn forward_streaming_response(
                 ),
         )
         .await;
+    let artifact_capture_expected = assistant_capture.is_some() || responses_capture.is_some();
     persist_assistant_artifact(
         services.admin_state(),
         usage_event_id,
@@ -833,6 +834,7 @@ pub(super) async fn forward_streaming_response(
             Some(&capture.response_text),
             response_prompt.as_deref(),
         ),
+        artifact_capture_expected,
         request_ctx.request_prompt_log.conversation_id,
         request,
         &route_ctx.route,
@@ -1044,6 +1046,7 @@ async fn forward_buffered_non_sse_response(
                 ),
         )
         .await;
+    let artifact_capture_expected = assistant_capture.is_some() || responses_capture.is_some();
     persist_assistant_artifact(
         services.admin_state(),
         usage_event_id,
@@ -1052,6 +1055,7 @@ async fn forward_buffered_non_sse_response(
             Some(&capture.response_text),
             response_prompt.as_deref(),
         ),
+        artifact_capture_expected,
         request_ctx.request_prompt_log.conversation_id,
         request,
         &route_ctx.route,

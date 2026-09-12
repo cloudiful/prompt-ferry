@@ -4,6 +4,7 @@ mod cache;
 mod entry;
 mod filtering;
 mod protocol;
+mod provider_usage;
 mod quota;
 mod routing;
 mod server;
@@ -18,7 +19,18 @@ pub use entry::{
     McpRequestContext, McpTransportResponse, handle, handle_stream,
     handle_stream_with_session_store, inspect_server,
 };
+pub use provider_usage::{
+    FIRECRAWL_BALANCE_REFRESH_CONCURRENCY, FirecrawlBalanceClient, FirecrawlRefreshSummary,
+    ProviderBalanceError, refresh_firecrawl_balances, refresh_firecrawl_credential,
+};
 pub use quota::{McpQuotaValkey, QuotaDecision, prepare_quota, record_credential_failure};
+// MCP provider preset contract (issue #296 Phase 1): re-exported here so
+// transport/runtime code resolves provider metadata from the mcp module.
+pub use crate::db::{
+    MCP_PROVIDER_CONTEXT7, MCP_PROVIDER_FIRECRAWL, MCP_PROVIDER_GENERIC, MCP_PROVIDER_MINIMAX,
+    MCP_PROVIDER_REGISTRY, McpProviderAuth, McpProviderInfo, McpProviderUnit,
+    effective_provider_kind, is_known_mcp_provider, mcp_provider_info,
+};
 pub use service::{McpCatalogService, catalog_for_server};
 pub use session_store::McpSessionStore;
 pub(crate) use transport::{tracked_credits_used, tracked_upstream_failure, with_tracked_credits};

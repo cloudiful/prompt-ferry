@@ -27,6 +27,10 @@ pub struct RequestRecordListRow {
     pub endpoint_name: Option<String>,
     pub mcp_server_id: Option<Uuid>,
     pub mcp_server_name: Option<String>,
+    /// Canonical MCP provider preset id for the row's server
+    /// (`context7`/`firecrawl`/`minimax`); `None` for AI rows and for
+    /// generic/legacy MCP servers.
+    pub server_provider_kind: Option<String>,
     pub mcp_protocol_method: Option<String>,
     pub mcp_operation_name: Option<String>,
     pub path: String,

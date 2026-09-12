@@ -1,11 +1,19 @@
 use crate::{
     db,
     worker_admin_types::{
-        CredentialPageResponse, CredentialQuotaBindingRequest, McpCatalogResponse, McpServer,
-        McpServerPageResponse, McpServerRequest, McpTestResponse, QuotaGroupRequest,
-        QuotaGroupUsageResponse, TablePageQuery,
+        CredentialPageResponse, CredentialQuotaBindingRequest, McpCatalogResponse,
+        McpProviderDescriptor, McpServer, McpServerPageResponse, McpServerRequest, McpTestResponse,
+        QuotaGroupRequest, QuotaGroupUsageResponse, TablePageQuery,
     },
 };
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/mcp-providers",
+    responses((status = 200, body = Vec<McpProviderDescriptor>, description = "MCP provider presets")),
+    tag = "mcp"
+)]
+pub(super) fn list_mcp_providers() {}
 
 #[utoipa::path(
     get,
@@ -83,6 +91,23 @@ pub(super) fn list_server_credentials() {}
     tag = "mcp"
 )]
 pub(super) fn bind_credential_group() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/mcp-servers/{server_id}/credentials/{credential_id}/refresh",
+    params(
+        ("server_id" = uuid::Uuid, Path, description = "MCP server ID"),
+        ("credential_id" = uuid::Uuid, Path, description = "Credential ID"),
+    ),
+    responses(
+        (status = 200, body = db::McpCredentialView, description = "Refreshed credential"),
+        (status = 400, description = "Provider balance refresh is not supported"),
+        (status = 404, description = "Server or credential not found"),
+        (status = 502, description = "Provider balance refresh failed"),
+    ),
+    tag = "mcp"
+)]
+pub(super) fn refresh_server_credential_balance() {}
 
 #[utoipa::path(
     get,

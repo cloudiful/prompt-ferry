@@ -208,6 +208,24 @@ async fn insert_reservation(
 /// Settle a reservation: move reserved units into used on success, or release
 /// them back on failure. Returns `false` when no active reservation existed.
 pub async fn settle_reservation(pool: &PgPool, request_id: Uuid, commit: bool) -> Result<bool> {
+    settle_reservation_with_actual(pool, request_id, commit, None).await
+}
+
+/// Settle a reservation using the provider-reported actual cost when one is
+/// known.
+///
+/// `actual_units` is only honored for a committed reservation and only when it
+/// is a finite positive number; a missing/zero/negative value keeps the
+/// original reserved cost. The reservation status flip and both the day/month
+/// account updates run in one transaction, so the account is charged exactly
+/// `actual_units` (or the reserved cost) with no double counting and no
+/// over-charge when the real cost is below the reservation.
+pub async fn settle_reservation_with_actual(
+    pool: &PgPool,
+    request_id: Uuid,
+    commit: bool,
+    actual_units: Option<f64>,
+) -> Result<bool> {
     let status = if commit { "committed" } else { "released" };
     let mut tx = pool.begin().await?;
     let row = sqlx::query_file!(
@@ -221,32 +239,40 @@ pub async fn settle_reservation(pool: &PgPool, request_id: Uuid, commit: bool) -
         tx.rollback().await?;
         return Ok(false);
     };
-    let units = row.units;
+    let reserved = row.units;
+    let charged = if commit {
+        actual_units
+            .filter(|units| units.is_finite() && *units > 0.0)
+            .unwrap_or(reserved)
+    } else {
+        0.0
+    };
     if let Some(account_id) = row.day_account_id {
-        settle_account(&mut tx, account_id, units, commit).await?;
+        settle_account(&mut tx, account_id, charged, reserved).await?;
     }
     if let Some(account_id) = row.month_account_id {
-        settle_account(&mut tx, account_id, units, commit).await?;
+        settle_account(&mut tx, account_id, charged, reserved).await?;
     }
     tx.commit().await?;
     Ok(true)
 }
 
+/// Apply one account's share of a settlement atomically: add the charged units
+/// to `used_units` and release the full reservation from `reserved_units`.
 async fn settle_account(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     account_id: i64,
-    units: f64,
-    commit: bool,
+    charged: f64,
+    reserved: f64,
 ) -> Result<()> {
-    if commit {
-        sqlx::query_file!("src/sql/quota/settle_commit.sql", account_id, units)
-            .fetch_optional(&mut **tx)
-            .await?;
-    } else {
-        sqlx::query_file!("src/sql/quota/settle_release.sql", account_id, units)
-            .fetch_optional(&mut **tx)
-            .await?;
-    }
+    sqlx::query_file!(
+        "src/sql/quota/settle_account_with_actual.sql",
+        account_id,
+        charged,
+        reserved,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -304,6 +330,25 @@ pub async fn update_credential_provider_remaining(
         remaining,
         now,
         reset_at,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Persist a sanitized provider-balance sync failure without touching cooldown
+/// or the previously known balance.
+pub async fn record_credential_provider_sync_error(
+    pool: &PgPool,
+    credential_id: Uuid,
+    error: &str,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    sqlx::query_file!(
+        "src/sql/quota/set_credential_provider_sync_error.sql",
+        credential_id,
+        error,
+        now,
     )
     .execute(pool)
     .await?;

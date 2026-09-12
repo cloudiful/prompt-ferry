@@ -63,6 +63,7 @@ async function refresh(): Promise<void> {
   try {
     await Promise.all([
       mcpStore.refresh(),
+      mcpStore.loadProviders(),
       loadQuotaGroups(),
       session.isAdmin ? usersStore.loadUsers() : Promise.resolve(),
     ])
@@ -223,6 +224,7 @@ onMounted(async () => {
       :header="dialogHeader"
       :is-admin="session.isAdmin"
       :learned="dialogLearned"
+      :providers="mcpStore.providers"
       :quota-groups="quotaGroups"
       :t="t"
       :users="usersStore.users"

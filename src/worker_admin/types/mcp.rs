@@ -32,6 +32,8 @@ pub struct McpServer {
     #[schema(example = "passthrough_preferred")]
     pub aggregate_naming_mode: String,
     pub transport: String,
+    /// Provider preset id; `null` means the untyped legacy generic behavior.
+    pub provider_kind: Option<String>,
     pub url: Option<String>,
     pub command: Option<String>,
     pub args: Value,
@@ -70,6 +72,7 @@ impl From<&db::McpServer> for McpServer {
             name: server.name.clone(),
             aggregate_naming_mode: server.aggregate_naming_mode.clone(),
             transport: server.transport.clone(),
+            provider_kind: server.provider_kind.clone(),
             url: server.url.clone(),
             command: server.command.clone(),
             args: server.args.clone(),
@@ -126,6 +129,9 @@ pub struct McpServerRequest {
     pub name: String,
     pub aggregate_naming_mode: Option<String>,
     pub transport: String,
+    /// Provider preset id. `null`/omitted keeps the existing (or untyped
+    /// legacy) value; `"generic"` explicitly clears a preset binding.
+    pub provider_kind: Option<String>,
     pub url: Option<String>,
     pub command: Option<String>,
     pub args: Option<serde_json::Value>,
@@ -300,6 +306,32 @@ impl McpServerRequest {
                     .or(basic_password),
             )
         };
+        // Managed rows (builtin_minimax) are always the minimax preset;
+        // explicit requests cannot re-label them. Presets only ride on the
+        // standard http transport, so switching a row to stdio drops any
+        // previously attached preset.
+        let provider_kind = if self.transport == "builtin_minimax" {
+            Some(db::MCP_PROVIDER_MINIMAX.to_string())
+        } else if self.transport != "http" {
+            None
+        } else {
+            match self.provider_kind.as_deref().map(str::trim) {
+                // Field omitted: keep the stored value (or untyped for new
+                // rows) so legacy clients are unaffected.
+                None => existing_server.and_then(|server| server.provider_kind.clone()),
+                // Explicit empty string or "generic" clears the binding.
+                Some("") | Some(db::MCP_PROVIDER_GENERIC) => None,
+                Some(value) => Some(value.to_string()),
+            }
+        };
+        // Hosted presets are server-derived: a Context7/Firecrawl row always
+        // uses the official endpoint and bearer auth regardless of what the
+        // client omitted, so a nullable request can never persist a preset
+        // with a contradictory URL or auth mode.
+        let hosted_preset = hosted_bearer_preset(&self.transport, provider_kind.as_deref());
+        if hosted_preset.is_some() {
+            auth_mode = db::MCP_AUTH_MODE_BEARER.to_string();
+        }
         db::McpServerInput {
             scope,
             owner_user_id,
@@ -309,7 +341,11 @@ impl McpServerRequest {
                 .aggregate_naming_mode
                 .unwrap_or_else(|| "passthrough_preferred".to_string()),
             transport: self.transport,
-            url: self.url,
+            provider_kind,
+            url: match hosted_preset {
+                Some(info) => info.default_url.map(str::to_string),
+                None => self.url,
+            },
             command: self.command,
             args: self.args.unwrap_or_else(|| serde_json::json!([])),
             env_json,
@@ -368,6 +404,130 @@ impl McpServerRequest {
                 "invalid_transport",
                 "transport must be http, stdio, or builtin_minimax",
             ));
+        }
+        // Provider preset validation (issue #296 Phase 1). `generic` is the
+        // implicit untyped value and also an explicit "clear preset" signal,
+        // so it carries no transport constraint. Hosted presets require the
+        // standard http transport; the managed MiniMax projection stays on
+        // builtin_minimax and keeps its source_endpoint_id binding. Unknown
+        // ids are rejected instead of being stored.
+        if let Some(provider_kind) = self.provider_kind.as_deref().map(str::trim) {
+            if !provider_kind.is_empty() && provider_kind != db::MCP_PROVIDER_GENERIC {
+                if !db::is_known_mcp_provider(provider_kind) {
+                    return Err(error(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_provider_kind",
+                        "provider_kind must be one of generic, minimax, context7, firecrawl",
+                    ));
+                }
+                if provider_kind == db::MCP_PROVIDER_MINIMAX {
+                    if self.transport != "builtin_minimax" {
+                        return Err(error(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_provider_kind",
+                            "provider_kind minimax requires the builtin_minimax transport",
+                        ));
+                    }
+                } else if self.transport != "http" {
+                    return Err(error(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_provider_kind",
+                        "provider_kind presets require the http transport",
+                    ));
+                }
+            }
+        }
+        // Hosted preset consistency (issue #296 Phase 2): explicit or
+        // inherited Context7/Firecrawl rows must use the official endpoint and
+        // bearer auth. Custom/self-hosted endpoints must select generic mode
+        // explicitly so a row never mixes a preset id with a contradictory URL
+        // or auth style. When the client omits provider_kind on update, the
+        // inherited preset still drives the check.
+        if self.transport == "http" {
+            let provider_kind = match self.provider_kind.as_deref().map(str::trim) {
+                Some("") | Some(db::MCP_PROVIDER_GENERIC) => None,
+                Some(value) if !value.is_empty() => Some(value.to_string()),
+                _ => match existing_server_id {
+                    Some(id) => state
+                        .config_repository
+                        .get_mcp_server(id)
+                        .await
+                        .map_err(|err| internal(state, err))?
+                        .map(|server| server.effective_provider_kind().to_string()),
+                    None => None,
+                },
+            };
+            if let Some(info) = hosted_bearer_preset("http", provider_kind.as_deref()) {
+                let default_url = info.default_url.unwrap_or_default();
+                if let Some(url) = self
+                    .url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|url| !url.is_empty())
+                    && !urls_equivalent(url, default_url)
+                {
+                    return Err(error(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_provider_url",
+                        &format!(
+                            "{} preset uses the official endpoint {default_url}; choose generic for a custom URL",
+                            info.id
+                        ),
+                    ));
+                }
+                if let Some(auth_mode) = self
+                    .auth_mode
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|mode| !mode.is_empty())
+                    && auth_mode != db::MCP_AUTH_MODE_BEARER
+                {
+                    return Err(error(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_provider_auth",
+                        &format!("{} preset only supports bearer auth", info.id),
+                    ));
+                }
+                let has_usable_request_token = self.bearer_tokens.as_ref().is_some_and(|tokens| {
+                    tokens
+                        .iter()
+                        .any(|token| token.enabled && !token.token.trim().is_empty())
+                });
+                if !has_usable_request_token {
+                    // An explicit `bearer_tokens: []` means "clear the
+                    // credentials": a hosted preset must never be persisted
+                    // with an empty token merely because the previous row had
+                    // one. Only an omitted field inherits the existing token.
+                    if self.bearer_tokens.is_some() {
+                        return Err(error(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_bearer_tokens",
+                            &format!("{} preset requires a bearer token", info.id),
+                        ));
+                    }
+                    let has_existing = match existing_server_id {
+                        Some(id) => state
+                            .config_repository
+                            .get_mcp_server(id)
+                            .await
+                            .map_err(|err| internal(state, err))?
+                            .is_some_and(|server| {
+                                server
+                                    .bearer_tokens()
+                                    .iter()
+                                    .any(|token| token.enabled && !token.token.trim().is_empty())
+                            }),
+                        None => false,
+                    };
+                    if !has_existing {
+                        return Err(error(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_bearer_tokens",
+                            &format!("{} preset requires a bearer token", info.id),
+                        ));
+                    }
+                }
+            }
         }
         // For builtin_minimax the request may legitimately omit
         // `source_endpoint_id` and inherit the existing binding. The
@@ -723,6 +883,26 @@ fn owner_for_request(request: &McpServerRequest, user: &SessionUser) -> Option<i
     }
 }
 
+/// Registry metadata for a hosted HTTP preset that authenticates with a bearer
+/// token. `None` for generic rows, the managed MiniMax projection, stdio, and
+/// unknown values, so those paths keep their existing behavior.
+fn hosted_bearer_preset(
+    transport: &str,
+    provider_kind: Option<&str>,
+) -> Option<&'static db::McpProviderInfo> {
+    if transport != "http" {
+        return None;
+    }
+    let info = db::mcp_provider_info(provider_kind)?;
+    (info.default_url.is_some() && info.auth == db::McpProviderAuth::Bearer).then_some(info)
+}
+
+/// Preset URLs are canonical, so a single trailing slash is tolerated while
+/// any other difference means the row is a custom endpoint (generic mode).
+fn urls_equivalent(left: &str, right: &str) -> bool {
+    left.trim().trim_end_matches('/') == right.trim().trim_end_matches('/')
+}
+
 fn valid_stdio_env(value: &Value, allow_preserve_null: bool) -> bool {
     let Some(object) = value.as_object() else {
         return false;
@@ -789,9 +969,11 @@ fn is_valid_protocol_version(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
+        super::tests::{test_state, test_state_with_pool_url},
         McpServerRequest, SessionUser, is_valid_protocol_version, merge_env_json, public_env_json,
     };
     use crate::db::McpServer;
+    use axum::http::StatusCode;
     use uuid::Uuid;
 
     fn admin_user() -> SessionUser {
@@ -812,6 +994,7 @@ mod tests {
             name: "managed".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "builtin_minimax".to_string(),
+            provider_kind: Some(crate::db::MCP_PROVIDER_MINIMAX.to_string()),
             url: None,
             command: None,
             args: serde_json::json!([]),
@@ -848,6 +1031,7 @@ mod tests {
             name: "reconfigured".to_string(),
             aggregate_naming_mode: None,
             transport: transport.to_string(),
+            provider_kind: None,
             url: if transport == "http" {
                 Some("http://127.0.0.1:3000/mcp".to_string())
             } else {
@@ -963,6 +1147,349 @@ mod tests {
 
         let input = request.into_input(&admin_user(), Some(&existing));
         assert_eq!(input.source_endpoint_id, None);
+    }
+
+    #[test]
+    fn managed_minimax_rows_always_carry_the_minimax_preset() {
+        let endpoint_id = Uuid::new_v4();
+        let existing = existing_with_source(endpoint_id);
+        let request = McpServerRequest {
+            source_endpoint_id: None,
+            provider_kind: Some("context7".to_string()),
+            ..request_for_transport("builtin_minimax")
+        };
+
+        let input = request.into_input(&admin_user(), Some(&existing));
+        assert_eq!(
+            input.provider_kind.as_deref(),
+            Some(crate::db::MCP_PROVIDER_MINIMAX),
+            "explicit preset must not relabel a managed minimax row"
+        );
+    }
+
+    #[test]
+    fn response_provider_kind_preserves_stored_value() {
+        let managed = existing_with_source(Uuid::new_v4());
+        let response: super::McpServer = (&managed).into();
+        assert_eq!(response.provider_kind.as_deref(), Some("minimax"));
+
+        let mut legacy = existing_with_source(Uuid::new_v4());
+        legacy.transport = "http".to_string();
+        legacy.provider_kind = None;
+        let response: super::McpServer = (&legacy).into();
+        assert_eq!(
+            response.provider_kind, None,
+            "legacy rows keep the untyped null value"
+        );
+    }
+
+    #[test]
+    fn provider_kind_omitted_keeps_existing_value() {
+        let mut existing = existing_with_source(Uuid::new_v4());
+        existing.transport = "http".to_string();
+        existing.provider_kind = Some("firecrawl".to_string());
+
+        let input = McpServerRequest {
+            ..request_for_transport("http")
+        }
+        .into_input(&admin_user(), Some(&existing));
+        assert_eq!(input.provider_kind.as_deref(), Some("firecrawl"));
+
+        let created = McpServerRequest {
+            ..request_for_transport("http")
+        }
+        .into_input(&admin_user(), None);
+        assert_eq!(created.provider_kind, None);
+    }
+
+    #[test]
+    fn provider_kind_empty_or_generic_clears_preset() {
+        let mut existing = existing_with_source(Uuid::new_v4());
+        existing.transport = "http".to_string();
+        existing.provider_kind = Some("context7".to_string());
+
+        for cleared in ["", "generic", "  "] {
+            let input = McpServerRequest {
+                provider_kind: Some(cleared.to_string()),
+                ..request_for_transport("http")
+            }
+            .into_input(&admin_user(), Some(&existing));
+            assert_eq!(input.provider_kind, None, "value {cleared:?} must clear");
+        }
+    }
+
+    #[test]
+    fn provider_kind_is_dropped_when_transport_switches_to_stdio() {
+        let mut existing = existing_with_source(Uuid::new_v4());
+        existing.transport = "http".to_string();
+        existing.provider_kind = Some("firecrawl".to_string());
+
+        let input = McpServerRequest {
+            command: Some("mcpd".to_string()),
+            ..request_for_transport("stdio")
+        }
+        .into_input(&admin_user(), Some(&existing));
+        assert_eq!(input.provider_kind, None);
+    }
+
+    #[test]
+    fn provider_kind_explicit_preset_is_applied_verbatim() {
+        let input = McpServerRequest {
+            provider_kind: Some("  context7  ".to_string()),
+            ..request_for_transport("http")
+        }
+        .into_input(&admin_user(), None);
+        assert_eq!(input.provider_kind.as_deref(), Some("context7"));
+    }
+
+    #[tokio::test]
+    async fn provider_kind_rejects_unknown_values() {
+        let state = test_state();
+        let user = admin_user();
+        let request = McpServerRequest {
+            name: "provider-kind-unknown".to_string(),
+            provider_kind: Some("unknown-provider".to_string()),
+            ..request_for_transport("http")
+        };
+        let err = request
+            .validate_for_create(&state, &user)
+            .await
+            .unwrap_err();
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn provider_kind_requires_http_transport() {
+        let state = test_state();
+        let user = admin_user();
+        let request = McpServerRequest {
+            command: Some("mcpd".to_string()),
+            provider_kind: Some("context7".to_string()),
+            ..request_for_transport("stdio")
+        };
+        let err = request
+            .validate_for_create(&state, &user)
+            .await
+            .unwrap_err();
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn provider_kind_minimax_requires_builtin_transport() {
+        let state = test_state();
+        let user = admin_user();
+        let request = McpServerRequest {
+            provider_kind: Some("minimax".to_string()),
+            ..request_for_transport("http")
+        };
+        let err = request
+            .validate_for_create(&state, &user)
+            .await
+            .unwrap_err();
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn provider_kind_accepts_context7_and_firecrawl_on_http() {
+        // Positive validation needs the duplicate-name lookup, so this test
+        // runs against the shared dev database and skips when it is absent
+        // (matching the DB-gated convention in `mcp::entry::tests`).
+        let Ok(url) = std::env::var("PROMPT_FERRY_TEST_DATABASE_URL") else {
+            eprintln!("skipping preset validation test: PROMPT_FERRY_TEST_DATABASE_URL is not set");
+            return;
+        };
+        let user = admin_user();
+        for (value, preset_url) in [
+            ("context7", "https://mcp.context7.com/mcp"),
+            ("firecrawl", "https://mcp.firecrawl.dev/v2/mcp"),
+        ] {
+            let state = test_state_with_pool_url(&url);
+            let request = McpServerRequest {
+                name: format!("preset-{value}"),
+                provider_kind: Some(value.to_string()),
+                url: Some(preset_url.to_string()),
+                auth_mode: Some(crate::db::MCP_AUTH_MODE_BEARER.to_string()),
+                bearer_tokens: Some(vec![crate::db::McpBearerToken {
+                    token: "preset-token".to_string(),
+                    enabled: true,
+                }]),
+                ..request_for_transport("http")
+            };
+            let result = request.validate_for_create(&state, &user).await;
+            if let Err(err) = &result {
+                eprintln!("preset {value} rejected: {}", err.status());
+            }
+            assert!(result.is_ok(), "preset {value} must validate");
+        }
+    }
+
+    #[test]
+    fn hosted_preset_matches_only_bearer_http_presets() {
+        assert!(super::hosted_bearer_preset("http", Some("context7")).is_some());
+        assert!(super::hosted_bearer_preset("http", Some("firecrawl")).is_some());
+        assert!(super::hosted_bearer_preset("http", Some("generic")).is_none());
+        assert!(super::hosted_bearer_preset("http", Some("minimax")).is_none());
+        assert!(super::hosted_bearer_preset("http", None).is_none());
+        assert!(super::hosted_bearer_preset("stdio", Some("context7")).is_none());
+        assert!(super::hosted_bearer_preset("builtin_minimax", Some("minimax")).is_none());
+    }
+
+    #[test]
+    fn preset_url_equivalence_tolerates_trailing_slash_only() {
+        assert!(super::urls_equivalent(
+            "https://mcp.context7.com/mcp/",
+            "https://mcp.context7.com/mcp"
+        ));
+        assert!(!super::urls_equivalent(
+            "https://self-hosted.example.com/mcp",
+            "https://mcp.context7.com/mcp"
+        ));
+    }
+
+    #[test]
+    fn preset_into_input_derives_default_url_and_bearer_auth() {
+        for (value, preset_url) in [
+            ("context7", "https://mcp.context7.com/mcp"),
+            ("firecrawl", "https://mcp.firecrawl.dev/v2/mcp"),
+        ] {
+            let input = McpServerRequest {
+                provider_kind: Some(value.to_string()),
+                url: None,
+                auth_mode: None,
+                bearer_tokens: Some(vec![crate::db::McpBearerToken {
+                    token: "preset-token".to_string(),
+                    enabled: true,
+                }]),
+                ..request_for_transport("http")
+            }
+            .into_input(&admin_user(), None);
+
+            assert_eq!(input.provider_kind.as_deref(), Some(value));
+            assert_eq!(
+                input.url.as_deref(),
+                Some(preset_url),
+                "{value} must persist the official endpoint"
+            );
+            assert_eq!(input.auth_mode, crate::db::MCP_AUTH_MODE_BEARER);
+        }
+    }
+
+    #[test]
+    fn preset_into_input_keeps_preset_when_request_omits_provider_kind() {
+        let mut existing = existing_with_source(Uuid::new_v4());
+        existing.transport = "http".to_string();
+        existing.provider_kind = Some("context7".to_string());
+        existing.url = Some("https://mcp.context7.com/mcp".to_string());
+        existing.auth_mode = crate::db::MCP_AUTH_MODE_BEARER.to_string();
+        existing.bearer_tokens_json = serde_json::json!(["stored-token"]);
+
+        let input = McpServerRequest {
+            url: Some("https://legacy.example.com/mcp".to_string()),
+            auth_mode: None,
+            ..request_for_transport("http")
+        }
+        .into_input(&admin_user(), Some(&existing));
+
+        assert_eq!(input.provider_kind.as_deref(), Some("context7"));
+        assert_eq!(input.url.as_deref(), Some("https://mcp.context7.com/mcp"));
+        assert_eq!(input.auth_mode, crate::db::MCP_AUTH_MODE_BEARER);
+        assert_eq!(
+            input.bearer_tokens_json,
+            serde_json::json!(["stored-token"])
+        );
+    }
+
+    #[test]
+    fn generic_custom_url_into_input_is_untouched() {
+        let input = McpServerRequest {
+            provider_kind: Some("generic".to_string()),
+            url: Some("https://self-hosted.example.com/mcp".to_string()),
+            ..request_for_transport("http")
+        }
+        .into_input(&admin_user(), None);
+
+        assert_eq!(input.provider_kind, None);
+        assert_eq!(
+            input.url.as_deref(),
+            Some("https://self-hosted.example.com/mcp")
+        );
+    }
+
+    #[tokio::test]
+    async fn preset_rejects_custom_url_before_persistence() {
+        let state = test_state();
+        let user = admin_user();
+        let request = McpServerRequest {
+            name: "preset-custom-url".to_string(),
+            provider_kind: Some("context7".to_string()),
+            url: Some("https://self-hosted.example.com/mcp".to_string()),
+            ..request_for_transport("http")
+        };
+        let err = request
+            .validate_for_create(&state, &user)
+            .await
+            .unwrap_err();
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn preset_rejects_non_bearer_auth() {
+        let state = test_state();
+        let user = admin_user();
+        let request = McpServerRequest {
+            name: "preset-basic-auth".to_string(),
+            provider_kind: Some("firecrawl".to_string()),
+            url: Some("https://mcp.firecrawl.dev/v2/mcp".to_string()),
+            auth_mode: Some(crate::db::MCP_AUTH_MODE_BASIC.to_string()),
+            ..request_for_transport("http")
+        };
+        let err = request
+            .validate_for_create(&state, &user)
+            .await
+            .unwrap_err();
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn preset_requires_a_bearer_token() {
+        let state = test_state();
+        let user = admin_user();
+        let request = McpServerRequest {
+            name: "preset-no-token".to_string(),
+            provider_kind: Some("context7".to_string()),
+            url: Some("https://mcp.context7.com/mcp".to_string()),
+            auth_mode: Some(crate::db::MCP_AUTH_MODE_BEARER.to_string()),
+            bearer_tokens: Some(vec![]),
+            ..request_for_transport("http")
+        };
+        let err = request
+            .validate_for_create(&state, &user)
+            .await
+            .unwrap_err();
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn preset_update_rejects_explicitly_cleared_bearer_tokens() {
+        // Reviewer P3: an explicit `bearer_tokens: []` on update is a request
+        // to clear the credentials and must not persist a hosted preset with
+        // no token just because the previous row had one. This returns before
+        // any database lookup, so it runs without a live database.
+        let state = test_state();
+        let user = admin_user();
+        let request = McpServerRequest {
+            name: "preset-clear-token".to_string(),
+            provider_kind: Some("firecrawl".to_string()),
+            url: Some("https://mcp.firecrawl.dev/v2/mcp".to_string()),
+            auth_mode: Some(crate::db::MCP_AUTH_MODE_BEARER.to_string()),
+            bearer_tokens: Some(vec![]),
+            ..request_for_transport("http")
+        };
+        let err = request
+            .validate_for_update(&state, Uuid::new_v4(), None, &user)
+            .await
+            .unwrap_err();
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
     }
 }
 

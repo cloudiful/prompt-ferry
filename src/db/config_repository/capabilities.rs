@@ -263,6 +263,12 @@ mod tests {
             Capability::for_path("/admin/mcp-servers/abc/credentials/def/quota-group"),
             Some(Capability::McpQuota)
         );
+        // The provider balance refresh reuses the PostgreSQL-only quota
+        // capability so SQLite rejects it before any provider call.
+        assert_eq!(
+            Capability::for_path("/admin/mcp-servers/abc/credentials/def/refresh"),
+            Some(Capability::McpQuota)
+        );
         assert_eq!(
             Capability::for_path("/admin/mcp-quota-groups"),
             Some(Capability::McpQuota)

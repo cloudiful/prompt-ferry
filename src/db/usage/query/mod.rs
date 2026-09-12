@@ -28,6 +28,7 @@ struct RequestRecordListRowFlat {
     endpoint_name: Option<String>,
     mcp_server_id: Option<uuid::Uuid>,
     mcp_server_name: Option<String>,
+    server_provider_kind: Option<String>,
     mcp_protocol_method: Option<String>,
     mcp_operation_name: Option<String>,
     path: Option<String>,
@@ -81,6 +82,10 @@ impl From<RequestRecordListRowFlat> for RequestRecordListRow {
             endpoint_name: row.endpoint_name,
             mcp_server_id: row.mcp_server_id,
             mcp_server_name: row.mcp_server_name,
+            server_provider_kind: crate::db::canonical_mcp_provider_kind(
+                row.server_provider_kind.as_deref(),
+            )
+            .map(str::to_string),
             mcp_protocol_method: row.mcp_protocol_method,
             mcp_operation_name: row.mcp_operation_name,
             path: row.path.unwrap_or_default(),

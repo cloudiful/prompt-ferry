@@ -109,6 +109,12 @@ pub(crate) fn parse_opencode_go_usage(body: &Value) -> Option<OpencodeGoUsage> {
 
 // Tightest (lowest) remaining percent across the present OpencodeGo windows,
 // where remaining = 100 - clamp(used). Use for cache reservation weighting.
+//
+// Degradation: an absent window is skipped, never padded; only a window that
+// carries a percent counts. A missing `monthly` window therefore neither
+// masks an exhausted `rolling`/`weekly` window nor by itself marks the key
+// healthy. `None` means no present window carried a percent at all (PAYG),
+// which routing treats as "no quota signal", not as exhaustion.
 pub(crate) fn opencode_go_remaining_percent(key: &TokenPlanKeyUsage) -> Option<f64> {
     [
         &key.opencodego_rolling,
@@ -281,6 +287,21 @@ mod tests {
         assert_eq!(
             opencode_go_remaining_percent(&full_key(None, None, None)),
             None
+        );
+    }
+
+    #[test]
+    fn missing_monthly_window_does_not_assert_health() {
+        // A missing monthly window must not hide an exhausted rolling/weekly
+        // window: the tightest present window still decides.
+        assert_eq!(
+            opencode_go_remaining_percent(&full_key(Some(100.0), Some(100.0), None)),
+            Some(0.0)
+        );
+        // Monthly is the only present window and it is exhausted.
+        assert_eq!(
+            opencode_go_remaining_percent(&full_key(None, None, Some(100.0))),
+            Some(0.0)
         );
     }
 

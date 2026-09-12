@@ -312,4 +312,24 @@ mod tests {
             "exhaustion checks must keep the raw window percent"
         );
     }
+
+    #[tokio::test]
+    async fn invalidate_drops_freshness_so_next_refresh_refetches() {
+        let cache = TokenPlanQuotaCache::default();
+        let endpoint_id = Uuid::new_v4();
+        let key_id = Uuid::new_v4();
+        cache
+            .store_for_test(endpoint_id, opencode_go_usage(key_id, 80.0))
+            .await;
+        assert!(cache.is_fresh(endpoint_id).await);
+        assert!(cache.snapshot(endpoint_id).await.is_some());
+
+        cache.invalidate(endpoint_id).await;
+
+        // `refresh_if_due` short-circuits on `is_fresh`. An invalidated entry
+        // must stop being fresh so the next `refresh_candidate_quota` call
+        // refetches instead of serving the pre-exhaustion snapshot (issue #310).
+        assert!(!cache.is_fresh(endpoint_id).await);
+        assert!(cache.snapshot(endpoint_id).await.is_none());
+    }
 }

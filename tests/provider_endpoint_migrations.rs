@@ -379,7 +379,7 @@ async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_o
     let path = standalone_temp_path("fresh");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 16);
+    assert_eq!(standalone_schema_version(&pool).await?, 17);
 
     let ddl: String = sqlx::query(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'standalone_provider_endpoints'",
@@ -540,7 +540,7 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     let pool = db::connect_sqlite(&path).await?;
     // 0015 (issue #230) adds `glm` and 0016 (issue #287) adds `deepseek`;
     // the final schema version is 16 after the pending migrations apply.
-    assert_eq!(standalone_schema_version(&pool).await?, 16);
+    assert_eq!(standalone_schema_version(&pool).await?, 17);
     let preserved: i64 = sqlx::query(
         "SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'",
     )

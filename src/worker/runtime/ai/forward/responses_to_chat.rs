@@ -165,6 +165,7 @@ pub(super) async fn forward_non_stream_responses_to_chat_response(
         services.admin_state(),
         usage_event_id,
         resolve_assistant_artifact(captured_artifact, None, artifact_response_text.as_deref()),
+        true,
         request_ctx.request_prompt_log.conversation_id,
         request,
         &route_ctx.route,

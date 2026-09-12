@@ -77,6 +77,14 @@ pub struct RequestRecordOverviewBreakdownRow {
     pub tokens: RequestRecordOverviewTokenUsage,
     pub model: Option<String>,
     pub mcp_server_id: Option<Uuid>,
+    /// Canonical MCP provider preset id (`context7`/`firecrawl`/`minimax`)
+    /// resolved from `mcp_servers.provider_kind`. `None` for AI rows and for
+    /// generic/legacy MCP servers.
+    pub server_provider_kind: Option<String>,
+    /// Usage unit for the provider (`requests`/`credits`), derived from the
+    /// server-side registry so the client never re-derives it. `None` when the
+    /// provider is unknown or the row is not an MCP server row.
+    pub usage_unit: Option<String>,
     /// Average output tokens per second for completed AI requests with
     /// positive output tokens and positive duration, averaged per request
     /// within the breakdown row. `None` when no valid samples exist or

@@ -491,6 +491,7 @@ async fn visible_mcp_servers_are_scoped_by_owner() -> anyhow::Result<()> {
             name: "public-server".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("https://example.com/mcp".to_string()),
             command: None,
             args: serde_json::json!([]),
@@ -523,6 +524,7 @@ async fn visible_mcp_servers_are_scoped_by_owner() -> anyhow::Result<()> {
             name: "private-a".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("https://example.com/a".to_string()),
             command: None,
             args: serde_json::json!([]),
@@ -555,6 +557,7 @@ async fn visible_mcp_servers_are_scoped_by_owner() -> anyhow::Result<()> {
             name: "private-b".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("https://example.com/b".to_string()),
             command: None,
             args: serde_json::json!([]),
@@ -769,6 +772,7 @@ async fn mcp_lifecycle_learning_is_persisted_and_tied_to_updated_at() -> anyhow:
             name: "lifecycle-learn".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("https://example.com/mcp".to_string()),
             command: None,
             args: serde_json::json!([]),
@@ -826,6 +830,7 @@ async fn mcp_lifecycle_learning_is_persisted_and_tied_to_updated_at() -> anyhow:
             name: "lifecycle-learn".to_string(),
             aggregate_naming_mode: "passthrough_preferred".to_string(),
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some("https://example.com/mcp".to_string()),
             command: None,
             args: serde_json::json!([]),
@@ -867,4 +872,150 @@ async fn mcp_lifecycle_learning_is_persisted_and_tied_to_updated_at() -> anyhow:
     let _ = server_edited;
     schema.cleanup().await?;
     Ok(())
+}
+
+// Issue #296 Phase 1: provider_kind persists through create/update, stays
+// optional for legacy rows (NULL), and survives a migration on a pre-existing
+// table without the column.
+#[tokio::test]
+async fn mcp_provider_kind_persists_and_defaults_to_null() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    db::migrate(&schema.pool).await?;
+
+    let preset_server = db::create_mcp_server(
+        &schema.pool,
+        db::McpServerInput {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            source_endpoint_id: None,
+            name: "preset-firecrawl".to_string(),
+            aggregate_naming_mode: "passthrough_preferred".to_string(),
+            transport: "http".to_string(),
+            provider_kind: Some("firecrawl".to_string()),
+            url: Some("https://mcp.firecrawl.dev/v2/mcp".to_string()),
+            command: None,
+            args: serde_json::json!([]),
+            env_json: serde_json::json!({}),
+            bearer_tokens_json: serde_json::json!([]),
+            http_headers_json: serde_json::json!({}),
+            auth_mode: "bearer".to_string(),
+            basic_username: None,
+            basic_password: None,
+            tool_filter_mode: "blacklist".to_string(),
+            allowed_tools: serde_json::json!([]),
+            disabled_tools: serde_json::json!([]),
+            disabled_resources: serde_json::json!([]),
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+        },
+    )
+    .await?;
+    assert_eq!(preset_server.provider_kind.as_deref(), Some("firecrawl"));
+
+    // Legacy-style row: provider_kind omitted stays NULL in storage.
+    let legacy_server = db::create_mcp_server(
+        &schema.pool,
+        db::McpServerInput {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            source_endpoint_id: None,
+            name: "legacy-http".to_string(),
+            aggregate_naming_mode: "passthrough_preferred".to_string(),
+            transport: "http".to_string(),
+            provider_kind: None,
+            url: Some("https://example.com/mcp".to_string()),
+            command: None,
+            args: serde_json::json!([]),
+            env_json: serde_json::json!({}),
+            bearer_tokens_json: serde_json::json!([]),
+            http_headers_json: serde_json::json!({}),
+            auth_mode: "none".to_string(),
+            basic_username: None,
+            basic_password: None,
+            tool_filter_mode: "blacklist".to_string(),
+            allowed_tools: serde_json::json!([]),
+            disabled_tools: serde_json::json!([]),
+            disabled_resources: serde_json::json!([]),
+            daily_max_requests: None,
+            monthly_max_requests: None,
+            enabled: true,
+            timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+        },
+    )
+    .await?;
+    assert_eq!(legacy_server.provider_kind, None);
+    assert_eq!(legacy_server.effective_provider_kind(), "generic");
+
+    // Update can attach a preset to the legacy row.
+    let updated = db::update_mcp_server(
+        &schema.pool,
+        legacy_server.server_id,
+        db::McpServerInput {
+            provider_kind: Some("context7".to_string()),
+            name: "legacy-http".to_string(),
+            url: Some("https://mcp.context7.com/mcp".to_string()),
+            ..legacy_input_clone(&legacy_server)
+        },
+    )
+    .await?
+    .expect("server updated");
+    assert_eq!(updated.provider_kind.as_deref(), Some("context7"));
+
+    // ...and clear it back to untyped legacy.
+    let cleared = db::update_mcp_server(
+        &schema.pool,
+        legacy_server.server_id,
+        db::McpServerInput {
+            provider_kind: None,
+            name: "legacy-http".to_string(),
+            ..legacy_input_clone(&updated)
+        },
+    )
+    .await?
+    .expect("server updated");
+    assert_eq!(cleared.provider_kind, None);
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+fn legacy_input_clone(server: &db::McpServer) -> db::McpServerInput {
+    db::McpServerInput {
+        scope: server.scope.clone(),
+        owner_user_id: server.owner_user_id,
+        source_endpoint_id: server.source_endpoint_id,
+        name: server.name.clone(),
+        aggregate_naming_mode: server.aggregate_naming_mode.clone(),
+        transport: server.transport.clone(),
+        provider_kind: server.provider_kind.clone(),
+        url: server.url.clone(),
+        command: server.command.clone(),
+        args: server.args.clone(),
+        env_json: server.env_json.clone(),
+        bearer_tokens_json: server.bearer_tokens_json.clone(),
+        http_headers_json: server.http_headers_json.clone(),
+        auth_mode: server.auth_mode.clone(),
+        basic_username: server.basic_username.clone(),
+        basic_password: server.basic_password.clone(),
+        tool_filter_mode: server.tool_filter_mode.clone(),
+        allowed_tools: server.allowed_tools.clone(),
+        disabled_tools: server.disabled_tools.clone(),
+        disabled_resources: server.disabled_resources.clone(),
+        daily_max_requests: server.daily_max_requests,
+        monthly_max_requests: server.monthly_max_requests,
+        enabled: server.enabled,
+        timeout_ms: server.timeout_ms,
+        lifecycle_policy: server.lifecycle_policy.clone(),
+        lifecycle_manual_protocol_version: server.lifecycle_manual_protocol_version.clone(),
+    }
 }

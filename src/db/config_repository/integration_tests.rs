@@ -160,6 +160,7 @@ fn mcp_input() -> crate::db::McpServerInput {
         name: "local tools".to_string(),
         aggregate_naming_mode: "passthrough_preferred".to_string(),
         transport: "stdio".to_string(),
+        provider_kind: None,
         url: None,
         command: Some("mcpd".to_string()),
         args: serde_json::json!(["--stdio"]),
@@ -266,6 +267,48 @@ async fn mcp_crud_projection_and_credentials_use_encrypted_sqlite_storage() {
             .expect("get deleted MCP server")
             .is_none()
     );
+    close_repository(store, path).await;
+}
+
+// Issue #296 Phase 1: the standalone SQLite store persists provider_kind
+// through save/read, and legacy rows without the column read as NULL.
+#[tokio::test]
+async fn sqlite_mcp_provider_kind_round_trips() {
+    let (store, manager, path) = open_repository().await;
+    let repo = ConfigRepository::sqlite(store.clone(), manager);
+    let server_id = Uuid::new_v4();
+
+    let mut input = mcp_input();
+    input.transport = "http".to_string();
+    input.url = Some("https://mcp.context7.com/mcp".to_string());
+    input.provider_kind = Some("context7".to_string());
+
+    let created = repo
+        .create_mcp_server(server_id, input)
+        .await
+        .expect("create preset MCP server");
+    assert_eq!(created.provider_kind.as_deref(), Some("context7"));
+    assert_eq!(created.effective_provider_kind(), "context7");
+
+    let reloaded = repo
+        .get_mcp_server(server_id)
+        .await
+        .expect("reload MCP server")
+        .expect("MCP server present");
+    assert_eq!(reloaded.provider_kind.as_deref(), Some("context7"));
+
+    // Clearing the preset stores NULL again.
+    let mut cleared_input = mcp_input();
+    cleared_input.transport = "http".to_string();
+    cleared_input.url = Some("https://mcp.context7.com/mcp".to_string());
+    let cleared = repo
+        .update_mcp_server(server_id, cleared_input)
+        .await
+        .expect("clear preset")
+        .expect("MCP server present");
+    assert_eq!(cleared.provider_kind, None);
+    assert_eq!(cleared.effective_provider_kind(), "generic");
+
     close_repository(store, path).await;
 }
 

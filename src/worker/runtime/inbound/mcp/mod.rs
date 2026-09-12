@@ -69,32 +69,25 @@ async fn settle_quota(
     let Some(pool) = state.storage.postgres_pool() else {
         return;
     };
-    if let Err(err) = db::settle_reservation(pool, request_id, commit).await {
+    // The provider-reported actual cost (Firecrawl `creditsUsed`) replaces the
+    // reserved default when present; a missing/zero value keeps the
+    // reservation and a failure releases it. The durable settlement is atomic
+    // so the account is never charged the reservation and the actual cost
+    // twice.
+    let actual_units = if commit {
+        crate::mcp::tracked_credits_used()
+    } else {
+        None
+    };
+    if let Err(err) =
+        db::settle_reservation_with_actual(pool, request_id, commit, actual_units).await
+    {
         tracing::warn!(
             error = %err,
             request_id = %request_id,
             "failed to settle MCP quota reservation"
         );
         return;
-    }
-    if commit
-        && let Some(credits_used) = crate::mcp::tracked_credits_used()
-        && credits_used > grant.reservation.units
-    {
-        let extra = credits_used - grant.reservation.units;
-        for account in [grant.day_account.as_ref(), grant.month_account.as_ref()]
-            .into_iter()
-            .flatten()
-        {
-            if let Err(err) = db::charge_extra_units(pool, account.account_id, extra).await {
-                tracing::warn!(
-                    error = %err,
-                    request_id = %request_id,
-                    account_id = account.account_id,
-                    "failed to charge extra MCP quota units"
-                );
-            }
-        }
     }
     if let Some((slot, upstream_status)) = crate::mcp::tracked_upstream_failure()
         && matches!(upstream_status, 401 | 403 | 429)

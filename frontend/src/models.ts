@@ -81,6 +81,7 @@ export type McpForm = {
   name: string
   aggregate_naming_mode: 'qualified_only' | 'passthrough_preferred'
   transport: 'http' | 'stdio' | 'builtin_minimax'
+  provider_kind: string
   url: string
   command_argv_text: string
   auth_mode: 'none' | 'bearer' | 'basic'

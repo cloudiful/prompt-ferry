@@ -1,5 +1,18 @@
 use super::*;
 
+/// Read-only MCP provider registry so the admin UI renders preset ids, labels,
+/// default URLs, auth styles, and units from one server-owned source instead of
+/// duplicating them in the frontend.
+pub(super) async fn list_mcp_providers(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = current_user(&state, &headers).await {
+        return response;
+    }
+    Json(mcp_provider_descriptors()).into_response()
+}
+
 pub(super) async fn list_mcp_servers(
     State(state): State<AdminState>,
     headers: HeaderMap,

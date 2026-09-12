@@ -12,6 +12,7 @@ fn server(name: &str) -> McpServer {
         name: name.to_string(),
         aggregate_naming_mode: "qualified_only".to_string(),
         transport: "http".to_string(),
+        provider_kind: None,
         url: Some("http://127.0.0.1:3000/mcp".to_string()),
         command: None,
         args: json!([]),

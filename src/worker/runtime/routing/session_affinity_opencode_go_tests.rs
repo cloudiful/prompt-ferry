@@ -155,6 +155,87 @@ async fn exhausted_opencode_go_bound_key_migrates_to_alternate_key() {
 }
 
 #[tokio::test]
+async fn missing_monthly_window_still_migrates_when_rolling_exhausted() {
+    // Regression (issue #310 Task 3): the OpencodeGo usage payload can omit the
+    // `monthly` window. A missing window is skipped, not treated as healthy, so
+    // an exhausted `rolling` window still rotates the bound session off the key.
+    let replay_cache = ReplayCache::for_tests();
+    let runtime_state = super::super::WorkerRuntimeState::default();
+    let services =
+        super::super::tests::session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let mut candidate = super::super::tests::session_affinity_candidate();
+    let target = candidate.targets.first_mut().expect("target exists");
+    target.key_lb_enabled = true;
+    let endpoint_id = target.endpoint_id;
+    let bound_key_id = target.api_keys[0].key_id;
+    let alternate_key_id = Uuid::new_v4();
+    target.api_keys.push(db::EndpointApiKey {
+        key_id: alternate_key_id,
+        endpoint_id,
+        key_label: "alternate".to_string(),
+        api_key: "alternate-key".to_string(),
+        position: 1,
+        enabled: true,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    });
+    // Keep the redraw on the bound endpoint so a healthy alternate key there is
+    // the only correct migration target.
+    candidate.targets[1].enabled = false;
+
+    let conversation_id = Uuid::new_v4();
+    bind_key(
+        &replay_cache,
+        candidate.rule_id,
+        conversation_id,
+        endpoint_id,
+        bound_key_id,
+        "key-a",
+    )
+    .await;
+    services
+        .admin_state()
+        .expect("admin state")
+        .token_plan_quota
+        .store_for_test(
+            endpoint_id,
+            opencode_go_usage(&[
+                // monthly/weekly absent; rolling fully consumed.
+                (bound_key_id, "primary", Some(100.0), None, None),
+                (alternate_key_id, "alternate", Some(50.0), None, None),
+            ]),
+        )
+        .await;
+
+    let request_ctx = request_context(
+        runtime_state.worker_instance_id(),
+        RequestPromptLog {
+            conversation_id: Some(conversation_id),
+            conversation_seq: Some(1),
+            preferred_endpoint_id: Some(endpoint_id),
+            ..RequestPromptLog::default()
+        },
+    );
+    let selected = select_route_for_candidate(
+        &services,
+        &request_ctx,
+        &candidate,
+        &request(),
+        1,
+        Some("key-a"),
+    )
+    .await
+    .expect("a missing monthly window must not mask an exhausted rolling window")
+    .expect("migration must select a route");
+    assert_eq!(selected.route.endpoint_key_id, Some(alternate_key_id));
+    assert_ne!(selected.route.endpoint_key_id, Some(bound_key_id));
+    assert_eq!(
+        selected.route.route_selection_reason,
+        db::RouteSelectionReason::QuotaFailover
+    );
+}
+
+#[tokio::test]
 async fn payg_opencode_go_bound_key_without_windows_is_still_honored() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();

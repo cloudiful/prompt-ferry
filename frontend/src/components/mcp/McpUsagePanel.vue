@@ -50,6 +50,11 @@ const columns = computed<TableColumn<RequestRecordRowView>[]>(() => [
   },
   { accessorKey: 'target', header: props.t('mcpServer'), enableSorting: true },
   {
+    accessorKey: 'server_provider_kind',
+    header: props.t('providerKind'),
+    enableSorting: false,
+  },
+  {
     accessorKey: 'mcp_protocol_method',
     header: props.t('mcpMethod'),
     enableSorting: true,
@@ -135,6 +140,15 @@ const sorting = computed<SortingState>({
           <span class="font-semibold text-highlighted">{{
             row.original.mcp_server_name || row.original.upstream_label
           }}</span>
+        </template>
+        <template #server_provider_kind-cell="{ row }">
+          <UBadge
+            v-if="row.original.server_provider_kind"
+            :label="row.original.server_provider_kind"
+            color="neutral"
+            variant="subtle"
+          />
+          <span v-else>-</span>
         </template>
         <template #mcp_protocol_method-cell="{ row }">
           <span class="font-mono">{{

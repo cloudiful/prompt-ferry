@@ -219,7 +219,9 @@ fn candidate_units_mode<'a>(
         .targets
         .iter()
         .flat_map(|target| target_units_mode(target, quota_cache, model, include_all_keys))
-        .filter(|unit| Some(unit.unit_id) != exclude_unit)
+        .filter(|unit| {
+            Some(unit.unit_id) != exclude_unit && Some(unit.target.target_id) != exclude_unit
+        })
         .collect()
 }
 

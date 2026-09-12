@@ -9,6 +9,7 @@ SELECT
     pe.name AS endpoint_name,
     rr.mcp_server_id,
     COALESCE(rr.mcp_server_name, ms.name) AS mcp_server_name,
+    ms.provider_kind AS server_provider_kind,
     rr.mcp_protocol_method,
     rr.mcp_operation_name,
     rr.path,

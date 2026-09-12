@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 import type {
   McpCatalogResponse,
+  McpProviderDescriptor,
   McpQuotaGroup,
   User,
 } from '@/generated/admin-api'
@@ -20,6 +21,7 @@ const props = defineProps<{
   catalog: McpCatalogResponse
   users: User[]
   quotaGroups: McpQuotaGroup[]
+  providers: McpProviderDescriptor[]
   learned?: {
     mode: string | null
     protocolVersion: string | null
@@ -38,6 +40,48 @@ const authModeItems = computed(() => [
   { label: props.t('authModeBearer'), value: 'bearer' },
   { label: props.t('authModeBasic'), value: 'basic' },
 ])
+
+// Provider presets come from the server registry. The HTTP editor offers the
+// generic option plus any provider with an official hosted endpoint; minimax
+// stays bound to the managed builtin transport and is not selectable here.
+const httpProviderItems = computed(() =>
+  props.providers
+    .filter((provider) => provider.id === 'generic' || provider.default_url)
+    .map((provider) => ({ label: provider.display_name, value: provider.id })),
+)
+
+const selectedProvider = computed<McpProviderDescriptor | undefined>(() =>
+  props.providers.find((provider) => provider.id === form.value.provider_kind),
+)
+
+const isHostedPreset = computed(
+  () =>
+    selectedProvider.value?.default_url != null &&
+    selectedProvider.value.auth === 'bearer',
+)
+
+// Selecting a hosted preset pins the official URL and bearer auth; picking
+// generic relaxes both so a self-hosted endpoint stays fully editable.
+const providerKindModel = computed<string>({
+  get: () => form.value.provider_kind || 'generic',
+  set: (value) => {
+    form.value.provider_kind = value || 'generic'
+  },
+})
+
+// Applies the preset defaults whenever the effective provider changes,
+// including when the registry finishes loading after the dialog opened. This
+// also normalizes a preset row whose stored auth style predates enforcement.
+watch(
+  selectedProvider,
+  (provider) => {
+    if (provider?.default_url != null && provider.auth === 'bearer') {
+      form.value.url = provider.default_url
+      form.value.auth_mode = 'bearer'
+    }
+  },
+  { immediate: true },
+)
 
 const protocolVersionItems = computed(() => [
   { label: props.t('lifecycleManualProtocolVersionAuto'), value: '' },
@@ -257,6 +301,7 @@ defineEmits<{
                 v-model="form.url"
                 class="min-w-0 flex-1"
                 placeholder="http://127.0.0.1:3000/mcp"
+                :readonly="isHostedPreset"
               />
             </div>
             <div
@@ -282,8 +327,44 @@ defineEmits<{
           </div>
           <div
             v-if="form.transport === 'http'"
-            class="grid min-w-0 gap-2"
+            class="grid gap-3 md:grid-cols-[10rem_minmax(0,1fr)]"
           >
+            <div class="grid min-w-0 gap-2">
+              <div class="flex items-center gap-1 text-muted">
+                <span>{{ t('providerKind') }}</span>
+                <UTooltip :text="t('providerDefaultUrlHint')">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-info"
+                    :aria-label="t('providerDefaultUrlHint')"
+                  />
+                </UTooltip>
+              </div>
+              <USelect
+                v-model="providerKindModel"
+                class="w-full"
+                :items="httpProviderItems"
+                label-key="label"
+                value-key="value"
+              />
+            </div>
+            <div
+              v-if="selectedProvider"
+              class="flex min-w-0 items-end gap-2 pb-1 text-xs"
+            >
+              <UBadge
+                :label="`${t('quotaUnit')}: ${selectedProvider.unit}`"
+                color="neutral"
+              />
+              <span v-if="isHostedPreset" class="text-dimmed">{{
+                t('providerBearerHint')
+              }}</span>
+            </div>
+          </div>
+          <div v-if="form.transport === 'http'" class="grid min-w-0 gap-2">
             <div class="text-muted">{{ t('authMode') }}</div>
             <USelect
               v-model="form.auth_mode"
@@ -291,6 +372,7 @@ defineEmits<{
               :items="authModeItems"
               label-key="label"
               value-key="value"
+              :disabled="isHostedPreset"
             />
           </div>
           <McpBearerTokensEditor
@@ -306,6 +388,7 @@ defineEmits<{
             "
             :server-id="form.server_id"
             :quota-groups="quotaGroups"
+            :providers="providers"
             :t="t"
           />
           <div

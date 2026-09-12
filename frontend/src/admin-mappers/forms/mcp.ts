@@ -74,6 +74,7 @@ export function createEmptyMcpForm(): McpForm {
     name: '',
     aggregate_naming_mode: 'passthrough_preferred',
     transport: 'http',
+    provider_kind: 'generic',
     url: '',
     command_argv_text: '[]',
     auth_mode: 'none',
@@ -117,6 +118,7 @@ export function mcpServerToForm(server: McpServer): McpForm {
         : server.transport === 'stdio'
           ? 'stdio'
           : 'http',
+    provider_kind: server.provider_kind ?? 'generic',
     url: server.url ?? '',
     command_argv_text: JSON.stringify(commandArgv(server)),
     auth_mode: authMode,
@@ -227,6 +229,8 @@ export function mcpFormToRequest(form: McpForm): McpServerRequest {
     owner_user_id: form.scope === 'user' ? form.owner_user_id : null,
     scope: form.scope,
     aggregate_naming_mode: form.aggregate_naming_mode,
+    provider_kind:
+      form.transport === 'http' ? form.provider_kind || 'generic' : null,
     daily_max_requests: form.daily_max_requests,
     monthly_max_requests: form.monthly_max_requests,
     timeout_ms: form.timeout_ms,

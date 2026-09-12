@@ -220,6 +220,7 @@ pub(crate) fn mcp_server(
             name: required_string(row, "name")?,
             aggregate_naming_mode: required_string(row, "aggregate_naming_mode")?,
             transport: required_string(row, "transport")?,
+            provider_kind: optional_string(row, "provider_kind")?,
             url: optional_string(row, "url")?,
             command: optional_string(row, "command")?,
             args: json_value(row, "args_json")?,

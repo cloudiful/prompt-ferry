@@ -329,6 +329,7 @@ fn input_from_endpoint(endpoint: &ProviderEndpoint, name: String, enabled: bool)
         name,
         aggregate_naming_mode: "passthrough_preferred".to_string(),
         transport: "builtin_minimax".to_string(),
+        provider_kind: Some(crate::db::MCP_PROVIDER_MINIMAX.to_string()),
         url: None,
         command: None,
         args: serde_json::json!([]),

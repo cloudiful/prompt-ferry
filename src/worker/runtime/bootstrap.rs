@@ -17,6 +17,10 @@ use sqlx::postgres::PgPoolOptions;
 use std::{path::Path, sync::Arc, time::Duration};
 use tracing::{error, info, warn};
 
+/// Background cadence for reconciling Firecrawl provider balances. The task
+/// only issues network calls when eligible credentials exist.
+const FIRECRAWL_REFRESH_INTERVAL_SECS: u64 = 3600;
+
 /// Atomically publish a generated bootstrap admin password and return the
 /// effective one to store in the database.
 ///
@@ -500,6 +504,42 @@ pub(super) async fn build_admin_state(
                 interval.tick().await;
                 if let Err(err) = crate::db::release_expired_reservations(&quota_pool).await {
                     warn!(error = %err, "MCP quota reservation cleanup failed");
+                }
+            }
+        });
+
+        // Provider balance sync runs off the request path: Firecrawl credits
+        // are reconciled in the background so a slow provider API never stalls
+        // MCP forwarding. SQLite never reaches this branch.
+        let provider_pool = state.pool.clone();
+        let provider_valkey = state.mcp_quota_valkey.clone();
+        tokio::spawn(async move {
+            let client = crate::mcp::FirecrawlBalanceClient::new();
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+                FIRECRAWL_REFRESH_INTERVAL_SECS,
+            ));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                interval.tick().await;
+                match crate::mcp::refresh_firecrawl_balances(
+                    &provider_pool,
+                    &provider_valkey,
+                    &client,
+                )
+                .await
+                {
+                    Ok(summary) if summary.attempted > 0 => {
+                        info!(
+                            attempted = summary.attempted,
+                            refreshed = summary.refreshed,
+                            failed = summary.failed,
+                            "refreshed MCP provider balances"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        warn!(error = %err, "MCP provider balance refresh failed");
+                    }
                 }
             }
         });

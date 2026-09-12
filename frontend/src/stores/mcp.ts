@@ -8,12 +8,14 @@ import {
   createMcpServer,
   deleteMcpServer,
   getMcpCatalog,
+  listMcpProviders,
   listMcpServers,
   testMcpServer,
   updateMcpServer,
 } from '../generated/admin-api'
 import type {
   McpCatalogResponse,
+  McpProviderDescriptor,
   McpServer,
   McpServerRequest,
   McpTestResponse,
@@ -25,6 +27,7 @@ import { useLocale } from '../composables/useLocale'
 export const useMcpStore = defineStore('mcp', () => {
   const { t } = useLocale()
   const servers = ref<McpServer[]>([])
+  const providers = ref<McpProviderDescriptor[]>([])
   const serverFirst = ref(0)
   const serverRows = useStoredPageSize(
     'mcp-servers',
@@ -48,6 +51,16 @@ export const useMcpStore = defineStore('mcp', () => {
         managedMinimax: t('minimaxManaged'),
         privateScope: t('privateScope'),
         publicScope: t('publicScope'),
+        providerGenericLabel: t('providerGeneric'),
+        providerLabels: Object.fromEntries(
+          providers.value.map((provider) => [
+            provider.id,
+            provider.display_name,
+          ]),
+        ),
+        hostedProviderIds: providers.value
+          .filter((provider) => provider.default_url != null)
+          .map((provider) => provider.id),
       },
       testResults: testResults.value,
       total: serverTotal.value,
@@ -56,6 +69,10 @@ export const useMcpStore = defineStore('mcp', () => {
 
   async function setServerPage(first: number, rows: number): Promise<void> {
     await refresh(first, rows)
+  }
+
+  async function loadProviders(): Promise<void> {
+    providers.value = expectData(await listMcpProviders<true>(withData({})))
   }
 
   async function refresh(
@@ -171,8 +188,10 @@ export const useMcpStore = defineStore('mcp', () => {
     catalogCache,
     getCachedCatalog,
     loadCatalog,
+    loadProviders,
     loading,
     primeCatalog,
+    providers,
     refresh,
     removeServer,
     runTest,

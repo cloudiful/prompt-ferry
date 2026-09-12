@@ -4,12 +4,14 @@ use super::super::{
     tests::{session_affinity_candidate, session_affinity_services},
 };
 use super::{
-    RouteAffinityError, select_route_for_candidate, session_affinity_tests::request_context,
+    RouteAffinityError, select_route_for_candidate,
+    session_affinity_quota::quota_failover_selection, session_affinity_tests::request_context,
 };
 use crate::{
     db,
     replay_cache::ReplayCache,
     response_affinity::{ResponseAffinityBinding, ResponseAffinityStore, api_key_fingerprint},
+    worker_admin::token_plan_cache::TokenPlanQuotaCache,
     worker_admin_types::{
         CommandCodeBalances, CommandCodeWindowUsage, TokenPlanKeyUsage, TokenPlanModelUsage,
         TokenPlanUsageResponse, TokenPlanWindowUsage,
@@ -627,4 +629,138 @@ async fn previous_response_chain_rotates_key_on_the_same_endpoint() {
         selected.route.route_selection_reason,
         db::RouteSelectionReason::QuotaFailover
     );
+}
+
+fn model_key(
+    key_id: uuid::Uuid,
+    key_label: &str,
+    model_remains: Vec<TokenPlanModelUsage>,
+) -> TokenPlanKeyUsage {
+    TokenPlanKeyUsage {
+        key_id,
+        key_label: key_label.to_string(),
+        ok: true,
+        status: Some(200),
+        error_code: None,
+        error_message: None,
+        model_remains,
+        balances: None,
+        five_hour: None,
+        weekly: None,
+        opencodego_rolling: None,
+        opencodego_weekly: None,
+        opencodego_monthly: None,
+        openrouter_balance: None,
+        openrouter_spend: None,
+        glm_five_hour: None,
+        glm_weekly: None,
+        deepseek_balance: None,
+    }
+}
+
+fn model_window(
+    remaining_percent: f64,
+    total_count: Option<i64>,
+    resets_in_ms: Option<i64>,
+) -> TokenPlanModelUsage {
+    TokenPlanModelUsage {
+        model_name: "general".to_string(),
+        interval: Some(TokenPlanWindowUsage {
+            status: Some(1),
+            remaining_percent: Some(remaining_percent),
+            total_count,
+            usage_count: None,
+            boost_permille: None,
+            start_at: None,
+            end_at: None,
+            remains_time_ms: resets_in_ms,
+        }),
+        weekly: None,
+    }
+}
+
+fn model_usage(keys: Vec<TokenPlanKeyUsage>) -> TokenPlanUsageResponse {
+    TokenPlanUsageResponse {
+        local_today_tokens: None,
+        provider: db::EndpointProvider::Minimax,
+        provider_region: Some(db::EndpointRegion::Cn),
+        keys,
+    }
+}
+
+/// Regression (issue #310 Task 1): a legacy binding without `endpoint_key_id`
+/// only carries the endpoint and a key fingerprint. The exhausted key must be
+/// resolved back through that fingerprint and excluded from the failover
+/// redraw, even when its quota filter still keeps it eligible because the
+/// urgency-lifted pool weight stays positive while the raw remaining bottoms
+/// out under outstanding reservations.
+#[tokio::test]
+async fn none_binding_fingerprint_migrates_off_exhausted_key() {
+    let mut candidate = session_affinity_candidate();
+    let target = candidate.targets.first_mut().expect("target exists");
+    target.key_lb_enabled = true;
+    let endpoint_id = target.endpoint_id;
+    let bound_key_id = target.api_keys[0].key_id;
+    let alternate_key_id = uuid::Uuid::new_v4();
+    target.api_keys.push(db::EndpointApiKey {
+        key_id: alternate_key_id,
+        endpoint_id,
+        key_label: "alternate".to_string(),
+        api_key: "alternate-key".to_string(),
+        position: 1,
+        enabled: true,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    });
+    // Keep the redraw on the bound endpoint so a healthy alternate key there
+    // is the only correct migration.
+    candidate.targets[1].enabled = false;
+
+    let quota = TokenPlanQuotaCache::default();
+    quota
+        .store_for_test(
+            endpoint_id,
+            model_usage(vec![
+                model_key(
+                    bound_key_id,
+                    "primary",
+                    vec![model_window(10.0, Some(1_000), Some(60_000))],
+                ),
+                // Negligible but strictly positive weight: without the bound
+                // unit exclusion the dominant primary would win the draw.
+                model_key(
+                    alternate_key_id,
+                    "alternate",
+                    vec![model_window(0.0001, None, None)],
+                ),
+            ]),
+        )
+        .await;
+    // 100 reserved tokens == 10% of the 1000-token window, so the bound key's
+    // raw remaining is 0 (quota-exhausted) while its 1-minute reset keeps the
+    // urgency-lifted weight near 90.
+    quota.reserve_estimated_tokens(endpoint_id, bound_key_id, 100);
+
+    let binding = ResponseAffinityBinding {
+        endpoint_id,
+        endpoint_key_id: None,
+        endpoint_key_fingerprint: api_key_fingerprint("key-a"),
+    };
+    let (selection, replacement) = quota_failover_selection(
+        &candidate,
+        &binding,
+        &request(),
+        &RequestPromptLog::default(),
+        &quota,
+        "session-stable-key",
+        1,
+    )
+    .expect("exhausted bound key must migrate to the alternate key");
+    assert_eq!(selection.key_selection.key_id, Some(alternate_key_id));
+    assert_ne!(selection.key_selection.key_id, Some(bound_key_id));
+    assert_eq!(
+        selection.route_selection_reason,
+        db::RouteSelectionReason::QuotaFailover
+    );
+    assert_eq!(replacement.endpoint_key_id, Some(alternate_key_id));
 }

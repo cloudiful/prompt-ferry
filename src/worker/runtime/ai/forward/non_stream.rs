@@ -230,10 +230,12 @@ pub(super) async fn forward_non_stream_chat_response(
                 ),
         )
         .await;
+    let artifact_capture_expected = assistant_capture.is_some();
     persist_assistant_artifact(
         services.admin_state(),
         usage_event_id,
         resolve_assistant_artifact(captured_artifact, None, artifact_response_text.as_deref()),
+        artifact_capture_expected,
         request_ctx.request_prompt_log.conversation_id,
         request,
         &route_ctx.route,
@@ -365,6 +367,7 @@ pub(super) async fn forward_non_stream_responses_response(
         services.admin_state(),
         usage_event_id,
         resolve_assistant_artifact(captured_artifact, None, artifact_response_text.as_deref()),
+        true,
         request_ctx.request_prompt_log.conversation_id,
         request,
         &route_ctx.route,
@@ -486,6 +489,7 @@ pub(super) async fn forward_non_stream_anthropic_response(
         services.admin_state(),
         usage_event_id,
         resolve_assistant_artifact(captured_artifact, None, artifact_response_text.as_deref()),
+        true,
         request_ctx.request_prompt_log.conversation_id,
         request,
         &route_ctx.route,

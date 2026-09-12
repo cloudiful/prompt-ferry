@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mcp_credentials c\nSET provider_kind = CASE\n        WHEN s.provider_kind IN ('context7', 'firecrawl', 'minimax') THEN s.provider_kind\n        ELSE NULL\n    END,\n    updated_at = NOW()\nFROM mcp_servers s\nWHERE c.server_id = s.server_id\n  AND c.provider_kind IS DISTINCT FROM CASE\n        WHEN s.provider_kind IN ('context7', 'firecrawl', 'minimax') THEN s.provider_kind\n        ELSE NULL\n    END\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "7735a13b777a3bff473db63dd3b13c0533de0484185c9f84afb6d5a7fcb22868"
+}

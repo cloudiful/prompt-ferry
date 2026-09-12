@@ -2,7 +2,10 @@ use anyhow::Result;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::db::types::{McpBearerToken, McpCredential};
+use crate::db::types::{
+    McpBearerToken, McpCredential, McpProviderSecret, canonical_mcp_provider_kind,
+    canonical_quota_group_provider_kind,
+};
 
 pub async fn list_credentials_by_server(
     pool: &PgPool,
@@ -82,6 +85,17 @@ pub async fn sync_credentials_from_tokens(
 ) -> Result<()> {
     let tokens = McpBearerToken::parse_array(tokens_json);
     let mut tx = pool.begin().await?;
+    // The owning MCP server is the source of truth for the credential
+    // provider; generic/legacy servers resolve to NULL so they never trigger
+    // provider-specific flows such as a Firecrawl balance fetch.
+    let server_provider_kind = sqlx::query_file!(
+        "src/sql/mcp_credentials/get_credential_provider_kind.sql",
+        server_id,
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .and_then(|row| row.provider_kind);
+    let provider_kind = canonical_mcp_provider_kind(server_provider_kind.as_deref());
     let existing = sqlx::query_file_as!(
         McpCredential,
         "src/sql/mcp_credentials/list_credentials_by_server.sql",
@@ -111,26 +125,29 @@ pub async fn sync_credentials_from_tokens(
             if credential.credential_label != label
                 || credential.secret != token.token
                 || credential.enabled != token.enabled
+                || credential.provider_kind.as_deref() != provider_kind
             {
                 sqlx::query_file!(
-                    "src/sql/mcp_credentials/update_credential_token.sql",
+                    "src/sql/mcp_credentials/update_credential_with_provider.sql",
                     credential.credential_id,
                     label,
                     token.token,
                     token.enabled,
+                    provider_kind,
                 )
                 .fetch_one(&mut *tx)
                 .await?;
             }
         } else {
             sqlx::query_file!(
-                "src/sql/mcp_credentials/insert_credential.sql",
+                "src/sql/mcp_credentials/insert_credential_with_provider.sql",
                 server_id,
                 label,
                 token.token,
                 position,
                 token.enabled,
                 default_group,
+                provider_kind,
             )
             .fetch_one(&mut *tx)
             .await?;
@@ -149,6 +166,28 @@ pub async fn sync_credentials_from_tokens(
     }
     tx.commit().await?;
     Ok(())
+}
+
+/// Enabled Firecrawl credentials eligible for a provider balance refresh.
+/// Only PostgreSQL stores these rows; the SQLite runtime never calls this.
+pub async fn list_firecrawl_credentials(pool: &PgPool) -> Result<Vec<McpProviderSecret>> {
+    Ok(sqlx::query_file_as!(
+        McpProviderSecret,
+        "src/sql/mcp_credentials/list_firecrawl_credentials.sql",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Reconcile every credential's `provider_kind` with its owning MCP server.
+/// Idempotent: only rows whose canonical value differs are touched. Returns
+/// the number of credentials updated.
+pub async fn backfill_credential_provider_kinds(pool: &PgPool) -> Result<i64> {
+    let result =
+        sqlx::query_file!("src/sql/mcp_credentials/backfill_credential_provider_kinds.sql")
+            .execute(pool)
+            .await?;
+    Ok(result.rows_affected() as i64)
 }
 
 pub async fn get_quota_group(
@@ -177,13 +216,14 @@ pub async fn create_quota_group(
     pool: &PgPool,
     input: crate::db::McpQuotaGroupInput,
 ) -> Result<crate::db::McpQuotaGroup> {
+    let provider_kind = canonical_quota_group_provider_kind(input.provider_kind.as_deref());
     Ok(sqlx::query_file_as!(
         crate::db::McpQuotaGroup,
         "src/sql/mcp_credentials/create_quota_group.sql",
         input.name,
         input.scope.as_deref().unwrap_or("admin"),
         input.owner_user_id,
-        input.provider_kind,
+        provider_kind,
         input
             .unit
             .unwrap_or(crate::db::QuotaUnit::Requests)
@@ -204,6 +244,7 @@ pub async fn update_quota_group(
     group_id: Uuid,
     input: crate::db::McpQuotaGroupInput,
 ) -> Result<Option<crate::db::McpQuotaGroup>> {
+    let provider_kind = canonical_quota_group_provider_kind(input.provider_kind.as_deref());
     Ok(sqlx::query_file_as!(
         crate::db::McpQuotaGroup,
         "src/sql/mcp_credentials/update_quota_group.sql",
@@ -211,7 +252,7 @@ pub async fn update_quota_group(
         input.name,
         input.scope.as_deref().unwrap_or("admin"),
         input.owner_user_id,
-        input.provider_kind,
+        provider_kind,
         input
             .unit
             .unwrap_or(crate::db::QuotaUnit::Requests)

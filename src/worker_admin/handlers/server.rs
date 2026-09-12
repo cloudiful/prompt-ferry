@@ -155,6 +155,7 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             "/admin/mcp-servers",
             get(list_mcp_servers).post(create_mcp_server),
         )
+        .route("/admin/mcp-providers", get(list_mcp_providers))
         .route("/admin/relays", get(list_relays).post(create_relay))
         .route(
             "/admin/relays/{relay_id}",
@@ -177,6 +178,10 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
         .route(
             "/admin/mcp-servers/{server_id}/credentials/{credential_id}/quota-group",
             put(bind_credential_group),
+        )
+        .route(
+            "/admin/mcp-servers/{server_id}/credentials/{credential_id}/refresh",
+            post(refresh_server_credential_balance),
         )
         .route(
             "/admin/mcp-quota-groups",
@@ -401,6 +406,9 @@ mod admin_routing_tests {
                 "/admin/request-records/summary",
                 Some(Capability::RequestRecords),
             ),
+            // The read-only provider registry is served from memory and stays
+            // available on SQLite; it must not map to an unsupported capability.
+            ("/admin/mcp-providers", None),
             ("/admin/approvals", Some(Capability::Approvals)),
             ("/admin/billing/summary", Some(Capability::Billing)),
             ("/me/models", Some(Capability::AvailableModels)),
@@ -665,6 +673,30 @@ mod tests {
                 std::str::from_utf8(&body).unwrap_or("<binary>")
             );
         }
+
+        // The provider balance refresh is PostgreSQL-only (MCP quota
+        // capability); SQLite must reject it before any provider call.
+        let refresh = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/mcp-servers/abc/credentials/def/refresh")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(refresh.status(), StatusCode::NOT_IMPLEMENTED);
+        let body = to_bytes(refresh.into_body(), usize::MAX).await.unwrap();
+        assert!(
+            std::str::from_utf8(&body)
+                .expect("JSON body")
+                .contains("sqlite_mcp_quota_unavailable"),
+            "unexpected refresh response on SQLite: {}",
+            std::str::from_utf8(&body).unwrap_or("<binary>")
+        );
 
         sqlite_pool.close().await;
         let _ = fs::remove_dir_all(frontend_dir);

@@ -46,15 +46,17 @@ pub use mcp::{
     update_mcp_server,
 };
 pub use mcp_credentials::{
-    create_quota_group, delete_credential, delete_quota_group, get_quota_group, insert_credential,
-    list_credentials_by_server, list_quota_groups, set_credential_quota_group,
-    sync_credentials_from_tokens, update_credential_token, update_quota_group,
+    backfill_credential_provider_kinds, create_quota_group, delete_credential, delete_quota_group,
+    get_quota_group, insert_credential, list_credentials_by_server, list_firecrawl_credentials,
+    list_quota_groups, set_credential_quota_group, sync_credentials_from_tokens,
+    update_credential_token, update_quota_group,
 };
 pub use quota::period::{current_day_period, current_month_period};
 pub use quota::{
     ReserveOutcome, charge_extra_units, group_usage_ratio, load_accounts_for_group,
-    mark_credential_failure, pick_credential, release_expired_reservations, reserve_for_credential,
-    settle_reservation, update_credential_provider_remaining,
+    mark_credential_failure, pick_credential, record_credential_provider_sync_error,
+    release_expired_reservations, reserve_for_credential, settle_reservation,
+    settle_reservation_with_actual, update_credential_provider_remaining,
 };
 pub use relays::{
     create_managed_relay, delete_managed_relay, get_managed_relay, list_enabled_managed_relays,

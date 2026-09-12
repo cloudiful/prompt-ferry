@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT credential_id, secret\nFROM mcp_credentials\nWHERE enabled = TRUE AND provider_kind = 'firecrawl'\nORDER BY credential_id\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "credential_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "credential_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "secret",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_credentials",
+            "name": "secret"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "479d7d0586b23b89e34fe879d0fe6fd17b4c63de7d02934e96987fe7ca8ff542"
+}

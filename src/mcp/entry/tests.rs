@@ -1039,6 +1039,7 @@ async fn insert_test_mcp_server(
             name: name.to_string(),
             aggregate_naming_mode: "qualified_only".to_string(),
             transport: "http".to_string(),
+            provider_kind: None,
             url: Some(url.to_string()),
             command: None,
             args: json!([]),

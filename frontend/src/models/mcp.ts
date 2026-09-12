@@ -6,6 +6,8 @@ export type McpServerListItemView = {
   name: string
   enabled: boolean
   transport: string
+  provider_label: string
+  show_provider_badge: boolean
   endpoint_label: string
   scope_label: string
   timeout_label: string
@@ -25,6 +27,9 @@ type McpViewLabels = {
   managedMinimax: string
   privateScope: string
   publicScope: string
+  providerGenericLabel: string
+  providerLabels: Record<string, string>
+  hostedProviderIds: string[]
 }
 
 export function createMcpServerListItemView(
@@ -43,6 +48,14 @@ export function createMcpServerListItemView(
       server.transport === 'builtin_minimax'
         ? options.labels.managedMinimax
         : server.transport,
+    provider_label:
+      server.provider_kind != null && server.provider_kind !== ''
+        ? (options.labels.providerLabels[server.provider_kind] ??
+          server.provider_kind)
+        : options.labels.providerGenericLabel,
+    show_provider_badge:
+      server.provider_kind != null &&
+      options.labels.hostedProviderIds.includes(server.provider_kind),
     endpoint_label:
       server.transport === 'builtin_minimax'
         ? options.labels.managedMinimax

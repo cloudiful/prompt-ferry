@@ -14,6 +14,12 @@ pub(crate) fn is_quota_exhaustion(text: &str) -> bool {
         || normalized.contains("token_plan")
         || normalized.contains("usage limit")
         || normalized.contains("usage_limit")
+        // OpenCode Go returns HTTP 429 with a `GoUsageLimitError` envelope
+        // (`Monthly usage limit reached` / `Free usage limit`). The typed code
+        // is the stable signal when the human message changes (issue #310).
+        || normalized.contains("gousagelimiterror")
+        || normalized.contains("free usage limit")
+        || normalized.contains("monthly usage")
         || text.contains("用量上限")
         || text.contains("额度")
         || contains_provider_code_2056(text, &normalized)
@@ -71,6 +77,17 @@ mod tests {
         ] {
             assert!(is_quota_exhaustion(body), "expected quota marker in {body}");
         }
+    }
+
+    #[test]
+    fn recognizes_the_opencode_go_usage_limit_envelope() {
+        // Real `request_records` body (issue #310): the typed code and the
+        // monthly message must both classify as quota exhaustion, and the
+        // typed code alone must be enough if the message is reworded.
+        let body = r#"{"type":"error","error":{"type":"GoUsageLimitError","message":"Monthly usage limit reached. Resets in 4 days."},"metadata":{"limitName":"monthly"}}"#;
+        assert!(is_quota_exhaustion(body));
+        assert!(is_quota_exhaustion("GoUsageLimitError"));
+        assert!(is_quota_exhaustion("Free usage limit reached"));
     }
 
     #[test]

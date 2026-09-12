@@ -62,6 +62,12 @@ const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
               color="info"
               class="shrink-0"
             />
+            <UBadge
+              v-if="row.original.show_provider_badge"
+              :label="row.original.provider_label"
+              color="primary"
+              class="shrink-0"
+            />
           </div>
           <div class="flex min-w-0 items-center gap-1.5">
             <UIcon name="i-lucide-server" class="h-3.5 w-3.5 shrink-0" />

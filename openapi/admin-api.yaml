@@ -680,6 +680,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TokenPlanUsageResponse'
+  /api/v1/admin/mcp-providers:
+    get:
+      tags:
+      - mcp
+      operationId: list_mcp_providers
+      responses:
+        '200':
+          description: MCP provider presets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/McpProviderDescriptor'
   /api/v1/admin/mcp-quota-groups:
     get:
       tags:
@@ -928,6 +942,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/McpCredentialView'
+  /api/v1/admin/mcp-servers/{server_id}/credentials/{credential_id}/refresh:
+    post:
+      tags:
+      - mcp
+      operationId: refresh_server_credential_balance
+      parameters:
+      - name: server_id
+        in: path
+        description: MCP server ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: credential_id
+        in: path
+        description: Credential ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Refreshed credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpCredentialView'
+        '400':
+          description: Provider balance refresh is not supported
+        '404':
+          description: Server or credential not found
+        '502':
+          description: Provider balance refresh failed
   /api/v1/admin/mcp-servers/{server_id}/test:
     post:
       tags:
@@ -4004,6 +4051,32 @@ components:
         updated_at:
           type: string
           format: date-time
+    McpProviderDescriptor:
+      type: object
+      required:
+      - id
+      - display_name
+      - auth
+      - unit
+      - provider_balance_supported
+      properties:
+        auth:
+          type: string
+          description: '`none` or `bearer`.'
+        default_url:
+          type:
+          - string
+          - 'null'
+          description: Official hosted endpoint for the preset; `null` for generic/minimax.
+        display_name:
+          type: string
+        id:
+          type: string
+        provider_balance_supported:
+          type: boolean
+        unit:
+          type: string
+          description: 'Usage unit used by quota groups and usage views: `requests`/`credits`.'
     McpQuotaAccountSnapshot:
       type: object
       required:
@@ -4183,6 +4256,11 @@ components:
           - integer
           - 'null'
           format: int64
+        provider_kind:
+          type:
+          - string
+          - 'null'
+          description: Provider preset id; `null` means the untyped legacy generic behavior.
         scope:
           type: string
         server_id:
@@ -4295,6 +4373,13 @@ components:
           - integer
           - 'null'
           format: int64
+        provider_kind:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Provider preset id. `null`/omitted keeps the existing (or untyped
+            legacy) value; `"generic"` explicitly clears a preset binding.
         scope:
           type:
           - string
@@ -5921,6 +6006,14 @@ components:
           $ref: '#/components/schemas/RequestRecordState'
         route_selection_reason:
           $ref: '#/components/schemas/RouteSelectionReason'
+        server_provider_kind:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Canonical MCP provider preset id for the row's server
+            (`context7`/`firecrawl`/`minimax`); `None` for AI rows and for
+            generic/legacy MCP servers.
         status:
           type:
           - integer
@@ -6001,6 +6094,14 @@ components:
         request_share:
           type: number
           format: double
+        server_provider_kind:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Canonical MCP provider preset id (`context7`/`firecrawl`/`minimax`)
+            resolved from `mcp_servers.provider_kind`. `None` for AI rows and for
+            generic/legacy MCP servers.
         success_count:
           type: integer
           format: int64
@@ -6031,6 +6132,14 @@ components:
           description: |-
             Number of distinct upstreams (`endpoint_id`) observed for this row.
             `None` for rows without upstream breakdown (e.g. MCP breakdown).
+        usage_unit:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Usage unit for the provider (`requests`/`credits`), derived from the
+            server-side registry so the client never re-derives it. `None` when the
+            provider is unknown or the row is not an MCP server row.
     RequestRecordOverviewErrorRow:
       type: object
       required:

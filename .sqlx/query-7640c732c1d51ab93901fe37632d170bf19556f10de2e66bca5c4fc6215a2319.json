@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mcp_credentials\nSET last_error = $2,\n    last_error_at = $3,\n    updated_at = NOW()\nWHERE credential_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7640c732c1d51ab93901fe37632d170bf19556f10de2e66bca5c4fc6215a2319"
+}

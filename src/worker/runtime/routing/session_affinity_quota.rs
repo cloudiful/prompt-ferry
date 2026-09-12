@@ -87,6 +87,11 @@ fn previous_response_chain(request_prompt_log: &RequestPromptLog) -> bool {
 
 /// Unit id of the currently bound selection so the redraw can exclude it.
 /// Keys use their key id; a target-level secret unit uses the target id.
+///
+/// Legacy bindings predate `endpoint_key_id` and carry only the endpoint plus
+/// a key fingerprint. Resolve the fingerprint back to the current key row so
+/// the exclusion matches the pool unit id (`key_id`) instead of falling back
+/// to the incomparable `target_id`.
 fn bound_unit_id(
     candidate: &db::ModelRouteCandidate,
     binding: &ResponseAffinityBinding,
@@ -98,7 +103,8 @@ fn bound_unit_id(
         .targets
         .iter()
         .find(|target| target.endpoint_id == binding.endpoint_id)
-        .map(|target| target.target_id)
+        .and_then(|target| select_bound_api_key(target, binding))
+        .and_then(|selection| selection.key_id)
 }
 
 /// Redraw after the bound key's quota is exhausted. The bound unit is

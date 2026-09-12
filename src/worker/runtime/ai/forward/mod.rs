@@ -49,9 +49,12 @@ pub(super) struct ResponseForwardContext<'a> {
     pub(super) logging: ResponseLoggingContext,
     pub(super) response_adapter: ResponseAdapter,
     pub(super) services: &'a RuntimeServices,
-    /// When true, a non-stream upstream quota-exhaustion response is handed
-    /// back to the retry loop instead of being written to the client so the
-    /// caller can re-select another key on the same endpoint.
+    /// When true, an upstream quota-exhaustion response that has not yet sent
+    /// `ResponseStart` is handed back to the retry loop instead of being
+    /// written to the client so the caller can re-select another key on the
+    /// same endpoint. Streaming responses are only eligible here; once
+    /// `forward_streaming_response` has committed `ResponseStart`, read errors
+    /// stay committed and never re-enter the failover branch.
     pub(super) quota_failover_enabled: bool,
 }
 
@@ -71,9 +74,10 @@ impl ResponseForwardContext<'_> {
     }
 }
 
-/// A non-stream upstream quota-exhaustion response buffered by
+/// An upstream quota-exhaustion response buffered by
 /// `forward_upstream_response` so the retry loop can attempt another key
-/// before the error is surfaced.
+/// before the error is surfaced. Only reachable before `ResponseStart`, so a
+/// streaming upstream error is failover-eligible too.
 #[derive(Debug)]
 pub(super) struct QuotaFailoverSignal {
     pub(super) status: http::StatusCode,
@@ -128,7 +132,11 @@ pub(super) async fn forward_upstream_response(
         if quota_exhausted && let Some(state) = services.admin_state() {
             state.token_plan_quota.invalidate(route.route_id).await;
         }
-        if quota_exhausted && !is_sse && context.quota_failover_enabled {
+        // This branch runs before any `ResponseStart` is emitted, so a quota
+        // exhaustion is failover-eligible for streaming requests too: the
+        // upstream SSE content type does not mean the client already received
+        // a committed stream.
+        if quota_exhausted && context.quota_failover_enabled {
             return Err(anyhow::Error::new(QuotaFailoverSignal {
                 status,
                 body,

@@ -542,6 +542,24 @@ export type McpCredentialView = {
     updated_at: string;
 };
 
+export type McpProviderDescriptor = {
+    /**
+     * `none` or `bearer`.
+     */
+    auth: string;
+    /**
+     * Official hosted endpoint for the preset; `null` for generic/minimax.
+     */
+    default_url?: string | null;
+    display_name: string;
+    id: string;
+    provider_balance_supported: boolean;
+    /**
+     * Usage unit used by quota groups and usage views: `requests`/`credits`.
+     */
+    unit: string;
+};
+
 export type McpQuotaAccountSnapshot = {
     account_id: number;
     period: QuotaPeriod;
@@ -596,6 +614,10 @@ export type McpServer = {
     monthly_max_requests?: number | null;
     name: string;
     owner_user_id?: number | null;
+    /**
+     * Provider preset id; `null` means the untyped legacy generic behavior.
+     */
+    provider_kind?: string | null;
     scope: string;
     server_id: string;
     source_endpoint_id?: string | null;
@@ -633,6 +655,11 @@ export type McpServerRequest = {
     monthly_max_requests?: number | null;
     name: string;
     owner_user_id?: number | null;
+    /**
+     * Provider preset id. `null`/omitted keeps the existing (or untyped
+     * legacy) value; `"generic"` explicitly clears a preset binding.
+     */
+    provider_kind?: string | null;
     scope?: string | null;
     source_endpoint_id?: string | null;
     timeout_ms?: number | null;
@@ -1143,6 +1170,12 @@ export type RequestRecordListRow = {
     request_id: string;
     request_state: RequestRecordState;
     route_selection_reason: RouteSelectionReason;
+    /**
+     * Canonical MCP provider preset id for the row's server
+     * (`context7`/`firecrawl`/`minimax`); `None` for AI rows and for
+     * generic/legacy MCP servers.
+     */
+    server_provider_kind?: string | null;
     status?: number | null;
     storage_sanitized: boolean;
     storage_sanitized_nul_count: number;
@@ -1174,6 +1207,12 @@ export type RequestRecordOverviewBreakdownRow = {
     model?: string | null;
     request_count: number;
     request_share: number;
+    /**
+     * Canonical MCP provider preset id (`context7`/`firecrawl`/`minimax`)
+     * resolved from `mcp_servers.provider_kind`. `None` for AI rows and for
+     * generic/legacy MCP servers.
+     */
+    server_provider_kind?: string | null;
     success_count: number;
     success_rate: number;
     token_share?: number | null;
@@ -1188,6 +1227,12 @@ export type RequestRecordOverviewBreakdownRow = {
      * `None` for rows without upstream breakdown (e.g. MCP breakdown).
      */
     upstream_count?: number | null;
+    /**
+     * Usage unit for the provider (`requests`/`credits`), derived from the
+     * server-side registry so the client never re-derives it. `None` when the
+     * provider is unknown or the row is not an MCP server row.
+     */
+    usage_unit?: string | null;
 };
 
 export type RequestRecordOverviewErrorRow = {
@@ -2009,6 +2054,22 @@ export type TokenPlanUsageResponses = {
 
 export type TokenPlanUsageResponse2 = TokenPlanUsageResponses[keyof TokenPlanUsageResponses];
 
+export type ListMcpProvidersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mcp-providers';
+};
+
+export type ListMcpProvidersResponses = {
+    /**
+     * MCP provider presets
+     */
+    200: Array<McpProviderDescriptor>;
+};
+
+export type ListMcpProvidersResponse = ListMcpProvidersResponses[keyof ListMcpProvidersResponses];
+
 export type ListQuotaGroupsData = {
     body?: never;
     path?: never;
@@ -2247,6 +2308,46 @@ export type BindCredentialGroupResponses = {
 };
 
 export type BindCredentialGroupResponse = BindCredentialGroupResponses[keyof BindCredentialGroupResponses];
+
+export type RefreshServerCredentialBalanceData = {
+    body?: never;
+    path: {
+        /**
+         * MCP server ID
+         */
+        server_id: string;
+        /**
+         * Credential ID
+         */
+        credential_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mcp-servers/{server_id}/credentials/{credential_id}/refresh';
+};
+
+export type RefreshServerCredentialBalanceErrors = {
+    /**
+     * Provider balance refresh is not supported
+     */
+    400: unknown;
+    /**
+     * Server or credential not found
+     */
+    404: unknown;
+    /**
+     * Provider balance refresh failed
+     */
+    502: unknown;
+};
+
+export type RefreshServerCredentialBalanceResponses = {
+    /**
+     * Refreshed credential
+     */
+    200: McpCredentialView;
+};
+
+export type RefreshServerCredentialBalanceResponse = RefreshServerCredentialBalanceResponses[keyof RefreshServerCredentialBalanceResponses];
 
 export type TestMcpServerData = {
     body?: never;

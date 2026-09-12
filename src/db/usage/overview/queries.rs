@@ -62,6 +62,7 @@ struct BreakdownRow {
     label: String,
     model: Option<String>,
     mcp_server_id: Option<uuid::Uuid>,
+    server_provider_kind: Option<String>,
     request_count: i64,
     request_share: f64,
     success_count: i64,
@@ -107,6 +108,16 @@ fn parse_upstream_breakdown(
         return None;
     }
     serde_json::from_value(value).ok()
+}
+
+/// Resolve the canonical provider preset and its usage unit for an MCP
+/// breakdown row. Generic/legacy/unknown stored values collapse to `(None,
+/// None)` so the client never renders a fabricated provider or unit.
+fn mcp_provider_dimension(raw: Option<&str>) -> (Option<String>, Option<String>) {
+    let provider_kind = crate::db::canonical_mcp_provider_kind(raw);
+    let usage_unit =
+        crate::db::mcp_provider_info(provider_kind).map(|info| info.unit.as_str().to_string());
+    (provider_kind.map(str::to_string), usage_unit)
 }
 
 #[derive(Debug, FromRow)]
@@ -247,6 +258,8 @@ pub async fn query_breakdown(
                         ),
                         model: row.model,
                         mcp_server_id: row.mcp_server_id,
+                        server_provider_kind: None,
+                        usage_unit: None,
                         avg_output_tokens_per_second: row.avg_output_tokens_per_second,
                     }
                 })
@@ -266,32 +279,38 @@ pub async fn query_breakdown(
             .await?;
             Ok(rows
                 .into_iter()
-                .map(|row| RequestRecordOverviewBreakdownRow {
-                    label: row.label,
-                    request_count: row.request_count,
-                    request_share: row.request_share,
-                    success_count: row.success_count,
-                    success_rate: ratio(row.success_count, row.request_count),
-                    error_count: None,
-                    error_rate: opt_error_rate(None, row.request_count),
-                    upstream_count: None,
-                    upstream_breakdown: None,
-                    token_share: row.token_share,
-                    tokens: token_usage(
-                        row.input_tokens,
-                        row.cache_read_tokens,
-                        row.cache_write_tokens,
-                        row.output_tokens,
-                        row.total_tokens,
-                        row.cache_hit_count,
-                        row.request_count,
-                        row.input_tokens
-                            .saturating_add(row.cache_read_tokens)
-                            .saturating_add(row.cache_write_tokens),
-                    ),
-                    model: row.model,
-                    mcp_server_id: row.mcp_server_id,
-                    avg_output_tokens_per_second: row.avg_output_tokens_per_second,
+                .map(|row| {
+                    let (server_provider_kind, usage_unit) =
+                        mcp_provider_dimension(row.server_provider_kind.as_deref());
+                    RequestRecordOverviewBreakdownRow {
+                        label: row.label,
+                        request_count: row.request_count,
+                        request_share: row.request_share,
+                        success_count: row.success_count,
+                        success_rate: ratio(row.success_count, row.request_count),
+                        error_count: None,
+                        error_rate: opt_error_rate(None, row.request_count),
+                        upstream_count: None,
+                        upstream_breakdown: None,
+                        token_share: row.token_share,
+                        tokens: token_usage(
+                            row.input_tokens,
+                            row.cache_read_tokens,
+                            row.cache_write_tokens,
+                            row.output_tokens,
+                            row.total_tokens,
+                            row.cache_hit_count,
+                            row.request_count,
+                            row.input_tokens
+                                .saturating_add(row.cache_read_tokens)
+                                .saturating_add(row.cache_write_tokens),
+                        ),
+                        model: row.model,
+                        mcp_server_id: row.mcp_server_id,
+                        server_provider_kind,
+                        usage_unit,
+                        avg_output_tokens_per_second: row.avg_output_tokens_per_second,
+                    }
                 })
                 .collect())
         }
@@ -327,4 +346,30 @@ pub async fn query_error_breakdown(
             rate: ratio(row.count, total),
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_provider_dimension_uses_the_registry_unit() {
+        assert_eq!(
+            mcp_provider_dimension(Some("firecrawl")),
+            (Some("firecrawl".to_string()), Some("credits".to_string()))
+        );
+        assert_eq!(
+            mcp_provider_dimension(Some("context7")),
+            (Some("context7".to_string()), Some("requests".to_string()))
+        );
+        assert_eq!(
+            mcp_provider_dimension(Some("minimax")),
+            (Some("minimax".to_string()), Some("requests".to_string()))
+        );
+        // Generic/legacy/unknown stored values must not fabricate a unit.
+        assert_eq!(mcp_provider_dimension(Some("generic")), (None, None));
+        assert_eq!(mcp_provider_dimension(Some("legacy-unknown")), (None, None));
+        assert_eq!(mcp_provider_dimension(Some("")), (None, None));
+        assert_eq!(mcp_provider_dimension(None), (None, None));
+    }
 }

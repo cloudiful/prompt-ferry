@@ -130,6 +130,11 @@ function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
     mcp_server_id: props.category === 'mcp' ? row.mcp_server_id : null,
   })
 }
+
+function providerBadge(row: RequestRecordOverviewBreakdownRow): string {
+  const provider = row.server_provider_kind ?? 'generic'
+  return row.usage_unit ? `${provider} · ${row.usage_unit}` : provider
+}
 </script>
 
 <template>
@@ -220,6 +225,12 @@ function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
                       v-if="category === 'ai'"
                       :row="row"
                       :formatting="formatting"
+                    />
+                    <UBadge
+                      v-if="category === 'mcp'"
+                      :label="providerBadge(row)"
+                      color="neutral"
+                      size="sm"
                     />
                   </span>
                 </td>

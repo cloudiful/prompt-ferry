@@ -133,6 +133,7 @@ fn mcp_input(name: &str, daily_max_requests: Option<i32>) -> McpServerInput {
         name: name.to_string(),
         aggregate_naming_mode: "qualified_only".to_string(),
         transport: "stdio".to_string(),
+        provider_kind: None,
         url: None,
         command: Some("mcpd".to_string()),
         args: serde_json::json!([]),

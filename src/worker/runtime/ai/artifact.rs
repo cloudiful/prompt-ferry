@@ -19,6 +19,17 @@ pub(super) fn resolve_assistant_artifact(
         .or_else(|| logged_response_text.and_then(fallback_text_artifact))
 }
 
+/// A missing artifact is only a warning when the current forward path was
+/// supposed to capture one. Paths without an `AssistantArtifactCapture` /
+/// `ResponsesArtifactCapture` (e.g. Passthrough AnthropicMessages) legitimately
+/// produce nothing and must stay silent.
+fn should_warn_missing_artifact(
+    artifact_capture_expected: bool,
+    artifact: Option<&AssistantArtifact>,
+) -> bool {
+    artifact_capture_expected && artifact.is_none()
+}
+
 fn tool_call_preview(arguments: &str) -> Option<String> {
     let trimmed = arguments.trim();
     (!trimmed.is_empty()).then(|| truncate_chars(trimmed, 240))
@@ -101,6 +112,7 @@ pub(super) async fn persist_assistant_artifact(
     admin_state: Option<&AdminState>,
     usage_event_id: Option<i64>,
     artifact: Option<AssistantArtifact>,
+    artifact_capture_expected: bool,
     conversation_id: Option<uuid::Uuid>,
     request: &BufferedBridgeRequest,
     route: &db::RouteConfig,
@@ -110,15 +122,17 @@ pub(super) async fn persist_assistant_artifact(
         return;
     };
     let Some(artifact) = artifact else {
-        warn!(
-            request_id = %request.request_id,
-            event_id,
-            provider_response_id = provider_response_id.unwrap_or(""),
-            path = %request.path,
-            endpoint_id = %route.route_id,
-            native_api = %route.native_api.as_str(),
-            "assistant replay artifact unavailable after fallback recovery"
-        );
+        if should_warn_missing_artifact(artifact_capture_expected, None) {
+            warn!(
+                request_id = %request.request_id,
+                event_id,
+                provider_response_id = provider_response_id.unwrap_or(""),
+                path = %request.path,
+                endpoint_id = %route.route_id,
+                native_api = %route.native_api.as_str(),
+                "assistant replay artifact unavailable after fallback recovery"
+            );
+        }
         return;
     };
     let tool_calls = collect_tool_calls_from_artifact(&artifact);
@@ -147,4 +161,25 @@ pub(super) async fn persist_assistant_artifact(
         Ok(_) => {}
     }
     persist_tool_call_events(Some(state), event_id, conversation_id, tool_calls).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_assistant_artifact, should_warn_missing_artifact};
+
+    #[test]
+    fn does_not_warn_when_artifact_capture_is_not_configured() {
+        assert!(!should_warn_missing_artifact(false, None));
+    }
+
+    #[test]
+    fn warns_when_configured_artifact_capture_produces_nothing() {
+        assert!(should_warn_missing_artifact(true, None));
+    }
+
+    #[test]
+    fn keeps_text_fallback_artifact_recovery() {
+        assert!(resolve_assistant_artifact(None, Some("done"), None).is_some());
+        assert!(resolve_assistant_artifact(None, Some("  "), None).is_none());
+    }
 }

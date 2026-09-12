@@ -6,7 +6,6 @@ use crate::{
         QuotaGroupUsageResponse,
     },
 };
-
 pub(super) async fn list_quota_groups(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -200,6 +199,84 @@ pub(super) async fn bind_credential_group(
     }
 }
 
+/// Refresh the provider balance for one credential through its provider's
+/// balance adapter. Only a canonical hosted provider whose registry descriptor
+/// reports balance support (currently Firecrawl) may be refreshed. Generic,
+/// Context7, and MiniMax credentials are rejected without touching the secret,
+/// and the SQLite capability gate keeps the endpoint unavailable there.
+pub(super) async fn refresh_server_credential_balance(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Path((server_id, credential_id)): Path<(uuid::Uuid, uuid::Uuid)>,
+) -> Response {
+    let user = match current_user(&state, &headers).await {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    if !user.is_admin {
+        return forbidden(&state, &user);
+    }
+    let server = match state.config_repository.get_mcp_server(server_id).await {
+        Ok(Some(server)) => server,
+        Ok(None) => return not_found(&state, "MCP server not found"),
+        Err(err) => return internal(&state, err),
+    };
+    let provider_kind = db::canonical_mcp_provider_kind(server.provider_kind.as_deref());
+    if !provider_balance_refresh_supported(provider_kind) {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "provider_balance_unsupported",
+            "provider balance refresh is not supported for this provider",
+        );
+    }
+    // The owning server is the source of truth for the credential provider;
+    // reconcile pre-existing rows before the provider-specific lookup so a
+    // stale credential kind can never redirect the call.
+    if let Err(err) = db::backfill_credential_provider_kinds(&state.pool).await {
+        return internal(&state, err);
+    }
+    let credential = match db::list_credentials_by_server(&state.pool, server_id).await {
+        Ok(credentials) => credentials
+            .into_iter()
+            .find(|credential| credential.credential_id == credential_id),
+        Err(err) => return internal(&state, err),
+    };
+    let Some(credential) = credential else {
+        return not_found(&state, "credential not found");
+    };
+    let secret = db::McpProviderSecret {
+        credential_id: credential.credential_id,
+        secret: credential.secret.clone(),
+    };
+    let client = crate::mcp::FirecrawlBalanceClient::new();
+    match crate::mcp::refresh_firecrawl_credential(
+        &state.pool,
+        &state.mcp_quota_valkey,
+        &client,
+        &secret,
+    )
+    .await
+    {
+        Ok(_) => match db::list_credentials_by_server(&state.pool, server_id).await {
+            Ok(credentials) => credentials
+                .into_iter()
+                .find(|credential| credential.credential_id == credential_id)
+                .map(|credential| Json(db::McpCredentialView::from(credential)).into_response())
+                .unwrap_or_else(|| not_found(&state, "credential not found")),
+            Err(err) => internal(&state, err),
+        },
+        Err(crate::mcp::ProviderBalanceError::Persistence) => internal(
+            &state,
+            anyhow::anyhow!("provider balance could not be persisted"),
+        ),
+        Err(err) => error(
+            StatusCode::BAD_GATEWAY,
+            "provider_balance_refresh_failed",
+            &err.to_string(),
+        ),
+    }
+}
+
 fn validate_quota_group(
     body: &QuotaGroupRequest,
     group_id: Option<uuid::Uuid>,
@@ -249,4 +326,29 @@ fn not_found(_state: &AdminState, message: &str) -> Response {
 
 fn internal(state: &AdminState, err: anyhow::Error) -> Response {
     super::internal(state, err)
+}
+
+/// Only a canonical hosted provider whose registry descriptor reports balance
+/// support (currently Firecrawl) may run an on-demand balance refresh. Generic,
+/// legacy/unknown, Context7, and MiniMax servers are rejected.
+fn provider_balance_refresh_supported(provider_kind: Option<&str>) -> bool {
+    provider_kind == Some(db::MCP_PROVIDER_FIRECRAWL)
+        && db::mcp_provider_info(provider_kind).is_some_and(|info| info.provider_balance_supported)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_firecrawl_supports_a_provider_balance_refresh() {
+        assert!(provider_balance_refresh_supported(Some("firecrawl")));
+        // Canonical Context7/MiniMax are known presets but expose no balance.
+        assert!(!provider_balance_refresh_supported(Some("context7")));
+        assert!(!provider_balance_refresh_supported(Some("minimax")));
+        // Generic/legacy/unknown never trigger a provider call.
+        assert!(!provider_balance_refresh_supported(Some("generic")));
+        assert!(!provider_balance_refresh_supported(Some("legacy-unknown")));
+        assert!(!provider_balance_refresh_supported(None));
+    }
 }
