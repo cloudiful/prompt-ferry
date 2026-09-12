@@ -54,7 +54,11 @@ WITH normalized AS (
            COALESCE(SUM(normalized_input_tokens), 0)::BIGINT AS input_tokens,
            COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
            COALESCE(SUM(normalized_cache_write_tokens), 0)::BIGINT AS cache_write_tokens,
-           COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens
+           COALESCE(SUM(output_tokens), 0)::BIGINT AS output_tokens,
+           -- Per-row-summed fold-aware denominator for `cache_rate`; still-folded
+           -- rows use the `max(input, read+write)` fallback, so the aggregate must
+           -- not re-derive the guard on the raw input SUM (issue #338).
+           COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens
     FROM normalized
     GROUP BY label, mcp_server_id, server_provider_kind
 ), totals AS (
@@ -75,6 +79,7 @@ SELECT label AS "label!",
        cache_write_tokens AS "cache_write_tokens!",
        output_tokens AS "output_tokens!",
        (grouped.input_tokens + grouped.cache_read_tokens + grouped.cache_write_tokens + grouped.output_tokens)::BIGINT AS "total_tokens!",
+       grouped.full_input_tokens AS "full_input_tokens!",
        NULL::DOUBLE PRECISION AS avg_output_tokens_per_second
 FROM grouped
 CROSS JOIN totals

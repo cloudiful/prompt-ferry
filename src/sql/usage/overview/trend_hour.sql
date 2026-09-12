@@ -62,6 +62,10 @@ SELECT bucket_at AS "bucket_at!",
                + normalized_cache_write_tokens
                + output_tokens
        ), 0)::BIGINT AS "total_tokens!",
+       -- Per-row-summed fold-aware denominator for `cache_rate`; still-folded
+       -- rows use the `max(input, read+write)` fallback, so the aggregate must
+       -- not re-derive the guard on the raw input SUM (issue #338).
+       COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS "full_input_tokens!",
        percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)
            FILTER (WHERE duration_ms IS NOT NULL) AS p95_total_ms,
        percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms)

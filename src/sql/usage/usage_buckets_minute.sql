@@ -6,9 +6,9 @@ buckets AS (
     SELECT generate_series(start_at, end_at, INTERVAL '1 minute') AS bucket_at FROM bounds
 ),
 normalized AS (
-    -- TODO(#228): cache_rate here still uses the legacy GREATEST(input, cache_sum)
-    -- denominator. Sync to the sum+CASE guard (usage_events_page.sql:29-69) once this
-    -- consumer has regression coverage; not force-synced this phase.
+    -- Same fold-aware denominator as `usage/overview/metrics.sql` and
+    -- `usage_events_page.sql`: still-folded rows use `max(input, read+write)`;
+    -- normalized rows sum the ordinary input with the cache meters.
     SELECT date_trunc('minute', rr.created_at) AS bucket_at,
            rr.request_state,
            rr.duration_ms,
@@ -22,12 +22,21 @@ normalized AS (
            )::BIGINT AS normalized_cache_read_tokens,
            GREATEST(COALESCE(rr.cached_tokens, 0), 0)::BIGINT AS normalized_cached_tokens,
            GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)::BIGINT AS normalized_cache_write_tokens,
-           GREATEST(
-               COALESCE(rr.input_tokens, 0),
-               GREATEST(COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0), 0)
-                   + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
-               0
-           )::BIGINT AS normalized_full_input_tokens
+           CASE
+               WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
+                   AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
+                   AND COALESCE(rr.input_tokens, 0)
+                       >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
+               THEN GREATEST(
+                   COALESCE(rr.input_tokens, 0),
+                   GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
+                       + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
+                   0
+               )
+               ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
+                   + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
+                   + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)
+           END::BIGINT AS normalized_full_input_tokens
     FROM request_records rr, bounds
     WHERE rr.event_kind = 'request'
       AND rr.created_at >= bounds.start_at AND rr.created_at < bounds.end_at + INTERVAL '1 minute'

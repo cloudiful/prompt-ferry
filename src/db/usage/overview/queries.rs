@@ -53,6 +53,10 @@ struct TrendRow {
     cache_write_tokens: i64,
     output_tokens: i64,
     total_tokens: i64,
+    /// Per-row-summed fold-aware full-input denominator from `trend_*.sql`,
+    /// so the trend `cache_rate` is `SUM(cache_read) / SUM(full_input)` and
+    /// still-folded rows are not double-counted on the aggregate SUM.
+    full_input_tokens: i64,
     p95_total_ms: Option<f64>,
     p95_first_token_ms: Option<f64>,
 }
@@ -73,6 +77,10 @@ struct BreakdownRow {
     cache_write_tokens: i64,
     output_tokens: i64,
     total_tokens: i64,
+    /// Per-row-summed fold-aware full-input denominator from
+    /// `breakdown_mcp_server.sql`, so the MCP breakdown `cache_rate` is
+    /// `SUM(cache_read) / SUM(full_input)`.
+    full_input_tokens: i64,
     avg_output_tokens_per_second: Option<f64>,
 }
 
@@ -203,9 +211,7 @@ pub async fn query_trend(
                 row.total_tokens,
                 row.cache_hit_count,
                 row.request_count,
-                row.input_tokens
-                    .saturating_add(row.cache_read_tokens)
-                    .saturating_add(row.cache_write_tokens),
+                row.full_input_tokens,
             ),
         })
         .collect())
@@ -301,9 +307,7 @@ pub async fn query_breakdown(
                             row.total_tokens,
                             row.cache_hit_count,
                             row.request_count,
-                            row.input_tokens
-                                .saturating_add(row.cache_read_tokens)
-                                .saturating_add(row.cache_write_tokens),
+                            row.full_input_tokens,
                         ),
                         model: row.model,
                         mcp_server_id: row.mcp_server_id,

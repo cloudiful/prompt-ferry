@@ -1,7 +1,8 @@
 WITH normalized AS (
-    -- TODO(#228): cache_rate here still uses the legacy GREATEST(input, cache_sum)
-    -- denominator. Sync to the sum+CASE guard (usage_events_page.sql:29-69) once this
-    -- consumer has regression coverage; not force-synced this phase.
+    -- Same fold-aware denominator as `usage/overview/metrics.sql` and
+    -- `usage_events_page.sql`: still-folded rows (cache already inside
+    -- `input_tokens`) use `max(input, read+write)`; normalized rows sum the
+    -- ordinary input with the cache meters.
     SELECT
         request_state,
         duration_ms,
@@ -14,12 +15,21 @@ WITH normalized AS (
         )::BIGINT AS normalized_cache_read_tokens,
         GREATEST(COALESCE(cached_tokens, 0), 0)::BIGINT AS normalized_cached_tokens,
         GREATEST(COALESCE(cache_write_tokens, 0), 0)::BIGINT AS normalized_cache_write_tokens,
-        GREATEST(
-            COALESCE(input_tokens, 0),
-            GREATEST(COALESCE(COALESCE(cache_read_tokens, cached_tokens), 0), 0)
-                + GREATEST(COALESCE(cache_write_tokens, 0), 0),
-            0
-        )::BIGINT AS normalized_full_input_tokens
+        CASE
+            WHEN COALESCE(COALESCE(cache_read_tokens, cached_tokens), 0) > 0
+                AND COALESCE(total_tokens, 0) >= COALESCE(output_tokens, 0)
+                AND COALESCE(input_tokens, 0)
+                    >= COALESCE(total_tokens, 0) - COALESCE(output_tokens, 0)
+            THEN GREATEST(
+                COALESCE(input_tokens, 0),
+                GREATEST(COALESCE(cache_read_tokens, cached_tokens, 0), 0)
+                    + GREATEST(COALESCE(cache_write_tokens, 0), 0),
+                0
+            )
+            ELSE GREATEST(COALESCE(input_tokens, 0), 0)
+                + GREATEST(COALESCE(cache_read_tokens, cached_tokens, 0), 0)
+                + GREATEST(COALESCE(cache_write_tokens, 0), 0)
+        END::BIGINT AS normalized_full_input_tokens
     FROM request_records
     WHERE event_kind = 'request'
       AND created_at >= NOW() - ($1::BIGINT * INTERVAL '1 day')
