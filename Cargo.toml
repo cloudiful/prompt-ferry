@@ -31,7 +31,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.104"
-argon2 = "0.5.3"
+argon2 = "0.6.0"
 async-openai = { version = "0.41.3", default-features = false, features = ["realtime-types"] }
 async-trait = "0.1.92"
 async-stream = "0.3.6"
@@ -76,7 +76,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 utoipa = { version = "5.5.0", features = ["chrono", "uuid", "yaml"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.26.1", features = ["serde", "v4"] }
-zstd = "0.13.3"
+zstd = "0.14.0"
 
 [dev-dependencies]
 flate2 = "1.1.10"
