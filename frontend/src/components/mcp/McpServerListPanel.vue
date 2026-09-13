@@ -48,26 +48,8 @@ const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
       </template>
       <template #name-cell="{ row }">
         <div class="min-w-0">
-          <div class="flex min-w-0 items-center gap-1.5">
-            <div class="min-w-0 flex-1 truncate font-semibold text-highlighted">
-              {{ row.original.name }}
-            </div>
-            <UBadge
-              :label="row.original.scope_label"
-              color="neutral"
-              class="shrink-0"
-            />
-            <UBadge
-              :label="row.original.transport"
-              color="info"
-              class="shrink-0"
-            />
-            <UBadge
-              v-if="row.original.show_provider_badge"
-              :label="row.original.provider_label"
-              color="primary"
-              class="shrink-0"
-            />
+          <div class="min-w-0 truncate font-semibold text-highlighted">
+            {{ row.original.name }}
           </div>
           <div class="flex min-w-0 items-center gap-1.5">
             <UIcon name="i-lucide-server" class="h-3.5 w-3.5 shrink-0" />

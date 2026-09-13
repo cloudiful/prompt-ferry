@@ -173,11 +173,6 @@ const EndpointUsageBadges = defineComponent({
             :label="row.original.owner_label"
             color="neutral"
           />
-          <UBadge
-            v-if="row.original.mcp_enabled"
-            :label="t('minimaxMcp')"
-            color="success"
-          />
         </div>
       </template>
       <template v-if="showUsageColumn" #usage-cell="{ row }">
