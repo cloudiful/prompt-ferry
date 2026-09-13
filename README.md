@@ -56,11 +56,27 @@ docker compose pull
 docker compose up -d
 ```
 
-The worker image includes `uv`/`uvx` for stdio MCP servers. For example, enter
-`["uvx", "minimax-coding-plan-mcp", "-y"]` as the command. Environment variables
-not configured in the MCP form are inherited from the worker. Sensitive variables
-should be placed in `.env`, such as `MINIMAX_API_KEY`; Compose passes it to the
-worker. Values can also be entered directly in the MCP form.
+For MiniMax Coding Plan, prefer the MiniMax endpoint's `Expose MiniMax MCP tools`
+switch (recommended). It creates a managed `builtin_minimax` server exposing
+`web_search` and `understand_image` without spawning a `uvx` subprocess. The
+managed server reuses the endpoint's token-plan API keys (multi-key rotation
+when endpoint key load-balancing is on) and needs no Basic Auth; the endpoint
+region selects `https://api.minimaxi.com` (CN) or `https://api.minimax.io`
+(Global). Existing custom `minimax-coding-plan-mcp` stdio rows are left
+untouched and keep their current behavior.
+
+The worker image also includes `uv`/`uvx` for generic third-party stdio MCP
+servers. For example, enter `["uvx", "example-mcp-server", "-y"]` as the
+command. Environment variables not configured in the MCP form are inherited
+from the worker. Sensitive variables should be placed in `.env`, such as
+`MINIMAX_API_KEY`; Compose passes it to the worker. Values can also be entered
+directly in the MCP form.
+
+Compose persists the worker uv caches (`/root/.cache/uv` and
+`/root/.local/share/uv`) in named volumes so recreating the container does not
+re-download the Python runtime and dependencies. A plain container `restart`
+keeps the filesystem; `down`/recreate without these volumes would lose the
+caches.
 
 Open the admin console at <http://127.0.0.1:8789>. After signing in, configure
 an upstream endpoint, model route, user, and client API key. Point an

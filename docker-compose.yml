@@ -88,6 +88,16 @@ services:
       start_period: 15s
     ports:
       - "127.0.0.1:${PROMPT_FERRY_WORKER_ADMIN_PORT:-8789}:80"
+    # Persist uv caches for the remaining uvx-based third-party stdio MCP
+    # servers so a container recreate does not re-download the Python runtime
+    # and dependencies. The built-in MiniMax MCP needs no uv. A plain
+    # `restart` keeps the container filesystem; `down`/recreate without these
+    # volumes would lose the caches.
+    volumes:
+      - prompt-ferry-uv-cache:/root/.cache/uv
+      - prompt-ferry-uv-data:/root/.local/share/uv
 
 volumes:
   postgres-data:
+  prompt-ferry-uv-cache:
+  prompt-ferry-uv-data:

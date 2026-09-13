@@ -52,10 +52,22 @@ docker compose pull
 docker compose up -d
 ```
 
-stdio MCP 的 worker 镜像包含 `uv`/`uvx`。配置 MCP 时，命令可以填写为
-`["uvx", "minimax-coding-plan-mcp", "-y"]`；未在 MCP 表单中配置的环境变量会自动
-继承 worker 环境。敏感变量建议设置在 `.env` 的 `MINIMAX_API_KEY` 中，Compose 会将其
-传入 worker；也可以在 MCP 表单中直接填写变量值。
+MiniMax Coding Plan 请优先使用 MiniMax 上游端点的「暴露 MiniMax MCP 工具」开关
+（推荐）。开启后会创建托管的 `builtin_minimax` 服务，提供 `web_search` 和
+`understand_image`，无需启动 `uvx` 子进程。托管服务复用该端点已配置的
+token-plan API key（开启 endpoint key 分流时多 key 轮换），无需 Basic Auth；
+端点区域决定请求 `https://api.minimaxi.com`（中国区）或
+`https://api.minimax.io`（国际区）。已有自定义 `minimax-coding-plan-mcp`
+stdio 行不会被自动转换，行为保持不变。
+
+worker 镜像同样内置 `uv`/`uvx`，可用于通用的第三方 stdio MCP 服务。配置时命令
+可填写为 `["uvx", "example-mcp-server", "-y"]`；未在 MCP 表单中配置的环境变量
+会自动继承 worker 环境。敏感变量建议设置在 `.env` 的 `MINIMAX_API_KEY` 中，
+Compose 会将其传入 worker；也可以在 MCP 表单中直接填写变量值。
+
+Compose 已通过命名卷持久化 worker 的 uv 缓存（`/root/.cache/uv` 与
+`/root/.local/share/uv`），重建容器时无需重新下载 Python 运行时与依赖。容器
+`restart` 会保留文件系统；若没有这些卷，`down`/重建会丢失缓存。
 
 打开管理控制台：<http://127.0.0.1:8789>。登录后配置上游端点、模型路由、
 用户和客户端 API Key，再将 OpenAI 兼容客户端指向 relay：
