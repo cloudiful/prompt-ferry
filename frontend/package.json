@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@iconify-json/lucide": "1.2.129",
-    "@nuxt/icon": "2.5.1",
     "@nuxt/ui": "4.11.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/vue-table": "^9.2.4",

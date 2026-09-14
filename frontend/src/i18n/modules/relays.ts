@@ -13,7 +13,6 @@ export const relayMessages = {
     relaySecretKeep: '保留',
     relaySecretReplace: '替换',
     relaySecretClear: '清空',
-    relaySecretAction: '密钥处理',
     relaySecretCaLabel: 'CA',
     relaySecretCertLabel: '证书',
     relaySecretKeyLabel: '私钥',
@@ -38,7 +37,6 @@ export const relayMessages = {
     relayBridgeRequired: '必须加密',
     relayNameHint: '例如：华东中继 / 公网中继',
     relaySnapshotVersion: '快照',
-    relaySecretsHint: '密钥明文只在提交时发送给 worker，读取时只返回是否已存。',
   },
   'en-US': {
     relays: 'Relays',
@@ -54,7 +52,6 @@ export const relayMessages = {
     relaySecretKeep: 'Keep',
     relaySecretReplace: 'Replace',
     relaySecretClear: 'Clear',
-    relaySecretAction: 'Secret action',
     relaySecretCaLabel: 'CA',
     relaySecretCertLabel: 'Cert',
     relaySecretKeyLabel: 'Key',
@@ -80,7 +77,5 @@ export const relayMessages = {
     relayBridgeRequired: 'Required',
     relayNameHint: 'For example: east relay / public relay',
     relaySnapshotVersion: 'Snapshot',
-    relaySecretsHint:
-      'Secret plaintext is only sent to the worker on submit. Reads return presence flags only.',
   },
 } as const
