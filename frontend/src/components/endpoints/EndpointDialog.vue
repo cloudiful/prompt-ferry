@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import type { User } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
 import EndpointApiKeysEditor from '@/components/endpoints/EndpointApiKeysEditor.vue'
 import EndpointProviderFields from '@/components/endpoints/EndpointProviderFields.vue'
+import ProxySettingsDialog from '@/components/shared/ProxySettingsDialog.vue'
 import RequestLimitFields from '@/components/shared/RequestLimitFields.vue'
 
 defineProps<{
@@ -19,13 +21,33 @@ defineEmits<{
   save: []
 }>()
 
+const proxyModalOpen = ref(false)
+
+// INLINE-proxy-ui-a1 BUG fix: guard legacy forms missing Phase C fields so
+// the dialog always renders instead of throwing on undefined access.
+const hasProxy = computed(() => {
+  const typed = (form.value?.proxy_url ?? '').trim() !== ''
+  const saved = form.value?.has_saved_proxy_url ?? false
+  return typed || saved
+})
+
 // Issue #368 Phase C: clear the saved proxy so the next save sends `""`
 // (clear to direct). Leaving the field blank while `has_saved_proxy_url`
 // is true omits the key and keeps the stored value (see
 // `endpointFormToRequest`).
 function clearProxyUrl(): void {
+  if (!form.value) return
   form.value.proxy_url = ''
   form.value.has_saved_proxy_url = false
+}
+
+function onProxySave(value: string): void {
+  if (!form.value) return
+  const trimmed = (value ?? '').trim()
+  form.value.proxy_url = trimmed
+  // Saving direct (`""`) must clear the saved flag so the next save sends
+  // `""` (clear) instead of omitting the key (keep).
+  if (trimmed === '') form.value.has_saved_proxy_url = false
 }
 </script>
 
@@ -49,14 +71,13 @@ function clearProxyUrl(): void {
           @update:model-value="form.owner_user_id = $event ?? null"
         />
         <EndpointApiKeysEditor v-model:form="form" :t="t" />
-        <div class="grid gap-2 border-t border-default pt-3">
+        <div
+          class="flex items-center justify-between gap-3 border-t border-default pt-3"
+        >
           <div class="flex items-center gap-1">
-            <label
-              for="endpoint-proxy-url"
-              class="text-xs font-medium text-default"
-            >
+            <span class="text-xs font-medium text-default">
               {{ t('proxyUrl') }}
-            </label>
+            </span>
             <UTooltip :text="t('proxyUrlHint')">
               <UButton
                 type="button"
@@ -67,35 +88,34 @@ function clearProxyUrl(): void {
                 :aria-label="t('proxyUrlHint')"
               />
             </UTooltip>
-          </div>
-          <div class="flex min-w-0 items-center gap-2">
-            <div v-if="form.has_saved_proxy_url" class="shrink-0">
-              <UBadge :label="t('saved')" color="neutral" />
-            </div>
-            <UInput
-              id="endpoint-proxy-url"
-              v-model="form.proxy_url"
-              type="password"
-              class="min-w-0 flex-1"
-              :placeholder="
-                form.has_saved_proxy_url
-                  ? t('savedSecret')
-                  : t('proxyUrlPlaceholder')
-              "
+            <UBadge
+              v-if="form?.has_saved_proxy_url"
+              :label="t('saved')"
+              color="neutral"
             />
+          </div>
+          <UTooltip :text="t('proxyUrlHint')">
             <UButton
-              v-if="form.has_saved_proxy_url"
               type="button"
               size="sm"
-              color="neutral"
+              :color="hasProxy ? 'primary' : 'neutral'"
               variant="ghost"
-              :aria-label="t('proxyClear')"
-              @click="clearProxyUrl"
-            >
-              <UIcon name="i-lucide-trash-2" class="h-4 w-4" />
-            </UButton>
-          </div>
+              icon="i-lucide-globe"
+              :aria-label="t('proxyUrl')"
+              :aria-pressed="hasProxy"
+              @click="proxyModalOpen = true"
+            />
+          </UTooltip>
         </div>
+        <ProxySettingsDialog
+          v-model:visible="proxyModalOpen"
+          :initial-value="form?.proxy_url ?? ''"
+          :has-saved="form?.has_saved_proxy_url ?? false"
+          :hint="t('proxyUrlHint')"
+          :t="t"
+          @save="onProxySave"
+          @clear="clearProxyUrl"
+        />
         <div
           v-if="form.provider === 'minimax'"
           class="flex items-center justify-between gap-3 border-t border-default pt-3"

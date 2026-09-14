@@ -18,13 +18,7 @@ defineEmits<{
 
 const targetsLabel = computed(
   () =>
-    props.item.targets
-      .map((target) =>
-        target.upstream_model
-          ? `${target.endpoint_label} / ${target.upstream_model}`
-          : target.endpoint_label,
-      )
-      .join(', ') || '-',
+    props.item.targets.map((target) => target.endpoint_label).join(', ') || '-',
 )
 </script>
 

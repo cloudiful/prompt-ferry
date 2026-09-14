@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type {
   McpCatalogResponse,
   McpProviderDescriptor,
@@ -10,6 +10,7 @@ import type { McpForm } from '@/models'
 import McpBearerTokensEditor from '@/components/mcp/McpBearerTokensEditor.vue'
 import McpCredentialQuotaEditor from '@/components/mcp/McpCredentialQuotaEditor.vue'
 import McpEnvironmentEditor from '@/components/mcp/McpEnvironmentEditor.vue'
+import ProxySettingsDialog from '@/components/shared/ProxySettingsDialog.vue'
 import RequestLimitFields from '@/components/shared/RequestLimitFields.vue'
 
 const props = defineProps<{
@@ -184,9 +185,26 @@ defineEmits<{
 // (clear to inherit). Leaving the field blank while `has_saved_proxy_url`
 // is true omits the key and keeps the stored value (see `mcpFormToRequest`).
 function clearProxyUrl(): void {
+  if (!form.value) return
   form.value.proxy_url = ''
   form.value.has_saved_proxy_url = false
 }
+
+function onProxySave(value: string): void {
+  if (!form.value) return
+  const trimmed = (value ?? '').trim()
+  form.value.proxy_url = trimmed
+  if (trimmed === '') form.value.has_saved_proxy_url = false
+}
+
+const proxyModalOpen = ref(false)
+
+// INLINE-proxy-ui-a1: active state for the ghost globe button.
+const hasProxy = computed(() => {
+  const typed = (form.value?.proxy_url ?? '').trim() !== ''
+  const saved = form.value?.has_saved_proxy_url ?? false
+  return typed || saved
+})
 </script>
 
 <template>
@@ -424,7 +442,10 @@ function clearProxyUrl(): void {
             v-model:variables="form.environment_variables"
             :t="t"
           />
-          <div v-if="form.transport === 'http'" class="grid min-w-0 gap-2">
+          <div
+            v-if="form.transport === 'http'"
+            class="flex items-center justify-between gap-3"
+          >
             <div class="flex items-center gap-1 text-muted">
               <span>{{ t('proxyUrl') }}</span>
               <UTooltip :text="t('mcpProxyUrlHint')">
@@ -443,30 +464,29 @@ function clearProxyUrl(): void {
                 color="neutral"
               />
             </div>
-            <div class="flex min-w-0 items-center gap-2">
-              <UInput
-                v-model="form.proxy_url"
-                type="password"
-                class="min-w-0 flex-1"
-                :placeholder="
-                  form.has_saved_proxy_url
-                    ? t('savedSecret')
-                    : t('proxyUrlPlaceholder')
-                "
-              />
+            <UTooltip :text="t('mcpProxyUrlHint')">
               <UButton
-                v-if="form.has_saved_proxy_url"
                 type="button"
                 size="sm"
-                color="neutral"
+                :color="hasProxy ? 'primary' : 'neutral'"
                 variant="ghost"
-                :aria-label="t('proxyClear')"
-                @click="clearProxyUrl"
-              >
-                <UIcon name="i-lucide-trash-2" class="h-4 w-4" />
-              </UButton>
-            </div>
+                icon="i-lucide-globe"
+                :aria-label="t('proxyUrl')"
+                :aria-pressed="hasProxy"
+                @click="proxyModalOpen = true"
+              />
+            </UTooltip>
           </div>
+          <ProxySettingsDialog
+            v-if="form.transport === 'http'"
+            v-model:visible="proxyModalOpen"
+            :initial-value="form?.proxy_url ?? ''"
+            :has-saved="form?.has_saved_proxy_url ?? false"
+            :hint="t('mcpProxyUrlHint')"
+            :t="t"
+            @save="onProxySave"
+            @clear="clearProxyUrl"
+          />
           <RequestLimitFields
             v-model:form="form"
             daily-label="dailyCallLimit"

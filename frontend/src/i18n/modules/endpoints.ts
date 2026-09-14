@@ -152,13 +152,22 @@ export const endpointMessages = {
     upstreamModelOptional: '上游模型名（可选，留空沿用原始模型）',
     proxyUrl: '代理地址',
     proxyUrlHint:
-      '可选出站代理，支持 http/https/socks5/socks5h；留空直连，编辑时留空保持不变。',
-    proxyUrlPlaceholder: 'http://user:pass@host:port',
+      '可选出站代理，支持 http/https/socks5/socks5h；留空直连。已保存代理直接保存会保留，仅清除或选择直连并保存才会移除。',
     proxyUrlOverride: '代理覆盖',
     proxyUrlOverrideHint:
-      '按目标覆盖端点默认代理，留空继承；编辑时留空保持不变。',
+      '按目标覆盖端点默认代理，留空继承。已保存覆盖直接保存会保留，仅清除或选择直连并保存才会移除。',
     proxyUrlOverridePlaceholder: '留空继承端点代理',
     proxyClear: '清除已保存代理',
+    proxySettings: '代理设置',
+    proxyScheme: '代理协议',
+    proxyAddress: '代理地址',
+    proxyDirect: '直连（无代理）',
+    proxySchemeKept: '保留已保存代理',
+    proxySavedHidden: '已保存的代理已隐藏',
+    proxyKeepHint:
+      '已保存代理已隐藏：直接保存将保留原值；如需移除请点击清除，或选择直连并保存。',
+    moveUp: '上移',
+    moveDown: '下移',
   },
   'en-US': {
     addTarget: 'Add target',
@@ -317,12 +326,21 @@ export const endpointMessages = {
       'Upstream model name (optional, leave blank to keep the original model)',
     proxyUrl: 'Proxy URL',
     proxyUrlHint:
-      'Optional outbound proxy (http/https/socks5/socks5h). Leave empty for direct; leave blank while editing to keep the stored value.',
-    proxyUrlPlaceholder: 'http://user:pass@host:port',
+      'Optional outbound proxy (http/https/socks5/socks5h). Empty means direct. Saving without changes keeps the stored proxy; only Clear or Direct + Save removes it.',
     proxyUrlOverride: 'Proxy override',
     proxyUrlOverrideHint:
-      'Override the endpoint proxy for this target. Leave empty to inherit; leave blank while editing to keep the stored value.',
+      'Override the endpoint proxy for this target. Empty means inherit. Saving without changes keeps the stored override; only Clear or Direct + Save removes it.',
     proxyUrlOverridePlaceholder: 'Leave empty to inherit the endpoint proxy',
     proxyClear: 'Clear saved proxy',
+    proxySettings: 'Proxy settings',
+    proxyScheme: 'Proxy scheme',
+    proxyAddress: 'Proxy address',
+    proxyDirect: 'Direct (no proxy)',
+    proxySchemeKept: 'Keep saved proxy',
+    proxySavedHidden: 'Saved proxy is hidden',
+    proxyKeepHint:
+      'Saved proxy is hidden: saving without changes keeps it. To remove it, use Clear or select Direct and save.',
+    moveUp: 'Move up',
+    moveDown: 'Move down',
   },
 } as const

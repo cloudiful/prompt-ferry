@@ -11,7 +11,7 @@ const form = defineModel<EndpointForm>('form', { required: true })
 type ApiKeyRow = { key: string; index: number }
 
 const rows = computed<ApiKeyRow[]>(() =>
-  form.value.api_keys.map((_, index) => ({
+  (form.value?.api_keys ?? []).map((_, index) => ({
     key: `key-${index}`,
     index,
   })),
@@ -23,46 +23,68 @@ const columns = computed<TableColumn<ApiKeyRow>[]>(() => [
 ])
 
 function addApiKey(): void {
+  if (!form.value) return
+  if (!Array.isArray(form.value.api_keys)) form.value.api_keys = []
   form.value.api_keys.push({
     key_label: '',
     api_key: '',
     has_saved_key: false,
     enabled: true,
+    key_id: '',
   })
 }
 
 function canDeleteApiKey(index: number): boolean {
+  const keys = form.value?.api_keys ?? []
   return (
-    form.value.api_keys.length > 1 &&
-    form.value.api_keys.some(
-      (apiKey, apiKeyIndex) => apiKeyIndex !== index && apiKey.enabled,
-    )
+    keys.length > 1 &&
+    keys.some((apiKey, apiKeyIndex) => apiKeyIndex !== index && apiKey.enabled)
   )
 }
 
 function canDisableApiKey(index: number): boolean {
-  const apiKey = form.value.api_keys[index]
+  const keys = form.value?.api_keys ?? []
+  const apiKey = keys[index]
   return (
     !apiKey?.enabled ||
-    form.value.api_keys.some(
+    keys.some(
       (otherApiKey, otherIndex) => otherIndex !== index && otherApiKey.enabled,
     )
   )
 }
 
 function removeApiKey(index: number): void {
+  if (!form.value || !Array.isArray(form.value.api_keys)) return
   if (!canDeleteApiKey(index)) return
   form.value.api_keys.splice(index, 1)
 }
 
 function rowHasSavedKey(index: number): boolean {
-  return form.value.api_keys[index]?.has_saved_key ?? false
+  return form.value?.api_keys[index]?.has_saved_key ?? false
 }
 
 function rowPlaceholder(index: number): string {
   return rowHasSavedKey(index)
     ? props.t('apiKeyOptionalOnEdit')
     : props.t('apiKey')
+}
+
+function apiKeyValue(index: number): string {
+  return form.value?.api_keys?.[index]?.api_key ?? ''
+}
+
+function setApiKeyValue(index: number, value: string): void {
+  const entry = form.value?.api_keys?.[index]
+  if (entry) entry.api_key = value
+}
+
+function apiKeyEnabled(index: number): boolean {
+  return form.value?.api_keys?.[index]?.enabled ?? true
+}
+
+function setApiKeyEnabled(index: number, value: boolean): void {
+  const entry = form.value?.api_keys?.[index]
+  if (entry) entry.enabled = value
 }
 </script>
 
@@ -105,18 +127,20 @@ function rowPlaceholder(index: number): string {
             <UBadge :label="t('saved')" color="neutral" />
           </div>
           <UInput
-            v-model="form.api_keys[row.original.index].api_key"
+            :model-value="apiKeyValue(row.original.index)"
             class="min-w-0 flex-1"
             :placeholder="rowPlaceholder(row.original.index)"
+            @update:model-value="setApiKeyValue(row.original.index, $event)"
           />
         </div>
       </template>
       <template #status-cell="{ row }">
         <div class="flex justify-center">
           <USwitch
-            v-model="form.api_keys[row.original.index].enabled"
+            :model-value="apiKeyEnabled(row.original.index)"
             :aria-label="t('status')"
             :disabled="!canDisableApiKey(row.original.index)"
+            @update:model-value="setApiKeyEnabled(row.original.index, $event)"
           />
         </div>
       </template>

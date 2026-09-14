@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import ProviderIcon from '@/components/providers/ProviderIcon.vue'
+import ProxySettingsDialog from '@/components/shared/ProxySettingsDialog.vue'
 import type { ModelRouteForm } from '@/models'
 import type { ProviderEndpoint, User } from '@/generated/admin-api'
 import type { EndpointOption } from '@/models/endpoints'
@@ -22,8 +23,15 @@ defineEmits<{
   save: []
 }>()
 
+function ensureTargets(): ModelRouteForm['targets'] {
+  if (!form.value) return []
+  if (!Array.isArray(form.value.targets)) form.value.targets = []
+  return form.value.targets
+}
+
 function addTarget(): void {
-  form.value.targets.push({
+  if (!form.value) return
+  ensureTargets().push({
     endpoint_id: '',
     enabled: true,
     upstream_model: '',
@@ -35,6 +43,7 @@ function addTarget(): void {
 }
 
 function removeTarget(index: number): void {
+  if (!form.value || !Array.isArray(form.value.targets)) return
   form.value.targets.splice(index, 1)
 }
 
@@ -43,17 +52,104 @@ function removeTarget(index: number): void {
 // `has_saved_proxy_url_override` is true omits the key and keeps the
 // stored value (see `modelRouteFormToRequest`).
 function clearTargetProxyOverride(index: number): void {
-  const target = form.value.targets[index]
+  const target = form.value?.targets?.[index]
   if (!target) return
   target.proxy_url_override = ''
   target.has_saved_proxy_url_override = false
 }
 
+function onTargetProxySave(index: number, value: string): void {
+  const target = form.value?.targets?.[index]
+  if (!target) return
+  const trimmed = (value ?? '').trim()
+  target.proxy_url_override = trimmed
+  if (trimmed === '') target.has_saved_proxy_url_override = false
+}
+
+function hasTargetProxy(index: number): boolean {
+  const target = form.value?.targets?.[index]
+  if (!target) return false
+  return (
+    (target.proxy_url_override ?? '').trim() !== '' ||
+    (target.has_saved_proxy_url_override ?? false)
+  )
+}
+
+const proxyModalIndex = ref<number | null>(null)
+const proxyModalOpen = ref(false)
+
+function openTargetProxy(index: number): void {
+  proxyModalIndex.value = index
+  proxyModalOpen.value = true
+}
+
+const proxyModalValue = computed(
+  () =>
+    form.value?.targets?.[proxyModalIndex.value ?? -1]?.proxy_url_override ??
+    '',
+)
+const proxyModalHasSaved = computed(
+  () =>
+    form.value?.targets?.[proxyModalIndex.value ?? -1]
+      ?.has_saved_proxy_url_override ?? false,
+)
+
+function onProxyModalSave(value: string): void {
+  if (proxyModalIndex.value == null) return
+  onTargetProxySave(proxyModalIndex.value, value)
+}
+
+function onProxyModalClear(): void {
+  if (proxyModalIndex.value == null) return
+  clearTargetProxyOverride(proxyModalIndex.value)
+}
+
 function moveTarget(index: number, offset: -1 | 1): void {
+  const targets = form.value?.targets
+  if (!Array.isArray(targets)) return
   const targetIndex = index + offset
-  if (targetIndex < 0 || targetIndex >= form.value.targets.length) return
-  const [target] = form.value.targets.splice(index, 1)
-  if (target) form.value.targets.splice(targetIndex, 0, target)
+  if (targetIndex < 0 || targetIndex >= targets.length) return
+  const [target] = targets.splice(index, 1)
+  if (target) targets.splice(targetIndex, 0, target)
+}
+
+// INLINE-proxy-ui: drag reorder reuses the same splice move-order logic.
+const dragFromIndex = ref<number | null>(null)
+
+function moveTargetTo(from: number, to: number): void {
+  const targets = form.value?.targets
+  if (!Array.isArray(targets)) return
+  if (from < 0 || from >= targets.length) return
+  if (to < 0 || to >= targets.length) return
+  if (from === to) return
+  const [target] = targets.splice(from, 1)
+  if (target) targets.splice(to, 0, target)
+}
+
+function onDragStart(event: DragEvent, index: number): void {
+  dragFromIndex.value = index
+  if (event.dataTransfer) {
+    event.dataTransfer.setData('text/plain', String(index))
+    event.dataTransfer.effectAllowed = 'move'
+  }
+}
+
+function onDragOver(event: DragEvent): void {
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+function onDrop(event: DragEvent, index: number): void {
+  event.preventDefault()
+  const raw = event.dataTransfer?.getData('text/plain')
+  const from = dragFromIndex.value ?? (raw ? Number(raw) : NaN)
+  dragFromIndex.value = null
+  if (!Number.isInteger(from)) return
+  moveTargetTo(from as number, index)
+}
+
+function onDragEnd(): void {
+  dragFromIndex.value = null
 }
 
 const routingStrategyOptions = computed(() => [
@@ -85,28 +181,26 @@ const targetColumns = computed<
   >
     <template #body>
       <form class="grid gap-3 text-xs" @submit.prevent="$emit('save')">
-        <div
-          class="grid gap-3 xl:grid-cols-[9rem_minmax(0,1.2fr)_minmax(0,1.1fr)_auto]"
-        >
+        <div class="flex flex-wrap items-end gap-3">
           <USelect
             v-model="form.scope"
-            class="w-full"
+            class="w-28 shrink-0"
             :items="['admin', 'user']"
           />
           <UInput
             v-model="form.model_pattern"
-            class="w-full"
+            class="min-w-40 flex-1"
             :placeholder="t('modelPattern')"
           />
           <USelect
             v-model="form.routing_strategy"
-            class="w-full"
+            class="min-w-44 flex-1"
             :items="routingStrategyOptions"
             label-key="label"
             value-key="value"
           />
           <label
-            class="inline-flex min-h-8 items-center justify-end self-end pb-1 text-[0.75rem] text-default"
+            class="inline-flex min-h-8 shrink-0 items-center justify-end pb-1 text-[0.75rem] text-default"
           >
             <USwitch v-model="form.enabled" :aria-label="t('status')" />
           </label>
@@ -157,31 +251,54 @@ const targetColumns = computed<
               }}</UButton
             >
           </div>
-          <UTable :data="form.targets" :columns="targetColumns" class="min-w-0">
+          <UTable
+            :data="form?.targets ?? []"
+            :columns="targetColumns"
+            class="min-w-0"
+          >
             <template #order-cell="{ row }">
-              <div class="flex gap-1">
-                <UButton
-                  icon="i-lucide-chevron-up"
-                  color="neutral"
-                  variant="ghost"
-                  size="xs"
-                  :disabled="row.index === 0"
-                  @click="moveTarget(row.index, -1)"
-                />
-                <UButton
-                  icon="i-lucide-chevron-down"
-                  color="neutral"
-                  variant="ghost"
-                  size="xs"
-                  :disabled="row.index === form.targets.length - 1"
-                  @click="moveTarget(row.index, 1)"
-                />
+              <div class="flex items-center gap-1">
+                <div class="flex flex-col gap-0.5">
+                  <UButton
+                    icon="i-lucide-chevron-up"
+                    color="neutral"
+                    variant="ghost"
+                    size="xs"
+                    :disabled="row.index === 0"
+                    :aria-label="t('moveUp')"
+                    @click="moveTarget(row.index, -1)"
+                  />
+                  <UButton
+                    icon="i-lucide-chevron-down"
+                    color="neutral"
+                    variant="ghost"
+                    size="xs"
+                    :disabled="row.index === (form?.targets?.length ?? 0) - 1"
+                    :aria-label="t('moveDown')"
+                    @click="moveTarget(row.index, 1)"
+                  />
+                </div>
+                <div
+                  draggable="true"
+                  class="inline-flex cursor-grab items-center justify-center rounded p-1 text-muted active:cursor-grabbing"
+                  :aria-label="t('target')"
+                  @dragstart="onDragStart($event, row.index)"
+                  @dragover="onDragOver"
+                  @drop="onDrop($event, row.index)"
+                  @dragend="onDragEnd"
+                >
+                  <UIcon name="i-lucide-grip-vertical" class="h-4 w-4" />
+                </div>
               </div>
             </template>
             <template #endpoint-cell="{ row }">
-              <div class="grid gap-2">
+              <div
+                class="grid gap-2"
+                @dragover="onDragOver"
+                @drop="onDrop($event, row.index)"
+              >
                 <div
-                  class="grid gap-2 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]"
+                  class="grid gap-2 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_auto]"
                 >
                   <USelect
                     v-model="row.original.endpoint_id"
@@ -200,46 +317,27 @@ const targetColumns = computed<
                     class="w-full"
                     :placeholder="t('upstreamModelOptional')"
                   />
-                </div>
-                <div class="flex min-w-0 items-center gap-2">
-                  <div
-                    v-if="row.original.has_saved_proxy_url_override"
-                    class="shrink-0"
-                  >
-                    <UBadge :label="t('saved')" color="neutral" />
-                  </div>
-                  <UInput
-                    v-model="row.original.proxy_url_override"
-                    type="password"
-                    class="min-w-0 flex-1"
-                    :placeholder="
-                      row.original.has_saved_proxy_url_override
-                        ? t('savedSecret')
-                        : t('proxyUrlOverridePlaceholder')
-                    "
-                    :aria-label="t('proxyUrlOverride')"
-                  />
-                  <UTooltip :text="t('proxyUrlOverrideHint')">
-                    <UButton
-                      type="button"
-                      size="xs"
+                  <div class="flex items-center gap-1">
+                    <UBadge
+                      v-if="row.original.has_saved_proxy_url_override"
+                      :label="t('saved')"
                       color="neutral"
-                      variant="ghost"
-                      icon="i-lucide-info"
-                      :aria-label="t('proxyUrlOverrideHint')"
                     />
-                  </UTooltip>
-                  <UButton
-                    v-if="row.original.has_saved_proxy_url_override"
-                    type="button"
-                    size="sm"
-                    color="neutral"
-                    variant="ghost"
-                    :aria-label="t('proxyClear')"
-                    @click="clearTargetProxyOverride(row.index)"
-                  >
-                    <UIcon name="i-lucide-trash-2" class="h-4 w-4" />
-                  </UButton>
+                    <UTooltip :text="t('proxyUrlOverrideHint')">
+                      <UButton
+                        type="button"
+                        size="sm"
+                        :color="
+                          hasTargetProxy(row.index) ? 'primary' : 'neutral'
+                        "
+                        variant="ghost"
+                        icon="i-lucide-globe"
+                        :aria-label="t('proxyUrlOverride')"
+                        :aria-pressed="hasTargetProxy(row.index)"
+                        @click="openTargetProxy(row.index)"
+                      />
+                    </UTooltip>
+                  </div>
                 </div>
               </div>
             </template>
@@ -263,6 +361,16 @@ const targetColumns = computed<
             </template>
           </UTable>
         </div>
+
+        <ProxySettingsDialog
+          v-model:visible="proxyModalOpen"
+          :initial-value="proxyModalValue"
+          :has-saved="proxyModalHasSaved"
+          :hint="t('proxyUrlOverrideHint')"
+          :t="t"
+          @save="onProxyModalSave"
+          @clear="onProxyModalClear"
+        />
 
         <div class="flex justify-end gap-2 pt-1">
           <UButton

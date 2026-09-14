@@ -61,12 +61,6 @@ defineEmits<{
               "
             >
               {{ target.endpoint_label }}
-              <span
-                v-if="target.upstream_model"
-                class="text-[0.68rem] text-muted"
-              >
-                / {{ target.upstream_model }}
-              </span>
             </span>
             <UBadge
               :label="row.original.owner_label"

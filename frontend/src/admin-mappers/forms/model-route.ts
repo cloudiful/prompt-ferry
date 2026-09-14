@@ -56,23 +56,27 @@ export function streamDeltaBatchingFormToRequest(
 }
 
 export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
+  // INLINE-proxy-ui-a1 BUG fix: tolerate legacy payloads missing targets or
+  // Phase C override flags so the edit dialog always has a renderable form.
+  const source = (route ?? {}) as Partial<ModelEndpointRule>
+  const targets = source.targets ?? []
   return {
-    rule_id: route.rule_id,
-    scope: route.scope === 'user' ? 'user' : 'admin',
-    owner_user_id: route.owner_user_id ?? null,
-    model_pattern: route.model_pattern,
-    routing_strategy: route.routing_strategy ?? 'client_key_rendezvous',
-    daily_max_requests: route.daily_max_requests ?? null,
-    monthly_max_requests: route.monthly_max_requests ?? null,
-    enabled: route.enabled,
-    targets: route.targets.map((target) => ({
-      endpoint_id: target.endpoint_id,
-      enabled: target.enabled,
-      upstream_model: target.upstream_model ?? '',
+    rule_id: source.rule_id ?? '',
+    scope: source.scope === 'user' ? 'user' : 'admin',
+    owner_user_id: source.owner_user_id ?? null,
+    model_pattern: source.model_pattern ?? '',
+    routing_strategy: source.routing_strategy ?? 'client_key_rendezvous',
+    daily_max_requests: source.daily_max_requests ?? null,
+    monthly_max_requests: source.monthly_max_requests ?? null,
+    enabled: source.enabled ?? true,
+    targets: targets.map((target) => ({
+      endpoint_id: target?.endpoint_id ?? '',
+      enabled: target?.enabled ?? true,
+      upstream_model: target?.upstream_model ?? '',
       // Issue #368 Phase C: masked override; never echo the secret.
       // `has_proxy_url_override` is optional for legacy payloads.
       proxy_url_override: '',
-      has_saved_proxy_url_override: target.has_proxy_url_override ?? false,
+      has_saved_proxy_url_override: target?.has_proxy_url_override ?? false,
     })),
   }
 }
@@ -80,31 +84,37 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
 export function modelRouteFormToRequest(
   form: ModelRouteForm,
 ): ModelRouteRequest {
+  // INLINE-proxy-ui-a1: tolerate legacy target rows missing proxy fields.
+  const safe = (form ?? {}) as Partial<ModelRouteForm>
+  const targets = safe.targets ?? []
   return {
-    enabled: form.enabled,
-    model_pattern: form.model_pattern.trim(),
-    owner_user_id: form.scope === 'user' ? form.owner_user_id : null,
-    routing_strategy: form.routing_strategy,
-    scope: form.scope,
-    daily_max_requests: form.daily_max_requests,
-    monthly_max_requests: form.monthly_max_requests,
-    targets: form.targets
-      .filter((target) => target.endpoint_id.trim() !== '')
+    enabled: safe.enabled ?? true,
+    model_pattern: (safe.model_pattern ?? '').trim(),
+    owner_user_id: safe.scope === 'user' ? (safe.owner_user_id ?? null) : null,
+    routing_strategy:
+      safe.routing_strategy === 'responses_session_affinity'
+        ? 'responses_session_affinity'
+        : 'client_key_rendezvous',
+    scope: safe.scope === 'user' ? 'user' : 'admin',
+    daily_max_requests: safe.daily_max_requests ?? null,
+    monthly_max_requests: safe.monthly_max_requests ?? null,
+    targets: targets
+      .filter((target) => (target?.endpoint_id ?? '').trim() !== '')
       .map((target) => {
         // Issue #368 Phase C: omit-when-untouched per target.
         // Non-empty means replace; empty + saved means omit (keep);
         // empty + no saved means clear to inherit (`""`).
-        const trimmed = target.proxy_url_override.trim()
+        const trimmed = (target?.proxy_url_override ?? '').trim()
         const proxy_url_override =
           trimmed !== ''
             ? trimmed
-            : target.has_saved_proxy_url_override
+            : target?.has_saved_proxy_url_override
               ? undefined
               : ''
         return {
-          endpoint_id: target.endpoint_id,
-          enabled: target.enabled,
-          upstream_model: target.upstream_model.trim() || undefined,
+          endpoint_id: target?.endpoint_id ?? '',
+          enabled: target?.enabled ?? true,
+          upstream_model: (target?.upstream_model ?? '').trim() || undefined,
           proxy_url_override,
         }
       }),

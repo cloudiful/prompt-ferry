@@ -101,62 +101,64 @@ export function createEmptyMcpForm(): McpForm {
 }
 
 export function mcpServerToForm(server: McpServer): McpForm {
+  // INLINE-proxy-ui-a1: tolerate legacy payloads missing Phase F fields.
+  const source = (server ?? {}) as Partial<McpServer>
   const authMode =
-    server.auth_mode === 'bearer' || server.auth_mode === 'basic'
-      ? server.auth_mode
+    source.auth_mode === 'bearer' || source.auth_mode === 'basic'
+      ? source.auth_mode
       : 'none'
   return {
-    server_id: server.server_id,
-    source_endpoint_id: server.source_endpoint_id ?? null,
-    scope: server.scope === 'user' ? 'user' : 'admin',
-    owner_user_id: server.owner_user_id ?? null,
-    name: server.name,
+    server_id: source.server_id ?? '',
+    source_endpoint_id: source.source_endpoint_id ?? null,
+    scope: source.scope === 'user' ? 'user' : 'admin',
+    owner_user_id: source.owner_user_id ?? null,
+    name: source.name ?? '',
     aggregate_naming_mode:
-      server.aggregate_naming_mode === 'qualified_only'
+      source.aggregate_naming_mode === 'qualified_only'
         ? 'qualified_only'
         : 'passthrough_preferred',
     transport:
-      server.transport === 'builtin_minimax'
+      source.transport === 'builtin_minimax'
         ? 'builtin_minimax'
-        : server.transport === 'stdio'
+        : source.transport === 'stdio'
           ? 'stdio'
           : 'http',
-    provider_kind: server.provider_kind ?? 'generic',
-    url: server.url ?? '',
-    command_argv_text: JSON.stringify(commandArgv(server)),
+    provider_kind: source.provider_kind ?? 'generic',
+    url: source.url ?? '',
+    command_argv_text: JSON.stringify(commandArgv(source as McpServer)),
     auth_mode: authMode,
-    bearer_tokens: server.bearer_tokens.map((value) => ({
-      token: value.token,
-      enabled: value.enabled,
+    bearer_tokens: (source.bearer_tokens ?? []).map((value) => ({
+      token: value?.token ?? '',
+      enabled: value?.enabled ?? true,
     })),
-    basic_username: server.basic_username ?? '',
+    basic_username: source.basic_username ?? '',
     basic_password: '',
-    has_basic_password: server.has_basic_password ?? false,
+    has_basic_password: source.has_basic_password ?? false,
     // Issue #375 Phase F: masked proxy input; never echo the secret.
     // `has_proxy_url` is optional for legacy payloads (missing means inherit).
     proxy_url: '',
-    has_saved_proxy_url: server.has_proxy_url ?? false,
+    has_saved_proxy_url: source.has_proxy_url ?? false,
     http_headers_text: JSON.stringify(
-      normalizeJsonRecord(server.http_headers_json),
+      normalizeJsonRecord(source.http_headers_json),
       null,
       2,
     ),
-    environment_variables: environmentVariables(server.env_json),
+    environment_variables: environmentVariables(source.env_json),
     tool_filter_mode:
-      server.tool_filter_mode === 'whitelist' ? 'whitelist' : 'blacklist',
-    allowed_tools: normalizeStringList(server.allowed_tools),
-    disabled_tools: normalizeStringList(server.disabled_tools),
-    disabled_resources: normalizeStringList(server.disabled_resources),
-    daily_max_requests: server.daily_max_requests ?? null,
-    monthly_max_requests: server.monthly_max_requests ?? null,
-    enabled: server.enabled,
-    timeout_ms: server.timeout_ms,
+      source.tool_filter_mode === 'whitelist' ? 'whitelist' : 'blacklist',
+    allowed_tools: normalizeStringList(source.allowed_tools),
+    disabled_tools: normalizeStringList(source.disabled_tools),
+    disabled_resources: normalizeStringList(source.disabled_resources),
+    daily_max_requests: source.daily_max_requests ?? null,
+    monthly_max_requests: source.monthly_max_requests ?? null,
+    enabled: source.enabled ?? true,
+    timeout_ms: source.timeout_ms ?? 30000,
     lifecycle_policy:
-      server.lifecycle_policy === 'legacy_initialize'
+      source.lifecycle_policy === 'legacy_initialize'
         ? 'legacy_initialize'
         : 'auto',
     lifecycle_manual_protocol_version:
-      server.lifecycle_manual_protocol_version ?? null,
+      source.lifecycle_manual_protocol_version ?? null,
   }
 }
 
@@ -197,11 +199,12 @@ export function mcpFormToRequest(form: McpForm): McpServerRequest {
   // Non-empty means replace; empty + saved means omit (keep stored value);
   // empty + no saved means clear to inherit (`""`). The request-side
   // `has_proxy_url` hint is intentionally not sent (server ignores it).
-  const trimmedProxy = form.proxy_url.trim()
+  // INLINE-proxy-ui-a1: tolerate legacy forms missing proxy fields.
+  const trimmedProxy = (form.proxy_url ?? '').trim()
   const proxy_url =
     trimmedProxy !== ''
       ? trimmedProxy
-      : form.has_saved_proxy_url
+      : (form.has_saved_proxy_url ?? false)
         ? undefined
         : ''
   return {

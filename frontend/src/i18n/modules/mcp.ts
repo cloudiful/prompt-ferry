@@ -125,7 +125,7 @@ export const mcpMessages = {
     basicPassword: '密码',
     basicPasswordPlaceholder: 'password',
     mcpProxyUrlHint:
-      '可选单行代理，支持 http/https/socks5/socks5h；留空继承环境代理，编辑时留空保持不变。',
+      '可选单行代理，支持 http/https/socks5/socks5h；留空继承环境代理。已保存代理直接保存会保留，仅清除或选择直连并保存才会移除。',
   },
   'en-US': {
     allowedTools: 'Allowed tools',
@@ -260,6 +260,6 @@ export const mcpMessages = {
     basicPassword: 'Password',
     basicPasswordPlaceholder: 'password',
     mcpProxyUrlHint:
-      'Optional per-row proxy (http/https/socks5/socks5h). Leave empty to inherit the environment proxy; leave blank while editing to keep the stored value.',
+      'Optional per-row proxy (http/https/socks5/socks5h). Empty inherits the environment proxy. Saving without changes keeps the stored proxy; only Clear or Direct + Save removes it.',
   },
 } as const

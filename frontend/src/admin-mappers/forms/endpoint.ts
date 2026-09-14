@@ -46,44 +46,48 @@ export function createEmptyEndpointForm(): EndpointForm {
 }
 
 export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
-  const endpointApiKeys = endpoint.api_keys ?? []
+  // INLINE-proxy-ui-a1 BUG fix: upstream edit showed only the modal overlay.
+  // Legacy/cached payloads can omit Phase C fields or carry empty api_keys;
+  // normalize everything so the dialog always has a renderable form.
+  const source = (endpoint ?? {}) as Partial<ProviderEndpoint>
+  const endpointApiKeys = source.api_keys ?? []
   const nativeApiOverride =
-    endpoint.native_api === 'anthropic_messages' ||
-    endpoint.native_api === 'responses' ||
-    endpoint.native_api === 'chat' ||
-    endpoint.native_api === 'realtime'
-      ? endpoint.native_api
+    source.native_api === 'anthropic_messages' ||
+    source.native_api === 'responses' ||
+    source.native_api === 'chat' ||
+    source.native_api === 'realtime'
+      ? source.native_api
       : null
   return {
-    endpoint_id: endpoint.endpoint_id,
-    scope: endpoint.scope === 'user' ? 'user' : 'admin',
-    owner_user_id: endpoint.owner_user_id ?? null,
-    name: endpoint.name,
-    provider: endpoint.provider ?? 'generic',
-    provider_region: endpoint.provider_region ?? null,
-    service_tier: normalizeServiceTier(endpoint.service_tier),
-    base_url: endpoint.base_url,
+    endpoint_id: source.endpoint_id ?? '',
+    scope: source.scope === 'user' ? 'user' : 'admin',
+    owner_user_id: source.owner_user_id ?? null,
+    name: source.name ?? '',
+    provider: source.provider ?? 'generic',
+    provider_region: source.provider_region ?? null,
+    service_tier: normalizeServiceTier(source.service_tier),
+    base_url: source.base_url ?? '',
     api_keys: endpointApiKeys.map((key) => ({
-      key_label: key.key_label,
+      key_label: key.key_label ?? '',
       api_key: '',
       has_saved_key: true,
-      enabled: key.enabled,
-      key_id: key.key_id,
+      enabled: key.enabled ?? true,
+      key_id: key.key_id ?? '',
     })),
-    key_lb_enabled: endpoint.key_lb_enabled ?? false,
+    key_lb_enabled: source.key_lb_enabled ?? false,
     protocol_mode:
-      endpoint.native_api_source === 'auto' && endpoint.native_api === 'auto'
+      source.native_api_source === 'auto' && source.native_api === 'auto'
         ? 'auto'
         : 'manual',
     native_api_override: nativeApiOverride,
-    daily_max_requests: endpoint.daily_max_requests ?? null,
-    monthly_max_requests: endpoint.monthly_max_requests ?? null,
-    enabled: endpoint.enabled,
-    mcp_enabled: endpoint.mcp_enabled ?? false,
+    daily_max_requests: source.daily_max_requests ?? null,
+    monthly_max_requests: source.monthly_max_requests ?? null,
+    enabled: source.enabled ?? true,
+    mcp_enabled: source.mcp_enabled ?? false,
     // Issue #368 Phase C: masked proxy input; never echo the secret.
     // `has_proxy_url` is optional for legacy payloads (missing means direct).
     proxy_url: '',
-    has_saved_proxy_url: endpoint.has_proxy_url ?? false,
+    has_saved_proxy_url: source.has_proxy_url ?? false,
   }
 }
 
@@ -92,38 +96,43 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
   // Non-empty means replace; empty + saved means omit (keep stored value);
   // empty + no saved means clear to direct (`""`). The request-side
   // `has_proxy_url` hint is intentionally not sent (server ignores it).
-  const trimmedProxy = form.proxy_url.trim()
+  // INLINE-proxy-ui-a1: tolerate legacy forms missing proxy fields.
+  const safe = (form ?? {}) as Partial<EndpointForm>
+  const trimmedProxy = (safe.proxy_url ?? '').trim()
   const proxy_url =
     trimmedProxy !== ''
       ? trimmedProxy
-      : form.has_saved_proxy_url
+      : safe.has_saved_proxy_url
         ? undefined
         : ''
+  const apiKeys = safe.api_keys ?? []
   return {
-    api_key: form.api_keys[0]?.api_key ?? '',
-    api_keys: form.api_keys
+    api_key: apiKeys[0]?.api_key ?? '',
+    api_keys: apiKeys
       .map((key) => ({
-        key_label: key.key_label.trim(),
-        api_key: key.api_key,
-        enabled: key.enabled,
+        key_label: (key.key_label ?? '').trim(),
+        api_key: key.api_key ?? '',
+        enabled: key.enabled ?? true,
         key_id: key.key_id || undefined,
       }))
       .filter((key) => key.key_label || key.api_key),
-    key_lb_enabled: form.key_lb_enabled,
-    base_url: form.base_url.trim(),
-    enabled: form.enabled,
-    name: form.name.trim(),
-    provider: form.provider,
-    provider_region: form.provider_region,
-    service_tier: normalizeServiceTier(form.service_tier),
+    key_lb_enabled: safe.key_lb_enabled ?? false,
+    base_url: (safe.base_url ?? '').trim(),
+    enabled: safe.enabled ?? true,
+    name: (safe.name ?? '').trim(),
+    provider: safe.provider ?? 'generic',
+    provider_region: safe.provider_region ?? null,
+    service_tier: normalizeServiceTier(safe.service_tier),
     native_api_override:
-      form.protocol_mode === 'manual' ? form.native_api_override : null,
-    owner_user_id: form.scope === 'user' ? form.owner_user_id : null,
-    protocol_mode: form.protocol_mode,
-    scope: form.scope,
-    daily_max_requests: form.daily_max_requests,
-    monthly_max_requests: form.monthly_max_requests,
-    mcp_enabled: form.mcp_enabled,
+      safe.protocol_mode === 'manual'
+        ? (safe.native_api_override ?? null)
+        : null,
+    owner_user_id: safe.scope === 'user' ? (safe.owner_user_id ?? null) : null,
+    protocol_mode: safe.protocol_mode === 'manual' ? 'manual' : 'auto',
+    scope: safe.scope === 'user' ? 'user' : 'admin',
+    daily_max_requests: safe.daily_max_requests ?? null,
+    monthly_max_requests: safe.monthly_max_requests ?? null,
+    mcp_enabled: safe.mcp_enabled ?? false,
     proxy_url,
   }
 }
