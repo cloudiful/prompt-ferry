@@ -41,8 +41,12 @@ impl ModelRouteRequest {
         self,
         state: &AdminState,
     ) -> Result<db::ModelEndpointRuleCreate, Response> {
-        self.into_create_with_existing(state, &std::collections::HashMap::new())
-            .await
+        self.into_create_with_existing(
+            state,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        )
+        .await
     }
 
     /// Issue #368 Phase B: PATCH carry for per-target overrides.
@@ -50,10 +54,13 @@ impl ModelRouteRequest {
     /// (`None` means inherit). When the request omits `proxy_url_override`
     /// (`None`), the stored value is kept; `Some("")` clears to inherit;
     /// `Some(url)` replaces after scheme validation.
+    /// Issue #378 Phase I: same omit-when-untouched carry applies to
+    /// `active_windows` via `existing_windows` (`None` means all-day).
     pub async fn into_create_with_existing(
         self,
         state: &AdminState,
         existing_overrides: &std::collections::HashMap<Uuid, Option<String>>,
+        existing_windows: &std::collections::HashMap<Uuid, Vec<db::ActiveWindow>>,
     ) -> Result<db::ModelEndpointRuleCreate, Response> {
         let targets = self
             .targets
@@ -67,6 +74,7 @@ impl ModelRouteRequest {
                         upstream_model: None,
                         proxy_url_override: None,
                         has_proxy_url_override: None,
+                        active_windows: None,
                     })
                     .collect()
             })
@@ -92,6 +100,14 @@ impl ModelRouteRequest {
                         error(StatusCode::BAD_REQUEST, "invalid_proxy_url", message)
                     })?),
                 };
+                let active_windows = match target.active_windows {
+                    None => existing_windows.get(&target.endpoint_id).cloned(),
+                    Some(windows) => {
+                        Some(db::normalize_request_windows(&windows).map_err(|message| {
+                            error(StatusCode::BAD_REQUEST, "invalid_active_windows", message)
+                        })?)
+                    }
+                };
                 Ok(db::ModelRouteTargetCreate {
                     endpoint_id: target.endpoint_id,
                     enabled: target.enabled.unwrap_or(true),
@@ -102,6 +118,7 @@ impl ModelRouteRequest {
                         .filter(|value| !value.is_empty())
                         .map(str::to_string),
                     proxy_url_override,
+                    active_windows,
                 })
             });
         let targets = futures::future::try_join_all(targets).await?;
@@ -217,6 +234,17 @@ impl ModelRouteRequest {
             {
                 return Err(error(StatusCode::BAD_REQUEST, "invalid_proxy_url", message));
             }
+            // Issue #378 Phase I: HH:MM format, ranges, start != end;
+            // end < start is overnight; overlaps allowed; sorted normalize.
+            if let Some(windows) = target.active_windows.as_deref()
+                && let Err(message) = db::normalize_request_windows(windows)
+            {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_active_windows",
+                    message,
+                ));
+            }
         }
         let rules = db::list_model_endpoint_rules(&state.pool)
             .await
@@ -252,6 +280,11 @@ pub struct ModelRouteTargetRequest {
     /// `proxy_url_override` is omitted.
     #[serde(default)]
     pub has_proxy_url_override: Option<bool>,
+    /// Issue #378 Phase I: effective windows (`[{start,end}]` `HH:MM`).
+    /// `None` (omitted) keeps the stored value on PATCH; `Some([])`
+    /// means all-day; `Some([...])` replaces after validation.
+    #[serde(default)]
+    pub active_windows: Option<Vec<db::ActiveWindow>>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

@@ -60,6 +60,11 @@ export type ModelRouteTargetForm = {
   // `has_proxy_url_override` indicator.
   proxy_url_override: string
   has_saved_proxy_url_override: boolean
+  // Issue #378 Phase J: per-target schedule windows. Empty means all-day.
+  // `active_windows_touched` tracks omit-when-untouched: false omits the key
+  // (keeps the stored value on PATCH), true sends the array (empty = all-day).
+  active_windows: Array<{ start: string; end: string }>
+  active_windows_touched: boolean
 }
 
 export type StreamDeltaBatchingForm = {

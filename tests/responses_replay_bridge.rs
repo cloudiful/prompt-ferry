@@ -203,6 +203,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
                 enabled: true,
                 upstream_model: None,
                 proxy_url_override: None,
+                active_windows: None,
             }],
         },
     )
@@ -343,12 +344,14 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
                     enabled: true,
                     upstream_model: None,
                     proxy_url_override: None,
+                    active_windows: None,
                 },
                 db::ModelRouteTargetCreate {
                     endpoint_id: right_code.endpoint_id,
                     enabled: true,
                     upstream_model: None,
                     proxy_url_override: None,
+                    active_windows: None,
                 },
             ],
         },
@@ -458,6 +461,7 @@ async fn raw_passthrough_keeps_previous_response_id_without_replay_state() -> an
                 enabled: true,
                 upstream_model: None,
                 proxy_url_override: None,
+                active_windows: None,
             }],
         },
     )
@@ -548,6 +552,7 @@ async fn raw_passthrough_keeps_conversation_without_replay_state() -> anyhow::Re
                 enabled: true,
                 upstream_model: None,
                 proxy_url_override: None,
+                active_windows: None,
             }],
         },
     )
@@ -634,6 +639,7 @@ async fn rejects_stateful_responses_routed_to_chat_native_target() -> anyhow::Re
                 enabled: true,
                 upstream_model: None,
                 proxy_url_override: None,
+                active_windows: None,
             }],
         },
     )
@@ -723,6 +729,7 @@ async fn rejects_responses_routed_to_anthropic_native_target() -> anyhow::Result
                 enabled: true,
                 upstream_model: None,
                 proxy_url_override: None,
+                active_windows: None,
             }],
         },
     )

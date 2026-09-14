@@ -46,6 +46,7 @@ pub(super) fn from_postgres_target(target: crate::db::ModelRouteTarget) -> Unifi
         enabled: target.enabled,
         upstream_model: target.upstream_model,
         has_proxy_url_override,
+        active_windows: target.active_windows,
     }
 }
 
@@ -97,6 +98,10 @@ where
                 .proxy_url_override
                 .as_deref()
                 .is_some_and(|raw| !raw.trim().is_empty());
+            // Issue #378 Phase I: 0020 plaintext schedule; corrupt reads as
+            // all-day for display (routing fails closed separately).
+            let active_windows = crate::db::parse_stored_windows(target.active_windows.as_deref())
+                .unwrap_or_default();
             UnifiedModelRouteTarget {
                 target_id: target.target_id,
                 rule_id: route.rule_id,
@@ -107,6 +112,7 @@ where
                 enabled: target.enabled,
                 upstream_model: target.upstream_model,
                 has_proxy_url_override,
+                active_windows,
             }
         })
         .collect();
@@ -148,6 +154,12 @@ pub(super) fn sqlite_route_from_create(
                 .proxy_url_override
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty());
+            // Issue #378 Phase I: already normalized by the admin layer;
+            // `None`/empty means all-day -> NULL.
+            let active_windows = match target.active_windows.as_deref() {
+                None | Some([]) => None,
+                Some(windows) => crate::db::storage_value(windows),
+            };
             Ok(ModelRouteTargetConfig {
                 target_id: Uuid::new_v4(),
                 endpoint_id: target.endpoint_id,
@@ -155,6 +167,7 @@ pub(super) fn sqlite_route_from_create(
                 enabled: target.enabled,
                 upstream_model: target.upstream_model,
                 proxy_url_override,
+                active_windows,
             })
         })
         .collect::<Result<Vec<_>>>()?;

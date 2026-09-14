@@ -360,6 +360,15 @@ pub(crate) fn route_target(
     ModelRouteTargetConfig,
     Option<EncryptedSecretEnvelope>,
 )> {
+    // Issue #378 Phase I: 0020 `active_windows` is plaintext; pre-migration
+    // rows lack the column and read as all-day (`None`).
+    let active_windows = match row.try_get::<Option<String>, _>("active_windows") {
+        Ok(value) => value
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        Err(sqlx::Error::ColumnNotFound(_)) => None,
+        Err(error) => return Err(error.into()),
+    };
     Ok((
         uuid(row, "rule_id")?,
         ModelRouteTargetConfig {
@@ -373,6 +382,7 @@ pub(crate) fn route_target(
             enabled: bool_value(row, "enabled")?,
             upstream_model: optional_string(row, "upstream_model")?,
             proxy_url_override: None,
+            active_windows,
         },
         envelope_opt(row, "proxy_url_override")?,
     ))

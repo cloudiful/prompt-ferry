@@ -611,6 +611,7 @@ fn sample_candidate() -> ModelRouteCandidate {
                 service_tier: db::MinimaxServiceTier::Standard,
                 proxy_url: None,
                 proxy_url_override: None,
+                active_windows: None,
             },
             ModelRouteCandidateTarget {
                 target_id: uuid::Uuid::new_v4(),
@@ -637,6 +638,7 @@ fn sample_candidate() -> ModelRouteCandidate {
                 service_tier: db::MinimaxServiceTier::Standard,
                 proxy_url: None,
                 proxy_url_override: None,
+                active_windows: None,
             },
         ],
     }

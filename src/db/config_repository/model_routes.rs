@@ -36,6 +36,8 @@ pub struct UnifiedModelRouteTarget {
     pub upstream_model: Option<String>,
     // Issue #368 Phase C (P2): response-side saved-override indicator.
     pub has_proxy_url_override: bool,
+    // Issue #378 Phase I: effective windows (empty means all-day).
+    pub active_windows: Vec<crate::db::ActiveWindow>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +92,8 @@ fn target_to_pg(target: UnifiedModelRouteTarget) -> PgModelRouteTarget {
         // Issue #368 Phase C (P2): carry the saved-override indicator so
         // the page response matches the single-route shape.
         has_proxy_url_override: target.has_proxy_url_override,
+        // Issue #378 Phase I: carry schedule through the unified shape.
+        active_windows: target.active_windows,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }

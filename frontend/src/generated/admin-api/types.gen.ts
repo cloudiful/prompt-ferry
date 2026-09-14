@@ -4,6 +4,11 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type ActiveWindow = {
+    end: string;
+    start: string;
+};
+
 export type AppliedReplacementSchema = {
     display_value?: string | null;
     kind: string;
@@ -765,6 +770,11 @@ export type ModelRouteRequest = {
 export type ModelRouteRoutingStrategy = 'client_key_rendezvous' | 'responses_session_affinity';
 
 export type ModelRouteTarget = {
+    /**
+     * Issue #378 Phase I: per-target effective windows (`HH:MM` pairs).
+     * Empty means all-day.
+     */
+    active_windows?: Array<ActiveWindow>;
     created_at: string;
     enabled: boolean;
     endpoint_enabled: boolean;
@@ -783,6 +793,12 @@ export type ModelRouteTarget = {
 };
 
 export type ModelRouteTargetRequest = {
+    /**
+     * Issue #378 Phase I: effective windows (`[{start,end}]` `HH:MM`).
+     * `None` (omitted) keeps the stored value on PATCH; `Some([])`
+     * means all-day; `Some([...])` replaces after validation.
+     */
+    active_windows?: Array<ActiveWindow> | null;
     enabled?: boolean | null;
     endpoint_id: string;
     /**

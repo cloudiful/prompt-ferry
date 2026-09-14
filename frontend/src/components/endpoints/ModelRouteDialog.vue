@@ -3,6 +3,7 @@ import type { TableColumn } from '@nuxt/ui'
 import { computed, ref } from 'vue'
 import ProviderIcon from '@/components/providers/ProviderIcon.vue'
 import ProxySettingsDialog from '@/components/shared/ProxySettingsDialog.vue'
+import ScheduleWindowsDialog from '@/components/shared/ScheduleWindowsDialog.vue'
 import type { ModelRouteForm } from '@/models'
 import type { ProviderEndpoint, User } from '@/generated/admin-api'
 import type { EndpointOption } from '@/models/endpoints'
@@ -39,6 +40,9 @@ function addTarget(): void {
     // means inherit.
     proxy_url_override: '',
     has_saved_proxy_url_override: false,
+    // Issue #378 Phase J: untouched all-day schedule.
+    active_windows: [],
+    active_windows_touched: false,
   })
 }
 
@@ -75,6 +79,67 @@ function hasTargetProxy(index: number): boolean {
   )
 }
 
+// Issue #378 Phase J: per-target schedule windows. Non-empty means
+// restricted (highlight the timer button); empty means all-day.
+function targetWindows(index: number): Array<{ start: string; end: string }> {
+  const target = form.value?.targets?.[index]
+  return Array.isArray(target?.active_windows)
+    ? (target?.active_windows ?? [])
+    : []
+}
+
+function sortedTargetWindows(
+  index: number,
+): Array<{ start: string; end: string }> {
+  return [...targetWindows(index)]
+    .map((window) => ({
+      start: (window?.start ?? '').trim(),
+      end: (window?.end ?? '').trim(),
+    }))
+    .filter((window) => window.start !== '' && window.end !== '')
+    .sort((a, b) =>
+      a.start === b.start
+        ? a.end.localeCompare(b.end)
+        : a.start.localeCompare(b.start),
+    )
+}
+
+function hasTargetSchedule(index: number): boolean {
+  return sortedTargetWindows(index).length > 0
+}
+
+function formatWindow(window: { start: string; end: string }): string {
+  return `${window.start}–${window.end}`
+}
+
+function scheduleSummary(index: number): string {
+  const windows = sortedTargetWindows(index)
+  if (windows.length === 0) return props.t('scheduleAllDay')
+  const first = windows[0]
+  if (!first) return props.t('scheduleAllDay')
+  if (windows.length === 1) return formatWindow(first)
+  return `${formatWindow(first)} ${props.t('scheduleMoreWindows', { count: windows.length })}`
+}
+
+function scheduleTooltip(index: number): string {
+  const windows = sortedTargetWindows(index)
+  if (windows.length === 0) return props.t('scheduleAllDay')
+  return windows.map(formatWindow).join(', ')
+}
+
+function onTargetScheduleSave(
+  index: number,
+  value: Array<{ start: string; end: string }>,
+): void {
+  const target = form.value?.targets?.[index]
+  if (!target) return
+  target.active_windows = value.map((window) => ({
+    start: (window?.start ?? '').trim(),
+    end: (window?.end ?? '').trim(),
+  }))
+  target.active_windows_touched = true
+}
+
 const proxyModalIndex = ref<number | null>(null)
 const proxyModalOpen = ref(false)
 
@@ -104,17 +169,35 @@ function onProxyModalClear(): void {
   clearTargetProxyOverride(proxyModalIndex.value)
 }
 
-function moveTarget(index: number, offset: -1 | 1): void {
-  const targets = form.value?.targets
-  if (!Array.isArray(targets)) return
-  const targetIndex = index + offset
-  if (targetIndex < 0 || targetIndex >= targets.length) return
-  const [target] = targets.splice(index, 1)
-  if (target) targets.splice(targetIndex, 0, target)
+// Issue #378 Phase J: schedule modal mirrors the proxy modal interaction.
+// Untouched save closes without emitting, so the outer form keeps
+// `active_windows_touched=false` (request omits the key); touched save
+// marks the target (empty array = all-day).
+const scheduleModalIndex = ref<number | null>(null)
+const scheduleModalOpen = ref(false)
+
+function openTargetSchedule(index: number): void {
+  scheduleModalIndex.value = index
+  scheduleModalOpen.value = true
 }
 
-// INLINE-proxy-ui: drag reorder reuses the same splice move-order logic.
+const scheduleModalValue = computed(
+  () =>
+    form.value?.targets?.[scheduleModalIndex.value ?? -1]?.active_windows ?? [],
+)
+
+function onScheduleModalSave(
+  value: Array<{ start: string; end: string }>,
+): void {
+  if (scheduleModalIndex.value == null) return
+  onTargetScheduleSave(scheduleModalIndex.value, value)
+}
+
+// Issue #378 Phase H: grip-only drag reorder reuses the same splice
+// move-order logic. `draggable` sits on each row-cell container so the whole
+// row is the drop target; `dragstart` is gated to the grip handle.
 const dragFromIndex = ref<number | null>(null)
+const dragOverIndex = ref<number | null>(null)
 
 function moveTargetTo(from: number, to: number): void {
   const targets = form.value?.targets
@@ -126,7 +209,16 @@ function moveTargetTo(from: number, to: number): void {
   if (target) targets.splice(to, 0, target)
 }
 
-function onDragStart(event: DragEvent, index: number): void {
+function isGripTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null
+  return element?.closest?.('[data-target-drag-handle]') != null
+}
+
+function onRowDragStart(event: DragEvent, index: number): void {
+  if (!isGripTarget(event.target)) {
+    event.preventDefault()
+    return
+  }
   dragFromIndex.value = index
   if (event.dataTransfer) {
     event.dataTransfer.setData('text/plain', String(index))
@@ -134,8 +226,9 @@ function onDragStart(event: DragEvent, index: number): void {
   }
 }
 
-function onDragOver(event: DragEvent): void {
+function onRowDragOver(event: DragEvent, index: number): void {
   event.preventDefault()
+  dragOverIndex.value = index
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
 }
 
@@ -144,12 +237,24 @@ function onDrop(event: DragEvent, index: number): void {
   const raw = event.dataTransfer?.getData('text/plain')
   const from = dragFromIndex.value ?? (raw ? Number(raw) : NaN)
   dragFromIndex.value = null
+  dragOverIndex.value = null
   if (!Number.isInteger(from)) return
   moveTargetTo(from as number, index)
 }
 
 function onDragEnd(): void {
   dragFromIndex.value = null
+  dragOverIndex.value = null
+}
+
+function onGripKeydown(event: KeyboardEvent, index: number): void {
+  if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    moveTargetTo(index, index - 1)
+  } else if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    moveTargetTo(index, index + 1)
+  }
 }
 
 const routingStrategyOptions = computed(() => [
@@ -171,6 +276,13 @@ const targetColumns = computed<
   { id: 'status', header: props.t('status') },
   { id: 'actions' },
 ])
+
+const targetTableMeta = computed(() => ({
+  class: {
+    tr: (row: { index: number }) =>
+      row.index === dragOverIndex.value ? 'bg-elevated' : '',
+  },
+}))
 </script>
 
 <template>
@@ -254,38 +366,25 @@ const targetColumns = computed<
           <UTable
             :data="form?.targets ?? []"
             :columns="targetColumns"
+            :meta="targetTableMeta"
             class="min-w-0"
           >
             <template #order-cell="{ row }">
-              <div class="flex items-center gap-1">
-                <div class="flex flex-col gap-0.5">
-                  <UButton
-                    icon="i-lucide-chevron-up"
-                    color="neutral"
-                    variant="ghost"
-                    size="xs"
-                    :disabled="row.index === 0"
-                    :aria-label="t('moveUp')"
-                    @click="moveTarget(row.index, -1)"
-                  />
-                  <UButton
-                    icon="i-lucide-chevron-down"
-                    color="neutral"
-                    variant="ghost"
-                    size="xs"
-                    :disabled="row.index === (form?.targets?.length ?? 0) - 1"
-                    :aria-label="t('moveDown')"
-                    @click="moveTarget(row.index, 1)"
-                  />
-                </div>
+              <div
+                class="flex items-center gap-1"
+                draggable="true"
+                @dragstart="onRowDragStart($event, row.index)"
+                @dragover="onRowDragOver($event, row.index)"
+                @drop="onDrop($event, row.index)"
+                @dragend="onDragEnd"
+              >
                 <div
-                  draggable="true"
-                  class="inline-flex cursor-grab items-center justify-center rounded p-1 text-muted active:cursor-grabbing"
+                  data-target-drag-handle
+                  tabindex="0"
+                  role="button"
+                  class="inline-flex cursor-grab items-center justify-center rounded p-1 text-muted focus-visible:outline-2 focus-visible:outline-primary active:cursor-grabbing"
                   :aria-label="t('target')"
-                  @dragstart="onDragStart($event, row.index)"
-                  @dragover="onDragOver"
-                  @drop="onDrop($event, row.index)"
-                  @dragend="onDragEnd"
+                  @keydown="onGripKeydown($event, row.index)"
                 >
                   <UIcon name="i-lucide-grip-vertical" class="h-4 w-4" />
                 </div>
@@ -294,8 +393,11 @@ const targetColumns = computed<
             <template #endpoint-cell="{ row }">
               <div
                 class="grid gap-2"
-                @dragover="onDragOver"
+                draggable="true"
+                @dragstart="onRowDragStart($event, row.index)"
+                @dragover="onRowDragOver($event, row.index)"
                 @drop="onDrop($event, row.index)"
+                @dragend="onDragEnd"
               >
                 <div
                   class="grid gap-2 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_auto]"
@@ -318,11 +420,6 @@ const targetColumns = computed<
                     :placeholder="t('upstreamModelOptional')"
                   />
                   <div class="flex items-center gap-1">
-                    <UBadge
-                      v-if="row.original.has_saved_proxy_url_override"
-                      :label="t('saved')"
-                      color="neutral"
-                    />
                     <UTooltip :text="t('proxyUrlOverrideHint')">
                       <UButton
                         type="button"
@@ -337,27 +434,66 @@ const targetColumns = computed<
                         @click="openTargetProxy(row.index)"
                       />
                     </UTooltip>
+                    <UTooltip :text="t('scheduleWindowsHint')">
+                      <UButton
+                        type="button"
+                        size="sm"
+                        :color="
+                          hasTargetSchedule(row.index) ? 'primary' : 'neutral'
+                        "
+                        variant="ghost"
+                        icon="i-lucide-clock"
+                        :aria-label="t('scheduleWindows')"
+                        :aria-pressed="hasTargetSchedule(row.index)"
+                        @click="openTargetSchedule(row.index)"
+                      />
+                    </UTooltip>
+                    <UTooltip :text="scheduleTooltip(row.index)">
+                      <span
+                        class="cursor-default text-xs whitespace-nowrap text-muted"
+                        @click="openTargetSchedule(row.index)"
+                      >
+                        {{ scheduleSummary(row.index) }}
+                      </span>
+                    </UTooltip>
                   </div>
                 </div>
               </div>
             </template>
             <template #status-cell="{ row }">
-              <label
-                class="inline-flex min-h-8 items-center justify-center gap-2 text-[0.75rem] text-default"
-                ><UCheckbox v-model="row.original.enabled" />{{
-                  row.original.enabled ? t('active') : t('disabled')
-                }}</label
+              <div
+                class="flex min-h-8 items-center justify-center"
+                draggable="true"
+                @dragstart="onRowDragStart($event, row.index)"
+                @dragover="onRowDragOver($event, row.index)"
+                @drop="onDrop($event, row.index)"
+                @dragend="onDragEnd"
               >
+                <USwitch
+                  v-model="row.original.enabled"
+                  :aria-label="t('status')"
+                />
+              </div>
             </template>
             <template #actions-cell="{ row }">
-              <UButton
-                type="button"
-                size="sm"
-                color="error"
-                variant="ghost"
-                @click="removeTarget(row.index)"
-                ><UIcon name="i-lucide-trash-2" class="h-4 w-4"
-              /></UButton>
+              <div
+                class="flex items-center"
+                draggable="true"
+                @dragstart="onRowDragStart($event, row.index)"
+                @dragover="onRowDragOver($event, row.index)"
+                @drop="onDrop($event, row.index)"
+                @dragend="onDragEnd"
+              >
+                <UButton
+                  type="button"
+                  size="sm"
+                  color="error"
+                  variant="ghost"
+                  :aria-label="t('delete')"
+                  @click="removeTarget(row.index)"
+                  ><UIcon name="i-lucide-trash-2" class="h-4 w-4"
+                /></UButton>
+              </div>
             </template>
           </UTable>
         </div>
@@ -370,6 +506,14 @@ const targetColumns = computed<
           :t="t"
           @save="onProxyModalSave"
           @clear="onProxyModalClear"
+        />
+
+        <ScheduleWindowsDialog
+          v-model:visible="scheduleModalOpen"
+          :initial-value="scheduleModalValue"
+          :hint="t('scheduleWindowsHint')"
+          :t="t"
+          @save="onScheduleModalSave"
         />
 
         <div class="flex justify-end gap-2 pt-1">

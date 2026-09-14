@@ -210,6 +210,21 @@ HTTPS_PROXY=http://proxy.example.invalid:8080
 NO_PROXY=127.0.0.1,localhost
 ```
 
+### 路由目标排期
+
+每个模型路由目标可配每日生效时间段（`[{start,end}]` `HH:MM`）；留空即全天。
+窗口外的目标不参与路由。时间段按 Worker 本机时间解释：`end` 早于 `start`
+视为跨天（如 `22:00–06:00` 覆盖午夜），开始分钟含在内、结束分钟不含在内，
+命中任一段即生效。`enabled=false` 的目标即使在窗口内也不参选。
+
+排期生效时请让所有 Worker 使用同一时区；多机时区不一致会对同一窗口得出
+不同结论。过滤为 fail-closed：无可用目标时请求直接报错，不会回落到窗口外
+目标；已存排期非法时也不会静默当作全天。
+
+```text
+no route target is active for route 'summarizer' at 03:12 (worker-local time; windows: primary(enabled): 06:30–14:00, 18:00–20:00; night(disabled): all-day)
+```
+
 ### 单机二进制
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的

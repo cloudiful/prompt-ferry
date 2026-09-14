@@ -4,6 +4,7 @@ INSERT INTO model_route_targets(
     position,
     enabled,
     upstream_model,
-    proxy_url_override
+    proxy_url_override,
+    active_windows
 )
-VALUES ($1, $2, $3, $4, $5, $6)
+VALUES ($1, $2, $3, $4, $5, $6, $7)

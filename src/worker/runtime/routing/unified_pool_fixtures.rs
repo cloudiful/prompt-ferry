@@ -144,6 +144,7 @@ pub(super) fn target(
         proxy_url: None,
 
         proxy_url_override: None,
+        active_windows: None,
     }
 }
 

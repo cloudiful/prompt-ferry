@@ -46,6 +46,7 @@ pub async fn spawn_worker(
                 enabled: true,
                 upstream_model: None,
                 proxy_url_override: None,
+                active_windows: None,
             }],
         },
     )

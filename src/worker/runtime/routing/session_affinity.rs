@@ -302,7 +302,13 @@ fn select_new_session_unit<'a>(
 ) -> Result<NewSessionUnit<'a>> {
     if let Some(endpoint_id) = request_prompt_log.conversation_override_endpoint_id {
         let target = candidate_target_by_endpoint(candidate, endpoint_id)
-            .filter(|target| target.enabled)
+            .filter(|target| {
+                target.enabled
+                    && crate::db::stored_is_active_at(
+                        target.active_windows.as_deref(),
+                        crate::db::worker_local_minutes_now(),
+                    )
+            })
             .ok_or_else(|| {
                 anyhow::Error::new(RouteAffinityError::target_unavailable(audit.clone()))
             })?;
@@ -325,7 +331,13 @@ fn select_new_session_unit<'a>(
     if let Some(target) = request_prompt_log
         .preferred_endpoint_id
         .and_then(|endpoint_id| candidate_target_by_endpoint(candidate, endpoint_id))
-        .filter(|target| target.enabled)
+        .filter(|target| {
+            target.enabled
+                && crate::db::stored_is_active_at(
+                    target.active_windows.as_deref(),
+                    crate::db::worker_local_minutes_now(),
+                )
+        })
     {
         let (key, invalid_override) = select_target_unit(
             target,

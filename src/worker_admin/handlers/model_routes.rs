@@ -66,9 +66,10 @@ pub(super) async fn update_model_route(
     // Issue #368 Phase B: PATCH carry for per-target overrides. The unified
     // route shape is redacted, so load the stored overrides separately;
     // omitted per-target `proxy_url_override` keeps the stored value.
-    let existing_overrides = load_existing_route_overrides(&state, rule_id).await;
+    // Issue #378 Phase I: same carry for `active_windows` (omitted keeps).
+    let (existing_overrides, existing_windows) = load_existing_route_carry(&state, rule_id).await;
     let input = match body
-        .into_create_with_existing(&state, &existing_overrides)
+        .into_create_with_existing(&state, &existing_overrides, &existing_windows)
         .await
     {
         Ok(input) => input,
@@ -95,27 +96,31 @@ pub(super) async fn update_model_route(
 /// missing rules or backends yield an empty map and the update then falls
 /// back to inherit; the subsequent `update_model_route` still returns 404
 /// for unknown rules.
-async fn load_existing_route_overrides(
+/// Issue #378 Phase I: also loads stored `active_windows` for the same
+/// omit-when-untouched carry (`None`/empty means all-day).
+async fn load_existing_route_carry(
     state: &AdminState,
     rule_id: Uuid,
-) -> HashMap<Uuid, Option<String>> {
+) -> (
+    HashMap<Uuid, Option<String>>,
+    HashMap<Uuid, Vec<db::ActiveWindow>>,
+) {
     if let Some(pool) = state.config_repository.as_postgres() {
         if let Ok(Some(rule)) = db::get_model_endpoint_rule(pool, rule_id).await {
-            return rule
-                .targets
-                .into_iter()
-                .map(|target| {
-                    let override_value = target
-                        .proxy_url_override
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_string);
-                    (target.endpoint_id, override_value)
-                })
-                .collect();
+            return carry_from_targets(
+                rule.targets
+                    .iter()
+                    .map(|target| {
+                        (
+                            target.endpoint_id,
+                            target.proxy_url_override.clone(),
+                            target.active_windows.clone(),
+                        )
+                    })
+                    .collect(),
+            );
         }
-        return HashMap::new();
+        return (HashMap::new(), HashMap::new());
     }
     if let Some(repo) = state.config_repository.as_sqlite() {
         if let Ok(Some(route)) = repo
@@ -124,22 +129,48 @@ async fn load_existing_route_overrides(
             .await
             .map_err(|_| anyhow::anyhow!("sqlite lookup failed"))
         {
-            return route
-                .targets
-                .into_iter()
-                .map(|target| {
-                    let override_value = target
-                        .proxy_url_override
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_string);
-                    (target.endpoint_id, override_value)
-                })
-                .collect();
+            return carry_from_targets(
+                route
+                    .targets
+                    .iter()
+                    .map(|target| {
+                        (
+                            target.endpoint_id,
+                            target.proxy_url_override.clone(),
+                            parse_sqlite_windows(&target.active_windows),
+                        )
+                    })
+                    .collect(),
+            );
         }
     }
-    HashMap::new()
+    (HashMap::new(), HashMap::new())
+}
+
+fn carry_from_targets(
+    targets: Vec<(Uuid, Option<String>, Vec<db::ActiveWindow>)>,
+) -> (
+    HashMap<Uuid, Option<String>>,
+    HashMap<Uuid, Vec<db::ActiveWindow>>,
+) {
+    let mut overrides = HashMap::new();
+    let mut windows = HashMap::new();
+    for (endpoint_id, proxy_override, active_windows) in targets {
+        overrides.insert(
+            endpoint_id,
+            proxy_override
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        );
+        windows.insert(endpoint_id, active_windows);
+    }
+    (overrides, windows)
+}
+
+fn parse_sqlite_windows(raw: &Option<String>) -> Vec<db::ActiveWindow> {
+    db::parse_stored_windows(raw.as_deref()).unwrap_or_default()
 }
 
 pub(super) async fn delete_model_route(

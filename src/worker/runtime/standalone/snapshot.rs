@@ -196,6 +196,7 @@ mod tests {
                     enabled: true,
                     upstream_model: None,
                     proxy_url_override: None,
+                    active_windows: None,
                 }],
             }],
             client_keys: vec![ClientKeyConfig {

@@ -24,6 +24,9 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         // means inherit.
         proxy_url_override: '',
         has_saved_proxy_url_override: false,
+        // Issue #378 Phase J: untouched all-day schedule.
+        active_windows: [],
+        active_windows_touched: false,
       },
     ],
   }
@@ -77,6 +80,13 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
       // `has_proxy_url_override` is optional for legacy payloads.
       proxy_url_override: '',
       has_saved_proxy_url_override: target?.has_proxy_url_override ?? false,
+      // Issue #378 Phase J: copy stored windows; untouched until the
+      // schedule dialog saves. Tolerate legacy payloads without the field.
+      active_windows: (target?.active_windows ?? []).map((window) => ({
+        start: window?.start ?? '',
+        end: window?.end ?? '',
+      })),
+      active_windows_touched: false,
     })),
   }
 }
@@ -111,11 +121,28 @@ export function modelRouteFormToRequest(
             : target?.has_saved_proxy_url_override
               ? undefined
               : ''
+        // Issue #378 Phase J: omit-when-untouched for schedules.
+        // Untouched omits the key (PATCH keeps the stored value);
+        // touched sends the edited array (empty = all-day, sorted).
+        const touched = target?.active_windows_touched ?? false
+        const active_windows = touched
+          ? [...(target?.active_windows ?? [])]
+              .map((window) => ({
+                start: (window?.start ?? '').trim(),
+                end: (window?.end ?? '').trim(),
+              }))
+              .sort((a, b) =>
+                a.start === b.start
+                  ? a.end.localeCompare(b.end)
+                  : a.start.localeCompare(b.start),
+              )
+          : undefined
         return {
           endpoint_id: target?.endpoint_id ?? '',
           enabled: target?.enabled ?? true,
           upstream_model: (target?.upstream_model ?? '').trim() || undefined,
           proxy_url_override,
+          active_windows,
         }
       }),
   }

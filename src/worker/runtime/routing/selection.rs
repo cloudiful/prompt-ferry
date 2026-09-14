@@ -94,6 +94,19 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
     user_id: i64,
     routing_key: Option<&str>,
 ) -> anyhow::Result<Option<SelectedRoute>> {
+    // Issue #378 Phase I: schedule fail-closed. Worker-local time; disabled
+    // targets are always out. Empty after filtering carries route, time,
+    // and per-target windows summaries (no silent fallback).
+    let now_min = db::worker_local_minutes_now();
+    if !candidate
+        .targets
+        .iter()
+        .any(|target| db::candidate_target_is_active(target, now_min))
+    {
+        return Err(anyhow::anyhow!(db::schedule_unavailable_message(
+            candidate, now_min
+        )));
+    }
     if services.standalone_state().is_none()
         && candidate.routing_strategy == db::ModelRouteRoutingStrategy::ResponsesSessionAffinity
         && (request.path == "/v1/responses" || request.path == "/v1/chat/completions")
@@ -154,10 +167,16 @@ fn select_unified_candidate<'a>(
     let estimated = estimate_input_tokens(&request.body);
 
     if let Some(endpoint_id) = request_prompt_log.conversation_override_endpoint_id
-        && let Some(target) = candidate
-            .targets
-            .iter()
-            .find(|target| target.enabled && target.endpoint_id == endpoint_id)
+        && let Some(target) = candidate.targets.iter().find(|target| {
+            // Issue #378 Phase I: window-inactive override targets do not
+            // participate (same worker-local clock as the pool filter).
+            target.enabled
+                && target.endpoint_id == endpoint_id
+                && db::stored_is_active_at(
+                    target.active_windows.as_deref(),
+                    db::worker_local_minutes_now(),
+                )
+        })
     {
         let units = key_pool::target_units(target, quota_cache, model);
         let drawn = key_pool::draw(&units, &stable_key, quota_cache, estimated);
@@ -412,6 +431,7 @@ mod tests {
             service_tier: db::MinimaxServiceTier::Standard,
             proxy_url: proxy_url.map(str::to_string),
             proxy_url_override: proxy_override.map(str::to_string),
+            active_windows: None,
         }
     }
 

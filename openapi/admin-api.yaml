@@ -2500,6 +2500,16 @@ paths:
                 $ref: '#/components/schemas/UsageRetentionSettings'
 components:
   schemas:
+    ActiveWindow:
+      type: object
+      required:
+      - start
+      - end
+      properties:
+        end:
+          type: string
+        start:
+          type: string
     AppliedReplacementSchema:
       type: object
       required:
@@ -4665,6 +4675,13 @@ components:
       - created_at
       - updated_at
       properties:
+        active_windows:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActiveWindow'
+          description: |-
+            Issue #378 Phase I: per-target effective windows (`HH:MM` pairs).
+            Empty means all-day.
         created_at:
           type: string
           format: date-time
@@ -4705,6 +4722,16 @@ components:
       required:
       - endpoint_id
       properties:
+        active_windows:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/ActiveWindow'
+          description: |-
+            Issue #378 Phase I: effective windows (`[{start,end}]` `HH:MM`).
+            `None` (omitted) keeps the stored value on PATCH; `Some([])`
+            means all-day; `Some([...])` replaces after validation.
         enabled:
           type:
           - boolean

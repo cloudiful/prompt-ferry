@@ -30,6 +30,13 @@ pub fn bound_binding_state(
     if !target.enabled {
         return BoundBindingState::StaleEndpoint;
     }
+    // Issue #378 Phase I: window-inactive bindings are stale (worker-local).
+    if !crate::db::stored_is_active_at(
+        target.active_windows.as_deref(),
+        crate::db::worker_local_minutes_now(),
+    ) {
+        return BoundBindingState::StaleEndpoint;
+    }
     match select_bound_api_key(target, binding) {
         Some(_) => BoundBindingState::Active,
         None => BoundBindingState::StaleKey,

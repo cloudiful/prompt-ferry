@@ -304,6 +304,13 @@ pub(crate) async fn insert_route(
                 .map(str::trim)
                 .filter(|v| !v.is_empty()),
         )?;
+        // Issue #378 Phase I: plaintext schedule; empty normalizes to NULL.
+        let active_windows = target
+            .active_windows
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string);
         standalone_query!("src/sql/standalone/save_route_target.sql")
             .bind(target.target_id.to_string())
             .bind(route.rule_id.to_string())
@@ -314,6 +321,7 @@ pub(crate) async fn insert_route(
             .bind(envelope_part(&proxy_envelope, EnvelopePart::Ciphertext))
             .bind(envelope_part(&proxy_envelope, EnvelopePart::Nonce))
             .bind(envelope_version(&proxy_envelope))
+            .bind(active_windows)
             .execute(&mut **transaction)
             .await?;
     }
@@ -353,6 +361,7 @@ pub(crate) async fn insert_encrypted_route(
                 EnvelopePart::Nonce,
             ))
             .bind(envelope_version(&target.proxy_url_override))
+            .bind(target.target.active_windows.clone())
             .execute(&mut **transaction)
             .await?;
     }

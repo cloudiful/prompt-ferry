@@ -381,6 +381,11 @@ pub struct ModelRouteTargetConfig {
     // memory; SQLite persists the 0018 envelope.
     #[serde(default, skip_serializing)]
     pub proxy_url_override: Option<String>,
+    // Issue #378 Phase I: effective windows as normalized JSON array
+    // (`None`/empty means all-day). Plaintext (not a secret); SQLite
+    // persists the 0020 `active_windows` column.
+    #[serde(default)]
+    pub active_windows: Option<String>,
 }
 
 impl fmt::Debug for ModelRouteTargetConfig {
@@ -396,6 +401,7 @@ impl fmt::Debug for ModelRouteTargetConfig {
                 "proxy_url_override",
                 &redacted_optional_secret(self.proxy_url_override.as_deref()),
             )
+            .field("active_windows", &self.active_windows)
             .finish()
     }
 }

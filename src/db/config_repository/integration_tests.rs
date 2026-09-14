@@ -232,6 +232,7 @@ async fn endpoint_proxy_round_trips_with_encrypted_envelope() {
             proxy_url_override: Some(
                 "socks5h://route-user:route-pass@route-proxy.example:1080".to_string(),
             ),
+            active_windows: None,
         }],
     };
     repo.create_model_route(rule_id, route_input)
@@ -625,6 +626,7 @@ async fn model_route_crud_round_trips_with_target_persistence() {
             enabled: true,
             upstream_model: Some("gpt-4o-mini".to_string()),
             proxy_url_override: None,
+            active_windows: None,
         }],
     };
     let rule = repo

@@ -70,7 +70,13 @@ pub struct RouteConfig {
     pub proxy_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, FromRow, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ActiveWindow {
+    pub start: String,
+    pub end: String,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ModelRouteTarget {
     pub target_id: uuid::Uuid,
     pub rule_id: uuid::Uuid,
@@ -88,8 +94,11 @@ pub struct ModelRouteTarget {
     /// Issue #368 Phase C (P2): response-side saved-override indicator.
     /// `true` when an override is stored; the secret itself is never echoed.
     #[serde(default)]
-    #[sqlx(default)]
     pub has_proxy_url_override: bool,
+    /// Issue #378 Phase I: per-target effective windows (`HH:MM` pairs).
+    /// Empty means all-day.
+    #[serde(default)]
+    pub active_windows: Vec<ActiveWindow>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -132,6 +141,11 @@ pub struct ModelRouteTargetCreate {
     // (SQLite encrypts via the 0018 envelope). `None`/empty means inherit.
     #[serde(default)]
     pub proxy_url_override: Option<String>,
+    // Issue #378 Phase I: effective windows. `None` (omitted) means keep
+    // on PATCH / inherit on create; `Some([])` means all-day; `Some([...])`
+    // replaces after validation (sorted normalize).
+    #[serde(default)]
+    pub active_windows: Option<Vec<ActiveWindow>>,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -179,6 +193,10 @@ pub struct ModelRouteCandidateTarget {
     // carried here so the selector can pick without extra lookups.
     pub proxy_url: Option<String>,
     pub proxy_url_override: Option<String>,
+    // Issue #378 Phase I: normalized `active_windows` JSON (`None`/empty
+    // means all-day). Carried as the stored string so routing can filter
+    // by worker-local time without reparsing request shapes.
+    pub active_windows: Option<String>,
 }
 
 #[derive(Debug, Clone)]

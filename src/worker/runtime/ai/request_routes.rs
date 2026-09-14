@@ -267,6 +267,7 @@ mod tests {
                     enabled: true,
                     upstream_model: Some("provider-local".to_string()),
                     proxy_url_override: None,
+                    active_windows: None,
                 }],
             }],
             ..StandaloneConfig::default()

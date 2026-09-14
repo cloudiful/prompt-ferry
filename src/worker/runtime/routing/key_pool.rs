@@ -158,6 +158,14 @@ fn target_units_mode<'a>(
     if !target.enabled {
         return Vec::new();
     }
+    // Issue #378 Phase I: window-inactive targets never enter the pool.
+    // Worker-local time; `enabled=false` stays out above.
+    if !db::stored_is_active_at(
+        target.active_windows.as_deref(),
+        db::worker_local_minutes_now(),
+    ) {
+        return Vec::new();
+    }
     let keys = eligible_keys(target);
     if keys.is_empty() {
         return secret_unit(target).into_iter().collect();

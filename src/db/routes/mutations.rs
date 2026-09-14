@@ -82,6 +82,12 @@ async fn sync_model_route_targets(
             .as_deref()
             .map(str::trim)
             .filter(|v| !v.is_empty());
+        // Issue #378 Phase I: `active_windows` already normalized by the
+        // admin layer (`None`/empty means all-day -> NULL).
+        let active_windows = match target.active_windows.as_deref() {
+            None | Some([]) => None,
+            Some(windows) => active_windows::storage_value(windows),
+        };
         sqlx::query_file!(
             "src/sql/routes/insert_model_route_target.sql",
             rule_id,
@@ -90,6 +96,7 @@ async fn sync_model_route_targets(
             target.enabled,
             target.upstream_model,
             proxy_override,
+            active_windows,
         )
         .execute(&mut **tx)
         .await?;

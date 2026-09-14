@@ -9,11 +9,19 @@ use crate::db::types::{
     ModelRouteTarget, RouteConfig, SnapshotKey,
 };
 
+mod active_windows;
 mod hydrate;
 mod matching;
 mod mutations;
 mod queries;
 mod snapshot;
+
+pub use crate::db::types::ActiveWindow;
+pub use active_windows::{
+    candidate_target_is_active, format_minutes, is_active_at, normalize_request_windows,
+    parse_stored_windows, schedule_unavailable_message, storage_value, stored_is_active_at,
+    summarize_stored, summarize_windows, worker_local_hhmm_now, worker_local_minutes_now,
+};
 
 pub use matching::{cleanup_orphan_model_routes, get_route, model_pattern_matches};
 pub use mutations::{
@@ -52,6 +60,7 @@ struct ModelRouteCandidateRow {
     target_enabled: bool,
     upstream_model: Option<String>,
     proxy_url_override: Option<String>,
+    active_windows: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -65,6 +74,7 @@ struct ModelRouteTargetRow {
     enabled: bool,
     upstream_model: Option<String>,
     proxy_url_override: Option<String>,
+    active_windows: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }

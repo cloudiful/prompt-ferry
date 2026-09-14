@@ -67,6 +67,7 @@ declare module 'vue' {
     ResetPasswordDialog: typeof import('./src/components/users/ResetPasswordDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    ScheduleWindowsDialog: typeof import('./src/components/shared/ScheduleWindowsDialog.vue')['default']
     SessionRoutingSection: typeof import('./src/components/usage/detail/SessionRoutingSection.vue')['default']
     SettingsCard: typeof import('./src/components/settings/SettingsCard.vue')['default']
     SettingsGeneralTab: typeof import('./src/components/settings/SettingsGeneralTab.vue')['default']

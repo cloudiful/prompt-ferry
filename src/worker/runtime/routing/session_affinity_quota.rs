@@ -27,8 +27,14 @@ pub(super) fn selection_for_binding<'a>(
     request: &BufferedBridgeRequest,
     quota_cache: Option<&TokenPlanQuotaCache>,
 ) -> BindingSelection<'a> {
-    let Some(target) = candidate_target_by_endpoint(candidate, binding.endpoint_id)
-        .filter(|target| target.enabled)
+    let Some(target) =
+        candidate_target_by_endpoint(candidate, binding.endpoint_id).filter(|target| {
+            target.enabled
+                && crate::db::stored_is_active_at(
+                    target.active_windows.as_deref(),
+                    crate::db::worker_local_minutes_now(),
+                )
+        })
     else {
         return BindingSelection::Unavailable;
     };

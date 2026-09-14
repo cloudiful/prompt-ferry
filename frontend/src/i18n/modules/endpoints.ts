@@ -166,8 +166,19 @@ export const endpointMessages = {
     proxySavedHidden: '已保存的代理已隐藏',
     proxyKeepHint:
       '已保存代理已隐藏：直接保存将保留原值；如需移除请点击清除，或选择直连并保存。',
-    moveUp: '上移',
-    moveDown: '下移',
+    scheduleSettings: '排期设置',
+    scheduleWindows: '生效时间段',
+    scheduleWindowsHint:
+      '按 Worker 本机时间判断是否生效；留空即全天。结束早于开始视为跨天（如 22:00–06:00）；命中任一段即生效。',
+    scheduleAllDay: '全天',
+    scheduleAddWindow: '新增时间段',
+    scheduleRestoreAllDay: '恢复全天',
+    scheduleStart: '开始',
+    scheduleEnd: '结束',
+    scheduleRequired: '开始与结束必填',
+    scheduleInvalid: '需为 HH:MM（00:00–23:59）',
+    scheduleEqual: '开始与结束不能相同',
+    scheduleMoreWindows: '等{count}段',
   },
   'en-US': {
     addTarget: 'Add target',
@@ -340,7 +351,18 @@ export const endpointMessages = {
     proxySavedHidden: 'Saved proxy is hidden',
     proxyKeepHint:
       'Saved proxy is hidden: saving without changes keeps it. To remove it, use Clear or select Direct and save.',
-    moveUp: 'Move up',
-    moveDown: 'Move down',
+    scheduleSettings: 'Schedule settings',
+    scheduleWindows: 'Active windows',
+    scheduleWindowsHint:
+      'Evaluated in worker-local time; empty means all-day. End before start wraps overnight (e.g. 22:00–06:00); any matching window activates the target.',
+    scheduleAllDay: 'All day',
+    scheduleAddWindow: 'Add window',
+    scheduleRestoreAllDay: 'Restore all-day',
+    scheduleStart: 'Start',
+    scheduleEnd: 'End',
+    scheduleRequired: 'Start and end are required',
+    scheduleInvalid: 'Must be HH:MM (00:00–23:59)',
+    scheduleEqual: 'Start must not equal end',
+    scheduleMoreWindows: '+{count} windows',
   },
 } as const

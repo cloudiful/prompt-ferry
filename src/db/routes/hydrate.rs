@@ -48,6 +48,11 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
                 .proxy_url_override
                 .as_deref()
                 .is_some_and(|raw| !raw.trim().is_empty());
+            // Issue #378 Phase I: stored JSON array; corrupt reads as
+            // all-day for display (routing fails closed separately).
+            let active_windows =
+                active_windows::parse_stored_windows(row.active_windows.as_deref())
+                    .unwrap_or_default();
             ModelRouteTarget {
                 target_id: row.target_id,
                 rule_id: row.rule_id,
@@ -59,6 +64,7 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
                 upstream_model: row.upstream_model,
                 proxy_url_override: row.proxy_url_override,
                 has_proxy_url_override,
+                active_windows,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
             }
@@ -127,6 +133,7 @@ pub(super) async fn model_route_candidates_by_rule(
                 service_tier,
                 proxy_url: row.proxy_url.clone(),
                 proxy_url_override: row.proxy_url_override.clone(),
+                active_windows: row.active_windows.clone(),
             });
             continue;
         }
@@ -155,6 +162,7 @@ pub(super) async fn model_route_candidates_by_rule(
                 service_tier,
                 proxy_url: row.proxy_url,
                 proxy_url_override: row.proxy_url_override,
+                active_windows: row.active_windows,
             }],
         });
     }

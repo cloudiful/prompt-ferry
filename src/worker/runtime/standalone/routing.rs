@@ -122,6 +122,7 @@ fn target_from_endpoint(
         },
         proxy_url: endpoint.proxy_url.clone(),
         proxy_url_override: target.proxy_url_override.clone(),
+        active_windows: target.active_windows.clone(),
     }
 }
 
@@ -218,6 +219,7 @@ mod tests {
                         enabled: true,
                         upstream_model: None,
                         proxy_url_override: None,
+                        active_windows: None,
                     }],
                 },
                 ModelRouteConfig {
@@ -236,6 +238,7 @@ mod tests {
                         enabled: true,
                         upstream_model: None,
                         proxy_url_override: None,
+                        active_windows: None,
                     }],
                 },
             ],
@@ -286,6 +289,7 @@ mod tests {
                     enabled: true,
                     upstream_model: None,
                     proxy_url_override: None,
+                    active_windows: None,
                 }],
             }],
             ..StandaloneConfig::default()
