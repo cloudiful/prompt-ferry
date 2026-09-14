@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import JsonSyntaxBlock from '@/components/usage/detail/JsonSyntaxBlock.vue'
 import type {
   RequestRecordDetail,
@@ -19,11 +19,23 @@ const props = defineProps<{
   detail: RequestRecordDetail | null
   requestFull: RequestRecordFullResponse | null
   requestFullLoading: boolean
+  requestFullLoadingMore?: boolean
   responsePendingText: string
   t: TranslateFn
 }>()
 
+const emit = defineEmits<{
+  loadMoreRequestFull: []
+}>()
+
 const expandedIds = ref<string[]>([])
+const sentinel = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | null = null
+
+const hasMoreMessages = computed(() => props.requestFull?.has_more === true)
+const loadingMore = computed(() => props.requestFullLoadingMore === true)
+const totalMessages = computed(() => props.requestFull?.total_messages ?? null)
+const loadedCount = computed(() => props.requestFull?.messages.length ?? 0)
 
 const items = computed<TimelineItem[]>(() => {
   const merged: TimelineItem[] = []
@@ -128,12 +140,50 @@ function toggleItem(id: string): void {
     ? expandedIds.value.filter((value) => value !== id)
     : [...expandedIds.value, id]
 }
+
+function setupObserver(): void {
+  teardownObserver()
+  if (!sentinel.value || !hasMoreMessages.value) return
+  // Bottom infinite scroll: when the sentinel enters view, fetch the next
+  // newest-first page. The visible loading indicator is rendered below.
+  observer = new IntersectionObserver(
+    (entries) => {
+      const entry = entries[0]
+      if (!entry?.isIntersecting) return
+      if (loadingMore.value || props.requestFullLoading) return
+      if (!hasMoreMessages.value) return
+      emit('loadMoreRequestFull')
+    },
+    { rootMargin: '240px' },
+  )
+  observer.observe(sentinel.value)
+}
+
+function teardownObserver(): void {
+  observer?.disconnect()
+  observer = null
+}
+
+watch(
+  [sentinel, hasMoreMessages, loadingMore],
+  () => {
+    setupObserver()
+  },
+  { flush: 'post' },
+)
+
+onBeforeUnmount(() => {
+  teardownObserver()
+})
 </script>
 
 <template>
   <div class="grid gap-3">
     <div class="text-xs font-semibold text-muted">
       {{ t('rawMessages') }}
+      <span v-if="totalMessages != null" class="font-normal text-dimmed">
+        ({{ loadedCount }}/{{ totalMessages }})
+      </span>
     </div>
     <div
       v-if="requestFullLoading && !requestFull && !items.length"
@@ -173,6 +223,21 @@ function toggleItem(id: string): void {
         >
           <JsonSyntaxBlock :value="item.value" />
         </div>
+      </div>
+      <div v-if="hasMoreMessages" class="grid justify-items-center gap-2 py-1">
+        <div ref="sentinel" class="h-px w-full" aria-hidden="true" />
+        <div v-if="loadingMore" class="text-xs text-dimmed">
+          {{ t('loading') }}
+        </div>
+        <UButton
+          v-else
+          size="xs"
+          color="neutral"
+          variant="ghost"
+          @click="emit('loadMoreRequestFull')"
+        >
+          {{ t('showMoreContent') }}
+        </UButton>
       </div>
     </div>
   </div>

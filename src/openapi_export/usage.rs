@@ -1,10 +1,10 @@
 use crate::{
     db,
     worker_admin_types::{
-        ConversationEndpointOverrideRequest, RequestRecordFullResponse, RequestRecordOverviewQuery,
-        RequestRecordPruneResponse, RequestRecordSeriesQuery, RequestRecordSummaryQuery,
-        RequestRecordsClearRequest, RequestRecordsClearResponse, RequestRecordsQuery,
-        SessionAffinityResetResponse, SessionRouteOptionsResponse,
+        ConversationEndpointOverrideRequest, RequestRecordFullQuery, RequestRecordFullResponse,
+        RequestRecordOverviewQuery, RequestRecordPruneResponse, RequestRecordSeriesQuery,
+        RequestRecordSummaryQuery, RequestRecordsClearRequest, RequestRecordsClearResponse,
+        RequestRecordsQuery, SessionAffinityResetResponse, SessionRouteOptionsResponse,
     },
 };
 
@@ -89,7 +89,7 @@ pub(super) fn request_record_reset_session_affinity() {}
 #[utoipa::path(
     get,
     path = "/api/v1/admin/request-records/{record_id}/request-full",
-    params(("record_id" = i64, Path, description = "Request record ID")),
+    params(RequestRecordFullQuery, ("record_id" = i64, Path, description = "Request record ID")),
     responses((status = 200, body = RequestRecordFullResponse, description = "Full stored request record payload")),
     tag = "request-records"
 )]

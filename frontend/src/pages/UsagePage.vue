@@ -31,6 +31,7 @@ const {
   formatting,
   handleOverviewDrilldown,
   loadDetailRequestFull,
+  loadMoreDetailRequestFull,
   onFilter,
   onPage,
   onSort,
@@ -97,6 +98,7 @@ watch(activeSection, (next) => {
       @drilldown="handleOverviewDrilldown"
       @filter="onFilter"
       @load-detail-request-full="loadDetailRequestFull"
+      @load-more-detail-request-full="loadMoreDetailRequestFull"
       @open-clear-dialog="clearDialogVisible = true"
       @open-detail="openDetail"
       @page="onPage"

@@ -191,6 +191,63 @@ pub(in crate::worker_admin::handlers) fn parse_usage_series_bucket(
     }
 }
 
+pub const REQUEST_FULL_DEFAULT_LIMIT: i64 = 10;
+pub const REQUEST_FULL_MAX_LIMIT: i64 = 100;
+
+/// Resolve fail-safe pagination for the request-full messages payload.
+///
+/// - `limit`: defaults to 10, values <= 0 fall back to 10, values > 100 clamp to 100.
+/// - `offset`/`cursor`: `cursor` (stringified offset) wins when parseable and
+///   non-negative; otherwise `offset` is used with negatives clamped to 0.
+/// - `order`: case-insensitive `asc` vs `desc`, anything else falls back to `desc`
+///   (newest first).
+pub(in crate::worker_admin::handlers) fn resolve_request_full_pagination(
+    query: &RequestRecordFullQuery,
+) -> (i64, i64, bool, String) {
+    let limit = match query.limit {
+        None => REQUEST_FULL_DEFAULT_LIMIT,
+        Some(value) if value <= 0 => REQUEST_FULL_DEFAULT_LIMIT,
+        Some(value) if value > REQUEST_FULL_MAX_LIMIT => REQUEST_FULL_MAX_LIMIT,
+        Some(value) => value,
+    };
+    let offset_from_param = match query.offset {
+        None => 0,
+        Some(value) if value < 0 => 0,
+        Some(value) => value,
+    };
+    let offset = query
+        .cursor
+        .as_deref()
+        .and_then(|raw| raw.trim().parse::<i64>().ok())
+        .filter(|parsed| *parsed >= 0)
+        .unwrap_or(offset_from_param);
+    let desc = !query
+        .order
+        .as_deref()
+        .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("asc"));
+    let order = if desc {
+        "desc".to_string()
+    } else {
+        "asc".to_string()
+    };
+    (limit, offset, desc, order)
+}
+
+/// Slice bounds for an ordered message list of length `total`.
+/// Returns `(start, end, has_more, next_cursor)`.
+pub(in crate::worker_admin::handlers) fn paginate_message_index(
+    total: usize,
+    limit: i64,
+    offset: i64,
+) -> (usize, usize, bool, Option<String>) {
+    let total_i64 = total as i64;
+    let start = offset.min(total_i64).max(0) as usize;
+    let end = (offset + limit).min(total_i64).max(start as i64) as usize;
+    let has_more = end < total;
+    let next_cursor = has_more.then(|| end.to_string());
+    (start, end, has_more, next_cursor)
+}
+
 pub(in crate::worker_admin::handlers) fn build_request_record_query(
     user: &SessionUser,
     query: UsageEventsQuery,
@@ -606,5 +663,140 @@ mod tests {
             resolve_record_range_bounds(Some(RequestRecordOverviewRange::Custom), None, None, now)
                 .expect_err("custom needs bounds");
         assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn request_full_pagination_defaults_to_newest_first_page_of_ten() {
+        use super::{
+            REQUEST_FULL_DEFAULT_LIMIT, paginate_message_index, resolve_request_full_pagination,
+        };
+        use crate::worker_admin::types::RequestRecordFullQuery;
+
+        let query = RequestRecordFullQuery {
+            limit: None,
+            offset: None,
+            cursor: None,
+            order: None,
+        };
+        let (limit, offset, desc, order) = resolve_request_full_pagination(&query);
+        assert_eq!(limit, REQUEST_FULL_DEFAULT_LIMIT);
+        assert_eq!(limit, 10);
+        assert_eq!(offset, 0);
+        assert!(desc);
+        assert_eq!(order, "desc");
+
+        let (start, end, has_more, next_cursor) = paginate_message_index(25, limit, offset);
+        assert_eq!((start, end), (0, 10));
+        assert!(has_more);
+        assert_eq!(next_cursor.as_deref(), Some("10"));
+    }
+
+    #[test]
+    fn request_full_pagination_orders_desc_newest_first() {
+        use super::{paginate_message_index, resolve_request_full_pagination};
+        use crate::worker_admin::types::RequestRecordFullQuery;
+
+        // Simulate storage order oldest->newest, then apply desc ordering.
+        let stored: Vec<i64> = (0..5).collect();
+        let query = RequestRecordFullQuery {
+            limit: Some(2),
+            offset: Some(0),
+            cursor: None,
+            order: Some("desc".to_string()),
+        };
+        let (limit, offset, desc, _) = resolve_request_full_pagination(&query);
+        assert!(desc);
+        let ordered: Vec<i64> = if desc {
+            stored.iter().rev().cloned().collect()
+        } else {
+            stored.clone()
+        };
+        assert_eq!(ordered, vec![4, 3, 2, 1, 0]);
+        let (start, end, has_more, next_cursor) =
+            paginate_message_index(ordered.len(), limit, offset);
+        assert_eq!(&ordered[start..end], &[4, 3]);
+        assert!(has_more);
+        assert_eq!(next_cursor.as_deref(), Some("2"));
+
+        // Second page continues with older messages.
+        let (start, end, has_more, next_cursor) = paginate_message_index(ordered.len(), limit, 2);
+        assert_eq!(&ordered[start..end], &[2, 1]);
+        assert!(has_more);
+        assert_eq!(next_cursor.as_deref(), Some("4"));
+
+        // Asc order preserves storage order.
+        let asc_query = RequestRecordFullQuery {
+            limit: Some(2),
+            offset: Some(0),
+            cursor: None,
+            order: Some("ASC".to_string()),
+        };
+        let (_, _, desc, _) = resolve_request_full_pagination(&asc_query);
+        assert!(!desc);
+    }
+
+    #[test]
+    fn request_full_pagination_applies_fail_safe_defaults() {
+        use super::{paginate_message_index, resolve_request_full_pagination};
+        use crate::worker_admin::types::RequestRecordFullQuery;
+
+        // Non-positive limits fall back to the default instead of erroring.
+        for bad_limit in [0, -5] {
+            let query = RequestRecordFullQuery {
+                limit: Some(bad_limit),
+                offset: None,
+                cursor: None,
+                order: None,
+            };
+            let (limit, _, _, _) = resolve_request_full_pagination(&query);
+            assert_eq!(limit, 10, "limit {bad_limit} must fall back to 10");
+        }
+
+        // Oversized limits clamp to the 100-item maximum.
+        let query = RequestRecordFullQuery {
+            limit: Some(10_000),
+            offset: None,
+            cursor: None,
+            order: None,
+        };
+        let (limit, _, _, _) = resolve_request_full_pagination(&query);
+        assert_eq!(limit, 100);
+
+        // Negative offsets clamp to zero; invalid order falls back to desc.
+        let query = RequestRecordFullQuery {
+            limit: None,
+            offset: Some(-3),
+            cursor: None,
+            order: Some("newest".to_string()),
+        };
+        let (_, offset, desc, order) = resolve_request_full_pagination(&query);
+        assert_eq!(offset, 0);
+        assert!(desc);
+        assert_eq!(order, "desc");
+
+        // Cursor wins over offset when parseable; unparseable cursor is ignored.
+        let query = RequestRecordFullQuery {
+            limit: Some(10),
+            offset: Some(0),
+            cursor: Some("20".to_string()),
+            order: None,
+        };
+        let (_, offset, _, _) = resolve_request_full_pagination(&query);
+        assert_eq!(offset, 20);
+
+        let query = RequestRecordFullQuery {
+            limit: Some(10),
+            offset: Some(5),
+            cursor: Some("not-a-cursor".to_string()),
+            order: None,
+        };
+        let (_, offset, _, _) = resolve_request_full_pagination(&query);
+        assert_eq!(offset, 5);
+
+        // Offsets past the end return an empty page without more data.
+        let (start, end, has_more, next_cursor) = paginate_message_index(3, 10, 10);
+        assert_eq!((start, end), (3, 3));
+        assert!(!has_more);
+        assert_eq!(next_cursor, None);
     }
 }

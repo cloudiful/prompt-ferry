@@ -209,13 +209,14 @@ pub(super) async fn usage_request_full(
     State(state): State<AdminState>,
     headers: HeaderMap,
     Path(record_id): Path<i64>,
+    Query(query): Query<RequestRecordFullQuery>,
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
         Err(response) => return response,
     };
     let visible_user_id = (!user.is_admin).then_some(user.user_id);
-    match build_usage_request_full_response(&state, record_id, visible_user_id).await {
+    match build_usage_request_full_response(&state, record_id, visible_user_id, &query).await {
         Ok(response) => Json(response).into_response(),
         Err(response) => response,
     }

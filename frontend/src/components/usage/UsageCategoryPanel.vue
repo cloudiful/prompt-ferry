@@ -39,6 +39,7 @@ defineEmits<{
   drilldown: [filter: RequestOverviewDrilldown]
   filter: [event: TableFilterChange]
   loadDetailRequestFull: []
+  loadMoreDetailRequestFull: []
   openClearDialog: []
   openDetail: [record: RequestRecordRowView]
   page: [event: TablePageChange]
@@ -80,6 +81,7 @@ const McpUsagePanel = defineAsyncComponent(
         @clear-conversation-override="$emit('clearConversationOverride')"
         @filter="$emit('filter', $event)"
         @load-detail-request-full="$emit('loadDetailRequestFull')"
+        @load-more-detail-request-full="$emit('loadMoreDetailRequestFull')"
         @open-clear-dialog="$emit('openClearDialog')"
         @open-detail="$emit('openDetail', $event)"
         @page="$emit('page', $event)"

@@ -26,9 +26,13 @@ import type {
   SessionRouteOptionsView,
 } from '../models'
 
+export const REQUEST_FULL_PAGE_SIZE = 10
+export const REQUEST_FULL_PAGE_ORDER = 'desc'
+
 export function createRequestRecordDetailState() {
   const detailLoading = ref(false)
   const requestFullLoading = ref(false)
+  const requestFullLoadingMore = ref(false)
   const routeOptionsLoading = ref(false)
   const overrideSaving = ref(false)
   const affinityResetting = ref(false)
@@ -103,9 +107,17 @@ export function createRequestRecordDetailState() {
     const effectiveLoadVersion = loadVersion ?? detailLoadVersion
     requestFullLoading.value = true
     try {
+      // First paint fetches 10 newest-first messages only to avoid the
+      // legacy 800KB full payload; older pages load via loadMoreRequestFull.
       const full = expectData(
         await requestRecordFull<true>(
-          withData({ path: { record_id: recordId } }),
+          withData({
+            path: { record_id: recordId },
+            query: {
+              limit: REQUEST_FULL_PAGE_SIZE,
+              order: REQUEST_FULL_PAGE_ORDER,
+            },
+          }),
         ),
       )
       if (isCurrentDetailLoad(recordId, effectiveLoadVersion)) {
@@ -115,6 +127,52 @@ export function createRequestRecordDetailState() {
     } finally {
       if (isCurrentDetailLoad(recordId, effectiveLoadVersion)) {
         requestFullLoading.value = false
+      }
+    }
+  }
+
+  async function loadMoreRequestFull(
+    recordId: number,
+    loadVersion?: number,
+  ): Promise<RequestRecordFullResponse | null> {
+    const effectiveLoadVersion = loadVersion ?? detailLoadVersion
+    const current = requestFull.value
+    if (!current?.has_more || !current.next_cursor) return current
+    if (requestFullLoading.value || requestFullLoadingMore.value) {
+      return current
+    }
+    if (!isCurrentDetailLoad(recordId, effectiveLoadVersion)) return current
+    requestFullLoadingMore.value = true
+    try {
+      const page = expectData(
+        await requestRecordFull<true>(
+          withData({
+            path: { record_id: recordId },
+            query: {
+              limit: REQUEST_FULL_PAGE_SIZE,
+              cursor: current.next_cursor ?? undefined,
+              order: REQUEST_FULL_PAGE_ORDER,
+            },
+          }),
+        ),
+      )
+      if (!isCurrentDetailLoad(recordId, effectiveLoadVersion)) {
+        return page
+      }
+      const base = requestFull.value ?? current
+      const merged: RequestRecordFullResponse = {
+        ...base,
+        ...page,
+        messages: [...base.messages, ...page.messages],
+        rendered_text: [base.rendered_text, page.rendered_text]
+          .filter((text) => text && text.length > 0)
+          .join('\n'),
+      }
+      requestFull.value = merged
+      return merged
+    } finally {
+      if (isCurrentDetailLoad(recordId, effectiveLoadVersion)) {
+        requestFullLoadingMore.value = false
       }
     }
   }
@@ -235,6 +293,7 @@ export function createRequestRecordDetailState() {
     detailRecord.value = null
     requestFull.value = null
     requestFullLoading.value = false
+    requestFullLoadingMore.value = false
     sessionRouteOptions.value = null
     routeOptionsLoading.value = false
     conversationOverride.value = null
@@ -248,11 +307,13 @@ export function createRequestRecordDetailState() {
     detailLoading,
     detailRecord,
     loadDetail,
+    loadMoreRequestFull,
     loadRequestFull,
     loadSessionRouteOptions,
     overrideSaving,
     requestFull,
     requestFullLoading,
+    requestFullLoadingMore,
     resetDetail,
     resetSessionAffinity,
     routeOptionsLoading,

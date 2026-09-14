@@ -25,6 +25,7 @@ export type UsageDetailWorkspaceView = {
   detail_loading: boolean
   request_full: RequestRecordFullResponse | null
   request_full_loading: boolean
+  request_full_loading_more: boolean
   session_route_options: SessionRouteOptionsView | null
   session_route_options_loading: boolean
   conversation_override: ConversationEndpointOverrideView | null
@@ -63,6 +64,7 @@ type UsageWorkspaceDetailInput = {
   overrideSaving: boolean
   requestFull: RequestRecordFullResponse | null
   requestFullLoading: boolean
+  requestFullLoadingMore: boolean
   routeOptionsLoading: boolean
   sessionRouteOptions: SessionRouteOptionsView | null
 }
@@ -137,6 +139,7 @@ export function createUsageWorkspaceView(options: {
       detail_loading: options.detail.detailLoading,
       request_full: options.detail.requestFull,
       request_full_loading: options.detail.requestFullLoading,
+      request_full_loading_more: options.detail.requestFullLoadingMore,
       session_route_options: options.detail.sessionRouteOptions,
       session_route_options_loading: options.detail.routeOptionsLoading,
       conversation_override: options.detail.conversationOverride,

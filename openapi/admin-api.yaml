@@ -1548,6 +1548,34 @@ paths:
       - request-records
       operationId: request_record_full
       parameters:
+      - name: limit
+        in: query
+        description: Page size for `messages`. Optional, defaults to 10, clamped to 1..=100.
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: offset
+        in: query
+        description: Zero-based offset into the ordered `messages`. Optional, defaults to 0.
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: cursor
+        in: query
+        description: |-
+          Opaque cursor alias for `offset` (stringified offset). When present
+          and parseable it takes precedence over `offset` for forward compat.
+        required: false
+        schema:
+          type: string
+      - name: order
+        in: query
+        description: 'Message order: `desc` (newest first, default) or `asc` (oldest first).'
+        required: false
+        schema:
+          type: string
       - name: record_id
         in: path
         description: Request record ID
@@ -5902,6 +5930,11 @@ components:
       - request_has_previous_response_id
       - messages
       - rendered_text
+      - total_messages
+      - has_more
+      - limit
+      - offset
+      - order
       properties:
         client_installation_id:
           type:
@@ -5914,15 +5947,34 @@ components:
           format: uuid
         conversation_source:
           type: string
+        has_more:
+          type: boolean
+          description: True when more messages remain beyond the current page.
+        limit:
+          type: integer
+          format: int64
+          description: Effective page size after fail-safe defaults.
         messages:
           type: array
           items:
             $ref: '#/components/schemas/RequestRecordFullMessage'
+        next_cursor:
+          type:
+          - string
+          - 'null'
+          description: Opaque cursor (stringified next offset) for the next page, if any.
         normalized_item_count:
           type:
           - integer
           - 'null'
           format: int32
+        offset:
+          type: integer
+          format: int64
+          description: Effective offset after fail-safe defaults.
+        order:
+          type: string
+          description: Effective order (`asc` or `desc`, default `desc`).
         record_id:
           type: integer
           format: int64
@@ -5941,6 +5993,10 @@ components:
         request_raw_json: {}
         request_storage_mode:
           type: string
+        total_messages:
+          type: integer
+          format: int64
+          description: Total number of stored messages before pagination.
     RequestRecordListRow:
       type: object
       required:

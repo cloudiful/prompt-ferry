@@ -11,12 +11,14 @@ const props = defineProps<{
   event: RequestRecordDetailView | null
   requestFull: RequestRecordFullResponse | null
   requestFullLoading: boolean
+  requestFullLoadingMore?: boolean
   t: TranslateFn
   visible: boolean
 }>()
 
 const emit = defineEmits<{
   loadRequestFull: []
+  loadMoreRequestFull: []
 }>()
 
 const detailEvent = computed<RequestRecordDetailWithAssistant | null>(
@@ -70,7 +72,9 @@ watch(
     :detail="detailEvent"
     :request-full="requestFull"
     :request-full-loading="requestFullLoading"
+    :request-full-loading-more="requestFullLoadingMore ?? false"
     :response-pending-text="responsePendingText"
     :t="t"
+    @load-more-request-full="emit('loadMoreRequestFull')"
   />
 </template>

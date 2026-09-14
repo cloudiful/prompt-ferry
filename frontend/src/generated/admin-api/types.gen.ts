@@ -1191,8 +1191,28 @@ export type RequestRecordFullResponse = {
     client_installation_id?: string | null;
     conversation_id?: string | null;
     conversation_source: string;
+    /**
+     * True when more messages remain beyond the current page.
+     */
+    has_more: boolean;
+    /**
+     * Effective page size after fail-safe defaults.
+     */
+    limit: number;
     messages: Array<RequestRecordFullMessage>;
+    /**
+     * Opaque cursor (stringified next offset) for the next page, if any.
+     */
+    next_cursor?: string | null;
     normalized_item_count?: number | null;
+    /**
+     * Effective offset after fail-safe defaults.
+     */
+    offset: number;
+    /**
+     * Effective order (`asc` or `desc`, default `desc`).
+     */
+    order: string;
     record_id: number;
     rendered_text: string;
     request_has_previous_response_id: boolean;
@@ -1200,6 +1220,10 @@ export type RequestRecordFullResponse = {
     request_previous_response_parent_found?: boolean | null;
     request_raw_json?: unknown;
     request_storage_mode: string;
+    /**
+     * Total number of stored messages before pagination.
+     */
+    total_messages: number;
 };
 
 export type RequestRecordListRow = {
@@ -2865,7 +2889,25 @@ export type RequestRecordFullData = {
          */
         record_id: number;
     };
-    query?: never;
+    query?: {
+        /**
+         * Page size for `messages`. Optional, defaults to 10, clamped to 1..=100.
+         */
+        limit?: number;
+        /**
+         * Zero-based offset into the ordered `messages`. Optional, defaults to 0.
+         */
+        offset?: number;
+        /**
+         * Opaque cursor alias for `offset` (stringified offset). When present
+         * and parseable it takes precedence over `offset` for forward compat.
+         */
+        cursor?: string;
+        /**
+         * Message order: `desc` (newest first, default) or `asc` (oldest first).
+         */
+        order?: string;
+    };
     url: '/api/v1/admin/request-records/{record_id}/request-full';
 };
 

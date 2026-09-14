@@ -1,179 +1,88 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import DetailKeyValue from './DetailKeyValue.vue'
 import FlatSection from '@/components/shared/FlatSection.vue'
+import type { RequestRecordFullResponse } from '@/generated/admin-api'
 import type { RequestRecordDetailView } from '@/models'
-import type { RequestRecordFormatting } from '@/models/request-record-formatting'
 
-defineProps<{
+const props = defineProps<{
   event: RequestRecordDetailView
-  conversationSourceText: string
-  installationIdText: string
-  normalizedItemCountText: string | number
-  requestCompressionText: string
-  compressedBytesText: string
-  decompressedBytesText: string
-  compressionRatioText: string
-  formatting: RequestRecordFormatting
+  requestFull: RequestRecordFullResponse | null
   t: TranslateFn
 }>()
+
+const reasoningEffort = computed(() => {
+  const candidates: unknown[] = [
+    props.event.request_raw_json,
+    props.requestFull?.request_raw_json,
+  ]
+  for (const candidate of candidates) {
+    const effort = extractReasoningEffort(candidate)
+    if (effort) return effort
+  }
+  return null
+})
+
+function extractReasoningEffort(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const direct = record['reasoning_effort']
+  if (typeof direct === 'string' && direct.trim().length > 0) {
+    return direct.trim()
+  }
+  const reasoning = record['reasoning']
+  if (reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)) {
+    const effort = (reasoning as Record<string, unknown>)['effort']
+    if (typeof effort === 'string' && effort.trim().length > 0) {
+      return effort.trim()
+    }
+  }
+  return null
+}
 </script>
 
 <template>
   <FlatSection :title="t('requestContext')">
-    <div class="grid gap-3">
-      <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        <DetailKeyValue :label="t('status')">
-          <div class="flex flex-wrap items-center gap-1">
-            <UBadge
-              :label="formatting.formatRequestStateLabel(event.request_state)"
-              :color="formatting.requestStateSeverity(event.request_state)"
-            />
-            <UButton
-              v-if="event.request_category === 'ai'"
-              size="xs"
-              color="neutral"
-              variant="link"
-              icon="i-lucide-receipt-text"
-              :to="{
-                path: '/billing',
-                query: { request_id: event.request_id },
-              }"
-              :aria-label="t('requestLinkBilling')"
-              :label="t('requestLinkBilling')"
-            />
-          </div>
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('tokens')">
-          {{ formatting.formatTokenQuantity(event.input_tokens) }} /
-          {{ formatting.formatTokenQuantity(event.output_tokens) }} /
-          {{ formatting.formatTokenQuantity(event.total_tokens) }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('cachedTokens')">
-          {{ formatting.formatTokenQuantity(event.cached_tokens) }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('cacheRate')">
-          {{ formatting.formatPercent(event.cache_rate) }}
-        </DetailKeyValue>
-        <DetailKeyValue
-          v-if="event.request_category === 'ai'"
-          :label="t('ttft')"
+    <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <DetailKeyValue :label="t('upstream')">
+        {{ event.target }}
+      </DetailKeyValue>
+      <DetailKeyValue :label="t('upstreamId')">
+        <span class="break-all">{{ event.endpoint_id || '-' }}</span>
+      </DetailKeyValue>
+      <DetailKeyValue :label="t('upstreamKey')">
+        <span
+          v-if="event.endpoint_key_label || event.endpoint_key_id"
+          class="grid gap-0.5"
         >
-          {{ formatting.formatMs(event.ttft_ms) }}
-        </DetailKeyValue>
-        <DetailKeyValue
-          v-if="event.request_category === 'ai'"
-          :label="t('streamLatency')"
+          <span>{{ event.endpoint_key_label || '-' }}</span>
+          <span v-if="event.endpoint_key_id" class="break-all text-dimmed">
+            {{ event.endpoint_key_id }}
+          </span>
+        </span>
+        <span v-else>-</span>
+      </DetailKeyValue>
+      <DetailKeyValue :label="t('clientKey')">
+        {{ event.client_key_label || '-' }}
+      </DetailKeyValue>
+      <DetailKeyValue :label="t('conversationId')">
+        <span class="break-all">{{ event.conversation_id || '-' }}</span>
+      </DetailKeyValue>
+      <DetailKeyValue :label="t('conversationSeq')">
+        <span
+          v-if="event.conversation_seq != null"
+          class="flex flex-wrap gap-1"
         >
-          {{ formatting.formatMs(formatting.streamMs(event)) }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('upstream')">
-          {{ event.target }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('upstreamKey')">
-          <span
-            v-if="event.endpoint_key_label || event.endpoint_key_id"
-            class="grid gap-0.5"
-          >
-            <span>{{ event.endpoint_key_label || '-' }}</span>
-            <span v-if="event.endpoint_key_id" class="break-all text-dimmed">
-              {{ event.endpoint_key_id }}
-            </span>
-          </span>
-          <span v-else>-</span>
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('requestCompression')">
-          {{ requestCompressionText }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('compressedBytes')">
-          {{ compressedBytesText }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('decompressedBytes')">
-          {{ decompressedBytesText }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('compressionRatio')">
-          {{ compressionRatioText }}
-        </DetailKeyValue>
-      </div>
-      <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        <DetailKeyValue :label="t('clientKey')">
-          {{ event.client_key_label || '-' }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('sessionState')">
-          <UBadge
-            :label="
-              event.is_session_recognized
-                ? t('sessionRecognized')
-                : t('sessionUnrecognized')
-            "
-            :color="event.is_session_recognized ? 'success' : 'warning'"
-          />
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('sessionId')">
-          <span class="break-all">{{ event.conversation_id || '-' }}</span>
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('session')">
-          <span v-if="event.is_session_recognized" class="flex flex-wrap gap-1">
-            <UBadge
-              v-if="event.conversation_seq != null"
-              :label="`#${event.conversation_seq}`"
-            />
-            <UBadge v-if="event.is_first_turn" :label="t('firstTurn')" />
-            <UBadge
-              v-if="
-                event.conversation_id &&
-                !event.has_parent &&
-                (event.conversation_seq ?? 0) > 1
-              "
-              :value="t('usageBranchStart')"
-              color="warning"
-            />
-          </span>
-          <span v-else>-</span>
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('conversationSource')">
-          {{ conversationSourceText }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('clientInstallationId')">
-          <span class="break-all">{{ installationIdText }}</span>
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('normalizedItemCount')">
-          {{ normalizedItemCountText }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('storageSanitized')">
-          {{
-            event.storage_sanitized
-              ? t('previousResponseIdPresent')
-              : t('previousResponseIdMissing')
-          }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('hasPreviousResponseId')">
-          {{
-            event.request_has_previous_response_id
-              ? t('previousResponseIdPresent')
-              : t('previousResponseIdMissing')
-          }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('previousResponseId')">
-          <span class="break-all">{{
-            event.request_previous_response_id || '-'
-          }}</span>
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('parentFound')">
-          {{
-            event.request_previous_response_parent_found == null
-              ? '-'
-              : event.request_previous_response_parent_found
-                ? t('parentFoundYes')
-                : t('parentFoundNo')
-          }}
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('upstreamId')">
-          <span class="break-all">{{ event.endpoint_id || '-' }}</span>
-        </DetailKeyValue>
-        <DetailKeyValue :label="t('providerResponseId')">
-          <span class="break-all">{{ event.provider_response_id || '-' }}</span>
-        </DetailKeyValue>
-      </div>
+          <UBadge :label="`#${event.conversation_seq}`" />
+          <UBadge v-if="event.is_first_turn" :label="t('firstTurn')" />
+        </span>
+        <span v-else>-</span>
+      </DetailKeyValue>
+      <DetailKeyValue v-if="reasoningEffort" :label="t('reasoningEffort')">
+        {{ reasoningEffort }}
+      </DetailKeyValue>
+      <!-- Reasoning effort is hidden when unavailable: neither the record nor
+        the stored request payload carries reasoning_effort / reasoning.effort. -->
     </div>
   </FlatSection>
 </template>

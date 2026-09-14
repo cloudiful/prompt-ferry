@@ -103,7 +103,21 @@ pub struct RequestRecordsClearResponse {
     pub protected_by_billing: u64,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct RequestRecordFullQuery {
+    /// Page size for `messages`. Optional, defaults to 10, clamped to 1..=100.
+    pub limit: Option<i64>,
+    /// Zero-based offset into the ordered `messages`. Optional, defaults to 0.
+    pub offset: Option<i64>,
+    /// Opaque cursor alias for `offset` (stringified offset). When present
+    /// and parseable it takes precedence over `offset` for forward compat.
+    pub cursor: Option<String>,
+    /// Message order: `desc` (newest first, default) or `asc` (oldest first).
+    pub order: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RequestRecordFullMessage {
     pub role: String,
     pub block_hash: String,
@@ -126,12 +140,25 @@ pub struct RequestRecordFullResponse {
     pub request_previous_response_parent_found: Option<bool>,
     pub messages: Vec<RequestRecordFullMessage>,
     pub rendered_text: String,
+    /// Total number of stored messages before pagination.
+    pub total_messages: i64,
+    /// True when more messages remain beyond the current page.
+    pub has_more: bool,
+    /// Opaque cursor (stringified next offset) for the next page, if any.
+    pub next_cursor: Option<String>,
+    /// Effective page size after fail-safe defaults.
+    pub limit: i64,
+    /// Effective offset after fail-safe defaults.
+    pub offset: i64,
+    /// Effective order (`asc` or `desc`, default `desc`).
+    pub order: String,
 }
 
 pub type UsageSummaryQuery = RequestRecordSummaryQuery;
 pub type UsageEventsQuery = RequestRecordsQuery;
 pub type UsageClearRequest = RequestRecordsClearRequest;
 pub type UsageSeriesQuery = RequestRecordSeriesQuery;
+pub type UsageRequestFullQuery = RequestRecordFullQuery;
 pub type UsagePruneResponse = RequestRecordPruneResponse;
 pub type UsageClearResponse = RequestRecordsClearResponse;
 pub type UsageRequestFullMessage = RequestRecordFullMessage;

@@ -1,12 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { Option } from '@/models'
-import type { RequestRecordFormatting } from '@/models/request-record-formatting'
 import type { UsageDetailWorkspaceView } from '@/models/usage'
-import {
-  formatBytes,
-  formatCompressionRatio,
-} from '@/composables/useUsageFormatting'
 import RequestContextSection from './RequestContextSection.vue'
 import SessionRoutingSection from './SessionRoutingSection.vue'
 import UsageErrorSection from './UsageErrorSection.vue'
@@ -16,7 +11,6 @@ const AUTOMATIC_KEY_VALUE = '__automatic__'
 
 const props = defineProps<{
   detail: UsageDetailWorkspaceView
-  formatting: RequestRecordFormatting
   t: TranslateFn
 }>()
 
@@ -30,61 +24,12 @@ const emit = defineEmits<{
   clearConversationOverride: []
   resetSessionAffinity: []
   loadRequestFull: []
+  loadMoreRequestFull: []
 }>()
 
 const visible = defineModel<boolean>('visible', { required: true })
 const selectedOverrideEndpointId = ref('')
 const selectedOverrideEndpointKeyId = ref(AUTOMATIC_KEY_VALUE)
-const conversationSourceText = computed(() => {
-  const source =
-    props.detail.request_full?.conversation_source ||
-    props.detail.record?.conversation_source ||
-    'none'
-  switch (source) {
-    case 'explicit_previous_response_id':
-      return props.t('conversationSourceExplicitPreviousResponseId')
-    case 'codex_thread_key':
-      return props.t('conversationSourceCodexThreadKey')
-    case 'session_header':
-      return props.t('conversationSourceSessionHeader')
-    case 'relay_hint':
-      return props.t('conversationSourceRelayHint')
-    default:
-      return props.t('conversationSourceNone')
-  }
-})
-
-const installationIdText = computed(() => {
-  return (
-    props.detail.record?.client_installation_short ||
-    props.detail.request_full?.client_installation_id ||
-    props.detail.record?.client_installation_id ||
-    '-'
-  )
-})
-
-const normalizedItemCountText = computed(() => {
-  return (
-    props.detail.request_full?.normalized_item_count ??
-    props.detail.record?.normalized_item_count ??
-    '-'
-  )
-})
-
-const requestCompressionText = computed(
-  () =>
-    props.detail.record?.http_request_content_encoding ||
-    props.t('requestCompressionNone'),
-)
-const compressedBytesText = computed(() =>
-  formatBytes(props.detail.record?.http_request_compressed_bytes),
-)
-const decompressedBytesText = computed(() =>
-  formatBytes(props.detail.record?.http_request_decompressed_bytes),
-)
-const compressionRatioText = computed(() =>
-  formatCompressionRatio(props.detail.record?.http_request_compression_ratio),
-)
 
 const routeOptionChoices = computed<Option[]>(
   () =>
@@ -146,14 +91,7 @@ function saveOverride(): void {
         <div class="grid gap-3">
           <RequestContextSection
             :event="detail.record"
-            :conversation-source-text="conversationSourceText"
-            :installation-id-text="installationIdText"
-            :normalized-item-count-text="normalizedItemCountText"
-            :request-compression-text="requestCompressionText"
-            :compressed-bytes-text="compressedBytesText"
-            :decompressed-bytes-text="decompressedBytesText"
-            :compression-ratio-text="compressionRatioText"
-            :formatting="formatting"
+            :request-full="detail.request_full"
             :t="t"
           />
           <SessionRoutingSection
@@ -183,9 +121,11 @@ function saveOverride(): void {
           :event="detail.record"
           :request-full="detail.request_full"
           :request-full-loading="detail.request_full_loading"
+          :request-full-loading-more="detail.request_full_loading_more"
           :t="t"
           :visible="visible"
           @load-request-full="emit('loadRequestFull')"
+          @load-more-request-full="emit('loadMoreRequestFull')"
         />
       </div>
       <div

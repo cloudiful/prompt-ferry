@@ -24,10 +24,26 @@ const loadRouteOptions = mock(async () => ({
   },
 }))
 
+const requestRecordFullMock = mock(async () => ({
+  data: {
+    record_id: 1,
+    conversation_source: 'none',
+    request_storage_mode: 'full',
+    messages: [],
+    rendered_text: '',
+    total_messages: 0,
+    has_more: false,
+    next_cursor: null,
+    limit: 10,
+    offset: 0,
+    order: 'desc',
+  },
+}))
+
 mock.module('../src/generated/admin-api', () => ({
   deleteConversationEndpointOverride: mock(),
   requestRecordDetail: mock(),
-  requestRecordFull: mock(),
+  requestRecordFull: requestRecordFullMock,
   requestRecordResetSessionAffinity: resetAffinity,
   requestRecordSessionRouteOptions: loadRouteOptions,
   setConversationEndpointOverride: mock(),
@@ -87,4 +103,103 @@ test('reset session affinity parses idempotent empty results', async () => {
 
   expect(result.cleared).toBe(false)
   expect(result.cleared_count).toBe(0)
+})
+
+function fullMessage(index: number) {
+  return {
+    role: 'user',
+    block_hash: `hash-${index}`,
+    preview_text: `message ${index}`,
+    content_json: { text: `message ${index}` },
+    same_as_turn: null,
+  }
+}
+
+test('first paint fetches 10 newest-first messages only', async () => {
+  requestRecordFullMock.mockClear()
+  requestRecordFullMock.mockImplementation(
+    async (options: { query?: Record<string, unknown> }) => ({
+      data: {
+        record_id: 11,
+        conversation_source: 'none',
+        request_storage_mode: 'full',
+        messages: [9, 8, 7].map(fullMessage),
+        rendered_text: 'newest page',
+        total_messages: 25,
+        has_more: true,
+        next_cursor: '10',
+        limit: 10,
+        offset: 0,
+        order: 'desc',
+      },
+    }),
+  )
+  const state = detailStateWithRecord(11)
+
+  const full = await state.loadRequestFull(11)
+
+  expect(requestRecordFullMock).toHaveBeenCalledTimes(1)
+  const call = requestRecordFullMock.mock.calls[0][0] as {
+    query?: Record<string, unknown>
+  }
+  expect(call.query?.['limit']).toBe(10)
+  expect(call.query?.['order']).toBe('desc')
+  expect(full?.messages.map((message) => message.block_hash)).toEqual([
+    'hash-9',
+    'hash-8',
+    'hash-7',
+  ])
+  expect(full?.total_messages).toBe(25)
+  expect(full?.has_more).toBe(true)
+  expect(state.requestFullLoading.value).toBe(false)
+})
+
+test('load more appends older messages and updates the cursor', async () => {
+  const state = detailStateWithRecord(12)
+  state.requestFull.value = {
+    record_id: 12,
+    conversation_source: 'none',
+    request_storage_mode: 'full',
+    messages: [9, 8].map(fullMessage),
+    rendered_text: 'first',
+    total_messages: 4,
+    has_more: true,
+    next_cursor: '2',
+    limit: 10,
+    offset: 0,
+    order: 'desc',
+  } as never
+  requestRecordFullMock.mockClear()
+  requestRecordFullMock.mockImplementation(async () => ({
+    data: {
+      record_id: 12,
+      conversation_source: 'none',
+      request_storage_mode: 'full',
+      messages: [7, 6].map(fullMessage),
+      rendered_text: 'second',
+      total_messages: 4,
+      has_more: false,
+      next_cursor: null,
+      limit: 10,
+      offset: 2,
+      order: 'desc',
+    },
+  }))
+
+  const merged = await state.loadMoreRequestFull(12)
+
+  expect(requestRecordFullMock).toHaveBeenCalledTimes(1)
+  const call = requestRecordFullMock.mock.calls[0][0] as {
+    query?: Record<string, unknown>
+  }
+  expect(call.query?.['cursor']).toBe('2')
+  expect(merged?.messages.map((message) => message.block_hash)).toEqual([
+    'hash-9',
+    'hash-8',
+    'hash-7',
+    'hash-6',
+  ])
+  expect(merged?.has_more).toBe(false)
+  expect(merged?.next_cursor).toBeNull()
+  expect(state.requestFullLoadingMore.value).toBe(false)
 })

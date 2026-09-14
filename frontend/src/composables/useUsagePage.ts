@@ -107,6 +107,16 @@ export function useUsagePage() {
     }
   }
 
+  async function loadMoreDetailRequestFull(): Promise<void> {
+    const recordId = requestRecordsStore.detailRecord?.record_id
+    if (!recordId) return
+    try {
+      await requestRecordsStore.loadMoreRequestFull(recordId)
+    } catch (cause) {
+      notifyApiError(cause)
+    }
+  }
+
   async function clearConversationOverride(): Promise<void> {
     if (!requestRecordsStore.sessionRouteOptions?.conversation_id) return
     try {
@@ -197,6 +207,7 @@ export function useUsagePage() {
     formatting,
     handleOverviewDrilldown,
     loadDetailRequestFull,
+    loadMoreDetailRequestFull,
     onFilter,
     onPage,
     onSort,

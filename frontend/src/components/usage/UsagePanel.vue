@@ -25,6 +25,7 @@ const emit = defineEmits<{
   clearConversationOverride: []
   filter: [event: TableFilterChange]
   loadDetailRequestFull: []
+  loadMoreDetailRequestFull: []
   resetSessionAffinity: []
   openClearDialog: []
   openDetail: [record: RequestRecordRowView]
@@ -241,10 +242,10 @@ const sorting = computed<SortingState>({
     <UsageDetailDialog
       v-model:visible="detailVisible"
       :detail="workspace.detail"
-      :formatting="formatting"
       :t="t"
       @clear-conversation-override="$emit('clearConversationOverride')"
       @load-request-full="$emit('loadDetailRequestFull')"
+      @load-more-request-full="$emit('loadMoreDetailRequestFull')"
       @reset-session-affinity="$emit('resetSessionAffinity')"
       @save-conversation-override="$emit('saveConversationOverride', $event)"
     />

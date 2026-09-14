@@ -128,6 +128,7 @@ pub(in crate::worker_admin::handlers) async fn build_usage_request_full_response
     state: &AdminState,
     record_id: i64,
     visible_user_id: Option<i64>,
+    query: &RequestRecordFullQuery,
 ) -> Result<UsageRequestFullResponse, Response> {
     let entry =
         get_visible_usage_chain_entry_or_not_found(state, record_id, visible_user_id).await?;
@@ -147,9 +148,19 @@ pub(in crate::worker_admin::handlers) async fn build_usage_request_full_response
     } else {
         (Vec::new(), None)
     };
-    let messages = build_usage_request_messages(&state.pool, &refs, &parent_refs, parent_turn)
+    let all_messages = build_usage_request_messages(&state.pool, &refs, &parent_refs, parent_turn)
         .await
         .map_err(|err| internal(state, err))?;
+    let (limit, offset, desc, order) = super::resolve_request_full_pagination(query);
+    let total_messages = all_messages.len() as i64;
+    let mut ordered: Vec<UsageRequestFullMessage> = if desc {
+        all_messages.into_iter().rev().collect()
+    } else {
+        all_messages
+    };
+    let (start, end, has_more, next_cursor) =
+        super::paginate_message_index(ordered.len(), limit, offset);
+    let messages: Vec<UsageRequestFullMessage> = ordered.drain(start..end).collect();
     let rendered_text = render_usage_request_text(&messages);
 
     Ok(UsageRequestFullResponse {
@@ -169,6 +180,12 @@ pub(in crate::worker_admin::handlers) async fn build_usage_request_full_response
         request_previous_response_parent_found: entry.request_previous_response_parent_found,
         rendered_text,
         messages,
+        total_messages,
+        has_more,
+        next_cursor,
+        limit,
+        offset,
+        order,
     })
 }
 
