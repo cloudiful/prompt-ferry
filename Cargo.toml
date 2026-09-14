@@ -4,7 +4,7 @@ default-members = [".", "tools/db-init"]
 
 [package]
 name = "prompt-ferry"
-version = "1.28.1"
+version = "1.29.0"
 edition = "2024"
 license = "Apache-2.0"
 readme = "README.md"
