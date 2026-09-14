@@ -1,6 +1,7 @@
 use super::{UpstreamRedactionSession, redact_text_with_stateful_session, restore_text};
-use crate::redact_test_support::domain_redaction;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use prompt_ferry_redact::test_support::domain_redaction;
+use prompt_ferry_runtime_env::relay_secrets::RelaySecretManager;
 
 fn token_for(session: &UpstreamRedactionSession, original: &str) -> String {
     session
@@ -91,7 +92,7 @@ fn unauthorized_token_is_preserved_and_reported() {
 fn encrypted_session_round_trip() {
     let _guard = domain_redaction();
     let key = STANDARD.encode([7_u8; 32]);
-    let manager = crate::relay_secrets::RelaySecretManager::from_base64(&key).expect("mgr");
+    let manager = RelaySecretManager::from_base64(&key).expect("mgr");
     let session = redact_text_with_stateful_session(
         "a.example.com",
         redactor::InputKind::Text,
@@ -111,7 +112,7 @@ fn encrypted_session_round_trip() {
 fn legacy_session_envelope_is_rejected() {
     let _guard = domain_redaction();
     let key = STANDARD.encode([7_u8; 32]);
-    let manager = crate::relay_secrets::RelaySecretManager::from_base64(&key).expect("mgr");
+    let manager = RelaySecretManager::from_base64(&key).expect("mgr");
     let session = redact_text_with_stateful_session(
         "a.example.com",
         redactor::InputKind::Text,

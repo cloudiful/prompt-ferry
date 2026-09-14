@@ -1,0 +1,20 @@
+[package]
+name = "prompt-ferry-runtime-env"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Runtime environment and relay secret helpers for prompt-ferry"
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.23.1"
+chacha20poly1305 = "0.11.0"
+config = { package = "cloudiful-config", version = "0.6.3" }
+db-init = { package = "cloudiful-db-init", version = "0.1.0" }
+rand = "0.10.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tracing = "0.1.44"
+
+[dev-dependencies]
+uuid = { version = "1.26.1", features = ["serde", "v4"] }

@@ -5,6 +5,8 @@ use uuid::Uuid;
 
 use crate::llm_review::ApprovalStatus;
 
+pub use prompt_ferry_llm_review::record_approval_webhook_result;
+
 use super::types::{
     ApprovalRequest, ApprovalRequestCreate, ApprovalRequestPage, ApprovalStatusFilter,
     FlaggedApprovalRequestInput,
@@ -189,21 +191,6 @@ pub async fn run_approval_retention_maintenance(
         )),
         (Ok(_), Err(error)) => Err(error.into()),
     }
-}
-
-pub async fn record_approval_webhook_result(
-    pool: &PgPool,
-    approval_id: Uuid,
-    error: Option<String>,
-) -> Result<()> {
-    sqlx::query_file!(
-        "src/sql/approvals/record_approval_webhook_result.sql",
-        approval_id,
-        error,
-    )
-    .execute(pool)
-    .await?;
-    Ok(())
 }
 
 pub async fn create_flagged_approval_request(

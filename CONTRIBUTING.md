@@ -80,6 +80,13 @@ cargo sqlx prepare --workspace -- --all-targets
 The `.sqlx` directory is tracked so GitHub Actions can compile with
 `SQLX_OFFLINE=true`.
 
+## Version Freeze
+
+Internal library crates and `tools/db-init` stay at `0.1.0` forever.
+Release commits must not bump them; only the root `prompt-ferry`
+binary follows the `1.x` release line. Reviewers must check this
+on every release commit.
+
 ## Pull Requests
 
 Keep changes focused and include regression coverage for behavior changes.

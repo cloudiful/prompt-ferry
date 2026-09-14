@@ -1,6 +1,6 @@
 [workspace]
-members = [".", "tools/db-init"]
-default-members = [".", "tools/db-init"]
+members = [".", "tools/db-init", "crates/prompt-ferry-llm-review", "crates/prompt-ferry-upstream-presets", "crates/prompt-ferry-redact", "crates/prompt-ferry-runtime-env", "crates/prompt-ferry-redact-upstream"]
+default-members = [".", "tools/db-init", "crates/prompt-ferry-llm-review", "crates/prompt-ferry-upstream-presets", "crates/prompt-ferry-redact", "crates/prompt-ferry-runtime-env", "crates/prompt-ferry-redact-upstream"]
 
 [package]
 name = "prompt-ferry"
@@ -56,6 +56,11 @@ redactor = { package = "cloudiful-redactor", version = "0.5.1" }
 redis = { version = "1.7.0", features = ["tokio-comp", "connection-manager"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["charset", "gzip", "http2", "json", "rustls", "socks", "stream", "system-proxy"] }
 object_store = { version = "0.14.1", default-features = false, features = ["aws", "fs"] }
+prompt-ferry-llm-review = { version = "0.1.0", path = "crates/prompt-ferry-llm-review" }
+prompt-ferry-redact = { version = "0.1.0", path = "crates/prompt-ferry-redact" }
+prompt-ferry-redact-upstream = { version = "0.1.0", path = "crates/prompt-ferry-redact-upstream" }
+prompt-ferry-runtime-env = { version = "0.1.0", path = "crates/prompt-ferry-runtime-env" }
+prompt-ferry-upstream-presets = { version = "0.1.0", path = "crates/prompt-ferry-upstream-presets" }
 rmcp = { version = "3.3.0", features = ["client", "transport-streamable-http-client-reqwest", "transport-child-process", "transport-streamable-http-server"] }
 scheduler = { package = "cloudiful-scheduler", version = "0.4.12", features = ["valkey-store"] }
 rustls = { version = "0.23.44", features = ["aws-lc-rs"] }

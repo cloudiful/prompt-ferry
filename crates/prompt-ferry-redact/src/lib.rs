@@ -1,3 +1,7 @@
+// Issue #384 Phase 2: redaction runtime moved from `prompt_ferry::redact`.
+// Leaf crate with zero intra-workspace dependencies.
+pub mod test_support;
+
 use std::{
     collections::{HashMap, HashSet},
     sync::{LazyLock, RwLock},
@@ -174,7 +178,8 @@ impl RedactionRuntimeStore {
 static REDACTION_RUNTIME: LazyLock<RwLock<RedactionRuntimeStore>> =
     LazyLock::new(|| RwLock::new(RedactionRuntimeStore::default()));
 
-#[cfg(test)]
+// Unconditional so downstream `test_support` helpers can lock it even when
+// this crate is built as a non-test dependency of `prompt-ferry` tests.
 pub static TEST_REDACTION_LOCK: LazyLock<std::sync::Mutex<()>> =
     LazyLock::new(|| std::sync::Mutex::new(()));
 
@@ -409,13 +414,13 @@ mod tests {
 
     use redactor::{CustomStringMatch, InputKind};
 
-    use super::{RedactionConfig, RedactionPreviewRequest, apply_configs, redact_text_for_user};
-    use crate::redact_test_support::{apply as apply_test_config, lock, secret_redaction};
+    use crate::test_support::{apply as apply_test_config, lock, secret_redaction};
+    use crate::{RedactionConfig, RedactionPreviewRequest, apply_configs, redact_text_for_user};
 
     #[test]
     fn redacts_secrets_in_text() {
         let _guard = secret_redaction();
-        let redacted = super::redact_text("API_TOKEN=sk_live_1234567890ABCDEFghij");
+        let redacted = crate::redact_text("API_TOKEN=sk_live_1234567890ABCDEFghij");
 
         assert!(!redacted.contains("sk_live_1234567890ABCDEFghij"));
         assert!(redacted.contains("[[RDX:v2:"));
@@ -423,19 +428,19 @@ mod tests {
 
     #[test]
     fn runtime_config_can_disable_redaction() {
-        let _guard = apply_test_config(&super::RedactionConfig {
+        let _guard = apply_test_config(&crate::RedactionConfig {
             enabled: false,
             ..Default::default()
         });
 
-        let redacted = super::redact_text("API_TOKEN=sk_live_1234567890ABCDEFghij");
+        let redacted = crate::redact_text("API_TOKEN=sk_live_1234567890ABCDEFghij");
 
         assert_eq!(redacted, "API_TOKEN=sk_live_1234567890ABCDEFghij");
     }
 
     #[test]
     fn preview_supports_custom_string_rules() {
-        let result = super::preview(&RedactionPreviewRequest {
+        let result = crate::preview(&RedactionPreviewRequest {
             text: "tenant=acme".to_string(),
             input_kind: InputKind::Text,
             enabled: true,

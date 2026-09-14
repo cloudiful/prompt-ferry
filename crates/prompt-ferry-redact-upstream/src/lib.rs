@@ -1,4 +1,10 @@
+// Issue #384 Phase 4: upstream redaction moved from
+// `prompt_ferry::redact_upstream`. Depends on the Phase 2 redact crate and
+// the Phase 3 runtime-env envelope types; the root crate re-exports this
+// crate so `prompt_ferry::redact_upstream::*` paths are unchanged.
 use anyhow::Result;
+use prompt_ferry_redact::redactor_snapshot_for_user;
+use prompt_ferry_runtime_env::relay_secrets::{EncryptedSecretEnvelope, RelaySecretManager};
 use redactor::{
     InputKind, RedactionSession, RedactorError, RestoreResult, RestoreState, SessionRedactor,
     ensure_restore_valid,
@@ -6,21 +12,16 @@ use redactor::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{
-    redact,
-    relay_secrets::{EncryptedSecretEnvelope, RelaySecretManager},
-};
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UpstreamRedactionSession {
     pub restore_state: RestoreState,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct UpstreamRedactedRequest {
-    pub(crate) body: Vec<u8>,
-    pub(crate) redacted_request_json: Option<Value>,
-    pub(crate) restore_session: Option<UpstreamRedactionSession>,
+pub struct UpstreamRedactedRequest {
+    pub body: Vec<u8>,
+    pub redacted_request_json: Option<Value>,
+    pub restore_session: Option<UpstreamRedactionSession>,
 }
 
 impl UpstreamRedactionSession {
@@ -48,7 +49,7 @@ impl UpstreamRedactionProcessor {
         external_id: Option<&str>,
         prior: Option<&UpstreamRedactionSession>,
     ) -> Result<Self, RedactorError> {
-        let redactor = redact::redactor_snapshot_for_user(user_id).ok_or_else(|| {
+        let redactor = redactor_snapshot_for_user(user_id).ok_or_else(|| {
             RedactorError::Validation("redaction is disabled for this user".to_string())
         })?;
         let prior_session = prior.map(UpstreamRedactionSession::request_session);

@@ -268,9 +268,9 @@ pub(super) async fn resolve_endpoint_input(
     // persist the derived official root; Generic keeps the normalized
     // client-sent base byte-for-byte.
     let base_url = match crate::upstream_presets::preset_base_url(
-        body.provider,
-        body.provider_region,
-        native_api,
+        body.provider.into(),
+        body.provider_region.map(|region| region.into()),
+        native_api.into(),
     ) {
         Some(derived) => derived.to_string(),
         None => normalize_endpoint_base_url(&body.base_url),

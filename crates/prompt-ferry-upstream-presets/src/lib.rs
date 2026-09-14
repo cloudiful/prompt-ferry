@@ -15,8 +15,41 @@
 //! as a legacy/custom override and left untouched so existing deployments
 //! and local upstream test doubles keep working.
 
-use crate::config::NativeApi;
-use crate::db::{EndpointProvider, EndpointRegion};
+//! The three enums below are intentionally decoupled duplicates of
+//! `prompt_ferry::config::NativeApi` and
+//! `prompt_ferry::db::{EndpointProvider, EndpointRegion}` so this leaf crate
+//! stays dependency-free of the root crate (and of `db`). Variant lists must
+//! stay in sync; the root crate's `From` conversions fail to compile when
+//! either side drifts.
+
+/// Protocol family a preset base URL is derived for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeApi {
+    Auto,
+    AnthropicMessages,
+    Chat,
+    Responses,
+    Realtime,
+}
+
+/// Preset provider identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndpointProvider {
+    Generic,
+    Minimax,
+    CommandCode,
+    OpencodeGo,
+    OpenRouter,
+    Glm,
+    DeepSeek,
+}
+
+/// MiniMax region; only MiniMax preset rows carry one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndpointRegion {
+    Cn,
+    Global,
+}
 
 /// CommandCode provider-compatible inference root.
 pub const COMMAND_CODE_BASE_URL: &str = "https://api.commandcode.ai/provider";
@@ -96,7 +129,7 @@ pub fn derive_route_base(
 /// [`derive_route_base`] with the stored base as the fallback. Read paths
 /// that need a concrete base string (model discovery, quota) use this so a
 /// legacy/custom host keeps working instead of being dropped.
-pub(crate) fn route_base_or_stored(
+pub fn route_base_or_stored(
     provider: EndpointProvider,
     stored_base: &str,
     native_api: NativeApi,

@@ -1,8 +1,7 @@
 use reqwest::Client;
 
-use crate::db;
-
 use super::LlmReviewSettings;
+use crate::{ApprovalRequest, record_approval_webhook_result};
 
 pub fn approval_webhook_enabled(settings: &LlmReviewSettings) -> bool {
     settings.webhook.enabled && !settings.webhook.url.trim().is_empty()
@@ -13,7 +12,7 @@ pub fn spawn_approval_webhook(
     client: Client,
     settings: LlmReviewSettings,
     event: &'static str,
-    approval: db::ApprovalRequest,
+    approval: ApprovalRequest,
 ) {
     if !approval_webhook_enabled(&settings) {
         return;
@@ -38,8 +37,7 @@ pub fn spawn_approval_webhook(
             }
             match request.json(&payload).send().await {
                 Ok(response) if response.status().is_success() => {
-                    let _ =
-                        db::record_approval_webhook_result(&pool, approval.approval_id, None).await;
+                    let _ = record_approval_webhook_result(&pool, approval.approval_id, None).await;
                     return;
                 }
                 Ok(response) => {
@@ -53,8 +51,7 @@ pub fn spawn_approval_webhook(
         }
         if let Some(error) = last_error {
             tracing::warn!(approval_id = %approval.approval_id, error = %error, "approval webhook delivery failed");
-            let _ =
-                db::record_approval_webhook_result(&pool, approval.approval_id, Some(error)).await;
+            let _ = record_approval_webhook_result(&pool, approval.approval_id, Some(error)).await;
         }
     });
 }

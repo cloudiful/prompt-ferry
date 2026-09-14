@@ -1,0 +1,10 @@
+[package]
+name = "prompt-ferry-redact"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Redaction runtime and policy types for prompt-ferry"
+
+[dependencies]
+redactor = { package = "cloudiful-redactor", version = "0.5.1" }
+serde = { version = "1.0.229", features = ["derive"] }

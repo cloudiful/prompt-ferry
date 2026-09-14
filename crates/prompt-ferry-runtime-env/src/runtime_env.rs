@@ -1,4 +1,4 @@
-use crate::naming::CONFIG_APP_NAME;
+use crate::naming::{CONFIG_APP_NAME, CONFIG_ENV_PREFIX};
 use anyhow::{Result, anyhow};
 pub use db_init::DatabaseUrlResolution;
 use db_init::{load_dotenv_if_exists, resolve_database_url as resolve_shared_database_url};
@@ -20,9 +20,19 @@ pub fn load_dotenv(path: impl AsRef<Path>) -> Result<()> {
 
 pub fn resolve_database_url(from_arg: Option<String>) -> Result<DatabaseUrlResolution> {
     resolve_shared_database_url(from_arg, DATABASE_URL_ENV_KEYS, || {
-        let config = crate::config::read_app_config()
-            .map_err(|error| anyhow!(error).context("failed to load prompt-ferry config"))?;
-        Ok(Some(config.worker.database_url))
+        let config = config::read::<serde_json::Value>(
+            CONFIG_APP_NAME,
+            Some(config::ReadOptions::with_env_prefix(CONFIG_ENV_PREFIX)),
+        )
+        .map_err(|error| anyhow!(error).context("failed to load prompt-ferry config"))?;
+        let url = config
+            .get("worker")
+            .and_then(|value| value.get("database_url"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        Ok(url)
     })
 }
 

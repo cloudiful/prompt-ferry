@@ -1,8 +1,6 @@
 use reqwest::Client;
 use serde_json::Value;
 
-use crate::usage::truncate_chars;
-
 use super::{LlmReviewSettings, ReviewFailure, ReviewResult, parse_review_completion_body};
 
 pub const LLM_REVIEW_SETTINGS_KEY: &str = "llm_review_settings";
@@ -120,6 +118,17 @@ fn upstream_url(base_url: &str, path: &str) -> String {
         base_url.trim_end_matches('/'),
         path.trim_start_matches('/')
     )
+}
+
+// Issue #384 Phase 5: small in-crate copy of `usage::truncate_chars` so the
+// leaf crate stays dependency-free of the root `usage` module.
+fn truncate_chars(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_string();
+    }
+    let mut value = text.chars().take(limit).collect::<String>();
+    value.push('…');
+    value
 }
 
 #[cfg(test)]

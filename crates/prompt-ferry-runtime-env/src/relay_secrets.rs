@@ -21,7 +21,7 @@ pub const BOOTSTRAP_ADMIN_PASSWORD_FILE: &str = "bootstrap-admin.txt";
 /// Generate a strong random bootstrap admin password for first startup. The
 /// generated value is written once to a protected local file by the caller
 /// and never logged.
-pub(crate) fn generate_bootstrap_password() -> String {
+pub fn generate_bootstrap_password() -> String {
     use rand::distr::{Alphanumeric, SampleString};
     Alphanumeric.sample_string(&mut rand::rng(), 32)
 }

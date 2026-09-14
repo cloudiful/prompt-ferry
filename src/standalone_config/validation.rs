@@ -56,9 +56,9 @@ impl StandaloneConfig {
                 super::models::EndpointRegion::Global => crate::db::EndpointRegion::Global,
             });
             let normalized_base = match crate::upstream_presets::preset_base_url(
-                provider,
-                region,
-                endpoint.native_api,
+                provider.into(),
+                region.map(|region| region.into()),
+                endpoint.native_api.into(),
             ) {
                 Some(derived) => derived.to_string(),
                 None => {
@@ -274,9 +274,9 @@ mod tests {
         // because the base is derived from the provider/protocol.
         let provider = crate::db::EndpointProvider::from_str(EndpointProvider::Glm.as_str());
         let derived = crate::upstream_presets::preset_base_url(
-            provider,
+            provider.into(),
             None,
-            crate::config::NativeApi::Responses,
+            crate::config::NativeApi::Responses.into(),
         );
         assert_eq!(
             derived,

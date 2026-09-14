@@ -118,9 +118,9 @@ pub async fn fetch_endpoint_model_ids(
 /// plain `{base}/v1/models` join.
 pub fn models_url(base_url: &str, provider: EndpointProvider) -> String {
     let base = crate::upstream_presets::route_base_or_stored(
-        provider,
+        provider.into(),
         base_url,
-        crate::config::NativeApi::Chat,
+        crate::config::NativeApi::Chat.into(),
     );
     let base = base.trim_end_matches('/');
     match provider {

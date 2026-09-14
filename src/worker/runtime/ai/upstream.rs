@@ -206,7 +206,9 @@ pub fn upstream_url_for_route_parts(
     native_api: crate::config::NativeApi,
     path: &str,
 ) -> String {
-    if let Some(base) = crate::upstream_presets::derive_route_base(provider, base_url, native_api) {
+    if let Some(base) =
+        crate::upstream_presets::derive_route_base(provider.into(), base_url, native_api.into())
+    {
         return match provider {
             // GLM derived roots are always version-bearing protocol roots:
             // only the Anthropic root keeps the standard `/v1/messages`

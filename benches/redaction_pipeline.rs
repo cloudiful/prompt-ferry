@@ -1,10 +1,8 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use prompt_ferry::{
-    redact::{RedactionConfig, apply_config},
-    redact_upstream::UpstreamRedactionProcessor,
-};
+use prompt_ferry_redact::{RedactionConfig, apply_config};
+use prompt_ferry_redact_upstream::UpstreamRedactionProcessor;
 use redactor::RedactionRules;
 
 fn timed(label: &str, iterations: usize, mut run: impl FnMut()) {
