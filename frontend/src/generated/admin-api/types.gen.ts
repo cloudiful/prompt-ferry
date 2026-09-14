@@ -336,6 +336,12 @@ export type EndpointRequest = {
     base_url: string;
     daily_max_requests?: number | null;
     enabled?: boolean | null;
+    /**
+     * Issue #368 Phase B: carry hint for the proxy secret. Accepted for
+     * forward-compat with the masked frontend input; the server ignores it
+     * for logic and uses the stored value when `proxy_url` is omitted.
+     */
+    has_proxy_url?: boolean | null;
     key_lb_enabled?: boolean;
     mcp_enabled?: boolean | null;
     monthly_max_requests?: number | null;
@@ -345,6 +351,13 @@ export type EndpointRequest = {
     protocol_mode: EndpointProtocolMode;
     provider?: EndpointProvider;
     provider_region?: null | EndpointRegion;
+    /**
+     * Issue #368 Phase B: outbound proxy default (full URL with optional
+     * userinfo). `None` (omitted/null) means keep on PATCH / direct on
+     * create; `Some("")` (empty/whitespace) means clear to direct;
+     * `Some(url)` must use `http/https/socks5/socks5h`.
+     */
+    proxy_url?: string | null;
     scope: string;
     service_tier?: MinimaxServiceTier;
 };
@@ -604,6 +617,12 @@ export type McpServer = {
     enabled: boolean;
     env_json: unknown;
     has_basic_password: boolean;
+    /**
+     * Issue #375 Phase F: response-side saved-proxy indicator.
+     * `true` when a per-row proxy URL is stored; the secret itself is never
+     * echoed.
+     */
+    has_proxy_url: boolean;
     http_headers_json: unknown;
     lifecycle_learned_at?: string | null;
     lifecycle_learned_for_updated_at?: string | null;
@@ -649,6 +668,12 @@ export type McpServerRequest = {
     disabled_tools?: unknown;
     enabled?: boolean | null;
     env_json?: unknown;
+    /**
+     * Issue #375 Phase F: carry hint for the proxy secret. Accepted for
+     * forward-compat with the masked frontend input; the server ignores it
+     * for logic and uses the stored value when `proxy_url` is omitted.
+     */
+    has_proxy_url?: boolean | null;
     http_headers_json?: unknown;
     lifecycle_manual_protocol_version?: string | null;
     lifecycle_policy?: string | null;
@@ -660,6 +685,13 @@ export type McpServerRequest = {
      * legacy) value; `"generic"` explicitly clears a preset binding.
      */
     provider_kind?: string | null;
+    /**
+     * Issue #375 Phase F: per-row outbound proxy (full URL with optional
+     * userinfo). `None` (omitted/null) means keep on PATCH / inherit on
+     * create; `Some("")` (empty/whitespace) means clear to inherit;
+     * `Some(url)` must use `http/https/socks5/socks5h`.
+     */
+    proxy_url?: string | null;
     scope?: string | null;
     source_endpoint_id?: string | null;
     timeout_ms?: number | null;
@@ -738,6 +770,11 @@ export type ModelRouteTarget = {
     endpoint_enabled: boolean;
     endpoint_id: string;
     endpoint_name?: string | null;
+    /**
+     * Issue #368 Phase C (P2): response-side saved-override indicator.
+     * `true` when an override is stored; the secret itself is never echoed.
+     */
+    has_proxy_url_override?: boolean;
     position: number;
     rule_id: string;
     target_id: string;
@@ -748,6 +785,18 @@ export type ModelRouteTarget = {
 export type ModelRouteTargetRequest = {
     enabled?: boolean | null;
     endpoint_id: string;
+    /**
+     * Issue #368 Phase B: carry hint for the override secret. Accepted for
+     * forward-compat; the server ignores it and uses the stored value when
+     * `proxy_url_override` is omitted.
+     */
+    has_proxy_url_override?: boolean | null;
+    /**
+     * Issue #368 Phase B: per-target proxy override. `None` (omitted/null)
+     * means keep on PATCH / inherit on create; `Some("")` means clear to
+     * inherit; `Some(url)` must use `http/https/socks5/socks5h`.
+     */
+    proxy_url_override?: string | null;
     upstream_model?: string | null;
 };
 
@@ -808,6 +857,11 @@ export type ProviderEndpoint = {
     daily_max_requests?: number | null;
     enabled: boolean;
     endpoint_id: string;
+    /**
+     * Issue #368 Phase C (P2): response-side saved-proxy indicator.
+     * `true` when a proxy URL is stored; the secret itself is never echoed.
+     */
+    has_proxy_url?: boolean;
     key_lb_enabled: boolean;
     mcp_enabled: boolean;
     monthly_max_requests?: number | null;

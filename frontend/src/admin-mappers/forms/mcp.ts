@@ -82,6 +82,9 @@ export function createEmptyMcpForm(): McpForm {
     basic_username: '',
     basic_password: '',
     has_basic_password: false,
+    // Issue #375 Phase F: masked per-row proxy; empty + no saved means inherit.
+    proxy_url: '',
+    has_saved_proxy_url: false,
     http_headers_text: '{}',
     environment_variables: [],
     tool_filter_mode: 'blacklist',
@@ -129,6 +132,10 @@ export function mcpServerToForm(server: McpServer): McpForm {
     basic_username: server.basic_username ?? '',
     basic_password: '',
     has_basic_password: server.has_basic_password ?? false,
+    // Issue #375 Phase F: masked proxy input; never echo the secret.
+    // `has_proxy_url` is optional for legacy payloads (missing means inherit).
+    proxy_url: '',
+    has_saved_proxy_url: server.has_proxy_url ?? false,
     http_headers_text: JSON.stringify(
       normalizeJsonRecord(server.http_headers_json),
       null,
@@ -186,6 +193,17 @@ export function mcpFormToRequest(form: McpForm): McpServerRequest {
   }
 
   const authMode = form.transport === 'http' ? form.auth_mode : 'none'
+  // Issue #375 Phase F: omit-when-untouched to avoid secret-wipe.
+  // Non-empty means replace; empty + saved means omit (keep stored value);
+  // empty + no saved means clear to inherit (`""`). The request-side
+  // `has_proxy_url` hint is intentionally not sent (server ignores it).
+  const trimmedProxy = form.proxy_url.trim()
+  const proxy_url =
+    trimmedProxy !== ''
+      ? trimmedProxy
+      : form.has_saved_proxy_url
+        ? undefined
+        : ''
   return {
     source_endpoint_id: form.source_endpoint_id,
     args: commandArgv.slice(1),
@@ -237,6 +255,7 @@ export function mcpFormToRequest(form: McpForm): McpServerRequest {
     tool_filter_mode: form.tool_filter_mode,
     transport: form.transport,
     url: form.transport === 'http' ? form.url.trim() : null,
+    proxy_url,
     lifecycle_policy: form.lifecycle_policy,
     lifecycle_manual_protocol_version:
       form.lifecycle_manual_protocol_version?.trim() || '',

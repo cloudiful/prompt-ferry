@@ -93,6 +93,20 @@ pub(crate) fn envelope(row: &SqliteRow, prefix: &str) -> Result<Option<Encrypted
     }
 }
 
+// Issue #368 Phase A: proxy envelopes were added by standalone 0018.
+// Pre-migration rows lack the columns entirely; treat a missing column
+// as `None` (direct) so legacy snapshots keep loading.
+pub(crate) fn envelope_opt(
+    row: &SqliteRow,
+    prefix: &str,
+) -> Result<Option<EncryptedSecretEnvelope>> {
+    match envelope(row, prefix) {
+        Ok(value) => Ok(value),
+        Err(StandaloneConfigError::Database(sqlx::Error::ColumnNotFound(_))) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 pub(crate) fn relay(
     row: &SqliteRow,
 ) -> Result<(ManagedRelayConfig, [Option<EncryptedSecretEnvelope>; 4])> {
@@ -133,7 +147,11 @@ pub(crate) fn relay_envelopes(row: &SqliteRow) -> Result<[Option<EncryptedSecret
 
 pub(crate) fn endpoint(
     row: &SqliteRow,
-) -> Result<(ProviderEndpointConfig, Option<EncryptedSecretEnvelope>)> {
+) -> Result<(
+    ProviderEndpointConfig,
+    Option<EncryptedSecretEnvelope>,
+    Option<EncryptedSecretEnvelope>,
+)> {
     let created_at = sqlite_timestamp(row, "created_at")?;
     let updated_at = sqlite_timestamp(row, "updated_at")?;
     // `service_tier` was added by standalone migration 0011; older rows and
@@ -168,8 +186,10 @@ pub(crate) fn endpoint(
             updated_at,
             api_key: String::new(),
             api_keys: Vec::new(),
+            proxy_url: None,
         },
         envelope(row, "api_key")?,
+        envelope_opt(row, "proxy_url")?,
     ))
 }
 
@@ -208,6 +228,7 @@ pub(crate) fn mcp_server(
     EncryptedSecretEnvelope,
     EncryptedSecretEnvelope,
     Option<EncryptedSecretEnvelope>,
+    Option<EncryptedSecretEnvelope>,
 )> {
     let auth_mode = optional_string(row, "auth_mode")?
         .unwrap_or_else(|| crate::db::MCP_AUTH_MODE_NONE.to_string());
@@ -230,6 +251,10 @@ pub(crate) fn mcp_server(
             auth_mode,
             basic_username: optional_string(row, "basic_username")?,
             basic_password: None,
+            // Issue #375 Phase F: per-row proxy (0019 envelope). `None`
+            // means inherit; decrypted in `store::mcp_server_from_row`.
+            proxy_url: None,
+            has_proxy_url: false,
             tool_filter_mode: required_string(row, "tool_filter_mode")?,
             allowed_tools: json_value(row, "allowed_tools_json")?,
             disabled_tools: json_value(row, "disabled_tools_json")?,
@@ -271,6 +296,10 @@ pub(crate) fn mcp_server(
             )
         })?,
         envelope(row, "basic_password")?,
+        // Issue #375 Phase F: proxy envelope added by standalone 0019.
+        // Pre-migration rows lack the columns; treat missing as `None`
+        // (inherit) so legacy snapshots keep loading.
+        envelope_opt(row, "proxy_url")?,
     ))
 }
 
@@ -324,7 +353,13 @@ pub(crate) fn route(row: &SqliteRow) -> Result<ModelRouteConfig> {
     })
 }
 
-pub(crate) fn route_target(row: &SqliteRow) -> Result<(Uuid, ModelRouteTargetConfig)> {
+pub(crate) fn route_target(
+    row: &SqliteRow,
+) -> Result<(
+    Uuid,
+    ModelRouteTargetConfig,
+    Option<EncryptedSecretEnvelope>,
+)> {
     Ok((
         uuid(row, "rule_id")?,
         ModelRouteTargetConfig {
@@ -337,7 +372,9 @@ pub(crate) fn route_target(row: &SqliteRow) -> Result<(Uuid, ModelRouteTargetCon
             })?,
             enabled: bool_value(row, "enabled")?,
             upstream_model: optional_string(row, "upstream_model")?,
+            proxy_url_override: None,
         },
+        envelope_opt(row, "proxy_url_override")?,
     ))
 }
 

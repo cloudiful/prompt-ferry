@@ -41,6 +41,20 @@ impl ModelRouteRequest {
         self,
         state: &AdminState,
     ) -> Result<db::ModelEndpointRuleCreate, Response> {
+        self.into_create_with_existing(state, &std::collections::HashMap::new())
+            .await
+    }
+
+    /// Issue #368 Phase B: PATCH carry for per-target overrides.
+    /// `existing_overrides` maps `endpoint_id` to the stored override
+    /// (`None` means inherit). When the request omits `proxy_url_override`
+    /// (`None`), the stored value is kept; `Some("")` clears to inherit;
+    /// `Some(url)` replaces after scheme validation.
+    pub async fn into_create_with_existing(
+        self,
+        state: &AdminState,
+        existing_overrides: &std::collections::HashMap<Uuid, Option<String>>,
+    ) -> Result<db::ModelEndpointRuleCreate, Response> {
         let targets = self
             .targets
             .unwrap_or_else(|| {
@@ -51,6 +65,8 @@ impl ModelRouteRequest {
                         endpoint_id,
                         enabled: Some(true),
                         upstream_model: None,
+                        proxy_url_override: None,
+                        has_proxy_url_override: None,
                     })
                     .collect()
             })
@@ -66,6 +82,16 @@ impl ModelRouteRequest {
                             "target endpoint not found",
                         )
                     })?;
+                let proxy_url_override = match target.proxy_url_override.as_deref() {
+                    None => existing_overrides
+                        .get(&target.endpoint_id)
+                        .cloned()
+                        .unwrap_or(None),
+                    Some(raw) if raw.trim().is_empty() => None,
+                    Some(raw) => Some(normalize_proxy_url(raw.trim()).map_err(|message| {
+                        error(StatusCode::BAD_REQUEST, "invalid_proxy_url", message)
+                    })?),
+                };
                 Ok(db::ModelRouteTargetCreate {
                     endpoint_id: target.endpoint_id,
                     enabled: target.enabled.unwrap_or(true),
@@ -75,6 +101,7 @@ impl ModelRouteRequest {
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
                         .map(str::to_string),
+                    proxy_url_override,
                 })
             });
         let targets = futures::future::try_join_all(targets).await?;
@@ -181,6 +208,16 @@ impl ModelRouteRequest {
                 ));
             }
         }
+        // Issue #368 Phase B: scheme whitelist for per-target overrides.
+        // Empty means clear (inherit); non-empty must be http/https/socks5/socks5h.
+        for target in targets {
+            if let Some(raw) = target.proxy_url_override.as_deref()
+                && !raw.trim().is_empty()
+                && let Err(message) = normalize_proxy_url(raw.trim())
+            {
+                return Err(error(StatusCode::BAD_REQUEST, "invalid_proxy_url", message));
+            }
+        }
         let rules = db::list_model_endpoint_rules(&state.pool)
             .await
             .map_err(|err| internal(state, err))?;
@@ -205,6 +242,16 @@ pub struct ModelRouteTargetRequest {
     pub endpoint_id: Uuid,
     pub enabled: Option<bool>,
     pub upstream_model: Option<String>,
+    /// Issue #368 Phase B: per-target proxy override. `None` (omitted/null)
+    /// means keep on PATCH / inherit on create; `Some("")` means clear to
+    /// inherit; `Some(url)` must use `http/https/socks5/socks5h`.
+    #[serde(default)]
+    pub proxy_url_override: Option<String>,
+    /// Issue #368 Phase B: carry hint for the override secret. Accepted for
+    /// forward-compat; the server ignores it and uses the stored value when
+    /// `proxy_url_override` is omitted.
+    #[serde(default)]
+    pub has_proxy_url_override: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -255,4 +302,21 @@ impl From<db::ModelRoutePage> for ModelRoutePageResponse {
             rows: value.rows,
         }
     }
+}
+
+/// Issue #368 Phase B: normalize and validate an outbound proxy URL.
+/// Empty is handled by callers (clear to inherit/direct); this helper only
+/// validates non-empty values. Returns the trimmed URL on success without
+/// echoing userinfo in errors.
+fn normalize_proxy_url(trimmed: &str) -> Result<String, &'static str> {
+    let parsed = reqwest::Url::parse(trimmed)
+        .map_err(|_| "proxy_url scheme must be one of http, https, socks5, socks5h")?;
+    match parsed.scheme().to_ascii_lowercase().as_str() {
+        "http" | "https" | "socks5" | "socks5h" => {}
+        _ => return Err("proxy_url scheme must be one of http, https, socks5, socks5h"),
+    }
+    if parsed.host_str().is_none_or(|host| host.trim().is_empty()) {
+        return Err("proxy_url must include a host");
+    }
+    Ok(trimmed.to_string())
 }

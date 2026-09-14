@@ -6,11 +6,25 @@ use crate::db::{EndpointProvider, ProviderEndpoint};
 
 use super::mcp_credentials::sync_credentials_from_tokens;
 
+// Issue #375 Phase F: derive the saved-proxy indicator from the stored
+// value; the secret itself stays `skip_serializing`. `has_proxy_url` is
+// `#[sqlx(default)]` so legacy selects without the column still load.
+fn with_proxy_indicator(mut server: McpServer) -> McpServer {
+    server.has_proxy_url = server
+        .proxy_url
+        .as_deref()
+        .is_some_and(|raw| !raw.trim().is_empty());
+    server
+}
+
 pub async fn list_mcp_servers(pool: &PgPool) -> Result<Vec<McpServer>> {
     Ok(
         sqlx::query_file_as!(McpServer, "src/sql/mcp/list_mcp_servers.sql",)
             .fetch_all(pool)
-            .await?,
+            .await?
+            .into_iter()
+            .map(with_proxy_indicator)
+            .collect(),
     )
 }
 
@@ -32,7 +46,10 @@ pub async fn list_mcp_servers_page(
         rows,
     )
     .fetch_all(pool)
-    .await?;
+    .await?
+    .into_iter()
+    .map(with_proxy_indicator)
+    .collect();
     Ok((total, servers))
 }
 
@@ -46,7 +63,10 @@ pub async fn list_visible_mcp_servers(
         user_id,
     )
     .fetch_all(pool)
-    .await?)
+    .await?
+    .into_iter()
+    .map(with_proxy_indicator)
+    .collect())
 }
 
 pub async fn get_visible_mcp_server(
@@ -61,14 +81,16 @@ pub async fn get_visible_mcp_server(
         name,
     )
     .fetch_optional(pool)
-    .await?)
+    .await?
+    .map(with_proxy_indicator))
 }
 
 pub async fn get_mcp_server_by_name(pool: &PgPool, name: &str) -> Result<Option<McpServer>> {
     Ok(
         sqlx::query_file_as!(McpServer, "src/sql/mcp/get_mcp_server_by_name.sql", name,)
             .fetch_optional(pool)
-            .await?,
+            .await?
+            .map(with_proxy_indicator),
     )
 }
 
@@ -82,14 +104,18 @@ pub async fn get_mcp_server_by_source_endpoint(
         endpoint_id,
     )
     .fetch_optional(pool)
-    .await?)
+    .await?
+    .map(with_proxy_indicator))
 }
 
 pub async fn list_user_mcp_servers(pool: &PgPool, user_id: i64) -> Result<Vec<McpServer>> {
     Ok(
         sqlx::query_file_as!(McpServer, "src/sql/mcp/list_user_mcp_servers.sql", user_id,)
             .fetch_all(pool)
-            .await?,
+            .await?
+            .into_iter()
+            .map(with_proxy_indicator)
+            .collect(),
     )
 }
 
@@ -113,7 +139,10 @@ pub async fn list_user_mcp_servers_page(
         rows,
     )
     .fetch_all(pool)
-    .await?;
+    .await?
+    .into_iter()
+    .map(with_proxy_indicator)
+    .collect();
     Ok((total, servers))
 }
 
@@ -121,7 +150,8 @@ pub async fn get_mcp_server(pool: &PgPool, server_id: uuid::Uuid) -> Result<Opti
     Ok(
         sqlx::query_file_as!(McpServer, "src/sql/mcp/get_mcp_server.sql", server_id,)
             .fetch_optional(pool)
-            .await?,
+            .await?
+            .map(with_proxy_indicator),
     )
 }
 
@@ -137,10 +167,17 @@ pub async fn get_user_mcp_server(
         user_id,
     )
     .fetch_optional(pool)
-    .await?)
+    .await?
+    .map(with_proxy_indicator))
 }
 
 pub async fn create_mcp_server(pool: &PgPool, input: McpServerInput) -> Result<McpServer> {
+    // Issue #375 Phase F: normalize empty proxy to NULL (inherit).
+    let proxy_url = input
+        .proxy_url
+        .clone()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     let server = sqlx::query_file_as!(
         McpServer,
         "src/sql/mcp/create_mcp_server.sql",
@@ -160,6 +197,7 @@ pub async fn create_mcp_server(pool: &PgPool, input: McpServerInput) -> Result<M
         input.auth_mode,
         input.basic_username,
         input.basic_password,
+        proxy_url,
         input.tool_filter_mode,
         input.allowed_tools,
         input.disabled_tools,
@@ -172,7 +210,8 @@ pub async fn create_mcp_server(pool: &PgPool, input: McpServerInput) -> Result<M
         input.lifecycle_manual_protocol_version,
     )
     .fetch_one(pool)
-    .await?;
+    .await
+    .map(with_proxy_indicator)?;
     sync_credentials_from_tokens(pool, server.server_id, &server.bearer_tokens_json).await?;
     Ok(server)
 }
@@ -182,6 +221,11 @@ pub async fn update_mcp_server(
     server_id: uuid::Uuid,
     input: McpServerInput,
 ) -> Result<Option<McpServer>> {
+    let proxy_url = input
+        .proxy_url
+        .clone()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     let server = sqlx::query_file_as!(
         McpServer,
         "src/sql/mcp/update_mcp_server.sql",
@@ -202,6 +246,7 @@ pub async fn update_mcp_server(
         input.auth_mode,
         input.basic_username,
         input.basic_password,
+        proxy_url,
         input.tool_filter_mode,
         input.allowed_tools,
         input.disabled_tools,
@@ -214,7 +259,8 @@ pub async fn update_mcp_server(
         input.lifecycle_manual_protocol_version,
     )
     .fetch_optional(pool)
-    .await?;
+    .await?
+    .map(with_proxy_indicator);
     if let Some(server) = server.as_ref() {
         sync_credentials_from_tokens(pool, server.server_id, &server.bearer_tokens_json).await?;
     }
@@ -239,7 +285,8 @@ pub async fn sync_minimax_mcp_server(
             enabled,
         )
         .fetch_optional(pool)
-        .await?;
+        .await?
+        .map(with_proxy_indicator);
         if updated.is_some() {
             return Ok(());
         }
@@ -301,7 +348,8 @@ async fn create_managed_mcp_server(
                             enabled,
                         )
                         .fetch_optional(pool)
-                        .await?;
+                        .await?
+                        .map(with_proxy_indicator);
                         return Ok(());
                     }
                     return Err(err);
@@ -346,6 +394,9 @@ fn managed_mcp_server_input(
         auth_mode: crate::db::MCP_AUTH_MODE_NONE.to_string(),
         basic_username: None,
         basic_password: None,
+        // Issue #375 Phase F: managed rows carry no row proxy; the builtin
+        // transport inherits the source endpoint proxy at call time.
+        proxy_url: None,
         tool_filter_mode: "blacklist".to_string(),
         allowed_tools: serde_json::json!([]),
         disabled_tools: serde_json::json!([]),

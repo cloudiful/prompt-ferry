@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy,\n       r.daily_max_requests, r.monthly_max_requests, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.key_lb_enabled, e.native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,\n       t.position, t.enabled AS target_enabled, t.upstream_model\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\n  AND (\n      (r.scope = 'user' AND r.owner_user_id = $1)\n      OR (r.scope = 'admin' AND r.owner_user_id IS NULL)\n  )\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
+  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy,\n       r.daily_max_requests, r.monthly_max_requests, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.rule_id = $1\n  AND r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
   "describe": {
     "columns": [
       {
@@ -148,6 +148,17 @@
       },
       {
         "ordinal": 13,
+        "name": "proxy_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "proxy_url"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
         "name": "key_lb_enabled",
         "type_info": "Bool",
         "origin": {
@@ -158,7 +169,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "native_api",
         "type_info": "Text",
         "origin": {
@@ -169,7 +180,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "provider",
         "type_info": "Text",
         "origin": {
@@ -180,13 +191,13 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "service_tier",
         "type_info": "Text",
         "origin": "Expression"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "position",
         "type_info": "Int4",
         "origin": {
@@ -197,7 +208,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "target_enabled",
         "type_info": "Bool",
         "origin": {
@@ -208,7 +219,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "upstream_model",
         "type_info": "Text",
         "origin": {
@@ -217,11 +228,22 @@
             "name": "upstream_model"
           }
         }
+      },
+      {
+        "ordinal": 21,
+        "name": "proxy_url_override",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_route_targets",
+            "name": "proxy_url_override"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -238,14 +260,16 @@
       false,
       false,
       false,
+      true,
       false,
       false,
       false,
       null,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "66c71963536aa836ebaa67102267776e22ab5817edf5127120cdb9f359fc33cc"
+  "hash": "ca5196d95496ed3b5128dd7bb108a001d2ab78da001710d6b1fc6a4f3b50c890"
 }

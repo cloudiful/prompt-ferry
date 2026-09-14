@@ -248,6 +248,7 @@ mod auto_protocol_tests {
             route_selection_reason: db::RouteSelectionReason::Default,
             provider: db::EndpointProvider::Generic,
             service_tier: db::MinimaxServiceTier::Standard,
+            proxy_url: None,
         }
     }
 

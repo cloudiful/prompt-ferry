@@ -109,6 +109,7 @@ fn route(endpoint_id: Uuid, keys: Vec<db::EndpointApiKey>) -> db::RouteConfig {
         route_selection_reason: db::RouteSelectionReason::Default,
         provider: db::EndpointProvider::OpenRouter,
         service_tier: db::MinimaxServiceTier::Standard,
+        proxy_url: None,
     }
 }
 

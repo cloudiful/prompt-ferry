@@ -69,6 +69,7 @@ async fn endpoint_crud_round_trips_with_encrypted_secret() {
         }],
         key_lb_enabled: true,
         enabled: true,
+        proxy_url: None,
     };
     let endpoint_id = Uuid::new_v4();
     let created = repo
@@ -125,6 +126,7 @@ async fn endpoint_crud_round_trips_with_encrypted_secret() {
         }],
         key_lb_enabled: true,
         enabled: true,
+        proxy_url: None,
     };
     let updated = repo
         .update_endpoint(endpoint_id, updated_input)
@@ -152,6 +154,207 @@ async fn endpoint_crud_round_trips_with_encrypted_secret() {
     close_repository(store, path).await;
 }
 
+// Issue #368 Phase A: outbound proxy must follow the `api_key` asymmetry
+// (PG plaintext, SQLite envelope). Mirrors
+// `endpoint_crud_round_trips_with_encrypted_secret`: ciphertext must not
+// contain the plaintext userinfo, decrypted reads must round-trip, and
+// clearing must persist as NULL (direct).
+#[tokio::test]
+async fn endpoint_proxy_round_trips_with_encrypted_envelope() {
+    let (store, manager, path) = open_repository().await;
+    let repo = ConfigRepository::sqlite(store.clone(), manager.clone());
+
+    let proxy = "http://proxy-user:proxy-pass@proxy.example:8080".to_string();
+    let input = EndpointCreate {
+        scope: "admin".to_string(),
+        owner_user_id: None,
+        name: "proxy upstream".to_string(),
+        provider: EndpointProvider::Generic,
+        provider_region: None,
+        service_tier: Default::default(),
+        base_url: "https://upstream.example".to_string(),
+        native_api: NativeApi::Chat,
+        native_api_source: DbNativeApiSource::Manual,
+        daily_max_requests: None,
+        monthly_max_requests: None,
+        api_key: "secret".to_string(),
+        api_keys: vec![],
+        key_lb_enabled: false,
+        enabled: true,
+        proxy_url: Some(proxy.clone()),
+    };
+    let endpoint_id = Uuid::new_v4();
+    repo.create_endpoint(endpoint_id, input, false)
+        .await
+        .expect("create endpoint with proxy");
+
+    // Envelope must not leak plaintext userinfo.
+    let row = sqlx::query(
+        "SELECT proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version FROM standalone_provider_endpoints WHERE endpoint_id = ?",
+    )
+    .bind(endpoint_id.to_string())
+    .fetch_one(store.pool())
+    .await
+    .expect("proxy row");
+    let ciphertext: Option<Vec<u8>> = row.try_get("proxy_url_ciphertext").expect("ct");
+    let ciphertext = ciphertext.expect("proxy envelope present");
+    assert!(!ciphertext.is_empty());
+    assert_ne!(ciphertext, proxy.as_bytes());
+    assert!(!String::from_utf8_lossy(&ciphertext).contains("proxy-pass"));
+    assert!(!String::from_utf8_lossy(&ciphertext).contains(&proxy));
+    let nonce: Option<Vec<u8>> = row.try_get("proxy_url_nonce").expect("nonce");
+    let nonce = nonce.expect("proxy nonce present");
+    assert!(!nonce.is_empty());
+    let key_version: Option<i64> = row.try_get("proxy_url_key_version").expect("key version");
+    assert!(key_version.is_some());
+
+    let decrypted = repo
+        .endpoint_proxy_url(endpoint_id)
+        .await
+        .expect("decrypt proxy")
+        .expect("proxy present");
+    assert_eq!(decrypted, proxy);
+
+    // Route override envelope must also round-trip via the store.
+    let rule_id = Uuid::new_v4();
+    let route_input = ModelEndpointRuleCreate {
+        scope: "admin".to_string(),
+        owner_user_id: None,
+        model_pattern: "gpt-*".to_string(),
+        routing_strategy: ModelRouteRoutingStrategy::ClientKeyRendezvous,
+        daily_max_requests: None,
+        monthly_max_requests: None,
+        enabled: true,
+        targets: vec![ModelRouteTargetCreate {
+            endpoint_id,
+            enabled: true,
+            upstream_model: None,
+            proxy_url_override: Some(
+                "socks5h://route-user:route-pass@route-proxy.example:1080".to_string(),
+            ),
+        }],
+    };
+    repo.create_model_route(rule_id, route_input)
+        .await
+        .expect("create route with override");
+
+    let target_row = sqlx::query(
+        "SELECT proxy_url_override_ciphertext, proxy_url_override_nonce, proxy_url_override_key_version FROM standalone_model_route_targets WHERE rule_id = ?",
+    )
+    .bind(rule_id.to_string())
+    .fetch_one(store.pool())
+    .await
+    .expect("override row");
+    let override_ct: Option<Vec<u8>> = target_row
+        .try_get("proxy_url_override_ciphertext")
+        .expect("override ct");
+    let override_ct = override_ct.expect("override envelope present");
+    let override_proxy = "socks5h://route-user:route-pass@route-proxy.example:1080";
+    assert!(!override_ct.is_empty());
+    assert_ne!(override_ct, override_proxy.as_bytes());
+    assert!(!String::from_utf8_lossy(&override_ct).contains("route-pass"));
+    assert!(!String::from_utf8_lossy(&override_ct).contains(override_proxy));
+    let override_nonce: Option<Vec<u8>> = target_row
+        .try_get("proxy_url_override_nonce")
+        .expect("override nonce");
+    assert!(override_nonce.expect("override nonce present").len() > 0);
+    let override_version: Option<i64> = target_row
+        .try_get("proxy_url_override_key_version")
+        .expect("override version");
+    assert!(override_version.is_some());
+
+    let stored_route = store
+        .get_route(&manager, rule_id)
+        .await
+        .expect("get route")
+        .expect("route present");
+    assert_eq!(
+        stored_route.targets[0].proxy_url_override.as_deref(),
+        Some("socks5h://route-user:route-pass@route-proxy.example:1080")
+    );
+
+    // Defense-in-depth: proxy secrets must never serialize (mirrors api_key).
+    // Covers the PG plaintext shapes (ProviderEndpoint/ModelRouteTarget/
+    // ProviderEndpointRow) and the standalone in-memory configs.
+    let endpoint_snapshot = store
+        .get_endpoint(&manager, endpoint_id)
+        .await
+        .expect("get endpoint")
+        .expect("endpoint present");
+    assert_eq!(endpoint_snapshot.proxy_url.as_deref(), Some(proxy.as_str()));
+    for value in [
+        serde_json::to_value(&endpoint_snapshot).expect("serialize endpoint config"),
+        serde_json::to_value(&stored_route.targets[0]).expect("serialize target config"),
+    ] {
+        let rendered = serde_json::to_string(&value).expect("render");
+        assert!(!rendered.contains("proxy-pass"));
+        assert!(!rendered.contains("route-pass"));
+        assert!(value.get("proxy_url").is_none());
+        assert!(value.get("proxy_url_override").is_none());
+    }
+    let unified = repo
+        .get_endpoint(endpoint_id)
+        .await
+        .expect("unified endpoint")
+        .expect("endpoint present");
+    let unified_value =
+        serde_json::to_value(unified.into_pg()).expect("serialize unified endpoint");
+    assert!(unified_value.get("proxy_url").is_none());
+    assert!(
+        !serde_json::to_string(&unified_value)
+            .expect("render unified")
+            .contains("proxy-pass")
+    );
+    let unified_route = repo
+        .get_model_route(rule_id)
+        .await
+        .expect("unified route")
+        .expect("route present");
+    let route_value = serde_json::to_value(&unified_route).expect("serialize route");
+    assert!(
+        !serde_json::to_string(&route_value)
+            .expect("render route")
+            .contains("route-pass")
+    );
+    // Standalone Debug must redact proxy userinfo as well.
+    let debug = format!("{:?}", endpoint_snapshot);
+    assert!(!debug.contains("proxy-pass"));
+    let target_debug = format!("{:?}", stored_route.targets[0]);
+    assert!(!target_debug.contains("route-pass"));
+
+    // Clearing the endpoint proxy must persist as NULL (direct).
+    let cleared = EndpointCreate {
+        scope: "admin".to_string(),
+        owner_user_id: None,
+        name: "proxy upstream".to_string(),
+        provider: EndpointProvider::Generic,
+        provider_region: None,
+        service_tier: Default::default(),
+        base_url: "https://upstream.example".to_string(),
+        native_api: NativeApi::Chat,
+        native_api_source: DbNativeApiSource::Manual,
+        daily_max_requests: None,
+        monthly_max_requests: None,
+        api_key: "secret".to_string(),
+        api_keys: vec![],
+        key_lb_enabled: false,
+        enabled: true,
+        proxy_url: None,
+    };
+    repo.update_endpoint(endpoint_id, cleared)
+        .await
+        .expect("clear proxy")
+        .expect("endpoint present");
+    assert_eq!(
+        repo.endpoint_proxy_url(endpoint_id)
+            .await
+            .expect("proxy after clear"),
+        None
+    );
+
+    close_repository(store, path).await;
+}
+
 fn mcp_input() -> crate::db::McpServerInput {
     crate::db::McpServerInput {
         scope: "admin".to_string(),
@@ -172,6 +375,7 @@ fn mcp_input() -> crate::db::McpServerInput {
         auth_mode: "none".to_string(),
         basic_username: None,
         basic_password: None,
+        proxy_url: None,
         tool_filter_mode: "blacklist".to_string(),
         allowed_tools: serde_json::json!([]),
         disabled_tools: serde_json::json!([]),
@@ -335,6 +539,7 @@ async fn sqlite_minimax_endpoint_creates_managed_mcp_projection() {
                 api_keys: vec![],
                 key_lb_enabled: false,
                 enabled: true,
+                proxy_url: None,
             },
             true,
         )
@@ -400,6 +605,7 @@ async fn model_route_crud_round_trips_with_target_persistence() {
         api_keys: vec![],
         key_lb_enabled: false,
         enabled: true,
+        proxy_url: None,
     };
     repo.create_endpoint(endpoint_id, endpoint, false)
         .await
@@ -418,6 +624,7 @@ async fn model_route_crud_round_trips_with_target_persistence() {
             endpoint_id,
             enabled: true,
             upstream_model: Some("gpt-4o-mini".to_string()),
+            proxy_url_override: None,
         }],
     };
     let rule = repo

@@ -59,11 +59,38 @@ pub(super) async fn connect_with_selected(
 ) -> anyhow::Result<rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>> {
     match server.transport.as_str() {
         "http" => {
+            // Issue #368 Phase E + #375 Phase F: `StreamableHttpClientTransportConfig`
+            // has no proxy field and `from_config` builds rmcp's internal
+            // default client (auto system proxy enabled; unified
+            // `socks`/`system-proxy` features via Cargo), so the proxy client
+            // is injected via `with_client` (see `super::proxy`). Resolution
+            // is row proxy → process env → direct; builtin rows ignore their
+            // own row proxy (see `builtin::call`). `Ok(None)` keeps the
+            // direct `from_config` path (identical when no proxy env is set);
+            // `Err` fails closed without silent direct fallback.
+            // `stdio`/`builtin_minimax` never reach here, so they stay direct
+            // by construction.
             let config = http_transport_config(server, selected)?;
+            let upstream_url = server.url.as_deref().unwrap_or_default();
+            // The error text already carries the redacted proxy (userinfo
+            // scrubbed in `super::proxy`); never log the raw row or env value
+            // here.
+            let proxy_client = super::proxy::client_for_mcp_server_with_row(
+                server.proxy_url.as_deref(),
+                upstream_url,
+            )
+            .map_err(|message| {
+                tracing::warn!(server_name = %server.name, "{message}");
+                anyhow!("{message}")
+            })?;
             connect_with_lifecycle_fallback(storage, server, move |mode, protocol_version| {
                 let config = config.clone();
+                let proxy_client = proxy_client.clone();
                 async move {
-                    let transport = StreamableHttpClientTransport::from_config(config);
+                    let transport = match proxy_client {
+                        Some(client) => StreamableHttpClientTransport::with_client(client, config),
+                        None => StreamableHttpClientTransport::from_config(config),
+                    };
                     Ok(client_info()
                         .with_protocol_version(protocol_version)
                         .serve_with_lifecycle(transport, mode)
@@ -1291,6 +1318,8 @@ mod tests {
             auth_mode: "none".to_string(),
             basic_username: None,
             basic_password: None,
+            proxy_url: None,
+            has_proxy_url: false,
             tool_filter_mode: "blacklist".to_string(),
             allowed_tools: json!([]),
             disabled_tools: json!([]),

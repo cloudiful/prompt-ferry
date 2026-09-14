@@ -115,9 +115,22 @@ pub(crate) async fn call(
         Some(db::EndpointRegion::Global) => "https://api.minimax.io",
         None => bail!("MiniMax MCP source endpoint has no region"),
     };
-    let client = Client::builder()
-        .timeout(Duration::from_millis(server.timeout_ms.max(100) as u64))
-        .build()?;
+    // Issue #375 Phase F+G: builtin inherits its source endpoint proxy
+    // (endpoint → env → direct) for the MiniMax API request via the endpoint
+    // proxy pool (`mcp::transport::proxy::client_for_builtin`). Invalid
+    // endpoint proxy fails closed with userinfo scrubbed; empty falls
+    // through to env/direct. The row's own proxy_url is ignored by design
+    // (managed rows carry none). Image-URL fetches stay direct (pinned DNS,
+    // see `client_with_pinned_dns`).
+    let client = crate::mcp::transport::proxy::client_for_builtin(
+        endpoint.proxy_url.as_deref(),
+        host,
+        server.timeout_ms,
+    )
+    .map_err(|message| {
+        tracing::warn!(server_name = %server.name, "{message}");
+        anyhow!("{message}")
+    })?;
     let (path, body) = match name {
         Some("web_search") => {
             let query = arguments
@@ -284,6 +297,10 @@ fn client_with_pinned_dns(
     resolved: &[std::net::SocketAddr],
     timeout_ms: i32,
 ) -> anyhow::Result<Client> {
+    // Issue #375 Phase G: image-URL fetches stay direct by design (no
+    // endpoint proxy context). The URL is user-supplied and SSRF-pinned via
+    // `resolve_to_addrs` after blocklist validation; routing it through the
+    // endpoint proxy would move DNS to the proxy and defeat the pinning.
     // Preserve the caller-configured timeout while removing redirect-following
     // and pinning the host to the addresses we just validated.
     let timeout = Duration::from_millis(timeout_ms.max(100) as u64);

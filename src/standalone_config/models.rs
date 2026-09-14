@@ -335,6 +335,11 @@ pub struct ProviderEndpointConfig {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub api_key: String,
     pub api_keys: Vec<EndpointApiKeyConfig>,
+    // Issue #368 Phase A: outbound proxy default (full URL with optional
+    // userinfo). `None` means direct. Plaintext only in memory; SQLite
+    // persists the 0018 envelope.
+    #[serde(default, skip_serializing)]
+    pub proxy_url: Option<String>,
 }
 
 impl fmt::Debug for ProviderEndpointConfig {
@@ -356,17 +361,43 @@ impl fmt::Debug for ProviderEndpointConfig {
             .field("updated_at", &self.updated_at)
             .field("api_key", &redacted_secret(&self.api_key))
             .field("api_keys", &self.api_keys)
+            .field(
+                "proxy_url",
+                &redacted_optional_secret(self.proxy_url.as_deref()),
+            )
             .finish()
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelRouteTargetConfig {
     pub target_id: Uuid,
     pub endpoint_id: Uuid,
     pub position: i32,
     pub enabled: bool,
     pub upstream_model: Option<String>,
+    // Issue #368 Phase A: per-target proxy override (full URL with optional
+    // userinfo). `None` inherits the endpoint default. Plaintext only in
+    // memory; SQLite persists the 0018 envelope.
+    #[serde(default, skip_serializing)]
+    pub proxy_url_override: Option<String>,
+}
+
+impl fmt::Debug for ModelRouteTargetConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ModelRouteTargetConfig")
+            .field("target_id", &self.target_id)
+            .field("endpoint_id", &self.endpoint_id)
+            .field("position", &self.position)
+            .field("enabled", &self.enabled)
+            .field("upstream_model", &self.upstream_model)
+            .field(
+                "proxy_url_override",
+                &redacted_optional_secret(self.proxy_url_override.as_deref()),
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

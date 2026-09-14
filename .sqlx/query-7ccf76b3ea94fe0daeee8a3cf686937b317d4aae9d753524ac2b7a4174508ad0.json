@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT endpoint_id AS \"route_id!\", COALESCE(owner_user_id, 0) AS \"user_id!\", base_url, api_key, key_lb_enabled, native_api, provider, COALESCE(service_tier, 'standard') AS service_tier\nFROM provider_endpoints\nWHERE endpoint_id = $1\n  AND enabled = TRUE\n",
+  "query": "SELECT DISTINCT ON (e.endpoint_id) e.endpoint_id, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\n  AND (\n      (r.scope = 'user' AND r.owner_user_id = $1)\n      OR (r.scope = 'admin' AND r.owner_user_id IS NULL)\n  )\nORDER BY\n  e.endpoint_id,\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  t.position ASC,\n  r.updated_at DESC\n",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "route_id!",
+        "name": "endpoint_id",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -16,12 +16,6 @@
       },
       {
         "ordinal": 1,
-        "name": "user_id!",
-        "type_info": "Int8",
-        "origin": "Expression"
-      },
-      {
-        "ordinal": 2,
         "name": "base_url",
         "type_info": "Text",
         "origin": {
@@ -32,13 +26,24 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 2,
         "name": "api_key",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "provider_endpoints",
             "name": "api_key"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "proxy_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "proxy_url"
           }
         }
       },
@@ -84,19 +89,19 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Int8"
       ]
     },
     "nullable": [
       false,
-      null,
       false,
       false,
+      true,
       false,
       false,
       false,
       null
     ]
   },
-  "hash": "1ab929f3a90f59dcf4cdab1ba0e464d78f15bc107470d15e886f02df670169e3"
+  "hash": "7ccf76b3ea94fe0daeee8a3cf686937b317d4aae9d753524ac2b7a4174508ad0"
 }

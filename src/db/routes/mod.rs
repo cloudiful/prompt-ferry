@@ -43,6 +43,7 @@ struct ModelRouteCandidateRow {
     endpoint_name: String,
     base_url: String,
     api_key: String,
+    proxy_url: Option<String>,
     key_lb_enabled: bool,
     native_api: String,
     provider: String,
@@ -50,6 +51,7 @@ struct ModelRouteCandidateRow {
     position: i32,
     target_enabled: bool,
     upstream_model: Option<String>,
+    proxy_url_override: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -62,6 +64,7 @@ struct ModelRouteTargetRow {
     position: i32,
     enabled: bool,
     upstream_model: Option<String>,
+    proxy_url_override: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }

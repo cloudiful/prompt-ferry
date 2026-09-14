@@ -19,6 +19,13 @@ use crate::{
 use super::{UnifiedEndpointApiKey, UnifiedProviderEndpoint};
 
 pub(super) fn from_postgres(endpoint: PgProviderEndpoint) -> UnifiedProviderEndpoint {
+    // Issue #368 Phase C (P2): carry the saved-proxy indicator; the secret
+    // itself stays redacted (unified never holds `proxy_url`).
+    let has_proxy_url = endpoint.has_proxy_url
+        || endpoint
+            .proxy_url
+            .as_deref()
+            .is_some_and(|raw| !raw.trim().is_empty());
     UnifiedProviderEndpoint {
         endpoint_id: endpoint.endpoint_id,
         scope: endpoint.scope,
@@ -35,6 +42,7 @@ pub(super) fn from_postgres(endpoint: PgProviderEndpoint) -> UnifiedProviderEndp
         key_lb_enabled: endpoint.key_lb_enabled,
         enabled: endpoint.enabled,
         mcp_enabled: endpoint.mcp_enabled,
+        has_proxy_url,
         created_at: endpoint.created_at,
         updated_at: endpoint.updated_at,
         api_keys: endpoint
@@ -51,6 +59,12 @@ pub(super) fn from_sqlite(endpoint: ScProviderEndpoint) -> Result<UnifiedProvide
         .into_iter()
         .map(from_sqlite_api_key)
         .collect::<Result<Vec<_>>>()?;
+    // Issue #368 Phase C (P2): SQLite stores the proxy in the 0018 envelope;
+    // `get_endpoint` already decrypted it, so presence means saved.
+    let has_proxy_url = endpoint
+        .proxy_url
+        .as_deref()
+        .is_some_and(|raw| !raw.trim().is_empty());
     Ok(UnifiedProviderEndpoint {
         endpoint_id: endpoint.endpoint_id,
         scope: "admin".to_string(),
@@ -67,6 +81,7 @@ pub(super) fn from_sqlite(endpoint: ScProviderEndpoint) -> Result<UnifiedProvide
         key_lb_enabled: endpoint.key_lb_enabled,
         enabled: endpoint.enabled,
         mcp_enabled: endpoint.mcp_enabled,
+        has_proxy_url,
         created_at: endpoint.created_at,
         updated_at: endpoint.updated_at,
         api_keys,
@@ -182,6 +197,13 @@ pub(super) fn unified_to_pg(endpoint: UnifiedProviderEndpoint) -> crate::db::Pro
         daily_max_requests: endpoint.daily_max_requests,
         monthly_max_requests: endpoint.monthly_max_requests,
         api_key: String::new(),
+        // Issue #368 Phase A: Unified is the redacted admin shape; the
+        // proxy secret never leaves the store via this path (mirrors
+        // `api_key` redaction). Decrypted reads use dedicated helpers.
+        proxy_url: None,
+        // Issue #368 Phase C (P2): carry the saved-proxy indicator so the
+        // page response matches the single-endpoint shape.
+        has_proxy_url: endpoint.has_proxy_url,
         key_lb_enabled: endpoint.key_lb_enabled,
         enabled: endpoint.enabled,
         mcp_enabled: endpoint.mcp_enabled,

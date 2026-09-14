@@ -48,6 +48,7 @@ pub async fn create_test_endpoint(pool: &sqlx::PgPool) -> anyhow::Result<Uuid> {
             api_keys: Vec::new(),
             key_lb_enabled: false,
             enabled: true,
+            proxy_url: None,
         },
     )
     .await?

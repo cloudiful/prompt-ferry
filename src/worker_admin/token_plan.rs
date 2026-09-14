@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use futures::{StreamExt, stream};
-use reqwest::Client;
+use reqwest::{Client, Proxy};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -15,11 +17,66 @@ use super::json_scalars::{
 use super::opencode_go_usage::{OPENCODE_GO_BASE, fetch_opencode_go_key_usage};
 use super::openrouter_usage::fetch_openrouter_key_usage;
 use crate::{
-    db::{EndpointProvider, EndpointRegion, ProviderEndpoint},
+    db::{self, EndpointProvider, EndpointRegion, ProviderEndpoint},
     worker_admin_types::{
         TokenPlanKeyUsage, TokenPlanModelUsage, TokenPlanUsageResponse, TokenPlanWindowUsage,
     },
 };
+
+// Issue #375 Phase G: per-`(proxy_url, host)` client pool for token-plan
+// balance fetches. Direct endpoints build the same 8s-timeout client as
+// before; proxy endpoints reuse a pooled 8s client keyed by trimmed proxy
+// plus the lowercased upstream host. Errors are redacted; invalid proxy
+// fails closed without falling back to direct.
+static TOKEN_PLAN_POOL: OnceLock<Mutex<HashMap<(String, String), Client>>> = OnceLock::new();
+
+fn pool() -> &'static Mutex<HashMap<(String, String), Client>> {
+    TOKEN_PLAN_POOL.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn lock_pool() -> std::sync::MutexGuard<'static, HashMap<(String, String), Client>> {
+    pool()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn build_pooled_client(validated_proxy: &str) -> Result<Client, String> {
+    let redacted = db::redact_proxy_url_for_log(validated_proxy);
+    let proxy = Proxy::all(validated_proxy)
+        .map_err(|_| format!("invalid proxy {redacted}: unsupported proxy URL"))?;
+    Client::builder()
+        .timeout(Duration::from_secs(8))
+        .proxy(proxy)
+        .build()
+        .map_err(|_| format!("invalid proxy {redacted}: failed to build proxy client"))
+}
+
+fn direct_client() -> Result<Client, String> {
+    Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|err| format!("failed to build token plan client: {err}"))
+}
+
+/// Pooled client for an endpoint's token-plan host. `host_url` is the actual
+/// upstream being contacted (usage URL or derived base) so the pool key uses
+/// the real host. Empty proxy means direct with the same 8s timeout.
+fn client_for_endpoint_proxy(proxy_url: Option<&str>, host_url: &str) -> Result<Client, String> {
+    let Some(raw) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return direct_client();
+    };
+    let validated = db::validate_outbound_proxy_url(raw).map_err(|message| message.to_string())?;
+    let key = (validated.clone(), db::proxy_base_host(host_url));
+    {
+        let guard = lock_pool();
+        if let Some(client) = guard.get(&key) {
+            return Ok(client.clone());
+        }
+    }
+    let client = build_pooled_client(&validated)?;
+    lock_pool().insert(key, client.clone());
+    Ok(client)
+}
 
 const MINIMAX_CN_USAGE_URL: &str = "https://www.minimaxi.com/v1/token_plan/remains";
 const MINIMAX_GLOBAL_USAGE_URL: &str = "https://www.minimax.io/v1/token_plan/remains";
@@ -72,8 +129,9 @@ async fn fetch_minimax_endpoint_usage(
         return Err(anyhow!("endpoint has no enabled API key"));
     }
 
-    let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
     let url = usage_url(region);
+    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), url)
+        .map_err(|message| anyhow!("{message}"))?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_minimax_key_usage(client.clone(), url, key_id, key_label, secret)
     }))
@@ -97,7 +155,8 @@ async fn fetch_command_code_endpoint_usage(
         return Err(anyhow!("endpoint has no enabled API key"));
     }
 
-    let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
+    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), COMMAND_CODE_BASE)
+        .map_err(|message| anyhow!("{message}"))?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_command_code_key_usage(client.clone(), COMMAND_CODE_BASE, key_id, key_label, secret)
     }))
@@ -121,7 +180,8 @@ async fn fetch_opencode_go_endpoint_usage(
         return Err(anyhow!("endpoint has no enabled API key"));
     }
 
-    let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
+    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), OPENCODE_GO_BASE)
+        .map_err(|message| anyhow!("{message}"))?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_opencode_go_key_usage(client.clone(), OPENCODE_GO_BASE, key_id, key_label, secret)
     }))
@@ -145,7 +205,6 @@ async fn fetch_openrouter_endpoint_usage(
         return Err(anyhow!("endpoint has no enabled API key"));
     }
 
-    let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
     // Issue #248: preset providers derive their official base; the stored
     // base is only a fallback for a legacy/custom host.
     let base = crate::upstream_presets::route_base_or_stored(
@@ -153,6 +212,8 @@ async fn fetch_openrouter_endpoint_usage(
         &endpoint.base_url,
         crate::config::NativeApi::Chat,
     );
+    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), &base)
+        .map_err(|message| anyhow!("{message}"))?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_openrouter_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
     }))
@@ -174,7 +235,6 @@ async fn fetch_glm_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
         return Err(anyhow!("endpoint has no enabled API key"));
     }
 
-    let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
     // Issue #248: derive the GLM origin from the official Chat family root
     // instead of trusting a stored base that may carry a stale path.
     let base = crate::upstream_presets::route_base_or_stored(
@@ -182,6 +242,8 @@ async fn fetch_glm_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
         &endpoint.base_url,
         crate::config::NativeApi::Chat,
     );
+    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), &base)
+        .map_err(|message| anyhow!("{message}"))?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_glm_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
     }))
@@ -205,7 +267,6 @@ async fn fetch_deepseek_endpoint_usage(
         return Err(anyhow!("endpoint has no enabled API key"));
     }
 
-    let client = Client::builder().timeout(Duration::from_secs(8)).build()?;
     // Issue #248: preset providers derive their official base; the stored
     // base is only a fallback for a legacy/custom host.
     let base = crate::upstream_presets::route_base_or_stored(
@@ -213,6 +274,8 @@ async fn fetch_deepseek_endpoint_usage(
         &endpoint.base_url,
         crate::config::NativeApi::Chat,
     );
+    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), &base)
+        .map_err(|message| anyhow!("{message}"))?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_deepseek_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
     }))
@@ -521,5 +584,44 @@ mod tests {
     fn maps_regions_to_fixed_minimax_hosts() {
         assert_eq!(usage_url(EndpointRegion::Cn), MINIMAX_CN_USAGE_URL);
         assert_eq!(usage_url(EndpointRegion::Global), MINIMAX_GLOBAL_USAGE_URL);
+    }
+
+    #[test]
+    fn empty_proxy_means_direct_token_plan_client() {
+        for proxy in [None, Some(""), Some("   ")] {
+            client_for_endpoint_proxy(proxy, "https://token-plan-direct.example.test")
+                .expect("direct must succeed");
+        }
+        assert!(db::proxy_pool_key("", "https://token-plan-direct.example.test").is_none());
+    }
+
+    #[test]
+    fn proxy_selection_reuses_pooled_token_plan_client() {
+        let proxy = "http://proxy-token-plan-reuse.test:8080";
+        let host_a = "https://a-token-plan-reuse.example.test";
+        let host_b = "https://b-token-plan-reuse.example.test";
+        let via_a = client_for_endpoint_proxy(Some(proxy), host_a).expect("proxy a");
+        let via_a_again = client_for_endpoint_proxy(Some(proxy), host_a).expect("proxy a again");
+        let via_b = client_for_endpoint_proxy(Some(proxy), host_b).expect("proxy b");
+        let _ = (via_a, via_a_again, via_b);
+        let key_a = db::proxy_pool_key(proxy, host_a).unwrap();
+        let key_b = db::proxy_pool_key(proxy, host_b).unwrap();
+        assert_eq!(key_a.0, key_b.0);
+        assert_ne!(key_a.1, key_b.1);
+        let guard = lock_pool();
+        assert!(guard.contains_key(&key_a));
+        assert!(guard.contains_key(&key_b));
+    }
+
+    #[test]
+    fn invalid_token_plan_proxy_is_rejected_without_userinfo_leak() {
+        let err = client_for_endpoint_proxy(
+            Some("ftp://user:secret@proxy-token-plan-invalid.test:21"),
+            "https://token-plan-invalid.example.test",
+        )
+        .expect_err("ftp must be rejected");
+        assert!(err.contains("scheme"));
+        assert!(!err.contains("secret"));
+        assert!(!err.contains("user"));
     }
 }

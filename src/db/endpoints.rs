@@ -43,6 +43,7 @@ pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<R
             route_selection_reason: crate::db::RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::from_str(&row.provider),
             service_tier: MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
+            proxy_url: row.proxy_url,
         })
         .collect::<Vec<_>>();
     attach_route_config_api_keys(pool, routes).await
@@ -94,6 +95,12 @@ pub async fn get_endpoint(
 }
 
 pub async fn create_endpoint(pool: &PgPool, input: EndpointCreate) -> Result<ProviderEndpoint> {
+    // Issue #368 Phase A: normalize empty proxy to NULL (direct).
+    let proxy_url = input
+        .proxy_url
+        .clone()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     let endpoint = sqlx::query_file_as!(
         ProviderEndpointRow,
         "src/sql/endpoints/create_endpoint.sql",
@@ -109,6 +116,7 @@ pub async fn create_endpoint(pool: &PgPool, input: EndpointCreate) -> Result<Pro
         input.daily_max_requests,
         input.monthly_max_requests,
         input.api_key,
+        proxy_url,
         input.key_lb_enabled,
         input.enabled,
     )
@@ -130,6 +138,11 @@ pub async fn create_endpoint_with_mcp(
     input: EndpointCreate,
     mcp_enabled: bool,
 ) -> Result<ProviderEndpoint> {
+    let proxy_url = input
+        .proxy_url
+        .clone()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     let endpoint = sqlx::query_file_as!(
         ProviderEndpointRow,
         "src/sql/endpoints/create_endpoint_with_mcp.sql",
@@ -145,6 +158,7 @@ pub async fn create_endpoint_with_mcp(
         input.daily_max_requests,
         input.monthly_max_requests,
         input.api_key,
+        proxy_url,
         input.key_lb_enabled,
         input.enabled,
         mcp_enabled,
@@ -163,6 +177,11 @@ pub async fn update_endpoint(
     endpoint_id: uuid::Uuid,
     input: EndpointCreate,
 ) -> Result<Option<ProviderEndpoint>> {
+    let proxy_url = input
+        .proxy_url
+        .clone()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     let endpoint = sqlx::query_file_as!(
         ProviderEndpointRow,
         "src/sql/endpoints/update_endpoint.sql",
@@ -179,6 +198,7 @@ pub async fn update_endpoint(
         input.daily_max_requests,
         input.monthly_max_requests,
         input.api_key,
+        proxy_url,
         input.key_lb_enabled,
         input.enabled,
     )

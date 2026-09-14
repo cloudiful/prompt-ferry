@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\nFROM provider_endpoints\nWHERE endpoint_id = $1\n",
+  "query": "SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, proxy_url, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\nFROM provider_endpoints\nORDER BY updated_at DESC\n",
   "describe": {
     "columns": [
       {
@@ -143,6 +143,17 @@
       },
       {
         "ordinal": 13,
+        "name": "proxy_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "proxy_url"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
         "name": "key_lb_enabled",
         "type_info": "Bool",
         "origin": {
@@ -153,7 +164,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -164,7 +175,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "mcp_enabled",
         "type_info": "Bool",
         "origin": {
@@ -175,7 +186,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -186,7 +197,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -198,9 +209,7 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -216,6 +225,7 @@
       true,
       true,
       false,
+      true,
       false,
       false,
       false,
@@ -223,5 +233,5 @@
       false
     ]
   },
-  "hash": "7077c142117904ef5de5265a8c13263a92a93c1ce76ede9d0c171abc299e7245"
+  "hash": "133f08defda037c2e2f3a44f80b1a1678abdea775efc82f911c07bf8ae8d69dc"
 }

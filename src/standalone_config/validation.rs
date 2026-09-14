@@ -177,6 +177,7 @@ impl BootstrapSeed {
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
                 api_key: upstream_api_key.clone(),
+                proxy_url: None,
                 api_keys: vec![EndpointApiKeyConfig {
                     key_id: endpoint_key_id,
                     endpoint_id,

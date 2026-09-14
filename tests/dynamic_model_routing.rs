@@ -132,6 +132,7 @@ async fn auto_discovers_endpoint_for_model_when_whitelist_is_disabled() -> anyho
             api_keys: vec![],
             key_lb_enabled: false,
             enabled: true,
+            proxy_url: None,
         },
     )
     .await?;
@@ -153,6 +154,7 @@ async fn auto_discovers_endpoint_for_model_when_whitelist_is_disabled() -> anyho
             api_keys: vec![],
             key_lb_enabled: false,
             enabled: true,
+            proxy_url: None,
         },
     )
     .await?;

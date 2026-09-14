@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO provider_endpoints(scope, owner_user_id, name, provider, provider_region, service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
+  "query": "SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, proxy_url, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\nFROM provider_endpoints\nORDER BY updated_at DESC, endpoint_id DESC\nOFFSET $1\nLIMIT $2\n",
   "describe": {
     "columns": [
       {
@@ -143,6 +143,17 @@
       },
       {
         "ordinal": 13,
+        "name": "proxy_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "proxy_url"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
         "name": "key_lb_enabled",
         "type_info": "Bool",
         "origin": {
@@ -153,7 +164,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -164,7 +175,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "mcp_enabled",
         "type_info": "Bool",
         "origin": {
@@ -175,7 +186,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -186,7 +197,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -199,21 +210,8 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
         "Int8",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Int4",
-        "Int4",
-        "Text",
-        "Bool",
-        "Bool",
-        "Bool"
+        "Int8"
       ]
     },
     "nullable": [
@@ -230,6 +228,7 @@
       true,
       true,
       false,
+      true,
       false,
       false,
       false,
@@ -237,5 +236,5 @@
       false
     ]
   },
-  "hash": "ee6a79924935280c8669fa34c337736596e83e238e2e1d16999560e942890d6b"
+  "hash": "3e1c48748c0bb979b379474555b53997a25d4c7953f2735b13227cd9e494a767"
 }

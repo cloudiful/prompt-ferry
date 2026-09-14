@@ -112,6 +112,7 @@ pub async fn list_visible_model_route_endpoints_strict(
             route_selection_reason: crate::db::RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::from_str(&row.provider),
             service_tier: crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
+            proxy_url: row.proxy_url,
         })
         .collect::<Vec<_>>();
     crate::db::endpoints::attach_route_config_api_keys(pool, routes).await

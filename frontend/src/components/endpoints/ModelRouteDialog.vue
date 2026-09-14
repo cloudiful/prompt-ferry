@@ -27,11 +27,26 @@ function addTarget(): void {
     endpoint_id: '',
     enabled: true,
     upstream_model: '',
+    // Issue #368 Phase C: masked per-target override; empty + no saved
+    // means inherit.
+    proxy_url_override: '',
+    has_saved_proxy_url_override: false,
   })
 }
 
 function removeTarget(index: number): void {
   form.value.targets.splice(index, 1)
+}
+
+// Issue #368 Phase C: clear the saved override so the next save sends `""`
+// (clear to inherit). Leaving the field blank while
+// `has_saved_proxy_url_override` is true omits the key and keeps the
+// stored value (see `modelRouteFormToRequest`).
+function clearTargetProxyOverride(index: number): void {
+  const target = form.value.targets[index]
+  if (!target) return
+  target.proxy_url_override = ''
+  target.has_saved_proxy_url_override = false
 }
 
 function moveTarget(index: number, offset: -1 | 1): void {
@@ -164,26 +179,68 @@ const targetColumns = computed<
               </div>
             </template>
             <template #endpoint-cell="{ row }">
-              <div
-                class="grid gap-2 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]"
-              >
-                <USelect
-                  v-model="row.original.endpoint_id"
-                  class="w-full"
-                  :items="endpointOptions"
-                  label-key="label"
-                  value-key="value"
-                  :placeholder="t('endpoint')"
+              <div class="grid gap-2">
+                <div
+                  class="grid gap-2 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]"
                 >
-                  <template #item-leading="{ item }">
-                    <ProviderIcon :provider="item.provider" size="sm" />
-                  </template>
-                </USelect>
-                <UInput
-                  v-model="row.original.upstream_model"
-                  class="w-full"
-                  :placeholder="t('upstreamModelOptional')"
-                />
+                  <USelect
+                    v-model="row.original.endpoint_id"
+                    class="w-full"
+                    :items="endpointOptions"
+                    label-key="label"
+                    value-key="value"
+                    :placeholder="t('endpoint')"
+                  >
+                    <template #item-leading="{ item }">
+                      <ProviderIcon :provider="item.provider" size="sm" />
+                    </template>
+                  </USelect>
+                  <UInput
+                    v-model="row.original.upstream_model"
+                    class="w-full"
+                    :placeholder="t('upstreamModelOptional')"
+                  />
+                </div>
+                <div class="flex min-w-0 items-center gap-2">
+                  <div
+                    v-if="row.original.has_saved_proxy_url_override"
+                    class="shrink-0"
+                  >
+                    <UBadge :label="t('saved')" color="neutral" />
+                  </div>
+                  <UInput
+                    v-model="row.original.proxy_url_override"
+                    type="password"
+                    class="min-w-0 flex-1"
+                    :placeholder="
+                      row.original.has_saved_proxy_url_override
+                        ? t('savedSecret')
+                        : t('proxyUrlOverridePlaceholder')
+                    "
+                    :aria-label="t('proxyUrlOverride')"
+                  />
+                  <UTooltip :text="t('proxyUrlOverrideHint')">
+                    <UButton
+                      type="button"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-info"
+                      :aria-label="t('proxyUrlOverrideHint')"
+                    />
+                  </UTooltip>
+                  <UButton
+                    v-if="row.original.has_saved_proxy_url_override"
+                    type="button"
+                    size="sm"
+                    color="neutral"
+                    variant="ghost"
+                    :aria-label="t('proxyClear')"
+                    @click="clearTargetProxyOverride(row.index)"
+                  >
+                    <UIcon name="i-lucide-trash-2" class="h-4 w-4" />
+                  </UButton>
+                </div>
               </div>
             </template>
             <template #status-cell="{ row }">

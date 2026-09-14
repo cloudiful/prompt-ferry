@@ -17,7 +17,18 @@ pub(crate) struct EncryptedRelay {
 pub(crate) struct EncryptedEndpoint {
     endpoint: ProviderEndpointConfig,
     api_key: EncryptedSecretEnvelope,
+    proxy_url: Option<EncryptedSecretEnvelope>,
     api_keys: Vec<(EndpointApiKeyConfig, EncryptedSecretEnvelope)>,
+}
+
+pub(crate) struct EncryptedRouteTarget {
+    target: super::ModelRouteTargetConfig,
+    proxy_url_override: Option<EncryptedSecretEnvelope>,
+}
+
+pub(crate) struct EncryptedRoute {
+    route: ModelRouteConfig,
+    targets: Vec<EncryptedRouteTarget>,
 }
 
 pub(crate) struct EncryptedClientKey {
@@ -28,7 +39,7 @@ pub(crate) struct EncryptedClientKey {
 pub(crate) struct EncryptedConfig {
     pub(crate) relays: Vec<EncryptedRelay>,
     pub(crate) endpoints: Vec<EncryptedEndpoint>,
-    routes: Vec<ModelRouteConfig>,
+    routes: Vec<EncryptedRoute>,
     pub(crate) client_keys: Vec<EncryptedClientKey>,
     settings: Vec<SettingConfig>,
 }
@@ -62,6 +73,14 @@ impl EncryptedConfig {
                     Ok(EncryptedEndpoint {
                         endpoint: endpoint.clone(),
                         api_key: manager.encrypt(&endpoint.api_key)?,
+                        proxy_url: encrypt_optional(
+                            manager,
+                            endpoint
+                                .proxy_url
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|v| !v.is_empty()),
+                        )?,
                         api_keys: endpoint
                             .api_keys
                             .iter()
@@ -71,7 +90,35 @@ impl EncryptedConfig {
                     })
                 })
                 .collect::<Result<Vec<_>>>()?,
-            routes: snapshot.routes.clone(),
+            routes: snapshot
+                .routes
+                .iter()
+                .map(|route| {
+                    Ok(EncryptedRoute {
+                        route: ModelRouteConfig {
+                            targets: Vec::new(),
+                            ..route.clone()
+                        },
+                        targets: route
+                            .targets
+                            .iter()
+                            .map(|target| {
+                                Ok(EncryptedRouteTarget {
+                                    target: target.clone(),
+                                    proxy_url_override: encrypt_optional(
+                                        manager,
+                                        target
+                                            .proxy_url_override
+                                            .as_deref()
+                                            .map(str::trim)
+                                            .filter(|v| !v.is_empty()),
+                                    )?,
+                                })
+                            })
+                            .collect::<Result<Vec<_>>>()?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
             client_keys: snapshot
                 .client_keys
                 .iter()
@@ -123,7 +170,7 @@ pub(crate) async fn insert_all(
         insert_endpoint(transaction, endpoint).await?;
     }
     for route in &config.routes {
-        insert_route(transaction, route).await?;
+        insert_encrypted_route(transaction, route).await?;
     }
     for key in &config.client_keys {
         insert_client_key(transaction, key).await?;
@@ -204,6 +251,9 @@ pub(crate) async fn insert_endpoint(
             EnvelopePart::Nonce,
         ))
         .bind(envelope_version(&Some(endpoint.api_key.clone())))
+        .bind(envelope_part(&endpoint.proxy_url, EnvelopePart::Ciphertext))
+        .bind(envelope_part(&endpoint.proxy_url, EnvelopePart::Nonce))
+        .bind(envelope_version(&endpoint.proxy_url))
         .bind(timestamp(endpoint.endpoint.created_at))
         .bind(timestamp(endpoint.endpoint.updated_at))
         .execute(&mut **transaction)
@@ -231,6 +281,7 @@ pub(crate) async fn insert_endpoint(
 
 pub(crate) async fn insert_route(
     transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    manager: &RelaySecretManager,
     route: &ModelRouteConfig,
 ) -> Result<()> {
     standalone_query!("src/sql/standalone/save_route.sql")
@@ -245,6 +296,14 @@ pub(crate) async fn insert_route(
         .execute(&mut **transaction)
         .await?;
     for target in &route.targets {
+        let proxy_envelope = encrypt_optional(
+            manager,
+            target
+                .proxy_url_override
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty()),
+        )?;
         standalone_query!("src/sql/standalone/save_route_target.sql")
             .bind(target.target_id.to_string())
             .bind(route.rule_id.to_string())
@@ -252,6 +311,48 @@ pub(crate) async fn insert_route(
             .bind(target.position)
             .bind(bool_i64(target.enabled))
             .bind(&target.upstream_model)
+            .bind(envelope_part(&proxy_envelope, EnvelopePart::Ciphertext))
+            .bind(envelope_part(&proxy_envelope, EnvelopePart::Nonce))
+            .bind(envelope_version(&proxy_envelope))
+            .execute(&mut **transaction)
+            .await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn insert_encrypted_route(
+    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    encrypted: &EncryptedRoute,
+) -> Result<()> {
+    let route = &encrypted.route;
+    standalone_query!("src/sql/standalone/save_route.sql")
+        .bind(route.rule_id.to_string())
+        .bind(route.scope.as_str())
+        .bind(route.owner_user_id)
+        .bind(&route.model_pattern)
+        .bind(route.routing_strategy.as_str())
+        .bind(route.daily_max_requests)
+        .bind(route.monthly_max_requests)
+        .bind(bool_i64(route.enabled))
+        .execute(&mut **transaction)
+        .await?;
+    for target in &encrypted.targets {
+        standalone_query!("src/sql/standalone/save_route_target.sql")
+            .bind(target.target.target_id.to_string())
+            .bind(route.rule_id.to_string())
+            .bind(target.target.endpoint_id.to_string())
+            .bind(target.target.position)
+            .bind(bool_i64(target.target.enabled))
+            .bind(&target.target.upstream_model)
+            .bind(envelope_part(
+                &target.proxy_url_override,
+                EnvelopePart::Ciphertext,
+            ))
+            .bind(envelope_part(
+                &target.proxy_url_override,
+                EnvelopePart::Nonce,
+            ))
+            .bind(envelope_version(&target.proxy_url_override))
             .execute(&mut **transaction)
             .await?;
     }

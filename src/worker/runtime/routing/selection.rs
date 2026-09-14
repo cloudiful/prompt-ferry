@@ -49,15 +49,22 @@ pub(in crate::worker::runtime) async fn discover_dynamic_model_route(
         return None;
     }
 
+    // Issue #375 Phase G: dynamic discovery reuses the per-route endpoint
+    // proxy pool. Direct routes clone `shared` unchanged; proxy routes use
+    // the pooled client. Invalid proxy fails closed (no silent direct).
     let discovered = endpoint_models::discover_route_for_model(
         &state.endpoint_model_cache,
         &visible_routes,
         fallback_route,
         model,
         |route| {
-            let client = client.clone();
+            let shared = client.clone();
             let route = route.clone();
-            async move { endpoint_models::fetch_endpoint_model_ids(&client, &route).await }
+            async move {
+                let pooled = endpoint_models::client_for_route(&route, &shared)
+                    .map_err(|message| anyhow::anyhow!("{message}"))?;
+                endpoint_models::fetch_endpoint_model_ids(&pooled, &route).await
+            }
         },
     )
     .await;
@@ -236,6 +243,12 @@ fn route_from_target(
         route_selection_reason,
         provider: target.provider,
         service_tier: target.service_tier,
+        // Issue #368 Phase D: resolved proxy (override wins, empty means
+        // direct); pooled client selection uses this value.
+        proxy_url: db::resolve_proxy_url(
+            target.proxy_url.as_deref(),
+            target.proxy_url_override.as_deref(),
+        ),
     }
 }
 
@@ -373,4 +386,136 @@ pub(in crate::worker::runtime) async fn clear_invalid_conversation_endpoint_key_
 pub(in crate::worker::runtime) struct EndpointApiKeySelectionResult {
     pub(in crate::worker::runtime) selection: db::EndpointApiKeySelection,
     pub(in crate::worker::runtime) invalid_conversation_override: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn candidate_target(
+        proxy_url: Option<&str>,
+        proxy_override: Option<&str>,
+    ) -> db::ModelRouteCandidateTarget {
+        db::ModelRouteCandidateTarget {
+            target_id: uuid::Uuid::new_v4(),
+            endpoint_id: uuid::Uuid::new_v4(),
+            endpoint_name: "e".to_string(),
+            base_url: "https://api.example.test".to_string(),
+            api_key: "k".to_string(),
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: crate::config::NativeApi::Chat,
+            position: 0,
+            enabled: true,
+            upstream_model: None,
+            provider: db::EndpointProvider::Generic,
+            service_tier: db::MinimaxServiceTier::Standard,
+            proxy_url: proxy_url.map(str::to_string),
+            proxy_url_override: proxy_override.map(str::to_string),
+        }
+    }
+
+    fn selected_proxy(target: &db::ModelRouteCandidateTarget) -> Option<String> {
+        route_from_target(
+            target,
+            7,
+            uuid::Uuid::new_v4(),
+            db::EndpointApiKeySelection {
+                key_id: None,
+                key_label: None,
+                secret: "k".to_string(),
+            },
+            db::RouteSelectionReason::Default,
+        )
+        .proxy_url
+    }
+
+    #[test]
+    fn override_wins_over_endpoint_default() {
+        let target = candidate_target(
+            Some("http://endpoint-proxy.test:8080"),
+            Some("http://override-proxy.test:8080"),
+        );
+        assert_eq!(
+            selected_proxy(&target).as_deref(),
+            Some("http://override-proxy.test:8080")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_endpoint_default_when_override_missing() {
+        let target = candidate_target(Some("http://endpoint-proxy.test:8080"), None);
+        assert_eq!(
+            selected_proxy(&target).as_deref(),
+            Some("http://endpoint-proxy.test:8080")
+        );
+    }
+
+    #[test]
+    fn empty_override_falls_back_and_empty_default_means_direct() {
+        let target = candidate_target(Some("http://endpoint-proxy.test:8080"), Some("   "));
+        assert_eq!(
+            selected_proxy(&target).as_deref(),
+            Some("http://endpoint-proxy.test:8080")
+        );
+        let direct = candidate_target(Some("  "), Some(""));
+        assert_eq!(selected_proxy(&direct), None);
+        let none = candidate_target(None, None);
+        assert_eq!(selected_proxy(&none), None);
+    }
+
+    #[test]
+    fn trims_whitespace_around_proxy_values() {
+        let target = candidate_target(None, Some("  http://proxy.test:8080  "));
+        assert_eq!(
+            selected_proxy(&target).as_deref(),
+            Some("http://proxy.test:8080")
+        );
+    }
+
+    fn route_for_target(target: &db::ModelRouteCandidateTarget) -> db::RouteConfig {
+        route_from_target(
+            target,
+            7,
+            uuid::Uuid::new_v4(),
+            db::EndpointApiKeySelection {
+                key_id: None,
+                key_label: None,
+                secret: "k".to_string(),
+            },
+            db::RouteSelectionReason::Default,
+        )
+    }
+
+    #[test]
+    fn discovery_callback_selects_per_route_proxy_fail_closed() {
+        // Issue #375 Phase G P2-1: the dynamic-discovery callback must
+        // resolve each route through `endpoint_models::client_for_route`
+        // with the shared client, fail closed on invalid proxy, and never
+        // fall back to direct.
+        let shared = Client::new();
+        let proxied = route_for_target(&candidate_target(
+            Some("http://proxy-discovery-caller.test:8080"),
+            None,
+        ));
+        let direct = route_for_target(&candidate_target(None, None));
+        crate::endpoint_models::client_for_route(&proxied, &shared)
+            .expect("proxied discovery route must resolve pooled client");
+        crate::endpoint_models::client_for_route(&direct, &shared)
+            .expect("direct discovery route must reuse shared client");
+        let key = db::proxy_pool_key("http://proxy-discovery-caller.test:8080", &proxied.base_url)
+            .expect("proxied key");
+        assert_eq!(key.0, "http://proxy-discovery-caller.test:8080");
+        assert_eq!(key.1, "api.example.test");
+        assert!(db::proxy_pool_key("", &direct.base_url).is_none());
+        let invalid = route_for_target(&candidate_target(
+            Some("ftp://user:secret@proxy-discovery-invalid.test:21"),
+            None,
+        ));
+        let err = crate::endpoint_models::client_for_route(&invalid, &shared)
+            .expect_err("invalid discovery proxy must fail closed");
+        assert!(err.contains("scheme"));
+        assert!(!err.contains("secret"));
+        assert!(!err.contains("user"));
+    }
 }

@@ -1,9 +1,69 @@
-use anyhow::{Context, Result, anyhow};
-use reqwest::Client;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
-use crate::db::{EndpointProvider, RouteConfig};
+use anyhow::{Context, Result, anyhow};
+use reqwest::{Client, Proxy};
+
+use crate::db::{self, EndpointProvider, RouteConfig};
 
 use super::EndpointModelSnapshot;
+
+// Issue #375 Phase G: per-`(proxy_url, base_host)` reqwest client pool for
+// model-list fetches. Direct routes reuse the caller-passed client unchanged;
+// proxy routes get a pooled client keyed by trimmed proxy URL plus the
+// lowercased upstream host (same shape as #368 `worker::runtime::ai::proxy`).
+// All errors are redacted (never echo userinfo); callers must not fall back
+// to direct on error.
+static MODELS_PROXY_POOL: OnceLock<Mutex<HashMap<(String, String), Client>>> = OnceLock::new();
+
+fn pool() -> &'static Mutex<HashMap<(String, String), Client>> {
+    MODELS_PROXY_POOL.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn lock_pool() -> std::sync::MutexGuard<'static, HashMap<(String, String), Client>> {
+    pool()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn build_pooled_client(validated_proxy: &str) -> Result<Client, String> {
+    let redacted = db::redact_proxy_url_for_log(validated_proxy);
+    let proxy = Proxy::all(validated_proxy)
+        .map_err(|_| format!("invalid proxy {redacted}: unsupported proxy URL"))?;
+    Client::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .proxy(proxy)
+        .build()
+        .map_err(|_| format!("invalid proxy {redacted}: failed to build proxy client"))
+}
+
+/// Issue #375 Phase G: pooled client for a model-list route. Direct
+/// (`None`/empty proxy) clones `direct` unchanged so the direct path stays
+/// identical; proxy routes use the pooled client. Invalid proxy is an error
+/// (never silent direct fallback) with userinfo already scrubbed.
+pub fn client_for_route(route: &RouteConfig, direct: &Client) -> Result<Client, String> {
+    let Some(proxy_url) = route
+        .proxy_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(direct.clone());
+    };
+    let validated =
+        db::validate_outbound_proxy_url(proxy_url).map_err(|message| message.to_string())?;
+    let key = (validated.clone(), db::proxy_base_host(&route.base_url));
+    {
+        let guard = lock_pool();
+        if let Some(client) = guard.get(&key) {
+            return Ok(client.clone());
+        }
+    }
+    let client = build_pooled_client(&validated)?;
+    lock_pool().insert(key, client.clone());
+    Ok(client)
+}
 
 pub async fn fetch_endpoint_model_ids(
     client: &Client,
@@ -85,7 +145,94 @@ fn truncate_message(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::EndpointProvider;
+    use crate::db::{EndpointProvider, RouteSelectionReason};
+
+    fn route_with_proxy(proxy: Option<&str>, base: &str) -> RouteConfig {
+        RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 7,
+            model_route_rule_id: None,
+            base_url: base.to_string(),
+            api_key: "secret".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: crate::config::NativeApi::Chat,
+            upstream_model: None,
+            route_selection_reason: RouteSelectionReason::Default,
+            provider: EndpointProvider::Generic,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
+            proxy_url: proxy.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn empty_proxy_means_direct_without_pool_entry() {
+        let direct = Client::new();
+        for proxy in [None, Some(""), Some("   ")] {
+            let route = route_with_proxy(proxy, "https://models-direct.test");
+            client_for_route(&route, &direct).expect("direct must succeed");
+        }
+        assert!(db::proxy_pool_key("", "https://models-direct.test").is_none());
+    }
+
+    #[test]
+    fn proxy_selection_reuses_pooled_client() {
+        let direct = Client::new();
+        let proxy = "http://proxy-models-reuse.test:8080";
+        let via_a = client_for_route(
+            &route_with_proxy(Some(proxy), "https://a-models-reuse.example.test"),
+            &direct,
+        )
+        .expect("proxy a");
+        let via_a_again = client_for_route(
+            &route_with_proxy(Some(proxy), "https://a-models-reuse.example.test"),
+            &direct,
+        )
+        .expect("proxy a again");
+        let via_b = client_for_route(
+            &route_with_proxy(Some(proxy), "https://b-models-reuse.example.test"),
+            &direct,
+        )
+        .expect("proxy b");
+        let _ = (via_a, via_a_again, via_b);
+        let key_a = db::proxy_pool_key(proxy, "https://a-models-reuse.example.test").unwrap();
+        let key_b = db::proxy_pool_key(proxy, "https://b-models-reuse.example.test").unwrap();
+        assert_eq!(key_a.0, key_b.0);
+        assert_ne!(key_a.1, key_b.1);
+        let guard = lock_pool();
+        assert!(guard.contains_key(&key_a));
+        assert!(guard.contains_key(&key_b));
+    }
+
+    #[test]
+    fn invalid_scheme_is_rejected_without_userinfo_leak() {
+        let direct = Client::new();
+        let route = route_with_proxy(
+            Some("ftp://user:secret@proxy-models-invalid.test:21"),
+            "https://models-invalid.example.test",
+        );
+        let err = client_for_route(&route, &direct).expect_err("ftp must be rejected");
+        assert!(err.contains("scheme"));
+        assert!(!err.contains("secret"));
+        assert!(!err.contains("user"));
+    }
+
+    #[test]
+    fn caller_passing_selects_per_route_proxy() {
+        // The Phase G caller pattern: each route resolves its own pooled
+        // client from `proxy_url`; direct routes reuse the passed client.
+        let direct = Client::new();
+        let proxy = "http://proxy-models-caller.test:8080";
+        let proxied = route_with_proxy(Some(proxy), "https://caller-proxied.example.test");
+        let plain = route_with_proxy(None, "https://caller-direct.example.test");
+        client_for_route(&proxied, &direct).expect("proxied caller must succeed");
+        client_for_route(&plain, &direct).expect("direct caller must succeed");
+        let key = db::proxy_pool_key(proxy, "https://caller-proxied.example.test").unwrap();
+        assert!(lock_pool().contains_key(&key));
+        assert!(db::proxy_pool_key("", "https://caller-direct.example.test").is_none());
+    }
 
     #[test]
     fn models_url_keeps_v1_for_generic_and_derives_for_presets() {

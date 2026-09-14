@@ -179,6 +179,14 @@ const resourceOptions = computed(() =>
 defineEmits<{
   save: []
 }>()
+
+// Issue #375 Phase F: clear the saved row proxy so the next save sends `""`
+// (clear to inherit). Leaving the field blank while `has_saved_proxy_url`
+// is true omits the key and keeps the stored value (see `mcpFormToRequest`).
+function clearProxyUrl(): void {
+  form.value.proxy_url = ''
+  form.value.has_saved_proxy_url = false
+}
 </script>
 
 <template>
@@ -416,6 +424,49 @@ defineEmits<{
             v-model:variables="form.environment_variables"
             :t="t"
           />
+          <div v-if="form.transport === 'http'" class="grid min-w-0 gap-2">
+            <div class="flex items-center gap-1 text-muted">
+              <span>{{ t('proxyUrl') }}</span>
+              <UTooltip :text="t('mcpProxyUrlHint')">
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-info"
+                  :aria-label="t('mcpProxyUrlHint')"
+                />
+              </UTooltip>
+              <UBadge
+                v-if="form.has_saved_proxy_url"
+                :label="t('saved')"
+                color="neutral"
+              />
+            </div>
+            <div class="flex min-w-0 items-center gap-2">
+              <UInput
+                v-model="form.proxy_url"
+                type="password"
+                class="min-w-0 flex-1"
+                :placeholder="
+                  form.has_saved_proxy_url
+                    ? t('savedSecret')
+                    : t('proxyUrlPlaceholder')
+                "
+              />
+              <UButton
+                v-if="form.has_saved_proxy_url"
+                type="button"
+                size="sm"
+                color="neutral"
+                variant="ghost"
+                :aria-label="t('proxyClear')"
+                @click="clearProxyUrl"
+              >
+                <UIcon name="i-lucide-trash-2" class="h-4 w-4" />
+              </UButton>
+            </div>
+          </div>
           <RequestLimitFields
             v-model:form="form"
             daily-label="dailyCallLimit"

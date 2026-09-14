@@ -63,7 +63,14 @@ pub(super) async fn update_model_route(
         Ok(()) => {}
         Err(response) => return response,
     }
-    let input = match body.into_create(&state).await {
+    // Issue #368 Phase B: PATCH carry for per-target overrides. The unified
+    // route shape is redacted, so load the stored overrides separately;
+    // omitted per-target `proxy_url_override` keeps the stored value.
+    let existing_overrides = load_existing_route_overrides(&state, rule_id).await;
+    let input = match body
+        .into_create_with_existing(&state, &existing_overrides)
+        .await
+    {
         Ok(input) => input,
         Err(response) => return response,
     };
@@ -81,6 +88,58 @@ pub(super) async fn update_model_route(
         Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "model route not found"),
         Err(err) => internal(&state, err),
     }
+}
+
+/// Issue #368 Phase B: load stored per-target proxy overrides for PATCH carry.
+/// Returns `endpoint_id -> override` (`None` means inherit). Best-effort:
+/// missing rules or backends yield an empty map and the update then falls
+/// back to inherit; the subsequent `update_model_route` still returns 404
+/// for unknown rules.
+async fn load_existing_route_overrides(
+    state: &AdminState,
+    rule_id: Uuid,
+) -> HashMap<Uuid, Option<String>> {
+    if let Some(pool) = state.config_repository.as_postgres() {
+        if let Ok(Some(rule)) = db::get_model_endpoint_rule(pool, rule_id).await {
+            return rule
+                .targets
+                .into_iter()
+                .map(|target| {
+                    let override_value = target
+                        .proxy_url_override
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string);
+                    (target.endpoint_id, override_value)
+                })
+                .collect();
+        }
+        return HashMap::new();
+    }
+    if let Some(repo) = state.config_repository.as_sqlite() {
+        if let Ok(Some(route)) = repo
+            .store()
+            .get_route(repo.manager(), rule_id)
+            .await
+            .map_err(|_| anyhow::anyhow!("sqlite lookup failed"))
+        {
+            return route
+                .targets
+                .into_iter()
+                .map(|target| {
+                    let override_value = target
+                        .proxy_url_override
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string);
+                    (target.endpoint_id, override_value)
+                })
+                .collect();
+        }
+    }
+    HashMap::new()
 }
 
 pub(super) async fn delete_model_route(
@@ -173,13 +232,27 @@ async fn run_model_route_test(
     state: &AdminState,
     candidate: &db::ModelRouteCandidate,
 ) -> Result<(db::RouteTestEndpoint, String, StatusCode, String), reqwest::Error> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .expect("static reqwest client config is valid");
     let routing_key = model_route_test_routing_key(candidate);
     let target = choose_preferred_target(candidate, routing_key)
         .expect("validated model route has at least one target");
+    // Issue #368 Phase D: the test probe uses the same resolved proxy
+    // (`override ?? endpoint`) as live forwarding so the "test" button is
+    // representative. Invalid proxy fails closed as BAD_GATEWAY without
+    // echoing userinfo.
+    let client = match probe_client_for_target(&target) {
+        Ok(client) => client,
+        Err((status, message)) => {
+            return Ok((
+                db::RouteTestEndpoint {
+                    endpoint_id: target.endpoint_id,
+                    name: target.endpoint_name.clone(),
+                },
+                candidate.model_pattern.clone(),
+                status,
+                message,
+            ));
+        }
+    };
     // GLM (issue #230 P2) lists models at `{base}/models` (the Coding
     // Plan base already encodes the protocol root); every other provider
     // keeps the plain `/v1/models` join. The probe URL composition
@@ -378,6 +451,57 @@ async fn run_model_route_test(
         status,
         message,
     ))
+}
+
+/// Issue #368 Phase D: build the test-probe client with the resolved
+/// proxy (`override ?? endpoint`). Direct targets reuse a plain client;
+/// proxy targets add `Proxy::all`. Errors are redacted and fail closed.
+fn probe_client_for_target(
+    target: &db::ModelRouteCandidateTarget,
+) -> Result<reqwest::Client, (StatusCode, String)> {
+    let resolved = db::resolve_proxy_url(
+        target.proxy_url.as_deref(),
+        target.proxy_url_override.as_deref(),
+    );
+    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(20));
+    if let Some(proxy_url) = resolved {
+        let trimmed = proxy_url.trim().to_string();
+        if let Err(message) = db::validate_outbound_proxy_url(&trimmed) {
+            tracing::warn!(
+                endpoint_id = %target.endpoint_id,
+                proxy = %db::redact_proxy_url_for_log(&trimmed),
+                "rejecting model route test with invalid proxy configuration"
+            );
+            return Err((StatusCode::BAD_GATEWAY, message.to_string()));
+        }
+        match reqwest::Proxy::all(trimmed.clone()) {
+            Ok(proxy) => {
+                builder = builder.proxy(proxy);
+                tracing::debug!(
+                    endpoint_id = %target.endpoint_id,
+                    proxy = %db::redact_proxy_url_for_log(&trimmed),
+                    "model route test via configured proxy"
+                );
+            }
+            Err(_) => {
+                tracing::warn!(
+                    endpoint_id = %target.endpoint_id,
+                    proxy = %db::redact_proxy_url_for_log(&trimmed),
+                    "rejecting model route test with unsupported proxy URL"
+                );
+                return Err((
+                    StatusCode::BAD_GATEWAY,
+                    "invalid proxy configuration".to_string(),
+                ));
+            }
+        }
+    }
+    builder.build().map_err(|_| {
+        (
+            StatusCode::BAD_GATEWAY,
+            "failed to build HTTP client".to_string(),
+        )
+    })
 }
 
 fn select_test_model(pattern: &str, models_body: &str) -> Option<String> {

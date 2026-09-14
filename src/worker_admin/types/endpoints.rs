@@ -42,6 +42,17 @@ pub struct EndpointRequest {
     pub enabled: Option<bool>,
     #[serde(default)]
     pub mcp_enabled: Option<bool>,
+    /// Issue #368 Phase B: outbound proxy default (full URL with optional
+    /// userinfo). `None` (omitted/null) means keep on PATCH / direct on
+    /// create; `Some("")` (empty/whitespace) means clear to direct;
+    /// `Some(url)` must use `http/https/socks5/socks5h`.
+    #[serde(default)]
+    pub proxy_url: Option<String>,
+    /// Issue #368 Phase B: carry hint for the proxy secret. Accepted for
+    /// forward-compat with the masked frontend input; the server ignores it
+    /// for logic and uses the stored value when `proxy_url` is omitted.
+    #[serde(default)]
+    pub has_proxy_url: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, ToSchema)]

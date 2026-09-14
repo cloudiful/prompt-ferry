@@ -41,17 +41,27 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
     .await?;
     Ok(rows
         .into_iter()
-        .map(|row| ModelRouteTarget {
-            target_id: row.target_id,
-            rule_id: row.rule_id,
-            endpoint_id: row.endpoint_id,
-            endpoint_name: row.endpoint_name,
-            endpoint_enabled: row.endpoint_enabled,
-            position: row.position,
-            enabled: row.enabled,
-            upstream_model: row.upstream_model,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
+        .map(|row| {
+            // Issue #368 Phase C (P2): derive the saved-override indicator;
+            // the secret itself stays `skip_serializing`.
+            let has_proxy_url_override = row
+                .proxy_url_override
+                .as_deref()
+                .is_some_and(|raw| !raw.trim().is_empty());
+            ModelRouteTarget {
+                target_id: row.target_id,
+                rule_id: row.rule_id,
+                endpoint_id: row.endpoint_id,
+                endpoint_name: row.endpoint_name,
+                endpoint_enabled: row.endpoint_enabled,
+                position: row.position,
+                enabled: row.enabled,
+                upstream_model: row.upstream_model,
+                proxy_url_override: row.proxy_url_override,
+                has_proxy_url_override,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            }
         })
         .collect())
 }
@@ -104,25 +114,27 @@ pub(super) async fn model_route_candidates_by_rule(
             candidate.targets.push(ModelRouteCandidateTarget {
                 target_id: row.target_id,
                 endpoint_id: row.endpoint_id,
-                endpoint_name: row.endpoint_name,
-                base_url: row.base_url,
-                api_key: row.api_key,
+                endpoint_name: row.endpoint_name.clone(),
+                base_url: row.base_url.clone(),
+                api_key: row.api_key.clone(),
                 api_keys,
                 key_lb_enabled: row.key_lb_enabled,
                 native_api: parse_native_api(&row.native_api),
                 position: row.position,
                 enabled: row.target_enabled,
-                upstream_model: row.upstream_model,
+                upstream_model: row.upstream_model.clone(),
                 provider,
                 service_tier,
+                proxy_url: row.proxy_url.clone(),
+                proxy_url_override: row.proxy_url_override.clone(),
             });
             continue;
         }
         grouped.push(ModelRouteCandidate {
             rule_id: row.rule_id,
-            scope: row.scope,
+            scope: row.scope.clone(),
             owner_user_id: row.owner_user_id,
-            model_pattern: row.model_pattern,
+            model_pattern: row.model_pattern.clone(),
             routing_strategy: parse_routing_strategy(&row.routing_strategy),
             daily_max_requests: row.daily_max_requests,
             monthly_max_requests: row.monthly_max_requests,
@@ -141,6 +153,8 @@ pub(super) async fn model_route_candidates_by_rule(
                 upstream_model: row.upstream_model,
                 provider,
                 service_tier,
+                proxy_url: row.proxy_url,
+                proxy_url_override: row.proxy_url_override,
             }],
         });
     }

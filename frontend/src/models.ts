@@ -36,6 +36,11 @@ export type EndpointForm = {
   monthly_max_requests: number | null
   enabled: boolean
   mcp_enabled: boolean
+  // Issue #368 Phase C: masked outbound proxy default. `proxy_url` holds
+  // the user-typed value (empty means untouched); `has_saved_proxy_url`
+  // mirrors the response-side `has_proxy_url` indicator.
+  proxy_url: string
+  has_saved_proxy_url: boolean
 }
 
 export type EndpointApiKeyForm = {
@@ -50,6 +55,11 @@ export type ModelRouteTargetForm = {
   endpoint_id: string
   enabled: boolean
   upstream_model: string
+  // Issue #368 Phase C: per-target proxy override (masked). Empty means
+  // untouched; `has_saved_proxy_url_override` mirrors the response-side
+  // `has_proxy_url_override` indicator.
+  proxy_url_override: string
+  has_saved_proxy_url_override: boolean
 }
 
 export type StreamDeltaBatchingForm = {
@@ -89,6 +99,11 @@ export type McpForm = {
   basic_username: string
   basic_password: string
   has_basic_password: boolean
+  // Issue #375 Phase F: masked per-row proxy. `proxy_url` holds the
+  // user-typed value (empty means untouched); `has_saved_proxy_url`
+  // mirrors the response-side `has_proxy_url` indicator.
+  proxy_url: string
+  has_saved_proxy_url: boolean
   http_headers_text: string
   environment_variables: McpEnvironmentVariableForm[]
   tool_filter_mode: 'blacklist' | 'whitelist'

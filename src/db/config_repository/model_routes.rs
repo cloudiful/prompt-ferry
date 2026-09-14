@@ -34,6 +34,8 @@ pub struct UnifiedModelRouteTarget {
     pub position: i32,
     pub enabled: bool,
     pub upstream_model: Option<String>,
+    // Issue #368 Phase C (P2): response-side saved-override indicator.
+    pub has_proxy_url_override: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,6 +84,12 @@ fn target_to_pg(target: UnifiedModelRouteTarget) -> PgModelRouteTarget {
         position: target.position,
         enabled: target.enabled,
         upstream_model: target.upstream_model,
+        // Issue #368 Phase A: Unified is redacted; proxy override never
+        // leaves via this path.
+        proxy_url_override: None,
+        // Issue #368 Phase C (P2): carry the saved-override indicator so
+        // the page response matches the single-route shape.
+        has_proxy_url_override: target.has_proxy_url_override,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }
@@ -187,7 +195,7 @@ impl SqliteConfigRepository {
     async fn list_model_routes_page(&self, first: i64, rows: i64) -> Result<UnifiedModelRoutePage> {
         let (total, routes) = self
             .store
-            .list_routes_page(first, rows)
+            .list_routes_page(&self.manager, first, rows)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         let snapshot = self
@@ -218,7 +226,7 @@ impl SqliteConfigRepository {
     async fn get_model_route(&self, rule_id: Uuid) -> Result<Option<UnifiedModelRoute>> {
         let route = self
             .store
-            .get_route(rule_id)
+            .get_route(&self.manager, rule_id)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         let Some(route) = route else { return Ok(None) };
@@ -245,12 +253,12 @@ impl SqliteConfigRepository {
     ) -> Result<UnifiedModelRoute> {
         let config = model_routes_map::sqlite_route_from_create(rule_id, input)?;
         self.store
-            .save_route_direct(&config)
+            .save_route_direct(&self.manager, &config)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         let route = self
             .store
-            .get_route(rule_id)
+            .get_route(&self.manager, rule_id)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?
             .ok_or_else(|| anyhow::anyhow!("route not found after insert"))?;
@@ -277,7 +285,7 @@ impl SqliteConfigRepository {
     ) -> Result<Option<UnifiedModelRoute>> {
         let existing = self
             .store
-            .get_route(rule_id)
+            .get_route(&self.manager, rule_id)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         if existing.is_none() {
@@ -285,12 +293,12 @@ impl SqliteConfigRepository {
         }
         let config = model_routes_map::sqlite_route_from_create(rule_id, input)?;
         self.store
-            .save_route_direct(&config)
+            .save_route_direct(&self.manager, &config)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         let route = self
             .store
-            .get_route(rule_id)
+            .get_route(&self.manager, rule_id)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         let snapshot = self

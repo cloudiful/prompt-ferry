@@ -23,6 +23,7 @@ pub async fn get_route(pool: &PgPool, route_id: uuid::Uuid) -> Result<Option<Rou
             route_selection_reason: crate::db::RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::from_str(&row.provider),
             service_tier: crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
+            proxy_url: row.proxy_url,
         });
     match route {
         Some(route) => Ok(

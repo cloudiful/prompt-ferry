@@ -29,7 +29,7 @@ pub(super) async fn create_endpoint(
     let mcp_enabled = body
         .mcp_enabled
         .unwrap_or(body.provider == db::EndpointProvider::Minimax);
-    let input = match resolve_endpoint_input(&state, body, None).await {
+    let input = match resolve_endpoint_input(&state, body, None, None).await {
         Ok(input) => input,
         Err(response) => return response,
     };
@@ -90,10 +90,24 @@ pub(super) async fn update_endpoint(
         Ok(keys) => keys,
         Err(err) => return internal(&state, err),
     };
-    let input = match resolve_endpoint_input(&state, body, Some(existing_api_keys)).await {
-        Ok(input) => input,
-        Err(response) => return response,
+    // Issue #368 Phase B: PATCH carry for the proxy secret. The unified
+    // endpoint shape is redacted, so fetch the decrypted value separately;
+    // `None` (omitted) keeps it, `Some("")` clears to direct.
+    let existing_proxy_url = match state
+        .config_repository
+        .endpoint_proxy_url(endpoint_id)
+        .await
+    {
+        Ok(value) => value,
+        Err(err) => return internal(&state, err),
     };
+    let input =
+        match resolve_endpoint_input(&state, body, Some(existing_api_keys), existing_proxy_url)
+            .await
+        {
+            Ok(input) => input,
+            Err(response) => return response,
+        };
     match state
         .config_repository
         .update_endpoint(endpoint_id, input)
@@ -206,7 +220,43 @@ pub(super) async fn test_endpoint(
         Err(err) => return internal(&state, err),
     };
 
-    let client = endpoint_protocol_client();
+    // Issue #375 Phase G: endpoint protocol check reuses the endpoint proxy
+    // via the pooled client. The unified row never echoes the secret, so
+    // fetch the decrypted value separately (same PATCH-carry helper as
+    // `update_endpoint`). Invalid proxy fails closed (no silent direct).
+    let proxy_url = match state
+        .config_repository
+        .endpoint_proxy_url(endpoint_id)
+        .await
+    {
+        Ok(value) => value,
+        Err(err) => return internal(&state, err),
+    };
+    let client = match crate::endpoint_protocol::endpoint_protocol_client_for_endpoint(
+        proxy_url.as_deref(),
+        &endpoint.base_url,
+    ) {
+        Ok(client) => client,
+        Err(message) => {
+            tracing::warn!(
+                endpoint_id = %endpoint_id,
+                proxy = %crate::db::redact_proxy_url_for_log(
+                    proxy_url.as_deref().unwrap_or_default()
+                ),
+                "rejecting endpoint test with invalid proxy configuration"
+            );
+            return Json(EndpointTestResponse {
+                ok: false,
+                status: None,
+                duration_ms: 0,
+                model_count: None,
+                native_api: None,
+                native_api_source: None,
+                message: truncate_message(&maybe_redact(&state, &message)),
+            })
+            .into_response();
+        }
+    };
     let url = crate::endpoint_models::models_url(&endpoint.base_url, endpoint.provider);
     let started = Instant::now();
     let request = client.get(url);

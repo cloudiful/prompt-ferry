@@ -44,6 +44,10 @@ pub struct McpServer {
     pub auth_mode: String,
     pub basic_username: Option<String>,
     pub has_basic_password: bool,
+    /// Issue #375 Phase F: response-side saved-proxy indicator.
+    /// `true` when a per-row proxy URL is stored; the secret itself is never
+    /// echoed.
+    pub has_proxy_url: bool,
     pub tool_filter_mode: String,
     pub allowed_tools: Value,
     pub disabled_tools: Value,
@@ -82,6 +86,14 @@ impl From<&db::McpServer> for McpServer {
             auth_mode: server.effective_auth_mode().to_string(),
             basic_username: server.basic_username.clone(),
             has_basic_password: server.has_basic_password(),
+            // Issue #375 Phase F: carry the saved-proxy indicator; the
+            // secret itself stays redacted (`skip_serializing` on the db
+            // shape). Derive from the stored value so PG and SQLite agree.
+            has_proxy_url: server.has_proxy_url
+                || server
+                    .proxy_url
+                    .as_deref()
+                    .is_some_and(|raw| !raw.trim().is_empty()),
             tool_filter_mode: server.tool_filter_mode.clone(),
             allowed_tools: server.allowed_tools.clone(),
             disabled_tools: server.disabled_tools.clone(),
@@ -141,6 +153,17 @@ pub struct McpServerRequest {
     pub auth_mode: Option<String>,
     pub basic_username: Option<String>,
     pub basic_password: Option<String>,
+    /// Issue #375 Phase F: per-row outbound proxy (full URL with optional
+    /// userinfo). `None` (omitted/null) means keep on PATCH / inherit on
+    /// create; `Some("")` (empty/whitespace) means clear to inherit;
+    /// `Some(url)` must use `http/https/socks5/socks5h`.
+    #[serde(default)]
+    pub proxy_url: Option<String>,
+    /// Issue #375 Phase F: carry hint for the proxy secret. Accepted for
+    /// forward-compat with the masked frontend input; the server ignores it
+    /// for logic and uses the stored value when `proxy_url` is omitted.
+    #[serde(default)]
+    pub has_proxy_url: Option<bool>,
     pub tool_filter_mode: Option<String>,
     pub allowed_tools: Option<serde_json::Value>,
     pub disabled_tools: Option<serde_json::Value>,
@@ -356,6 +379,19 @@ impl McpServerRequest {
             auth_mode,
             basic_username,
             basic_password,
+            // Issue #375 Phase F: per-row proxy PATCH carry. `None`
+            // (omitted/null) keeps the stored value; empty/whitespace
+            // clears to inherit; non-empty was validated in `validate`
+            // (scheme whitelist reused from #368). `has_proxy_url` is
+            // accepted for forward-compat and ignored for logic.
+            proxy_url: match self.proxy_url.as_deref() {
+                None => existing_server
+                    .and_then(|server| server.proxy_url.clone())
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty()),
+                Some(raw) if raw.trim().is_empty() => None,
+                Some(raw) => Some(raw.trim().to_string()),
+            },
             tool_filter_mode: self
                 .tool_filter_mode
                 .unwrap_or_else(|| "blacklist".to_string()),
@@ -404,6 +440,17 @@ impl McpServerRequest {
                 "invalid_transport",
                 "transport must be http, stdio, or builtin_minimax",
             ));
+        }
+        // Issue #375 Phase F: per-row proxy scheme whitelist (reuse #368).
+        // Empty/omitted means inherit/clear; non-empty must be
+        // http/https/socks5/socks5h with a host. Errors never echo userinfo.
+        if let Some(raw) = self.proxy_url.as_deref() {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty()
+                && let Err(message) = db::validate_outbound_proxy_url(trimmed)
+            {
+                return Err(error(StatusCode::BAD_REQUEST, "invalid_proxy_url", message));
+            }
         }
         // Provider preset validation (issue #296 Phase 1). `generic` is the
         // implicit untyped value and also an explicit "clear preset" signal,
@@ -1004,6 +1051,8 @@ mod tests {
             auth_mode: crate::db::MCP_AUTH_MODE_NONE.to_string(),
             basic_username: None,
             basic_password: None,
+            proxy_url: None,
+            has_proxy_url: false,
             tool_filter_mode: "blacklist".to_string(),
             allowed_tools: serde_json::json!([]),
             disabled_tools: serde_json::json!([]),
@@ -1049,6 +1098,8 @@ mod tests {
             auth_mode: None,
             basic_username: None,
             basic_password: None,
+            proxy_url: None,
+            has_proxy_url: None,
             tool_filter_mode: None,
             allowed_tools: None,
             disabled_tools: None,

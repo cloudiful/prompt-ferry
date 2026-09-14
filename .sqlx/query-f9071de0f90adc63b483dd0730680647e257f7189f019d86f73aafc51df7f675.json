@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,\n       COALESCE(e.enabled, FALSE) AS \"endpoint_enabled!\",\n       t.position, t.enabled, t.upstream_model,\n       t.created_at, t.updated_at\nFROM model_route_targets t\nLEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE t.rule_id = ANY($1)\nORDER BY t.rule_id ASC, t.position ASC, t.created_at ASC\n",
+  "query": "SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,\n       COALESCE(e.enabled, FALSE) AS \"endpoint_enabled!\",\n       t.position, t.enabled, t.upstream_model, t.proxy_url_override,\n       t.created_at, t.updated_at\nFROM model_route_targets t\nLEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE t.rule_id = ANY($1)\nORDER BY t.rule_id ASC, t.position ASC, t.created_at ASC\n",
   "describe": {
     "columns": [
       {
@@ -88,6 +88,17 @@
       },
       {
         "ordinal": 8,
+        "name": "proxy_url_override",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_route_targets",
+            "name": "proxy_url_override"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -98,7 +109,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -123,9 +134,10 @@
       false,
       false,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "bcc3e5491d50aab1b94a2e6d51f48a484b6ed2cca3662b61306622619d965f2d"
+  "hash": "f9071de0f90adc63b483dd0730680647e257f7189f019d86f73aafc51df7f675"
 }

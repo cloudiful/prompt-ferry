@@ -29,6 +29,7 @@ async fn create_endpoint(pool: &sqlx::PgPool, name: &str) -> anyhow::Result<Uuid
             api_keys: Vec::new(),
             key_lb_enabled: false,
             enabled: true,
+            proxy_url: None,
         },
     )
     .await?

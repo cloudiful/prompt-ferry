@@ -102,6 +102,7 @@ pub(super) async fn resolve_route(
                         route_selection_reason: db::RouteSelectionReason::Default,
                         provider: db::EndpointProvider::Generic,
                         service_tier: db::MinimaxServiceTier::Standard,
+                        proxy_url: None,
                     },
                     endpoint_id: None,
                     model_route_rule_id: Some(candidate.rule_id),
@@ -248,6 +249,7 @@ mod tests {
                 updated_at: chrono::Utc::now(),
                 api_key: "local-key".to_string(),
                 api_keys: Vec::new(),
+                proxy_url: None,
             }],
             routes: vec![ModelRouteConfig {
                 rule_id: uuid::Uuid::new_v4(),
@@ -264,6 +266,7 @@ mod tests {
                     position: 0,
                     enabled: true,
                     upstream_model: Some("provider-local".to_string()),
+                    proxy_url_override: None,
                 }],
             }],
             ..StandaloneConfig::default()
@@ -356,5 +359,6 @@ fn default_route_for_user(config: &WorkerConfig, user_id: i64) -> db::RouteConfi
         route_selection_reason: db::RouteSelectionReason::Default,
         provider: db::EndpointProvider::Generic,
         service_tier: db::MinimaxServiceTier::Standard,
+        proxy_url: None,
     }
 }

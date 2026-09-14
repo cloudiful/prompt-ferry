@@ -192,37 +192,35 @@ impl ReplayCache {
                 );
             }
         };
-        let manager = match tokio::time::timeout(
-            VALKEY_CONNECT_TIMEOUT,
-            client.get_connection_manager(),
-        )
-        .await
-        {
-            Ok(Ok(manager)) => manager,
-            Ok(Err(err)) => {
-                warn!(error = %err, "failed to connect valkey");
-                if let Some(pool) = sqlite_pool {
-                    return Self::sqlite(config, pool, "valkey_connection_failed");
+        let manager =
+            match tokio::time::timeout(VALKEY_CONNECT_TIMEOUT, client.get_connection_manager())
+                .await
+            {
+                Ok(Ok(manager)) => manager,
+                Ok(Err(err)) => {
+                    warn!(error = %err, "failed to connect valkey");
+                    if let Some(pool) = sqlite_pool {
+                        return Self::sqlite(config, pool, "valkey_connection_failed");
+                    }
+                    return Self::unavailable_sessions_only(
+                        config,
+                        "valkey_connection_failed_without_durable_store",
+                    );
                 }
-                return Self::unavailable_sessions_only(
-                    config,
-                    "valkey_connection_failed_without_durable_store",
-                );
-            }
-            Err(_) => {
-                warn!(
-                    timeout_seconds = VALKEY_CONNECT_TIMEOUT.as_secs(),
-                    "timed out connecting to valkey for replay cache; falling back",
-                );
-                if let Some(pool) = sqlite_pool {
-                    return Self::sqlite(config, pool, "valkey_connection_timeout");
+                Err(_) => {
+                    warn!(
+                        timeout_seconds = VALKEY_CONNECT_TIMEOUT.as_secs(),
+                        "timed out connecting to valkey for replay cache; falling back",
+                    );
+                    if let Some(pool) = sqlite_pool {
+                        return Self::sqlite(config, pool, "valkey_connection_timeout");
+                    }
+                    return Self::unavailable_sessions_only(
+                        config,
+                        "valkey_connection_timeout_without_durable_store",
+                    );
                 }
-                return Self::unavailable_sessions_only(
-                    config,
-                    "valkey_connection_timeout_without_durable_store",
-                );
-            }
-        };
+            };
         Self {
             backend: ReplayCacheBackend::Redis(Arc::new(RedisBackend {
                 manager: manager.clone(),

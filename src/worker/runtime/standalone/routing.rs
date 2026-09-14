@@ -120,6 +120,8 @@ fn target_from_endpoint(
                 db::MinimaxServiceTier::Standard
             }
         },
+        proxy_url: endpoint.proxy_url.clone(),
+        proxy_url_override: target.proxy_url_override.clone(),
     }
 }
 
@@ -197,6 +199,7 @@ mod tests {
                 updated_at: chrono::Utc::now(),
                 api_key: "key".to_string(),
                 api_keys: Vec::new(),
+                proxy_url: None,
             }],
             routes: vec![
                 ModelRouteConfig {
@@ -214,6 +217,7 @@ mod tests {
                         position: 0,
                         enabled: true,
                         upstream_model: None,
+                        proxy_url_override: None,
                     }],
                 },
                 ModelRouteConfig {
@@ -231,6 +235,7 @@ mod tests {
                         position: 0,
                         enabled: true,
                         upstream_model: None,
+                        proxy_url_override: None,
                     }],
                 },
             ],
@@ -263,6 +268,7 @@ mod tests {
                 updated_at: chrono::Utc::now(),
                 api_key: "key".to_string(),
                 api_keys: Vec::new(),
+                proxy_url: None,
             }],
             routes: vec![ModelRouteConfig {
                 rule_id: Uuid::new_v4(),
@@ -279,6 +285,7 @@ mod tests {
                     position: 0,
                     enabled: true,
                     upstream_model: None,
+                    proxy_url_override: None,
                 }],
             }],
             ..StandaloneConfig::default()

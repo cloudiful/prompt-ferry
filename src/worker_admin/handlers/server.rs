@@ -4,8 +4,8 @@ use axum::{
     extract::Request,
     middleware::{self, Next},
 };
-use std::{env, path::PathBuf};
 use std::time::Duration;
+use std::{env, path::PathBuf};
 use tokio::sync::watch;
 use tower_http::services::{ServeDir, ServeFile};
 

@@ -145,6 +145,16 @@ pub struct McpServer {
     pub auth_mode: String,
     pub basic_username: Option<String>,
     pub basic_password: Option<String>,
+    // Issue #375 Phase F: per-row outbound proxy (full URL with optional
+    // userinfo). `None`/empty means inherit (row empty falls back to process
+    // env, then direct). Never echoed; see `has_proxy_url`.
+    #[serde(skip_serializing)]
+    pub proxy_url: Option<String>,
+    /// Issue #375 Phase F: response-side saved-proxy indicator.
+    /// `true` when a proxy URL is stored; the secret itself is never echoed.
+    #[serde(default)]
+    #[sqlx(default)]
+    pub has_proxy_url: bool,
     pub tool_filter_mode: String,
     pub allowed_tools: serde_json::Value,
     pub disabled_tools: serde_json::Value,
@@ -285,6 +295,8 @@ mod tests {
             auth_mode: MCP_AUTH_MODE_NONE.to_string(),
             basic_username: None,
             basic_password: None,
+            proxy_url: None,
+            has_proxy_url: false,
             tool_filter_mode: "blacklist".to_string(),
             allowed_tools: Value::Array(Vec::new()),
             disabled_tools: Value::Array(Vec::new()),
@@ -423,6 +435,9 @@ pub struct McpServerInput {
     pub auth_mode: String,
     pub basic_username: Option<String>,
     pub basic_password: Option<String>,
+    // Issue #375 Phase F: per-row proxy for the PG write path (SQLite
+    // encrypts via the 0019 envelope). `None`/empty means inherit.
+    pub proxy_url: Option<String>,
     pub tool_filter_mode: String,
     pub allowed_tools: serde_json::Value,
     pub disabled_tools: serde_json::Value,

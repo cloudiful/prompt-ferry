@@ -76,10 +76,7 @@ fn relay_tcp_endpoint(relay_url: &str) -> Option<(String, u16)> {
     let trimmed = relay_url.trim();
     let scheme_end = trimmed.find("://")?;
     let after_scheme = &trimmed[scheme_end + 3..];
-    let host_port_path = after_scheme
-        .split('/')
-        .next()
-        .unwrap_or(after_scheme);
+    let host_port_path = after_scheme.split('/').next().unwrap_or(after_scheme);
     if host_port_path.is_empty() {
         return None;
     }
@@ -100,9 +97,8 @@ fn relay_tcp_endpoint(relay_url: &str) -> Option<(String, u16)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        RELAY_READY_PROBE_INTERVAL, relay_reconnect_base_delay,
-        relay_reconnect_delay_with_jitter, relay_reconnect_jitter_cap_millis, relay_tcp_endpoint,
-        wait_for_relay_ready_within,
+        RELAY_READY_PROBE_INTERVAL, relay_reconnect_base_delay, relay_reconnect_delay_with_jitter,
+        relay_reconnect_jitter_cap_millis, relay_tcp_endpoint, wait_for_relay_ready_within,
     };
     use std::time::Duration;
 

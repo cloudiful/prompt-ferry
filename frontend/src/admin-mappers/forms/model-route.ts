@@ -20,6 +20,10 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         endpoint_id: '',
         enabled: true,
         upstream_model: '',
+        // Issue #368 Phase C: masked per-target override; empty + no saved
+        // means inherit.
+        proxy_url_override: '',
+        has_saved_proxy_url_override: false,
       },
     ],
   }
@@ -65,6 +69,10 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
       endpoint_id: target.endpoint_id,
       enabled: target.enabled,
       upstream_model: target.upstream_model ?? '',
+      // Issue #368 Phase C: masked override; never echo the secret.
+      // `has_proxy_url_override` is optional for legacy payloads.
+      proxy_url_override: '',
+      has_saved_proxy_url_override: target.has_proxy_url_override ?? false,
     })),
   }
 }
@@ -82,10 +90,23 @@ export function modelRouteFormToRequest(
     monthly_max_requests: form.monthly_max_requests,
     targets: form.targets
       .filter((target) => target.endpoint_id.trim() !== '')
-      .map((target) => ({
-        endpoint_id: target.endpoint_id,
-        enabled: target.enabled,
-        upstream_model: target.upstream_model.trim() || undefined,
-      })),
+      .map((target) => {
+        // Issue #368 Phase C: omit-when-untouched per target.
+        // Non-empty means replace; empty + saved means omit (keep);
+        // empty + no saved means clear to inherit (`""`).
+        const trimmed = target.proxy_url_override.trim()
+        const proxy_url_override =
+          trimmed !== ''
+            ? trimmed
+            : target.has_saved_proxy_url_override
+              ? undefined
+              : ''
+        return {
+          endpoint_id: target.endpoint_id,
+          enabled: target.enabled,
+          upstream_model: target.upstream_model.trim() || undefined,
+          proxy_url_override,
+        }
+      }),
   }
 }

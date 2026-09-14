@@ -29,6 +29,13 @@ pub(super) fn from_postgres(rule: PgModelEndpointRule) -> UnifiedModelRoute {
 }
 
 pub(super) fn from_postgres_target(target: crate::db::ModelRouteTarget) -> UnifiedModelRouteTarget {
+    // Issue #368 Phase C (P2): carry the saved-override indicator; the
+    // secret itself stays redacted.
+    let has_proxy_url_override = target.has_proxy_url_override
+        || target
+            .proxy_url_override
+            .as_deref()
+            .is_some_and(|raw| !raw.trim().is_empty());
     UnifiedModelRouteTarget {
         target_id: target.target_id,
         rule_id: target.rule_id,
@@ -38,6 +45,7 @@ pub(super) fn from_postgres_target(target: crate::db::ModelRouteTarget) -> Unifi
         position: target.position,
         enabled: target.enabled,
         upstream_model: target.upstream_model,
+        has_proxy_url_override,
     }
 }
 
@@ -83,6 +91,12 @@ where
         .into_iter()
         .map(|target| {
             let (endpoint_name, endpoint_enabled) = endpoint_lookup(target.endpoint_id);
+            // Issue #368 Phase C (P2): SQLite 0018 envelope already
+            // decrypted by the store; presence means saved.
+            let has_proxy_url_override = target
+                .proxy_url_override
+                .as_deref()
+                .is_some_and(|raw| !raw.trim().is_empty());
             UnifiedModelRouteTarget {
                 target_id: target.target_id,
                 rule_id: route.rule_id,
@@ -92,6 +106,7 @@ where
                 position: target.position,
                 enabled: target.enabled,
                 upstream_model: target.upstream_model,
+                has_proxy_url_override,
             }
         })
         .collect();
@@ -129,12 +144,17 @@ pub(super) fn sqlite_route_from_create(
         .into_iter()
         .enumerate()
         .map(|(index, target)| {
+            let proxy_url_override = target
+                .proxy_url_override
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
             Ok(ModelRouteTargetConfig {
                 target_id: Uuid::new_v4(),
                 endpoint_id: target.endpoint_id,
                 position: i32::try_from(index).unwrap_or(i32::MAX),
                 enabled: target.enabled,
                 upstream_model: target.upstream_model,
+                proxy_url_override,
             })
         })
         .collect::<Result<Vec<_>>>()?;

@@ -12,8 +12,9 @@ SET
     daily_max_requests = $11,
     monthly_max_requests = $12,
     api_key = $13,
-    key_lb_enabled = $14,
-    enabled = $15,
+    proxy_url = $14,
+    key_lb_enabled = $15,
+    enabled = $16,
     updated_at = NOW()
 WHERE endpoint_id = $1
-RETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at
+RETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, proxy_url, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at

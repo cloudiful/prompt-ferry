@@ -240,10 +240,7 @@ fn spawn_mcp_warmup(
             );
         }
         crate::config::McpWarmupMode::Off => {
-            tracing::info!(
-                mode = "off",
-                "MCP startup warmup disabled by configuration"
-            );
+            tracing::info!(mode = "off", "MCP startup warmup disabled by configuration");
         }
     }
 }
@@ -361,9 +358,12 @@ pub(super) async fn build_admin_state(
             let admin_state = state.clone();
             let shutdown_rx = worker_shutdown.map(WorkerShutdown::subscribe);
             tokio::spawn(async move {
-                if let Err(err) =
-                    worker_admin::run_admin_server(admin_state, &admin_config.admin_bind, shutdown_rx)
-                        .await
+                if let Err(err) = worker_admin::run_admin_server(
+                    admin_state,
+                    &admin_config.admin_bind,
+                    shutdown_rx,
+                )
+                .await
                 {
                     error!(error = %err, "worker admin server stopped");
                 }
@@ -494,7 +494,11 @@ pub(super) async fn build_admin_state(
         });
 
         let mcp_catalog_service = state.mcp_catalog_service.clone();
-        spawn_mcp_warmup(config.mcp_warmup, state.mcp_catalog_cache.clone(), mcp_catalog_service);
+        spawn_mcp_warmup(
+            config.mcp_warmup,
+            state.mcp_catalog_cache.clone(),
+            mcp_catalog_service,
+        );
 
         let quota_pool = state.pool.clone();
         tokio::spawn(async move {

@@ -12,7 +12,7 @@ use super::{
 };
 use crate::relay_secrets::RelaySecretManager;
 
-const CURRENT_SCHEMA_VERSION: i64 = 17;
+const CURRENT_SCHEMA_VERSION: i64 = 19;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {
@@ -135,13 +135,16 @@ impl StandaloneConfigStore {
             .await?;
         let mut endpoints = Vec::with_capacity(endpoint_rows.len());
         for row in endpoint_rows {
-            let (mut endpoint, envelope) = rows::endpoint(&row)?;
+            let (mut endpoint, envelope, proxy_envelope) = rows::endpoint(&row)?;
             endpoint.api_key =
                 write::decrypt_optional(manager, envelope.as_ref())?.ok_or_else(|| {
                     StandaloneConfigError::CorruptDatabase(
                         "endpoint is missing its API key".to_string(),
                     )
                 })?;
+            endpoint.proxy_url = write::decrypt_optional(manager, proxy_envelope.as_ref())?
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
             endpoints.push(endpoint);
         }
         Ok((total, endpoints))
@@ -157,13 +160,16 @@ impl StandaloneConfigStore {
             .fetch_optional(&self.pool)
             .await?;
         let Some(row) = row else { return Ok(None) };
-        let (mut endpoint, envelope) = rows::endpoint(&row)?;
+        let (mut endpoint, envelope, proxy_envelope) = rows::endpoint(&row)?;
         endpoint.api_key =
             write::decrypt_optional(manager, envelope.as_ref())?.ok_or_else(|| {
                 StandaloneConfigError::CorruptDatabase(
                     "endpoint is missing its API key".to_string(),
                 )
             })?;
+        endpoint.proxy_url = write::decrypt_optional(manager, proxy_envelope.as_ref())?
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
         let key_rows = standalone_query!("src/sql/standalone/list_endpoint_keys_for.sql")
             .bind(endpoint_id.to_string())
             .fetch_all(&self.pool)
@@ -338,6 +344,12 @@ impl StandaloneConfigStore {
             Some(password) if !password.trim().is_empty() => Some(manager.encrypt(password)?),
             _ => None,
         };
+        // Issue #375 Phase F: per-row proxy envelope (0019). Empty means
+        // inherit (NULL) so clears round-trip as NULL.
+        let proxy_envelope = match input.proxy_url.as_deref().map(str::trim) {
+            Some(raw) if !raw.is_empty() => Some(manager.encrypt(raw)?),
+            _ => None,
+        };
         let now = chrono::Utc::now();
         standalone_query!("src/sql/standalone/save_mcp_server.sql")
             .bind(server_id.to_string())
@@ -401,6 +413,9 @@ impl StandaloneConfigStore {
             .bind(bearer_tokens.ciphertext)
             .bind(bearer_tokens.nonce)
             .bind(i64::from(bearer_tokens.key_version))
+            .bind(proxy_envelope.as_ref().map(|e| e.ciphertext.clone()))
+            .bind(proxy_envelope.as_ref().map(|e| e.nonce.clone()))
+            .bind(proxy_envelope.as_ref().map(|e| i64::from(e.key_version)))
             .bind(
                 existing
                     .map(|server| server.created_at)
@@ -447,18 +462,30 @@ impl StandaloneConfigStore {
         manager: &RelaySecretManager,
         row: &sqlx::sqlite::SqliteRow,
     ) -> Result<crate::db::McpServer> {
-        let (mut server, env, bearer_tokens, basic_password_envelope) = rows::mcp_server(row)?;
+        let (mut server, env, bearer_tokens, basic_password_envelope, proxy_envelope) =
+            rows::mcp_server(row)?;
         server.env_json = decrypt_json(manager, &env, "MCP environment")?;
         server.bearer_tokens_json = decrypt_json(manager, &bearer_tokens, "MCP bearer tokens")?;
         server.basic_password = match basic_password_envelope {
             Some(envelope) => Some(manager.decrypt(&envelope)?),
             None => None,
         };
+        // Issue #375 Phase F: decrypt the 0019 proxy envelope; presence
+        // means saved (drives `has_proxy_url`).
+        server.proxy_url =
+            crate::standalone_config::write::decrypt_optional(manager, proxy_envelope.as_ref())?
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
+        server.has_proxy_url = server
+            .proxy_url
+            .as_deref()
+            .is_some_and(|raw| !raw.trim().is_empty());
         Ok(server)
     }
 
     pub async fn list_routes_page(
         &self,
+        manager: &RelaySecretManager,
         first: i64,
         rows: i64,
     ) -> Result<(i64, Vec<ModelRouteConfig>)> {
@@ -479,7 +506,10 @@ impl StandaloneConfigStore {
             .fetch_all(&self.pool)
             .await?
         {
-            let (rule_id, target) = rows::route_target(&row)?;
+            let (rule_id, mut target, proxy_envelope) = rows::route_target(&row)?;
+            target.proxy_url_override = write::decrypt_optional(manager, proxy_envelope.as_ref())?
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
             routes
                 .iter_mut()
                 .find(|route| route.rule_id == rule_id)
@@ -494,7 +524,11 @@ impl StandaloneConfigStore {
         Ok((total, routes))
     }
 
-    pub async fn get_route(&self, rule_id: uuid::Uuid) -> Result<Option<ModelRouteConfig>> {
+    pub async fn get_route(
+        &self,
+        manager: &RelaySecretManager,
+        rule_id: uuid::Uuid,
+    ) -> Result<Option<ModelRouteConfig>> {
         let row = standalone_query!("src/sql/standalone/get_model_route.sql")
             .bind(rule_id.to_string())
             .fetch_optional(&self.pool)
@@ -506,7 +540,10 @@ impl StandaloneConfigStore {
             .fetch_all(&self.pool)
             .await?
         {
-            let (_, target) = rows::route_target(&row)?;
+            let (_, mut target, proxy_envelope) = rows::route_target(&row)?;
+            target.proxy_url_override = write::decrypt_optional(manager, proxy_envelope.as_ref())?
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
             route.targets.push(target);
         }
         Ok(Some(route))
@@ -514,6 +551,7 @@ impl StandaloneConfigStore {
 
     pub async fn list_route_targets_for(
         &self,
+        manager: &RelaySecretManager,
         rule_id: uuid::Uuid,
     ) -> Result<Vec<ModelRouteTargetConfig>> {
         let rows = standalone_query!("src/sql/standalone/list_route_targets_for.sql")
@@ -521,7 +559,14 @@ impl StandaloneConfigStore {
             .fetch_all(&self.pool)
             .await?;
         rows.into_iter()
-            .map(|row| Ok(rows::route_target(&row)?.1))
+            .map(|row| {
+                let (_, mut target, proxy_envelope) = rows::route_target(&row)?;
+                target.proxy_url_override =
+                    write::decrypt_optional(manager, proxy_envelope.as_ref())?
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty());
+                Ok(target)
+            })
             .collect()
     }
 
@@ -646,7 +691,7 @@ impl StandaloneConfigStore {
         let snapshot = StandaloneConfig {
             relays: Self::load_relays(&mut transaction, manager).await?,
             endpoints: Self::load_endpoints(&mut transaction, manager).await?,
-            routes: Self::load_routes(&mut transaction).await?,
+            routes: Self::load_routes(&mut transaction, manager).await?,
             client_keys: Self::load_client_keys(&mut transaction, manager).await?,
             settings: Self::load_settings(&mut transaction).await?,
         };
@@ -754,7 +799,11 @@ impl StandaloneConfigStore {
         Ok(())
     }
 
-    pub async fn save_route(&self, route: &ModelRouteConfig) -> Result<()> {
+    pub async fn save_route(
+        &self,
+        manager: &RelaySecretManager,
+        route: &ModelRouteConfig,
+    ) -> Result<()> {
         let snapshot = StandaloneConfig {
             routes: vec![route.clone()],
             ..StandaloneConfig::default()
@@ -765,7 +814,7 @@ impl StandaloneConfigStore {
             .bind(route.rule_id.to_string())
             .execute(&mut *transaction)
             .await?;
-        write::insert_route(&mut transaction, route).await?;
+        write::insert_route(&mut transaction, manager, route).await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -774,13 +823,17 @@ impl StandaloneConfigStore {
     /// the full snapshot validator. Used by the unified configuration
     /// repository when an endpoint has just been created in the same
     /// transaction context.
-    pub async fn save_route_direct(&self, route: &ModelRouteConfig) -> Result<()> {
+    pub async fn save_route_direct(
+        &self,
+        manager: &RelaySecretManager,
+        route: &ModelRouteConfig,
+    ) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         standalone_query!("src/sql/standalone/delete_route_targets.sql")
             .bind(route.rule_id.to_string())
             .execute(&mut *transaction)
             .await?;
-        write::insert_route(&mut transaction, route).await?;
+        write::insert_route(&mut transaction, manager, route).await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -905,13 +958,16 @@ impl StandaloneConfigStore {
             .await?;
         let mut endpoints = Vec::with_capacity(endpoint_rows.len());
         for row in endpoint_rows {
-            let (mut endpoint, envelope) = rows::endpoint(&row)?;
+            let (mut endpoint, envelope, proxy_envelope) = rows::endpoint(&row)?;
             endpoint.api_key =
                 write::decrypt_optional(manager, envelope.as_ref())?.ok_or_else(|| {
                     StandaloneConfigError::CorruptDatabase(
                         "endpoint is missing its API key".to_string(),
                     )
                 })?;
+            endpoint.proxy_url = write::decrypt_optional(manager, proxy_envelope.as_ref())?
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
             endpoints.push(endpoint);
         }
         for row in key_rows {
@@ -934,6 +990,7 @@ impl StandaloneConfigStore {
 
     async fn load_routes(
         transaction: &mut sqlx::Transaction<'_, Sqlite>,
+        manager: &RelaySecretManager,
     ) -> Result<Vec<ModelRouteConfig>> {
         let route_rows = standalone_query!("src/sql/standalone/list_routes.sql")
             .fetch_all(&mut **transaction)
@@ -946,7 +1003,10 @@ impl StandaloneConfigStore {
             .map(|row| rows::route(&row))
             .collect::<Result<Vec<_>>>()?;
         for row in target_rows {
-            let (rule_id, target) = rows::route_target(&row)?;
+            let (rule_id, mut target, proxy_envelope) = rows::route_target(&row)?;
+            target.proxy_url_override = write::decrypt_optional(manager, proxy_envelope.as_ref())?
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
             routes
                 .iter_mut()
                 .find(|route| route.rule_id == rule_id)

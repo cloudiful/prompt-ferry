@@ -150,6 +150,15 @@ export const endpointMessages = {
     tokenPlanExpired: '已到期',
     updatedAt: '更新时间',
     upstreamModelOptional: '上游模型名（可选，留空沿用原始模型）',
+    proxyUrl: '代理地址',
+    proxyUrlHint:
+      '可选出站代理，支持 http/https/socks5/socks5h；留空直连，编辑时留空保持不变。',
+    proxyUrlPlaceholder: 'http://user:pass@host:port',
+    proxyUrlOverride: '代理覆盖',
+    proxyUrlOverrideHint:
+      '按目标覆盖端点默认代理，留空继承；编辑时留空保持不变。',
+    proxyUrlOverridePlaceholder: '留空继承端点代理',
+    proxyClear: '清除已保存代理',
   },
   'en-US': {
     addTarget: 'Add target',
@@ -306,5 +315,14 @@ export const endpointMessages = {
     updatedAt: 'Updated at',
     upstreamModelOptional:
       'Upstream model name (optional, leave blank to keep the original model)',
+    proxyUrl: 'Proxy URL',
+    proxyUrlHint:
+      'Optional outbound proxy (http/https/socks5/socks5h). Leave empty for direct; leave blank while editing to keep the stored value.',
+    proxyUrlPlaceholder: 'http://user:pass@host:port',
+    proxyUrlOverride: 'Proxy override',
+    proxyUrlOverrideHint:
+      'Override the endpoint proxy for this target. Leave empty to inherit; leave blank while editing to keep the stored value.',
+    proxyUrlOverridePlaceholder: 'Leave empty to inherit the endpoint proxy',
+    proxyClear: 'Clear saved proxy',
   },
 } as const

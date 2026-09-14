@@ -22,6 +22,7 @@ SELECT
     $1::BIGINT AS "user_id!",
     e.base_url,
     e.api_key,
+    e.proxy_url,
     e.key_lb_enabled,
     e.native_api,
     e.provider,

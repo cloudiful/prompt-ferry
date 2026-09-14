@@ -7,6 +7,7 @@ SELECT server_id, source_endpoint_id, scope, owner_user_id, name,
        lifecycle_learned_protocol_version, lifecycle_learned_for_updated_at,
        lifecycle_learned_at, env_ciphertext, env_nonce, env_key_version,
        bearer_tokens_ciphertext, bearer_tokens_nonce, bearer_tokens_key_version,
+       proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version,
        created_at, updated_at
 FROM standalone_mcp_servers
 WHERE source_endpoint_id = ?;

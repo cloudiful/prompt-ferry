@@ -3467,6 +3467,14 @@ components:
           type:
           - boolean
           - 'null'
+        has_proxy_url:
+          type:
+          - boolean
+          - 'null'
+          description: |-
+            Issue #368 Phase B: carry hint for the proxy secret. Accepted for
+            forward-compat with the masked frontend input; the server ignores it
+            for logic and uses the stored value when `proxy_url` is omitted.
         key_lb_enabled:
           type: boolean
         mcp_enabled:
@@ -3497,6 +3505,15 @@ components:
           oneOf:
           - type: 'null'
           - $ref: '#/components/schemas/EndpointRegion'
+        proxy_url:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #368 Phase B: outbound proxy default (full URL with optional
+            userinfo). `None` (omitted/null) means keep on PATCH / direct on
+            create; `Some("")` (empty/whitespace) means clear to direct;
+            `Some(url)` must use `http/https/socks5/socks5h`.
         scope:
           type: string
         service_tier:
@@ -4175,6 +4192,7 @@ components:
       - http_headers_json
       - auth_mode
       - has_basic_password
+      - has_proxy_url
       - tool_filter_mode
       - allowed_tools
       - disabled_tools
@@ -4219,6 +4237,12 @@ components:
         env_json: {}
         has_basic_password:
           type: boolean
+        has_proxy_url:
+          type: boolean
+          description: |-
+            Issue #375 Phase F: response-side saved-proxy indicator.
+            `true` when a per-row proxy URL is stored; the secret itself is never
+            echoed.
         http_headers_json: {}
         lifecycle_learned_at:
           type:
@@ -4352,6 +4376,14 @@ components:
           - boolean
           - 'null'
         env_json: {}
+        has_proxy_url:
+          type:
+          - boolean
+          - 'null'
+          description: |-
+            Issue #375 Phase F: carry hint for the proxy secret. Accepted for
+            forward-compat with the masked frontend input; the server ignores it
+            for logic and uses the stored value when `proxy_url` is omitted.
         http_headers_json: {}
         lifecycle_manual_protocol_version:
           type:
@@ -4380,6 +4412,15 @@ components:
           description: |-
             Provider preset id. `null`/omitted keeps the existing (or untyped
             legacy) value; `"generic"` explicitly clears a preset binding.
+        proxy_url:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #375 Phase F: per-row outbound proxy (full URL with optional
+            userinfo). `None` (omitted/null) means keep on PATCH / inherit on
+            create; `Some("")` (empty/whitespace) means clear to inherit;
+            `Some(url)` must use `http/https/socks5/socks5h`.
         scope:
           type:
           - string
@@ -4638,6 +4679,11 @@ components:
           type:
           - string
           - 'null'
+        has_proxy_url_override:
+          type: boolean
+          description: |-
+            Issue #368 Phase C (P2): response-side saved-override indicator.
+            `true` when an override is stored; the secret itself is never echoed.
         position:
           type: integer
           format: int32
@@ -4666,6 +4712,22 @@ components:
         endpoint_id:
           type: string
           format: uuid
+        has_proxy_url_override:
+          type:
+          - boolean
+          - 'null'
+          description: |-
+            Issue #368 Phase B: carry hint for the override secret. Accepted for
+            forward-compat; the server ignores it and uses the stored value when
+            `proxy_url_override` is omitted.
+        proxy_url_override:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #368 Phase B: per-target proxy override. `None` (omitted/null)
+            means keep on PATCH / inherit on create; `Some("")` means clear to
+            inherit; `Some(url)` must use `http/https/socks5/socks5h`.
         upstream_model:
           type:
           - string
@@ -4856,6 +4918,11 @@ components:
         endpoint_id:
           type: string
           format: uuid
+        has_proxy_url:
+          type: boolean
+          description: |-
+            Issue #368 Phase C (P2): response-side saved-proxy indicator.
+            `true` when a proxy URL is stored; the secret itself is never echoed.
         key_lb_enabled:
           type: boolean
         mcp_enabled:

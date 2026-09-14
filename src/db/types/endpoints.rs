@@ -166,6 +166,11 @@ pub struct ProviderEndpointRow {
     pub monthly_max_requests: Option<i32>,
     #[serde(skip_serializing)]
     pub api_key: String,
+    // Issue #368 Phase A: outbound proxy default (full URL with optional
+    // userinfo). NULL means direct. Plaintext on PG mirrors `api_key`;
+    // SQLite uses the envelope columns (standalone 0018).
+    #[serde(skip_serializing)]
+    pub proxy_url: Option<String>,
     pub key_lb_enabled: bool,
     pub enabled: bool,
     pub mcp_enabled: bool,
@@ -190,6 +195,13 @@ pub struct ProviderEndpoint {
     pub monthly_max_requests: Option<i32>,
     #[serde(skip_serializing)]
     pub api_key: String,
+    // Issue #368 Phase A: never echoed (mirrors `api_key` redaction).
+    #[serde(skip_serializing)]
+    pub proxy_url: Option<String>,
+    /// Issue #368 Phase C (P2): response-side saved-proxy indicator.
+    /// `true` when a proxy URL is stored; the secret itself is never echoed.
+    #[serde(default)]
+    pub has_proxy_url: bool,
     pub key_lb_enabled: bool,
     pub enabled: bool,
     pub mcp_enabled: bool,
@@ -201,6 +213,12 @@ pub struct ProviderEndpoint {
 
 impl From<ProviderEndpointRow> for ProviderEndpoint {
     fn from(value: ProviderEndpointRow) -> Self {
+        // Issue #368 Phase C (P2): derive the saved-proxy indicator from the
+        // stored value; the secret itself stays `skip_serializing`.
+        let has_proxy_url = value
+            .proxy_url
+            .as_deref()
+            .is_some_and(|raw| !raw.trim().is_empty());
         Self {
             endpoint_id: value.endpoint_id,
             scope: value.scope,
@@ -215,6 +233,8 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             daily_max_requests: value.daily_max_requests,
             monthly_max_requests: value.monthly_max_requests,
             api_key: value.api_key,
+            proxy_url: value.proxy_url,
+            has_proxy_url,
             key_lb_enabled: value.key_lb_enabled,
             enabled: value.enabled,
             mcp_enabled: value.mcp_enabled,
@@ -243,6 +263,10 @@ pub struct EndpointCreate {
     pub api_keys: Vec<EndpointApiKeyCreate>,
     pub key_lb_enabled: bool,
     pub enabled: bool,
+    // Issue #368 Phase A: plaintext proxy default for the PG write path
+    // (SQLite encrypts via the 0018 envelope). `None`/empty means direct.
+    #[serde(default)]
+    pub proxy_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

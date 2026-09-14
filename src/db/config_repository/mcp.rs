@@ -339,6 +339,9 @@ fn input_from_endpoint(endpoint: &ProviderEndpoint, name: String, enabled: bool)
         auth_mode: crate::db::MCP_AUTH_MODE_NONE.to_string(),
         basic_username: None,
         basic_password: None,
+        // Issue #375 Phase F: managed rows carry no row proxy; builtin
+        // inherits the source endpoint proxy at call time.
+        proxy_url: None,
         tool_filter_mode: "blacklist".to_string(),
         allowed_tools: serde_json::json!([]),
         disabled_tools: serde_json::json!([]),

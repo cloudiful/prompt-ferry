@@ -33,6 +33,7 @@ async fn endpoint_api_key_keep_patch_preserves_existing_secret() {
         }],
         key_lb_enabled: false,
         enabled: true,
+        proxy_url: None,
     };
     let created = repo
         .create_endpoint(endpoint_id, initial, false)
@@ -82,6 +83,7 @@ async fn endpoint_api_key_keep_patch_preserves_existing_secret() {
         }],
         key_lb_enabled: false,
         enabled: true,
+        proxy_url: None,
     };
     let updated = repo
         .update_endpoint(endpoint_id, keep)

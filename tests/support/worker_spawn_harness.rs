@@ -26,6 +26,7 @@ pub async fn spawn_worker(
             api_keys: vec![],
             key_lb_enabled: false,
             enabled: true,
+            proxy_url: None,
         },
     )
     .await
@@ -44,6 +45,7 @@ pub async fn spawn_worker(
                 endpoint_id: endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
+                proxy_url_override: None,
             }],
         },
     )

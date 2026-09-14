@@ -67,6 +67,7 @@ pub(super) async fn resolve_endpoint_input(
     state: &AdminState,
     body: EndpointRequest,
     existing_endpoint_api_keys: Option<Vec<db::EndpointApiKey>>,
+    existing_proxy_url: Option<String>,
 ) -> Result<EndpointCreate, Response> {
     validate_mcp_provider(body.mcp_enabled, body.provider)
         .map_err(|message| error(StatusCode::BAD_REQUEST, "invalid_mcp_provider", message))?;
@@ -247,6 +248,22 @@ pub(super) async fn resolve_endpoint_input(
         ));
     }
     let api_key = api_keys[0].api_key.clone();
+    // Issue #368 Phase B: outbound proxy default. `None` (omitted/null)
+    // carries the stored value on PATCH (`None` on create means direct);
+    // empty/whitespace clears to direct; non-empty must pass the scheme
+    // whitelist. `has_proxy_url` is accepted for forward-compat and ignored.
+    let proxy_url = match body.proxy_url.as_deref() {
+        None => existing_proxy_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        Some(raw) if raw.trim().is_empty() => None,
+        Some(raw) => Some(
+            validate_proxy_url(raw.trim())
+                .map_err(|message| error(StatusCode::BAD_REQUEST, "invalid_proxy_url", message))?,
+        ),
+    };
     // Issue #248: preset providers ignore the client-sent base entirely and
     // persist the derived official root; Generic keeps the normalized
     // client-sent base byte-for-byte.
@@ -274,7 +291,23 @@ pub(super) async fn resolve_endpoint_input(
         api_keys,
         key_lb_enabled: body.key_lb_enabled,
         enabled: body.enabled.unwrap_or(true),
+        proxy_url,
     })
+}
+
+/// Issue #368 Phase B: normalize and validate an outbound proxy URL.
+/// Returns the trimmed URL on success. Never echoes userinfo in errors.
+pub(super) fn validate_proxy_url(trimmed: &str) -> Result<String, &'static str> {
+    let parsed = reqwest::Url::parse(trimmed)
+        .map_err(|_| "proxy_url scheme must be one of http, https, socks5, socks5h")?;
+    match parsed.scheme().to_ascii_lowercase().as_str() {
+        "http" | "https" | "socks5" | "socks5h" => {}
+        _ => return Err("proxy_url scheme must be one of http, https, socks5, socks5h"),
+    }
+    if parsed.host_str().is_none_or(|host| host.trim().is_empty()) {
+        return Err("proxy_url must include a host");
+    }
+    Ok(trimmed.to_string())
 }
 
 /// Normalize a Generic endpoint `base_url` for persistence.

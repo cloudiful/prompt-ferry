@@ -164,7 +164,11 @@ async fn available_models(state: &AdminState, user_id: i64) -> anyhow::Result<Ve
     let whitelist_enabled = state
         .model_route_whitelist_enabled
         .load(std::sync::atomic::Ordering::SeqCst);
-    let client = reqwest::Client::new();
+    // Issue #375 Phase G: per-route endpoint proxy pool for model listing.
+    // `direct` is reused unchanged for direct routes; proxy routes resolve a
+    // pooled client via `endpoint_models::client_for_route`. Invalid proxy
+    // fails closed (no silent direct fallback) with userinfo already scrubbed.
+    let direct = reqwest::Client::new();
     let mut models = Vec::new();
     let mut seen = HashSet::<String>::new();
 
@@ -196,13 +200,19 @@ async fn available_models(state: &AdminState, user_id: i64) -> anyhow::Result<Ve
                     route_selection_reason: db::RouteSelectionReason::Default,
                     provider: target.provider,
                     service_tier: target.service_tier,
+                    proxy_url: target
+                        .proxy_url_override
+                        .clone()
+                        .or_else(|| target.proxy_url.clone()),
                 };
                 let snapshot = state
                     .endpoint_model_cache
                     .load_or_fetch(&route, &|route| {
-                        let client = client.clone();
+                        let direct = direct.clone();
                         let route = route.clone();
                         async move {
+                            let client = crate::endpoint_models::client_for_route(&route, &direct)
+                                .map_err(|message| anyhow::anyhow!("{message}"))?;
                             crate::endpoint_models::fetch_endpoint_model_ids(&client, &route).await
                         }
                     })
@@ -225,9 +235,11 @@ async fn available_models(state: &AdminState, user_id: i64) -> anyhow::Result<Ve
             let snapshot = state
                 .endpoint_model_cache
                 .load_or_fetch(&route, &|route| {
-                    let client = client.clone();
+                    let direct = direct.clone();
                     let route = route.clone();
                     async move {
+                        let client = crate::endpoint_models::client_for_route(&route, &direct)
+                            .map_err(|message| anyhow::anyhow!("{message}"))?;
                         crate::endpoint_models::fetch_endpoint_model_ids(&client, &route).await
                     }
                 })

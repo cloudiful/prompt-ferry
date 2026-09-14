@@ -33,6 +33,9 @@ pub struct UnifiedProviderEndpoint {
     pub key_lb_enabled: bool,
     pub enabled: bool,
     pub mcp_enabled: bool,
+    // Issue #368 Phase C (P2): response-side saved-proxy indicator.
+    // `true` when a proxy URL is stored; the secret itself is never echoed.
+    pub has_proxy_url: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub api_keys: Vec<UnifiedEndpointApiKey>,
@@ -162,6 +165,13 @@ impl super::ConfigRepository {
                     daily_max_requests: None,
                     monthly_max_requests: None,
                     api_key: endpoint.api_key,
+                    proxy_url: endpoint.proxy_url.clone(),
+                    // Issue #368 Phase C (P2): internal MCP shape also
+                    // carries the saved indicator for consistency.
+                    has_proxy_url: endpoint
+                        .proxy_url
+                        .as_deref()
+                        .is_some_and(|raw| !raw.trim().is_empty()),
                     key_lb_enabled: endpoint.key_lb_enabled,
                     enabled: endpoint.enabled,
                     mcp_enabled: endpoint.mcp_enabled,
@@ -229,6 +239,16 @@ impl super::ConfigRepository {
         match self {
             Self::Postgres(repo) => repo.first_endpoint_api_key(endpoint_id).await,
             Self::Sqlite(repo) => repo.first_endpoint_api_key(endpoint_id).await,
+        }
+    }
+
+    /// Issue #368 Phase A: decrypted outbound proxy default for an endpoint.
+    /// `None` means direct. PG reads the plaintext column; SQLite decrypts
+    /// the 0018 envelope. Admin listings never expose this value.
+    pub async fn endpoint_proxy_url(&self, endpoint_id: Uuid) -> Result<Option<String>> {
+        match self {
+            Self::Postgres(repo) => repo.endpoint_proxy_url(endpoint_id).await,
+            Self::Sqlite(repo) => repo.endpoint_proxy_url(endpoint_id).await,
         }
     }
 
@@ -313,6 +333,11 @@ impl PostgresConfigRepository {
     async fn first_endpoint_api_key(&self, endpoint_id: Uuid) -> Result<Option<String>> {
         let endpoint = crate::db::get_endpoint(&self.pool, endpoint_id).await?;
         Ok(endpoint.map(|e| e.api_key))
+    }
+
+    async fn endpoint_proxy_url(&self, endpoint_id: Uuid) -> Result<Option<String>> {
+        let endpoint = crate::db::get_endpoint(&self.pool, endpoint_id).await?;
+        Ok(endpoint.and_then(|e| e.proxy_url))
     }
 
     async fn endpoint_api_keys_for_update(
@@ -447,6 +472,15 @@ impl SqliteConfigRepository {
         Ok(endpoint.map(|e| e.api_key))
     }
 
+    async fn endpoint_proxy_url(&self, endpoint_id: Uuid) -> Result<Option<String>> {
+        let endpoint = self
+            .store
+            .get_endpoint(&self.manager, endpoint_id)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        Ok(endpoint.and_then(|e| e.proxy_url))
+    }
+
     async fn endpoint_api_keys_for_update(
         &self,
         endpoint_id: Uuid,
@@ -500,6 +534,7 @@ mod tests {
             key_lb_enabled: false,
             enabled: true,
             mcp_enabled: false,
+            has_proxy_url: false,
             created_at: now,
             updated_at: now,
             api_keys: vec![],

@@ -77,6 +77,11 @@ async fn sync_model_route_targets(
         .await?;
 
     for (position, target) in input.targets.iter().enumerate() {
+        let proxy_override = target
+            .proxy_url_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
         sqlx::query_file!(
             "src/sql/routes/insert_model_route_target.sql",
             rule_id,
@@ -84,6 +89,7 @@ async fn sync_model_route_targets(
             position as i32,
             target.enabled,
             target.upstream_model,
+            proxy_override,
         )
         .execute(&mut **tx)
         .await?;

@@ -178,6 +178,7 @@ mod tests {
                 updated_at: chrono::Utc::now(),
                 api_key: "endpoint-secret".to_string(),
                 api_keys: Vec::new(),
+                proxy_url: None,
             }],
             routes: vec![ModelRouteConfig {
                 rule_id: route_id,
@@ -194,6 +195,7 @@ mod tests {
                     position: 0,
                     enabled: true,
                     upstream_model: None,
+                    proxy_url_override: None,
                 }],
             }],
             client_keys: vec![ClientKeyConfig {

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO provider_endpoints(scope, owner_user_id, name, provider, provider_region, service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
+  "query": "UPDATE provider_endpoints\nSET\n    scope = $2,\n    owner_user_id = $3,\n    name = $4,\n    provider = $5,\n    provider_region = $6,\n    service_tier = $7,\n    base_url = $8,\n    native_api = $9,\n    native_api_source = $10,\n    daily_max_requests = $11,\n    monthly_max_requests = $12,\n    api_key = $13,\n    proxy_url = $14,\n    key_lb_enabled = $15,\n    enabled = $16,\n    updated_at = NOW()\nWHERE endpoint_id = $1\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, daily_max_requests, monthly_max_requests, api_key, proxy_url, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
   "describe": {
     "columns": [
       {
@@ -143,6 +143,17 @@
       },
       {
         "ordinal": 13,
+        "name": "proxy_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "proxy_url"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
         "name": "key_lb_enabled",
         "type_info": "Bool",
         "origin": {
@@ -153,7 +164,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -164,7 +175,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "mcp_enabled",
         "type_info": "Bool",
         "origin": {
@@ -175,7 +186,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -186,7 +197,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -199,6 +210,7 @@
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Text",
         "Int8",
         "Text",
@@ -210,6 +222,7 @@
         "Text",
         "Int4",
         "Int4",
+        "Text",
         "Text",
         "Bool",
         "Bool"
@@ -229,6 +242,7 @@
       true,
       true,
       false,
+      true,
       false,
       false,
       false,
@@ -236,5 +250,5 @@
       false
     ]
   },
-  "hash": "3ea3484d93eaad364e750c0da271d77c85885b63c472bfe8163df4bb5bcced79"
+  "hash": "c0912f4e779e6d3402bae975900067c0d4ed675adb3737774ae55c0b67210713"
 }

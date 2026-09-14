@@ -22,6 +22,8 @@ fn server(name: &str) -> McpServer {
         auth_mode: "none".to_string(),
         basic_username: None,
         basic_password: None,
+        proxy_url: None,
+        has_proxy_url: false,
         tool_filter_mode: "blacklist".to_string(),
         allowed_tools: json!([]),
         disabled_tools: json!([]),

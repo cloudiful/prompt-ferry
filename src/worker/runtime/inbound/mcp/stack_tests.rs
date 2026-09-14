@@ -143,6 +143,7 @@ fn mcp_input(name: &str, daily_max_requests: Option<i32>) -> McpServerInput {
         auth_mode: "none".to_string(),
         basic_username: None,
         basic_password: None,
+        proxy_url: None,
         tool_filter_mode: "blacklist".to_string(),
         allowed_tools: serde_json::json!([]),
         disabled_tools: serde_json::json!([]),

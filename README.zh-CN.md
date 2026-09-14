@@ -188,6 +188,28 @@ PROMPT_FERRY_WORKER__BRIDGE_ENCRYPTION_MODE=<configured-bridge-mode>
 prompt-ferry worker
 ```
 
+### 出站代理
+
+LLM 上游使用端点 `proxy_url` 与按路由 `proxy_url_override`
+（`http/https/socks5/socks5h`）；未设置表示直连。模型列表拉取、token plan
+用量、端点协议检查与 `me` 可用模型复用同一端点代理走池化 client；非法代理
+直接失败，不会静默回落直连。
+
+MCP HTTP 服务按 `mcp_servers.proxy_url` 优先，再取 worker 进程环境变量
+（`HTTPS_PROXY`/`HTTP_PROXY`，小写可用，`ALL_PROXY` 兜底），`NO_PROXY` 绕行，
+最后直连。内置 MiniMax MCP 继承其绑定端点的代理（`端点 → 环境 → 直连`）；
+其行代理被忽略，图片 URL 拉取保持直连并做 pinned DNS。MCP `stdio` 继承
+worker 环境变量给子进程。代理非法时请求直接失败，不会静默直连；凭据不会
+写入日志。
+
+以下保持直连：审批 webhook（用户内网设施）、上游 Realtime websocket
+（需手写 CONNECT 隧道，已确认暂缓）、relay-worker 桥接（内部控制面）。
+
+```dotenv
+HTTPS_PROXY=http://proxy.example.invalid:8080
+NO_PROXY=127.0.0.1,localhost
+```
+
 ### 单机二进制
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的

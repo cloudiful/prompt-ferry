@@ -16,16 +16,17 @@ SET
     auth_mode = $15,
     basic_username = $16,
     basic_password = $17,
-    tool_filter_mode = $18,
-    allowed_tools = $19,
-    disabled_tools = $20,
-    disabled_resources = $21,
-    daily_max_requests = $22,
-    monthly_max_requests = $23,
-    enabled = $24,
-    timeout_ms = $25,
-    lifecycle_policy = $26,
-    lifecycle_manual_protocol_version = $27,
+    proxy_url = $18,
+    tool_filter_mode = $19,
+    allowed_tools = $20,
+    disabled_tools = $21,
+    disabled_resources = $22,
+    daily_max_requests = $23,
+    monthly_max_requests = $24,
+    enabled = $25,
+    timeout_ms = $26,
+    lifecycle_policy = $27,
+    lifecycle_manual_protocol_version = $28,
     updated_at = NOW()
 WHERE server_id = $1
-RETURNING server_id, source_endpoint_id, scope, owner_user_id, name, aggregate_naming_mode, transport, provider_kind, url, command, args, env_json, bearer_tokens_json, http_headers_json, auth_mode, basic_username, basic_password, tool_filter_mode, allowed_tools, disabled_tools, disabled_resources, daily_max_requests, monthly_max_requests, enabled, timeout_ms, lifecycle_policy, lifecycle_manual_protocol_version, lifecycle_learned_mode, lifecycle_learned_protocol_version, lifecycle_learned_for_updated_at, lifecycle_learned_at, created_at, updated_at
+RETURNING server_id, source_endpoint_id, scope, owner_user_id, name, aggregate_naming_mode, transport, provider_kind, url, command, args, env_json, bearer_tokens_json, http_headers_json, auth_mode, basic_username, basic_password, proxy_url, (COALESCE(btrim(proxy_url), '') <> '') AS "has_proxy_url!", tool_filter_mode, allowed_tools, disabled_tools, disabled_resources, daily_max_requests, monthly_max_requests, enabled, timeout_ms, lifecycle_policy, lifecycle_manual_protocol_version, lifecycle_learned_mode, lifecycle_learned_protocol_version, lifecycle_learned_for_updated_at, lifecycle_learned_at, created_at, updated_at

@@ -220,6 +220,31 @@ PROMPT_FERRY_WORKER__BRIDGE_ENCRYPTION_MODE=<configured-bridge-mode>
 prompt-ferry worker
 ```
 
+### Outbound proxy
+
+LLM upstreams use the endpoint `proxy_url` with per-route `proxy_url_override`
+(`http/https/socks5/socks5h`); unset means direct. Model listing, token-plan
+usage, the endpoint protocol check, and `me` available-models reuse the same
+endpoint proxy via a pooled client; invalid proxy fails closed without
+falling back to direct.
+
+MCP HTTP servers resolve `mcp_servers.proxy_url` first, then the worker
+process env (`HTTPS_PROXY`/`HTTP_PROXY`, lowercase accepted, `ALL_PROXY`
+fallback) with `NO_PROXY` bypass, then direct. The built-in MiniMax MCP
+inherits its source endpoint proxy (`endpoint → env → direct`); its row
+proxy is ignored and image-URL fetches stay direct with pinned DNS. MCP
+`stdio` inherits the worker env for the subprocess. An invalid proxy fails
+the request without falling back to direct; credentials are never logged.
+
+Stay direct by design: approval webhooks (user intranet facility), upstream
+Realtime websockets (needs a hand-written CONNECT tunnel, deferred), and the
+relay-worker bridge (internal control plane).
+
+```dotenv
+HTTPS_PROXY=http://proxy.example.invalid:8080
+NO_PROXY=127.0.0.1,localhost
+```
+
 ### Single-host binary
 
 Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases)

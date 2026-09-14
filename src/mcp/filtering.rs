@@ -137,6 +137,8 @@ mod tests {
             auth_mode: "none".to_string(),
             basic_username: None,
             basic_password: None,
+            proxy_url: None,
+            has_proxy_url: false,
             tool_filter_mode: tool_filter_mode.to_string(),
             allowed_tools,
             disabled_tools,

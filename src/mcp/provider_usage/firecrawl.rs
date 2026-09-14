@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -115,9 +117,71 @@ fn parse_reset_at(value: &Value) -> Option<DateTime<Utc>> {
     DateTime::from_timestamp(seconds, 0)
 }
 
+/// Issue #375 Phase G: per-`(proxy_url, host)` pool for the Firecrawl
+/// balance endpoint. The balance host is fixed
+/// (`api.firecrawl.dev`), so the pool key is `(proxy, fixed host)`.
+/// Direct stays the same 10s-timeout shape; proxy reuses a pooled 10s
+/// client. Errors are redacted; invalid proxy fails closed.
+static FIRECRAWL_BALANCE_POOL: OnceLock<Mutex<HashMap<(String, String), reqwest::Client>>> =
+    OnceLock::new();
+
+fn pool() -> &'static Mutex<HashMap<(String, String), reqwest::Client>> {
+    FIRECRAWL_BALANCE_POOL.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn lock_pool() -> std::sync::MutexGuard<'static, HashMap<(String, String), reqwest::Client>> {
+    pool()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn build_pooled_client(validated_proxy: &str) -> Result<reqwest::Client, String> {
+    let redacted = crate::db::redact_proxy_url_for_log(validated_proxy);
+    let proxy = reqwest::Proxy::all(validated_proxy)
+        .map_err(|_| format!("invalid proxy {redacted}: unsupported proxy URL"))?;
+    reqwest::Client::builder()
+        .timeout(FIRECRAWL_BALANCE_TIMEOUT)
+        .proxy(proxy)
+        .build()
+        .map_err(|_| format!("invalid proxy {redacted}: failed to build proxy client"))
+}
+
+/// Pooled balance client for an optional endpoint proxy. `None`/empty means
+/// direct with the same timeout. The host is always the fixed Firecrawl
+/// balance host so callers only pass the proxy.
+pub fn pooled_client_for_proxy(proxy_url: Option<&str>) -> Result<reqwest::Client, String> {
+    let Some(raw) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(reqwest::Client::builder()
+            .timeout(FIRECRAWL_BALANCE_TIMEOUT)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new()));
+    };
+    let validated =
+        crate::db::validate_outbound_proxy_url(raw).map_err(|message| message.to_string())?;
+    let key = (
+        validated.clone(),
+        crate::db::proxy_base_host(FIRECRAWL_CREDIT_USAGE_URL),
+    );
+    {
+        let guard = lock_pool();
+        if let Some(client) = guard.get(&key) {
+            return Ok(client.clone());
+        }
+    }
+    let client = build_pooled_client(&validated)?;
+    lock_pool().insert(key, client.clone());
+    Ok(client)
+}
+
 /// Minimal reqwest client for the Firecrawl balance endpoint. The token is
 /// only ever sent in the Authorization header and never formatted into an
 /// error.
+///
+/// Issue #375 Phase G: `new`/`with_timeout` stay direct by design — balance
+/// refreshes (scheduled loop, admin refresh) carry no endpoint proxy context
+/// (Firecrawl is a hosted MCP provider, not an LLM endpoint), so they use
+/// direct plus this comment. Endpoint-aware callers must build via
+/// `pooled_client_for_proxy` + `from_client` so the endpoint proxy applies.
 #[derive(Clone)]
 pub struct FirecrawlBalanceClient {
     client: reqwest::Client,
@@ -138,6 +202,12 @@ impl FirecrawlBalanceClient {
 
     pub fn from_client(client: reqwest::Client) -> Self {
         Self { client }
+    }
+
+    /// Issue #375 Phase G: endpoint-proxy-aware constructor. `None`/empty
+    /// stays direct; non-empty validates (fail-closed).
+    pub fn from_endpoint_proxy(proxy_url: Option<&str>) -> Result<Self, String> {
+        pooled_client_for_proxy(proxy_url).map(Self::from_client)
     }
 
     pub async fn fetch_balance(
@@ -282,6 +352,36 @@ mod tests {
         .expect("invalid optional reset must not drop the balance");
         assert_eq!(balance.remaining, 5.0);
         assert_eq!(balance.reset_at, None);
+    }
+
+    #[test]
+    fn empty_proxy_means_direct_balance_client() {
+        for proxy in [None, Some(""), Some("   ")] {
+            pooled_client_for_proxy(proxy).expect("direct must succeed");
+            FirecrawlBalanceClient::from_endpoint_proxy(proxy).expect("direct must succeed");
+        }
+        assert!(crate::db::proxy_pool_key("", FIRECRAWL_CREDIT_USAGE_URL).is_none());
+    }
+
+    #[test]
+    fn proxy_selection_reuses_pooled_balance_client() {
+        let proxy = "http://proxy-firecrawl-reuse.test:8080";
+        let via_a = pooled_client_for_proxy(Some(proxy)).expect("proxy must build");
+        let via_a_again = pooled_client_for_proxy(Some(proxy)).expect("proxy must reuse");
+        let _ = (via_a, via_a_again);
+        let key = crate::db::proxy_pool_key(proxy, FIRECRAWL_CREDIT_USAGE_URL).unwrap();
+        assert!(lock_pool().contains_key(&key));
+        FirecrawlBalanceClient::from_endpoint_proxy(Some(proxy)).expect("ctor must reuse");
+    }
+
+    #[test]
+    fn invalid_balance_proxy_is_rejected_without_userinfo_leak() {
+        let err =
+            pooled_client_for_proxy(Some("ftp://user:secret@proxy-firecrawl-invalid.test:21"))
+                .expect_err("ftp must be rejected");
+        assert!(err.contains("scheme"));
+        assert!(!err.contains("secret"));
+        assert!(!err.contains("user"));
     }
 
     #[test]

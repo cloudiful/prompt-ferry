@@ -99,6 +99,12 @@ pub(super) fn sqlite_endpoint_from_create(
         None => None,
     };
     let service_tier = super::endpoints_map::service_tier_to_sqlite(input.service_tier);
+    // Issue #368 Phase A: normalize the proxy default; empty/whitespace
+    // means direct (`None`) so clears round-trip as NULL.
+    let proxy_url = input
+        .proxy_url
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     Ok(ScProviderEndpoint {
         endpoint_id,
         name: input.name,
@@ -115,6 +121,7 @@ pub(super) fn sqlite_endpoint_from_create(
         updated_at: timestamps.endpoint_updated_at.unwrap_or(now),
         api_key,
         api_keys,
+        proxy_url,
     })
 }
 
@@ -150,6 +157,7 @@ mod tests {
                 api_keys: vec![],
                 key_lb_enabled: false,
                 enabled: true,
+                proxy_url: None,
             },
             false,
             EndpointTimestamps {

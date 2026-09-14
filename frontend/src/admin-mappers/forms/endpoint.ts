@@ -39,6 +39,9 @@ export function createEmptyEndpointForm(): EndpointForm {
     monthly_max_requests: null,
     enabled: true,
     mcp_enabled: false,
+    // Issue #368 Phase C: masked proxy default; empty + no saved means direct.
+    proxy_url: '',
+    has_saved_proxy_url: false,
   }
 }
 
@@ -77,10 +80,25 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
     monthly_max_requests: endpoint.monthly_max_requests ?? null,
     enabled: endpoint.enabled,
     mcp_enabled: endpoint.mcp_enabled ?? false,
+    // Issue #368 Phase C: masked proxy input; never echo the secret.
+    // `has_proxy_url` is optional for legacy payloads (missing means direct).
+    proxy_url: '',
+    has_saved_proxy_url: endpoint.has_proxy_url ?? false,
   }
 }
 
 export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
+  // Issue #368 Phase C: omit-when-untouched to avoid the P2 secret-wipe.
+  // Non-empty means replace; empty + saved means omit (keep stored value);
+  // empty + no saved means clear to direct (`""`). The request-side
+  // `has_proxy_url` hint is intentionally not sent (server ignores it).
+  const trimmedProxy = form.proxy_url.trim()
+  const proxy_url =
+    trimmedProxy !== ''
+      ? trimmedProxy
+      : form.has_saved_proxy_url
+        ? undefined
+        : ''
   return {
     api_key: form.api_keys[0]?.api_key ?? '',
     api_keys: form.api_keys
@@ -106,5 +124,6 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
     daily_max_requests: form.daily_max_requests,
     monthly_max_requests: form.monthly_max_requests,
     mcp_enabled: form.mcp_enabled,
+    proxy_url,
   }
 }

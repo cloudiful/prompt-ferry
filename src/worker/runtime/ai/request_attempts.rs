@@ -15,6 +15,7 @@ use super::{
         QuotaFailoverSignal, ResponseForwardContext, ResponseLoggingContext,
         forward_upstream_response, respond_upstream_error,
     },
+    proxy,
     request_logging::log_prepared_upstream_summary,
     request_support::prepare_upstream_request_for_route,
     upstream::{build_upstream_request, upstream_url_for_route},
@@ -189,8 +190,38 @@ pub(super) async fn forward_route_request(
             services,
             quota_failover_enabled: !route.api_keys.is_empty(),
         };
+        // Issue #368 Phase D: per-route proxy client. Direct routes clone
+        // the shared client unchanged; proxy routes use the pooled client.
+        // Invalid proxy fails closed without echoing userinfo.
+        let proxy_client = match proxy::client_for_route(&services.client, &route) {
+            Ok(client) => client,
+            Err(message) => {
+                tracing::warn!(
+                    event = "invalid_proxy_url",
+                    request_id = %request_ctx.request_id,
+                    endpoint_id = %route.route_id,
+                    proxy = %crate::db::redact_proxy_url_for_log(
+                        route.proxy_url.as_deref().unwrap_or_default()
+                    ),
+                    "rejecting upstream request with invalid proxy configuration"
+                );
+                return Ok(ForwardOutcome::TransportError {
+                    error: anyhow!("{message}"),
+                    terminal_recorded: false,
+                });
+            }
+        };
+        if !proxy::redacted_proxy_for_log(&route).is_empty() {
+            tracing::debug!(
+                event = "upstream_via_proxy",
+                request_id = %request_ctx.request_id,
+                endpoint_id = %route.route_id,
+                proxy = %proxy::redacted_proxy_for_log(&route),
+                "sending upstream request via configured proxy"
+            );
+        }
         let send_result = build_upstream_request(
-            &services.client,
+            &proxy_client,
             method,
             &upstream_url,
             &route,
