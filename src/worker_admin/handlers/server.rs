@@ -1,4 +1,5 @@
 use super::*;
+use axum::http::{Extensions, Version};
 use axum::routing::put;
 use axum::{
     extract::Request,
@@ -7,6 +8,10 @@ use axum::{
 use std::time::Duration;
 use std::{env, path::PathBuf};
 use tokio::sync::watch;
+use tower_http::compression::{
+    CompressionLayer,
+    predicate::{DefaultPredicate, NotForContentType, Predicate},
+};
 use tower_http::services::{ServeDir, ServeFile};
 
 /// Hard ceiling on how long the admin HTTP server waits for in-flight
@@ -93,6 +98,35 @@ async fn admin_shutdown_signal() {
 
 pub fn router(state: AdminState) -> Router {
     router_with_frontend_dist(state, frontend_dist_dir())
+}
+
+fn response_compression_layer() -> CompressionLayer<impl Predicate + Clone + Send + 'static> {
+    let predicate = DefaultPredicate::new()
+        .and(NotForContentType::SSE)
+        .and(skip_websocket_upgrade);
+    CompressionLayer::new().compress_when(predicate)
+}
+
+fn skip_websocket_upgrade(
+    status: StatusCode,
+    _version: Version,
+    headers: &HeaderMap,
+    _extensions: &Extensions,
+) -> bool {
+    if status == StatusCode::SWITCHING_PROTOCOLS {
+        return false;
+    }
+    if headers.contains_key(header::UPGRADE) {
+        return false;
+    }
+    if headers
+        .get(header::CONNECTION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.to_ascii_lowercase().contains("upgrade"))
+    {
+        return false;
+    }
+    true
 }
 
 fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Router {
@@ -309,6 +343,7 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
         .nest_service("/assets", frontend_assets)
         .fallback_service(frontend_index)
         .layer(CorsLayer::permissive())
+        .layer(response_compression_layer())
 }
 
 async fn reject_unsupported_sqlite_capabilities(
@@ -720,6 +755,173 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(std::str::from_utf8(&body).unwrap(), "ok");
+        let _ = fs::remove_dir_all(frontend_dir);
+    }
+
+    #[tokio::test]
+    async fn response_compression_layer_compresses_json_but_not_sse_or_upgrade() {
+        use axum::response::{IntoResponse, Response};
+        use axum::routing::get;
+
+        async fn json_handler() -> Response {
+            axum::Json(serde_json::json!({
+                "data": "x".repeat(512),
+                "message": "compressible admin json payload",
+            }))
+            .into_response()
+        }
+
+        async fn sse_handler() -> Response {
+            let body = format!("data: {}\n\n", "x".repeat(512));
+            (
+                [(header::CONTENT_TYPE, "text/event-stream")],
+                Body::from(body),
+            )
+                .into_response()
+        }
+
+        async fn upgrade_handler() -> Response {
+            (
+                StatusCode::SWITCHING_PROTOCOLS,
+                [
+                    (header::UPGRADE, "websocket"),
+                    (header::CONNECTION, "Upgrade"),
+                ],
+                Body::from("x".repeat(512)),
+            )
+                .into_response()
+        }
+
+        let app = axum::Router::new()
+            .route("/json", get(json_handler))
+            .route("/sse", get(sse_handler))
+            .route("/ws", get(upgrade_handler))
+            .layer(super::response_compression_layer());
+
+        let json_gzip = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/json")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            json_gzip
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .and_then(|value| value.to_str().ok()),
+            Some("gzip"),
+            "JSON should gain Content-Encoding: gzip",
+        );
+
+        let json_br = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/json")
+                    .header(header::ACCEPT_ENCODING, "br")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            json_br
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .and_then(|value| value.to_str().ok()),
+            Some("br"),
+            "JSON should gain Content-Encoding: br",
+        );
+
+        let json_plain = app
+            .clone()
+            .oneshot(Request::builder().uri("/json").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            json_plain.headers().get(header::CONTENT_ENCODING).is_none(),
+            "JSON should stay uncompressed without Accept-Encoding",
+        );
+
+        let sse = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/sse")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            sse.headers().get(header::CONTENT_ENCODING).is_none(),
+            "text/event-stream must stay uncompressed",
+        );
+
+        let upgrade = app
+            .oneshot(
+                Request::builder()
+                    .uri("/ws")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(upgrade.status(), StatusCode::SWITCHING_PROTOCOLS);
+        assert!(
+            upgrade.headers().get(header::CONTENT_ENCODING).is_none(),
+            "websocket upgrade must stay uncompressed",
+        );
+    }
+
+    #[tokio::test]
+    async fn admin_router_compresses_json_when_client_advertises_gzip() {
+        let frontend_dir = temp_frontend_dir();
+        let app = router_with_frontend_dist(test_state(), frontend_dir.clone());
+
+        let compressed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/auth/me")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(compressed.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            compressed
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .and_then(|value| value.to_str().ok()),
+            Some("gzip"),
+            "admin JSON should gain Content-Encoding: gzip through the router layer",
+        );
+
+        let plain = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/auth/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(plain.status(), StatusCode::UNAUTHORIZED);
+        assert!(
+            plain.headers().get(header::CONTENT_ENCODING).is_none(),
+            "admin JSON should stay uncompressed without Accept-Encoding",
+        );
+
         let _ = fs::remove_dir_all(frontend_dir);
     }
 }

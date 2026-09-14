@@ -70,7 +70,7 @@ tokio = { version = "1.53.1", features = ["io-util", "macros", "process", "rt-mu
 tokio-rustls = "0.26.5"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 tower = "0.5.3"
-tower-http = { version = "0.7.1", features = ["cors", "decompression-gzip", "fs"] }
+tower-http = { version = "0.7.1", features = ["compression-br", "compression-gzip", "cors", "decompression-gzip", "fs"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 utoipa = { version = "5.5.0", features = ["chrono", "uuid", "yaml"] }

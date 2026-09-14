@@ -17,12 +17,16 @@ use axum::{
     Router,
     body::Body,
     extract::{ConnectInfo, DefaultBodyLimit, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{Extensions, HeaderMap, StatusCode, Version, header},
     middleware,
     response::{IntoResponse, Response},
     routing::{any, get, post},
 };
 use std::net::IpAddr;
+use tower_http::compression::{
+    CompressionLayer,
+    predicate::{DefaultPredicate, NotForContentType, Predicate},
+};
 use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
 use tracing::{info, warn};
@@ -35,6 +39,36 @@ use self::{
     },
     mcp::{proxy_mcp_root, proxy_mcp_server},
 };
+
+pub(super) fn response_compression_layer()
+-> CompressionLayer<impl Predicate + Clone + Send + 'static> {
+    let predicate = DefaultPredicate::new()
+        .and(NotForContentType::SSE)
+        .and(skip_websocket_upgrade);
+    CompressionLayer::new().compress_when(predicate)
+}
+
+fn skip_websocket_upgrade(
+    status: StatusCode,
+    _version: Version,
+    headers: &HeaderMap,
+    _extensions: &Extensions,
+) -> bool {
+    if status == StatusCode::SWITCHING_PROTOCOLS {
+        return false;
+    }
+    if headers.contains_key(header::UPGRADE) {
+        return false;
+    }
+    if headers
+        .get(header::CONNECTION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.to_ascii_lowercase().contains("upgrade"))
+    {
+        return false;
+    }
+    true
+}
 
 pub(super) fn public_router(state: AppState) -> Router {
     Router::new()
@@ -87,6 +121,7 @@ pub(super) fn public_router(state: AppState) -> Router {
         .layer(RequestDecompressionLayer::new())
         .layer(CorsLayer::permissive())
         .layer(middleware::from_fn(capture_request_compression))
+        .layer(response_compression_layer())
         .with_state(state)
 }
 
@@ -470,5 +505,152 @@ fn public_ip_error(anthropic_format: bool) -> Response {
             "ip_not_allowed",
             "client IP is not allowed",
         )
+    }
+}
+
+#[cfg(test)]
+mod response_compression_tests {
+    use super::response_compression_layer;
+    use axum::{
+        Json, Router,
+        body::Body,
+        http::{Request, StatusCode, header},
+        response::{IntoResponse, Response},
+        routing::get,
+    };
+    use tower::ServiceExt;
+
+    fn test_app() -> Router {
+        async fn json_handler() -> Response {
+            Json(serde_json::json!({
+                "data": "x".repeat(512),
+                "message": "compressible json payload for response compression test",
+            }))
+            .into_response()
+        }
+
+        async fn sse_handler() -> Response {
+            let body = format!("data: {}\n\n", "x".repeat(512));
+            (
+                [(header::CONTENT_TYPE, "text/event-stream")],
+                Body::from(body),
+            )
+                .into_response()
+        }
+
+        async fn upgrade_handler() -> Response {
+            (
+                StatusCode::SWITCHING_PROTOCOLS,
+                [
+                    (header::UPGRADE, "websocket"),
+                    (header::CONNECTION, "Upgrade"),
+                ],
+                Body::from("x".repeat(512)),
+            )
+                .into_response()
+        }
+
+        Router::new()
+            .route("/json", get(json_handler))
+            .route("/sse", get(sse_handler))
+            .route("/ws", get(upgrade_handler))
+            .layer(response_compression_layer())
+    }
+
+    #[tokio::test]
+    async fn json_compresses_with_gzip_when_client_advertises_support() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/json")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .and_then(|value| value.to_str().ok()),
+            Some("gzip"),
+            "JSON should gain Content-Encoding: gzip",
+        );
+    }
+
+    #[tokio::test]
+    async fn json_compresses_with_brotli_when_client_advertises_support() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/json")
+                    .header(header::ACCEPT_ENCODING, "br")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_ENCODING)
+                .and_then(|value| value.to_str().ok()),
+            Some("br"),
+            "JSON should gain Content-Encoding: br",
+        );
+    }
+
+    #[tokio::test]
+    async fn json_stays_uncompressed_without_accept_encoding() {
+        let response = test_app()
+            .oneshot(Request::builder().uri("/json").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response.headers().get(header::CONTENT_ENCODING).is_none(),
+            "JSON should stay uncompressed without Accept-Encoding",
+        );
+    }
+
+    #[tokio::test]
+    async fn sse_content_type_stays_uncompressed() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/sse")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response.headers().get(header::CONTENT_ENCODING).is_none(),
+            "text/event-stream must stay uncompressed",
+        );
+    }
+
+    #[tokio::test]
+    async fn websocket_upgrade_stays_uncompressed() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/ws")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        assert!(
+            response.headers().get(header::CONTENT_ENCODING).is_none(),
+            "websocket upgrade must stay uncompressed",
+        );
     }
 }
