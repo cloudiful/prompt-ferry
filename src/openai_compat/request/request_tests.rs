@@ -578,12 +578,96 @@ mod tests {
     }
 
     #[test]
-    fn ignores_bare_reasoning_without_tool_calls_for_chat_compat() {
+    fn carries_bare_reasoning_onto_following_assistant_answer() {
         let value = serde_json::from_slice::<Value>(
             &responses_request_to_chat(
                 br#"{
                     "input":[
-                        {"type":"reasoning","content":[{"type":"reasoning_text","text":"ignored"}]},
+                        {"role":"user","content":"question"},
+                        {"type":"reasoning","content":[{"type":"reasoning_text","text":"think first"}]},
+                        {"role":"assistant","content":"answer"},
+                        {"role":"user","content":"follow up"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(value["messages"].as_array().map(Vec::len), Some(3));
+        assert_eq!(value["messages"][1]["role"].as_str(), Some("assistant"));
+        assert_eq!(value["messages"][1]["content"].as_str(), Some("answer"));
+        assert_eq!(
+            value["messages"][1]["reasoning_content"].as_str(),
+            Some("think first")
+        );
+        assert_eq!(value["messages"][2]["role"].as_str(), Some("user"));
+        assert_eq!(value["messages"][2]["content"].as_str(), Some("follow up"));
+    }
+
+    #[test]
+    fn carries_bare_reasoning_after_tool_round_onto_assistant_answer() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_request_to_chat(
+                br#"{
+                    "input":[
+                        {"role":"user","content":"check weather"},
+                        {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},
+                        {"type":"function_call_output","call_id":"call_1","output":"72F"},
+                        {"type":"reasoning","content":[{"type":"reasoning_text","text":"now answer"}]},
+                        {"role":"assistant","content":"it is 72F"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(value["messages"].as_array().map(Vec::len), Some(4));
+        assert_eq!(value["messages"][1]["role"].as_str(), Some("assistant"));
+        assert_eq!(
+            value["messages"][1]["tool_calls"][0]["id"].as_str(),
+            Some("call_1")
+        );
+        assert_eq!(value["messages"][2]["role"].as_str(), Some("tool"));
+        assert_eq!(value["messages"][3]["role"].as_str(), Some("assistant"));
+        assert_eq!(
+            value["messages"][3]["reasoning_content"].as_str(),
+            Some("now answer")
+        );
+    }
+
+    #[test]
+    fn flushes_trailing_bare_reasoning_as_assistant_message() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_request_to_chat(
+                br#"{
+                    "input":[
+                        {"role":"user","content":"question"},
+                        {"type":"reasoning","content":[{"type":"reasoning_text","text":"trailing chain"}]}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(value["messages"].as_array().map(Vec::len), Some(2));
+        assert_eq!(value["messages"][1]["role"].as_str(), Some("assistant"));
+        assert!(value["messages"][1]["content"].is_null());
+        assert_eq!(
+            value["messages"][1]["reasoning_content"].as_str(),
+            Some("trailing chain")
+        );
+    }
+
+    #[test]
+    fn flushes_bare_reasoning_before_non_assistant_messages() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_request_to_chat(
+                br#"{
+                    "input":[
+                        {"type":"reasoning","content":[{"type":"reasoning_text","text":"kept"}]},
                         {"role":"user","content":"continue"}
                     ]
                 }"#,
@@ -592,9 +676,47 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(value["messages"].as_array().map(Vec::len), Some(1));
-        assert_eq!(value["messages"][0]["role"].as_str(), Some("user"));
-        assert_eq!(value["messages"][0]["content"].as_str(), Some("continue"));
+        assert_eq!(value["messages"].as_array().map(Vec::len), Some(2));
+        assert_eq!(value["messages"][0]["role"].as_str(), Some("assistant"));
+        assert!(value["messages"][0]["content"].is_null());
+        assert_eq!(
+            value["messages"][0]["reasoning_content"].as_str(),
+            Some("kept")
+        );
+        assert_eq!(value["messages"][1]["role"].as_str(), Some("user"));
+        assert_eq!(value["messages"][1]["content"].as_str(), Some("continue"));
+    }
+
+    #[test]
+    fn keeps_bare_reasoning_across_consecutive_answer_rounds() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_request_to_chat(
+                br#"{
+                    "input":[
+                        {"role":"user","content":"question one"},
+                        {"type":"reasoning","content":[{"type":"reasoning_text","text":"reason one"}]},
+                        {"role":"assistant","content":"answer one"},
+                        {"role":"user","content":"question two"},
+                        {"type":"reasoning","content":[{"type":"reasoning_text","text":"reason two"}]},
+                        {"role":"assistant","content":"answer two"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(value["messages"].as_array().map(Vec::len), Some(4));
+        assert_eq!(value["messages"][1]["content"].as_str(), Some("answer one"));
+        assert_eq!(
+            value["messages"][1]["reasoning_content"].as_str(),
+            Some("reason one")
+        );
+        assert_eq!(value["messages"][3]["content"].as_str(), Some("answer two"));
+        assert_eq!(
+            value["messages"][3]["reasoning_content"].as_str(),
+            Some("reason two")
+        );
     }
 
     #[test]

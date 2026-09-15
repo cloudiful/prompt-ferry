@@ -46,24 +46,55 @@ impl ToolCallTurn {
         !self.outputs.is_empty()
     }
 
+    fn has_reasoning(&self) -> bool {
+        !self.reasoning_content.trim().is_empty()
+    }
+
+    fn has_tool_call_round(&self) -> bool {
+        !self.function_calls.is_empty() || self.has_outputs()
+    }
+
+    fn take_bare_reasoning(&mut self) -> Option<String> {
+        if self.function_calls.is_empty() && self.has_reasoning() {
+            Some(std::mem::take(&mut self.reasoning_content))
+        } else {
+            None
+        }
+    }
+
     fn finish(self) -> Vec<Value> {
+        if self.function_calls.is_empty() {
+            return self.finish_bare_reasoning();
+        }
+        let has_reasoning = self.has_reasoning();
+        let reasoning_content = self.reasoning_content;
+        let outputs = self.outputs;
+        let mut assistant = json!({
+            "role": "assistant",
+            "content": Value::Null,
+            "tool_calls": self.function_calls,
+        });
+        if has_reasoning && let Some(object) = assistant.as_object_mut() {
+            object.insert(
+                "reasoning_content".to_string(),
+                Value::String(reasoning_content),
+            );
+        }
+        let mut messages = Vec::with_capacity(1 + outputs.len());
+        messages.push(assistant);
+        messages.extend(outputs);
+        messages
+    }
+
+    fn finish_bare_reasoning(self) -> Vec<Value> {
         let mut messages =
-            Vec::with_capacity(usize::from(!self.function_calls.is_empty()) + self.outputs.len());
-        if !self.function_calls.is_empty() {
-            let mut assistant = json!({
+            Vec::with_capacity(usize::from(self.has_reasoning()) + self.outputs.len());
+        if self.has_reasoning() {
+            messages.push(json!({
                 "role": "assistant",
                 "content": Value::Null,
-                "tool_calls": self.function_calls,
-            });
-            if !self.reasoning_content.trim().is_empty()
-                && let Some(object) = assistant.as_object_mut()
-            {
-                object.insert(
-                    "reasoning_content".to_string(),
-                    Value::String(self.reasoning_content),
-                );
-            }
-            messages.push(assistant);
+                "reasoning_content": self.reasoning_content,
+            }));
         }
         messages.extend(self.outputs);
         messages
@@ -107,14 +138,36 @@ where
             }
             continue;
         }
-        messages.extend(turn.finish());
-        turn = ToolCallTurn::new();
-        if let Some(message) = translate_regular_item(item)? {
-            messages.push(message);
+        if turn.has_tool_call_round() {
+            messages.extend(turn.finish());
+            turn = ToolCallTurn::new();
         }
+        let Some(mut message) = translate_regular_item(item)? else {
+            continue;
+        };
+        if message.get("role").and_then(Value::as_str) == Some("assistant") {
+            if let Some(reasoning) = turn.take_bare_reasoning() {
+                merge_reasoning_content(&mut message, reasoning);
+            }
+        } else {
+            messages.extend(turn.finish());
+            turn = ToolCallTurn::new();
+        }
+        messages.push(message);
     }
     messages.extend(turn.finish());
     Ok(messages)
+}
+
+fn merge_reasoning_content(message: &mut Value, reasoning: String) {
+    let Some(object) = message.as_object_mut() else {
+        return;
+    };
+    let merged = match object.get("reasoning_content").and_then(Value::as_str) {
+        Some(existing) if !existing.trim().is_empty() => format!("{reasoning}{existing}"),
+        _ => reasoning,
+    };
+    object.insert("reasoning_content".to_string(), Value::String(merged));
 }
 
 pub(super) fn is_tool_call_item(value: &Value) -> bool {
