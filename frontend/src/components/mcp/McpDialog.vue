@@ -3,12 +3,10 @@ import { computed, ref, watch } from 'vue'
 import type {
   McpCatalogResponse,
   McpProviderDescriptor,
-  McpQuotaGroup,
   User,
 } from '@/generated/admin-api'
 import type { McpForm } from '@/models'
 import McpBearerTokensEditor from '@/components/mcp/McpBearerTokensEditor.vue'
-import McpCredentialQuotaEditor from '@/components/mcp/McpCredentialQuotaEditor.vue'
 import McpEnvironmentEditor from '@/components/mcp/McpEnvironmentEditor.vue'
 import ProxySettingsDialog from '@/components/shared/ProxySettingsDialog.vue'
 import RequestLimitFields from '@/components/shared/RequestLimitFields.vue'
@@ -21,7 +19,6 @@ const props = defineProps<{
   t: TranslateFn
   catalog: McpCatalogResponse
   users: User[]
-  quotaGroups: McpQuotaGroup[]
   providers: McpProviderDescriptor[]
   learned?: {
     mode: string | null
@@ -320,14 +317,13 @@ const hasProxy = computed(() => {
               </UTooltip>
             </div>
             <div
-              v-if="form.transport === 'http'"
+              v-if="form.transport === 'http' && !isHostedPreset"
               class="flex min-w-0 items-center gap-1"
             >
               <UInput
                 v-model="form.url"
                 class="min-w-0 flex-1"
                 placeholder="http://127.0.0.1:3000/mcp"
-                :readonly="isHostedPreset"
               />
             </div>
             <div
@@ -378,19 +374,16 @@ const hasProxy = computed(() => {
               />
             </div>
             <div
-              v-if="selectedProvider"
+              v-if="selectedProvider && isHostedPreset"
               class="flex min-w-0 items-end gap-2 pb-1 text-xs"
             >
-              <UBadge
-                :label="`${t('quotaUnit')}: ${selectedProvider.unit}`"
-                color="neutral"
-              />
-              <span v-if="isHostedPreset" class="text-dimmed">{{
-                t('providerBearerHint')
-              }}</span>
+              <span class="text-dimmed">{{ t('providerBearerHint') }}</span>
             </div>
           </div>
-          <div v-if="form.transport === 'http'" class="grid min-w-0 gap-2">
+          <div
+            v-if="form.transport === 'http' && !isHostedPreset"
+            class="grid min-w-0 gap-2"
+          >
             <div class="text-muted">{{ t('authMode') }}</div>
             <USelect
               v-model="form.auth_mode"
@@ -398,23 +391,11 @@ const hasProxy = computed(() => {
               :items="authModeItems"
               label-key="label"
               value-key="value"
-              :disabled="isHostedPreset"
             />
           </div>
           <McpBearerTokensEditor
             v-if="form.transport === 'http' && form.auth_mode === 'bearer'"
             v-model:tokens="form.bearer_tokens"
-            :t="t"
-          />
-          <McpCredentialQuotaEditor
-            v-if="
-              form.transport === 'http' &&
-              form.auth_mode === 'bearer' &&
-              isAdmin
-            "
-            :server-id="form.server_id"
-            :quota-groups="quotaGroups"
-            :providers="providers"
             :t="t"
           />
           <div

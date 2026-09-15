@@ -298,7 +298,6 @@ impl super::ConfigRepository {
                         secret: token.token,
                         position: index as i32,
                         enabled: token.enabled,
-                        quota_group_id: None,
                         provider_kind: None,
                         daily_limit: None,
                         monthly_limit: None,

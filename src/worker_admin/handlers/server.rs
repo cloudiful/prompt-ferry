@@ -1,6 +1,5 @@
 use super::*;
 use axum::http::{Extensions, Version};
-use axum::routing::put;
 use axum::{
     extract::Request,
     middleware::{self, Next},
@@ -205,30 +204,6 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             get(get_mcp_catalog),
         )
         .route("/admin/mcp-servers/{server_id}/test", post(test_mcp_server))
-        .route(
-            "/admin/mcp-servers/{server_id}/credentials",
-            get(list_server_credentials),
-        )
-        .route(
-            "/admin/mcp-servers/{server_id}/credentials/{credential_id}/quota-group",
-            put(bind_credential_group),
-        )
-        .route(
-            "/admin/mcp-servers/{server_id}/credentials/{credential_id}/refresh",
-            post(refresh_server_credential_balance),
-        )
-        .route(
-            "/admin/mcp-quota-groups",
-            get(list_quota_groups).post(create_quota_group),
-        )
-        .route(
-            "/admin/mcp-quota-groups/{group_id}",
-            patch(update_quota_group).delete(delete_quota_group),
-        )
-        .route(
-            "/admin/mcp-quota-groups/{group_id}/usage",
-            get(quota_group_usage),
-        )
         .route("/admin/request-records/summary", get(usage_summary))
         .route("/admin/request-records/overview", get(usage_overview))
         .route("/admin/request-records", get(usage_events))
@@ -518,7 +493,6 @@ mod tests {
             mcp_catalog_service: McpCatalogService::new(pool.clone(), McpCatalogCache::new()),
             mcp_session_store: None,
             mcp_allowed_origins: Vec::new(),
-            mcp_quota_valkey: crate::mcp::McpQuotaValkey::new(),
             endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
                 Duration::from_secs(60),
             ),
@@ -708,30 +682,6 @@ mod tests {
                 std::str::from_utf8(&body).unwrap_or("<binary>")
             );
         }
-
-        // The provider balance refresh is PostgreSQL-only (MCP quota
-        // capability); SQLite must reject it before any provider call.
-        let refresh = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/admin/mcp-servers/abc/credentials/def/refresh")
-                    .header(header::COOKIE, &cookie)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(refresh.status(), StatusCode::NOT_IMPLEMENTED);
-        let body = to_bytes(refresh.into_body(), usize::MAX).await.unwrap();
-        assert!(
-            std::str::from_utf8(&body)
-                .expect("JSON body")
-                .contains("sqlite_mcp_quota_unavailable"),
-            "unexpected refresh response on SQLite: {}",
-            std::str::from_utf8(&body).unwrap_or("<binary>")
-        );
 
         sqlite_pool.close().await;
         let _ = fs::remove_dir_all(frontend_dir);

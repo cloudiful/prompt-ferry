@@ -107,7 +107,6 @@ pub struct AdminState {
     pub mcp_catalog_service: McpCatalogService,
     pub mcp_session_store: Option<Arc<dyn SessionStore>>,
     pub mcp_allowed_origins: Vec<String>,
-    pub mcp_quota_valkey: crate::mcp::McpQuotaValkey,
     pub endpoint_model_cache: EndpointModelCache,
     pub(crate) token_plan_quota: TokenPlanQuotaCache,
 }
@@ -130,7 +129,6 @@ pub struct AdminStateInit {
     pub mcp_catalog_service: McpCatalogService,
     pub mcp_session_store: Option<Arc<dyn SessionStore>>,
     pub mcp_allowed_origins: Vec<String>,
-    pub mcp_quota_valkey: crate::mcp::McpQuotaValkey,
     pub endpoint_model_cache: EndpointModelCache,
 }
 
@@ -165,7 +163,6 @@ impl AdminState {
             mcp_catalog_service: init.mcp_catalog_service,
             mcp_session_store: init.mcp_session_store,
             mcp_allowed_origins: init.mcp_allowed_origins,
-            mcp_quota_valkey: init.mcp_quota_valkey,
             endpoint_model_cache: init.endpoint_model_cache,
             token_plan_quota: TokenPlanQuotaCache::default(),
         }

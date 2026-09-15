@@ -17,10 +17,6 @@ use sqlx::postgres::PgPoolOptions;
 use std::{path::Path, sync::Arc, time::Duration};
 use tracing::{error, info, warn};
 
-/// Background cadence for reconciling Firecrawl provider balances. The task
-/// only issues network calls when eligible credentials exist.
-const FIRECRAWL_REFRESH_INTERVAL_SECS: u64 = 3600;
-
 /// Atomically publish a generated bootstrap admin password and return the
 /// effective one to store in the database.
 ///
@@ -346,7 +342,6 @@ pub(super) async fn build_admin_state(
             ),
             mcp_session_store,
             mcp_allowed_origins: config.mcp_allowed_origins.clone(),
-            mcp_quota_valkey: crate::mcp::McpQuotaValkey::new(),
             endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
                 Duration::from_secs(config.endpoint_model_cache_ttl_seconds.max(1)),
             ),
@@ -441,19 +436,14 @@ pub(super) async fn build_admin_state(
             "aborted stale pending approval requests on startup"
         );
     }
-    // Valkey-backed components all talk to the same broker but with
-    // different keys/connections; spin them up concurrently so a slow
-    // handshake to one does not serialise the others.
-    let (mcp_catalog_cache, replay_cache, mcp_session_store, mcp_quota_valkey) = tokio::join!(
+    let (mcp_catalog_cache, replay_cache, mcp_session_store) = tokio::join!(
         crate::mcp::McpCatalogCache::from_config(config),
         ReplayCache::from_config(config),
         crate::mcp::McpSessionStore::from_config(config),
-        crate::mcp::McpQuotaValkey::from_config(config),
     );
     let mcp_catalog_cache = mcp_catalog_cache;
     let replay_cache = replay_cache;
     let mcp_session_store = mcp_session_store;
-    let mcp_quota_valkey = mcp_quota_valkey;
     let mcp_catalog_service =
         crate::mcp::McpCatalogService::new(pool.clone(), mcp_catalog_cache.clone());
     let state = AdminState::new(crate::worker_admin_state::AdminStateInit {
@@ -474,7 +464,6 @@ pub(super) async fn build_admin_state(
         mcp_catalog_service,
         mcp_session_store,
         mcp_allowed_origins: config.mcp_allowed_origins.clone(),
-        mcp_quota_valkey,
         endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(Duration::from_secs(
             config.endpoint_model_cache_ttl_seconds.max(1),
         )),
@@ -500,53 +489,7 @@ pub(super) async fn build_admin_state(
             mcp_catalog_service,
         );
 
-        let quota_pool = state.pool.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                interval.tick().await;
-                if let Err(err) = crate::db::release_expired_reservations(&quota_pool).await {
-                    warn!(error = %err, "MCP quota reservation cleanup failed");
-                }
-            }
-        });
-
-        // Provider balance sync runs off the request path: Firecrawl credits
-        // are reconciled in the background so a slow provider API never stalls
-        // MCP forwarding. SQLite never reaches this branch.
-        let provider_pool = state.pool.clone();
-        let provider_valkey = state.mcp_quota_valkey.clone();
-        tokio::spawn(async move {
-            let client = crate::mcp::FirecrawlBalanceClient::new();
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(
-                FIRECRAWL_REFRESH_INTERVAL_SECS,
-            ));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                interval.tick().await;
-                match crate::mcp::refresh_firecrawl_balances(
-                    &provider_pool,
-                    &provider_valkey,
-                    &client,
-                )
-                .await
-                {
-                    Ok(summary) if summary.attempted > 0 => {
-                        info!(
-                            attempted = summary.attempted,
-                            refreshed = summary.refreshed,
-                            failed = summary.failed,
-                            "refreshed MCP provider balances"
-                        );
-                    }
-                    Ok(_) => {}
-                    Err(err) => {
-                        warn!(error = %err, "MCP provider balance refresh failed");
-                    }
-                }
-            }
-        });
+        let _ = &state.pool;
     }
     Ok(Some(state))
 }

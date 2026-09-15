@@ -2,10 +2,8 @@ use anyhow::Result;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::db::types::{
-    McpBearerToken, McpCredential, McpProviderSecret, canonical_mcp_provider_kind,
-    canonical_quota_group_provider_kind,
-};
+use crate::db::types::{McpBearerToken, McpCredential, McpProviderSecret,
+                         canonical_mcp_provider_kind};
 
 pub async fn list_credentials_by_server(
     pool: &PgPool,
@@ -27,7 +25,6 @@ pub async fn insert_credential(
     secret: &str,
     position: i32,
     enabled: bool,
-    quota_group_id: Option<Uuid>,
 ) -> Result<McpCredential> {
     Ok(sqlx::query_file_as!(
         McpCredential,
@@ -37,7 +34,6 @@ pub async fn insert_credential(
         secret,
         position,
         enabled,
-        quota_group_id,
     )
     .fetch_one(pool)
     .await?)
@@ -75,9 +71,8 @@ pub async fn delete_credential(pool: &PgPool, credential_id: Uuid) -> Result<boo
 /// Reconcile `mcp_credentials` rows with the bearer token array of a server.
 ///
 /// The array position is the credential identity: new positions are inserted,
-/// removed positions are deleted, and matching positions keep their existing
-/// quota configuration while the token text, label and enabled flag follow the
-/// configuration.
+/// removed positions are deleted, and matching positions keep the token text,
+/// label and enabled flag following the configuration.
 pub async fn sync_credentials_from_tokens(
     pool: &PgPool,
     server_id: Uuid,
@@ -103,16 +98,6 @@ pub async fn sync_credentials_from_tokens(
     )
     .fetch_all(&mut *tx)
     .await?;
-    // Newly added tokens inherit the server's default quota group so that a
-    // post-upgrade token addition does not silently opt the server out of
-    // budget enforcement.
-    let default_group = sqlx::query_file!(
-        "src/sql/mcp_credentials/find_default_group_for_server.sql",
-        server_id,
-    )
-    .fetch_optional(&mut *tx)
-    .await?
-    .map(|row| row.group_id);
     let mut seen = std::collections::HashSet::new();
     for (index, token) in tokens.iter().enumerate() {
         let position = index as i32;
@@ -146,7 +131,6 @@ pub async fn sync_credentials_from_tokens(
                 token.token,
                 position,
                 token.enabled,
-                default_group,
                 provider_kind,
             )
             .fetch_one(&mut *tx)
@@ -188,104 +172,4 @@ pub async fn backfill_credential_provider_kinds(pool: &PgPool) -> Result<i64> {
             .execute(pool)
             .await?;
     Ok(result.rows_affected() as i64)
-}
-
-pub async fn get_quota_group(
-    pool: &PgPool,
-    group_id: Uuid,
-) -> Result<Option<crate::db::McpQuotaGroup>> {
-    Ok(sqlx::query_file_as!(
-        crate::db::McpQuotaGroup,
-        "src/sql/mcp_credentials/get_quota_group.sql",
-        group_id,
-    )
-    .fetch_optional(pool)
-    .await?)
-}
-
-pub async fn list_quota_groups(pool: &PgPool) -> Result<Vec<crate::db::McpQuotaGroup>> {
-    Ok(sqlx::query_file_as!(
-        crate::db::McpQuotaGroup,
-        "src/sql/mcp_credentials/list_quota_groups.sql",
-    )
-    .fetch_all(pool)
-    .await?)
-}
-
-pub async fn create_quota_group(
-    pool: &PgPool,
-    input: crate::db::McpQuotaGroupInput,
-) -> Result<crate::db::McpQuotaGroup> {
-    let provider_kind = canonical_quota_group_provider_kind(input.provider_kind.as_deref());
-    Ok(sqlx::query_file_as!(
-        crate::db::McpQuotaGroup,
-        "src/sql/mcp_credentials/create_quota_group.sql",
-        input.name,
-        input.scope.as_deref().unwrap_or("admin"),
-        input.owner_user_id,
-        provider_kind,
-        input
-            .unit
-            .unwrap_or(crate::db::QuotaUnit::Requests)
-            .as_str(),
-        input.daily_limit,
-        input.monthly_limit,
-        input.default_cost.unwrap_or(1.0),
-        input.strict_mode.unwrap_or(false),
-        input.billing_period_start,
-        input.billing_period_end,
-    )
-    .fetch_one(pool)
-    .await?)
-}
-
-pub async fn update_quota_group(
-    pool: &PgPool,
-    group_id: Uuid,
-    input: crate::db::McpQuotaGroupInput,
-) -> Result<Option<crate::db::McpQuotaGroup>> {
-    let provider_kind = canonical_quota_group_provider_kind(input.provider_kind.as_deref());
-    Ok(sqlx::query_file_as!(
-        crate::db::McpQuotaGroup,
-        "src/sql/mcp_credentials/update_quota_group.sql",
-        group_id,
-        input.name,
-        input.scope.as_deref().unwrap_or("admin"),
-        input.owner_user_id,
-        provider_kind,
-        input
-            .unit
-            .unwrap_or(crate::db::QuotaUnit::Requests)
-            .as_str(),
-        input.daily_limit,
-        input.monthly_limit,
-        input.default_cost.unwrap_or(1.0),
-        input.strict_mode.unwrap_or(false),
-        input.billing_period_start,
-        input.billing_period_end,
-    )
-    .fetch_optional(pool)
-    .await?)
-}
-
-pub async fn delete_quota_group(pool: &PgPool, group_id: Uuid) -> Result<bool> {
-    let result = sqlx::query_file!("src/sql/mcp_credentials/delete_quota_group.sql", group_id)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() > 0)
-}
-
-pub async fn set_credential_quota_group(
-    pool: &PgPool,
-    credential_id: Uuid,
-    quota_group_id: Option<Uuid>,
-) -> Result<bool> {
-    let result = sqlx::query_file!(
-        "src/sql/mcp_credentials/set_credential_quota_group.sql",
-        credential_id,
-        quota_group_id,
-    )
-    .fetch_optional(pool)
-    .await?;
-    Ok(result.is_some())
 }

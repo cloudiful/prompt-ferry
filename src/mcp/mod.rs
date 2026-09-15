@@ -5,7 +5,6 @@ mod entry;
 mod filtering;
 mod protocol;
 mod provider_usage;
-mod quota;
 mod routing;
 mod server;
 mod service;
@@ -19,11 +18,7 @@ pub use entry::{
     McpRequestContext, McpTransportResponse, handle, handle_stream,
     handle_stream_with_session_store, inspect_server,
 };
-pub use provider_usage::{
-    FIRECRAWL_BALANCE_REFRESH_CONCURRENCY, FirecrawlBalanceClient, FirecrawlRefreshSummary,
-    ProviderBalanceError, refresh_firecrawl_balances, refresh_firecrawl_credential,
-};
-pub use quota::{McpQuotaValkey, QuotaDecision, prepare_quota, record_credential_failure};
+pub use provider_usage::{FirecrawlBalanceClient, ProviderBalance, ProviderBalanceError};
 // MCP provider preset contract (issue #296 Phase 1): re-exported here so
 // transport/runtime code resolves provider metadata from the mcp module.
 pub use crate::db::{
@@ -33,7 +28,7 @@ pub use crate::db::{
 };
 pub use service::{McpCatalogService, catalog_for_server};
 pub use session_store::McpSessionStore;
-pub(crate) use transport::{tracked_credits_used, tracked_upstream_failure, with_tracked_credits};
+pub(crate) use transport::with_tracked_credits;
 
 /// Storage selected by the worker runtime for MCP configuration lookups.
 ///
@@ -78,7 +73,6 @@ pub(crate) struct McpRuntimeState {
     pub(crate) session_store:
         Option<std::sync::Arc<dyn rmcp::transport::streamable_http_server::session::SessionStore>>,
     pub(crate) allowed_origins: Vec<String>,
-    pub(crate) quota_valkey: McpQuotaValkey,
     pub(crate) request_content_logging: std::sync::Arc<
         tokio::sync::RwLock<crate::worker_admin_types::RequestContentLoggingResponse>,
     >,
@@ -91,7 +85,6 @@ impl McpRuntimeState {
             catalog_cache: state.mcp_catalog_cache.clone(),
             session_store: state.mcp_session_store.clone(),
             allowed_origins: state.mcp_allowed_origins.clone(),
-            quota_valkey: state.mcp_quota_valkey.clone(),
             request_content_logging: state.request_content_logging.clone(),
         }
     }
@@ -111,7 +104,6 @@ impl McpRuntimeState {
             session_store: McpSessionStore::from_config_with_sqlite(config, Some(sqlite_pool))
                 .await,
             allowed_origins: config.mcp_allowed_origins.clone(),
-            quota_valkey: McpQuotaValkey::new(),
             request_content_logging: std::sync::Arc::new(tokio::sync::RwLock::new(
                 crate::worker_admin_types::RequestContentLoggingResponse {
                     mode: crate::worker_admin_types::RequestContentLoggingMode::Off,

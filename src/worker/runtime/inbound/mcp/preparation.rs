@@ -20,8 +20,8 @@ use crate::{
 };
 
 /// Owned state shared across the MCP request stages: request context and
-/// usage recording, server resolution and quota reservation, upstream
-/// redaction, transport execution, and final quota settle and response.
+/// usage recording, server resolution, upstream redaction, transport
+/// execution, and final response.
 ///
 /// Holds the request lease so it covers the entire MCP request lifecycle.
 pub(super) struct McpExecution {
@@ -31,7 +31,7 @@ pub(super) struct McpExecution {
     pub(super) request_content_logging: RequestContentLoggingResponse,
     pub(super) redact_content: bool,
     pub(super) server: Option<db::McpServer>,
-    pub(super) budget_grant: Option<Box<db::QuotaGrant>>,
+    pub(super) selected_credential: Option<db::McpCredential>,
     pub(super) conversation_id: Option<uuid::Uuid>,
     /// Body sent upstream. Taken by the transport stage so later stages stop
     /// retaining the heap allocation once the upstream call consumed it.
@@ -193,7 +193,7 @@ pub(super) async fn build_request_context(
         request_content_logging,
         redact_content,
         server: None,
-        budget_grant: None,
+        selected_credential: None,
         conversation_id: None,
         effective_body: None,
         upstream_redacted_request_json: None,
@@ -265,26 +265,9 @@ async fn check_server_request_budget(
     })
 }
 
-/// Narrowed stage 2c: reserve credential quota for the resolved server.
-async fn acquire_budget_grant(
-    state: &mcp::McpRuntimeState,
-    server: &db::McpServer,
-    request_id: uuid::Uuid,
-) -> mcp::QuotaDecision {
-    mcp::prepare_quota(
-        state.storage.postgres_pool().expect("PostgreSQL MCP state"),
-        server.server_id,
-        request_id,
-        chrono::Utc::now(),
-    )
-    .await
-}
-
-/// Stage 2: resolve the named server, enforce its request budget, and reserve
-/// credential quota. Every rejection path sends the same HTTP error and
-/// records the failure event before returning `None`. Each sub-stage runs
-/// behind `Box::pin` so the `McpExecution` holder is not inlined into the
-/// repository/quota futures.
+/// Stage 2: resolve the named server and enforce its request budget.
+/// Quota groups were removed, so credential selection always follows the
+/// unconstrained legacy token path (`selected_credential` stays `None`).
 pub(super) async fn resolve_server_and_quota(
     mut execution: McpExecution,
     services: &RuntimeServices,
@@ -320,57 +303,8 @@ pub(super) async fn resolve_server_and_quota(
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case("x-prompt-ferry-conversation-id"))
         .and_then(|(_, value)| uuid::Uuid::parse_str(value).ok());
-    let decision = match execution.server.as_ref() {
-        Some(server) if !state.storage.repository().is_sqlite() => Some(
-            Box::pin(acquire_budget_grant(
-                state,
-                server,
-                execution.request_ctx.request_id,
-            ))
-            .await,
-        ),
-        _ => None,
-    };
-    let budget_grant = match decision {
-        None => None,
-        Some(mcp::QuotaDecision::Granted { grant }) => Some(grant),
-        Some(mcp::QuotaDecision::Unconstrained) => None,
-        Some(mcp::QuotaDecision::Exhausted) => {
-            let server_name = execution
-                .server
-                .as_ref()
-                .map(|server| server.name.clone())
-                .unwrap_or_default();
-            let context = execution.response_context(services);
-            Box::pin(send_failure(
-                services,
-                &context,
-                &execution.request.request_id,
-                StatusCode::TOO_MANY_REQUESTS,
-                "budget_exceeded",
-                "no credential with remaining budget".to_string(),
-                format!("mcp server {server_name} has no credentials with remaining budget"),
-            ))
-            .await;
-            return None;
-        }
-        Some(mcp::QuotaDecision::Unavailable { reason }) => {
-            let context = execution.response_context(services);
-            Box::pin(send_failure(
-                services,
-                &context,
-                &execution.request.request_id,
-                StatusCode::SERVICE_UNAVAILABLE,
-                "quota_unavailable",
-                reason.clone(),
-                format!("quota ledger unavailable: {reason}"),
-            ))
-            .await;
-            return None;
-        }
-    };
     execution.conversation_id = conversation_id;
-    execution.budget_grant = budget_grant;
+    execution.selected_credential = None;
     Some(execution)
 }
 

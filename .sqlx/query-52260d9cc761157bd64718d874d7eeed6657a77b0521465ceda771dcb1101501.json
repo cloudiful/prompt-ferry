@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE mcp_credentials\nSET credential_label = $2,\n    secret = $3,\n    enabled = $4,\n    provider_kind = $5,\n    updated_at = NOW()\nWHERE credential_id = $1\nRETURNING credential_id, server_id, credential_label, secret, position, enabled, quota_group_id,\n          provider_kind, daily_limit, monthly_limit, default_cost, strict_mode,\n          billing_period_start, billing_period_end, provider_remaining, provider_synced_at,\n          provider_reset_at, cooldown_until, last_error, last_error_at, created_at, updated_at\n",
+  "query": "UPDATE mcp_credentials\nSET credential_label = $2,\n    secret = $3,\n    enabled = $4,\n    provider_kind = $5,\n    updated_at = NOW()\nWHERE credential_id = $1\nRETURNING credential_id, server_id, credential_label, secret, position, enabled,\n          provider_kind, daily_limit, monthly_limit, default_cost, strict_mode,\n          billing_period_start, billing_period_end, provider_remaining, provider_synced_at,\n          provider_reset_at, cooldown_until, last_error, last_error_at, created_at, updated_at\n",
   "describe": {
     "columns": [
       {
@@ -71,17 +71,6 @@
       },
       {
         "ordinal": 6,
-        "name": "quota_group_id",
-        "type_info": "Uuid",
-        "origin": {
-          "Table": {
-            "table": "mcp_credentials",
-            "name": "quota_group_id"
-          }
-        }
-      },
-      {
-        "ordinal": 7,
         "name": "provider_kind",
         "type_info": "Text",
         "origin": {
@@ -92,7 +81,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "daily_limit",
         "type_info": "Float8",
         "origin": {
@@ -103,7 +92,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "monthly_limit",
         "type_info": "Float8",
         "origin": {
@@ -114,7 +103,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 9,
         "name": "default_cost",
         "type_info": "Float8",
         "origin": {
@@ -125,7 +114,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 10,
         "name": "strict_mode",
         "type_info": "Bool",
         "origin": {
@@ -136,7 +125,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 11,
         "name": "billing_period_start",
         "type_info": "Timestamptz",
         "origin": {
@@ -147,7 +136,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 12,
         "name": "billing_period_end",
         "type_info": "Timestamptz",
         "origin": {
@@ -158,7 +147,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 13,
         "name": "provider_remaining",
         "type_info": "Float8",
         "origin": {
@@ -169,7 +158,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 14,
         "name": "provider_synced_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -180,7 +169,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 15,
         "name": "provider_reset_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -191,7 +180,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 16,
         "name": "cooldown_until",
         "type_info": "Timestamptz",
         "origin": {
@@ -202,7 +191,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 17,
         "name": "last_error",
         "type_info": "Text",
         "origin": {
@@ -213,7 +202,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 18,
         "name": "last_error_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -224,7 +213,7 @@
         }
       },
       {
-        "ordinal": 20,
+        "ordinal": 19,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -235,7 +224,7 @@
         }
       },
       {
-        "ordinal": 21,
+        "ordinal": 20,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -265,7 +254,6 @@
       true,
       true,
       true,
-      true,
       false,
       false,
       true,
@@ -280,5 +268,5 @@
       false
     ]
   },
-  "hash": "675e3b51a5033e0a329fbe79dcc2adef197eea0e1405daf23569526c06dfde10"
+  "hash": "52260d9cc761157bd64718d874d7eeed6657a77b0521465ceda771dcb1101501"
 }

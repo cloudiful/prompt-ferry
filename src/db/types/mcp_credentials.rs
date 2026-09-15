@@ -1,11 +1,9 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sqlx::FromRow;
 use utoipa::ToSchema;
 
-use super::mcp::{
-    MCP_PROVIDER_CONTEXT7, MCP_PROVIDER_FIRECRAWL, MCP_PROVIDER_GENERIC, MCP_PROVIDER_MINIMAX,
-};
+use super::mcp::{MCP_PROVIDER_CONTEXT7, MCP_PROVIDER_FIRECRAWL, MCP_PROVIDER_MINIMAX};
 
 /// Canonical persisted provider id derived from an owning MCP server. Generic,
 /// legacy (NULL/blank), and unknown values all resolve to `None`, so untyped
@@ -17,21 +15,6 @@ pub fn canonical_mcp_provider_kind(value: Option<&str>) -> Option<&'static str> 
         Some(MCP_PROVIDER_FIRECRAWL) => Some(MCP_PROVIDER_FIRECRAWL),
         Some(MCP_PROVIDER_MINIMAX) => Some(MCP_PROVIDER_MINIMAX),
         _ => None,
-    }
-}
-
-/// Canonicalize a quota-group provider input. Known presets are kept, while
-/// `generic`, blank, and NULL all collapse to NULL (the canonical untyped
-/// value). Unknown legacy strings are preserved so existing rows stay readable
-/// and do not silently change meaning.
-pub fn canonical_quota_group_provider_kind(value: Option<&str>) -> Option<String> {
-    let trimmed = value.map(str::trim).unwrap_or("");
-    if trimmed.is_empty() || trimmed == MCP_PROVIDER_GENERIC {
-        return None;
-    }
-    match canonical_mcp_provider_kind(Some(trimmed)) {
-        Some(known) => Some(known.to_string()),
-        None => Some(trimmed.to_string()),
     }
 }
 
@@ -53,78 +36,6 @@ impl std::fmt::Debug for McpProviderSecret {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum QuotaUnit {
-    Requests,
-    Credits,
-}
-
-impl QuotaUnit {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Requests => "requests",
-            Self::Credits => "credits",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum QuotaPeriodKind {
-    Day,
-    Month,
-}
-
-impl QuotaPeriodKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Day => "day",
-            Self::Month => "month",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
-pub struct QuotaPeriod {
-    pub kind: QuotaPeriodKind,
-    pub start: DateTime<Utc>,
-    pub end: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, FromRow, ToSchema)]
-pub struct McpQuotaGroup {
-    pub group_id: uuid::Uuid,
-    pub name: String,
-    pub scope: String,
-    pub owner_user_id: Option<i64>,
-    pub provider_kind: Option<String>,
-    pub unit: String,
-    pub daily_limit: Option<f64>,
-    pub monthly_limit: Option<f64>,
-    pub default_cost: f64,
-    pub strict_mode: bool,
-    pub billing_period_start: Option<DateTime<Utc>>,
-    pub billing_period_end: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct McpQuotaGroupInput {
-    pub name: String,
-    pub scope: Option<String>,
-    pub owner_user_id: Option<i64>,
-    pub provider_kind: Option<String>,
-    pub unit: Option<QuotaUnit>,
-    pub daily_limit: Option<f64>,
-    pub monthly_limit: Option<f64>,
-    pub default_cost: Option<f64>,
-    pub strict_mode: Option<bool>,
-    pub billing_period_start: Option<DateTime<Utc>>,
-    pub billing_period_end: Option<DateTime<Utc>>,
-}
-
 #[derive(Debug, Clone, FromRow)]
 pub struct McpCredential {
     pub credential_id: uuid::Uuid,
@@ -133,7 +44,6 @@ pub struct McpCredential {
     pub secret: String,
     pub position: i32,
     pub enabled: bool,
-    pub quota_group_id: Option<uuid::Uuid>,
     pub provider_kind: Option<String>,
     pub daily_limit: Option<f64>,
     pub monthly_limit: Option<f64>,
@@ -181,7 +91,6 @@ pub struct McpCredentialView {
     pub secret_preview: String,
     pub position: i32,
     pub enabled: bool,
-    pub quota_group_id: Option<uuid::Uuid>,
     pub provider_kind: Option<String>,
     pub daily_limit: Option<f64>,
     pub monthly_limit: Option<f64>,
@@ -209,7 +118,6 @@ impl From<McpCredential> for McpCredentialView {
             secret_preview,
             position: credential.position,
             enabled: credential.enabled,
-            quota_group_id: credential.quota_group_id,
             provider_kind: credential.provider_kind,
             daily_limit: credential.daily_limit,
             monthly_limit: credential.monthly_limit,
@@ -227,43 +135,6 @@ impl From<McpCredential> for McpCredentialView {
             updated_at: credential.updated_at,
         }
     }
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub struct McpQuotaAccountRow {
-    pub account_id: i64,
-    pub group_id: uuid::Uuid,
-    pub period_kind: String,
-    pub period_start: DateTime<Utc>,
-    pub period_end: DateTime<Utc>,
-    pub used_units: f64,
-    pub reserved_units: f64,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct McpQuotaAccountSnapshot {
-    pub account_id: i64,
-    pub period: QuotaPeriod,
-    pub used_units: f64,
-    pub reserved_units: f64,
-}
-
-#[derive(Debug, Clone)]
-pub struct QuotaReservation {
-    pub reservation_id: i64,
-    pub account_id: i64,
-    pub credential_id: uuid::Uuid,
-    pub request_id: uuid::Uuid,
-    pub units: f64,
-}
-
-#[derive(Debug, Clone)]
-pub struct QuotaGrant {
-    pub credential: McpCredential,
-    pub reservation: QuotaReservation,
-    /// Additional account rows updated for the day dimension, when present.
-    pub day_account: Option<McpQuotaAccountSnapshot>,
-    pub month_account: Option<McpQuotaAccountSnapshot>,
 }
 
 #[cfg(test)]
@@ -288,21 +159,6 @@ mod tests {
         assert_eq!(
             canonical_mcp_provider_kind(Some("minimax")),
             Some(MCP_PROVIDER_MINIMAX)
-        );
-    }
-
-    #[test]
-    fn quota_group_provider_collapses_generic_and_keeps_unknown() {
-        assert_eq!(canonical_quota_group_provider_kind(None), None);
-        assert_eq!(canonical_quota_group_provider_kind(Some("")), None);
-        assert_eq!(canonical_quota_group_provider_kind(Some("generic")), None);
-        assert_eq!(
-            canonical_quota_group_provider_kind(Some(" firecrawl ")),
-            Some("firecrawl".to_string())
-        );
-        assert_eq!(
-            canonical_quota_group_provider_kind(Some("custom-legacy")),
-            Some("custom-legacy".to_string())
         );
     }
 

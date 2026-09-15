@@ -34,7 +34,7 @@ async fn invoke_mcp_transport(
     state: &mcp::McpRuntimeState,
     request: &BufferedMcpRequest,
     effective_body: &[u8],
-    budget_grant: Option<&db::QuotaGrant>,
+    selected_credential: Option<&db::McpCredential>,
 ) -> anyhow::Result<mcp::McpTransportResponse> {
     mcp::handle_stream_with_storage(
         &state.storage,
@@ -46,7 +46,7 @@ async fn invoke_mcp_transport(
             path: &request.path,
             headers: &request.headers,
             body: effective_body,
-            selected_credential: budget_grant.map(|grant| grant.credential.clone()),
+            selected_credential: selected_credential.cloned(),
         },
         state.session_store.clone(),
         &state.allowed_origins,
@@ -54,14 +54,14 @@ async fn invoke_mcp_transport(
     .await
 }
 
-/// Stage 5: settle quota and send the final response with usage recording on
-/// every outcome. Takes the response context by value plus narrowed
-/// references so each branch future stays small; the large transport
-/// handlers run behind `Box::pin`.
+/// Stage 5: send the final response with usage recording on every outcome.
+/// Takes the response context by value plus narrowed references so each
+/// branch future stays small; the large transport handlers run behind
+/// `Box::pin`.
 async fn settle_and_respond(
     services: &RuntimeServices,
     mut context: McpResponseContext<'_>,
-    budget_grant: Option<&db::QuotaGrant>,
+    selected_credential: Option<&db::McpCredential>,
     request_id: uuid::Uuid,
     response: anyhow::Result<mcp::McpTransportResponse>,
 ) {
@@ -73,7 +73,7 @@ async fn settle_and_respond(
             body,
             selected_token_slot,
         }) => {
-            settle_quota(services, budget_grant, request_id, status).await;
+            settle_quota(services, selected_credential, request_id, status).await;
             context.selected_token_slot = selected_token_slot;
             Box::pin(handle_buffered_transport_response(
                 &context,
@@ -91,7 +91,7 @@ async fn settle_and_respond(
             stream,
             selected_token_slot,
         }) => {
-            settle_quota(services, budget_grant, request_id, status).await;
+            settle_quota(services, selected_credential, request_id, status).await;
             context.selected_token_slot = selected_token_slot;
             Box::pin(handle_streaming_transport_response(
                 &context,
@@ -103,7 +103,7 @@ async fn settle_and_respond(
             .await;
         }
         Err(err) => {
-            settle_quota(services, budget_grant, request_id, 502).await;
+            settle_quota(services, selected_credential, request_id, 502).await;
             let body = serde_json::json!({
                 "error": {
                     "code": "mcp_error",
@@ -143,9 +143,9 @@ async fn settle_and_respond(
     }
 }
 
-/// Stage 4 + 5: execute the MCP transport, then settle quota and send the
-/// final response with usage recording on every outcome. Fields consumed by
-/// an earlier stage are taken so later stages stop retaining them.
+/// Stage 4 + 5: execute the MCP transport, then send the final response
+/// with usage recording on every outcome. Quota groups were removed, so the
+/// transport always uses legacy token balancing (`None` credential).
 async fn run_transport(mut execution: McpExecution, services: &RuntimeServices) {
     let Some(state) = services.mcp_state() else {
         return;
@@ -155,7 +155,7 @@ async fn run_transport(mut execution: McpExecution, services: &RuntimeServices) 
         state,
         &execution.request,
         &effective_body,
-        execution.budget_grant.as_deref(),
+        execution.selected_credential.as_ref(),
     ))
     .await;
     drop(effective_body);
@@ -175,7 +175,7 @@ async fn run_transport(mut execution: McpExecution, services: &RuntimeServices) 
     Box::pin(settle_and_respond(
         services,
         context,
-        execution.budget_grant.as_deref(),
+        execution.selected_credential.as_ref(),
         request_id,
         transport,
     ))

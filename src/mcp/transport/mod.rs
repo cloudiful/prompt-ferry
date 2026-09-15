@@ -38,6 +38,7 @@ where
     .await
 }
 
+#[cfg(test)]
 pub(crate) fn tracked_credits_used() -> Option<f64> {
     CREDITS_USED_TRACKER
         .try_with(|tracker| *tracker.borrow())
@@ -48,6 +49,7 @@ pub(crate) fn tracked_credits_used() -> Option<f64> {
 /// The (one-based token slot, HTTP status) of the last retryable upstream
 /// failure, when the upstream itself rejected the request. `None` when the
 /// upstream call succeeded or failed for non-retryable reasons.
+#[cfg(test)]
 pub(crate) fn tracked_upstream_failure() -> Option<(i16, u16)> {
     UPSTREAM_FAILURE_TRACKER
         .try_with(|tracker| *tracker.borrow())

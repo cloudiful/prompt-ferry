@@ -9,7 +9,6 @@ mod endpoints;
 #[path = "types/mcp.rs"]
 mod mcp;
 mod mcp_provider;
-mod mcp_quota;
 #[path = "types/model_routes.rs"]
 mod model_routes;
 #[path = "types/relays.rs"]
@@ -28,7 +27,6 @@ pub use billing::*;
 pub use endpoints::*;
 pub use mcp::*;
 pub use mcp_provider::*;
-pub use mcp_quota::*;
 pub use model_routes::*;
 pub use relays::*;
 pub use settings::*;
@@ -87,7 +85,6 @@ mod tests {
             mcp_catalog_service: McpCatalogService::new(pool.clone(), McpCatalogCache::new()),
             mcp_session_store: None,
             mcp_allowed_origins: Vec::new(),
-            mcp_quota_valkey: crate::mcp::McpQuotaValkey::new(),
             endpoint_model_cache: crate::endpoint_models::EndpointModelCache::new(
                 Duration::from_secs(60),
             ),

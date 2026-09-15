@@ -166,13 +166,7 @@ impl Capability {
             if path.ends_with("/credentials") {
                 return Some(Self::McpCredentials);
             }
-            if path.contains("/credentials/") {
-                return Some(Self::McpQuota);
-            }
             return Some(Self::McpServers);
-        }
-        if path.starts_with("/admin/mcp-quota-groups") {
-            return Some(Self::McpQuota);
         }
         if path == "/me/models" {
             return Some(Self::AvailableModels);
@@ -259,20 +253,17 @@ mod tests {
             Capability::for_path("/admin/mcp-servers/abc/credentials"),
             Some(Capability::McpCredentials)
         );
+        // Quota-group and credential-balance routes were removed (issue #414
+        // Phase 2); they no longer map to a capability.
         assert_eq!(
             Capability::for_path("/admin/mcp-servers/abc/credentials/def/quota-group"),
-            Some(Capability::McpQuota)
+            Some(Capability::McpServers)
         );
-        // The provider balance refresh reuses the PostgreSQL-only quota
-        // capability so SQLite rejects it before any provider call.
         assert_eq!(
             Capability::for_path("/admin/mcp-servers/abc/credentials/def/refresh"),
-            Some(Capability::McpQuota)
+            Some(Capability::McpServers)
         );
-        assert_eq!(
-            Capability::for_path("/admin/mcp-quota-groups"),
-            Some(Capability::McpQuota)
-        );
+        assert_eq!(Capability::for_path("/admin/mcp-quota-groups"), None);
         assert_eq!(
             Capability::for_path("/admin/request-records/summary"),
             Some(Capability::RequestRecords)

@@ -75,7 +75,6 @@ async fn test_state() -> (AdminState, Arc<StandaloneConfigStore>, PathBuf) {
         mcp_catalog_service: McpCatalogService::new(pool, McpCatalogCache::new()),
         mcp_session_store: None,
         mcp_allowed_origins: Vec::new(),
-        mcp_quota_valkey: crate::mcp::McpQuotaValkey::new(),
         endpoint_model_cache: EndpointModelCache::new(std::time::Duration::from_secs(60)),
     })
     .with_user_store(user_store)
