@@ -1,0 +1,63 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- All probes are scoped to the current schema because the shared test database\n-- may contain leftover schemas from other test runs.\nSELECT\n    EXISTS(\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_schema = current_schema()\n          AND table_name = 'request_records'\n          AND column_name = 'request_raw_json'\n    ) AS old_request_raw_column,\n    EXISTS(\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_schema = current_schema()\n          AND table_name = 'request_records'\n          AND column_name = 'response_raw_body'\n    ) AS old_response_raw_column,\n    EXISTS(\n        SELECT 1\n        FROM pg_class\n        WHERE relnamespace = current_schema()::regnamespace\n          AND relname = 'request_record_raw_payloads'\n          AND relkind = 'p'\n    ) AS raw_parent_is_partitioned,\n    EXISTS(\n        SELECT 1\n        FROM pg_inherits inheritance\n        JOIN pg_class child ON child.oid = inheritance.inhrelid\n        WHERE child.relnamespace = current_schema()::regnamespace\n          AND child.relname = 'request_record_raw_payloads_default'\n    ) AS default_partition_exists,\n    EXISTS(\n        SELECT 1\n        FROM pg_class\n        WHERE relnamespace = current_schema()::regnamespace\n          AND relname = 'request_record_raw_payloads_overflow'\n          AND relkind = 'r'\n    )\n    AND NOT EXISTS(\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_schema = current_schema()\n          AND table_name = 'request_record_raw_payloads_overflow'\n          AND column_name IN ('request_raw_json', 'response_raw_body')\n    ) AS overflow_table_exists,\n    EXISTS(\n        SELECT 1\n        FROM pg_indexes\n        WHERE schemaname = current_schema()\n          AND tablename = 'request_record_raw_payloads'\n          AND indexname = 'idx_request_record_raw_payloads_event_id'\n    ) AS event_id_index_exists,\n    EXISTS(\n        SELECT 1\n        FROM pg_indexes\n        WHERE schemaname = current_schema()\n          AND tablename = 'request_record_raw_payloads'\n          AND indexname = 'idx_request_record_raw_payloads_created_at_event_id'\n    ) AS created_at_event_id_index_exists;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "old_request_raw_column",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "old_response_raw_column",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "raw_parent_is_partitioned",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "default_partition_exists",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "overflow_table_exists",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "event_id_index_exists",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at_event_id_index_exists",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "26f4079255be7fbe25e7eabd44d67656273461f3eaf729360ae5f8e5b2b17137"
+}

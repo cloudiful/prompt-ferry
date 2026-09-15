@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n    SELECT 1\n    FROM pg_indexes\n    WHERE schemaname = current_schema()\n      AND tablename = 'mcp_servers'\n      AND indexname = 'idx_mcp_servers_scope_user_enabled'\n) AS \"exists!\"\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c9b5ac0311b630a0d9c4d223545344df643b39cfb4029eca8782f8ee2af45c2a"
+}

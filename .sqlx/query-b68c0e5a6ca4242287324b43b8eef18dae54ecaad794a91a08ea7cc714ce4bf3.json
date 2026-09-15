@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT NOT EXISTS (\n    SELECT 1\n    FROM information_schema.columns\n    WHERE table_schema = current_schema()\n      AND table_name = 'model_route_targets'\n      AND column_name = 'responses_continuation_policy'\n) AS removed,\nNOT EXISTS (\n    SELECT 1\n    FROM pg_constraint c\n    JOIN pg_class t ON t.oid = c.conrelid\n    JOIN pg_namespace n ON n.oid = t.relnamespace\n    WHERE n.nspname = current_schema()\n      AND t.relname = 'model_route_targets'\n      AND c.conname = 'ck_model_route_targets_responses_continuation_policy'\n) AS constraint_removed;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "removed",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "constraint_removed",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "b68c0e5a6ca4242287324b43b8eef18dae54ecaad794a91a08ea7cc714ce4bf3"
+}

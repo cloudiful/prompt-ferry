@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE approval_requests\nSET created_at = $2,\n    updated_at = $2\nWHERE approval_id = $1;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a85a64932a8b2602b6ed0d88d5b0854a9a83ab97835ae0c627aefb88c05bff71"
+}

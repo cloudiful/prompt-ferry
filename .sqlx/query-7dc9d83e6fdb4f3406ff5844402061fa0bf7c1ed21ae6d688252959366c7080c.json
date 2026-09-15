@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "CREATE TABLE request_record_raw_payloads_20000101\nPARTITION OF request_record_raw_payloads\nFOR VALUES FROM ('2000-01-01 00:00:00+00') TO ('2000-01-02 00:00:00+00');\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "7dc9d83e6fdb4f3406ff5844402061fa0bf7c1ed21ae6d688252959366c7080c"
+}

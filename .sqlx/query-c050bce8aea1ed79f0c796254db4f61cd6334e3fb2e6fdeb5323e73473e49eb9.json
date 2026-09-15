@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    data_type::TEXT AS \"data_type!\",\n    (is_nullable = 'NO') AS \"is_not_null!\",\n    (column_default IS NOT NULL) AS \"has_default!\",\n    EXISTS (\n        SELECT 1\n        FROM pg_constraint c\n        JOIN pg_class t ON t.oid = c.conrelid\n        JOIN pg_namespace n ON n.oid = t.relnamespace\n        WHERE n.nspname = current_schema()\n          AND t.relname = 'request_records'\n          AND c.conname = 'ck_usage_event_request_storage_mode'\n    ) AS \"has_storage_constraint!\"\nFROM information_schema.columns\nWHERE table_schema = current_schema()\n  AND table_name = 'request_records'\n  AND column_name = 'request_storage_mode'\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "data_type!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "is_not_null!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "has_default!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "has_storage_constraint!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "c050bce8aea1ed79f0c796254db4f61cd6334e3fb2e6fdeb5323e73473e49eb9"
+}

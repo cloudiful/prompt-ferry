@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT NOT EXISTS (\n    SELECT 1\n    FROM information_schema.columns\n    WHERE table_schema = current_schema()\n      AND table_name = 'model_route_targets'\n      AND column_name = 'chat_reasoning_replay_policy'\n) AS removed;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "removed",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "61ff3c6d73bd674bb9686e8b9cf6ea2cdff5183fa94dfe3b9329fe02e0a3c792"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE request_record_raw_payloads\nSET created_at = NOW() - INTERVAL '2 days'\nWHERE event_id = $1;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bfdad48d970304f9482f088510cfb010e7daf4c157e1da6c4cc846481cb46431"
+}
