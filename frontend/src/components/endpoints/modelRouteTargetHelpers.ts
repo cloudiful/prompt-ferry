@@ -1,0 +1,145 @@
+import type { TableColumn } from '@nuxt/ui'
+import type { Ref } from 'vue'
+import type { ModelRouteForm, ModelRouteTargetForm } from '@/models'
+
+type ScheduleWindow = { start: string; end: string }
+
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
+
+export function hasTargetProxy(
+  target: ModelRouteTargetForm | null | undefined,
+): boolean {
+  if (!target) return false
+  return (
+    (target.proxy_url_override ?? '').trim() !== '' ||
+    (target.has_saved_proxy_url_override ?? false)
+  )
+}
+
+export function targetProxySummary(
+  target: ModelRouteTargetForm | null | undefined,
+  t: TranslateFn,
+): string {
+  return hasTargetProxy(target) ? t('proxySet') : t('proxyInherit')
+}
+
+export function sortedTargetWindows(
+  target: ModelRouteTargetForm | null | undefined,
+): ScheduleWindow[] {
+  const windows = Array.isArray(target?.active_windows)
+    ? (target?.active_windows ?? [])
+    : []
+  return [...windows]
+    .map((window) => ({
+      start: (window?.start ?? '').trim(),
+      end: (window?.end ?? '').trim(),
+    }))
+    .filter((window) => window.start !== '' && window.end !== '')
+    .sort((a, b) =>
+      a.start === b.start
+        ? a.end.localeCompare(b.end)
+        : a.start.localeCompare(b.start),
+    )
+}
+
+export function hasTargetSchedule(
+  target: ModelRouteTargetForm | null | undefined,
+): boolean {
+  return sortedTargetWindows(target).length > 0
+}
+
+export function formatTargetWindow(window: ScheduleWindow): string {
+  return `${window.start}–${window.end}`
+}
+
+export function targetScheduleSummary(
+  target: ModelRouteTargetForm | null | undefined,
+  t: TranslateFn,
+): string {
+  const windows = sortedTargetWindows(target)
+  if (windows.length === 0) return t('scheduleAllDay')
+  const first = windows[0]
+  if (!first) return t('scheduleAllDay')
+  if (windows.length === 1) return formatTargetWindow(first)
+  return `${formatTargetWindow(first)} ${t('scheduleMoreWindows', { count: windows.length })}`
+}
+
+export function targetScheduleTooltip(
+  target: ModelRouteTargetForm | null | undefined,
+  t: TranslateFn,
+): string {
+  const windows = sortedTargetWindows(target)
+  if (windows.length === 0) return t('scheduleAllDay')
+  return windows.map(formatTargetWindow).join(', ')
+}
+
+export function hasTargetSettings(
+  target: ModelRouteTargetForm | null | undefined,
+): boolean {
+  if (!target) return false
+  return (
+    hasTargetProxy(target) ||
+    hasTargetSchedule(target) ||
+    (target.dev_system_normalize ?? false)
+  )
+}
+
+export function isTargetProxyValid(
+  target: ModelRouteTargetForm | null | undefined,
+): boolean {
+  const trimmed = (target?.proxy_url_override ?? '').trim()
+  if (!trimmed) return true
+  const match = trimmed.match(/^(http|https|socks5h|socks5):\/\/(.*)$/i)
+  if (match) return (match[2] ?? '').trim() !== ''
+  return true
+}
+
+export function isTargetScheduleValid(
+  target: ModelRouteTargetForm | null | undefined,
+): boolean {
+  return (target?.active_windows ?? []).every((window) => {
+    const start = (window?.start ?? '').trim()
+    const end = (window?.end ?? '').trim()
+    if (!start || !end) return false
+    if (!HHMM_RE.test(start) || !HHMM_RE.test(end)) return false
+    return start !== end
+  })
+}
+
+export function canSaveTargets(
+  targets: Array<ModelRouteTargetForm | null | undefined>,
+): boolean {
+  return targets.every(
+    (target) => isTargetProxyValid(target) && isTargetScheduleValid(target),
+  )
+}
+
+export function createRoutingOptions(t: TranslateFn) {
+  return [
+    { label: t('routingStrategyClientKey'), value: 'client_key_rendezvous' },
+    {
+      label: t('routingStrategySessionAffinity'),
+      value: 'responses_session_affinity',
+    },
+  ]
+}
+
+export function createTargetColumns(
+  t: TranslateFn,
+): TableColumn<ModelRouteForm['targets'][number]>[] {
+  return [
+    { id: 'order' },
+    { id: 'endpoint', header: t('endpoint') },
+    { id: 'status', header: t('status') },
+    { id: 'actions' },
+  ]
+}
+
+export function createTargetMeta(dragOver: Ref<number | null>) {
+  return {
+    class: {
+      tr: (row: { index: number }) =>
+        row.index === dragOver.value ? 'bg-elevated' : '',
+    },
+  }
+}

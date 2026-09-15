@@ -4,8 +4,8 @@ import type { User } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
 import EndpointApiKeysEditor from '@/components/endpoints/EndpointApiKeysEditor.vue'
 import EndpointProviderFields from '@/components/endpoints/EndpointProviderFields.vue'
-import ProxySettingsForm from '@/components/shared/ProxySettingsForm.vue'
-import ScheduleWindowsForm from '@/components/shared/ScheduleWindowsForm.vue'
+import ProxySettingsFields from '@/components/shared/ProxySettingsFields.vue'
+import ScheduleWindowsFields from '@/components/shared/ScheduleWindowsFields.vue'
 import RequestLimitFields from '@/components/shared/RequestLimitFields.vue'
 
 const props = defineProps<{
@@ -22,25 +22,22 @@ defineEmits<{
   save: []
 }>()
 
-// Two-level drill-in inside the same settings panel: level one lists the
-// rows, level two renders the existing proxy/schedule form. No second
-// overlay layer opens at any point.
-const settingsPopoverOpen = ref(false)
-const settingsView = ref<'main' | 'proxy' | 'schedule'>('main')
+// Whole-dialog two-level drill: main form plus settings sub-page.
+// Gear swaps the entire modal content; back returns to the main form.
+// Draft lives in `form` so edits persist across view switches and save
+// through the existing outer save button.
+const view = ref<'main' | 'settings'>('main')
 
-function backToSettingsMain(): void {
-  settingsView.value = 'main'
+function openSettings(): void {
+  view.value = 'settings'
+}
+
+function backToMain(): void {
+  view.value = 'main'
 }
 
 watch(visible, (open) => {
-  if (!open) {
-    settingsPopoverOpen.value = false
-    settingsView.value = 'main'
-  }
-})
-
-watch(settingsPopoverOpen, (open) => {
-  if (!open) settingsView.value = 'main'
+  if (!open) view.value = 'main'
 })
 
 // INLINE-proxy-ui-a1 BUG fix: guard legacy forms missing Phase C fields so
@@ -51,26 +48,36 @@ const hasProxy = computed(() => {
   return typed || saved
 })
 
-// Issue #368 Phase C: clear the saved proxy so the next save sends `""`
-// (clear to direct). Leaving the field blank while `has_saved_proxy_url`
-// is true omits the key and keeps the stored value (see
-// `endpointFormToRequest`).
-function clearProxyUrl(): void {
-  if (!form.value) return
-  form.value.proxy_url = ''
-  form.value.has_saved_proxy_url = false
-  backToSettingsMain()
+// Issue #368 Phase C: proxy validity for the outer save. Empty means
+// direct/keep (valid); `scheme://` with an empty address is an unfinished
+// inline edit and must block the outer save.
+const isProxyValid = computed(() => {
+  const trimmed = (form.value?.proxy_url ?? '').trim()
+  if (!trimmed) return true
+  const match = trimmed.match(/^(http|https|socks5h|socks5):\/\/(.*)$/i)
+  if (match) return (match[2] ?? '').trim() !== ''
+  return true
+})
+
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
+
+function endpointRowError(window: { start: string; end: string }): string {
+  const start = (window?.start ?? '').trim()
+  const end = (window?.end ?? '').trim()
+  if (!start || !end) return props.t('scheduleRequired')
+  if (!HHMM_RE.test(start) || !HHMM_RE.test(end))
+    return props.t('scheduleInvalid')
+  if (start === end) return props.t('scheduleEqual')
+  return ''
 }
 
-function onProxySave(value: string): void {
-  if (!form.value) return
-  const trimmed = (value ?? '').trim()
-  form.value.proxy_url = trimmed
-  // Saving direct (`""`) must clear the saved flag so the next save sends
-  // `""` (clear) instead of omitting the key (keep).
-  if (trimmed === '') form.value.has_saved_proxy_url = false
-  backToSettingsMain()
-}
+const isScheduleValid = computed(() =>
+  (form.value?.active_windows ?? []).every(
+    (window) => endpointRowError(window) === '',
+  ),
+)
+
+const canSaveOuter = computed(() => isProxyValid.value && isScheduleValid.value)
 
 // Issue #392 Phase L: endpoint default schedule mirrors the target dialog.
 // Non-empty means restricted; empty means all-day.
@@ -126,18 +133,6 @@ function endpointProxySummary(): string {
 function hasEndpointSettings(): boolean {
   return hasProxy.value || hasEndpointSchedule()
 }
-
-function onEndpointScheduleSave(
-  value: Array<{ start: string; end: string }>,
-): void {
-  if (!form.value) return
-  form.value.active_windows = value.map((window) => ({
-    start: (window?.start ?? '').trim(),
-    end: (window?.end ?? '').trim(),
-  }))
-  form.value.active_windows_touched = true
-  backToSettingsMain()
-}
 </script>
 
 <template>
@@ -148,228 +143,210 @@ function onEndpointScheduleSave(
   >
     <template #body>
       <form class="grid gap-3 text-xs" @submit.prevent="$emit('save')">
-        <EndpointProviderFields v-model:form="form" :t="t" />
-        <USelect
-          v-if="form.scope === 'user'"
-          :model-value="form.owner_user_id ?? undefined"
-          class="w-full"
-          :items="users"
-          label-key="login_name"
-          value-key="user_id"
-          :placeholder="t('ownerUser')"
-          @update:model-value="form.owner_user_id = $event ?? null"
-        />
-        <EndpointApiKeysEditor v-model:form="form" :t="t" />
-        <div
-          class="flex items-center justify-between gap-3 border-t border-default pt-3"
-        >
-          <div class="flex items-center gap-1">
-            <span class="text-xs font-medium text-default">
-              {{ t('endpointSettings') }}
-            </span>
-            <UTooltip :text="t('endpointSettingsHint')">
+        <template v-if="view === 'main'">
+          <EndpointProviderFields v-model:form="form" :t="t" />
+          <USelect
+            v-if="form.scope === 'user'"
+            :model-value="form.owner_user_id ?? undefined"
+            class="w-full"
+            :items="users"
+            label-key="login_name"
+            value-key="user_id"
+            :placeholder="t('ownerUser')"
+            @update:model-value="form.owner_user_id = $event ?? null"
+          />
+          <EndpointApiKeysEditor v-model:form="form" :t="t" />
+          <div class="grid gap-2 border-t border-default pt-3">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-1">
+                <span class="text-xs font-medium text-default">
+                  {{ t('endpointSettings') }}
+                </span>
+                <UTooltip :text="t('endpointSettingsHint')">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-info"
+                    :aria-label="t('endpointSettingsHint')"
+                  />
+                </UTooltip>
+              </div>
               <UButton
                 type="button"
-                size="xs"
-                color="neutral"
+                size="sm"
+                :color="hasEndpointSettings() ? 'primary' : 'neutral'"
                 variant="ghost"
-                icon="i-lucide-info"
-                :aria-label="t('endpointSettingsHint')"
+                icon="i-lucide-settings-2"
+                :aria-label="t('endpointSettings')"
+                :aria-pressed="hasEndpointSettings()"
+                :title="t('endpointSettingsHint')"
+                @click="openSettings"
               />
-            </UTooltip>
+            </div>
+            <div
+              role="button"
+              tabindex="0"
+              class="flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-1 hover:bg-elevated"
+              @click="openSettings"
+              @keydown.enter="openSettings"
+              @keydown.space.prevent="openSettings"
+            >
+              <div class="flex min-w-0 items-center gap-1">
+                <span class="font-medium text-default">{{
+                  t('proxyUrl')
+                }}</span>
+                <UTooltip :text="t('proxyUrlHint')">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-info"
+                    :aria-label="t('proxyUrlHint')"
+                    @click.stop
+                  />
+                </UTooltip>
+              </div>
+              <div class="flex shrink-0 items-center gap-1">
+                <span class="text-muted">{{ endpointProxySummary() }}</span>
+                <UIcon
+                  name="i-lucide-chevron-right"
+                  class="h-4 w-4 text-dimmed"
+                />
+              </div>
+            </div>
+            <div
+              role="button"
+              tabindex="0"
+              class="flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-1 hover:bg-elevated"
+              @click="openSettings"
+              @keydown.enter="openSettings"
+              @keydown.space.prevent="openSettings"
+            >
+              <div class="flex min-w-0 items-center gap-1">
+                <span class="font-medium text-default">{{
+                  t('scheduleWindows')
+                }}</span>
+                <UTooltip :text="t('scheduleWindowsHint')">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-info"
+                    :aria-label="t('scheduleWindowsHint')"
+                    @click.stop
+                  />
+                </UTooltip>
+              </div>
+              <div class="flex shrink-0 items-center gap-1">
+                <UTooltip :text="endpointScheduleTooltip()">
+                  <span class="text-muted">{{
+                    endpointScheduleSummary()
+                  }}</span>
+                </UTooltip>
+                <UIcon
+                  name="i-lucide-chevron-right"
+                  class="h-4 w-4 text-dimmed"
+                />
+              </div>
+            </div>
           </div>
-          <UPopover
-            v-model:open="settingsPopoverOpen"
-            :content="{
-              side: 'bottom',
-              align: 'end',
-              sideOffset: 6,
-              collisionPadding: 8,
-            }"
+          <div
+            v-if="form.provider === 'minimax'"
+            class="flex items-center justify-between gap-3 border-t border-default pt-3"
           >
+            <div class="flex items-center gap-1">
+              <label
+                for="endpoint-minimax-mcp"
+                class="text-xs font-medium text-default"
+              >
+                {{ t('minimaxMcp') }}
+              </label>
+              <UTooltip :text="t('minimaxMcpHint')">
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-info"
+                  :aria-label="t('minimaxMcpHint')"
+                />
+              </UTooltip>
+            </div>
+            <USwitch id="endpoint-minimax-mcp" v-model="form.mcp_enabled" />
+          </div>
+          <RequestLimitFields
+            v-model:form="form"
+            daily-label="dailyRequestLimit"
+            monthly-label="monthlyRequestLimit"
+            :t="t"
+          />
+        </template>
+        <template v-else>
+          <div class="flex items-center gap-1">
             <UButton
               type="button"
-              size="sm"
-              :color="hasEndpointSettings() ? 'primary' : 'neutral'"
+              size="xs"
+              color="neutral"
               variant="ghost"
-              icon="i-lucide-settings-2"
-              :aria-label="t('endpointSettings')"
-              :aria-pressed="hasEndpointSettings()"
-              :title="t('endpointSettingsHint')"
+              icon="i-lucide-arrow-left"
+              :aria-label="t('cancel')"
+              @click="backToMain"
             />
-            <template #content>
-              <div
-                v-if="settingsView === 'main'"
-                class="grid w-[min(20rem,calc(100vw-2rem))] gap-2 p-3 text-xs"
-              >
-                <div
-                  role="button"
-                  tabindex="0"
-                  class="flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-1 hover:bg-elevated"
-                  @click="settingsView = 'proxy'"
-                  @keydown.enter="settingsView = 'proxy'"
-                  @keydown.space.prevent="settingsView = 'proxy'"
-                >
-                  <div class="flex min-w-0 items-center gap-1">
-                    <span class="font-medium text-default">{{
-                      t('proxyUrl')
-                    }}</span>
-                    <UTooltip :text="t('proxyUrlHint')">
-                      <UButton
-                        type="button"
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        icon="i-lucide-info"
-                        :aria-label="t('proxyUrlHint')"
-                        @click.stop
-                      />
-                    </UTooltip>
-                  </div>
-                  <div class="flex shrink-0 items-center gap-1">
-                    <span class="text-muted">{{ endpointProxySummary() }}</span>
-                    <UButton
-                      type="button"
-                      size="xs"
-                      color="neutral"
-                      variant="ghost"
-                      icon="i-lucide-pencil"
-                      :aria-label="t('proxySettings')"
-                      @click.stop="settingsView = 'proxy'"
-                    />
-                  </div>
-                </div>
-                <div
-                  role="button"
-                  tabindex="0"
-                  class="flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-1 hover:bg-elevated"
-                  @click="settingsView = 'schedule'"
-                  @keydown.enter="settingsView = 'schedule'"
-                  @keydown.space.prevent="settingsView = 'schedule'"
-                >
-                  <div class="flex min-w-0 items-center gap-1">
-                    <span class="font-medium text-default">{{
-                      t('scheduleWindows')
-                    }}</span>
-                    <UTooltip :text="t('scheduleWindowsHint')">
-                      <UButton
-                        type="button"
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        icon="i-lucide-info"
-                        :aria-label="t('scheduleWindowsHint')"
-                        @click.stop
-                      />
-                    </UTooltip>
-                  </div>
-                  <div class="flex shrink-0 items-center gap-1">
-                    <UTooltip :text="endpointScheduleTooltip()">
-                      <span class="text-muted">{{
-                        endpointScheduleSummary()
-                      }}</span>
-                    </UTooltip>
-                    <UButton
-                      type="button"
-                      size="xs"
-                      color="neutral"
-                      variant="ghost"
-                      icon="i-lucide-pencil"
-                      :aria-label="t('scheduleSettings')"
-                      @click.stop="settingsView = 'schedule'"
-                    />
-                  </div>
-                </div>
-              </div>
-              <div
-                v-else-if="settingsView === 'proxy'"
-                class="grid w-[min(20rem,calc(100vw-2rem))] gap-2 p-3 text-xs"
-              >
-                <div class="flex items-center gap-1">
-                  <UButton
-                    type="button"
-                    size="xs"
-                    color="neutral"
-                    variant="ghost"
-                    icon="i-lucide-arrow-left"
-                    :aria-label="t('cancel')"
-                    @click="backToSettingsMain"
-                  />
-                  <span class="font-medium text-default">{{
-                    t('proxySettings')
-                  }}</span>
-                </div>
-                <ProxySettingsForm
-                  :key="`endpoint-proxy-${form?.proxy_url ?? ''}-${form?.has_saved_proxy_url ?? false}`"
-                  :initial-value="form?.proxy_url ?? ''"
-                  :has-saved="form?.has_saved_proxy_url ?? false"
-                  :hint="t('proxyUrlHint')"
-                  :t="t"
-                  @save="onProxySave"
-                  @clear="clearProxyUrl"
-                  @cancel="backToSettingsMain"
-                />
-              </div>
-              <div
-                v-else
-                class="grid w-[min(20rem,calc(100vw-2rem))] gap-2 p-3 text-xs"
-              >
-                <div class="flex items-center gap-1">
-                  <UButton
-                    type="button"
-                    size="xs"
-                    color="neutral"
-                    variant="ghost"
-                    icon="i-lucide-arrow-left"
-                    :aria-label="t('cancel')"
-                    @click="backToSettingsMain"
-                  />
-                  <span class="font-medium text-default">{{
-                    t('scheduleSettings')
-                  }}</span>
-                </div>
-                <ScheduleWindowsForm
-                  :key="`endpoint-schedule-${JSON.stringify(form?.active_windows ?? [])}`"
-                  :initial-value="form?.active_windows ?? []"
-                  :hint="t('scheduleWindowsHint')"
-                  :t="t"
-                  @save="onEndpointScheduleSave"
-                  @cancel="backToSettingsMain"
-                />
-              </div>
-            </template>
-          </UPopover>
-        </div>
-        <div
-          v-if="form.provider === 'minimax'"
-          class="flex items-center justify-between gap-3 border-t border-default pt-3"
-        >
-          <div class="flex items-center gap-1">
-            <label
-              for="endpoint-minimax-mcp"
-              class="text-xs font-medium text-default"
-            >
-              {{ t('minimaxMcp') }}
-            </label>
-            <UTooltip :text="t('minimaxMcpHint')">
-              <UButton
-                type="button"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                icon="i-lucide-info"
-                :aria-label="t('minimaxMcpHint')"
-              />
-            </UTooltip>
+            <span class="text-sm font-medium text-default">{{
+              t('endpointSettings')
+            }}</span>
           </div>
-          <USwitch id="endpoint-minimax-mcp" v-model="form.mcp_enabled" />
-        </div>
-        <RequestLimitFields
-          v-model:form="form"
-          daily-label="dailyRequestLimit"
-          monthly-label="monthlyRequestLimit"
-          :t="t"
-        />
+          <div class="grid gap-2 rounded border border-default bg-muted p-3">
+            <div class="flex items-center gap-1">
+              <span class="text-xs font-medium text-default">{{
+                t('proxyUrl')
+              }}</span>
+              <UTooltip :text="t('proxyUrlHint')">
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-info"
+                  :aria-label="t('proxyUrlHint')"
+                />
+              </UTooltip>
+            </div>
+            <ProxySettingsFields
+              v-model:proxy-url="form.proxy_url"
+              v-model:has-saved="form.has_saved_proxy_url"
+              :hint="t('proxyUrlHint')"
+              :t="t"
+            />
+          </div>
+          <div class="grid gap-2 rounded border border-default bg-muted p-3">
+            <div class="flex items-center gap-1">
+              <span class="text-xs font-medium text-default">{{
+                t('scheduleWindows')
+              }}</span>
+              <UTooltip :text="t('scheduleWindowsHint')">
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-info"
+                  :aria-label="t('scheduleWindowsHint')"
+                />
+              </UTooltip>
+            </div>
+            <ScheduleWindowsFields
+              v-model:windows="form.active_windows"
+              v-model:touched="form.active_windows_touched"
+              :hint="t('scheduleWindowsHint')"
+              :t="t"
+            />
+          </div>
+        </template>
         <div class="flex justify-end gap-2 pt-1">
           <UButton
             type="button"
@@ -382,7 +359,11 @@ function onEndpointScheduleSave(
             "
             >{{ t('cancel') }}</UButton
           >
-          <UButton type="submit" size="sm" :loading="busy"
+          <UButton
+            type="submit"
+            size="sm"
+            :loading="busy"
+            :disabled="!canSaveOuter"
             ><UIcon name="i-lucide-save" class="h-4 w-4" />{{
               t('saveEndpoint')
             }}</UButton
