@@ -69,29 +69,28 @@ pub(super) async fn resolve_endpoint_input(
     existing_endpoint_api_keys: Option<Vec<db::EndpointApiKey>>,
     existing_proxy_url: Option<String>,
     existing_active_windows: Option<Vec<db::ActiveWindow>>,
-) -> Result<EndpointCreate, Response> {
-    validate_mcp_provider(body.mcp_enabled, body.provider)
-        .map_err(|message| error(StatusCode::BAD_REQUEST, "invalid_mcp_provider", message))?;
-    validate_request_budget_limit(body.daily_max_requests, "daily_max_requests")
-        .map_err(|response| *response)?;
-    validate_request_budget_limit(body.monthly_max_requests, "monthly_max_requests")
-        .map_err(|response| *response)?;
+) -> Result<EndpointCreate, ApiError> {
+    validate_mcp_provider(body.mcp_enabled, body.provider).map_err(|message| {
+        ApiError::new(StatusCode::BAD_REQUEST, "invalid_mcp_provider", message)
+    })?;
+    validate_request_budget_limit(body.daily_max_requests, "daily_max_requests")?;
+    validate_request_budget_limit(body.monthly_max_requests, "monthly_max_requests")?;
     if !matches!(body.scope.as_str(), "admin" | "user") {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_scope",
             "scope must be admin or user",
         ));
     }
     if body.scope == "admin" && body.owner_user_id.is_some() {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_owner",
             "admin endpoint cannot have owner",
         ));
     }
     if body.scope == "user" && body.owner_user_id.is_none() {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_owner",
             "user endpoint requires owner",
@@ -104,14 +103,14 @@ pub(super) async fn resolve_endpoint_input(
         | (db::EndpointProvider::OpenRouter, Some(_))
         | (db::EndpointProvider::Glm, Some(_))
         | (db::EndpointProvider::DeepSeek, Some(_)) => {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_provider_region",
                 "provider_region is only valid for MiniMax endpoints",
             ));
         }
         (db::EndpointProvider::Minimax, None) => {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_provider_region",
                 "MiniMax endpoints require provider_region",
@@ -122,9 +121,9 @@ pub(super) async fn resolve_endpoint_input(
     if let Some(owner_user_id) = body.owner_user_id {
         let owner = db::get_active_user(&state.pool, owner_user_id)
             .await
-            .map_err(|err| internal(state, err))?;
+            .map_err(|err| ApiError::internal(state, err))?;
         if owner.is_none() {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_owner",
                 "owner user not found or inactive",
@@ -134,14 +133,14 @@ pub(super) async fn resolve_endpoint_input(
     let (native_api, native_api_source) = match body.protocol_mode {
         EndpointProtocolMode::Manual => {
             let native_api = body.native_api_override.ok_or_else(|| {
-                error(
+                ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_native_api",
                     "native_api_override is required in manual protocol mode",
                 )
             })?;
             if native_api == NativeApi::Auto {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_native_api",
                     "auto must use automatic protocol mode",
@@ -151,7 +150,7 @@ pub(super) async fn resolve_endpoint_input(
         }
         EndpointProtocolMode::Auto => {
             if body.native_api_override.is_some() {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_native_api",
                     "native_api_override is only valid in manual protocol mode",
@@ -167,7 +166,7 @@ pub(super) async fn resolve_endpoint_input(
         let key_label = submitted.key_label.trim();
         let raw_api_key = submitted.api_key.trim();
         if !key_label.is_empty() && !submitted_key_labels.insert(key_label.to_string()) {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "bad_request",
                 "endpoint api key labels must not contain duplicates",
@@ -176,7 +175,7 @@ pub(super) async fn resolve_endpoint_input(
         let existing_key = if let Some(key_id) = submitted.key_id {
             let matched = existing_api_keys.iter().find(|key| key.key_id == key_id);
             if matched.is_none() {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_endpoint_key",
                     "endpoint key not found for this endpoint",
@@ -195,7 +194,7 @@ pub(super) async fn resolve_endpoint_input(
                 .map(|key| key.api_key.clone())
                 .filter(|value| !value.trim().is_empty())
                 .ok_or_else(|| {
-                    error(
+                    ApiError::new(
                         StatusCode::BAD_REQUEST,
                         "bad_request",
                         "endpoint api key value is required",
@@ -235,14 +234,14 @@ pub(super) async fn resolve_endpoint_input(
         });
     }
     if api_keys.is_empty() {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "bad_request",
             "at least one endpoint api key is required",
         ));
     }
     if !api_keys.iter().any(|key| key.enabled) {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "bad_request",
             "at least one endpoint api key must be enabled",
@@ -260,10 +259,9 @@ pub(super) async fn resolve_endpoint_input(
             .filter(|value| !value.is_empty())
             .map(str::to_string),
         Some(raw) if raw.trim().is_empty() => None,
-        Some(raw) => Some(
-            validate_proxy_url(raw.trim())
-                .map_err(|message| error(StatusCode::BAD_REQUEST, "invalid_proxy_url", message))?,
-        ),
+        Some(raw) => Some(validate_proxy_url(raw.trim()).map_err(|message| {
+            ApiError::new(StatusCode::BAD_REQUEST, "invalid_proxy_url", message)
+        })?),
     };
     // Issue #392 Phase K: endpoint default windows reuse the same HH:MM
     // validation as targets. `None` keeps the stored value on PATCH
@@ -271,7 +269,7 @@ pub(super) async fn resolve_endpoint_input(
     let active_windows = match body.active_windows {
         None => existing_active_windows,
         Some(windows) => Some(db::normalize_request_windows(&windows).map_err(|message| {
-            error(StatusCode::BAD_REQUEST, "invalid_active_windows", message)
+            ApiError::new(StatusCode::BAD_REQUEST, "invalid_active_windows", message)
         })?),
     };
     // Issue #248: preset providers ignore the client-sent base entirely and
@@ -342,13 +340,13 @@ pub(super) fn normalize_endpoint_base_url(base_url: &str) -> String {
 pub(super) fn validate_request_budget_limit(
     value: Option<i32>,
     field_name: &str,
-) -> Result<(), Box<Response>> {
+) -> Result<(), ApiError> {
     if value.is_some_and(|limit| limit <= 0) {
-        return Err(Box::new(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_budget_limit",
-            &format!("{field_name} must be greater than 0"),
-        )));
+            format!("{field_name} must be greater than 0"),
+        ));
     }
     Ok(())
 }
@@ -371,14 +369,12 @@ pub(super) fn validate_mcp_provider(
     Ok(())
 }
 
-pub(super) fn validate_relay_ip_policy(
-    policy: RelayIpPolicy,
-) -> Result<RelayIpPolicy, Box<Response>> {
+pub(super) fn validate_relay_ip_policy(policy: RelayIpPolicy) -> Result<RelayIpPolicy, ApiError> {
     let policy = ip_acl::normalize_policy(&policy);
     if let Err(err) = ip_acl::compile_policy(&policy) {
-        return Err(Box::new(bad_request(&format!(
+        return Err(ApiError::bad_request(format!(
             "invalid relay IP whitelist: {err}"
-        ))));
+        )));
     }
     Ok(policy)
 }

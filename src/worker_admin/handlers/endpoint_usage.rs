@@ -6,7 +6,7 @@ pub(super) async fn token_plan_usage(
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let endpoint = match db::get_endpoint(&state.pool, endpoint_id).await {
         Ok(Some(endpoint)) => endpoint,

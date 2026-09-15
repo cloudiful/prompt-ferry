@@ -3,10 +3,7 @@ mod ai;
 mod mcp;
 
 use crate::{
-    auth::{bearer_token, client_token, error_response},
-    bridge_wire, ip_acl,
-    keys::hash_client_key,
-    protocol::ClientRoute,
+    auth::error_response, bridge_wire, ip_acl, keys::hash_client_key, protocol::ClientRoute,
 };
 
 use super::{
@@ -194,6 +191,119 @@ pub(super) fn anthropic_error_response(
         .into_response()
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct ApiError {
+    status: StatusCode,
+    code: String,
+    message: String,
+    anthropic: bool,
+}
+
+impl ApiError {
+    pub(super) fn new(
+        status: StatusCode,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            status,
+            code: code.into(),
+            message: message.into(),
+            anthropic: false,
+        }
+    }
+
+    pub(super) fn anthropic(
+        status: StatusCode,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            status,
+            code: code.into(),
+            message: message.into(),
+            anthropic: true,
+        }
+    }
+
+    pub(super) fn status(&self) -> StatusCode {
+        self.status
+    }
+}
+
+impl From<ApiError> for Response {
+    fn from(err: ApiError) -> Response {
+        if err.anthropic {
+            anthropic_error_response(err.status, &err.code, &err.message)
+        } else {
+            error_response(err.status, &err.code, &err.message)
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        Response::from(self)
+    }
+}
+
+fn extract_bearer_token(headers: &HeaderMap) -> Result<String, ApiError> {
+    let Some(value) = headers.get(http::header::AUTHORIZATION) else {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "missing_authorization",
+            "missing Authorization header",
+        ));
+    };
+    let Ok(value) = value.to_str() else {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_authorization",
+            "invalid Authorization header",
+        ));
+    };
+    value
+        .strip_prefix("Bearer ")
+        .map(str::to_string)
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "invalid_authorization",
+                "Authorization must use Bearer token",
+            )
+        })
+}
+
+fn extract_client_token(headers: &HeaderMap) -> Result<String, ApiError> {
+    let bearer = headers
+        .get(http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    let api_key = headers
+        .get("x-api-key")
+        .and_then(|value| value.to_str().ok());
+    if let (Some(bearer), Some(api_key)) = (bearer, api_key)
+        && bearer != api_key
+    {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_authorization",
+            "Authorization and x-api-key must contain the same token",
+        ));
+    }
+    bearer
+        .or(api_key)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "missing_authorization",
+                "missing Authorization or x-api-key header",
+            )
+        })
+}
+
 pub(super) fn chat_sse_error_event(code: &str, message: &str) -> Vec<u8> {
     let payload = serde_json::json!({
         "error": {
@@ -322,8 +432,8 @@ async fn public_healthz(
     ConnectInfo(peer_addr): ConnectInfo<RemoteAddr>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = enforce_public_ip_policy(&state, peer_addr.0.ip(), &headers).await {
-        return response;
+    if let Err(err) = enforce_public_ip_policy(&state, peer_addr.0.ip(), &headers).await {
+        return err.into_response();
     }
     Response::new(Body::from("ok"))
 }
@@ -331,14 +441,14 @@ async fn public_healthz(
 async fn authorize_client(
     state: &AppState,
     headers: &HeaderMap,
-) -> Result<Option<ClientRoute>, Response> {
+) -> Result<Option<ClientRoute>, ApiError> {
     authorize_client_with_format(state, headers, false).await
 }
 
 pub(super) async fn authorize_anthropic_client(
     state: &AppState,
     headers: &HeaderMap,
-) -> Result<Option<ClientRoute>, Response> {
+) -> Result<Option<ClientRoute>, ApiError> {
     authorize_client_with_format(state, headers, true).await
 }
 
@@ -346,33 +456,33 @@ async fn authorize_client_with_format(
     state: &AppState,
     headers: &HeaderMap,
     anthropic_format: bool,
-) -> Result<Option<ClientRoute>, Response> {
-    let auth_error = |status, code, message| {
+) -> Result<Option<ClientRoute>, ApiError> {
+    let auth_error = |status, code: &str, message: &str| {
         if anthropic_format {
-            anthropic_error_response(status, code, message)
+            ApiError::anthropic(status, code, message)
         } else {
-            error_response(status, code, message)
+            ApiError::new(status, code, message)
         }
     };
     let routes = state.inner.routes.lock().await;
     if routes.is_empty() {
         drop(routes);
         let token = match if anthropic_format {
-            client_token(headers)
+            extract_client_token(headers)
         } else {
-            bearer_token(headers)
+            extract_bearer_token(headers)
         } {
             Ok(token) => token,
-            Err(response) => {
+            Err(err) => {
                 warn!("client auth failed: missing or invalid bearer authorization");
                 if anthropic_format {
-                    return Err(anthropic_error_response(
-                        response.status(),
+                    return Err(ApiError::anthropic(
+                        err.status(),
                         "authentication_error",
                         "missing or invalid client authentication",
                     ));
                 }
-                return Err(*response);
+                return Err(err);
             }
         };
         if state.config.client_token.is_empty() {
@@ -387,7 +497,7 @@ async fn authorize_client_with_format(
             warn!(
                 mode = "legacy_client_token",
                 token_len = token.len(),
-                token_hash_prefix = %token_hash_prefix(token),
+                token_hash_prefix = %token_hash_prefix(&token),
                 "client auth failed: invalid token"
             );
             return Err(auth_error(
@@ -403,27 +513,27 @@ async fn authorize_client_with_format(
         Ok(None)
     } else {
         let token = match if anthropic_format {
-            client_token(headers)
+            extract_client_token(headers)
         } else {
-            bearer_token(headers)
+            extract_bearer_token(headers)
         } {
             Ok(token) => token,
-            Err(response) => {
+            Err(err) => {
                 warn!(
                     route_count = routes.len(),
                     "client auth failed: missing or invalid bearer authorization"
                 );
                 if anthropic_format {
-                    return Err(anthropic_error_response(
-                        response.status(),
+                    return Err(ApiError::anthropic(
+                        err.status(),
                         "authentication_error",
                         "missing or invalid client authentication",
                     ));
                 }
-                return Err(*response);
+                return Err(err);
             }
         };
-        let key_hash = hash_client_key(token);
+        let key_hash = hash_client_key(&token);
         match routes.get(&key_hash).cloned() {
             Some(route) => Ok(Some(route)),
             None => {
@@ -457,7 +567,7 @@ async fn enforce_public_ip_policy(
     state: &AppState,
     peer_ip: IpAddr,
     headers: &HeaderMap,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     enforce_public_ip_policy_with_format(state, peer_ip, headers, false).await
 }
 
@@ -466,7 +576,7 @@ pub(super) async fn enforce_public_ip_policy_for(
     peer_ip: IpAddr,
     headers: &HeaderMap,
     anthropic_format: bool,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     enforce_public_ip_policy_with_format(state, peer_ip, headers, anthropic_format).await
 }
 
@@ -475,7 +585,7 @@ async fn enforce_public_ip_policy_with_format(
     peer_ip: IpAddr,
     headers: &HeaderMap,
     anthropic_format: bool,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     let policy = state.inner.relay_ip_policy.lock().await.clone();
     if policy.allowed_cidrs.is_empty() {
         return Ok(());
@@ -492,15 +602,15 @@ async fn enforce_public_ip_policy_with_format(
     Err(public_ip_error(anthropic_format))
 }
 
-fn public_ip_error(anthropic_format: bool) -> Response {
+fn public_ip_error(anthropic_format: bool) -> ApiError {
     if anthropic_format {
-        anthropic_error_response(
+        ApiError::anthropic(
             StatusCode::FORBIDDEN,
             "permission_error",
             "client IP is not allowed",
         )
     } else {
-        error_response(
+        ApiError::new(
             StatusCode::FORBIDDEN,
             "ip_not_allowed",
             "client IP is not allowed",

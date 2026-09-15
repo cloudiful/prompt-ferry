@@ -78,12 +78,12 @@ pub(in crate::worker::runtime) async fn process_request(
     }
 
     if services.admin_state().is_some()
-        && !handle_llm_review_gate(services, &request, &request_ctx).await?
+        && !Box::pin(handle_llm_review_gate(services, &request, &request_ctx)).await?
     {
         return Ok(());
     }
 
-    let mut route = match resolve_route(&request, config, services, &request_ctx).await {
+    let mut route = match Box::pin(resolve_route(&request, config, services, &request_ctx)).await {
         Ok(RouteResolution::Ready { route }) => *route,
         Ok(RouteResolution::Responded) => return Ok(()),
         Err(err) => {
@@ -128,7 +128,7 @@ pub(in crate::worker::runtime) async fn process_request(
             message,
             model_route_rule_id,
         } => {
-            return respond_with_budget_error(
+            return Box::pin(respond_with_budget_error(
                 services,
                 &request,
                 &request_ctx,
@@ -139,7 +139,7 @@ pub(in crate::worker::runtime) async fn process_request(
                     route_selection_reason: route.route_selection_reason,
                 },
                 message,
-            )
+            ))
             .await;
         }
         ForwardOutcome::TransportError {

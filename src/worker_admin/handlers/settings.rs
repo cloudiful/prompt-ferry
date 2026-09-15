@@ -9,11 +9,11 @@ pub(super) async fn get_redaction_setting(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (scope, user_id) = match resolve_redaction_scope(&user, query) {
         Ok(target) => target,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     let config = match scope {
         RedactionScope::Global => match db::get_redaction_config(&state.pool).await {
@@ -47,11 +47,11 @@ pub(super) async fn set_redaction_setting(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (scope, user_id) = match resolve_redaction_scope(&user, query) {
         Ok(target) => target,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     let config = body.0.normalized();
     if let Err(err) = config.validate() {
@@ -100,7 +100,7 @@ pub(super) async fn preview_redaction(
     Json(body): Json<RedactionPreviewRequestBody>,
 ) -> Response {
     if let Err(response) = current_user(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let request = RedactionPreviewRequestBody(body.0.normalized());
     match redact::preview(&request.0) {
@@ -116,7 +116,7 @@ pub(super) async fn list_redaction_custom_strings(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let (scope, user_id) = match resolve_redaction_scope(
         &user,
@@ -126,7 +126,7 @@ pub(super) async fn list_redaction_custom_strings(
         },
     ) {
         Ok(target) => target,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     let (first, rows) = normalize_redaction_page(query.first, query.rows);
     match db::list_redaction_custom_string_rules(
@@ -162,27 +162,27 @@ pub(super) async fn list_redaction_custom_strings(
 fn resolve_redaction_scope(
     user: &SessionUser,
     query: RedactionSettingQuery,
-) -> Result<(RedactionScope, Option<i64>), Box<Response>> {
+) -> Result<(RedactionScope, Option<i64>), ApiError> {
     let scope = query.scope.unwrap_or(if user.is_admin {
         RedactionScope::Global
     } else {
         RedactionScope::User
     });
     match scope {
-        RedactionScope::Global if !user.is_admin => Err(Box::new(error(
+        RedactionScope::Global if !user.is_admin => Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "forbidden",
             "admin required for global redaction rules",
-        ))),
+        )),
         RedactionScope::Global => Ok((scope, None)),
         RedactionScope::User => {
             let target_user_id = query.user_id.unwrap_or(user.user_id);
             if !user.is_admin && target_user_id != user.user_id {
-                return Err(Box::new(error(
+                return Err(ApiError::new(
                     StatusCode::FORBIDDEN,
                     "forbidden",
                     "cannot access another user's redaction rules",
-                )));
+                ));
             }
             Ok((scope, Some(target_user_id)))
         }
@@ -198,7 +198,7 @@ pub(super) async fn get_request_content_logging(
     headers: HeaderMap,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     Json(state.request_content_logging.read().await.clone()).into_response()
 }
@@ -209,7 +209,7 @@ pub(super) async fn set_request_content_logging(
     Json(body): Json<RequestContentLoggingRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let normalized = RequestContentLoggingResponse {
         mode: body.mode,
@@ -251,7 +251,7 @@ pub(super) async fn get_usage_retention(
     headers: HeaderMap,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     Json(state.usage_retention.read().await.clone()).into_response()
 }
@@ -262,7 +262,7 @@ pub(super) async fn set_usage_retention(
     Json(body): Json<UsageRetentionSettings>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     if let Some(pool) = state.config_repository.as_postgres() {
         match db::set_usage_retention(pool, &body).await {
@@ -294,7 +294,7 @@ pub(super) async fn get_stream_delta_batching(
     headers: HeaderMap,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match state
         .config_repository
@@ -313,7 +313,7 @@ pub(super) async fn set_stream_delta_batching(
     Json(body): Json<db::StreamDeltaBatchingSettings>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match state
         .config_repository
@@ -331,7 +331,7 @@ pub(super) async fn get_endpoint_setting(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Some(pool) = state.config_repository.as_postgres() {
         match db::get_user_endpoint_setting(pool, user.user_id).await {
@@ -360,7 +360,7 @@ pub(super) async fn set_endpoint_setting(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Some(pool) = state.config_repository.as_postgres() {
         match db::set_user_endpoint_setting(pool, user.user_id, body.endpoint_id).await {
@@ -389,7 +389,7 @@ pub(super) async fn get_relay_ip_whitelist(
     headers: HeaderMap,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match state
         .config_repository
@@ -407,11 +407,11 @@ pub(super) async fn set_relay_ip_whitelist(
     Json(body): Json<RelayIpPolicy>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let policy = match validate_relay_ip_policy(body) {
         Ok(policy) => policy,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     if let Err(err) = state
         .config_repository
@@ -429,7 +429,7 @@ pub(super) async fn get_llm_review_setting(
     headers: HeaderMap,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     Json(state.llm_review_settings.read().await.clone()).into_response()
 }
@@ -440,7 +440,7 @@ pub(super) async fn set_llm_review_setting(
     Json(body): Json<LlmReviewSettings>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     if let Err(err) = body.validate() {
         return bad_request(&err.to_string());
@@ -461,7 +461,7 @@ pub(super) async fn get_model_route_whitelist(
     headers: HeaderMap,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match state
         .config_repository
@@ -479,7 +479,7 @@ pub(super) async fn set_model_route_whitelist(
     Json(body): Json<ModelRouteWhitelistRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     if let Err(err) = state
         .config_repository
@@ -502,7 +502,7 @@ pub(super) async fn get_raw_object_store(
     headers: HeaderMap,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     if state.config_repository.is_sqlite() {
         return state.capability_unavailable(crate::db::Capability::RawObjectStore);
@@ -546,7 +546,7 @@ pub(super) async fn set_raw_object_store(
     Json(body): Json<RawObjectStoreSettingsRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     if state.config_repository.is_sqlite() {
         return state.capability_unavailable(crate::db::Capability::RawObjectStore);
@@ -590,7 +590,7 @@ pub(super) async fn set_raw_object_store(
             .and_then(|c| c.s3_access_key.as_deref()),
     ) {
         Ok(value) => value,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     let s3_secret_key = match resolve_raw_secret_patch(
         &manager,
@@ -600,7 +600,7 @@ pub(super) async fn set_raw_object_store(
             .and_then(|c| c.s3_secret_key.as_deref()),
     ) {
         Ok(value) => value,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
 
     let config = crate::raw_payload_store::RawObjectStoreConfig {
@@ -663,14 +663,14 @@ fn resolve_raw_secret_patch(
     _manager: &crate::relay_secrets::RelaySecretManager,
     patch: Option<RawObjectStoreSecretPatch>,
     existing: Option<&str>,
-) -> Result<Option<String>, Box<Response>> {
+) -> Result<Option<String>, ApiError> {
     match patch {
         None | Some(RawObjectStoreSecretPatch::Keep) => Ok(existing.map(|v| v.to_string())),
         Some(RawObjectStoreSecretPatch::Clear) => Ok(None),
         Some(RawObjectStoreSecretPatch::Replace { value }) => {
             let trimmed = value.trim().to_string();
             if trimmed.is_empty() {
-                return Err(Box::new(bad_request("secret value cannot be empty")));
+                return Err(ApiError::bad_request("secret value cannot be empty"));
             }
             Ok(Some(trimmed))
         }

@@ -11,14 +11,14 @@ pub(super) async fn usage_event_session_route_options(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let visible_user_id = (!user.is_admin).then_some(user.user_id);
     match build_session_route_options_response(&state, record_id, visible_user_id, user.user_id)
         .await
     {
         Ok(response) => Json(response).into_response(),
-        Err(response) => response,
+        Err(response) => response.into_response(),
     }
 }
 
@@ -29,11 +29,11 @@ pub(super) async fn usage_event_session_affinity_reset(
 ) -> Response {
     let admin = match ensure_admin(&state, &headers).await {
         Ok(admin) => admin,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let locator = match db::get_request_record_route_locator(&state.pool, record_id).await {
         Ok(Some(locator)) => locator,
-        Ok(None) => return request_record_not_found(),
+        Ok(None) => return request_record_not_found().into_response(),
         Err(err) => return internal(&state, err),
     };
     let Some(conversation_id) = locator.conversation_id else {
@@ -108,7 +108,7 @@ pub(super) async fn get_conversation_endpoint_override(
     Path(conversation_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match db::get_conversation_endpoint_override(&state.pool, conversation_id).await {
         Ok(Some(override_entry)) => Json(override_entry).into_response(),
@@ -129,7 +129,7 @@ pub(super) async fn set_conversation_endpoint_override(
 ) -> Response {
     let user = match ensure_admin(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match db::get_endpoint(&state.pool, body.endpoint_id).await {
         Ok(Some(endpoint)) => {
@@ -177,7 +177,7 @@ pub(super) async fn delete_conversation_endpoint_override(
     Path(conversation_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match db::delete_conversation_endpoint_override(&state.pool, conversation_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),

@@ -22,7 +22,7 @@ use super::super::{
     state::{AppState, PendingRequest, RemoteAddr, WorkerSender},
 };
 use super::{
-    DownstreamStreamDiag, anthropic_error_response, anthropic_sse_error_event,
+    ApiError, DownstreamStreamDiag, anthropic_error_response, anthropic_sse_error_event,
     authorize_anthropic_client, authorize_client, enforce_public_ip_policy,
     enforce_public_ip_policy_for,
 };
@@ -83,16 +83,16 @@ pub(super) async fn proxy_models(
             "anthropic-version header is required",
         );
     }
-    proxy_request_with_options(
+    proxy_request_with_options(ProxyRequestOptions {
         state,
-        peer_addr.0.ip(),
+        peer_ip: peer_addr.0.ip(),
         headers,
         compression,
-        Method::GET,
-        "/v1/models",
-        Body::empty(),
+        method: Method::GET,
+        path: "/v1/models",
+        body: Body::empty(),
         anthropic_format,
-    )
+    })
     .await
 }
 
@@ -114,16 +114,16 @@ pub(super) async fn proxy_anthropic_messages(
             "anthropic-version header is required",
         );
     }
-    proxy_request_with_options(
+    proxy_request_with_options(ProxyRequestOptions {
         state,
-        peer_addr.0.ip(),
+        peer_ip: peer_addr.0.ip(),
         headers,
         compression,
-        Method::POST,
-        "/v1/messages",
+        method: Method::POST,
+        path: "/v1/messages",
         body,
-        true,
-    )
+        anthropic_format: true,
+    })
     .await
 }
 
@@ -170,11 +170,11 @@ pub(super) async fn proxy_conversations(
     ConnectInfo(peer_addr): ConnectInfo<RemoteAddr>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = enforce_public_ip_policy(&state, peer_addr.0.ip(), &headers).await {
-        return response;
+    if let Err(err) = enforce_public_ip_policy(&state, peer_addr.0.ip(), &headers).await {
+        return err.into_response();
     }
-    if let Err(response) = authorize_client(&state, &headers).await {
-        return response;
+    if let Err(err) = authorize_client(&state, &headers).await {
+        return err.into_response();
     }
 
     Json(serde_json::json!({
@@ -198,12 +198,12 @@ pub(super) async fn create_realtime_client_secret_handler(
     headers: HeaderMap,
     Json(body): Json<RealtimeClientSecretRequest>,
 ) -> Response {
-    if let Err(response) = enforce_public_ip_policy(&state, peer_addr.0.ip(), &headers).await {
-        return response;
+    if let Err(err) = enforce_public_ip_policy(&state, peer_addr.0.ip(), &headers).await {
+        return err.into_response();
     }
     let route = match authorize_client(&state, &headers).await {
         Ok(route) => route,
-        Err(response) => return response,
+        Err(err) => return err.into_response(),
     };
     let manager = match relay_secret_manager(&state) {
         Ok(manager) => manager,
@@ -257,8 +257,8 @@ pub(super) async fn proxy_realtime(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    if let Err(response) = enforce_public_ip_policy(&state, peer_addr.0.ip(), &headers).await {
-        return response;
+    if let Err(err) = enforce_public_ip_policy(&state, peer_addr.0.ip(), &headers).await {
+        return err.into_response();
     }
     let model = match query
         .model
@@ -278,7 +278,7 @@ pub(super) async fn proxy_realtime(
     let auth =
         match authorize_realtime_client(&state, &headers, query.client_secret.as_deref()).await {
             Ok(auth) => auth,
-            Err(response) => return response,
+            Err(err) => return err.into_response(),
         };
     let selection = match choose_worker(&state).await {
         Some(selection) => selection,
@@ -337,6 +337,17 @@ pub(super) async fn proxy_realtime(
     })
 }
 
+struct ProxyRequestOptions {
+    state: AppState,
+    peer_ip: IpAddr,
+    headers: HeaderMap,
+    compression: HttpRequestCompressionContext,
+    method: Method,
+    path: &'static str,
+    body: Body,
+    anthropic_format: bool,
+}
+
 async fn proxy_request(
     state: AppState,
     peer_ip: IpAddr,
@@ -346,7 +357,7 @@ async fn proxy_request(
     path: &'static str,
     body: Body,
 ) -> Response {
-    proxy_request_with_options(
+    proxy_request_with_options(ProxyRequestOptions {
         state,
         peer_ip,
         headers,
@@ -354,25 +365,26 @@ async fn proxy_request(
         method,
         path,
         body,
-        false,
-    )
+        anthropic_format: false,
+    })
     .await
 }
 
-async fn proxy_request_with_options(
-    state: AppState,
-    peer_ip: IpAddr,
-    headers: HeaderMap,
-    compression: HttpRequestCompressionContext,
-    method: Method,
-    path: &'static str,
-    body: Body,
-    anthropic_format: bool,
-) -> Response {
-    if let Err(response) =
+async fn proxy_request_with_options(options: ProxyRequestOptions) -> Response {
+    let ProxyRequestOptions {
+        state,
+        peer_ip,
+        headers,
+        compression,
+        method,
+        path,
+        body,
+        anthropic_format,
+    } = options;
+    if let Err(err) =
         enforce_public_ip_policy_for(&state, peer_ip, &headers, anthropic_format).await
     {
-        return response;
+        return err.into_response();
     }
     let route = match if anthropic_format {
         authorize_anthropic_client(&state, &headers).await
@@ -380,7 +392,7 @@ async fn proxy_request_with_options(
         authorize_client(&state, &headers).await
     } {
         Ok(route) => route,
-        Err(response) => return response,
+        Err(err) => return err.into_response(),
     };
 
     let request_id = Uuid::new_v4().to_string();
@@ -457,9 +469,9 @@ async fn proxy_request_with_options(
         http_request_compressed_bytes: compression.compressed_bytes,
     };
 
-    if let Err(response) = stream_request_body(&worker, bridge_request, compression, body).await {
+    if let Err(err) = stream_request_body(&worker, bridge_request, compression, body).await {
         remove_pending(&state, &request_id).await;
-        return response;
+        return err.into_response();
     }
 
     let timeout = Duration::from_secs(state.config.request_timeout_seconds);
@@ -666,7 +678,7 @@ pub(super) async fn stream_request_body(
     start: BridgeRequestStart,
     compression: HttpRequestCompressionContext,
     body: Body,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     let mut stream = body.into_data_stream();
     let request_id = start.request_id.clone();
     let mut started = false;
@@ -683,10 +695,10 @@ pub(super) async fn stream_request_body(
                     )
                     .await;
                 }
-                return Err(crate::auth::error_response(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "request_body_read_failed",
-                    &format!("failed to read request body: {err}"),
+                    format!("failed to read request body: {err}"),
                 ));
             }
         };
@@ -704,7 +716,7 @@ pub(super) async fn stream_request_body(
             .await
             .is_err()
         {
-            return Err(crate::auth::error_response(
+            return Err(ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "worker_disconnected",
                 "worker disconnected while streaming request body",
@@ -726,13 +738,13 @@ pub(super) async fn stream_request_body(
 async fn send_request_start(
     worker: &WorkerSender,
     start: BridgeRequestStart,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     if worker
         .send(BridgeMessage::RequestStart(start))
         .await
         .is_err()
     {
-        return Err(crate::auth::error_response(
+        return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "worker_disconnected",
             "worker disconnected before request was sent",
@@ -745,7 +757,7 @@ async fn send_request_end(
     worker: &WorkerSender,
     request_id: &str,
     stats: HttpRequestTransferStats,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     if worker
         .send(BridgeMessage::RequestEnd(BridgeRequestEnd {
             request_id: request_id.to_string(),
@@ -756,7 +768,7 @@ async fn send_request_end(
         .await
         .is_err()
     {
-        return Err(crate::auth::error_response(
+        return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "worker_disconnected",
             "worker disconnected before request finished",
@@ -1179,18 +1191,18 @@ mod tests {
         headers.insert("x-api-key", "test-token".parse().unwrap());
         headers.insert("anthropic-version", "2024-10-22".parse().unwrap());
         headers.insert("anthropic-beta", "tools".parse().unwrap());
-        let response = proxy_request_with_options(
+        let response = proxy_request_with_options(ProxyRequestOptions {
             state,
-            "127.0.0.1".parse().unwrap(),
+            peer_ip: "127.0.0.1".parse().unwrap(),
             headers,
-            HttpRequestCompressionContext::default(),
-            Method::POST,
-            "/v1/messages",
-            Body::from(
+            compression: HttpRequestCompressionContext::default(),
+            method: Method::POST,
+            path: "/v1/messages",
+            body: Body::from(
                 &br#"{"model":"claude-sonnet","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}"#[..],
             ),
-            true,
-        )
+            anthropic_format: true,
+        })
         .await;
 
         assert_eq!(response.status(), StatusCode::OK);
@@ -1316,16 +1328,16 @@ mod tests {
         headers.insert("x-api-key", "test-token".parse().unwrap());
         headers.insert("anthropic-version", "2024-10-22".parse().unwrap());
 
-        let response = proxy_request_with_options(
+        let response = proxy_request_with_options(ProxyRequestOptions {
             state,
-            "127.0.0.1".parse().unwrap(),
+            peer_ip: "127.0.0.1".parse().unwrap(),
             headers,
-            HttpRequestCompressionContext::default(),
-            Method::POST,
-            "/v1/messages",
-            Body::empty(),
-            true,
-        )
+            compression: HttpRequestCompressionContext::default(),
+            method: Method::POST,
+            path: "/v1/messages",
+            body: Body::empty(),
+            anthropic_format: true,
+        })
         .await;
 
         // The stream stays HTTP 200 because output was already committed;
@@ -1381,20 +1393,20 @@ async fn authorize_realtime_client(
     state: &AppState,
     headers: &HeaderMap,
     client_secret: Option<&str>,
-) -> Result<RealtimeAuthContext, Response> {
+) -> Result<RealtimeAuthContext, ApiError> {
     if let Some(client_secret) = client_secret {
         let manager = relay_secret_manager(state).map_err(|err| {
-            crate::auth::error_response(
+            ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "realtime_secret_unavailable",
-                &err,
+                err,
             )
         })?;
         let claims = verify_relay_client_secret(&manager, client_secret).map_err(|err| {
-            crate::auth::error_response(
+            ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "invalid_realtime_client_secret",
-                &err.to_string(),
+                err.to_string(),
             )
         })?;
         return Ok(RealtimeAuthContext {

@@ -5,9 +5,9 @@ use uuid::Uuid;
 
 use crate::{
     db,
-    worker_admin_state::{AdminState, error, internal},
+    worker_admin_state::{AdminState, ApiError},
 };
-use axum::{http::StatusCode, response::Response};
+use axum::http::StatusCode;
 
 use super::{SessionUser, validate_request_budget_limit};
 
@@ -181,7 +181,7 @@ impl McpServerRequest {
         &self,
         state: &AdminState,
         user: &SessionUser,
-    ) -> Result<(), Response> {
+    ) -> Result<(), ApiError> {
         self.validate(state, None, None, user).await
     }
 
@@ -191,7 +191,7 @@ impl McpServerRequest {
         existing_server_id: Uuid,
         existing_source_endpoint_id: Option<Uuid>,
         user: &SessionUser,
-    ) -> Result<(), Response> {
+    ) -> Result<(), ApiError> {
         self.validate(
             state,
             Some(existing_server_id),
@@ -426,16 +426,14 @@ impl McpServerRequest {
         existing_server_id: Option<Uuid>,
         existing_source_endpoint_id: Option<Uuid>,
         user: &SessionUser,
-    ) -> Result<(), Response> {
-        validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")
-            .map_err(|response| *response)?;
-        validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")
-            .map_err(|response| *response)?;
+    ) -> Result<(), ApiError> {
+        validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")?;
+        validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")?;
         if !matches!(
             self.transport.as_str(),
             "http" | "stdio" | "builtin_minimax"
         ) {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_transport",
                 "transport must be http, stdio, or builtin_minimax",
@@ -449,7 +447,11 @@ impl McpServerRequest {
             if !trimmed.is_empty()
                 && let Err(message) = db::validate_outbound_proxy_url(trimmed)
             {
-                return Err(error(StatusCode::BAD_REQUEST, "invalid_proxy_url", message));
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_proxy_url",
+                    message,
+                ));
             }
         }
         // Provider preset validation (issue #296 Phase 1). `generic` is the
@@ -461,7 +463,7 @@ impl McpServerRequest {
         if let Some(provider_kind) = self.provider_kind.as_deref().map(str::trim) {
             if !provider_kind.is_empty() && provider_kind != db::MCP_PROVIDER_GENERIC {
                 if !db::is_known_mcp_provider(provider_kind) {
-                    return Err(error(
+                    return Err(ApiError::new(
                         StatusCode::BAD_REQUEST,
                         "invalid_provider_kind",
                         "provider_kind must be one of generic, minimax, context7, firecrawl",
@@ -469,14 +471,14 @@ impl McpServerRequest {
                 }
                 if provider_kind == db::MCP_PROVIDER_MINIMAX {
                     if self.transport != "builtin_minimax" {
-                        return Err(error(
+                        return Err(ApiError::new(
                             StatusCode::BAD_REQUEST,
                             "invalid_provider_kind",
                             "provider_kind minimax requires the builtin_minimax transport",
                         ));
                     }
                 } else if self.transport != "http" {
-                    return Err(error(
+                    return Err(ApiError::new(
                         StatusCode::BAD_REQUEST,
                         "invalid_provider_kind",
                         "provider_kind presets require the http transport",
@@ -499,7 +501,7 @@ impl McpServerRequest {
                         .config_repository
                         .get_mcp_server(id)
                         .await
-                        .map_err(|err| internal(state, err))?
+                        .map_err(|err| ApiError::internal(state, err))?
                         .map(|server| server.effective_provider_kind().to_string()),
                     None => None,
                 },
@@ -513,10 +515,10 @@ impl McpServerRequest {
                     .filter(|url| !url.is_empty())
                     && !urls_equivalent(url, default_url)
                 {
-                    return Err(error(
+                    return Err(ApiError::new(
                         StatusCode::BAD_REQUEST,
                         "invalid_provider_url",
-                        &format!(
+                        format!(
                             "{} preset uses the official endpoint {default_url}; choose generic for a custom URL",
                             info.id
                         ),
@@ -529,10 +531,10 @@ impl McpServerRequest {
                     .filter(|mode| !mode.is_empty())
                     && auth_mode != db::MCP_AUTH_MODE_BEARER
                 {
-                    return Err(error(
+                    return Err(ApiError::new(
                         StatusCode::BAD_REQUEST,
                         "invalid_provider_auth",
-                        &format!("{} preset only supports bearer auth", info.id),
+                        format!("{} preset only supports bearer auth", info.id),
                     ));
                 }
                 let has_usable_request_token = self.bearer_tokens.as_ref().is_some_and(|tokens| {
@@ -546,10 +548,10 @@ impl McpServerRequest {
                     // with an empty token merely because the previous row had
                     // one. Only an omitted field inherits the existing token.
                     if self.bearer_tokens.is_some() {
-                        return Err(error(
+                        return Err(ApiError::new(
                             StatusCode::BAD_REQUEST,
                             "invalid_bearer_tokens",
-                            &format!("{} preset requires a bearer token", info.id),
+                            format!("{} preset requires a bearer token", info.id),
                         ));
                     }
                     let has_existing = match existing_server_id {
@@ -557,7 +559,7 @@ impl McpServerRequest {
                             .config_repository
                             .get_mcp_server(id)
                             .await
-                            .map_err(|err| internal(state, err))?
+                            .map_err(|err| ApiError::internal(state, err))?
                             .is_some_and(|server| {
                                 server
                                     .bearer_tokens()
@@ -567,10 +569,10 @@ impl McpServerRequest {
                         None => false,
                     };
                     if !has_existing {
-                        return Err(error(
+                        return Err(ApiError::new(
                             StatusCode::BAD_REQUEST,
                             "invalid_bearer_tokens",
-                            &format!("{} preset requires a bearer token", info.id),
+                            format!("{} preset requires a bearer token", info.id),
                         ));
                     }
                 }
@@ -587,7 +589,7 @@ impl McpServerRequest {
             None
         };
         if self.transport == "builtin_minimax" && effective_source_endpoint_id.is_none() {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_source_endpoint",
                 "builtin_minimax requires a source endpoint",
@@ -600,16 +602,16 @@ impl McpServerRequest {
                 .config_repository
                 .get_endpoint(endpoint_id)
                 .await
-                .map_err(|err| internal(state, err))?;
+                .map_err(|err| ApiError::internal(state, err))?;
             let Some(endpoint) = endpoint else {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_source_endpoint",
                     "MiniMax source endpoint not found",
                 ));
             };
             if endpoint.provider != db::EndpointProvider::Minimax {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_source_endpoint",
                     "MiniMax source endpoint is required",
@@ -618,14 +620,14 @@ impl McpServerRequest {
             if endpoint.scope != scope_for_request(self, user)
                 || endpoint.owner_user_id != owner_for_request(self, user)
             {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_source_endpoint",
                     "MiniMax source endpoint scope does not match the MCP server",
                 ));
             }
         } else if self.source_endpoint_id.is_some() {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_source_endpoint",
                 "source_endpoint_id is only valid for builtin_minimax",
@@ -639,7 +641,7 @@ impl McpServerRequest {
                 .trim()
                 .is_empty()
             {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_command",
                     "stdio command is required",
@@ -651,7 +653,7 @@ impl McpServerRequest {
                         .as_array()
                         .is_some_and(|values| values.iter().any(|value| !value.is_string()))
             }) {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_args",
                     "stdio args must be a JSON array of strings",
@@ -662,7 +664,7 @@ impl McpServerRequest {
                 .as_ref()
                 .is_some_and(|env| !valid_stdio_env(env, true))
             {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_env",
                     "stdio env must be an object with string values or worker references",
@@ -671,7 +673,7 @@ impl McpServerRequest {
         }
         let name = self.name.trim();
         if name.is_empty() {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_name",
                 "mcp server name is required",
@@ -683,7 +685,7 @@ impl McpServerRequest {
             "user"
         };
         if !matches!(scope, "admin" | "user") {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_scope",
                 "scope must be admin or user",
@@ -692,7 +694,7 @@ impl McpServerRequest {
         if let Some(tool_filter_mode) = self.tool_filter_mode.as_deref()
             && !matches!(tool_filter_mode, "blacklist" | "whitelist")
         {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_tool_filter_mode",
                 "tool_filter_mode must be blacklist or whitelist",
@@ -701,7 +703,7 @@ impl McpServerRequest {
         if let Some(lifecycle_policy) = self.lifecycle_policy.as_deref()
             && !matches!(lifecycle_policy, "auto" | "legacy_initialize")
         {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_lifecycle_policy",
                 "lifecycle_policy must be auto or legacy_initialize",
@@ -711,7 +713,7 @@ impl McpServerRequest {
             && !version.trim().is_empty()
             && !is_valid_protocol_version(version.trim())
         {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_lifecycle_protocol_version",
                 "lifecycle_manual_protocol_version must be a protocol version date such as 2025-06-18",
@@ -723,7 +725,7 @@ impl McpServerRequest {
                 "qualified_only" | "passthrough_preferred"
             )
         {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_aggregate_naming_mode",
                 "aggregate_naming_mode must be qualified_only or passthrough_preferred",
@@ -732,7 +734,7 @@ impl McpServerRequest {
         if let Some(auth_mode) = self.auth_mode.as_deref() {
             let trimmed = auth_mode.trim();
             if !trimmed.is_empty() && !db::is_valid_auth_mode(trimmed) {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_auth_mode",
                     "auth_mode must be none, bearer, or basic",
@@ -740,7 +742,7 @@ impl McpServerRequest {
             }
             if self.transport != "http" && !trimmed.is_empty() && trimmed != db::MCP_AUTH_MODE_NONE
             {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_auth_mode",
                     "only http transport supports bearer or basic auth",
@@ -749,14 +751,14 @@ impl McpServerRequest {
         }
         if let Some(tokens) = &self.bearer_tokens {
             if tokens.iter().any(|value| value.token.trim().is_empty()) {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_bearer_tokens",
                     "bearer_tokens must not contain empty values",
                 ));
             }
             if !tokens.is_empty() && !tokens.iter().any(|value| value.enabled) {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_bearer_tokens",
                     "at least one bearer token must be enabled",
@@ -767,7 +769,7 @@ impl McpServerRequest {
             && let Some(name) = db::reserved_http_header(http_headers)
         {
             let message = format!("http_headers_json must not override reserved header `{name}`");
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_http_headers",
                 &message,
@@ -788,13 +790,13 @@ impl McpServerRequest {
                             .config_repository
                             .get_mcp_server(id)
                             .await
-                            .map_err(|err| internal(state, err))?
+                            .map_err(|err| ApiError::internal(state, err))?
                             .is_some_and(|server| !server.bearer_tokens().is_empty())
                     } else {
                         false
                     };
                     if !has_existing {
-                        return Err(error(
+                        return Err(ApiError::new(
                             StatusCode::BAD_REQUEST,
                             "invalid_bearer_tokens",
                             "bearer auth requires at least one bearer token",
@@ -812,14 +814,14 @@ impl McpServerRequest {
                             .config_repository
                             .get_mcp_server(id)
                             .await
-                            .map_err(|err| internal(state, err))?
+                            .map_err(|err| ApiError::internal(state, err))?
                             .and_then(|s| s.basic_username)
                             .is_some_and(|v| !v.trim().is_empty())
                     } else {
                         false
                     };
                     if !has_existing {
-                        return Err(error(
+                        return Err(ApiError::new(
                             StatusCode::BAD_REQUEST,
                             "invalid_basic_auth",
                             "basic auth requires a username",
@@ -832,14 +834,14 @@ impl McpServerRequest {
                             .config_repository
                             .get_mcp_server(id)
                             .await
-                            .map_err(|err| internal(state, err))?
+                            .map_err(|err| ApiError::internal(state, err))?
                             .and_then(|s| s.basic_password)
                             .is_some_and(|v| !v.trim().is_empty())
                     } else {
                         false
                     };
                     if !has_existing {
-                        return Err(error(
+                        return Err(ApiError::new(
                             StatusCode::BAD_REQUEST,
                             "invalid_basic_auth",
                             "basic auth requires a password",
@@ -858,7 +860,7 @@ impl McpServerRequest {
                     .as_deref()
                     .is_some_and(|v| !v.trim().is_empty())
             {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_auth_mode",
                     "only http transport supports basic auth",
@@ -871,14 +873,14 @@ impl McpServerRequest {
             Some(user.user_id)
         };
         if scope == "admin" && owner_user_id.is_some() {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_owner",
                 "admin mcp server cannot have owner",
             ));
         }
         if scope == "user" && owner_user_id.is_none() {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_owner",
                 "user mcp server requires owner",
@@ -889,9 +891,9 @@ impl McpServerRequest {
                 .user_store
                 .get_active_user(owner_user_id)
                 .await
-                .map_err(|err| internal(state, err))?;
+                .map_err(|err| ApiError::internal(state, err))?;
             if owner.is_none() {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_owner",
                     "owner user not found or inactive",
@@ -902,9 +904,9 @@ impl McpServerRequest {
             .config_repository
             .get_mcp_server_by_name(name)
             .await
-            .map_err(|err| internal(state, err))?;
+            .map_err(|err| ApiError::internal(state, err))?;
         if duplicate.is_some_and(|server| Some(server.server_id) != existing_server_id) {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::CONFLICT,
                 "duplicate_mcp_server",
                 "mcp server name already exists",

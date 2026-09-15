@@ -96,7 +96,7 @@ pub(in crate::worker_admin::handlers) async fn get_visible_usage_event_detail_or
     state: &AdminState,
     record_id: i64,
     visible_user_id: Option<i64>,
-) -> Result<db::UsageEventDetail, Response> {
+) -> Result<db::UsageEventDetail, ApiError> {
     let raw_store = state.raw_payload_store.read().await.clone();
     match db::get_visible_usage_event_detail_with_raw_store(
         &state.pool,
@@ -108,7 +108,7 @@ pub(in crate::worker_admin::handlers) async fn get_visible_usage_event_detail_or
     {
         Ok(Some(event)) => Ok(event),
         Ok(None) => Err(request_record_not_found()),
-        Err(err) => Err(internal(state, err)),
+        Err(err) => Err(ApiError::internal(state, err)),
     }
 }
 
@@ -116,11 +116,11 @@ pub(in crate::worker_admin::handlers) async fn get_visible_usage_chain_entry_or_
     state: &AdminState,
     record_id: i64,
     visible_user_id: Option<i64>,
-) -> Result<db::UsageEventChainEntry, Response> {
+) -> Result<db::UsageEventChainEntry, ApiError> {
     match db::get_visible_usage_event_chain_entry(&state.pool, record_id, visible_user_id).await {
         Ok(Some(entry)) => Ok(entry),
         Ok(None) => Err(request_record_not_found()),
-        Err(err) => Err(internal(state, err)),
+        Err(err) => Err(ApiError::internal(state, err)),
     }
 }
 
@@ -129,12 +129,12 @@ pub(in crate::worker_admin::handlers) async fn build_usage_request_full_response
     record_id: i64,
     visible_user_id: Option<i64>,
     query: &RequestRecordFullQuery,
-) -> Result<UsageRequestFullResponse, Response> {
+) -> Result<UsageRequestFullResponse, ApiError> {
     let entry =
         get_visible_usage_chain_entry_or_not_found(state, record_id, visible_user_id).await?;
     let refs = reconstruct_usage_request_refs(&state.pool, &entry)
         .await
-        .map_err(|err| internal(state, err))?
+        .map_err(|err| ApiError::internal(state, err))?
         .unwrap_or_default();
     let (parent_refs, parent_turn) = if let Some(parent_event_id) = entry.parent_event_id {
         let parent =
@@ -142,7 +142,7 @@ pub(in crate::worker_admin::handlers) async fn build_usage_request_full_response
                 .await?;
         let refs = reconstruct_usage_request_refs(&state.pool, &parent)
             .await
-            .map_err(|err| internal(state, err))?
+            .map_err(|err| ApiError::internal(state, err))?
             .unwrap_or_default();
         (refs, parent.conversation_seq)
     } else {
@@ -150,7 +150,7 @@ pub(in crate::worker_admin::handlers) async fn build_usage_request_full_response
     };
     let all_messages = build_usage_request_messages(&state.pool, &refs, &parent_refs, parent_turn)
         .await
-        .map_err(|err| internal(state, err))?;
+        .map_err(|err| ApiError::internal(state, err))?;
     let (limit, offset, desc, order) = super::resolve_request_full_pagination(query);
     let total_messages = all_messages.len() as i64;
     let mut ordered: Vec<UsageRequestFullMessage> = if desc {
@@ -208,8 +208,8 @@ fn render_usage_request_text(messages: &[UsageRequestFullMessage]) -> String {
     )
 }
 
-pub(in crate::worker_admin::handlers) fn request_record_not_found() -> Response {
-    error(
+pub(in crate::worker_admin::handlers) fn request_record_not_found() -> ApiError {
+    ApiError::new(
         StatusCode::NOT_FOUND,
         "not_found",
         "request record not found",

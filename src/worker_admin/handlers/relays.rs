@@ -10,7 +10,7 @@ pub(super) async fn list_relays(
     Query(query): Query<TablePageQuery>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let first = query.first.unwrap_or(0).max(0);
     let rows = query.rows.unwrap_or(20).clamp(1, 200);
@@ -48,7 +48,7 @@ pub(super) async fn get_relay(
     Path(relay_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let relay = match state.config_repository.get_managed_relay(relay_id).await {
         Ok(Some(relay)) => relay,
@@ -65,14 +65,14 @@ pub(super) async fn create_relay(
     Json(body): Json<ManagedRelayRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     if let Err(message) = body.validate_create() {
         return bad_request(&message);
     }
     let input = match resolve_create_relay_input(&state, body).await {
         Ok(input) => input,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     let relay = match state.config_repository.create_managed_relay(input).await {
         Ok(relay) => relay,
@@ -93,7 +93,7 @@ pub(super) async fn update_relay(
     Json(body): Json<ManagedRelayPatchRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let existing = match state.config_repository.get_managed_relay(relay_id).await {
         Ok(Some(relay)) => relay,
@@ -105,7 +105,7 @@ pub(super) async fn update_relay(
     }
     let input = match resolve_update_relay_input(&state, existing.clone(), body).await {
         Ok(input) => input,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     let relay = match state
         .config_repository
@@ -129,7 +129,7 @@ pub(super) async fn delete_relay(
     Path(relay_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match state.config_repository.delete_managed_relay(relay_id).await {
         Ok(true) => {
@@ -150,7 +150,7 @@ pub(super) async fn reconnect_relay(
     Path(relay_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let relay = match state.config_repository.get_managed_relay(relay_id).await {
         Ok(Some(relay)) => relay,

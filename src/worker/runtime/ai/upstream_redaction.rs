@@ -123,7 +123,7 @@ mod tests {
     };
 
     use super::{redact_ai_request_json, redact_ai_request_json_blocking};
-    use crate::redact_test_support::domain_redaction;
+    use crate::redact_test_support::{domain_redaction, domain_redaction_async};
     use serde_json::{Value, json};
 
     #[test]
@@ -264,9 +264,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn blocking_redaction_yields_to_the_async_runtime() {
-        {
-            let _guard = domain_redaction();
-        }
+        let _guard = domain_redaction_async().await;
         let body = serde_json::to_vec(&json!({
             "model": "gpt-test",
             "instructions": "contact a.example.com ".repeat(1_000),

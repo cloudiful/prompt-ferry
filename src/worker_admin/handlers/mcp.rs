@@ -8,7 +8,7 @@ pub(super) async fn list_mcp_providers(
     headers: HeaderMap,
 ) -> Response {
     if let Err(response) = current_user(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     Json(mcp_provider_descriptors()).into_response()
 }
@@ -20,7 +20,7 @@ pub(super) async fn list_mcp_servers(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let first = query.first.unwrap_or(0).max(0);
     let rows = query.rows.unwrap_or(20).clamp(1, 200);
@@ -47,7 +47,7 @@ pub(super) async fn create_mcp_server(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if let Err(response) = body.validate_for_create(&state, &user).await {
         tracing::warn!(
@@ -57,7 +57,7 @@ pub(super) async fn create_mcp_server(
             transport = %body.transport,
             "mcp server create validation failed"
         );
-        return response;
+        return response.into_response();
     }
     match state
         .config_repository
@@ -83,7 +83,7 @@ pub(super) async fn update_mcp_server(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let existing = if user.is_admin {
         match state.config_repository.get_mcp_server(server_id).await {
@@ -115,7 +115,7 @@ pub(super) async fn update_mcp_server(
             transport = %body.transport,
             "mcp server update validation failed"
         );
-        return response;
+        return response.into_response();
     }
     match state
         .config_repository
@@ -141,7 +141,7 @@ pub(super) async fn delete_mcp_server(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !user.is_admin {
         match state
@@ -171,7 +171,7 @@ pub(super) async fn test_mcp_server(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let server = if user.is_admin {
         match state.config_repository.get_mcp_server(server_id).await {
@@ -290,7 +290,7 @@ pub(super) async fn get_mcp_catalog(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let server = if user.is_admin {
         match state.config_repository.get_mcp_server(server_id).await {

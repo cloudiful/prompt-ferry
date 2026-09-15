@@ -258,7 +258,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolves_client_key_identity_from_loaded_snapshot() {
-        let _redaction_guard = crate::redact_test_support::lock();
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         let path = database_path();
         let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
         let state = StandaloneRuntimeState::new(
@@ -288,7 +288,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_state_starts_with_empty_disposable_usage() {
-        let _redaction_guard = crate::redact_test_support::lock();
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         let path = database_path();
         let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
         let state = StandaloneRuntimeState::new(
@@ -308,7 +308,7 @@ mod tests {
 
     #[tokio::test]
     async fn loads_persisted_redaction_setting_and_applies_redaction() {
-        let _redaction_guard = crate::redact_test_support::lock();
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         let path = database_path();
         let manager =
             RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");
@@ -346,7 +346,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_or_missing_redaction_setting_uses_disabled_default() {
-        let _redaction_guard = crate::redact_test_support::lock();
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         let path = database_path();
         let manager =
             RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");

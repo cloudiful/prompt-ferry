@@ -10,7 +10,7 @@ pub(super) async fn list_billing_price_rules(
     Query(query): Query<BillingPriceRulesQuery>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let first = query.first.unwrap_or(0).clamp(0, 10_000);
     let rows = query.rows.unwrap_or(100).clamp(1, 1_000);
@@ -39,11 +39,11 @@ pub(super) async fn create_billing_price_rule(
 ) -> Response {
     let user = match ensure_admin(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let input = match billing_price_rule_input(body, user.user_id) {
         Ok(input) => input,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match db::create_price_rule(&state.pool, input).await {
         Ok(rule) => Json(price_rule_response(rule)).into_response(),
@@ -58,7 +58,7 @@ pub(super) async fn patch_billing_price_rule(
     Json(body): Json<BillingPriceRulePatch>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match db::update_price_rule_status(&state.pool, price_rule_id, body.enabled).await {
         Ok(Some(rule)) => Json(price_rule_response(rule)).into_response(),
@@ -74,11 +74,11 @@ pub(super) async fn update_billing_price_rule(
     Json(body): Json<BillingPriceRuleRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let input = match billing_price_rule_update_input(body) {
         Ok(input) => input,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match db::update_price_rule(&state.pool, price_rule_id, input).await {
         Ok(Some(rule)) => Json(price_rule_response(rule)).into_response(),
@@ -93,7 +93,7 @@ pub(super) async fn delete_billing_price_rule(
     Path(price_rule_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match db::delete_price_rule(&state.pool, price_rule_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
@@ -109,7 +109,7 @@ pub(super) async fn billing_summary(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let filter = BillingChargeFilter {
         user_id: if user.is_admin {
@@ -139,7 +139,7 @@ pub(super) async fn list_billing_charges(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let filter = BillingChargeFilter {
         user_id: if user.is_admin {
@@ -180,7 +180,7 @@ pub(super) async fn billing_charge_detail(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let detail = match db::get_charge(&state.pool, charge_id).await {
         Ok(Some(detail)) => detail,
@@ -204,7 +204,7 @@ pub(super) async fn reprice_billing(
     Json(body): Json<BillingRepriceRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match db::reprice_unpriced_charges(&state.pool, body.limit.unwrap_or(1_000)).await {
         Ok(repriced) => Json(BillingRepriceResponse { repriced }).into_response(),
@@ -219,7 +219,7 @@ pub(super) async fn export_billing(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let filter = BillingChargeFilter {
         user_id: if user.is_admin {
@@ -263,7 +263,7 @@ pub(super) async fn export_billing(
 fn billing_price_rule_input(
     body: BillingPriceRuleRequest,
     created_by_user_id: i64,
-) -> Result<BillingPriceRuleCreate, Response> {
+) -> Result<BillingPriceRuleCreate, ApiError> {
     let BillingPriceRuleUpdate {
         public_model,
         input_rate,
@@ -285,10 +285,10 @@ fn billing_price_rule_input(
 
 fn billing_price_rule_update_input(
     body: BillingPriceRuleRequest,
-) -> Result<BillingPriceRuleUpdate, Response> {
+) -> Result<BillingPriceRuleUpdate, ApiError> {
     let public_model = body.public_model.trim().to_string();
     if public_model.is_empty() {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_public_model",
             "public_model must not be empty",
@@ -302,7 +302,7 @@ fn billing_price_rule_update_input(
         .into_iter()
         .any(|value| value.is_sign_negative())
     {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_rate",
             "rates must be non-negative",
@@ -318,12 +318,12 @@ fn billing_price_rule_update_input(
     })
 }
 
-fn parse_decimal(value: &str, field: &str) -> Result<Decimal, Response> {
+fn parse_decimal(value: &str, field: &str) -> Result<Decimal, ApiError> {
     Decimal::from_str(value.trim()).map_err(|_| {
-        error(
+        ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_decimal",
-            &format!("{field} must be a decimal string"),
+            format!("{field} must be a decimal string"),
         )
     })
 }

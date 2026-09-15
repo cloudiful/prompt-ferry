@@ -147,11 +147,11 @@ pub(super) async fn forward_upstream_response(
     }
 
     if response_adapter == ResponseAdapter::ChatToResponses && !is_sse {
-        return forward_non_stream_chat_response(
+        return Box::pin(forward_non_stream_chat_response(
             response,
             context.cloned(),
             assistant_capture.as_mut(),
-        )
+        ))
         .await;
     }
 
@@ -197,21 +197,35 @@ pub(super) async fn forward_upstream_response(
         && response_adapter == ResponseAdapter::AnthropicMessagesToResponses
         && !is_sse
     {
-        return forward_non_stream_anthropic_response(response, context.cloned(), capture).await;
+        return Box::pin(forward_non_stream_anthropic_response(
+            response,
+            context.cloned(),
+            capture,
+        ))
+        .await;
     }
 
     if let Some(capture) = responses_capture.as_mut()
         && response_adapter == ResponseAdapter::ResponsesToChat
         && !is_sse
     {
-        return forward_non_stream_responses_to_chat_response(response, context.cloned(), capture)
-            .await;
+        return Box::pin(forward_non_stream_responses_to_chat_response(
+            response,
+            context.cloned(),
+            capture,
+        ))
+        .await;
     }
 
     if let Some(capture) = responses_capture.as_mut()
         && !is_sse
     {
-        return forward_non_stream_responses_response(response, context.cloned(), capture).await;
+        return Box::pin(forward_non_stream_responses_response(
+            response,
+            context.cloned(),
+            capture,
+        ))
+        .await;
     }
 
     Box::pin(forward_streaming_response(

@@ -53,8 +53,8 @@ pub(super) use crate::{
     routing::choose_preferred_target,
     usage_prompt::{REQUEST_CHAIN_DEPTH_LIMIT, RenderedPromptMessage, render_prompt_text},
     worker_admin_state::{
-        bad_request, current_user, ensure_admin, error, internal, maybe_redact, new_session_id,
-        session_id,
+        ApiError, bad_request, current_user, ensure_admin, error, internal, maybe_redact,
+        new_session_id, session_id,
     },
     worker_admin_types::*,
 };

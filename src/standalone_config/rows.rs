@@ -231,15 +231,15 @@ pub(crate) fn endpoint_key(
     ))
 }
 
-pub(crate) fn mcp_server(
-    row: &SqliteRow,
-) -> Result<(
+pub(crate) type McpServerRow = (
     McpServer,
     EncryptedSecretEnvelope,
     EncryptedSecretEnvelope,
     Option<EncryptedSecretEnvelope>,
     Option<EncryptedSecretEnvelope>,
-)> {
+);
+
+pub(crate) fn mcp_server(row: &SqliteRow) -> Result<McpServerRow> {
     let auth_mode = optional_string(row, "auth_mode")?
         .unwrap_or_else(|| crate::db::MCP_AUTH_MODE_NONE.to_string());
     Ok((

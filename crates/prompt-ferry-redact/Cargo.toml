@@ -8,3 +8,4 @@ description = "Redaction runtime and policy types for prompt-ferry"
 [dependencies]
 redactor = { package = "cloudiful-redactor", version = "0.5.1" }
 serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["sync"] }

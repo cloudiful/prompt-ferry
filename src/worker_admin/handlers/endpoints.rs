@@ -6,7 +6,7 @@ pub(super) async fn list_endpoints(
     Query(query): Query<TablePageQuery>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match state
         .config_repository
@@ -24,14 +24,14 @@ pub(super) async fn create_endpoint(
     Json(body): Json<EndpointRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let mcp_enabled = body
         .mcp_enabled
         .unwrap_or(body.provider == db::EndpointProvider::Minimax);
     let input = match resolve_endpoint_input(&state, body, None, None, None).await {
         Ok(input) => input,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let endpoint_id = uuid::Uuid::new_v4();
     match state
@@ -69,7 +69,7 @@ pub(super) async fn update_endpoint(
     Json(body): Json<EndpointRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let existing = match state.config_repository.get_endpoint(endpoint_id).await {
         Ok(Some(endpoint)) => endpoint,
@@ -113,7 +113,7 @@ pub(super) async fn update_endpoint(
     .await
     {
         Ok(input) => input,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match state
         .config_repository
@@ -173,7 +173,7 @@ pub(super) async fn delete_endpoint(
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let managed_server = match state
         .config_repository
@@ -204,7 +204,7 @@ pub(super) async fn test_endpoint(
     Path(endpoint_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let endpoint = match state.config_repository.get_endpoint(endpoint_id).await {
         Ok(Some(endpoint)) => endpoint,

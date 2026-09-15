@@ -8,27 +8,27 @@ type UsageDateRange = (
 
 pub(in crate::worker_admin::handlers) fn parse_usage_date_range(
     value: &str,
-) -> Result<UsageDateRange, Box<Response>> {
+) -> Result<UsageDateRange, ApiError> {
     let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
-        Box::new(error(
+        ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_date",
             "date must be in YYYY-MM-DD format",
-        ))
+        )
     })?;
     let Some(start_naive) = date.and_hms_opt(0, 0, 0) else {
-        return Err(Box::new(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_date",
             "date must be in YYYY-MM-DD format",
-        )));
+        ));
     };
     let Some(end_naive) = date.succ_opt().and_then(|next| next.and_hms_opt(0, 0, 0)) else {
-        return Err(Box::new(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_date",
             "date must be in YYYY-MM-DD format",
-        )));
+        ));
     };
     Ok((Some(start_naive.and_utc()), Some(end_naive.and_utc())))
 }
@@ -44,10 +44,10 @@ pub(in crate::worker_admin::handlers) fn combine_record_date_range(
     date_range: UsageDateRange,
     start: Option<chrono::DateTime<chrono::Utc>>,
     end: Option<chrono::DateTime<chrono::Utc>>,
-) -> Result<UsageDateRange, Box<Response>> {
+) -> Result<UsageDateRange, ApiError> {
     let (legacy_start, legacy_end) = date_range;
     if start.is_some() && end.is_some() && start >= end {
-        return Err(Box::new(bad_request("start must be earlier than end")));
+        return Err(ApiError::bad_request("start must be earlier than end"));
     }
     let effective_start = match (legacy_start, start) {
         (Some(legacy), Some(bound)) => Some(legacy.max(bound)),
@@ -59,7 +59,7 @@ pub(in crate::worker_admin::handlers) fn combine_record_date_range(
     };
     if let (Some(s), Some(e)) = (effective_start, effective_end) {
         if s >= e {
-            return Err(Box::new(bad_request("range produces an empty window")));
+            return Err(ApiError::bad_request("range produces an empty window"));
         }
     }
     Ok((effective_start, effective_end))
@@ -79,11 +79,11 @@ pub(in crate::worker_admin::handlers) fn resolve_record_range_bounds(
     start: Option<chrono::DateTime<chrono::Utc>>,
     end: Option<chrono::DateTime<chrono::Utc>>,
     now: chrono::DateTime<chrono::Utc>,
-) -> Result<UsageDateRange, Box<Response>> {
+) -> Result<UsageDateRange, ApiError> {
     if start.is_some() || end.is_some() {
         if let (Some(s), Some(e)) = (start, end) {
             if s >= e {
-                return Err(Box::new(bad_request("start must be earlier than end")));
+                return Err(ApiError::bad_request("start must be earlier than end"));
             }
             return Ok((Some(s), Some(e)));
         }
@@ -106,9 +106,9 @@ pub(in crate::worker_admin::handlers) fn resolve_record_range_bounds(
             (Some(month_start), Some(now))
         }
         RequestRecordOverviewRange::Custom => {
-            return Err(Box::new(bad_request(
+            return Err(ApiError::bad_request(
                 "custom range requires start and end query parameters",
-            )));
+            ));
         }
     };
     Ok(bounds)
@@ -118,7 +118,7 @@ pub(in crate::worker_admin::handlers) fn parse_overview_window(
     range: Option<RequestRecordOverviewRange>,
     start: Option<chrono::DateTime<chrono::Utc>>,
     end: Option<chrono::DateTime<chrono::Utc>>,
-) -> Result<db::OverviewWindow, Box<Response>> {
+) -> Result<db::OverviewWindow, ApiError> {
     let now = chrono::Utc::now();
     let range = range.unwrap_or(RequestRecordOverviewRange::Last24h);
     let (start, end) = match range {
@@ -136,15 +136,15 @@ pub(in crate::worker_admin::handlers) fn parse_overview_window(
         }
         RequestRecordOverviewRange::Custom => {
             let Some(start) = start else {
-                return Err(Box::new(bad_request(
+                return Err(ApiError::bad_request(
                     "custom overview range requires start",
-                )));
+                ));
             };
             let Some(end) = end else {
-                return Err(Box::new(bad_request("custom overview range requires end")));
+                return Err(ApiError::bad_request("custom overview range requires end"));
             };
             if start >= end {
-                return Err(Box::new(bad_request("overview start must be before end")));
+                return Err(ApiError::bad_request("overview start must be before end"));
             }
             (Some(start), Some(end))
         }
@@ -165,29 +165,29 @@ pub(in crate::worker_admin::handlers) fn parse_overview_window(
 
 pub(in crate::worker_admin::handlers) fn parse_usage_summary_days(
     days: Option<i64>,
-) -> Result<i64, Box<Response>> {
+) -> Result<i64, ApiError> {
     match days.unwrap_or(1) {
         1 | 7 | 30 => Ok(days.unwrap_or(1)),
-        _ => Err(Box::new(error(
+        _ => Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_days",
             "days must be 1, 7, or 30",
-        ))),
+        )),
     }
 }
 
 pub(in crate::worker_admin::handlers) fn parse_usage_series_bucket(
     bucket: Option<String>,
-) -> Result<String, Box<Response>> {
+) -> Result<String, ApiError> {
     let bucket = bucket.unwrap_or_else(|| "hour".to_string());
     if matches!(bucket.as_str(), "minute" | "hour" | "day") {
         Ok(bucket)
     } else {
-        Err(Box::new(error(
+        Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_bucket",
             "bucket must be minute, hour, or day",
-        )))
+        ))
     }
 }
 
@@ -280,24 +280,24 @@ pub(in crate::worker_admin::handlers) fn build_request_record_query(
 pub(in crate::worker_admin::handlers) fn build_usage_clear_query(
     user: &SessionUser,
     body: UsageClearRequest,
-) -> Result<db::UsageClearQuery, Box<Response>> {
+) -> Result<db::UsageClearQuery, ApiError> {
     if body
         .start_at
         .zip(body.end_at)
         .is_some_and(|(start, end)| start > end)
     {
-        return Err(Box::new(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_range",
             "start_at must be earlier than or equal to end_at",
-        )));
+        ));
     }
     if !body.delete_all.unwrap_or(false) && body.start_at.is_none() && body.end_at.is_none() {
-        return Err(Box::new(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "range_required",
             "provide start_at/end_at or set delete_all=true",
-        )));
+        ));
     }
 
     Ok(match body.scope.unwrap_or(UsageClearScope::CurrentUser) {
@@ -310,11 +310,11 @@ pub(in crate::worker_admin::handlers) fn build_usage_clear_query(
         },
         UsageClearScope::AllUsers => {
             if !user.is_admin {
-                return Err(Box::new(error(
+                return Err(ApiError::new(
                     StatusCode::FORBIDDEN,
                     "forbidden",
                     "admin required",
-                )));
+                ));
             }
             db::UsageClearQuery {
                 scope: db::UsageClearScope::AllUsers,
@@ -326,18 +326,18 @@ pub(in crate::worker_admin::handlers) fn build_usage_clear_query(
         }
         UsageClearScope::TargetUser => {
             if !user.is_admin {
-                return Err(Box::new(error(
+                return Err(ApiError::new(
                     StatusCode::FORBIDDEN,
                     "forbidden",
                     "admin required",
-                )));
+                ));
             }
             let Some(target_user_id) = body.user_id else {
-                return Err(Box::new(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "user_required",
                     "user_id is required",
-                )));
+                ));
             };
             db::UsageClearQuery {
                 scope: db::UsageClearScope::TargetUser,

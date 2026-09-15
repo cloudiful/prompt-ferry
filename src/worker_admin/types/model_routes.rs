@@ -4,9 +4,9 @@ use uuid::Uuid;
 
 use crate::{
     db,
-    worker_admin_state::{AdminState, error, internal},
+    worker_admin_state::{AdminState, ApiError},
 };
-use axum::{http::StatusCode, response::Response};
+use axum::http::StatusCode;
 
 use super::validate_request_budget_limit;
 
@@ -25,7 +25,7 @@ pub struct ModelRouteRequest {
 }
 
 impl ModelRouteRequest {
-    pub async fn validate_for_create(&self, state: &AdminState) -> Result<(), Response> {
+    pub async fn validate_for_create(&self, state: &AdminState) -> Result<(), ApiError> {
         self.validate(state, None).await
     }
 
@@ -33,14 +33,14 @@ impl ModelRouteRequest {
         &self,
         state: &AdminState,
         existing_rule_id: Uuid,
-    ) -> Result<(), Response> {
+    ) -> Result<(), ApiError> {
         self.validate(state, Some(existing_rule_id)).await
     }
 
     pub async fn into_create(
         self,
         state: &AdminState,
-    ) -> Result<db::ModelEndpointRuleCreate, Response> {
+    ) -> Result<db::ModelEndpointRuleCreate, ApiError> {
         self.into_create_with_existing(
             state,
             &std::collections::HashMap::new(),
@@ -61,7 +61,7 @@ impl ModelRouteRequest {
         state: &AdminState,
         existing_overrides: &std::collections::HashMap<Uuid, Option<String>>,
         existing_windows: &std::collections::HashMap<Uuid, Vec<db::ActiveWindow>>,
-    ) -> Result<db::ModelEndpointRuleCreate, Response> {
+    ) -> Result<db::ModelEndpointRuleCreate, ApiError> {
         let targets = self
             .targets
             .unwrap_or_else(|| {
@@ -84,9 +84,9 @@ impl ModelRouteRequest {
             .map(|target| async move {
                 db::get_endpoint(&state.pool, target.endpoint_id)
                     .await
-                    .map_err(|err| internal(state, err))?
+                    .map_err(|err| ApiError::internal(state, err))?
                     .ok_or_else(|| {
-                        error(
+                        ApiError::new(
                             StatusCode::BAD_REQUEST,
                             "invalid_target_endpoint",
                             "target endpoint not found",
@@ -99,14 +99,18 @@ impl ModelRouteRequest {
                         .unwrap_or(None),
                     Some(raw) if raw.trim().is_empty() => None,
                     Some(raw) => Some(normalize_proxy_url(raw.trim()).map_err(|message| {
-                        error(StatusCode::BAD_REQUEST, "invalid_proxy_url", message)
+                        ApiError::new(StatusCode::BAD_REQUEST, "invalid_proxy_url", message)
                     })?),
                 };
                 let active_windows = match target.active_windows {
                     None => existing_windows.get(&target.endpoint_id).cloned(),
                     Some(windows) => {
                         Some(db::normalize_request_windows(&windows).map_err(|message| {
-                            error(StatusCode::BAD_REQUEST, "invalid_active_windows", message)
+                            ApiError::new(
+                                StatusCode::BAD_REQUEST,
+                                "invalid_active_windows",
+                                message,
+                            )
                         })?)
                     }
                 };
@@ -142,35 +146,33 @@ impl ModelRouteRequest {
         &self,
         state: &AdminState,
         existing_rule_id: Option<Uuid>,
-    ) -> Result<(), Response> {
-        validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")
-            .map_err(|response| *response)?;
-        validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")
-            .map_err(|response| *response)?;
+    ) -> Result<(), ApiError> {
+        validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")?;
+        validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")?;
         let pattern = self.model_pattern.trim();
         if pattern.is_empty() {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_model_pattern",
                 "model pattern is required",
             ));
         }
         if !matches!(self.scope.as_str(), "admin" | "user") {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_scope",
                 "scope must be admin or user",
             ));
         }
         if self.scope == "admin" && self.owner_user_id.is_some() {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_owner",
                 "admin route cannot have owner",
             ));
         }
         if self.scope == "user" && self.owner_user_id.is_none() {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_owner",
                 "user route requires owner",
@@ -183,7 +185,7 @@ impl ModelRouteRequest {
                 .as_ref()
                 .map_or(self.endpoint_id.is_none(), |targets| targets.len() < 2)
         {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_routing_strategy",
                 "responses_session_affinity requires at least two route targets",
@@ -192,7 +194,7 @@ impl ModelRouteRequest {
         let targets = self.targets.as_deref().unwrap_or(&[]);
         let has_legacy_endpoint = self.endpoint_id.is_some();
         if targets.is_empty() && !has_legacy_endpoint {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_targets",
                 "model route requires at least one target",
@@ -211,7 +213,7 @@ impl ModelRouteRequest {
             .copied()
             .collect::<std::collections::HashSet<_>>();
         if unique_target_ids.len() != target_ids.len() {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "duplicate_targets",
                 "model route target endpoints must be unique",
@@ -220,9 +222,9 @@ impl ModelRouteRequest {
         for endpoint_id in unique_target_ids {
             let endpoint = db::get_endpoint(&state.pool, endpoint_id)
                 .await
-                .map_err(|err| internal(state, err))?;
+                .map_err(|err| ApiError::internal(state, err))?;
             if endpoint.is_none() {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_target_endpoint",
                     "target endpoint not found",
@@ -236,14 +238,18 @@ impl ModelRouteRequest {
                 && !raw.trim().is_empty()
                 && let Err(message) = normalize_proxy_url(raw.trim())
             {
-                return Err(error(StatusCode::BAD_REQUEST, "invalid_proxy_url", message));
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_proxy_url",
+                    message,
+                ));
             }
             // Issue #378 Phase I: HH:MM format, ranges, start != end;
             // end < start is overnight; overlaps allowed; sorted normalize.
             if let Some(windows) = target.active_windows.as_deref()
                 && let Err(message) = db::normalize_request_windows(windows)
             {
-                return Err(error(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_active_windows",
                     message,
@@ -252,14 +258,14 @@ impl ModelRouteRequest {
         }
         let rules = db::list_model_endpoint_rules(&state.pool)
             .await
-            .map_err(|err| internal(state, err))?;
+            .map_err(|err| ApiError::internal(state, err))?;
         if rules.iter().any(|rule| {
             Some(rule.rule_id) != existing_rule_id
                 && rule.scope == self.scope
                 && rule.owner_user_id == self.owner_user_id
                 && rule.model_pattern == pattern
         }) {
-            return Err(error(
+            return Err(ApiError::new(
                 StatusCode::CONFLICT,
                 "duplicate_model_route",
                 "model route pattern already exists for scope/owner",

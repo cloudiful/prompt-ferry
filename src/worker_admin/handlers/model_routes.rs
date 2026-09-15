@@ -6,7 +6,7 @@ pub(super) async fn list_model_routes(
     Query(query): Query<TablePageQuery>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match state
         .config_repository
@@ -24,15 +24,15 @@ pub(super) async fn create_model_route(
     Json(body): Json<ModelRouteRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match body.validate_for_create(&state).await {
         Ok(()) => {}
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     }
     let input = match body.into_create(&state).await {
         Ok(input) => input,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let rule_id = Uuid::new_v4();
     match state
@@ -57,11 +57,11 @@ pub(super) async fn update_model_route(
     Json(body): Json<ModelRouteRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match body.validate_for_update(&state, rule_id).await {
         Ok(()) => {}
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     }
     // Issue #368 Phase B: PATCH carry for per-target overrides. The unified
     // route shape is redacted, so load the stored overrides separately;
@@ -73,7 +73,7 @@ pub(super) async fn update_model_route(
         .await
     {
         Ok(input) => input,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match state
         .config_repository
@@ -179,7 +179,7 @@ pub(super) async fn delete_model_route(
     Path(rule_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match state.config_repository.delete_model_route(rule_id).await {
         Ok(true) => {
@@ -199,7 +199,7 @@ pub(super) async fn test_model_route(
     Json(body): Json<ModelRouteTestRequest>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     // For Phase 3 the test path is only implemented against PostgreSQL because
     // it needs `model_route_candidates` which still joins against the

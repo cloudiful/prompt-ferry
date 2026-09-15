@@ -8,7 +8,7 @@ use super::*;
 
 pub(super) async fn bridge_status(State(state): State<AdminState>, headers: HeaderMap) -> Response {
     if let Err(response) = current_user(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     if state.managed_mode {
         let relays = match db::list_managed_relays(&state.pool).await {
@@ -67,11 +67,11 @@ pub(super) async fn usage_summary(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let days = match parse_usage_summary_days(query.days) {
         Ok(days) => days,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     let visible_user_id = (!user.is_admin).then_some(user.user_id);
     match db::request_record_summary(&state.pool, days, visible_user_id).await {
@@ -87,11 +87,11 @@ pub(super) async fn usage_overview(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let window = match parse_overview_window(query.range, query.start, query.end) {
         Ok(window) => window,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     match db::request_records_overview(
         &state.pool,
@@ -123,12 +123,12 @@ pub(super) async fn usage_events(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let legacy_date_range = match query.date.as_deref() {
         Some(value) if !value.is_empty() => match parse_usage_date_range(value) {
             Ok(range) => range,
-            Err(response) => return *response,
+            Err(response) => return response.into_response(),
         },
         _ => (None, None),
     };
@@ -139,7 +139,7 @@ pub(super) async fn usage_events(
         chrono::Utc::now(),
     ) {
         Ok(range) => range,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     let (date_start, date_end) = match combine_record_date_range(
         legacy_date_range,
@@ -147,7 +147,7 @@ pub(super) async fn usage_events(
         preset_range_bounds.1,
     ) {
         Ok(range) => range,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     let request_query = build_request_record_query(&user, query, date_start, date_end);
     match db::list_request_records(&state.pool, request_query).await {
@@ -163,7 +163,7 @@ pub(super) async fn usage_facets(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match db::list_request_record_facets(
         &state.pool,
@@ -187,14 +187,14 @@ pub(super) async fn usage_event_detail(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let visible_user_id = (!user.is_admin).then_some(user.user_id);
     let mut event =
         match get_visible_usage_event_detail_or_not_found(&state, record_id, visible_user_id).await
         {
             Ok(event) => event,
-            Err(response) => return response,
+            Err(response) => return response.into_response(),
         };
     match db::list_request_record_tool_calls(&state.pool, event.record_id).await {
         Ok(tool_call_events) => {
@@ -213,12 +213,12 @@ pub(super) async fn usage_request_full(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let visible_user_id = (!user.is_admin).then_some(user.user_id);
     match build_usage_request_full_response(&state, record_id, visible_user_id, &query).await {
         Ok(response) => Json(response).into_response(),
-        Err(response) => response,
+        Err(response) => response.into_response(),
     }
 }
 
@@ -229,11 +229,11 @@ pub(super) async fn usage_series(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let bucket = match parse_usage_series_bucket(query.bucket) {
         Ok(bucket) => bucket,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     let limit = query.limit.unwrap_or(24).clamp(1, 120);
     match db::usage_buckets(
@@ -259,11 +259,11 @@ pub(super) async fn clear_usage_events(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let clear_query = match build_usage_clear_query(&user, body) {
         Ok(query) => query,
-        Err(response) => return *response,
+        Err(response) => return response.into_response(),
     };
     match db::clear_usage_events(&state.pool, clear_query).await {
         Ok(report) => Json(UsageClearResponse {
@@ -281,7 +281,7 @@ pub(super) async fn prune_usage_events(
     headers: HeaderMap,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     let retention_days = state.usage_retention.read().await.metadata_retention_days;
     match db::prune_usage_events(&state.pool, i64::from(retention_days)).await {

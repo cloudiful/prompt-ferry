@@ -74,6 +74,6 @@ pub(super) async fn me(State(state): State<AdminState>, headers: HeaderMap) -> R
             is_admin: user.is_admin,
         })
         .into_response(),
-        Err(response) => response,
+        Err(response) => response.into_response(),
     }
 }

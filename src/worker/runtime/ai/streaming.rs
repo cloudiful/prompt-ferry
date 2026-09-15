@@ -3,7 +3,9 @@ use super::super::{
     error_handling::{PassthroughSseFilter, ResponsesSseTerminal, safe_error},
 };
 use super::{
-    artifact::{persist_assistant_artifact, resolve_assistant_artifact},
+    artifact::{
+        PersistAssistantArtifactParams, persist_assistant_artifact, resolve_assistant_artifact,
+    },
     errors::respond_with_client_error,
     request_support::ai_route_usage_log,
 };
@@ -248,13 +250,13 @@ pub(super) async fn forward_streaming_response(
             is_sse,
             "using buffered non-SSE restore path"
         );
-        return forward_buffered_non_sse_response(
+        return Box::pin(forward_buffered_non_sse_response(
             response,
             context.cloned(),
             assistant_capture,
             responses_capture,
             upstream_content_type,
-        )
+        ))
         .await;
     }
     let status = response.status();
@@ -826,20 +828,20 @@ pub(super) async fn forward_streaming_response(
         )
         .await;
     let artifact_capture_expected = assistant_capture.is_some() || responses_capture.is_some();
-    persist_assistant_artifact(
-        services.admin_state(),
+    persist_assistant_artifact(PersistAssistantArtifactParams {
+        admin_state: services.admin_state(),
         usage_event_id,
-        resolve_assistant_artifact(
+        artifact: resolve_assistant_artifact(
             captured_artifact,
             Some(&capture.response_text),
             response_prompt.as_deref(),
         ),
         artifact_capture_expected,
-        request_ctx.request_prompt_log.conversation_id,
+        conversation_id: request_ctx.request_prompt_log.conversation_id,
         request,
-        &route_ctx.route,
-        capture.response_id.as_deref(),
-    )
+        route: &route_ctx.route,
+        provider_response_id: capture.response_id.as_deref(),
+    })
     .await;
     Ok(())
 }
@@ -1047,20 +1049,20 @@ async fn forward_buffered_non_sse_response(
         )
         .await;
     let artifact_capture_expected = assistant_capture.is_some() || responses_capture.is_some();
-    persist_assistant_artifact(
-        services.admin_state(),
+    persist_assistant_artifact(PersistAssistantArtifactParams {
+        admin_state: services.admin_state(),
         usage_event_id,
-        resolve_assistant_artifact(
+        artifact: resolve_assistant_artifact(
             captured_artifact,
             Some(&capture.response_text),
             response_prompt.as_deref(),
         ),
         artifact_capture_expected,
-        request_ctx.request_prompt_log.conversation_id,
+        conversation_id: request_ctx.request_prompt_log.conversation_id,
         request,
-        &route_ctx.route,
-        capture.response_id.as_deref(),
-    )
+        route: &route_ctx.route,
+        provider_response_id: capture.response_id.as_deref(),
+    })
     .await;
     Ok(())
 }

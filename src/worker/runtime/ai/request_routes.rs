@@ -24,39 +24,77 @@ pub(super) async fn resolve_route(
     request_ctx: &RequestExecutionContext,
 ) -> anyhow::Result<RouteResolution> {
     if let Some(state) = services.standalone_state() {
-        let user_id = request_ctx.user_id.or(request.user_id).unwrap_or_default();
-        let snapshot = state.snapshot().await;
-        if let Some(candidate) =
-            crate::worker::runtime::standalone::standalone_model_route_candidate(
-                &snapshot,
-                user_id,
-                request_ctx.request_model.as_deref(),
-            )
-        {
-            let selected = select_route_for_candidate(
-                services,
-                request_ctx,
-                &candidate,
-                request,
-                user_id,
-                request.client_key_hash.as_deref(),
-            )
-            .await?
-            .ok_or_else(|| anyhow!("route not found"))?;
-            return Ok(RouteResolution::Ready {
-                route: Box::new(selected.route),
-            });
-        }
-        return Ok(RouteResolution::Ready {
-            route: Box::new(default_route_for_user(config, user_id)),
-        });
+        return Box::pin(resolve_standalone_route(
+            request,
+            config,
+            services,
+            request_ctx,
+            state,
+        ))
+        .await;
     }
     let Some(state) = services.admin_state() else {
-        return Ok(RouteResolution::Ready {
-            route: Box::new(default_route(config, request)),
-        });
+        return Box::pin(resolve_no_state_route(config, request)).await;
     };
+    Box::pin(resolve_admin_route(
+        request,
+        config,
+        services,
+        request_ctx,
+        state,
+    ))
+    .await
+}
 
+async fn resolve_standalone_route(
+    request: &BufferedBridgeRequest,
+    config: &WorkerConfig,
+    services: &RuntimeServices,
+    request_ctx: &RequestExecutionContext,
+    state: &crate::worker::runtime::standalone::StandaloneRuntimeState,
+) -> anyhow::Result<RouteResolution> {
+    let user_id = request_ctx.user_id.or(request.user_id).unwrap_or_default();
+    let snapshot = state.snapshot().await;
+    if let Some(candidate) = crate::worker::runtime::standalone::standalone_model_route_candidate(
+        &snapshot,
+        user_id,
+        request_ctx.request_model.as_deref(),
+    ) {
+        let selected = select_route_for_candidate(
+            services,
+            request_ctx,
+            &candidate,
+            request,
+            user_id,
+            request.client_key_hash.as_deref(),
+        )
+        .await?
+        .ok_or_else(|| anyhow!("route not found"))?;
+        return Ok(RouteResolution::Ready {
+            route: Box::new(selected.route),
+        });
+    }
+    Ok(RouteResolution::Ready {
+        route: Box::new(default_route_for_user(config, user_id)),
+    })
+}
+
+async fn resolve_no_state_route(
+    config: &WorkerConfig,
+    request: &BufferedBridgeRequest,
+) -> anyhow::Result<RouteResolution> {
+    Ok(RouteResolution::Ready {
+        route: Box::new(default_route(config, request)),
+    })
+}
+
+async fn resolve_admin_route(
+    request: &BufferedBridgeRequest,
+    config: &WorkerConfig,
+    services: &RuntimeServices,
+    request_ctx: &RequestExecutionContext,
+    state: &crate::worker_admin::AdminState,
+) -> anyhow::Result<RouteResolution> {
     let user_id = request.user_id.unwrap_or_default();
     let whitelist_enabled = state
         .model_route_whitelist_enabled
@@ -82,7 +120,7 @@ pub(super) async fn resolve_route(
         )
         .await?
         {
-            respond_with_budget_error(
+            Box::pin(respond_with_budget_error(
                 services,
                 request,
                 request_ctx,
@@ -111,7 +149,7 @@ pub(super) async fn resolve_route(
                     route_selection_reason: db::RouteSelectionReason::Default,
                 },
                 message,
-            )
+            ))
             .await?;
             return Ok(RouteResolution::Responded);
         }
@@ -189,9 +227,9 @@ mod tests {
             RouteScope, RoutingStrategy, StandaloneConfig,
         },
         worker::runtime::{
-            WorkerRuntimeState, prompt_log::RequestPromptLog,
-            request_assembly::BufferedBridgeRequest, standalone::StandaloneRuntimeState,
-            tests::session_affinity_services,
+            WorkerRuntimeState, context::RequestExecutionContextParams,
+            prompt_log::RequestPromptLog, request_assembly::BufferedBridgeRequest,
+            standalone::StandaloneRuntimeState, tests::session_affinity_services,
         },
     };
     use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -230,7 +268,7 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_route_resolution_uses_local_snapshot_and_default_fallback() {
-        let _redaction_guard = crate::redact_test_support::lock();
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         let path = database_path();
         let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
         let endpoint_id = uuid::Uuid::new_v4();
@@ -286,16 +324,16 @@ mod tests {
         )
         .with_standalone_state(standalone);
         let request = request();
-        let request_ctx = RequestExecutionContext::new(
-            uuid::Uuid::new_v4(),
-            Instant::now(),
-            Some("local-model".to_string()),
-            None,
-            None,
-            Some(7),
-            runtime_state.worker_instance_id(),
-            RequestPromptLog::default(),
-        );
+        let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {
+            request_id: uuid::Uuid::new_v4(),
+            started: Instant::now(),
+            request_model: Some("local-model".to_string()),
+            client_key_id: None,
+            client_key_label: None,
+            user_id: Some(7),
+            owner_worker_id: runtime_state.worker_instance_id(),
+            request_prompt_log: RequestPromptLog::default(),
+        });
         let route = resolve_route(&request, &WorkerConfig::default(), &services, &request_ctx)
             .await
             .expect("local route")
@@ -307,16 +345,16 @@ mod tests {
             body: br#"{"model":"other-model"}"#.to_vec(),
             ..request
         };
-        let fallback_context = RequestExecutionContext::new(
-            uuid::Uuid::new_v4(),
-            Instant::now(),
-            Some("other-model".to_string()),
-            None,
-            None,
-            Some(7),
-            runtime_state.worker_instance_id(),
-            RequestPromptLog::default(),
-        );
+        let fallback_context = RequestExecutionContext::new(RequestExecutionContextParams {
+            request_id: uuid::Uuid::new_v4(),
+            started: Instant::now(),
+            request_model: Some("other-model".to_string()),
+            client_key_id: None,
+            client_key_label: None,
+            user_id: Some(7),
+            owner_worker_id: runtime_state.worker_instance_id(),
+            request_prompt_log: RequestPromptLog::default(),
+        });
         let fallback = resolve_route(
             &fallback_request,
             &WorkerConfig::default(),

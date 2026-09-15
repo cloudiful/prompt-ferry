@@ -126,7 +126,7 @@ pub(super) struct RequestLeaseGuard {
 /// caller only needs to know the abstract `RequestLeaseGuard` type.
 pub(super) enum RequestLeaseGuardKind {
     #[allow(dead_code)]
-    Managed(ManagedLeaseGuard),
+    Managed(Box<ManagedLeaseGuard>),
     #[allow(dead_code)]
     Standalone(super::lifecycle_standalone::StandaloneRequestLeaseGuard),
 }
@@ -218,11 +218,11 @@ impl RequestLeaseGuard {
             }
         });
         Some(Self {
-            inner: RequestLeaseGuardKind::Managed(ManagedLeaseGuard {
+            inner: RequestLeaseGuardKind::Managed(Box::new(ManagedLeaseGuard {
                 handle,
                 request_id,
                 admin_state: admin_state.cloned(),
-            }),
+            })),
         })
     }
 

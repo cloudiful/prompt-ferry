@@ -144,17 +144,30 @@ pub(super) struct RequestExecutionContext {
     pub(super) request_prompt_log: RequestPromptLog,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct RequestExecutionContextParams {
+    pub(super) request_id: Uuid,
+    pub(super) started: Instant,
+    pub(super) request_model: Option<String>,
+    pub(super) client_key_id: Option<i64>,
+    pub(super) client_key_label: Option<String>,
+    pub(super) user_id: Option<i64>,
+    pub(super) owner_worker_id: Uuid,
+    pub(super) request_prompt_log: RequestPromptLog,
+}
+
 impl RequestExecutionContext {
-    pub(super) fn new(
-        request_id: Uuid,
-        started: Instant,
-        request_model: Option<String>,
-        client_key_id: Option<i64>,
-        client_key_label: Option<String>,
-        user_id: Option<i64>,
-        owner_worker_id: Uuid,
-        request_prompt_log: RequestPromptLog,
-    ) -> Self {
+    pub(super) fn new(params: RequestExecutionContextParams) -> Self {
+        let RequestExecutionContextParams {
+            request_id,
+            started,
+            request_model,
+            client_key_id,
+            client_key_label,
+            user_id,
+            owner_worker_id,
+            request_prompt_log,
+        } = params;
         Self {
             request_id,
             started,

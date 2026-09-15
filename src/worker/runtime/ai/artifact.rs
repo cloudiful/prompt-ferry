@@ -108,16 +108,28 @@ async fn persist_tool_call_events(
     }
 }
 
-pub(super) async fn persist_assistant_artifact(
-    admin_state: Option<&AdminState>,
-    usage_event_id: Option<i64>,
-    artifact: Option<AssistantArtifact>,
-    artifact_capture_expected: bool,
-    conversation_id: Option<uuid::Uuid>,
-    request: &BufferedBridgeRequest,
-    route: &db::RouteConfig,
-    provider_response_id: Option<&str>,
-) {
+pub(super) struct PersistAssistantArtifactParams<'a> {
+    pub(super) admin_state: Option<&'a AdminState>,
+    pub(super) usage_event_id: Option<i64>,
+    pub(super) artifact: Option<AssistantArtifact>,
+    pub(super) artifact_capture_expected: bool,
+    pub(super) conversation_id: Option<uuid::Uuid>,
+    pub(super) request: &'a BufferedBridgeRequest,
+    pub(super) route: &'a db::RouteConfig,
+    pub(super) provider_response_id: Option<&'a str>,
+}
+
+pub(super) async fn persist_assistant_artifact(params: PersistAssistantArtifactParams<'_>) {
+    let PersistAssistantArtifactParams {
+        admin_state,
+        usage_event_id,
+        artifact,
+        artifact_capture_expected,
+        conversation_id,
+        request,
+        route,
+        provider_response_id,
+    } = params;
     let (Some(state), Some(event_id)) = (admin_state, usage_event_id) else {
         return;
     };

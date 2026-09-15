@@ -7,8 +7,10 @@ use crate::{
 };
 
 use super::super::{
-    RequestExecutionContext, RequestPromptLog, context::RuntimeServices,
-    error_handling::redaction_enabled, prepare_request_prompt_log,
+    RequestExecutionContext, RequestPromptLog,
+    context::{RequestExecutionContextParams, RuntimeServices},
+    error_handling::redaction_enabled,
+    prepare_request_prompt_log,
     request_assembly::BufferedBridgeRequest,
 };
 
@@ -82,15 +84,15 @@ pub(super) async fn initialize_request(
         raw_content_logging_enabled,
         method,
         redact_content,
-        request_ctx: RequestExecutionContext::new(
+        request_ctx: RequestExecutionContext::new(RequestExecutionContextParams {
             request_id,
             started,
             request_model,
             client_key_id,
             client_key_label,
             user_id,
-            services.runtime_state.worker_instance_id(),
+            owner_worker_id: services.runtime_state.worker_instance_id(),
             request_prompt_log,
-        ),
+        }),
     })
 }

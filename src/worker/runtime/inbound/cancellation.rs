@@ -13,16 +13,28 @@ use crate::{
 
 use super::super::request_assembly::{PendingIncomingRequest, RequestCancellation};
 
-pub(super) async fn cancel_request(
-    pending_requests: &Arc<Mutex<HashMap<String, PendingIncomingRequest>>>,
-    cancellations: &Arc<Mutex<HashMap<String, RequestCancellation>>>,
-    admin_state: Option<&AdminState>,
-    standalone_state: Option<&StandaloneRuntimeState>,
-    category: RequestRecordCategory,
-    request_id: &str,
-    reason: &str,
-    response_started: bool,
-) {
+pub(super) struct CancelRequestParams<'a> {
+    pub(super) pending_requests: &'a Arc<Mutex<HashMap<String, PendingIncomingRequest>>>,
+    pub(super) cancellations: &'a Arc<Mutex<HashMap<String, RequestCancellation>>>,
+    pub(super) admin_state: Option<&'a AdminState>,
+    pub(super) standalone_state: Option<&'a StandaloneRuntimeState>,
+    pub(super) category: RequestRecordCategory,
+    pub(super) request_id: &'a str,
+    pub(super) reason: &'a str,
+    pub(super) response_started: bool,
+}
+
+pub(super) async fn cancel_request(params: CancelRequestParams<'_>) {
+    let CancelRequestParams {
+        pending_requests,
+        cancellations,
+        admin_state,
+        standalone_state,
+        category,
+        request_id,
+        reason,
+        response_started,
+    } = params;
     let abort_reason = RequestAbortReason::from_relay_reason(reason);
     let abort_message = abort_message(reason, abort_reason);
     if let Some(state) = admin_state
@@ -206,16 +218,16 @@ mod tests {
         // Awaiting cancel_request must complete the durable SQLite write
         // before it returns, so the reopened ledger already contains the
         // aborted summary without any further polling.
-        super::cancel_request(
-            &pending_requests,
-            &cancellations,
-            None,
-            Some(&state),
-            RequestRecordCategory::Ai,
-            &request_id.to_string(),
-            "downstream_closed",
-            false,
-        )
+        super::cancel_request(super::CancelRequestParams {
+            pending_requests: &pending_requests,
+            cancellations: &cancellations,
+            admin_state: None,
+            standalone_state: Some(&state),
+            category: RequestRecordCategory::Ai,
+            request_id: &request_id.to_string(),
+            reason: "downstream_closed",
+            response_started: false,
+        })
         .await;
 
         // After the awaited call, the open store must already observe the

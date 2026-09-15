@@ -15,7 +15,7 @@ use axum::{
     body::Body,
     extract::{ConnectInfo, Extension, State},
     http::{HeaderMap, Method, StatusCode, Uri, header},
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use bytes::Bytes;
 use std::{net::IpAddr, time::Duration};
@@ -52,8 +52,8 @@ async fn proxy_request(
     path: String,
     body: Body,
 ) -> Response {
-    if let Err(response) = enforce_public_ip_policy(&state, peer_ip, &headers).await {
-        return response;
+    if let Err(err) = enforce_public_ip_policy(&state, peer_ip, &headers).await {
+        return err.into_response();
     }
 
     let request_id = Uuid::new_v4().to_string();
@@ -120,9 +120,9 @@ async fn proxy_request(
         http_request_compressed_bytes: compression.compressed_bytes,
     };
 
-    if let Err(response) = stream_request_body(&worker, bridge_request, compression, body).await {
+    if let Err(err) = stream_request_body(&worker, bridge_request, compression, body).await {
         remove_pending(&state, &request_id).await;
-        return response;
+        return err.into_response();
     }
 
     let timeout = Duration::from_secs(state.config.request_timeout_seconds);

@@ -155,7 +155,7 @@ mod tests {
 
     #[tokio::test]
     async fn publishes_local_client_key_hash_prefix_route_and_policy() {
-        let _redaction_guard = crate::redact_test_support::lock();
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         let path = database_path();
         let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
         let endpoint_id = Uuid::new_v4();

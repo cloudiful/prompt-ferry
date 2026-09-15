@@ -179,8 +179,10 @@ static REDACTION_RUNTIME: LazyLock<RwLock<RedactionRuntimeStore>> =
 
 // Unconditional so downstream `test_support` helpers can lock it even when
 // this crate is built as a non-test dependency of `prompt-ferry` tests.
-pub static TEST_REDACTION_LOCK: LazyLock<std::sync::Mutex<()>> =
-    LazyLock::new(|| std::sync::Mutex::new(()));
+// `tokio::sync::Mutex` keeps `clippy::await_holding_lock` quiet when the
+// guard is held across `.await` in async tests.
+pub static TEST_REDACTION_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 pub fn apply_config(config: &RedactionConfig) -> Result<(), RedactorError> {
     let normalized = config.normalized();

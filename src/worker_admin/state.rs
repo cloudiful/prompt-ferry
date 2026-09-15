@@ -254,6 +254,61 @@ impl AdminState {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ApiError {
+    status: StatusCode,
+    code: String,
+    message: String,
+}
+
+impl ApiError {
+    pub fn new(status: StatusCode, code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, "bad_request", message)
+    }
+
+    pub fn internal(state: &AdminState, err: impl std::fmt::Display) -> Self {
+        let message = format!("{err:#}");
+        tracing::warn!(error = %maybe_redact(state, &message), "admin api error");
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "internal server error",
+        )
+    }
+
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl From<ApiError> for Response {
+    fn from(err: ApiError) -> Response {
+        error(err.status, &err.code, &err.message)
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        Response::from(self)
+    }
+}
+
 pub fn bad_request(message: &str) -> Response {
     error(StatusCode::BAD_REQUEST, "bad_request", message)
 }
@@ -261,21 +316,25 @@ pub fn bad_request(message: &str) -> Response {
 pub async fn ensure_admin(
     state: &AdminState,
     headers: &HeaderMap,
-) -> Result<SessionUser, Response> {
+) -> Result<SessionUser, ApiError> {
     let user = current_user(state, headers).await?;
     if user.is_admin {
         Ok(user)
     } else {
-        Err(error(StatusCode::FORBIDDEN, "forbidden", "admin required"))
+        Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "admin required",
+        ))
     }
 }
 
 pub async fn current_user(
     state: &AdminState,
     headers: &HeaderMap,
-) -> Result<SessionUser, Response> {
+) -> Result<SessionUser, ApiError> {
     let Some(id) = session_id(headers) else {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "login required",
@@ -283,14 +342,14 @@ pub async fn current_user(
     };
     match state.replay_cache.read_session_refresh(id).await {
         Ok(Some(user)) => Ok(user),
-        Ok(None) => Err(error(
+        Ok(None) => Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "login required",
         )),
         Err(err) => {
             tracing::warn!(error = %maybe_redact(state, &err.to_string()), "session backend unavailable");
-            Err(error(
+            Err(ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "service_unavailable",
                 "session backend unavailable",

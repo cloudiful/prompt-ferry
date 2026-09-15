@@ -136,16 +136,16 @@ pub(super) async fn handle_relay_bridge_message(
             .await;
         }
         BridgeMessage::RequestCancel(cancel) => {
-            cancellation::cancel_request(
-                &services.runtime_state.pending_requests,
-                &services.runtime_state.request_cancellations,
-                services.admin_state(),
-                services.standalone_state(),
-                crate::db::RequestRecordCategory::Ai,
-                &cancel.request_id,
-                &cancel.reason,
-                cancel.response_started,
-            )
+            cancellation::cancel_request(cancellation::CancelRequestParams {
+                pending_requests: &services.runtime_state.pending_requests,
+                cancellations: &services.runtime_state.request_cancellations,
+                admin_state: services.admin_state(),
+                standalone_state: services.standalone_state(),
+                category: crate::db::RequestRecordCategory::Ai,
+                request_id: &cancel.request_id,
+                reason: &cancel.reason,
+                response_started: cancel.response_started,
+            })
             .await;
         }
         BridgeMessage::McpRequestStart(request) => {
@@ -241,16 +241,16 @@ pub(super) async fn handle_relay_bridge_message(
             .await;
         }
         BridgeMessage::McpRequestCancel(cancel) => {
-            cancellation::cancel_request(
-                &services.runtime_state.pending_mcp_requests,
-                &services.runtime_state.mcp_request_cancellations,
-                services.admin_state(),
-                services.standalone_state(),
-                crate::db::RequestRecordCategory::Mcp,
-                &cancel.request_id,
-                &cancel.reason,
-                cancel.response_started,
-            )
+            cancellation::cancel_request(cancellation::CancelRequestParams {
+                pending_requests: &services.runtime_state.pending_mcp_requests,
+                cancellations: &services.runtime_state.mcp_request_cancellations,
+                admin_state: services.admin_state(),
+                standalone_state: services.standalone_state(),
+                category: crate::db::RequestRecordCategory::Mcp,
+                request_id: &cancel.request_id,
+                reason: &cancel.reason,
+                response_started: cancel.response_started,
+            })
             .await;
         }
         BridgeMessage::RealtimeSessionStart(request) => {
@@ -270,7 +270,10 @@ pub(super) async fn handle_relay_bridge_message(
             let services = services.clone();
             tokio::spawn(async move {
                 let _active_guard = active_guard;
-                start_realtime_session(request, event_rx, &config, &services).await;
+                Box::pin(start_realtime_session(
+                    request, event_rx, &config, &services,
+                ))
+                .await;
             });
         }
         BridgeMessage::RealtimeClientEvent(event) => {

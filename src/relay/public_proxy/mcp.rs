@@ -11,13 +11,14 @@ use super::super::{
     state::{AppState, PendingMcpRequest, RemoteAddr, WorkerSender},
 };
 use super::{
-    DownstreamStreamDiag, authorize_client, enforce_public_ip_policy, header_value, sse_error_event,
+    ApiError, DownstreamStreamDiag, authorize_client, enforce_public_ip_policy, header_value,
+    sse_error_event,
 };
 use axum::{
     body::Body,
     extract::{ConnectInfo, Extension, State},
     http::{HeaderMap, Method, StatusCode, header},
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use bytes::Bytes;
 use futures::StreamExt;
@@ -108,12 +109,12 @@ async fn proxy_mcp_request(
         "mcp request received"
     );
 
-    if let Err(response) = enforce_public_ip_policy(&state, peer_ip, &headers).await {
-        return response;
+    if let Err(err) = enforce_public_ip_policy(&state, peer_ip, &headers).await {
+        return err.into_response();
     }
     let route = match authorize_client(&state, &headers).await {
         Ok(route) => route,
-        Err(response) => return response,
+        Err(err) => return err.into_response(),
     };
     let selection = match choose_worker(&state).await {
         Some(selection) => selection,
@@ -168,9 +169,9 @@ async fn proxy_mcp_request(
         http_request_compressed: compression.compressed,
         http_request_compressed_bytes: compression.compressed_bytes,
     };
-    if let Err(response) = stream_mcp_body(&worker, start, compression, body).await {
+    if let Err(err) = stream_mcp_body(&worker, start, compression, body).await {
         remove_mcp_pending(&state, &request_id).await;
-        return response;
+        return err.into_response();
     }
     let timeout = Duration::from_secs(state.config.request_timeout_seconds);
     let mut cleanup = PendingCleanup::mcp(state.clone(), request_id.clone());
@@ -316,7 +317,7 @@ async fn stream_mcp_body(
     start: McpRequestStart,
     compression: HttpRequestCompressionContext,
     body: Body,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     let mut stream = body.into_data_stream();
     let request_id = start.request_id.clone();
     let mut started = false;
@@ -333,10 +334,10 @@ async fn stream_mcp_body(
                     )
                     .await;
                 }
-                return Err(crate::auth::error_response(
+                return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "request_body_read_failed",
-                    &format!("failed to read MCP request body: {err}"),
+                    format!("failed to read MCP request body: {err}"),
                 ));
             }
         };
@@ -346,7 +347,7 @@ async fn stream_mcp_body(
             if started {
                 send_mcp_request_cancel(worker, &request_id, "request_body_too_large", false);
             }
-            return Err(crate::auth::error_response(
+            return Err(ApiError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "request_too_large",
                 "request body exceeds the maximum allowed size",
@@ -365,7 +366,7 @@ async fn stream_mcp_body(
             .await
             .is_err()
         {
-            return Err(crate::auth::error_response(
+            return Err(ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "worker_disconnected",
                 "worker disconnected while streaming MCP request body",
@@ -407,13 +408,13 @@ fn forwardable_mcp_headers(headers: &HeaderMap) -> Vec<(String, String)> {
 async fn send_mcp_request_start(
     worker: &WorkerSender,
     start: McpRequestStart,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     if worker
         .send(BridgeMessage::McpRequestStart(start))
         .await
         .is_err()
     {
-        return Err(crate::auth::error_response(
+        return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "worker_disconnected",
             "worker disconnected before MCP request was sent",
@@ -426,7 +427,7 @@ async fn send_mcp_request_end(
     worker: &WorkerSender,
     request_id: &str,
     stats: HttpRequestTransferStats,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     if worker
         .send(BridgeMessage::McpRequestEnd(McpRequestEnd {
             request_id: request_id.to_string(),
@@ -437,7 +438,7 @@ async fn send_mcp_request_end(
         .await
         .is_err()
     {
-        return Err(crate::auth::error_response(
+        return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "worker_disconnected",
             "worker disconnected before MCP request finished",

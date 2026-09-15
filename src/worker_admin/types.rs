@@ -19,8 +19,8 @@ mod settings;
 #[path = "types/usage.rs"]
 mod usage;
 
-use crate::worker_admin_state::error;
-use axum::{http::StatusCode, response::Response};
+use crate::worker_admin_state::ApiError;
+use axum::http::StatusCode;
 
 pub use approvals::*;
 pub use auth_users::*;
@@ -34,16 +34,13 @@ pub use relays::*;
 pub use settings::*;
 pub use usage::*;
 
-fn validate_request_budget_limit(
-    value: Option<i32>,
-    field_name: &str,
-) -> Result<(), Box<Response>> {
+fn validate_request_budget_limit(value: Option<i32>, field_name: &str) -> Result<(), ApiError> {
     if value.is_some_and(|limit| limit <= 0) {
-        return Err(Box::new(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_budget_limit",
-            &format!("{field_name} must be greater than 0"),
-        )));
+            format!("{field_name} must be greater than 0"),
+        ));
     }
     Ok(())
 }

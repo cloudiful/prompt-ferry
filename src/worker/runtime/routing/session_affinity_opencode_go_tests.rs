@@ -54,9 +54,9 @@ fn opencode_go_key(
     }
 }
 
-fn opencode_go_usage(
-    keys: &[(Uuid, &str, Option<f64>, Option<f64>, Option<f64>)],
-) -> TokenPlanUsageResponse {
+type OpencodeGoKeySpec<'a> = (Uuid, &'a str, Option<f64>, Option<f64>, Option<f64>);
+
+fn opencode_go_usage(keys: &[OpencodeGoKeySpec<'_>]) -> TokenPlanUsageResponse {
     TokenPlanUsageResponse {
         local_today_tokens: None,
         provider: db::EndpointProvider::OpencodeGo,

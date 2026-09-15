@@ -10,7 +10,7 @@ pub(super) async fn list_client_keys(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let first = query.first.unwrap_or(0).max(0);
     let rows = query.rows.unwrap_or(20).clamp(1, 200);
@@ -37,7 +37,7 @@ pub(super) async fn create_client_key(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let label = body.label.as_deref();
     match state
@@ -61,7 +61,7 @@ pub(super) async fn update_client_key(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let identifier = match parse_client_key_identifier(&key_id) {
         Ok(identifier) => identifier,
@@ -97,7 +97,7 @@ pub(super) async fn delete_client_key(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let identifier = match parse_client_key_identifier(&key_id) {
         Ok(identifier) => identifier,
@@ -133,7 +133,7 @@ pub(super) async fn list_available_models(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if state.user_store.is_sqlite() {
         return state.capability_unavailable(db::Capability::AvailableModels);

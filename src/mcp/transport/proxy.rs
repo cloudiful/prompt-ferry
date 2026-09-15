@@ -32,13 +32,16 @@ use reqwest::{Client, NoProxy, Proxy};
 
 use crate::db;
 
-static MCP_PROXY_POOL: OnceLock<Mutex<HashMap<(String, String, String), Client>>> = OnceLock::new();
+type McpProxyPoolKey = (String, String, String);
+type McpProxyPool = HashMap<McpProxyPoolKey, Client>;
 
-fn pool() -> &'static Mutex<HashMap<(String, String, String), Client>> {
+static MCP_PROXY_POOL: OnceLock<Mutex<McpProxyPool>> = OnceLock::new();
+
+fn pool() -> &'static Mutex<McpProxyPool> {
     MCP_PROXY_POOL.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn lock_pool() -> std::sync::MutexGuard<'static, HashMap<(String, String, String), Client>> {
+fn lock_pool() -> std::sync::MutexGuard<'static, McpProxyPool> {
     pool()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

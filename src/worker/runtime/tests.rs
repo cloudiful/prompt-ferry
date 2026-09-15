@@ -7,7 +7,7 @@ use crate::{
     mcp::{McpCatalogCache, McpCatalogService},
     redact_test_support::secret_redaction,
     replay_cache::ReplayCache,
-    worker::runtime::context::{ResponseLimits, RuntimeServices},
+    worker::runtime::context::{RequestExecutionContextParams, ResponseLimits, RuntimeServices},
     worker_admin_state::{AdminState, AdminStateInit},
     worker_admin_types::{
         RequestContentLoggingMode, RequestContentLoggingResponse, UsageRetentionSettings,
@@ -111,21 +111,21 @@ fn safe_error_preserves_error_chain() {
 
 #[test]
 fn request_execution_context_preserves_usage_fields() {
-    let request_ctx = RequestExecutionContext::new(
-        uuid::Uuid::new_v4(),
-        Instant::now(),
-        Some("gpt-5".to_string()),
-        None,
-        Some("desktop".to_string()),
-        Some(7),
-        uuid::Uuid::new_v4(),
-        RequestPromptLog {
+    let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {
+        request_id: uuid::Uuid::new_v4(),
+        started: Instant::now(),
+        request_model: Some("gpt-5".to_string()),
+        client_key_id: None,
+        client_key_label: Some("desktop".to_string()),
+        user_id: Some(7),
+        owner_worker_id: uuid::Uuid::new_v4(),
+        request_prompt_log: RequestPromptLog {
             conversation_id: Some(uuid::Uuid::new_v4()),
             conversation_seq: Some(3),
             conversation_source: "responses".to_string(),
             ..RequestPromptLog::default()
         },
-    );
+    });
     let request = BufferedBridgeRequest {
         request_id: uuid::Uuid::new_v4().to_string(),
         method: "POST".to_string(),
@@ -320,21 +320,21 @@ async fn session_affinity_uses_preferred_endpoint() {
     let services = session_affinity_services(runtime_state.clone(), ReplayCache::for_tests());
     let candidate = session_affinity_candidate();
     let preferred = candidate.targets[0].endpoint_id;
-    let request_ctx = RequestExecutionContext::new(
-        uuid::Uuid::new_v4(),
-        Instant::now(),
-        Some("gpt-4.1-mini".to_string()),
-        None,
-        None,
-        Some(1),
-        runtime_state.worker_instance_id(),
-        RequestPromptLog {
+    let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {
+        request_id: uuid::Uuid::new_v4(),
+        started: Instant::now(),
+        request_model: Some("gpt-4.1-mini".to_string()),
+        client_key_id: None,
+        client_key_label: None,
+        user_id: Some(1),
+        owner_worker_id: runtime_state.worker_instance_id(),
+        request_prompt_log: RequestPromptLog {
             conversation_id: Some(uuid::Uuid::new_v4()),
             conversation_seq: Some(1),
             preferred_endpoint_id: Some(preferred),
             ..RequestPromptLog::default()
         },
-    );
+    });
 
     let selected = select_route_for_candidate(
         &services,
@@ -361,20 +361,20 @@ async fn session_affinity_draws_and_pins_a_new_identity() {
     let services = session_affinity_services(runtime_state.clone(), ReplayCache::for_tests());
     let candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
-    let request_ctx = RequestExecutionContext::new(
-        uuid::Uuid::new_v4(),
-        Instant::now(),
-        Some("gpt-4.1-mini".to_string()),
-        None,
-        None,
-        Some(1),
-        runtime_state.worker_instance_id(),
-        RequestPromptLog {
+    let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {
+        request_id: uuid::Uuid::new_v4(),
+        started: Instant::now(),
+        request_model: Some("gpt-4.1-mini".to_string()),
+        client_key_id: None,
+        client_key_label: None,
+        user_id: Some(1),
+        owner_worker_id: runtime_state.worker_instance_id(),
+        request_prompt_log: RequestPromptLog {
             conversation_id: Some(conversation_id),
             conversation_seq: Some(1),
             ..RequestPromptLog::default()
         },
-    );
+    });
 
     let first = select_route_for_candidate(
         &services,
@@ -443,18 +443,18 @@ async fn session_affinity_requires_stable_identity() {
         client_key_hash: None,
         ..sample_request()
     };
-    let request_ctx = RequestExecutionContext::new(
-        uuid::Uuid::new_v4(),
-        Instant::now(),
-        Some("gpt-4.1-mini".to_string()),
-        None,
-        None,
-        Some(1),
-        runtime_state.worker_instance_id(),
-        RequestPromptLog {
+    let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {
+        request_id: uuid::Uuid::new_v4(),
+        started: Instant::now(),
+        request_model: Some("gpt-4.1-mini".to_string()),
+        client_key_id: None,
+        client_key_label: None,
+        user_id: Some(1),
+        owner_worker_id: runtime_state.worker_instance_id(),
+        request_prompt_log: RequestPromptLog {
             ..RequestPromptLog::default()
         },
-    );
+    });
 
     let result = select_route_for_candidate(
         &services,
@@ -489,16 +489,16 @@ async fn selected_route_carries_target_upstream_model_override() {
         ResponseLimits::default(),
     );
     let mut candidate = sample_candidate();
-    let request_ctx = RequestExecutionContext::new(
-        uuid::Uuid::new_v4(),
-        Instant::now(),
-        Some("auto".to_string()),
-        None,
-        None,
-        Some(1),
-        runtime_state.worker_instance_id(),
-        RequestPromptLog::default(),
-    );
+    let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {
+        request_id: uuid::Uuid::new_v4(),
+        started: Instant::now(),
+        request_model: Some("auto".to_string()),
+        client_key_id: None,
+        client_key_label: None,
+        user_id: Some(1),
+        owner_worker_id: runtime_state.worker_instance_id(),
+        request_prompt_log: RequestPromptLog::default(),
+    });
     let first = select_route_for_candidate(
         &services,
         &request_ctx,

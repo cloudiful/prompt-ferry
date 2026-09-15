@@ -3,17 +3,18 @@ use reqwest::StatusCode;
 use super::preparation::{self, McpExecution};
 use super::streaming::{handle_buffered_transport_response, handle_streaming_transport_response};
 use super::{send_mcp_response, settle_quota};
-use crate::mcp;
 use crate::worker::runtime::context::{FailurePayload, RuntimeServices};
 use crate::worker::runtime::mcp_support::McpResponseContext;
 use crate::worker::runtime::{
     record_mcp_request_event, redaction_enabled, request_assembly::BufferedMcpRequest, safe_error,
 };
+use crate::{db, mcp};
 
 /// Stage orchestration for one buffered MCP request. Early stages may already
 /// have responded (admission failures), so `None` means the request ended.
 pub(super) async fn execute_mcp_request(request: BufferedMcpRequest, services: &RuntimeServices) {
-    let Some(execution) = preparation::build_request_context(request, services).await else {
+    let Some(execution) = Box::pin(preparation::build_request_context(request, services)).await
+    else {
         return;
     };
     let Some(execution) =
@@ -27,44 +28,44 @@ pub(super) async fn execute_mcp_request(request: BufferedMcpRequest, services: &
     Box::pin(run_transport(execution, services)).await;
 }
 
-/// Stage 4 + 5: execute the MCP transport, then settle quota and send the
-/// final response with usage recording on every outcome.
-async fn run_transport(execution: McpExecution, services: &RuntimeServices) {
-    let Some(state) = services.mcp_state() else {
-        return;
-    };
-    let result = mcp::handle_stream_with_storage(
+/// Stage 4: execute the MCP transport with narrowed inputs so the large
+/// execution holder is not kept alive inside the transport future.
+async fn invoke_mcp_transport(
+    state: &mcp::McpRuntimeState,
+    request: &BufferedMcpRequest,
+    effective_body: &[u8],
+    budget_grant: Option<&db::QuotaGrant>,
+) -> anyhow::Result<mcp::McpTransportResponse> {
+    mcp::handle_stream_with_storage(
         &state.storage,
         &state.catalog_cache,
         mcp::McpRequestContext {
-            user_id: execution.request.user_id,
-            server_name: execution.request.server_name.as_deref(),
-            method: &execution.request.method,
-            path: &execution.request.path,
-            headers: &execution.request.headers,
-            body: &execution.effective_body,
-            selected_credential: execution
-                .budget_grant
-                .as_ref()
-                .map(|grant| grant.credential.clone()),
+            user_id: request.user_id,
+            server_name: request.server_name.as_deref(),
+            method: &request.method,
+            path: &request.path,
+            headers: &request.headers,
+            body: effective_body,
+            selected_credential: budget_grant.map(|grant| grant.credential.clone()),
         },
         state.session_store.clone(),
         &state.allowed_origins,
     )
-    .await;
-    let mut response_context = McpResponseContext {
-        request: &execution.request,
-        request_ctx: &execution.request_ctx,
-        metadata: &execution.metadata,
-        request_content_logging: &execution.request_content_logging,
-        redact_content: execution.redact_content,
-        upstream_redacted_request_json: execution.upstream_redacted_request_json.clone(),
-        upstream_restore_session: execution.upstream_restore_session.clone(),
-        selected_token_slot: None,
-        server: execution.server.as_ref(),
-        services,
-    };
-    match result {
+    .await
+}
+
+/// Stage 5: settle quota and send the final response with usage recording on
+/// every outcome. Takes the response context by value plus narrowed
+/// references so each branch future stays small; the large transport
+/// handlers run behind `Box::pin`.
+async fn settle_and_respond(
+    services: &RuntimeServices,
+    mut context: McpResponseContext<'_>,
+    budget_grant: Option<&db::QuotaGrant>,
+    request_id: uuid::Uuid,
+    response: anyhow::Result<mcp::McpTransportResponse>,
+) {
+    match response {
         Ok(mcp::McpTransportResponse::Buffered {
             status,
             content_type,
@@ -72,21 +73,15 @@ async fn run_transport(execution: McpExecution, services: &RuntimeServices) {
             body,
             selected_token_slot,
         }) => {
-            settle_quota(
-                services,
-                execution.budget_grant.as_deref(),
-                execution.request_ctx.request_id,
-                status,
-            )
-            .await;
-            response_context.selected_token_slot = selected_token_slot;
-            handle_buffered_transport_response(
-                &response_context,
+            settle_quota(services, budget_grant, request_id, status).await;
+            context.selected_token_slot = selected_token_slot;
+            Box::pin(handle_buffered_transport_response(
+                &context,
                 status,
                 content_type,
                 headers,
                 body,
-            )
+            ))
             .await;
         }
         Ok(mcp::McpTransportResponse::Streaming {
@@ -96,45 +91,33 @@ async fn run_transport(execution: McpExecution, services: &RuntimeServices) {
             stream,
             selected_token_slot,
         }) => {
-            settle_quota(
-                services,
-                execution.budget_grant.as_deref(),
-                execution.request_ctx.request_id,
-                status,
-            )
-            .await;
-            response_context.selected_token_slot = selected_token_slot;
-            handle_streaming_transport_response(
-                &response_context,
+            settle_quota(services, budget_grant, request_id, status).await;
+            context.selected_token_slot = selected_token_slot;
+            Box::pin(handle_streaming_transport_response(
+                &context,
                 status,
                 content_type,
                 headers,
                 stream,
-            )
+            ))
             .await;
         }
         Err(err) => {
-            settle_quota(
-                services,
-                execution.budget_grant.as_deref(),
-                execution.request_ctx.request_id,
-                502,
-            )
-            .await;
+            settle_quota(services, budget_grant, request_id, 502).await;
             let body = serde_json::json!({
                 "error": {
                     "code": "mcp_error",
                     "message": safe_error(
                         &err,
                         redaction_enabled(services.admin_state()),
-                        execution.request_ctx.user_id,
+                        context.request_ctx.user_id,
                     ),
                 }
             })
             .to_string();
             send_mcp_response(
                 services,
-                &execution.request.request_id,
+                &context.request.request_id,
                 StatusCode::BAD_GATEWAY.as_u16(),
                 Some("application/json".to_string()),
                 Vec::new(),
@@ -142,14 +125,14 @@ async fn run_transport(execution: McpExecution, services: &RuntimeServices) {
             )
             .await;
             record_mcp_request_event(
-                &response_context,
+                &context,
                 FailurePayload {
                     status: StatusCode::BAD_GATEWAY,
                     error_code: "mcp_error".to_string(),
                     error_message: safe_error(
                         &err,
                         redaction_enabled(services.admin_state()),
-                        execution.request_ctx.user_id,
+                        context.request_ctx.user_id,
                     ),
                     upstream_error_body: Some(body),
                     response_body: None,
@@ -158,4 +141,43 @@ async fn run_transport(execution: McpExecution, services: &RuntimeServices) {
             .await;
         }
     }
+}
+
+/// Stage 4 + 5: execute the MCP transport, then settle quota and send the
+/// final response with usage recording on every outcome. Fields consumed by
+/// an earlier stage are taken so later stages stop retaining them.
+async fn run_transport(mut execution: McpExecution, services: &RuntimeServices) {
+    let Some(state) = services.mcp_state() else {
+        return;
+    };
+    let effective_body = execution.effective_body.take().unwrap_or_default();
+    let transport = Box::pin(invoke_mcp_transport(
+        state,
+        &execution.request,
+        &effective_body,
+        execution.budget_grant.as_deref(),
+    ))
+    .await;
+    drop(effective_body);
+    let request_id = execution.request_ctx.request_id;
+    let context = McpResponseContext {
+        request: &execution.request,
+        request_ctx: &execution.request_ctx,
+        metadata: &execution.metadata,
+        request_content_logging: &execution.request_content_logging,
+        redact_content: execution.redact_content,
+        upstream_redacted_request_json: execution.upstream_redacted_request_json.take(),
+        upstream_restore_session: execution.upstream_restore_session.take(),
+        selected_token_slot: None,
+        server: execution.server.as_ref(),
+        services,
+    };
+    Box::pin(settle_and_respond(
+        services,
+        context,
+        execution.budget_grant.as_deref(),
+        request_id,
+        transport,
+    ))
+    .await;
 }

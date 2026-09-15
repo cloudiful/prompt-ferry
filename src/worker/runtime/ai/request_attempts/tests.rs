@@ -1,6 +1,6 @@
 use super::super::super::{
     RequestExecutionContext, WorkerRuntimeState,
-    context::{BridgeSender, ResponseLimits, RuntimeServices},
+    context::{BridgeSender, RequestExecutionContextParams, ResponseLimits, RuntimeServices},
     request_assembly::BufferedBridgeRequest,
 };
 use super::*;
@@ -78,16 +78,16 @@ fn test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
 }
 
 fn test_request_ctx(runtime_state: &WorkerRuntimeState) -> RequestExecutionContext {
-    RequestExecutionContext::new(
-        uuid::Uuid::new_v4(),
-        Instant::now(),
-        Some("gpt-test".to_string()),
-        None,
-        None,
-        Some(1),
-        runtime_state.worker_instance_id(),
-        RequestPromptLog::default(),
-    )
+    RequestExecutionContext::new(RequestExecutionContextParams {
+        request_id: uuid::Uuid::new_v4(),
+        started: Instant::now(),
+        request_model: Some("gpt-test".to_string()),
+        client_key_id: None,
+        client_key_label: None,
+        user_id: Some(1),
+        owner_worker_id: runtime_state.worker_instance_id(),
+        request_prompt_log: RequestPromptLog::default(),
+    })
 }
 
 async fn forward_test_request(

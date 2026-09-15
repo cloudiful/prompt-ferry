@@ -1,6 +1,8 @@
 use super::super::super::{context::RuntimeServices, error_handling::maybe_redact_text};
 use super::super::{
-    artifact::{persist_assistant_artifact, resolve_assistant_artifact},
+    artifact::{
+        PersistAssistantArtifactParams, persist_assistant_artifact, resolve_assistant_artifact,
+    },
     errors::respond_with_client_error,
     request_attempts::{UpstreamAttemptFailure, UpstreamFailurePhase},
     request_support::ai_route_usage_log,
@@ -231,16 +233,20 @@ pub(super) async fn forward_non_stream_chat_response(
         )
         .await;
     let artifact_capture_expected = assistant_capture.is_some();
-    persist_assistant_artifact(
-        services.admin_state(),
+    persist_assistant_artifact(PersistAssistantArtifactParams {
+        admin_state: services.admin_state(),
         usage_event_id,
-        resolve_assistant_artifact(captured_artifact, None, artifact_response_text.as_deref()),
+        artifact: resolve_assistant_artifact(
+            captured_artifact,
+            None,
+            artifact_response_text.as_deref(),
+        ),
         artifact_capture_expected,
-        request_ctx.request_prompt_log.conversation_id,
+        conversation_id: request_ctx.request_prompt_log.conversation_id,
         request,
-        &route_ctx.route,
-        capture.response_id.as_deref(),
-    )
+        route: &route_ctx.route,
+        provider_response_id: capture.response_id.as_deref(),
+    })
     .await;
     Ok(())
 }
@@ -363,16 +369,20 @@ pub(super) async fn forward_non_stream_responses_response(
                 ),
         )
         .await;
-    persist_assistant_artifact(
-        services.admin_state(),
+    persist_assistant_artifact(PersistAssistantArtifactParams {
+        admin_state: services.admin_state(),
         usage_event_id,
-        resolve_assistant_artifact(captured_artifact, None, artifact_response_text.as_deref()),
-        true,
-        request_ctx.request_prompt_log.conversation_id,
+        artifact: resolve_assistant_artifact(
+            captured_artifact,
+            None,
+            artifact_response_text.as_deref(),
+        ),
+        artifact_capture_expected: true,
+        conversation_id: request_ctx.request_prompt_log.conversation_id,
         request,
-        &route_ctx.route,
-        usage_capture.response_id.as_deref(),
-    )
+        route: &route_ctx.route,
+        provider_response_id: usage_capture.response_id.as_deref(),
+    })
     .await;
     Ok(())
 }
@@ -485,16 +495,20 @@ pub(super) async fn forward_non_stream_anthropic_response(
                 ),
         )
         .await;
-    persist_assistant_artifact(
-        services.admin_state(),
+    persist_assistant_artifact(PersistAssistantArtifactParams {
+        admin_state: services.admin_state(),
         usage_event_id,
-        resolve_assistant_artifact(captured_artifact, None, artifact_response_text.as_deref()),
-        true,
-        request_ctx.request_prompt_log.conversation_id,
+        artifact: resolve_assistant_artifact(
+            captured_artifact,
+            None,
+            artifact_response_text.as_deref(),
+        ),
+        artifact_capture_expected: true,
+        conversation_id: request_ctx.request_prompt_log.conversation_id,
         request,
-        &route_ctx.route,
-        usage_capture.response_id.as_deref(),
-    )
+        route: &route_ctx.route,
+        provider_response_id: usage_capture.response_id.as_deref(),
+    })
     .await;
     Ok(())
 }

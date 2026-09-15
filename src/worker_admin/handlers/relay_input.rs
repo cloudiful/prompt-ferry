@@ -8,12 +8,12 @@ use crate::config::normalize_relay_url;
 pub(super) async fn resolve_create_relay_input(
     state: &AdminState,
     body: ManagedRelayRequest,
-) -> Result<db::ManagedRelayInput, Box<Response>> {
+) -> Result<db::ManagedRelayInput, ApiError> {
     let relay_url = normalize_relay_url(&body.relay_url);
     ensure_unique_relay_url(state, &relay_url, None).await?;
     let manager = state
         .relay_secret_manager()
-        .map_err(|err| Box::new(internal(state, err)))?;
+        .map_err(|err| ApiError::internal(state, err))?;
     let relay_ca = encrypt_create_secret(manager, body.relay_ca_pem, "relay_ca_pem")?;
     let client_cert = encrypt_create_secret(manager, body.client_cert_pem, "client_cert_pem")?;
     let client_key = encrypt_create_secret(manager, body.client_key_pem, "client_key_pem")?;
@@ -48,10 +48,10 @@ pub(super) async fn resolve_update_relay_input(
     state: &AdminState,
     existing: crate::db::config_repository::UnifiedManagedRelay,
     body: ManagedRelayPatchRequest,
-) -> Result<db::ManagedRelayInput, Box<Response>> {
+) -> Result<db::ManagedRelayInput, ApiError> {
     let manager = state
         .relay_secret_manager()
-        .map_err(|err| Box::new(internal(state, err)))?;
+        .map_err(|err| ApiError::internal(state, err))?;
     let name = body
         .name
         .as_deref()
@@ -125,19 +125,19 @@ pub(super) async fn resolve_update_relay_input(
 async fn load_existing_secrets(
     state: &AdminState,
     relay_id: uuid::Uuid,
-) -> Result<Option<crate::db::config_repository::ManagedRelaySecrets>, Box<Response>> {
+) -> Result<Option<crate::db::config_repository::ManagedRelaySecrets>, ApiError> {
     use crate::db::config_repository::relay_secrets_for_state;
     relay_secrets_for_state(state, relay_id)
         .await
-        .map_err(|err| Box::new(internal(state, err)))
+        .map_err(|err| ApiError::internal(state, err))
 }
 
 fn decrypt_secret(
     manager: &crate::relay_secrets::RelaySecretManager,
     secret: Option<&crate::relay_secrets::EncryptedSecretEnvelope>,
-) -> Result<Option<String>, Box<Response>> {
+) -> Result<Option<String>, ApiError> {
     secret
         .map(|value| manager.decrypt(value))
         .transpose()
-        .map_err(|err| Box::new(bad_request(&err.to_string())))
+        .map_err(|err| ApiError::bad_request(err.to_string()))
 }

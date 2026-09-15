@@ -163,7 +163,7 @@ async fn sqlite_services(
     PathBuf,
     tokio::sync::mpsc::Receiver<super::super::super::bridge::BridgeData>,
 ) {
-    let _redaction_guard = crate::redact_test_support::lock();
+    let _redaction_guard = crate::redact_test_support::lock_async().await;
     let path = database_path();
     let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
     let manager = RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");

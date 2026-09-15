@@ -6,7 +6,7 @@ pub(super) async fn list_approvals(
     Query(query): Query<ApprovalPageQuery>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match db::list_approval_requests_page(
         &state.pool,
@@ -27,7 +27,7 @@ pub(super) async fn get_approval(
     Path(approval_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
-        return response;
+        return response.into_response();
     }
     match db::get_approval_request(&state.pool, approval_id).await {
         Ok(Some(approval)) => Json(approval).into_response(),
@@ -43,7 +43,7 @@ pub(super) async fn approve_approval(
 ) -> Response {
     let user = match ensure_admin(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     resolve_approval(
         &state,
@@ -62,7 +62,7 @@ pub(super) async fn reject_approval(
 ) -> Response {
     let user = match ensure_admin(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     resolve_approval(
         &state,

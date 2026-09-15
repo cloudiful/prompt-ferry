@@ -4,6 +4,7 @@ use chrono::Utc;
 
 use super::super::{
     RequestExecutionContext, WorkerRuntimeState,
+    context::RequestExecutionContextParams,
     prompt_log::RequestPromptLog,
     tests::{sample_request, session_affinity_candidate, session_affinity_services},
 };
@@ -14,16 +15,16 @@ pub(super) fn request_context(
     worker_id: uuid::Uuid,
     prompt_log: RequestPromptLog,
 ) -> RequestExecutionContext {
-    RequestExecutionContext::new(
-        uuid::Uuid::new_v4(),
-        Instant::now(),
-        Some("gpt-4.1-mini".to_string()),
-        None,
-        None,
-        Some(1),
-        worker_id,
-        prompt_log,
-    )
+    RequestExecutionContext::new(RequestExecutionContextParams {
+        request_id: uuid::Uuid::new_v4(),
+        started: Instant::now(),
+        request_model: Some("gpt-4.1-mini".to_string()),
+        client_key_id: None,
+        client_key_label: None,
+        user_id: Some(1),
+        owner_worker_id: worker_id,
+        request_prompt_log: prompt_log,
+    })
 }
 
 #[tokio::test]

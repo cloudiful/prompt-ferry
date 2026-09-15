@@ -7,21 +7,23 @@ pub(in crate::worker_admin::handlers) async fn build_session_route_options_respo
     record_id: i64,
     visible_user_id: Option<i64>,
     fallback_user_id: i64,
-) -> Result<SessionRouteOptionsResponse, Response> {
+) -> Result<SessionRouteOptionsResponse, ApiError> {
     let event =
         get_visible_usage_event_detail_or_not_found(state, record_id, visible_user_id).await?;
     let Some(conversation_id) = event.conversation_id else {
-        return Err(bad_request("request record has no conversation_id"));
+        return Err(ApiError::bad_request(
+            "request record has no conversation_id",
+        ));
     };
     let route_user_id = event.user_id.unwrap_or(fallback_user_id);
     let affinity_user_ids = session_affinity_user_ids(event.user_id, fallback_user_id);
     let record_rule_id = db::get_request_record_route_locator(&state.pool, record_id)
         .await
-        .map_err(|err| internal(state, err))?
+        .map_err(|err| ApiError::internal(state, err))?
         .and_then(|locator| locator.model_route_rule_id);
     let override_entry = db::get_conversation_endpoint_override(&state.pool, conversation_id)
         .await
-        .map_err(|err| internal(state, err))?;
+        .map_err(|err| ApiError::internal(state, err))?;
     let (fallback_route, candidate) = db::resolve_model_route_with_fallback(
         &state.pool,
         route_user_id,
@@ -29,7 +31,7 @@ pub(in crate::worker_admin::handlers) async fn build_session_route_options_respo
         true,
     )
     .await
-    .map_err(|err| internal(state, err))?;
+    .map_err(|err| ApiError::internal(state, err))?;
 
     let mut options = if let Some(candidate) = candidate.as_ref() {
         build_candidate_session_route_options(&event, &override_entry, candidate)

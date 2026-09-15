@@ -12,7 +12,7 @@ pub(super) async fn list_quota_groups(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !user.is_admin {
         return forbidden(&state, &user);
@@ -30,13 +30,13 @@ pub(super) async fn create_quota_group(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !user.is_admin {
         return forbidden(&state, &user);
     }
     if let Err(response) = validate_quota_group(&body, None) {
-        return response;
+        return response.into_response();
     }
     match db::create_quota_group(&state.pool, McpQuotaGroupInput::from(body)).await {
         Ok(group) => Json(group).into_response(),
@@ -52,13 +52,13 @@ pub(super) async fn update_quota_group(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !user.is_admin {
         return forbidden(&state, &user);
     }
     if let Err(response) = validate_quota_group(&body, Some(group_id)) {
-        return response;
+        return response.into_response();
     }
     match db::update_quota_group(&state.pool, group_id, McpQuotaGroupInput::from(body)).await {
         Ok(Some(group)) => Json(group).into_response(),
@@ -74,7 +74,7 @@ pub(super) async fn delete_quota_group(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !user.is_admin {
         return forbidden(&state, &user);
@@ -93,7 +93,7 @@ pub(super) async fn quota_group_usage(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !user.is_admin {
         return forbidden(&state, &user);
@@ -124,7 +124,7 @@ pub(super) async fn list_server_credentials(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !user.is_admin {
         return forbidden(&state, &user);
@@ -154,7 +154,7 @@ pub(super) async fn bind_credential_group(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !user.is_admin {
         return forbidden(&state, &user);
@@ -211,7 +211,7 @@ pub(super) async fn refresh_server_credential_balance(
 ) -> Response {
     let user = match current_user(&state, &headers).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !user.is_admin {
         return forbidden(&state, &user);
@@ -280,9 +280,9 @@ pub(super) async fn refresh_server_credential_balance(
 fn validate_quota_group(
     body: &QuotaGroupRequest,
     group_id: Option<uuid::Uuid>,
-) -> Result<(), Response> {
+) -> Result<(), ApiError> {
     if body.name.trim().is_empty() {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_name",
             "quota group name is required",
@@ -292,7 +292,7 @@ fn validate_quota_group(
         || body.monthly_limit.is_some_and(|value| value < 0.0)
         || body.default_cost.is_some_and(|value| value < 0.0)
     {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_limit",
             "quota limits and default cost must be non-negative",
@@ -301,7 +301,7 @@ fn validate_quota_group(
     if let (Some(start), Some(end)) = (body.billing_period_start, body.billing_period_end)
         && end <= start
     {
-        return Err(error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_period",
             "billing_period_end must be after billing_period_start",

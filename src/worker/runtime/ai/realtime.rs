@@ -28,7 +28,14 @@ pub(in crate::worker::runtime) async fn start_realtime_session(
     config: &WorkerConfig,
     services: &RuntimeServices,
 ) {
-    if let Err(err) = run_realtime_session(&request, &mut inbound_rx, config, services).await {
+    if let Err(err) = Box::pin(run_realtime_session(
+        &request,
+        &mut inbound_rx,
+        config,
+        services,
+    ))
+    .await
+    {
         let message = err.to_string();
         let (code, message) = message
             .strip_prefix("unsupported_auto_protocol: ")
