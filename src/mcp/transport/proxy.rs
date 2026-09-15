@@ -63,18 +63,6 @@ fn build_proxy_client(validated_proxy: &str, no_proxy: Option<&str>) -> Result<C
         .map_err(|_| format!("invalid MCP proxy {redacted}: failed to build proxy client"))
 }
 
-/// Pooled proxy client for an MCP upstream URL. `Ok(None)` means direct:
-/// the caller must use `from_config` unchanged (identical when no proxy env
-/// is set). `Err` is redacted and the caller must fail closed without
-/// falling back to direct.
-///
-/// Issue #375 Phase F: resolves row proxy first, then env, then direct.
-/// `row_proxy` empty/`None` falls through to env; non-empty invalid
-/// fails closed without env fallback.
-pub(super) fn client_for_mcp_server(upstream_url: &str) -> Result<Option<Client>, String> {
-    client_for_mcp_server_with_row(None, upstream_url)
-}
-
 /// Issue #375 Phase F: pooled client with per-row proxy support.
 pub(super) fn client_for_mcp_server_with_row(
     row_proxy: Option<&str>,
@@ -87,6 +75,8 @@ pub(super) fn client_for_mcp_server_with_row(
     })
 }
 
+// Unit-test seam for env-only resolution; production uses the row-aware path.
+#[allow(dead_code)]
 fn client_for_mcp_server_with_env(
     upstream_url: &str,
     get_env: &dyn Fn(&str) -> Option<String>,
@@ -119,16 +109,6 @@ fn client_for_mcp_server_with_row_and_env(
     Ok(Some(client))
 }
 
-/// Resolve the proxy for an upstream from process env. `Ok(None)` is direct
-/// (unset or `NO_PROXY` bypass); `Err` is a redacted fail-closed error.
-pub(super) fn resolve_mcp_proxy(upstream_url: &str) -> Result<Option<String>, String> {
-    resolve_mcp_proxy_with_env(upstream_url, &|name| {
-        std::env::var(name)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-    })
-}
-
 /// Issue #375 Phase F: resolve row proxy → env → direct. Non-empty row
 /// validates (fail-closed, no env fallback); empty/`None` falls through to
 /// env. `NO_PROXY` bypass applies to both levels (row bypass goes direct,
@@ -157,21 +137,8 @@ fn resolve_mcp_proxy_with_row(
     resolve_mcp_proxy_with_env(upstream_url, get_env)
 }
 
-/// Issue #375 Phase F: builtin MiniMax inherits its source endpoint proxy
-/// (endpoint → env → direct). `minimax_url` is the MiniMax API base (region
-/// host) so `NO_PROXY` and the pool key use the real upstream host.
-/// Empty/`None` endpoint proxy falls through to env; invalid fails closed.
-pub(crate) fn resolve_builtin_proxy(
-    endpoint_proxy: Option<&str>,
-    minimax_url: &str,
-) -> Result<Option<String>, String> {
-    resolve_builtin_proxy_with_env(endpoint_proxy, minimax_url, &|name| {
-        std::env::var(name)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-    })
-}
-
+// Unit-test seam for endpoint-proxy resolution; production goes through the row helper.
+#[allow(dead_code)]
 fn resolve_builtin_proxy_with_env(
     endpoint_proxy: Option<&str>,
     minimax_url: &str,

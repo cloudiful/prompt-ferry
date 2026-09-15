@@ -30,6 +30,7 @@ async fn create_endpoint(pool: &sqlx::PgPool, name: &str) -> anyhow::Result<Uuid
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?

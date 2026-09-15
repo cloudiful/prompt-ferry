@@ -27,6 +27,7 @@ pub async fn spawn_worker(
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await
@@ -47,6 +48,7 @@ pub async fn spawn_worker(
                 upstream_model: None,
                 proxy_url_override: None,
                 active_windows: None,
+                dev_system_normalize: false,
             }],
         },
     )

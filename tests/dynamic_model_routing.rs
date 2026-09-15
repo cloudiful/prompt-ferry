@@ -133,6 +133,7 @@ async fn auto_discovers_endpoint_for_model_when_whitelist_is_disabled() -> anyho
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -155,6 +156,7 @@ async fn auto_discovers_endpoint_for_model_when_whitelist_is_disabled() -> anyho
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;

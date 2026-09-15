@@ -384,6 +384,7 @@ async fn endpoint_key_override_and_request_snapshot_are_preserved() -> anyhow::R
             key_lb_enabled: true,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -520,6 +521,7 @@ async fn endpoint_key_override_and_request_snapshot_are_preserved() -> anyhow::R
             key_lb_enabled: endpoint.key_lb_enabled,
             enabled: endpoint.enabled,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -598,6 +600,7 @@ async fn endpoint_key_update_preserves_key_identity() -> anyhow::Result<()> {
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -649,6 +652,7 @@ async fn endpoint_key_update_preserves_key_identity() -> anyhow::Result<()> {
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?
@@ -716,6 +720,7 @@ async fn endpoint_key_update_preserves_key_identity() -> anyhow::Result<()> {
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?
@@ -762,6 +767,7 @@ async fn endpoint_key_update_preserves_key_identity() -> anyhow::Result<()> {
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?
@@ -809,6 +815,7 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -828,6 +835,7 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
                 upstream_model: None,
                 proxy_url_override: None,
                 active_windows: None,
+                dev_system_normalize: false,
             }],
         },
     )
@@ -938,6 +946,7 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -957,6 +966,7 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 upstream_model: None,
                 proxy_url_override: None,
                 active_windows: None,
+                dev_system_normalize: false,
             }],
         },
     )
@@ -977,6 +987,7 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 upstream_model: None,
                 proxy_url_override: None,
                 active_windows: None,
+                dev_system_normalize: false,
             }],
         },
     )
@@ -1187,6 +1198,7 @@ async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -1206,6 +1218,7 @@ async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow
                 upstream_model: None,
                 proxy_url_override: None,
                 active_windows: None,
+                dev_system_normalize: false,
             }],
         },
     )
@@ -1301,6 +1314,7 @@ async fn session_affinity_options_fixture(
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -1320,6 +1334,7 @@ async fn session_affinity_options_fixture(
                 upstream_model: None,
                 proxy_url_override: None,
                 active_windows: None,
+                dev_system_normalize: false,
             }],
         },
     )
@@ -1489,6 +1504,7 @@ async fn reset_session_affinity_clears_anonymous_record_binding_under_user_zero(
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -1508,6 +1524,7 @@ async fn reset_session_affinity_clears_anonymous_record_binding_under_user_zero(
                 upstream_model: None,
                 proxy_url_override: None,
                 active_windows: None,
+                dev_system_normalize: false,
             }],
         },
     )
@@ -1618,6 +1635,7 @@ async fn session_route_options_surfaces_binding_when_rule_no_longer_resolves() -
                     upstream_model: None,
                     proxy_url_override: None,
                     active_windows: None,
+                    dev_system_normalize: false,
                 }],
             },
         )
@@ -1677,6 +1695,7 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -1699,6 +1718,7 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -1718,6 +1738,7 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
                 upstream_model: None,
                 proxy_url_override: None,
                 active_windows: None,
+                dev_system_normalize: false,
             }],
         },
     )
@@ -1793,6 +1814,7 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -1812,6 +1834,7 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
                 upstream_model: None,
                 proxy_url_override: None,
                 active_windows: None,
+                dev_system_normalize: false,
             }],
         },
     )
@@ -2294,6 +2317,7 @@ async fn ignores_obsolete_continuation_policy_field() -> anyhow::Result<()> {
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -2362,6 +2386,7 @@ async fn model_route_response_omits_continuation_policy() -> anyhow::Result<()> 
             key_lb_enabled: false,
             enabled: true,
             proxy_url: None,
+            active_windows: None,
         },
     )
     .await?;
@@ -3330,6 +3355,7 @@ async fn overview_breakdown_reports_error_rate_and_upstream_breakdown() -> anyho
                 key_lb_enabled: false,
                 enabled: true,
                 proxy_url: None,
+                active_windows: None,
             },
         )
         .await
