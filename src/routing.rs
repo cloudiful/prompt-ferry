@@ -31,8 +31,10 @@ pub fn bound_binding_state(
         return BoundBindingState::StaleEndpoint;
     }
     // Issue #378 Phase I: window-inactive bindings are stale (worker-local).
-    if !crate::db::stored_is_active_at(
+    // Issue #392 Phase K: effective windows (target-nonempty else endpoint).
+    if !crate::db::effective_stored_is_active_at(
         target.active_windows.as_deref(),
+        target.endpoint_active_windows.as_deref(),
         crate::db::worker_local_minutes_now(),
     ) {
         return BoundBindingState::StaleEndpoint;

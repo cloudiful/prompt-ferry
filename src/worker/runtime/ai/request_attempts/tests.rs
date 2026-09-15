@@ -73,6 +73,7 @@ fn test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
         provider: crate::db::EndpointProvider::Generic,
         service_tier: crate::db::MinimaxServiceTier::Standard,
         proxy_url: None,
+        dev_system_normalize: false,
     }
 }
 
@@ -631,6 +632,7 @@ fn glm_test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
         provider: crate::db::EndpointProvider::Glm,
         service_tier: crate::db::MinimaxServiceTier::Standard,
         proxy_url: None,
+        dev_system_normalize: false,
     }
 }
 
@@ -1155,6 +1157,7 @@ fn quota_failover_route(base_url: &str) -> RouteConfig {
         provider: crate::db::EndpointProvider::Generic,
         service_tier: crate::db::MinimaxServiceTier::Standard,
         proxy_url: None,
+        dev_system_normalize: false,
     }
 }
 

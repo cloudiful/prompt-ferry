@@ -36,6 +36,8 @@ pub struct UnifiedProviderEndpoint {
     // Issue #368 Phase C (P2): response-side saved-proxy indicator.
     // `true` when a proxy URL is stored; the secret itself is never echoed.
     pub has_proxy_url: bool,
+    // Issue #392 Phase K: endpoint default windows (empty means all-day).
+    pub active_windows: Vec<crate::db::ActiveWindow>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub api_keys: Vec<UnifiedEndpointApiKey>,
@@ -172,6 +174,11 @@ impl super::ConfigRepository {
                         .proxy_url
                         .as_deref()
                         .is_some_and(|raw| !raw.trim().is_empty()),
+                    // Issue #392 Phase K: 0021 plaintext schedule for display.
+                    active_windows: crate::db::parse_stored_windows(
+                        endpoint.active_windows.as_deref(),
+                    )
+                    .unwrap_or_default(),
                     key_lb_enabled: endpoint.key_lb_enabled,
                     enabled: endpoint.enabled,
                     mcp_enabled: endpoint.mcp_enabled,
@@ -535,6 +542,7 @@ mod tests {
             enabled: true,
             mcp_enabled: false,
             has_proxy_url: false,
+            active_windows: vec![],
             created_at: now,
             updated_at: now,
             api_keys: vec![],

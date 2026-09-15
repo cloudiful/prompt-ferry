@@ -3,8 +3,9 @@ INSERT INTO standalone_provider_endpoints (
     native_api_source, key_lb_enabled, enabled, mcp_enabled,
     api_key_ciphertext, api_key_nonce, api_key_key_version,
     proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version,
+    active_windows,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(endpoint_id) DO UPDATE SET
     name = excluded.name,
     provider = excluded.provider,
@@ -22,4 +23,5 @@ ON CONFLICT(endpoint_id) DO UPDATE SET
     proxy_url_ciphertext = excluded.proxy_url_ciphertext,
     proxy_url_nonce = excluded.proxy_url_nonce,
     proxy_url_key_version = excluded.proxy_url_key_version,
+    active_windows = excluded.active_windows,
     updated_at = excluded.updated_at;

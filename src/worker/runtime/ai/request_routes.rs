@@ -103,6 +103,8 @@ pub(super) async fn resolve_route(
                         provider: db::EndpointProvider::Generic,
                         service_tier: db::MinimaxServiceTier::Standard,
                         proxy_url: None,
+                        // Issue #392 Phase K: budget-error placeholder never normalizes.
+                        dev_system_normalize: false,
                     },
                     endpoint_id: None,
                     model_route_rule_id: Some(candidate.rule_id),
@@ -250,6 +252,7 @@ mod tests {
                 api_key: "local-key".to_string(),
                 api_keys: Vec::new(),
                 proxy_url: None,
+                active_windows: None,
             }],
             routes: vec![ModelRouteConfig {
                 rule_id: uuid::Uuid::new_v4(),
@@ -268,6 +271,7 @@ mod tests {
                     upstream_model: Some("provider-local".to_string()),
                     proxy_url_override: None,
                     active_windows: None,
+                    dev_system_normalize: false,
                 }],
             }],
             ..StandaloneConfig::default()
@@ -361,5 +365,7 @@ fn default_route_for_user(config: &WorkerConfig, user_id: i64) -> db::RouteConfi
         provider: db::EndpointProvider::Generic,
         service_tier: db::MinimaxServiceTier::Standard,
         proxy_url: None,
+        // Issue #392 Phase K: legacy direct routes never normalize.
+        dev_system_normalize: false,
     }
 }

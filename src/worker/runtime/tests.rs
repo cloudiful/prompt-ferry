@@ -612,6 +612,8 @@ fn sample_candidate() -> ModelRouteCandidate {
                 proxy_url: None,
                 proxy_url_override: None,
                 active_windows: None,
+                endpoint_active_windows: None,
+                dev_system_normalize: false,
             },
             ModelRouteCandidateTarget {
                 target_id: uuid::Uuid::new_v4(),
@@ -639,6 +641,8 @@ fn sample_candidate() -> ModelRouteCandidate {
                 proxy_url: None,
                 proxy_url_override: None,
                 active_windows: None,
+                endpoint_active_windows: None,
+                dev_system_normalize: false,
             },
         ],
     }
@@ -712,6 +716,7 @@ fn endpoint_key_lb_uses_stable_selection_and_first_key_fallback() {
         provider: db::EndpointProvider::Generic,
         service_tier: db::MinimaxServiceTier::Standard,
         proxy_url: None,
+        dev_system_normalize: false,
     };
     let sticky_prompt_log = RequestPromptLog {
         request_conversation_key: Some("conv_123".to_string()),
@@ -740,6 +745,7 @@ fn endpoint_key_lb_uses_stable_selection_and_first_key_fallback() {
     let disabled = db::RouteConfig {
         key_lb_enabled: false,
         proxy_url: None,
+        dev_system_normalize: false,
         ..route
     };
     let disabled_pick =
@@ -789,6 +795,7 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
         provider: db::EndpointProvider::Generic,
         service_tier: db::MinimaxServiceTier::Standard,
         proxy_url: None,
+        dev_system_normalize: false,
     };
     let fixed_prompt_log = RequestPromptLog {
         conversation_override_endpoint_key_id: Some(fixed_key_id),
@@ -813,6 +820,7 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
             })
             .collect(),
         proxy_url: None,
+        dev_system_normalize: false,
         ..route.clone()
     };
     let disabled = materialize_route_api_key_selection(
@@ -830,6 +838,7 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
     let deleted_route = db::RouteConfig {
         key_lb_enabled: false,
         proxy_url: None,
+        dev_system_normalize: false,
         ..route.clone()
     };
     let deleted = materialize_route_api_key_selection(&deleted_route, &sample_request(), &deleted);
@@ -848,6 +857,7 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
             updated_at: Utc::now(),
         }],
         proxy_url: None,
+        dev_system_normalize: false,
         ..route
     };
     let cross_endpoint =
@@ -1089,6 +1099,7 @@ fn url_mapping_route(
         provider,
         service_tier: db::MinimaxServiceTier::Standard,
         proxy_url: None,
+        dev_system_normalize: false,
     }
 }
 

@@ -164,6 +164,15 @@ pub(crate) fn endpoint(
         Ok(Some(value)) if value.trim().is_empty() => MinimaxServiceTier::Standard,
         Ok(Some(value)) => MinimaxServiceTier::parse_lossy(Some(value.as_str())),
     };
+    // Issue #392 Phase K: 0021 `active_windows` is plaintext; pre-migration
+    // rows lack the column and read as all-day (`None`).
+    let active_windows = match row.try_get::<Option<String>, _>("active_windows") {
+        Ok(value) => value
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        Err(sqlx::Error::ColumnNotFound(_)) => None,
+        Err(error) => return Err(error.into()),
+    };
     Ok((
         ProviderEndpointConfig {
             endpoint_id: uuid(row, "endpoint_id")?,
@@ -187,6 +196,7 @@ pub(crate) fn endpoint(
             api_key: String::new(),
             api_keys: Vec::new(),
             proxy_url: None,
+            active_windows,
         },
         envelope(row, "api_key")?,
         envelope_opt(row, "proxy_url")?,
@@ -369,6 +379,13 @@ pub(crate) fn route_target(
         Err(sqlx::Error::ColumnNotFound(_)) => None,
         Err(error) => return Err(error.into()),
     };
+    // Issue #392 Phase K: 0022 `dev_system_normalize` INTEGER 0/1;
+    // pre-migration rows lack the column and read as disabled.
+    let dev_system_normalize = match row.try_get::<Option<i64>, _>("dev_system_normalize") {
+        Ok(value) => value.unwrap_or(0) != 0,
+        Err(sqlx::Error::ColumnNotFound(_)) => false,
+        Err(error) => return Err(error.into()),
+    };
     Ok((
         uuid(row, "rule_id")?,
         ModelRouteTargetConfig {
@@ -383,6 +400,7 @@ pub(crate) fn route_target(
             upstream_model: optional_string(row, "upstream_model")?,
             proxy_url_override: None,
             active_windows,
+            dev_system_normalize,
         },
         envelope_opt(row, "proxy_url_override")?,
     ))

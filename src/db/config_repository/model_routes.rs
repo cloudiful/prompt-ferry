@@ -38,6 +38,9 @@ pub struct UnifiedModelRouteTarget {
     pub has_proxy_url_override: bool,
     // Issue #378 Phase I: effective windows (empty means all-day).
     pub active_windows: Vec<crate::db::ActiveWindow>,
+    // Issue #392 Phase K: developer->system normalization switch.
+    // Always sent (no omit); `false` skips passthrough normalization.
+    pub dev_system_normalize: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -94,6 +97,8 @@ fn target_to_pg(target: UnifiedModelRouteTarget) -> PgModelRouteTarget {
         has_proxy_url_override: target.has_proxy_url_override,
         // Issue #378 Phase I: carry schedule through the unified shape.
         active_windows: target.active_windows,
+        // Issue #392 Phase K: carry normalize switch through unified shape.
+        dev_system_normalize: target.dev_system_normalize,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }

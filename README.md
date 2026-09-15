@@ -264,6 +264,21 @@ never silently becomes all-day.
 no route target is active for route 'summarizer' at 03:12 (worker-local time; windows: primary(enabled): 06:30–14:00, 18:00–20:00; night(disabled): all-day)
 ```
 
+### Endpoint default schedules and target normalize
+
+Each endpoint has optional daily default windows (`[{start,end}]` `HH:MM`);
+empty means all-day. A target with empty windows inherits its endpoint
+default; a non-empty target overrides it; empty on both means all-day.
+The same `HH:MM` validation applies to both levels.
+
+Target normalize (`dev_system_normalize`, default off) controls Chat
+passthrough: when off (default) `developer` is forwarded unchanged; when on
+`developer` is rewritten to `system`. This is a behavior change from the
+previous unconditional rewrite: strict upstreams that reject `developer`
+need the switch turned on explicitly per target. The toggle lives in the
+target-row gear popover alongside proxy and schedule, and is always sent as
+`true`/`false`.
+
 ### Single-host binary
 
 Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases)

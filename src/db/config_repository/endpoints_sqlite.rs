@@ -105,6 +105,12 @@ pub(super) fn sqlite_endpoint_from_create(
         .proxy_url
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
+    // Issue #392 Phase K: already normalized by the admin layer;
+    // `None`/empty means all-day -> NULL.
+    let active_windows = match input.active_windows.as_deref() {
+        None | Some([]) => None,
+        Some(windows) => crate::db::storage_value(windows),
+    };
     Ok(ScProviderEndpoint {
         endpoint_id,
         name: input.name,
@@ -122,6 +128,7 @@ pub(super) fn sqlite_endpoint_from_create(
         api_key,
         api_keys,
         proxy_url,
+        active_windows,
     })
 }
 
@@ -158,6 +165,7 @@ mod tests {
                 key_lb_enabled: false,
                 enabled: true,
                 proxy_url: None,
+                active_windows: None,
             },
             false,
             EndpointTimestamps {

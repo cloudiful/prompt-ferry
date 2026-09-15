@@ -170,10 +170,13 @@ fn select_unified_candidate<'a>(
         && let Some(target) = candidate.targets.iter().find(|target| {
             // Issue #378 Phase I: window-inactive override targets do not
             // participate (same worker-local clock as the pool filter).
+            // Issue #392 Phase K: effective windows (target-nonempty else
+            // endpoint else all-day).
             target.enabled
                 && target.endpoint_id == endpoint_id
-                && db::stored_is_active_at(
+                && db::effective_stored_is_active_at(
                     target.active_windows.as_deref(),
+                    target.endpoint_active_windows.as_deref(),
                     db::worker_local_minutes_now(),
                 )
         })
@@ -268,6 +271,9 @@ fn route_from_target(
             target.proxy_url.as_deref(),
             target.proxy_url_override.as_deref(),
         ),
+        // Issue #392 Phase K: carry the per-target normalize switch;
+        // `false` skips Chat developer->system rewriting.
+        dev_system_normalize: target.dev_system_normalize,
     }
 }
 
@@ -432,6 +438,8 @@ mod tests {
             proxy_url: proxy_url.map(str::to_string),
             proxy_url_override: proxy_override.map(str::to_string),
             active_windows: None,
+            endpoint_active_windows: None,
+            dev_system_normalize: false,
         }
     }
 

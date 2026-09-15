@@ -123,6 +123,9 @@ fn target_from_endpoint(
         proxy_url: endpoint.proxy_url.clone(),
         proxy_url_override: target.proxy_url_override.clone(),
         active_windows: target.active_windows.clone(),
+        // Issue #392 Phase K: endpoint default for inheritance + normalize.
+        endpoint_active_windows: endpoint.active_windows.clone(),
+        dev_system_normalize: target.dev_system_normalize,
     }
 }
 
@@ -201,6 +204,7 @@ mod tests {
                 api_key: "key".to_string(),
                 api_keys: Vec::new(),
                 proxy_url: None,
+                active_windows: None,
             }],
             routes: vec![
                 ModelRouteConfig {
@@ -220,6 +224,7 @@ mod tests {
                         upstream_model: None,
                         proxy_url_override: None,
                         active_windows: None,
+                        dev_system_normalize: false,
                     }],
                 },
                 ModelRouteConfig {
@@ -239,6 +244,7 @@ mod tests {
                         upstream_model: None,
                         proxy_url_override: None,
                         active_windows: None,
+                        dev_system_normalize: false,
                     }],
                 },
             ],
@@ -272,6 +278,7 @@ mod tests {
                 api_key: "key".to_string(),
                 api_keys: Vec::new(),
                 proxy_url: None,
+                active_windows: None,
             }],
             routes: vec![ModelRouteConfig {
                 rule_id: Uuid::new_v4(),
@@ -290,6 +297,7 @@ mod tests {
                     upstream_model: None,
                     proxy_url_override: None,
                     active_windows: None,
+                    dev_system_normalize: false,
                 }],
             }],
             ..StandaloneConfig::default()

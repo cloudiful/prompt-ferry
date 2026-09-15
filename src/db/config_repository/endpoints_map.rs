@@ -43,6 +43,8 @@ pub(super) fn from_postgres(endpoint: PgProviderEndpoint) -> UnifiedProviderEndp
         enabled: endpoint.enabled,
         mcp_enabled: endpoint.mcp_enabled,
         has_proxy_url,
+        // Issue #392 Phase K: carry schedule through unified shape.
+        active_windows: endpoint.active_windows,
         created_at: endpoint.created_at,
         updated_at: endpoint.updated_at,
         api_keys: endpoint
@@ -65,6 +67,10 @@ pub(super) fn from_sqlite(endpoint: ScProviderEndpoint) -> Result<UnifiedProvide
         .proxy_url
         .as_deref()
         .is_some_and(|raw| !raw.trim().is_empty());
+    // Issue #392 Phase K: 0021 plaintext schedule; corrupt reads as
+    // all-day for display (routing fails closed separately).
+    let active_windows =
+        crate::db::parse_stored_windows(endpoint.active_windows.as_deref()).unwrap_or_default();
     Ok(UnifiedProviderEndpoint {
         endpoint_id: endpoint.endpoint_id,
         scope: "admin".to_string(),
@@ -82,6 +88,7 @@ pub(super) fn from_sqlite(endpoint: ScProviderEndpoint) -> Result<UnifiedProvide
         enabled: endpoint.enabled,
         mcp_enabled: endpoint.mcp_enabled,
         has_proxy_url,
+        active_windows,
         created_at: endpoint.created_at,
         updated_at: endpoint.updated_at,
         api_keys,
@@ -204,6 +211,8 @@ pub(super) fn unified_to_pg(endpoint: UnifiedProviderEndpoint) -> crate::db::Pro
         // Issue #368 Phase C (P2): carry the saved-proxy indicator so the
         // page response matches the single-endpoint shape.
         has_proxy_url: endpoint.has_proxy_url,
+        // Issue #392 Phase K: carry schedule through unified shape.
+        active_windows: endpoint.active_windows,
         key_lb_enabled: endpoint.key_lb_enabled,
         enabled: endpoint.enabled,
         mcp_enabled: endpoint.mcp_enabled,

@@ -225,6 +225,17 @@ NO_PROXY=127.0.0.1,localhost
 no route target is active for route 'summarizer' at 03:12 (worker-local time; windows: primary(enabled): 06:30–14:00, 18:00–20:00; night(disabled): all-day)
 ```
 
+### 端点默认排期与目标归一
+
+每个上游端点可配每日默认时间段（`[{start,end}]` `HH:MM`）；留空即全天。
+目标排期留空时继承所属端点默认；目标非空则覆盖端点；两者都空即全天。
+两级复用同一套 `HH:MM` 校验。
+
+目标归一（`dev_system_normalize`，默认关闭）控制 Chat 透传：关闭（默认）时
+`developer` 原样透传；开启后 `developer` 重写为 `system`。这是相对此前无条件
+重写的行为变更：严格校验 `developer` 的上游需按目标手动开启。开关位于目标行
+齿轮 popover，与代理、排期同处，恒以 `true`/`false` 全量下发。
+
 ### 单机二进制
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的

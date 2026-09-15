@@ -99,6 +99,7 @@ fn route(endpoint_id: Uuid, keys: Vec<db::EndpointApiKey>) -> db::RouteConfig {
         provider: db::EndpointProvider::DeepSeek,
         service_tier: db::MinimaxServiceTier::Standard,
         proxy_url: None,
+        dev_system_normalize: false,
     }
 }
 

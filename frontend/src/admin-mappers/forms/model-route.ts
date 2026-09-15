@@ -27,6 +27,8 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         // Issue #378 Phase J: untouched all-day schedule.
         active_windows: [],
         active_windows_touched: false,
+        // Issue #392 Phase L: default-off normalize.
+        dev_system_normalize: false,
       },
     ],
   }
@@ -87,6 +89,8 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
         end: window?.end ?? '',
       })),
       active_windows_touched: false,
+      // Issue #392 Phase L: default-off normalize; legacy payloads miss it.
+      dev_system_normalize: target?.dev_system_normalize ?? false,
     })),
   }
 }
@@ -143,6 +147,8 @@ export function modelRouteFormToRequest(
           upstream_model: (target?.upstream_model ?? '').trim() || undefined,
           proxy_url_override,
           active_windows,
+          // Issue #392 Phase L: booleans always sent (no omit semantics).
+          dev_system_normalize: target?.dev_system_normalize ?? false,
         }
       }),
   }

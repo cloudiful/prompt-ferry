@@ -38,6 +38,7 @@ pub fn prepare_upstream_request(
     request_path: &str,
     request_body: &[u8],
     native_api: NativeApi,
+    dev_system_normalize: bool,
 ) -> Result<PreparedUpstreamRequest, CompatError> {
     match (request_path, native_api) {
         ("/v1/messages", NativeApi::AnthropicMessages) => {
@@ -85,16 +86,23 @@ pub fn prepare_upstream_request(
                  stateless responses requests may target chat-native endpoints, \
                  anthropic or auto targets remain unsupported",
         )),
-        ("/v1/chat/completions", NativeApi::Chat) => Ok(PreparedUpstreamRequest {
-            path: request_path.to_string(),
-            body: PreparedRequestBody::BufferedBytes(upstream_body(
-                request_path,
-                &normalize_chat_request_for_native(request_body),
-            )),
-            response_adapter: ResponseAdapter::Passthrough,
-            upstream_redacted_request_json: None,
-            upstream_restore_session: None,
-        }),
+        ("/v1/chat/completions", NativeApi::Chat) => {
+            // Issue #392 Phase K: developer->system normalization is opt-in.
+            // `false` (default) leaves `developer` untouched (strict
+            // upstreams must opt in); `true` rewrites to `system`.
+            let normalized = if dev_system_normalize {
+                normalize_chat_request_for_native(request_body)
+            } else {
+                request_body.to_vec()
+            };
+            Ok(PreparedUpstreamRequest {
+                path: request_path.to_string(),
+                body: PreparedRequestBody::BufferedBytes(upstream_body(request_path, &normalized)),
+                response_adapter: ResponseAdapter::Passthrough,
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+            })
+        }
         ("/v1/chat/completions", NativeApi::Responses) => {
             let translated = chat_request_to_responses(request_body)?;
             Ok(PreparedUpstreamRequest {
@@ -142,6 +150,7 @@ mod tests {
                 "stream":false
             }"#,
             NativeApi::Responses,
+            false,
         )
         .unwrap();
 
@@ -173,6 +182,7 @@ mod tests {
                 "reasoning_effort":"max"
             }"#,
             NativeApi::Chat,
+            true,
         )
         .unwrap();
 
@@ -184,6 +194,35 @@ mod tests {
         assert_eq!(body["messages"][0]["role"].as_str(), Some("system"));
         assert_eq!(body["messages"][1]["role"].as_str(), Some("user"));
         assert_eq!(body["reasoning_effort"].as_str(), Some("max"));
+    }
+
+    #[test]
+    fn default_off_passthrough_leaves_developer_untouched() {
+        // Issue #392 Phase K: default-off passthrough locks the behavior
+        // change — `false` must leave `developer` as-is so strict upstreams
+        // opt in explicitly.
+        let prepared = prepare_upstream_request(
+            "/v1/chat/completions",
+            br#"{
+                "model":"deepseek-v4-pro",
+                "messages":[
+                    {"role":"developer","content":"be concise"},
+                    {"role":"user","content":"hello"}
+                ]
+            }"#,
+            NativeApi::Chat,
+            false,
+        )
+        .unwrap();
+
+        let PreparedRequestBody::BufferedBytes(body) = prepared.body else {
+            panic!("chat-native requests should be buffered");
+        };
+        let body: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(body["messages"][0]["role"].as_str(), Some("developer"));
+        assert_eq!(body["messages"][0]["content"].as_str(), Some("be concise"));
+        assert_eq!(body["messages"][1]["role"].as_str(), Some("user"));
     }
 
     #[test]
@@ -203,7 +242,8 @@ mod tests {
             ]
         }"#;
         let prepared =
-            prepare_upstream_request("/v1/messages", body, NativeApi::AnthropicMessages).unwrap();
+            prepare_upstream_request("/v1/messages", body, NativeApi::AnthropicMessages, false)
+                .unwrap();
         assert_eq!(prepared.path, "/v1/messages");
         assert_eq!(prepared.response_adapter, ResponseAdapter::Passthrough);
         let PreparedRequestBody::PassthroughStream(forwarded) = prepared.body else {
@@ -218,6 +258,7 @@ mod tests {
             "/v1/messages",
             br#"{"model":"claude-sonnet","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}"#,
             NativeApi::Responses,
+            false,
         )
         .unwrap_err();
         assert_eq!(error.code, "unsupported_upstream");

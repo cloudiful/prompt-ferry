@@ -254,6 +254,16 @@ pub(crate) async fn insert_endpoint(
         .bind(envelope_part(&endpoint.proxy_url, EnvelopePart::Ciphertext))
         .bind(envelope_part(&endpoint.proxy_url, EnvelopePart::Nonce))
         .bind(envelope_version(&endpoint.proxy_url))
+        // Issue #392 Phase K: plaintext schedule; empty normalizes to NULL.
+        .bind(
+            endpoint
+                .endpoint
+                .active_windows
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string),
+        )
         .bind(timestamp(endpoint.endpoint.created_at))
         .bind(timestamp(endpoint.endpoint.updated_at))
         .execute(&mut **transaction)
@@ -322,6 +332,7 @@ pub(crate) async fn insert_route(
             .bind(envelope_part(&proxy_envelope, EnvelopePart::Nonce))
             .bind(envelope_version(&proxy_envelope))
             .bind(active_windows)
+            .bind(bool_i64(target.dev_system_normalize))
             .execute(&mut **transaction)
             .await?;
     }
@@ -362,6 +373,7 @@ pub(crate) async fn insert_encrypted_route(
             ))
             .bind(envelope_version(&target.proxy_url_override))
             .bind(target.target.active_windows.clone())
+            .bind(bool_i64(target.target.dev_system_normalize))
             .execute(&mut **transaction)
             .await?;
     }

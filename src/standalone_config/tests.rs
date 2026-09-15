@@ -70,6 +70,7 @@ fn sample_config() -> StandaloneConfig {
                 updated_at: chrono::Utc::now(),
             }],
             proxy_url: None,
+            active_windows: None,
         }],
         routes: vec![ModelRouteConfig {
             rule_id: Uuid::new_v4(),
@@ -88,6 +89,7 @@ fn sample_config() -> StandaloneConfig {
                 upstream_model: Some("provider-model".to_string()),
                 proxy_url_override: None,
                 active_windows: None,
+                dev_system_normalize: false,
             }],
         }],
         client_keys: vec![ClientKeyConfig {
@@ -589,7 +591,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 20);
+    assert_eq!(version, 22);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -687,7 +689,7 @@ async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_nine() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 20);
+    assert_eq!(version, 22);
     assert!(
         store
             .list_usage_summaries(64)
@@ -1580,7 +1582,7 @@ async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_nine() 
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 20);
+    assert_eq!(version, 22);
     let pool = store.pool().clone();
     for (column, declared_type) in [
         ("conversation_id", "TEXT"),
@@ -1703,7 +1705,7 @@ async fn upgrade_from_schema_eight_creates_request_lease_table() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 20);
+    assert_eq!(version, 22);
 
     // Confirm migration 0008 took effect before the new lease table
     // arrived so the test really exercises the schema-8 -> schema-9

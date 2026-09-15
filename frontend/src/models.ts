@@ -41,6 +41,10 @@ export type EndpointForm = {
   // mirrors the response-side `has_proxy_url` indicator.
   proxy_url: string
   has_saved_proxy_url: boolean
+  // Issue #392 Phase L: endpoint default schedule. Empty means all-day;
+  // `active_windows_touched` tracks omit-when-untouched like targets.
+  active_windows: Array<{ start: string; end: string }>
+  active_windows_touched: boolean
 }
 
 export type EndpointApiKeyForm = {
@@ -65,6 +69,9 @@ export type ModelRouteTargetForm = {
   // (keeps the stored value on PATCH), true sends the array (empty = all-day).
   active_windows: Array<{ start: string; end: string }>
   active_windows_touched: boolean
+  // Issue #392 Phase L: developer->system normalize switch, default off.
+  // Always sent as true/false (no omit semantics).
+  dev_system_normalize: boolean
 }
 
 export type StreamDeltaBatchingForm = {

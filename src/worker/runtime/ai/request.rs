@@ -249,6 +249,7 @@ mod auto_protocol_tests {
             provider: db::EndpointProvider::Generic,
             service_tier: db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
         }
     }
 

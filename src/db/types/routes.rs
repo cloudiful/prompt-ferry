@@ -68,6 +68,10 @@ pub struct RouteConfig {
     // (`proxy_url_override` ?? endpoint `proxy_url`). `None` means direct.
     // Pooled client selection lives in `worker::runtime::ai::proxy`.
     pub proxy_url: Option<String>,
+    // Issue #392 Phase K: developer->system normalization switch for
+    // Chat->Chat passthrough. `false` (default) leaves `developer`
+    // untouched; `true` rewrites to `system`. Always sent (no omit).
+    pub dev_system_normalize: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -99,6 +103,11 @@ pub struct ModelRouteTarget {
     /// Empty means all-day.
     #[serde(default)]
     pub active_windows: Vec<ActiveWindow>,
+    /// Issue #392 Phase K: developer->system normalization switch.
+    /// `false` (default) skips `normalize_chat_request_for_native`;
+    /// `true` rewrites `developer` to `system`. Always sent (no omit).
+    #[serde(default)]
+    pub dev_system_normalize: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -146,6 +155,11 @@ pub struct ModelRouteTargetCreate {
     // replaces after validation (sorted normalize).
     #[serde(default)]
     pub active_windows: Option<Vec<ActiveWindow>>,
+    // Issue #392 Phase K: developer->system normalization switch.
+    // Always sent (no omit semantics); `false` (default) skips
+    // normalization. Carried as plain bool so PATCH never inherits.
+    #[serde(default)]
+    pub dev_system_normalize: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -197,6 +211,13 @@ pub struct ModelRouteCandidateTarget {
     // means all-day). Carried as the stored string so routing can filter
     // by worker-local time without reparsing request shapes.
     pub active_windows: Option<String>,
+    // Issue #392 Phase K: endpoint default windows for inheritance.
+    // Effective windows resolve as target-nonempty else endpoint else
+    // all-day. Carried as the stored string (`None`/empty means all-day).
+    pub endpoint_active_windows: Option<String>,
+    // Issue #392 Phase K: developer->system normalization switch.
+    // `false` (default) skips Chat passthrough normalization.
+    pub dev_system_normalize: bool,
 }
 
 #[derive(Debug, Clone)]

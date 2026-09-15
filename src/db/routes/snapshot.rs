@@ -20,6 +20,8 @@ pub async fn effective_route(pool: &PgPool, user_id: i64) -> Result<Option<Route
             provider: crate::db::EndpointProvider::from_str(&row.provider),
             service_tier: crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
             proxy_url: row.proxy_url,
+            // Issue #392 Phase K: direct fallback never normalizes.
+            dev_system_normalize: false,
         });
     match route {
         Some(route) => Ok(

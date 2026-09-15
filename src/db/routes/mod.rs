@@ -18,8 +18,9 @@ mod snapshot;
 
 pub use crate::db::types::ActiveWindow;
 pub use active_windows::{
-    candidate_target_is_active, format_minutes, is_active_at, normalize_request_windows,
-    parse_stored_windows, schedule_unavailable_message, storage_value, stored_is_active_at,
+    candidate_target_is_active, effective_stored_is_active_at, effective_windows_raw,
+    format_minutes, is_active_at, normalize_request_windows, parse_stored_windows,
+    schedule_unavailable_message, storage_value, stored_is_active_at, summarize_effective_stored,
     summarize_stored, summarize_windows, worker_local_hhmm_now, worker_local_minutes_now,
 };
 
@@ -61,6 +62,8 @@ struct ModelRouteCandidateRow {
     upstream_model: Option<String>,
     proxy_url_override: Option<String>,
     active_windows: Option<String>,
+    endpoint_active_windows: Option<String>,
+    dev_system_normalize: bool,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -75,6 +78,7 @@ struct ModelRouteTargetRow {
     upstream_model: Option<String>,
     proxy_url_override: Option<String>,
     active_windows: Option<String>,
+    dev_system_normalize: bool,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }

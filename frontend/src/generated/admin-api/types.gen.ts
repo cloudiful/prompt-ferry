@@ -336,6 +336,12 @@ export type EndpointProvider = 'generic' | 'minimax' | 'command_code' | 'opencod
 export type EndpointRegion = 'cn' | 'global';
 
 export type EndpointRequest = {
+    /**
+     * Issue #392 Phase K: endpoint default windows (`[{start,end}]` `HH:MM`).
+     * `None` (omitted) keeps the stored value on PATCH; `Some([])`
+     * means all-day; `Some([...])` replaces after validation.
+     */
+    active_windows?: Array<ActiveWindow> | null;
     api_key: string;
     api_keys?: Array<EndpointApiKeyRequest>;
     base_url: string;
@@ -776,6 +782,12 @@ export type ModelRouteTarget = {
      */
     active_windows?: Array<ActiveWindow>;
     created_at: string;
+    /**
+     * Issue #392 Phase K: developer->system normalization switch.
+     * `false` (default) skips `normalize_chat_request_for_native`;
+     * `true` rewrites `developer` to `system`. Always sent (no omit).
+     */
+    dev_system_normalize?: boolean;
     enabled: boolean;
     endpoint_enabled: boolean;
     endpoint_id: string;
@@ -799,6 +811,12 @@ export type ModelRouteTargetRequest = {
      * means all-day; `Some([...])` replaces after validation.
      */
     active_windows?: Array<ActiveWindow> | null;
+    /**
+     * Issue #392 Phase K: developer->system normalization switch.
+     * Always sent (no omit semantics); `false` (default) skips
+     * `normalize_chat_request_for_native` in Chat passthrough.
+     */
+    dev_system_normalize?: boolean;
     enabled?: boolean | null;
     endpoint_id: string;
     /**
@@ -867,6 +885,11 @@ export type OpencodeGoWindowUsage = {
 };
 
 export type ProviderEndpoint = {
+    /**
+     * Issue #392 Phase K: endpoint default windows (`HH:MM` pairs).
+     * Empty means all-day; empty target inherits this value.
+     */
+    active_windows?: Array<ActiveWindow>;
     api_keys?: Array<EndpointApiKey>;
     base_url: string;
     created_at: string;

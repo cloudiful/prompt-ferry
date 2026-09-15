@@ -39,6 +39,7 @@ async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
         provider: db::EndpointProvider::Minimax,
         service_tier: db::MinimaxServiceTier::Standard,
         proxy_url: None,
+        dev_system_normalize: false,
     };
     let cache = TokenPlanQuotaCache::default();
     cache
@@ -215,6 +216,7 @@ fn command_code_route(
         provider: db::EndpointProvider::CommandCode,
         service_tier: db::MinimaxServiceTier::Standard,
         proxy_url: None,
+        dev_system_normalize: false,
     }
 }
 
@@ -327,6 +329,7 @@ async fn quota_key_lb_still_routes_payg_command_code_key_without_windows() {
         provider: db::EndpointProvider::CommandCode,
         service_tier: db::MinimaxServiceTier::Standard,
         proxy_url: None,
+        dev_system_normalize: false,
     };
     let cache = TokenPlanQuotaCache::default();
     cache

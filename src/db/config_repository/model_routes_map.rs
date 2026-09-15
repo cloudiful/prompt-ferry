@@ -47,6 +47,7 @@ pub(super) fn from_postgres_target(target: crate::db::ModelRouteTarget) -> Unifi
         upstream_model: target.upstream_model,
         has_proxy_url_override,
         active_windows: target.active_windows,
+        dev_system_normalize: target.dev_system_normalize,
     }
 }
 
@@ -113,6 +114,7 @@ where
                 upstream_model: target.upstream_model,
                 has_proxy_url_override,
                 active_windows,
+                dev_system_normalize: target.dev_system_normalize,
             }
         })
         .collect();
@@ -168,6 +170,8 @@ pub(super) fn sqlite_route_from_create(
                 upstream_model: target.upstream_model,
                 proxy_url_override,
                 active_windows,
+                // Issue #392 Phase K: always sent (no omit); direct carry.
+                dev_system_normalize: target.dev_system_normalize,
             })
         })
         .collect::<Result<Vec<_>>>()?;

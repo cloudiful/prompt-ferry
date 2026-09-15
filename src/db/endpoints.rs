@@ -44,6 +44,8 @@ pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<R
             provider: crate::db::EndpointProvider::from_str(&row.provider),
             service_tier: MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
             proxy_url: row.proxy_url,
+            // Issue #392 Phase K: direct endpoint routes never normalize.
+            dev_system_normalize: false,
         })
         .collect::<Vec<_>>();
     attach_route_config_api_keys(pool, routes).await
@@ -101,6 +103,12 @@ pub async fn create_endpoint(pool: &PgPool, input: EndpointCreate) -> Result<Pro
         .clone()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
+    // Issue #392 Phase K: endpoint default windows already normalized by
+    // the admin layer (`None`/empty means all-day -> NULL).
+    let active_windows = match input.active_windows.as_deref() {
+        None | Some([]) => None,
+        Some(windows) => crate::db::routes::storage_value(windows),
+    };
     let endpoint = sqlx::query_file_as!(
         ProviderEndpointRow,
         "src/sql/endpoints/create_endpoint.sql",
@@ -117,6 +125,7 @@ pub async fn create_endpoint(pool: &PgPool, input: EndpointCreate) -> Result<Pro
         input.monthly_max_requests,
         input.api_key,
         proxy_url,
+        active_windows,
         input.key_lb_enabled,
         input.enabled,
     )
@@ -143,6 +152,10 @@ pub async fn create_endpoint_with_mcp(
         .clone()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
+    let active_windows = match input.active_windows.as_deref() {
+        None | Some([]) => None,
+        Some(windows) => crate::db::routes::storage_value(windows),
+    };
     let endpoint = sqlx::query_file_as!(
         ProviderEndpointRow,
         "src/sql/endpoints/create_endpoint_with_mcp.sql",
@@ -159,6 +172,7 @@ pub async fn create_endpoint_with_mcp(
         input.monthly_max_requests,
         input.api_key,
         proxy_url,
+        active_windows,
         input.key_lb_enabled,
         input.enabled,
         mcp_enabled,
@@ -182,6 +196,10 @@ pub async fn update_endpoint(
         .clone()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
+    let active_windows = match input.active_windows.as_deref() {
+        None | Some([]) => None,
+        Some(windows) => crate::db::routes::storage_value(windows),
+    };
     let endpoint = sqlx::query_file_as!(
         ProviderEndpointRow,
         "src/sql/endpoints/update_endpoint.sql",
@@ -199,6 +217,7 @@ pub async fn update_endpoint(
         input.monthly_max_requests,
         input.api_key,
         proxy_url,
+        active_windows,
         input.key_lb_enabled,
         input.enabled,
     )

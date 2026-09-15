@@ -53,6 +53,11 @@ pub struct EndpointRequest {
     /// for logic and uses the stored value when `proxy_url` is omitted.
     #[serde(default)]
     pub has_proxy_url: Option<bool>,
+    /// Issue #392 Phase K: endpoint default windows (`[{start,end}]` `HH:MM`).
+    /// `None` (omitted) keeps the stored value on PATCH; `Some([])`
+    /// means all-day; `Some([...])` replaces after validation.
+    #[serde(default)]
+    pub active_windows: Option<Vec<db::ActiveWindow>>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, ToSchema)]

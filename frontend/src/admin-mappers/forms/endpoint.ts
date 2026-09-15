@@ -42,6 +42,9 @@ export function createEmptyEndpointForm(): EndpointForm {
     // Issue #368 Phase C: masked proxy default; empty + no saved means direct.
     proxy_url: '',
     has_saved_proxy_url: false,
+    // Issue #392 Phase L: untouched all-day endpoint schedule.
+    active_windows: [],
+    active_windows_touched: false,
   }
 }
 
@@ -88,6 +91,13 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
     // `has_proxy_url` is optional for legacy payloads (missing means direct).
     proxy_url: '',
     has_saved_proxy_url: source.has_proxy_url ?? false,
+    // Issue #392 Phase L: copy stored windows; untouched until the schedule
+    // dialog saves. Tolerate legacy payloads without the field.
+    active_windows: (source.active_windows ?? []).map((window) => ({
+      start: window?.start ?? '',
+      end: window?.end ?? '',
+    })),
+    active_windows_touched: false,
   }
 }
 
@@ -106,6 +116,22 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
         ? undefined
         : ''
   const apiKeys = safe.api_keys ?? []
+  // Issue #392 Phase L: omit-when-untouched for endpoint schedules.
+  // Untouched omits the key (PATCH keeps the stored value); touched sends
+  // the edited array (empty = all-day, sorted).
+  const endpointTouched = safe.active_windows_touched ?? false
+  const active_windows = endpointTouched
+    ? [...(safe.active_windows ?? [])]
+        .map((window) => ({
+          start: (window?.start ?? '').trim(),
+          end: (window?.end ?? '').trim(),
+        }))
+        .sort((a, b) =>
+          a.start === b.start
+            ? a.end.localeCompare(b.end)
+            : a.start.localeCompare(b.start),
+        )
+    : undefined
   return {
     api_key: apiKeys[0]?.api_key ?? '',
     api_keys: apiKeys
@@ -134,5 +160,6 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
     monthly_max_requests: safe.monthly_max_requests ?? null,
     mcp_enabled: safe.mcp_enabled ?? false,
     proxy_url,
+    active_windows,
   }
 }

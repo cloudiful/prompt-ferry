@@ -43,6 +43,8 @@ function addTarget(): void {
     // Issue #378 Phase J: untouched all-day schedule.
     active_windows: [],
     active_windows_touched: false,
+    // Issue #392 Phase L: default-off normalize.
+    dev_system_normalize: false,
   })
 }
 
@@ -76,6 +78,24 @@ function hasTargetProxy(index: number): boolean {
   return (
     (target.proxy_url_override ?? '').trim() !== '' ||
     (target.has_saved_proxy_url_override ?? false)
+  )
+}
+
+// Issue #392 Phase L: concise proxy summary (plain text, no pill).
+// Set when an override is typed or saved; otherwise inherit.
+function proxySummary(index: number): string {
+  return hasTargetProxy(index) ? props.t('proxySet') : props.t('proxyInherit')
+}
+
+// Issue #392 Phase L: gear highlight when anything is non-default
+// (proxy set, schedule restricted, or normalize on).
+function hasTargetSettings(index: number): boolean {
+  const target = form.value?.targets?.[index]
+  if (!target) return false
+  return (
+    hasTargetProxy(index) ||
+    hasTargetSchedule(index) ||
+    (target.dev_system_normalize ?? false)
   )
 }
 
@@ -419,43 +439,119 @@ const targetTableMeta = computed(() => ({
                     class="w-full"
                     :placeholder="t('upstreamModelOptional')"
                   />
-                  <div class="flex items-center gap-1">
-                    <UTooltip :text="t('proxyUrlOverrideHint')">
+                  <div class="flex items-center">
+                    <UPopover
+                      :content="{
+                        side: 'bottom',
+                        align: 'end',
+                        sideOffset: 6,
+                        collisionPadding: 8,
+                      }"
+                    >
                       <UButton
                         type="button"
                         size="sm"
                         :color="
-                          hasTargetProxy(row.index) ? 'primary' : 'neutral'
+                          hasTargetSettings(row.index) ? 'primary' : 'neutral'
                         "
                         variant="ghost"
-                        icon="i-lucide-globe"
-                        :aria-label="t('proxyUrlOverride')"
-                        :aria-pressed="hasTargetProxy(row.index)"
-                        @click="openTargetProxy(row.index)"
+                        icon="i-lucide-settings-2"
+                        :aria-label="t('targetSettings')"
+                        :aria-pressed="hasTargetSettings(row.index)"
+                        :title="t('targetSettingsHint')"
                       />
-                    </UTooltip>
-                    <UTooltip :text="t('scheduleWindowsHint')">
-                      <UButton
-                        type="button"
-                        size="sm"
-                        :color="
-                          hasTargetSchedule(row.index) ? 'primary' : 'neutral'
-                        "
-                        variant="ghost"
-                        icon="i-lucide-clock"
-                        :aria-label="t('scheduleWindows')"
-                        :aria-pressed="hasTargetSchedule(row.index)"
-                        @click="openTargetSchedule(row.index)"
-                      />
-                    </UTooltip>
-                    <UTooltip :text="scheduleTooltip(row.index)">
-                      <span
-                        class="cursor-default text-xs whitespace-nowrap text-muted"
-                        @click="openTargetSchedule(row.index)"
-                      >
-                        {{ scheduleSummary(row.index) }}
-                      </span>
-                    </UTooltip>
+                      <template #content>
+                        <div
+                          class="grid w-[min(20rem,calc(100vw-2rem))] gap-2 p-3 text-xs"
+                        >
+                          <div class="flex items-center justify-between gap-2">
+                            <div class="flex min-w-0 items-center gap-1">
+                              <span class="font-medium text-default">{{
+                                t('proxyUrlOverride')
+                              }}</span>
+                              <UTooltip :text="t('proxyUrlOverrideHint')">
+                                <UButton
+                                  type="button"
+                                  size="xs"
+                                  color="neutral"
+                                  variant="ghost"
+                                  icon="i-lucide-info"
+                                  :aria-label="t('proxyUrlOverrideHint')"
+                                />
+                              </UTooltip>
+                            </div>
+                            <div class="flex shrink-0 items-center gap-1">
+                              <span class="text-muted">{{
+                                proxySummary(row.index)
+                              }}</span>
+                              <UButton
+                                type="button"
+                                size="xs"
+                                color="neutral"
+                                variant="ghost"
+                                icon="i-lucide-pencil"
+                                :aria-label="t('proxySettings')"
+                                @click="openTargetProxy(row.index)"
+                              />
+                            </div>
+                          </div>
+                          <div class="flex items-center justify-between gap-2">
+                            <div class="flex min-w-0 items-center gap-1">
+                              <span class="font-medium text-default">{{
+                                t('scheduleWindows')
+                              }}</span>
+                              <UTooltip :text="t('scheduleWindowsHint')">
+                                <UButton
+                                  type="button"
+                                  size="xs"
+                                  color="neutral"
+                                  variant="ghost"
+                                  icon="i-lucide-info"
+                                  :aria-label="t('scheduleWindowsHint')"
+                                />
+                              </UTooltip>
+                            </div>
+                            <div class="flex shrink-0 items-center gap-1">
+                              <UTooltip :text="scheduleTooltip(row.index)">
+                                <span class="text-muted">{{
+                                  scheduleSummary(row.index)
+                                }}</span>
+                              </UTooltip>
+                              <UButton
+                                type="button"
+                                size="xs"
+                                color="neutral"
+                                variant="ghost"
+                                icon="i-lucide-pencil"
+                                :aria-label="t('scheduleSettings')"
+                                @click="openTargetSchedule(row.index)"
+                              />
+                            </div>
+                          </div>
+                          <div class="flex items-center justify-between gap-2">
+                            <div class="flex min-w-0 items-center gap-1">
+                              <span class="font-medium text-default">{{
+                                t('normalizeLabel')
+                              }}</span>
+                              <UTooltip :text="t('normalizeHint')">
+                                <UButton
+                                  type="button"
+                                  size="xs"
+                                  color="neutral"
+                                  variant="ghost"
+                                  icon="i-lucide-info"
+                                  :aria-label="t('normalizeHint')"
+                                />
+                              </UTooltip>
+                            </div>
+                            <USwitch
+                              v-model="row.original.dev_system_normalize"
+                              :aria-label="t('normalizeLabel')"
+                            />
+                          </div>
+                        </div>
+                      </template>
+                    </UPopover>
                   </div>
                 </div>
               </div>

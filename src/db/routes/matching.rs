@@ -24,6 +24,8 @@ pub async fn get_route(pool: &PgPool, route_id: uuid::Uuid) -> Result<Option<Rou
             provider: crate::db::EndpointProvider::from_str(&row.provider),
             service_tier: crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
             proxy_url: row.proxy_url,
+            // Issue #392 Phase K: direct lookup never normalizes.
+            dev_system_normalize: false,
         });
     match route {
         Some(route) => Ok(

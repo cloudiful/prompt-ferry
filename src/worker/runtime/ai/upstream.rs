@@ -403,6 +403,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
         };
         let response = send_upstream_request(
             &Client::new(),
@@ -436,6 +437,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -512,6 +514,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
@@ -567,6 +570,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
@@ -620,6 +624,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
@@ -676,6 +681,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -719,6 +725,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
@@ -773,6 +780,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
@@ -809,6 +817,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -854,6 +863,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Minimax,
             service_tier: tier,
             proxy_url: None,
+            dev_system_normalize: false,
         }
     }
 
@@ -862,6 +872,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
 
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         }
@@ -1049,6 +1060,7 @@ mod tests {
             let route = RouteConfig {
                 native_api,
                 proxy_url: None,
+                dev_system_normalize: false,
                 ..minimax_route(crate::db::MinimaxServiceTier::Standard)
             };
             assert_eq!(
@@ -1185,6 +1197,7 @@ mod tests {
             native_api: NativeApi::AnthropicMessages,
             provider: crate::db::EndpointProvider::Minimax,
             proxy_url: None,
+            dev_system_normalize: false,
 
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         }
@@ -1194,6 +1207,7 @@ mod tests {
         RouteConfig {
             base_url: base_url.to_string(),
             proxy_url: None,
+            dev_system_normalize: false,
 
             ..route.clone()
         }
@@ -1245,6 +1259,7 @@ mod tests {
         let chat = RouteConfig {
             native_api: NativeApi::Chat,
             proxy_url: None,
+            dev_system_normalize: false,
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         };
         assert_eq!(
@@ -1254,6 +1269,7 @@ mod tests {
         let responses = RouteConfig {
             native_api: NativeApi::Responses,
             proxy_url: None,
+            dev_system_normalize: false,
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         };
         assert_eq!(
@@ -1328,6 +1344,7 @@ mod tests {
             native_api,
             provider: crate::db::EndpointProvider::Glm,
             proxy_url: None,
+            dev_system_normalize: false,
 
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         }

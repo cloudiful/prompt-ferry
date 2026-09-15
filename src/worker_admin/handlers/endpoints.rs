@@ -29,7 +29,7 @@ pub(super) async fn create_endpoint(
     let mcp_enabled = body
         .mcp_enabled
         .unwrap_or(body.provider == db::EndpointProvider::Minimax);
-    let input = match resolve_endpoint_input(&state, body, None, None).await {
+    let input = match resolve_endpoint_input(&state, body, None, None, None).await {
         Ok(input) => input,
         Err(response) => return response,
     };
@@ -101,13 +101,20 @@ pub(super) async fn update_endpoint(
         Ok(value) => value,
         Err(err) => return internal(&state, err),
     };
-    let input =
-        match resolve_endpoint_input(&state, body, Some(existing_api_keys), existing_proxy_url)
-            .await
-        {
-            Ok(input) => input,
-            Err(response) => return response,
-        };
+    // Issue #392 Phase K: same carry for `active_windows` (omitted keeps).
+    let existing_active_windows = Some(existing.active_windows.clone());
+    let input = match resolve_endpoint_input(
+        &state,
+        body,
+        Some(existing_api_keys),
+        existing_proxy_url,
+        existing_active_windows,
+    )
+    .await
+    {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
     match state
         .config_repository
         .update_endpoint(endpoint_id, input)

@@ -102,6 +102,7 @@ mod tests {
             provider: db::EndpointProvider::Generic,
             service_tier: db::MinimaxServiceTier::Standard,
             proxy_url: proxy.map(str::to_string),
+            dev_system_normalize: false,
         }
     }
 

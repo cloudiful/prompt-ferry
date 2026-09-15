@@ -179,6 +179,7 @@ mod tests {
                 api_key: "endpoint-secret".to_string(),
                 api_keys: Vec::new(),
                 proxy_url: None,
+                active_windows: None,
             }],
             routes: vec![ModelRouteConfig {
                 rule_id: route_id,
@@ -197,6 +198,7 @@ mod tests {
                     upstream_model: None,
                     proxy_url_override: None,
                     active_windows: None,
+                    dev_system_normalize: false,
                 }],
             }],
             client_keys: vec![ClientKeyConfig {

@@ -160,8 +160,10 @@ fn target_units_mode<'a>(
     }
     // Issue #378 Phase I: window-inactive targets never enter the pool.
     // Worker-local time; `enabled=false` stays out above.
-    if !db::stored_is_active_at(
+    // Issue #392 Phase K: effective windows (target-nonempty else endpoint).
+    if !db::effective_stored_is_active_at(
         target.active_windows.as_deref(),
+        target.endpoint_active_windows.as_deref(),
         db::worker_local_minutes_now(),
     ) {
         return Vec::new();

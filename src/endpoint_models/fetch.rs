@@ -164,6 +164,7 @@ mod tests {
             provider: EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: proxy.map(str::to_string),
+            dev_system_normalize: false,
         }
     }
 

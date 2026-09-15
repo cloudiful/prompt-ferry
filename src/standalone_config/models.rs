@@ -340,6 +340,12 @@ pub struct ProviderEndpointConfig {
     // persists the 0018 envelope.
     #[serde(default, skip_serializing)]
     pub proxy_url: Option<String>,
+    // Issue #392 Phase K: endpoint default windows as normalized JSON array
+    // (`None`/empty means all-day). Plaintext (not a secret); SQLite
+    // persists the 0021 `active_windows` column. Effective windows resolve
+    // as target-nonempty else endpoint else all-day.
+    #[serde(default)]
+    pub active_windows: Option<String>,
 }
 
 impl fmt::Debug for ProviderEndpointConfig {
@@ -365,6 +371,7 @@ impl fmt::Debug for ProviderEndpointConfig {
                 "proxy_url",
                 &redacted_optional_secret(self.proxy_url.as_deref()),
             )
+            .field("active_windows", &self.active_windows)
             .finish()
     }
 }
@@ -386,6 +393,11 @@ pub struct ModelRouteTargetConfig {
     // persists the 0020 `active_windows` column.
     #[serde(default)]
     pub active_windows: Option<String>,
+    // Issue #392 Phase K: developer->system normalization switch.
+    // `false` (default) skips Chat passthrough normalization. SQLite
+    // persists the 0022 `dev_system_normalize` INTEGER column.
+    #[serde(default)]
+    pub dev_system_normalize: bool,
 }
 
 impl fmt::Debug for ModelRouteTargetConfig {
@@ -402,6 +414,7 @@ impl fmt::Debug for ModelRouteTargetConfig {
                 &redacted_optional_secret(self.proxy_url_override.as_deref()),
             )
             .field("active_windows", &self.active_windows)
+            .field("dev_system_normalize", &self.dev_system_normalize)
             .finish()
     }
 }

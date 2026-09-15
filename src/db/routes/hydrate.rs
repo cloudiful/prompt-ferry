@@ -65,6 +65,9 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
                 proxy_url_override: row.proxy_url_override,
                 has_proxy_url_override,
                 active_windows,
+                // Issue #392 Phase K: normalize switch, default-off for
+                // pre-migration rows (COALESCE in SQL already defaults).
+                dev_system_normalize: row.dev_system_normalize,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
             }
@@ -134,6 +137,8 @@ pub(super) async fn model_route_candidates_by_rule(
                 proxy_url: row.proxy_url.clone(),
                 proxy_url_override: row.proxy_url_override.clone(),
                 active_windows: row.active_windows.clone(),
+                endpoint_active_windows: row.endpoint_active_windows.clone(),
+                dev_system_normalize: row.dev_system_normalize,
             });
             continue;
         }
@@ -163,6 +168,8 @@ pub(super) async fn model_route_candidates_by_rule(
                 proxy_url: row.proxy_url,
                 proxy_url_override: row.proxy_url_override,
                 active_windows: row.active_windows,
+                endpoint_active_windows: row.endpoint_active_windows,
+                dev_system_normalize: row.dev_system_normalize,
             }],
         });
     }

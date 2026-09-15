@@ -142,6 +142,16 @@ export const endpointMessages = {
     scheduleInvalid: '需为 HH:MM（00:00–23:59）',
     scheduleEqual: '开始与结束不能相同',
     scheduleMoreWindows: '等{count}段',
+    targetSettings: '目标设置',
+    endpointSettings: '端点设置',
+    targetSettingsHint: '代理、排期与归一设置',
+    endpointSettingsHint: '代理与排期设置',
+    proxySet: '已设置',
+    proxyInherit: '继承',
+    proxyDirectShort: '直连',
+    normalizeLabel: '归一 developer→system',
+    normalizeHint:
+      '默认关闭；开启后 Chat 透传将 developer 重写为 system，关闭则原样透传。严格校验 developer 的上游需手动开启。',
   },
   'en-US': {
     addTarget: 'Add target',
@@ -289,5 +299,15 @@ export const endpointMessages = {
     scheduleInvalid: 'Must be HH:MM (00:00–23:59)',
     scheduleEqual: 'Start must not equal end',
     scheduleMoreWindows: '+{count} windows',
+    targetSettings: 'Target settings',
+    endpointSettings: 'Endpoint settings',
+    targetSettingsHint: 'Proxy, schedule and normalize settings',
+    endpointSettingsHint: 'Proxy and schedule settings',
+    proxySet: 'Set',
+    proxyInherit: 'Inherit',
+    proxyDirectShort: 'Direct',
+    normalizeLabel: 'Normalize developer→system',
+    normalizeHint:
+      'Off by default; when on, Chat passthrough rewrites developer to system, otherwise passes through unchanged. Strict upstreams that reject developer need this on.',
   },
 } as const

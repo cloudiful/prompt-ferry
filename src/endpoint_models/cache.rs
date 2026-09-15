@@ -183,6 +183,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
+            dev_system_normalize: false,
         }
     }
 

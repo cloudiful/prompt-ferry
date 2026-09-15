@@ -145,6 +145,8 @@ pub(super) fn target(
 
         proxy_url_override: None,
         active_windows: None,
+        endpoint_active_windows: None,
+        dev_system_normalize: false,
     }
 }
 

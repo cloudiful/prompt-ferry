@@ -70,6 +70,7 @@ async fn endpoint_crud_round_trips_with_encrypted_secret() {
         key_lb_enabled: true,
         enabled: true,
         proxy_url: None,
+        active_windows: None,
     };
     let endpoint_id = Uuid::new_v4();
     let created = repo
@@ -127,6 +128,7 @@ async fn endpoint_crud_round_trips_with_encrypted_secret() {
         key_lb_enabled: true,
         enabled: true,
         proxy_url: None,
+        active_windows: None,
     };
     let updated = repo
         .update_endpoint(endpoint_id, updated_input)
@@ -182,6 +184,7 @@ async fn endpoint_proxy_round_trips_with_encrypted_envelope() {
         key_lb_enabled: false,
         enabled: true,
         proxy_url: Some(proxy.clone()),
+        active_windows: None,
     };
     let endpoint_id = Uuid::new_v4();
     repo.create_endpoint(endpoint_id, input, false)
@@ -233,6 +236,7 @@ async fn endpoint_proxy_round_trips_with_encrypted_envelope() {
                 "socks5h://route-user:route-pass@route-proxy.example:1080".to_string(),
             ),
             active_windows: None,
+            dev_system_normalize: false,
         }],
     };
     repo.create_model_route(rule_id, route_input)
@@ -341,6 +345,7 @@ async fn endpoint_proxy_round_trips_with_encrypted_envelope() {
         key_lb_enabled: false,
         enabled: true,
         proxy_url: None,
+        active_windows: None,
     };
     repo.update_endpoint(endpoint_id, cleared)
         .await
@@ -541,6 +546,7 @@ async fn sqlite_minimax_endpoint_creates_managed_mcp_projection() {
                 key_lb_enabled: false,
                 enabled: true,
                 proxy_url: None,
+                active_windows: None,
             },
             true,
         )
@@ -607,6 +613,7 @@ async fn model_route_crud_round_trips_with_target_persistence() {
         key_lb_enabled: false,
         enabled: true,
         proxy_url: None,
+        active_windows: None,
     };
     repo.create_endpoint(endpoint_id, endpoint, false)
         .await
@@ -627,6 +634,7 @@ async fn model_route_crud_round_trips_with_target_persistence() {
             upstream_model: Some("gpt-4o-mini".to_string()),
             proxy_url_override: None,
             active_windows: None,
+            dev_system_normalize: false,
         }],
     };
     let rule = repo

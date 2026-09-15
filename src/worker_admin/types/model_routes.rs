@@ -75,6 +75,8 @@ impl ModelRouteRequest {
                         proxy_url_override: None,
                         has_proxy_url_override: None,
                         active_windows: None,
+                        // Issue #392 Phase K: default-off passthrough.
+                        dev_system_normalize: false,
                     })
                     .collect()
             })
@@ -119,6 +121,8 @@ impl ModelRouteRequest {
                         .map(str::to_string),
                     proxy_url_override,
                     active_windows,
+                    // Issue #392 Phase K: always sent (no omit/carry).
+                    dev_system_normalize: target.dev_system_normalize,
                 })
             });
         let targets = futures::future::try_join_all(targets).await?;
@@ -285,6 +289,11 @@ pub struct ModelRouteTargetRequest {
     /// means all-day; `Some([...])` replaces after validation.
     #[serde(default)]
     pub active_windows: Option<Vec<db::ActiveWindow>>,
+    /// Issue #392 Phase K: developer->system normalization switch.
+    /// Always sent (no omit semantics); `false` (default) skips
+    /// `normalize_chat_request_for_native` in Chat passthrough.
+    #[serde(default)]
+    pub dev_system_normalize: bool,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -352,4 +361,49 @@ fn normalize_proxy_url(trimmed: &str) -> Result<String, &'static str> {
         return Err("proxy_url must include a host");
     }
     Ok(trimmed.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ModelRouteTargetRequest;
+
+    #[test]
+    fn dev_system_normalize_defaults_off_and_always_serializes() {
+        // Issue #392 Phase K: booleans always sent (no omit semantics).
+        // Omitted input defaults to false for backward compat, but
+        // serialization always carries the key so `false` means off.
+        let omitted: ModelRouteTargetRequest = serde_json::from_value(serde_json::json!({
+            "endpoint_id": "00000000-0000-0000-0000-000000000000"
+        }))
+        .expect("missing normalize defaults to false");
+        assert!(!omitted.dev_system_normalize);
+        let off = serde_json::to_value(&ModelRouteTargetRequest {
+            endpoint_id: uuid::Uuid::nil(),
+            enabled: Some(true),
+            upstream_model: None,
+            proxy_url_override: None,
+            has_proxy_url_override: None,
+            active_windows: None,
+            dev_system_normalize: false,
+        })
+        .expect("serialize off");
+        assert_eq!(
+            off.get("dev_system_normalize").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        let on = serde_json::to_value(&ModelRouteTargetRequest {
+            endpoint_id: uuid::Uuid::nil(),
+            enabled: Some(true),
+            upstream_model: None,
+            proxy_url_override: None,
+            has_proxy_url_override: None,
+            active_windows: None,
+            dev_system_normalize: true,
+        })
+        .expect("serialize on");
+        assert_eq!(
+            on.get("dev_system_normalize").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
 }

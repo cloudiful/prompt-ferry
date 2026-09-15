@@ -171,6 +171,10 @@ pub struct ProviderEndpointRow {
     // SQLite uses the envelope columns (standalone 0018).
     #[serde(skip_serializing)]
     pub proxy_url: Option<String>,
+    // Issue #392 Phase K: endpoint default windows (`active_windows` TEXT
+    // NULL). Effective windows resolve as target-nonempty else endpoint
+    // else all-day. Carried as stored string for routing inheritance.
+    pub active_windows: Option<String>,
     pub key_lb_enabled: bool,
     pub enabled: bool,
     pub mcp_enabled: bool,
@@ -202,6 +206,10 @@ pub struct ProviderEndpoint {
     /// `true` when a proxy URL is stored; the secret itself is never echoed.
     #[serde(default)]
     pub has_proxy_url: bool,
+    /// Issue #392 Phase K: endpoint default windows (`HH:MM` pairs).
+    /// Empty means all-day; empty target inherits this value.
+    #[serde(default)]
+    pub active_windows: Vec<crate::db::types::ActiveWindow>,
     pub key_lb_enabled: bool,
     pub enabled: bool,
     pub mcp_enabled: bool,
@@ -219,6 +227,15 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             .proxy_url
             .as_deref()
             .is_some_and(|raw| !raw.trim().is_empty());
+        // Issue #392 Phase K: stored JSON array; corrupt reads as all-day
+        // for display (routing fails closed separately).
+        let active_windows = value
+            .active_windows
+            .as_deref()
+            .map(str::trim)
+            .filter(|raw| !raw.is_empty())
+            .and_then(|raw| serde_json::from_str(raw).ok())
+            .unwrap_or_default();
         Self {
             endpoint_id: value.endpoint_id,
             scope: value.scope,
@@ -235,6 +252,7 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             api_key: value.api_key,
             proxy_url: value.proxy_url,
             has_proxy_url,
+            active_windows,
             key_lb_enabled: value.key_lb_enabled,
             enabled: value.enabled,
             mcp_enabled: value.mcp_enabled,
@@ -267,6 +285,11 @@ pub struct EndpointCreate {
     // (SQLite encrypts via the 0018 envelope). `None`/empty means direct.
     #[serde(default)]
     pub proxy_url: Option<String>,
+    // Issue #392 Phase K: endpoint default windows. `None` (omitted) means
+    // keep on PATCH / all-day on create; `Some([])` means all-day;
+    // `Some([...])` replaces after HH:MM validation (sorted normalize).
+    #[serde(default)]
+    pub active_windows: Option<Vec<crate::db::types::ActiveWindow>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

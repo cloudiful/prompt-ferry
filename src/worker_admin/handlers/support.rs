@@ -68,6 +68,7 @@ pub(super) async fn resolve_endpoint_input(
     body: EndpointRequest,
     existing_endpoint_api_keys: Option<Vec<db::EndpointApiKey>>,
     existing_proxy_url: Option<String>,
+    existing_active_windows: Option<Vec<db::ActiveWindow>>,
 ) -> Result<EndpointCreate, Response> {
     validate_mcp_provider(body.mcp_enabled, body.provider)
         .map_err(|message| error(StatusCode::BAD_REQUEST, "invalid_mcp_provider", message))?;
@@ -264,6 +265,15 @@ pub(super) async fn resolve_endpoint_input(
                 .map_err(|message| error(StatusCode::BAD_REQUEST, "invalid_proxy_url", message))?,
         ),
     };
+    // Issue #392 Phase K: endpoint default windows reuse the same HH:MM
+    // validation as targets. `None` keeps the stored value on PATCH
+    // (`None` on create means all-day); `Some([])` means all-day.
+    let active_windows = match body.active_windows {
+        None => existing_active_windows,
+        Some(windows) => Some(db::normalize_request_windows(&windows).map_err(|message| {
+            error(StatusCode::BAD_REQUEST, "invalid_active_windows", message)
+        })?),
+    };
     // Issue #248: preset providers ignore the client-sent base entirely and
     // persist the derived official root; Generic keeps the normalized
     // client-sent base byte-for-byte.
@@ -292,6 +302,7 @@ pub(super) async fn resolve_endpoint_input(
         key_lb_enabled: body.key_lb_enabled,
         enabled: body.enabled.unwrap_or(true),
         proxy_url,
+        active_windows,
     })
 }
 

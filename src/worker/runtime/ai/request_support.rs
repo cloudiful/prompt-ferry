@@ -145,7 +145,14 @@ pub(super) async fn prepare_upstream_request_for_route(
     // previous_response_id or conversation are rejected with
     // `invalid_responses_continuation` inside `prepare_upstream_request` and are
     // never silently stripped here. Responses -> Anthropic/Auto remains rejected.
-    let mut prepared = prepare_upstream_request(&request.path, prepared_body, route.native_api)?;
+    // Issue #392 Phase K: thread the per-target normalize switch; false
+    // skips Chat developer->system rewriting (default-off passthrough).
+    let mut prepared = prepare_upstream_request(
+        &request.path,
+        prepared_body,
+        route.native_api,
+        route.dev_system_normalize,
+    )?;
     prepared.upstream_redacted_request_json = redacted_request
         .as_ref()
         .and_then(|value| value.redacted_request_json.clone());

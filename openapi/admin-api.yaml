@@ -3488,6 +3488,16 @@ components:
       - api_key
       - protocol_mode
       properties:
+        active_windows:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/ActiveWindow'
+          description: |-
+            Issue #392 Phase K: endpoint default windows (`[{start,end}]` `HH:MM`).
+            `None` (omitted) keeps the stored value on PATCH; `Some([])`
+            means all-day; `Some([...])` replaces after validation.
         api_key:
           type: string
         api_keys:
@@ -4713,6 +4723,12 @@ components:
         created_at:
           type: string
           format: date-time
+        dev_system_normalize:
+          type: boolean
+          description: |-
+            Issue #392 Phase K: developer->system normalization switch.
+            `false` (default) skips `normalize_chat_request_for_native`;
+            `true` rewrites `developer` to `system`. Always sent (no omit).
         enabled:
           type: boolean
         endpoint_enabled:
@@ -4760,6 +4776,12 @@ components:
             Issue #378 Phase I: effective windows (`[{start,end}]` `HH:MM`).
             `None` (omitted) keeps the stored value on PATCH; `Some([])`
             means all-day; `Some([...])` replaces after validation.
+        dev_system_normalize:
+          type: boolean
+          description: |-
+            Issue #392 Phase K: developer->system normalization switch.
+            Always sent (no omit semantics); `false` (default) skips
+            `normalize_chat_request_for_native` in Chat passthrough.
         enabled:
           type:
           - boolean
@@ -4954,6 +4976,13 @@ components:
       - created_at
       - updated_at
       properties:
+        active_windows:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActiveWindow'
+          description: |-
+            Issue #392 Phase K: endpoint default windows (`HH:MM` pairs).
+            Empty means all-day; empty target inherits this value.
         api_keys:
           type: array
           items:
