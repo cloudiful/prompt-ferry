@@ -2,8 +2,7 @@
 import type { TableColumn } from '@nuxt/ui'
 import { computed, ref } from 'vue'
 import ProviderIcon from '@/components/providers/ProviderIcon.vue'
-import ProxySettingsDialog from '@/components/shared/ProxySettingsDialog.vue'
-import ScheduleWindowsDialog from '@/components/shared/ScheduleWindowsDialog.vue'
+import ModelRouteTargetSettings from '@/components/endpoints/ModelRouteTargetSettings.vue'
 import type { ModelRouteForm } from '@/models'
 import type { ProviderEndpoint, User } from '@/generated/admin-api'
 import type { EndpointOption } from '@/models/endpoints'
@@ -51,166 +50,6 @@ function addTarget(): void {
 function removeTarget(index: number): void {
   if (!form.value || !Array.isArray(form.value.targets)) return
   form.value.targets.splice(index, 1)
-}
-
-// Issue #368 Phase C: clear the saved override so the next save sends `""`
-// (clear to inherit). Leaving the field blank while
-// `has_saved_proxy_url_override` is true omits the key and keeps the
-// stored value (see `modelRouteFormToRequest`).
-function clearTargetProxyOverride(index: number): void {
-  const target = form.value?.targets?.[index]
-  if (!target) return
-  target.proxy_url_override = ''
-  target.has_saved_proxy_url_override = false
-}
-
-function onTargetProxySave(index: number, value: string): void {
-  const target = form.value?.targets?.[index]
-  if (!target) return
-  const trimmed = (value ?? '').trim()
-  target.proxy_url_override = trimmed
-  if (trimmed === '') target.has_saved_proxy_url_override = false
-}
-
-function hasTargetProxy(index: number): boolean {
-  const target = form.value?.targets?.[index]
-  if (!target) return false
-  return (
-    (target.proxy_url_override ?? '').trim() !== '' ||
-    (target.has_saved_proxy_url_override ?? false)
-  )
-}
-
-// Issue #392 Phase L: concise proxy summary (plain text, no pill).
-// Set when an override is typed or saved; otherwise inherit.
-function proxySummary(index: number): string {
-  return hasTargetProxy(index) ? props.t('proxySet') : props.t('proxyInherit')
-}
-
-// Issue #392 Phase L: gear highlight when anything is non-default
-// (proxy set, schedule restricted, or normalize on).
-function hasTargetSettings(index: number): boolean {
-  const target = form.value?.targets?.[index]
-  if (!target) return false
-  return (
-    hasTargetProxy(index) ||
-    hasTargetSchedule(index) ||
-    (target.dev_system_normalize ?? false)
-  )
-}
-
-// Issue #378 Phase J: per-target schedule windows. Non-empty means
-// restricted (highlight the timer button); empty means all-day.
-function targetWindows(index: number): Array<{ start: string; end: string }> {
-  const target = form.value?.targets?.[index]
-  return Array.isArray(target?.active_windows)
-    ? (target?.active_windows ?? [])
-    : []
-}
-
-function sortedTargetWindows(
-  index: number,
-): Array<{ start: string; end: string }> {
-  return [...targetWindows(index)]
-    .map((window) => ({
-      start: (window?.start ?? '').trim(),
-      end: (window?.end ?? '').trim(),
-    }))
-    .filter((window) => window.start !== '' && window.end !== '')
-    .sort((a, b) =>
-      a.start === b.start
-        ? a.end.localeCompare(b.end)
-        : a.start.localeCompare(b.start),
-    )
-}
-
-function hasTargetSchedule(index: number): boolean {
-  return sortedTargetWindows(index).length > 0
-}
-
-function formatWindow(window: { start: string; end: string }): string {
-  return `${window.start}–${window.end}`
-}
-
-function scheduleSummary(index: number): string {
-  const windows = sortedTargetWindows(index)
-  if (windows.length === 0) return props.t('scheduleAllDay')
-  const first = windows[0]
-  if (!first) return props.t('scheduleAllDay')
-  if (windows.length === 1) return formatWindow(first)
-  return `${formatWindow(first)} ${props.t('scheduleMoreWindows', { count: windows.length })}`
-}
-
-function scheduleTooltip(index: number): string {
-  const windows = sortedTargetWindows(index)
-  if (windows.length === 0) return props.t('scheduleAllDay')
-  return windows.map(formatWindow).join(', ')
-}
-
-function onTargetScheduleSave(
-  index: number,
-  value: Array<{ start: string; end: string }>,
-): void {
-  const target = form.value?.targets?.[index]
-  if (!target) return
-  target.active_windows = value.map((window) => ({
-    start: (window?.start ?? '').trim(),
-    end: (window?.end ?? '').trim(),
-  }))
-  target.active_windows_touched = true
-}
-
-const proxyModalIndex = ref<number | null>(null)
-const proxyModalOpen = ref(false)
-
-function openTargetProxy(index: number): void {
-  proxyModalIndex.value = index
-  proxyModalOpen.value = true
-}
-
-const proxyModalValue = computed(
-  () =>
-    form.value?.targets?.[proxyModalIndex.value ?? -1]?.proxy_url_override ??
-    '',
-)
-const proxyModalHasSaved = computed(
-  () =>
-    form.value?.targets?.[proxyModalIndex.value ?? -1]
-      ?.has_saved_proxy_url_override ?? false,
-)
-
-function onProxyModalSave(value: string): void {
-  if (proxyModalIndex.value == null) return
-  onTargetProxySave(proxyModalIndex.value, value)
-}
-
-function onProxyModalClear(): void {
-  if (proxyModalIndex.value == null) return
-  clearTargetProxyOverride(proxyModalIndex.value)
-}
-
-// Issue #378 Phase J: schedule modal mirrors the proxy modal interaction.
-// Untouched save closes without emitting, so the outer form keeps
-// `active_windows_touched=false` (request omits the key); touched save
-// marks the target (empty array = all-day).
-const scheduleModalIndex = ref<number | null>(null)
-const scheduleModalOpen = ref(false)
-
-function openTargetSchedule(index: number): void {
-  scheduleModalIndex.value = index
-  scheduleModalOpen.value = true
-}
-
-const scheduleModalValue = computed(
-  () =>
-    form.value?.targets?.[scheduleModalIndex.value ?? -1]?.active_windows ?? [],
-)
-
-function onScheduleModalSave(
-  value: Array<{ start: string; end: string }>,
-): void {
-  if (scheduleModalIndex.value == null) return
-  onTargetScheduleSave(scheduleModalIndex.value, value)
 }
 
 // Issue #378 Phase H: grip-only drag reorder reuses the same splice
@@ -440,118 +279,10 @@ const targetTableMeta = computed(() => ({
                     :placeholder="t('upstreamModelOptional')"
                   />
                   <div class="flex items-center">
-                    <UPopover
-                      :content="{
-                        side: 'bottom',
-                        align: 'end',
-                        sideOffset: 6,
-                        collisionPadding: 8,
-                      }"
-                    >
-                      <UButton
-                        type="button"
-                        size="sm"
-                        :color="
-                          hasTargetSettings(row.index) ? 'primary' : 'neutral'
-                        "
-                        variant="ghost"
-                        icon="i-lucide-settings-2"
-                        :aria-label="t('targetSettings')"
-                        :aria-pressed="hasTargetSettings(row.index)"
-                        :title="t('targetSettingsHint')"
-                      />
-                      <template #content>
-                        <div
-                          class="grid w-[min(20rem,calc(100vw-2rem))] gap-2 p-3 text-xs"
-                        >
-                          <div class="flex items-center justify-between gap-2">
-                            <div class="flex min-w-0 items-center gap-1">
-                              <span class="font-medium text-default">{{
-                                t('proxyUrlOverride')
-                              }}</span>
-                              <UTooltip :text="t('proxyUrlOverrideHint')">
-                                <UButton
-                                  type="button"
-                                  size="xs"
-                                  color="neutral"
-                                  variant="ghost"
-                                  icon="i-lucide-info"
-                                  :aria-label="t('proxyUrlOverrideHint')"
-                                />
-                              </UTooltip>
-                            </div>
-                            <div class="flex shrink-0 items-center gap-1">
-                              <span class="text-muted">{{
-                                proxySummary(row.index)
-                              }}</span>
-                              <UButton
-                                type="button"
-                                size="xs"
-                                color="neutral"
-                                variant="ghost"
-                                icon="i-lucide-pencil"
-                                :aria-label="t('proxySettings')"
-                                @click="openTargetProxy(row.index)"
-                              />
-                            </div>
-                          </div>
-                          <div class="flex items-center justify-between gap-2">
-                            <div class="flex min-w-0 items-center gap-1">
-                              <span class="font-medium text-default">{{
-                                t('scheduleWindows')
-                              }}</span>
-                              <UTooltip :text="t('scheduleWindowsHint')">
-                                <UButton
-                                  type="button"
-                                  size="xs"
-                                  color="neutral"
-                                  variant="ghost"
-                                  icon="i-lucide-info"
-                                  :aria-label="t('scheduleWindowsHint')"
-                                />
-                              </UTooltip>
-                            </div>
-                            <div class="flex shrink-0 items-center gap-1">
-                              <UTooltip :text="scheduleTooltip(row.index)">
-                                <span class="text-muted">{{
-                                  scheduleSummary(row.index)
-                                }}</span>
-                              </UTooltip>
-                              <UButton
-                                type="button"
-                                size="xs"
-                                color="neutral"
-                                variant="ghost"
-                                icon="i-lucide-pencil"
-                                :aria-label="t('scheduleSettings')"
-                                @click="openTargetSchedule(row.index)"
-                              />
-                            </div>
-                          </div>
-                          <div class="flex items-center justify-between gap-2">
-                            <div class="flex min-w-0 items-center gap-1">
-                              <span class="font-medium text-default">{{
-                                t('normalizeLabel')
-                              }}</span>
-                              <UTooltip :text="t('normalizeHint')">
-                                <UButton
-                                  type="button"
-                                  size="xs"
-                                  color="neutral"
-                                  variant="ghost"
-                                  icon="i-lucide-info"
-                                  :aria-label="t('normalizeHint')"
-                                />
-                              </UTooltip>
-                            </div>
-                            <USwitch
-                              v-model="row.original.dev_system_normalize"
-                              :aria-label="t('normalizeLabel')"
-                            />
-                          </div>
-                        </div>
-                      </template>
-                    </UPopover>
+                    <ModelRouteTargetSettings
+                      v-model:target="row.original"
+                      :t="t"
+                    />
                   </div>
                 </div>
               </div>
@@ -593,24 +324,6 @@ const targetTableMeta = computed(() => ({
             </template>
           </UTable>
         </div>
-
-        <ProxySettingsDialog
-          v-model:visible="proxyModalOpen"
-          :initial-value="proxyModalValue"
-          :has-saved="proxyModalHasSaved"
-          :hint="t('proxyUrlOverrideHint')"
-          :t="t"
-          @save="onProxyModalSave"
-          @clear="onProxyModalClear"
-        />
-
-        <ScheduleWindowsDialog
-          v-model:visible="scheduleModalOpen"
-          :initial-value="scheduleModalValue"
-          :hint="t('scheduleWindowsHint')"
-          :t="t"
-          @save="onScheduleModalSave"
-        />
 
         <div class="flex justify-end gap-2 pt-1">
           <UButton

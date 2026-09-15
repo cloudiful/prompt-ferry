@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { User } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
 import EndpointApiKeysEditor from '@/components/endpoints/EndpointApiKeysEditor.vue'
 import EndpointProviderFields from '@/components/endpoints/EndpointProviderFields.vue'
-import ProxySettingsDialog from '@/components/shared/ProxySettingsDialog.vue'
-import ScheduleWindowsDialog from '@/components/shared/ScheduleWindowsDialog.vue'
+import ProxySettingsForm from '@/components/shared/ProxySettingsForm.vue'
+import ScheduleWindowsForm from '@/components/shared/ScheduleWindowsForm.vue'
 import RequestLimitFields from '@/components/shared/RequestLimitFields.vue'
 
 const props = defineProps<{
@@ -22,7 +22,26 @@ defineEmits<{
   save: []
 }>()
 
-const proxyModalOpen = ref(false)
+// Two-level drill-in inside the same settings panel: level one lists the
+// rows, level two renders the existing proxy/schedule form. No second
+// overlay layer opens at any point.
+const settingsPopoverOpen = ref(false)
+const settingsView = ref<'main' | 'proxy' | 'schedule'>('main')
+
+function backToSettingsMain(): void {
+  settingsView.value = 'main'
+}
+
+watch(visible, (open) => {
+  if (!open) {
+    settingsPopoverOpen.value = false
+    settingsView.value = 'main'
+  }
+})
+
+watch(settingsPopoverOpen, (open) => {
+  if (!open) settingsView.value = 'main'
+})
 
 // INLINE-proxy-ui-a1 BUG fix: guard legacy forms missing Phase C fields so
 // the dialog always renders instead of throwing on undefined access.
@@ -40,6 +59,7 @@ function clearProxyUrl(): void {
   if (!form.value) return
   form.value.proxy_url = ''
   form.value.has_saved_proxy_url = false
+  backToSettingsMain()
 }
 
 function onProxySave(value: string): void {
@@ -49,6 +69,7 @@ function onProxySave(value: string): void {
   // Saving direct (`""`) must clear the saved flag so the next save sends
   // `""` (clear) instead of omitting the key (keep).
   if (trimmed === '') form.value.has_saved_proxy_url = false
+  backToSettingsMain()
 }
 
 // Issue #392 Phase L: endpoint default schedule mirrors the target dialog.
@@ -115,9 +136,8 @@ function onEndpointScheduleSave(
     end: (window?.end ?? '').trim(),
   }))
   form.value.active_windows_touched = true
+  backToSettingsMain()
 }
-
-const scheduleModalOpen = ref(false)
 </script>
 
 <template>
@@ -159,6 +179,7 @@ const scheduleModalOpen = ref(false)
             </UTooltip>
           </div>
           <UPopover
+            v-model:open="settingsPopoverOpen"
             :content="{
               side: 'bottom',
               align: 'end',
@@ -178,9 +199,17 @@ const scheduleModalOpen = ref(false)
             />
             <template #content>
               <div
+                v-if="settingsView === 'main'"
                 class="grid w-[min(20rem,calc(100vw-2rem))] gap-2 p-3 text-xs"
               >
-                <div class="flex items-center justify-between gap-2">
+                <div
+                  role="button"
+                  tabindex="0"
+                  class="flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-1 hover:bg-elevated"
+                  @click="settingsView = 'proxy'"
+                  @keydown.enter="settingsView = 'proxy'"
+                  @keydown.space.prevent="settingsView = 'proxy'"
+                >
                   <div class="flex min-w-0 items-center gap-1">
                     <span class="font-medium text-default">{{
                       t('proxyUrl')
@@ -193,6 +222,7 @@ const scheduleModalOpen = ref(false)
                         variant="ghost"
                         icon="i-lucide-info"
                         :aria-label="t('proxyUrlHint')"
+                        @click.stop
                       />
                     </UTooltip>
                   </div>
@@ -205,11 +235,18 @@ const scheduleModalOpen = ref(false)
                       variant="ghost"
                       icon="i-lucide-pencil"
                       :aria-label="t('proxySettings')"
-                      @click="proxyModalOpen = true"
+                      @click.stop="settingsView = 'proxy'"
                     />
                   </div>
                 </div>
-                <div class="flex items-center justify-between gap-2">
+                <div
+                  role="button"
+                  tabindex="0"
+                  class="flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-1 hover:bg-elevated"
+                  @click="settingsView = 'schedule'"
+                  @keydown.enter="settingsView = 'schedule'"
+                  @keydown.space.prevent="settingsView = 'schedule'"
+                >
                   <div class="flex min-w-0 items-center gap-1">
                     <span class="font-medium text-default">{{
                       t('scheduleWindows')
@@ -222,6 +259,7 @@ const scheduleModalOpen = ref(false)
                         variant="ghost"
                         icon="i-lucide-info"
                         :aria-label="t('scheduleWindowsHint')"
+                        @click.stop
                       />
                     </UTooltip>
                   </div>
@@ -238,30 +276,70 @@ const scheduleModalOpen = ref(false)
                       variant="ghost"
                       icon="i-lucide-pencil"
                       :aria-label="t('scheduleSettings')"
-                      @click="scheduleModalOpen = true"
+                      @click.stop="settingsView = 'schedule'"
                     />
                   </div>
                 </div>
               </div>
+              <div
+                v-else-if="settingsView === 'proxy'"
+                class="grid w-[min(20rem,calc(100vw-2rem))] gap-2 p-3 text-xs"
+              >
+                <div class="flex items-center gap-1">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-arrow-left"
+                    :aria-label="t('cancel')"
+                    @click="backToSettingsMain"
+                  />
+                  <span class="font-medium text-default">{{
+                    t('proxySettings')
+                  }}</span>
+                </div>
+                <ProxySettingsForm
+                  :key="`endpoint-proxy-${form?.proxy_url ?? ''}-${form?.has_saved_proxy_url ?? false}`"
+                  :initial-value="form?.proxy_url ?? ''"
+                  :has-saved="form?.has_saved_proxy_url ?? false"
+                  :hint="t('proxyUrlHint')"
+                  :t="t"
+                  @save="onProxySave"
+                  @clear="clearProxyUrl"
+                  @cancel="backToSettingsMain"
+                />
+              </div>
+              <div
+                v-else
+                class="grid w-[min(20rem,calc(100vw-2rem))] gap-2 p-3 text-xs"
+              >
+                <div class="flex items-center gap-1">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-arrow-left"
+                    :aria-label="t('cancel')"
+                    @click="backToSettingsMain"
+                  />
+                  <span class="font-medium text-default">{{
+                    t('scheduleSettings')
+                  }}</span>
+                </div>
+                <ScheduleWindowsForm
+                  :key="`endpoint-schedule-${JSON.stringify(form?.active_windows ?? [])}`"
+                  :initial-value="form?.active_windows ?? []"
+                  :hint="t('scheduleWindowsHint')"
+                  :t="t"
+                  @save="onEndpointScheduleSave"
+                  @cancel="backToSettingsMain"
+                />
+              </div>
             </template>
           </UPopover>
         </div>
-        <ProxySettingsDialog
-          v-model:visible="proxyModalOpen"
-          :initial-value="form?.proxy_url ?? ''"
-          :has-saved="form?.has_saved_proxy_url ?? false"
-          :hint="t('proxyUrlHint')"
-          :t="t"
-          @save="onProxySave"
-          @clear="clearProxyUrl"
-        />
-        <ScheduleWindowsDialog
-          v-model:visible="scheduleModalOpen"
-          :initial-value="form?.active_windows ?? []"
-          :hint="t('scheduleWindowsHint')"
-          :t="t"
-          @save="onEndpointScheduleSave"
-        />
         <div
           v-if="form.provider === 'minimax'"
           class="flex items-center justify-between gap-3 border-t border-default pt-3"
