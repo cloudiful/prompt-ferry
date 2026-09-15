@@ -1014,4 +1014,125 @@ mod tests {
         assert_eq!(err.code, "unsupported_feature");
         assert!(err.message.contains("reasoning.summary"));
     }
+
+    #[test]
+    fn translates_chat_reasoning_content_to_responses_item_before_tool_calls() {
+        let value = serde_json::from_slice::<Value>(
+            &chat_request_to_responses(
+                br#"{
+                    "model":"deepseek-v4-pro",
+                    "messages":[
+                        {"role":"user","content":"check weather"},
+                        {"role":"assistant","reasoning_content":"think first","tool_calls":[
+                            {"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}
+                        ]},
+                        {"role":"tool","tool_call_id":"call_1","content":"72F"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let input = value["input"].as_array().unwrap();
+        assert_eq!(input.len(), 5);
+        assert_eq!(input[1]["type"].as_str(), Some("reasoning"));
+        assert_eq!(input[1]["status"].as_str(), Some("completed"));
+        assert_eq!(input[1]["summary"].as_array().map(Vec::len), Some(0));
+        assert_eq!(
+            input[1]["content"][0]["type"].as_str(),
+            Some("reasoning_text")
+        );
+        assert_eq!(input[1]["content"][0]["text"].as_str(), Some("think first"));
+        assert_eq!(input[2]["role"].as_str(), Some("assistant"));
+        assert!(input[2]["content"].is_null());
+        assert_eq!(input[3]["type"].as_str(), Some("function_call"));
+        assert_eq!(input[3]["call_id"].as_str(), Some("call_1"));
+    }
+
+    #[test]
+    fn translates_chat_reasoning_content_before_plain_assistant_answer() {
+        let value = serde_json::from_slice::<Value>(
+            &chat_request_to_responses(
+                br#"{
+                    "model":"deepseek-v4-pro",
+                    "messages":[
+                        {"role":"user","content":"question"},
+                        {"role":"assistant","reasoning_content":"plan then answer","content":"answer"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let input = value["input"].as_array().unwrap();
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[1]["type"].as_str(), Some("reasoning"));
+        assert!(
+            input[1]["id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("rs_"))
+        );
+        assert_eq!(
+            input[1]["content"][0]["text"].as_str(),
+            Some("plan then answer")
+        );
+        assert_eq!(input[2]["role"].as_str(), Some("assistant"));
+        assert_eq!(input[2]["content"][0]["text"].as_str(), Some("answer"));
+    }
+
+    #[test]
+    fn omits_chat_reasoning_item_when_reasoning_content_is_blank() {
+        let value = serde_json::from_slice::<Value>(
+            &chat_request_to_responses(
+                br#"{
+                    "model":"deepseek-v4-pro",
+                    "messages":[
+                        {"role":"user","content":"question"},
+                        {"role":"assistant","reasoning_content":"   ","content":"answer"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let input = value["input"].as_array().unwrap();
+        assert_eq!(input.len(), 2);
+        assert!(input.iter().all(|item| item["type"] != "reasoning"));
+        assert_eq!(input[1]["content"][0]["text"].as_str(), Some("answer"));
+    }
+
+    #[test]
+    fn keeps_chat_reasoning_items_across_consecutive_tool_rounds() {
+        let value = serde_json::from_slice::<Value>(
+            &chat_request_to_responses(
+                br#"{
+                    "messages":[
+                        {"role":"user","content":"check weather"},
+                        {"role":"assistant","reasoning_content":"first","tool_calls":[
+                            {"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}
+                        ]},
+                        {"role":"tool","tool_call_id":"call_1","content":"one"},
+                        {"role":"assistant","reasoning_content":"second","tool_calls":[
+                            {"id":"call_2","type":"function","function":{"name":"lookup","arguments":"{}"}}
+                        ]},
+                        {"role":"tool","tool_call_id":"call_2","content":"two"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let input = value["input"].as_array().unwrap();
+        assert_eq!(input.len(), 9);
+        assert_eq!(input[1]["content"][0]["text"].as_str(), Some("first"));
+        assert_eq!(input[3]["type"].as_str(), Some("function_call"));
+        assert_eq!(input[3]["call_id"].as_str(), Some("call_1"));
+        assert_eq!(input[5]["content"][0]["text"].as_str(), Some("second"));
+        assert_eq!(input[7]["type"].as_str(), Some("function_call"));
+        assert_eq!(input[7]["call_id"].as_str(), Some("call_2"));
+    }
 }

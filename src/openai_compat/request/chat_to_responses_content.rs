@@ -22,6 +22,26 @@ pub(super) fn chat_content_to_responses_parts(
     }
 }
 
+pub(super) fn chat_reasoning_to_responses_item(message: &Map<String, Value>) -> Option<Value> {
+    let text = message
+        .get("reasoning_content")
+        .map(crate::openai_compat::extract_text)
+        .unwrap_or_default();
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(json!({
+        "id": crate::openai_compat::response_items::generate_reasoning_id(),
+        "type": "reasoning",
+        "status": "completed",
+        "summary": [],
+        "content": [{
+            "type": "reasoning_text",
+            "text": text,
+        }],
+    }))
+}
+
 fn chat_part_to_responses(part: &Value, assistant: bool) -> Result<Value, CompatError> {
     let object = part.as_object().ok_or_else(|| {
         CompatError::new(

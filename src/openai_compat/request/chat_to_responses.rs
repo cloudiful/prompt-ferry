@@ -6,7 +6,9 @@ mod chat_to_responses_content;
 #[path = "chat_to_responses_tools.rs"]
 mod chat_to_responses_tools;
 
-use chat_to_responses_content::{chat_content_to_responses_parts, chat_content_to_text};
+use chat_to_responses_content::{
+    chat_content_to_responses_parts, chat_content_to_text, chat_reasoning_to_responses_item,
+};
 use chat_to_responses_tools::{
     translate_chat_tool_calls, translate_chat_tool_choice, translate_chat_tool_output,
     translate_chat_tools,
@@ -54,6 +56,11 @@ pub fn chat_request_to_responses(body: &[u8]) -> Result<Vec<u8>, CompatError> {
                 }
             }
             "user" | "assistant" => {
+                if role == "assistant"
+                    && let Some(item) = chat_reasoning_to_responses_item(message_object)
+                {
+                    input.push(item);
+                }
                 let parts = chat_content_to_responses_parts(content, role == "assistant")?;
                 if !parts.is_empty() {
                     input.push(json!({
