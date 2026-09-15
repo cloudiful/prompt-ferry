@@ -90,6 +90,10 @@ pub struct ModelRouteTarget {
     pub position: i32,
     pub enabled: bool,
     pub upstream_model: Option<String>,
+    // Issue #409 Phase 1: per-target native API override. `Auto` (default)
+    // follows the caller; an explicit value wins over the endpoint setting.
+    #[serde(default = "crate::standalone_config::default_target_native_api")]
+    pub native_api: NativeApi,
     // Issue #368 Phase A: per-target proxy override (PG plaintext).
     // `None` falls back to the endpoint default; never echoed without
     // the Phase B `has_*` contract, so skip serializing for now.
@@ -146,6 +150,11 @@ pub struct ModelRouteTargetCreate {
     pub endpoint_id: uuid::Uuid,
     pub enabled: bool,
     pub upstream_model: Option<String>,
+    // Issue #409 Phase 1: per-target native API override, default `Auto`
+    // (follow the caller). `NativeApi::default` is `Responses`, so an
+    // explicit serde default keeps create payloads backward compatible.
+    #[serde(default = "crate::standalone_config::default_target_native_api")]
+    pub native_api: NativeApi,
     // Issue #368 Phase A: plaintext override for the PG write path
     // (SQLite encrypts via the 0018 envelope). `None`/empty means inherit.
     #[serde(default)]
@@ -197,6 +206,11 @@ pub struct ModelRouteCandidateTarget {
     pub api_keys: Vec<EndpointApiKey>,
     pub key_lb_enabled: bool,
     pub native_api: NativeApi,
+    // Issue #409 Phase 1: raw per-target override before endpoint fallback.
+    // `native_api` above is the resolved value (`target` when explicit,
+    // else endpoint); this preserves the stored target choice for display
+    // and for `Auto`-fallback auditing.
+    pub target_native_api: NativeApi,
     pub position: i32,
     pub enabled: bool,
     pub upstream_model: Option<String>,
@@ -224,6 +238,18 @@ pub struct ModelRouteCandidateTarget {
 pub struct RouteTestEndpoint {
     pub endpoint_id: uuid::Uuid,
     pub name: String,
+}
+
+// Issue #409 Phase 1: resolve the effective target protocol.
+// An explicit target value wins; `Auto` falls back to the endpoint
+// `native_api` (which itself may be `Auto` and is later resolved per
+// caller via `resolve_auto_protocol`).
+pub fn resolve_target_native_api(target: NativeApi, endpoint: NativeApi) -> NativeApi {
+    if target != NativeApi::Auto {
+        target
+    } else {
+        endpoint
+    }
 }
 
 // Issue #368 Phase D: resolved outbound proxy for LLM upstream.

@@ -386,6 +386,16 @@ pub(crate) fn route_target(
         Err(sqlx::Error::ColumnNotFound(_)) => false,
         Err(error) => return Err(error.into()),
     };
+    // Issue #409 Phase 1: 0023 `native_api` TEXT; pre-migration rows lack
+    // the column and read as `Auto` (follow the caller).
+    let native_api = match row.try_get::<Option<String>, _>("native_api") {
+        Ok(value) => value
+            .as_deref()
+            .map(|v| parse_native_api_lossy(v))
+            .unwrap_or(NativeApi::Auto),
+        Err(sqlx::Error::ColumnNotFound(_)) => NativeApi::Auto,
+        Err(error) => return Err(error.into()),
+    };
     Ok((
         uuid(row, "rule_id")?,
         ModelRouteTargetConfig {
@@ -398,6 +408,7 @@ pub(crate) fn route_target(
             })?,
             enabled: bool_value(row, "enabled")?,
             upstream_model: optional_string(row, "upstream_model")?,
+            native_api,
             proxy_url_override: None,
             active_windows,
             dev_system_normalize,
@@ -464,6 +475,20 @@ fn parse_native_api(value: &str) -> Result<NativeApi> {
         _ => Err(StandaloneConfigError::CorruptDatabase(format!(
             "unknown native API {value:?}"
         ))),
+    }
+}
+
+// Issue #409 Phase 1: lossy parse for the 0023 `native_api` column.
+// Unknown/empty values read as `Auto` so a corrupt row degrades to
+// caller-following instead of failing the whole snapshot load.
+fn parse_native_api_lossy(value: &str) -> NativeApi {
+    match value.trim() {
+        "auto" => NativeApi::Auto,
+        "anthropic_messages" => NativeApi::AnthropicMessages,
+        "chat" => NativeApi::Chat,
+        "responses" => NativeApi::Responses,
+        "realtime" => NativeApi::Realtime,
+        _ => NativeApi::Auto,
     }
 }
 

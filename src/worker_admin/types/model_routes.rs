@@ -72,6 +72,8 @@ impl ModelRouteRequest {
                         endpoint_id,
                         enabled: Some(true),
                         upstream_model: None,
+                        // Issue #409 Phase 1: legacy path defaults to `Auto`.
+                        native_api: None,
                         proxy_url_override: None,
                         has_proxy_url_override: None,
                         active_windows: None,
@@ -123,6 +125,9 @@ impl ModelRouteRequest {
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
                         .map(str::to_string),
+                    // Issue #409 Phase 1: target port type, default `Auto`
+                    // (always sent, no omit/carry like `dev_system_normalize`).
+                    native_api: target.native_api.unwrap_or(crate::config::NativeApi::Auto),
                     proxy_url_override,
                     active_windows,
                     // Issue #392 Phase K: always sent (no omit/carry).
@@ -280,6 +285,11 @@ pub struct ModelRouteTargetRequest {
     pub endpoint_id: Uuid,
     pub enabled: Option<bool>,
     pub upstream_model: Option<String>,
+    /// Issue #409 Phase 1: per-target port type. `None` (omitted/null)
+    /// means `Auto` (follow the caller); an explicit value wins over the
+    /// upstream endpoint `native_api`.
+    #[serde(default)]
+    pub native_api: Option<crate::config::NativeApi>,
     /// Issue #368 Phase B: per-target proxy override. `None` (omitted/null)
     /// means keep on PATCH / inherit on create; `Some("")` means clear to
     /// inherit; `Some(url)` must use `http/https/socks5/socks5h`.
@@ -383,10 +393,13 @@ mod tests {
         }))
         .expect("missing normalize defaults to false");
         assert!(!omitted.dev_system_normalize);
+        // Issue #409 Phase 1: omitted target port type defaults to `Auto`.
+        assert_eq!(omitted.native_api, None);
         let off = serde_json::to_value(&ModelRouteTargetRequest {
             endpoint_id: uuid::Uuid::nil(),
             enabled: Some(true),
             upstream_model: None,
+            native_api: None,
             proxy_url_override: None,
             has_proxy_url_override: None,
             active_windows: None,
@@ -401,6 +414,7 @@ mod tests {
             endpoint_id: uuid::Uuid::nil(),
             enabled: Some(true),
             upstream_model: None,
+            native_api: Some(crate::config::NativeApi::Chat),
             proxy_url_override: None,
             has_proxy_url_override: None,
             active_windows: None,
@@ -410,6 +424,26 @@ mod tests {
         assert_eq!(
             on.get("dev_system_normalize").and_then(|v| v.as_bool()),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn target_native_api_omitted_means_auto() {
+        // Issue #409 Phase 1: `None` (omitted/null) maps to `Auto`
+        // (follow the caller) in `into_create` paths.
+        let omitted: ModelRouteTargetRequest = serde_json::from_value(serde_json::json!({
+            "endpoint_id": "00000000-0000-0000-0000-000000000000"
+        }))
+        .expect("parse");
+        assert_eq!(omitted.native_api, None);
+        let explicit: ModelRouteTargetRequest = serde_json::from_value(serde_json::json!({
+            "endpoint_id": "00000000-0000-0000-0000-000000000000",
+            "native_api": "chat"
+        }))
+        .expect("parse explicit");
+        assert_eq!(
+            explicit.native_api,
+            Some(crate::config::NativeApi::Chat)
         );
     }
 }

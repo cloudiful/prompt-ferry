@@ -31,6 +31,25 @@ const windows = computed({
   },
 })
 
+// Issue #409 Phase 2: per-target port type, default Auto (follow caller).
+// Reuses EndpointProviderFields USelect paradigm + endpoint i18n labels.
+const nativeApiSelection = computed({
+  get(): 'auto' | 'anthropic_messages' | 'chat' | 'responses' | 'realtime' {
+    const value = target.value?.native_api ?? 'auto'
+    return value === 'anthropic_messages' ||
+      value === 'responses' ||
+      value === 'chat' ||
+      value === 'realtime'
+      ? value
+      : 'auto'
+  },
+  set(
+    value: 'auto' | 'anthropic_messages' | 'chat' | 'responses' | 'realtime',
+  ) {
+    if (target.value) target.value.native_api = value
+  },
+})
+
 const touched = computed({
   get: () => target.value?.active_windows_touched ?? false,
   set: (value: boolean) => {
@@ -45,6 +64,39 @@ const touched = computed({
     class="grid gap-3 rounded border border-default bg-muted p-3"
   >
     <div class="grid gap-2">
+      <div class="flex items-center gap-1">
+        <span class="text-xs font-medium text-default">{{
+          t('modelRouteNativeApi')
+        }}</span>
+        <UTooltip :text="t('modelRouteNativeApiHint')">
+          <UButton
+            type="button"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-info"
+            :aria-label="t('modelRouteNativeApiHint')"
+          />
+        </UTooltip>
+      </div>
+      <USelect
+        v-model="nativeApiSelection"
+        class="w-full"
+        :items="[
+          { label: t('endpointSourceAuto'), value: 'auto' },
+          { label: t('nativeApiChat'), value: 'chat' },
+          { label: t('nativeApiResponses'), value: 'responses' },
+          {
+            label: t('nativeApiAnthropicMessages'),
+            value: 'anthropic_messages',
+          },
+          { label: t('nativeApiRealtime'), value: 'realtime' },
+        ]"
+        label-key="label"
+        value-key="value"
+      />
+    </div>
+    <div class="grid gap-2 border-t border-default pt-3">
       <div class="flex items-center gap-1">
         <span class="text-xs font-medium text-default">{{
           t('proxyUrlOverride')

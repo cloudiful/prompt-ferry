@@ -46,6 +46,7 @@ pub async fn spawn_worker(
                 endpoint_id: endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
+                native_api: prompt_ferry::config::NativeApi::Auto,
                 proxy_url_override: None,
                 active_windows: None,
                 dev_system_normalize: false,

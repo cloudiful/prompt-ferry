@@ -383,6 +383,11 @@ pub struct ModelRouteTargetConfig {
     pub position: i32,
     pub enabled: bool,
     pub upstream_model: Option<String>,
+    // Issue #409 Phase 1: per-target native API override. `Auto` (default)
+    // follows the caller via `resolve_auto_protocol`; an explicit value
+    // wins over the endpoint `native_api`.
+    #[serde(default = "default_target_native_api")]
+    pub native_api: NativeApi,
     // Issue #368 Phase A: per-target proxy override (full URL with optional
     // userinfo). `None` inherits the endpoint default. Plaintext only in
     // memory; SQLite persists the 0018 envelope.
@@ -409,6 +414,7 @@ impl fmt::Debug for ModelRouteTargetConfig {
             .field("position", &self.position)
             .field("enabled", &self.enabled)
             .field("upstream_model", &self.upstream_model)
+            .field("native_api", &self.native_api)
             .field(
                 "proxy_url_override",
                 &redacted_optional_secret(self.proxy_url_override.as_deref()),
@@ -531,6 +537,13 @@ impl fmt::Debug for BootstrapSeed {
 
 fn redacted_secret(value: &str) -> String {
     format!("[REDACTED; {} bytes]", value.len())
+}
+
+/// Issue #409 Phase 1: new targets default to `Auto` (follow the caller).
+/// `NativeApi::default` is `Responses`, so an explicit serde default is
+/// required for both the standalone config and the admin create payload.
+pub fn default_target_native_api() -> NativeApi {
+    NativeApi::Auto
 }
 
 fn redacted_optional_secret(value: Option<&str>) -> Option<String> {

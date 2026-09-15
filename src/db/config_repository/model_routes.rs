@@ -34,6 +34,8 @@ pub struct UnifiedModelRouteTarget {
     pub position: i32,
     pub enabled: bool,
     pub upstream_model: Option<String>,
+    // Issue #409 Phase 1: per-target native API override, default `Auto`.
+    pub native_api: crate::config::NativeApi,
     // Issue #368 Phase C (P2): response-side saved-override indicator.
     pub has_proxy_url_override: bool,
     // Issue #378 Phase I: effective windows (empty means all-day).
@@ -89,6 +91,8 @@ fn target_to_pg(target: UnifiedModelRouteTarget) -> PgModelRouteTarget {
         position: target.position,
         enabled: target.enabled,
         upstream_model: target.upstream_model,
+        // Issue #409 Phase 1: carry target native API through unified shape.
+        native_api: target.native_api,
         // Issue #368 Phase A: Unified is redacted; proxy override never
         // leaves via this path.
         proxy_url_override: None,

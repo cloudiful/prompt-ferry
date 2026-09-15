@@ -232,6 +232,7 @@ async fn endpoint_proxy_round_trips_with_encrypted_envelope() {
             endpoint_id,
             enabled: true,
             upstream_model: None,
+            native_api: crate::config::NativeApi::Auto,
             proxy_url_override: Some(
                 "socks5h://route-user:route-pass@route-proxy.example:1080".to_string(),
             ),
@@ -632,6 +633,7 @@ async fn model_route_crud_round_trips_with_target_persistence() {
             endpoint_id,
             enabled: true,
             upstream_model: Some("gpt-4o-mini".to_string()),
+            native_api: crate::config::NativeApi::Auto,
             proxy_url_override: None,
             active_windows: None,
             dev_system_normalize: false,

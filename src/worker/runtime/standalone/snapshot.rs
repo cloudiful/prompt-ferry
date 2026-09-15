@@ -196,6 +196,7 @@ mod tests {
                     position: 0,
                     enabled: true,
                     upstream_model: None,
+                    native_api: crate::config::NativeApi::Auto,
                     proxy_url_override: None,
                     active_windows: None,
                     dev_system_normalize: false,

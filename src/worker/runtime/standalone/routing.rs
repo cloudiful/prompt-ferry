@@ -93,7 +93,10 @@ fn target_from_endpoint(
             .map(|key| endpoint_key(endpoint.endpoint_id, key))
             .collect(),
         key_lb_enabled: endpoint.key_lb_enabled,
-        native_api: endpoint.native_api,
+        // Issue #409 Phase 1: target explicit wins, else endpoint fallback.
+        // Both `Auto` stays `Auto` for per-caller `resolve_auto_protocol`.
+        native_api: db::resolve_target_native_api(target.native_api, endpoint.native_api),
+        target_native_api: target.native_api,
         position: target.position,
         enabled: target.enabled,
         upstream_model: target.upstream_model.clone(),
@@ -222,6 +225,7 @@ mod tests {
                         position: 0,
                         enabled: true,
                         upstream_model: None,
+                        native_api: NativeApi::Auto,
                         proxy_url_override: None,
                         active_windows: None,
                         dev_system_normalize: false,
@@ -242,6 +246,7 @@ mod tests {
                         position: 0,
                         enabled: true,
                         upstream_model: None,
+                        native_api: NativeApi::Auto,
                         proxy_url_override: None,
                         active_windows: None,
                         dev_system_normalize: false,
@@ -295,6 +300,7 @@ mod tests {
                     position: 0,
                     enabled: true,
                     upstream_model: None,
+                    native_api: NativeApi::Auto,
                     proxy_url_override: None,
                     active_windows: None,
                     dev_system_normalize: false,

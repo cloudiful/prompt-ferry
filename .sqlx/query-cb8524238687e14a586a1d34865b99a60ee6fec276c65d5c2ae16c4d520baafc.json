@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy,\n       r.daily_max_requests, r.monthly_max_requests, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override,\n       t.active_windows, e.active_windows AS endpoint_active_windows,\n       COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\"\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\n  AND (\n      (r.scope = 'user' AND r.owner_user_id = $1)\n      OR (r.scope = 'admin' AND r.owner_user_id IS NULL)\n  )\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
+  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy,\n       r.daily_max_requests, r.monthly_max_requests, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, COALESCE(t.native_api, 'auto') AS target_native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override,\n       t.active_windows, e.active_windows AS endpoint_active_windows,\n       COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\"\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\n  AND (\n      (r.scope = 'user' AND r.owner_user_id = $1)\n      OR (r.scope = 'admin' AND r.owner_user_id IS NULL)\n  )\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
   "describe": {
     "columns": [
       {
@@ -181,6 +181,12 @@
       },
       {
         "ordinal": 16,
+        "name": "target_native_api",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 17,
         "name": "provider",
         "type_info": "Text",
         "origin": {
@@ -191,13 +197,13 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "service_tier",
         "type_info": "Text",
         "origin": "Expression"
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "position",
         "type_info": "Int4",
         "origin": {
@@ -208,7 +214,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "target_enabled",
         "type_info": "Bool",
         "origin": {
@@ -219,7 +225,7 @@
         }
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "upstream_model",
         "type_info": "Text",
         "origin": {
@@ -230,7 +236,7 @@
         }
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "proxy_url_override",
         "type_info": "Text",
         "origin": {
@@ -241,7 +247,7 @@
         }
       },
       {
-        "ordinal": 22,
+        "ordinal": 23,
         "name": "active_windows",
         "type_info": "Text",
         "origin": {
@@ -252,7 +258,7 @@
         }
       },
       {
-        "ordinal": 23,
+        "ordinal": 24,
         "name": "endpoint_active_windows",
         "type_info": "Text",
         "origin": {
@@ -263,7 +269,7 @@
         }
       },
       {
-        "ordinal": 24,
+        "ordinal": 25,
         "name": "dev_system_normalize!",
         "type_info": "Bool",
         "origin": "Expression"
@@ -291,6 +297,7 @@
       true,
       false,
       false,
+      null,
       false,
       null,
       false,
@@ -302,5 +309,5 @@
       null
     ]
   },
-  "hash": "5a2e86f67f287d4cac9da5b4b101b24a509dc56b4e4cb4e5a2fbdd7a82c947a4"
+  "hash": "cb8524238687e14a586a1d34865b99a60ee6fec276c65d5c2ae16c4d520baafc"
 }

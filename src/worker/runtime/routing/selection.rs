@@ -260,6 +260,10 @@ fn route_from_target(
         endpoint_key_label: key_selection.key_label,
         api_keys: target.api_keys.clone(),
         key_lb_enabled: target.key_lb_enabled,
+        // Issue #409 Phase 1: `target.native_api` is already resolved as
+        // target-explicit else endpoint fallback (see `hydrate` and
+        // standalone `target_from_endpoint`); `Auto` stays `Auto` for
+        // per-caller `resolve_auto_protocol`.
         native_api: target.native_api,
         upstream_model: target.upstream_model.clone(),
         route_selection_reason,
@@ -430,6 +434,7 @@ mod tests {
             api_keys: Vec::new(),
             key_lb_enabled: false,
             native_api: crate::config::NativeApi::Chat,
+            target_native_api: crate::config::NativeApi::Chat,
             position: 0,
             enabled: true,
             upstream_model: None,
@@ -437,6 +442,34 @@ mod tests {
             service_tier: db::MinimaxServiceTier::Standard,
             proxy_url: proxy_url.map(str::to_string),
             proxy_url_override: proxy_override.map(str::to_string),
+            active_windows: None,
+            endpoint_active_windows: None,
+            dev_system_normalize: false,
+        }
+    }
+
+    fn candidate_target_with_native_api(
+        target_native_api: crate::config::NativeApi,
+        endpoint_native_api: crate::config::NativeApi,
+    ) -> db::ModelRouteCandidateTarget {
+        let native_api = db::resolve_target_native_api(target_native_api, endpoint_native_api);
+        db::ModelRouteCandidateTarget {
+            target_id: uuid::Uuid::new_v4(),
+            endpoint_id: uuid::Uuid::new_v4(),
+            endpoint_name: "e".to_string(),
+            base_url: "https://api.example.test".to_string(),
+            api_key: "k".to_string(),
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api,
+            target_native_api,
+            position: 0,
+            enabled: true,
+            upstream_model: None,
+            provider: db::EndpointProvider::Generic,
+            service_tier: db::MinimaxServiceTier::Standard,
+            proxy_url: None,
+            proxy_url_override: None,
             active_windows: None,
             endpoint_active_windows: None,
             dev_system_normalize: false,
@@ -545,5 +578,34 @@ mod tests {
         assert!(err.contains("scheme"));
         assert!(!err.contains("secret"));
         assert!(!err.contains("user"));
+    }
+
+    #[test]
+    fn target_explicit_native_api_wins_over_endpoint() {
+        // Issue #409 Phase 1: target explicit value has priority over the
+        // upstream endpoint setting.
+        use crate::config::NativeApi;
+        let explicit = candidate_target_with_native_api(NativeApi::Chat, NativeApi::Responses);
+        assert_eq!(explicit.native_api, NativeApi::Chat);
+        assert_eq!(explicit.target_native_api, NativeApi::Chat);
+        assert_eq!(route_for_target(&explicit).native_api, NativeApi::Chat);
+
+        let realtime =
+            candidate_target_with_native_api(NativeApi::Realtime, NativeApi::Chat);
+        assert_eq!(realtime.native_api, NativeApi::Realtime);
+    }
+
+    #[test]
+    fn target_auto_falls_back_to_endpoint_native_api() {
+        // Issue #409 Phase 1: target `Auto` keeps endpoint/global logic
+        // unchanged; both `Auto` stays `Auto` for per-caller resolution.
+        use crate::config::NativeApi;
+        let fallback =
+            candidate_target_with_native_api(NativeApi::Auto, NativeApi::Responses);
+        assert_eq!(fallback.native_api, NativeApi::Responses);
+        assert_eq!(route_for_target(&fallback).native_api, NativeApi::Responses);
+
+        let auto = candidate_target_with_native_api(NativeApi::Auto, NativeApi::Auto);
+        assert_eq!(auto.native_api, NativeApi::Auto);
     }
 }

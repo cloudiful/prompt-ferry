@@ -4745,6 +4745,8 @@ components:
           description: |-
             Issue #368 Phase C (P2): response-side saved-override indicator.
             `true` when an override is stored; the secret itself is never echoed.
+        native_api:
+          $ref: '#/components/schemas/NativeApi'
         position:
           type: integer
           format: int32
@@ -4797,6 +4799,14 @@ components:
             Issue #368 Phase B: carry hint for the override secret. Accepted for
             forward-compat; the server ignores it and uses the stored value when
             `proxy_url_override` is omitted.
+        native_api:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/NativeApi'
+            description: |-
+              Issue #409 Phase 1: per-target port type. `None` (omitted/null)
+              means `Auto` (follow the caller); an explicit value wins over the
+              upstream endpoint `native_api`.
         proxy_url_override:
           type:
           - string

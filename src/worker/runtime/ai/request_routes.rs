@@ -307,6 +307,7 @@ mod tests {
                     position: 0,
                     enabled: true,
                     upstream_model: Some("provider-local".to_string()),
+                    native_api: NativeApi::Auto,
                     proxy_url_override: None,
                     active_windows: None,
                     dev_system_normalize: false,

@@ -1,6 +1,7 @@
 import type {
   ApprovalStatusFilter,
   ConversationEndpointOverride,
+  NativeApi,
   RequestRecordDetail,
   RequestRecordListRow,
   RequestRecordState,
@@ -72,6 +73,10 @@ export type ModelRouteTargetForm = {
   // Issue #392 Phase L: developer->system normalize switch, default off.
   // Always sent as true/false (no omit semantics).
   dev_system_normalize: boolean
+  // Issue #409 Phase 2: per-target port type. Optional for legacy forms
+  // (ModelRouteDialog addTarget); missing means Auto (follow caller).
+  // Mapper normalizes to Auto and always sends the value.
+  native_api?: NativeApi
 }
 
 export type StreamDeltaBatchingForm = {

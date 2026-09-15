@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,\n       COALESCE(e.enabled, FALSE) AS \"endpoint_enabled!\",\n       t.position, t.enabled, t.upstream_model, t.proxy_url_override,\n       t.active_windows,\n       COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\",\n       t.created_at, t.updated_at\nFROM model_route_targets t\nLEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE t.rule_id = ANY($1)\nORDER BY t.rule_id ASC, t.position ASC, t.created_at ASC\n",
+  "query": "SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,\n       COALESCE(e.enabled, FALSE) AS \"endpoint_enabled!\",\n       t.position, t.enabled, t.upstream_model,\n       COALESCE(t.native_api, 'auto') AS \"native_api!\",\n       t.proxy_url_override,\n       t.active_windows,\n       COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\",\n       t.created_at, t.updated_at\nFROM model_route_targets t\nLEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE t.rule_id = ANY($1)\nORDER BY t.rule_id ASC, t.position ASC, t.created_at ASC\n",
   "describe": {
     "columns": [
       {
@@ -88,6 +88,12 @@
       },
       {
         "ordinal": 8,
+        "name": "native_api!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
         "name": "proxy_url_override",
         "type_info": "Text",
         "origin": {
@@ -98,7 +104,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "active_windows",
         "type_info": "Text",
         "origin": {
@@ -109,13 +115,13 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "dev_system_normalize!",
         "type_info": "Bool",
         "origin": "Expression"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -126,7 +132,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -151,6 +157,7 @@
       false,
       false,
       true,
+      null,
       true,
       true,
       null,
@@ -158,5 +165,5 @@
       false
     ]
   },
-  "hash": "6ce6720e9e4081f47a683ab3ca3462d46464b3471bbca3268370578f1fefaf35"
+  "hash": "bf810bb37a851ca3250616b669ecee8a199668e8e1d0df45b3163d9e79814ca3"
 }

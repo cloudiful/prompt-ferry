@@ -95,6 +95,7 @@ async fn sync_model_route_targets(
             position as i32,
             target.enabled,
             target.upstream_model,
+            target.native_api.as_str(),
             proxy_override,
             active_windows,
             target.dev_system_normalize,

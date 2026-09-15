@@ -45,6 +45,7 @@ pub(super) fn from_postgres_target(target: crate::db::ModelRouteTarget) -> Unifi
         position: target.position,
         enabled: target.enabled,
         upstream_model: target.upstream_model,
+        native_api: target.native_api,
         has_proxy_url_override,
         active_windows: target.active_windows,
         dev_system_normalize: target.dev_system_normalize,
@@ -112,6 +113,7 @@ where
                 position: target.position,
                 enabled: target.enabled,
                 upstream_model: target.upstream_model,
+                native_api: target.native_api,
                 has_proxy_url_override,
                 active_windows,
                 dev_system_normalize: target.dev_system_normalize,
@@ -168,6 +170,8 @@ pub(super) fn sqlite_route_from_create(
                 position: i32::try_from(index).unwrap_or(i32::MAX),
                 enabled: target.enabled,
                 upstream_model: target.upstream_model,
+                // Issue #409 Phase 1: target port type, default `Auto`.
+                native_api: target.native_api,
                 proxy_url_override,
                 active_windows,
                 // Issue #392 Phase K: always sent (no omit); direct carry.

@@ -1,9 +1,24 @@
 import type {
   ModelEndpointRule,
   ModelRouteRequest,
+  NativeApi,
   StreamDeltaBatchingSettings,
 } from '../../generated/admin-api'
 import type { ModelRouteForm, StreamDeltaBatchingForm } from '../../models'
+
+const TARGET_NATIVE_APIS: readonly NativeApi[] = [
+  'auto',
+  'anthropic_messages',
+  'chat',
+  'responses',
+  'realtime',
+]
+
+function normalizeTargetNativeApi(value: unknown): NativeApi {
+  return TARGET_NATIVE_APIS.includes(value as NativeApi)
+    ? (value as NativeApi)
+    : 'auto'
+}
 
 export function createEmptyModelRouteForm(): ModelRouteForm {
   return {
@@ -29,6 +44,8 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         active_windows_touched: false,
         // Issue #392 Phase L: default-off normalize.
         dev_system_normalize: false,
+        // Issue #409 Phase 2: default Auto (follow caller).
+        native_api: 'auto',
       },
     ],
   }
@@ -91,6 +108,11 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
       active_windows_touched: false,
       // Issue #392 Phase L: default-off normalize; legacy payloads miss it.
       dev_system_normalize: target?.dev_system_normalize ?? false,
+      // Issue #409 Phase 2: per-target port type; legacy payloads miss it
+      // (means Auto). Round-trips Auto default.
+      native_api: normalizeTargetNativeApi(
+        (target as { native_api?: unknown } | undefined)?.native_api,
+      ),
     })),
   }
 }
@@ -149,6 +171,9 @@ export function modelRouteFormToRequest(
           active_windows,
           // Issue #392 Phase L: booleans always sent (no omit semantics).
           dev_system_normalize: target?.dev_system_normalize ?? false,
+          // Issue #409 Phase 2: always sent (Auto default follows caller;
+          // explicit wins over endpoint). Normalize legacy/undefined to Auto.
+          native_api: normalizeTargetNativeApi(target?.native_api),
         }
       }),
   }

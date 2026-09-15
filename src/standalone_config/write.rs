@@ -328,6 +328,7 @@ pub(crate) async fn insert_route(
             .bind(target.position)
             .bind(bool_i64(target.enabled))
             .bind(&target.upstream_model)
+            .bind(target.native_api.as_str())
             .bind(envelope_part(&proxy_envelope, EnvelopePart::Ciphertext))
             .bind(envelope_part(&proxy_envelope, EnvelopePart::Nonce))
             .bind(envelope_version(&proxy_envelope))
@@ -363,6 +364,7 @@ pub(crate) async fn insert_encrypted_route(
             .bind(target.target.position)
             .bind(bool_i64(target.target.enabled))
             .bind(&target.target.upstream_model)
+            .bind(target.target.native_api.as_str())
             .bind(envelope_part(
                 &target.proxy_url_override,
                 EnvelopePart::Ciphertext,

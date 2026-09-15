@@ -136,6 +136,7 @@ pub(super) fn target(
         api_keys: keys,
         key_lb_enabled,
         native_api: crate::config::NativeApi::Responses,
+        target_native_api: crate::config::NativeApi::Responses,
         position,
         enabled: true,
         upstream_model: None,

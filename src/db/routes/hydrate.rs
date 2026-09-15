@@ -53,6 +53,13 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
             let active_windows =
                 active_windows::parse_stored_windows(row.active_windows.as_deref())
                     .unwrap_or_default();
+            // Issue #409 Phase 1: per-target native API, default `auto`
+            // (COALESCE in SQL already defaults pre-migration rows).
+            let native_api = row
+                .native_api
+                .as_deref()
+                .map(parse_native_api)
+                .unwrap_or(NativeApi::Auto);
             ModelRouteTarget {
                 target_id: row.target_id,
                 rule_id: row.rule_id,
@@ -62,6 +69,7 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
                 position: row.position,
                 enabled: row.enabled,
                 upstream_model: row.upstream_model,
+                native_api,
                 proxy_url_override: row.proxy_url_override,
                 has_proxy_url_override,
                 active_windows,
@@ -116,6 +124,16 @@ pub(super) async fn model_route_candidates_by_rule(
         let provider = crate::db::EndpointProvider::from_str(&row.provider);
         let service_tier =
             crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref());
+        // Issue #409 Phase 1: target explicit wins, else endpoint fallback.
+        // Both `Auto` stays `Auto` for per-caller `resolve_auto_protocol`.
+        let target_native_api = row
+            .target_native_api
+            .as_deref()
+            .map(parse_native_api)
+            .unwrap_or(NativeApi::Auto);
+        let endpoint_native_api = parse_native_api(&row.native_api);
+        let native_api =
+            crate::db::resolve_target_native_api(target_native_api, endpoint_native_api);
         if let Some(candidate) = grouped
             .iter_mut()
             .find(|candidate| candidate.rule_id == row.rule_id)
@@ -128,7 +146,8 @@ pub(super) async fn model_route_candidates_by_rule(
                 api_key: row.api_key.clone(),
                 api_keys,
                 key_lb_enabled: row.key_lb_enabled,
-                native_api: parse_native_api(&row.native_api),
+                native_api,
+                target_native_api,
                 position: row.position,
                 enabled: row.target_enabled,
                 upstream_model: row.upstream_model.clone(),
@@ -159,7 +178,8 @@ pub(super) async fn model_route_candidates_by_rule(
                 api_key: row.api_key,
                 api_keys,
                 key_lb_enabled: row.key_lb_enabled,
-                native_api: parse_native_api(&row.native_api),
+                native_api,
+                target_native_api,
                 position: row.position,
                 enabled: row.target_enabled,
                 upstream_model: row.upstream_model,

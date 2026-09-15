@@ -1,15 +1,17 @@
 INSERT INTO standalone_model_route_targets (
     target_id, rule_id, endpoint_id, position, enabled, upstream_model,
+    native_api,
     proxy_url_override_ciphertext, proxy_url_override_nonce, proxy_url_override_key_version,
     active_windows, dev_system_normalize,
     updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(target_id) DO UPDATE SET
     rule_id = excluded.rule_id,
     endpoint_id = excluded.endpoint_id,
     position = excluded.position,
     enabled = excluded.enabled,
     upstream_model = excluded.upstream_model,
+    native_api = excluded.native_api,
     proxy_url_override_ciphertext = excluded.proxy_url_override_ciphertext,
     proxy_url_override_nonce = excluded.proxy_url_override_nonce,
     proxy_url_override_key_version = excluded.proxy_url_override_key_version,

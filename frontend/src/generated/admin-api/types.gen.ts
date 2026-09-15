@@ -797,6 +797,7 @@ export type ModelRouteTarget = {
      * `true` when an override is stored; the secret itself is never echoed.
      */
     has_proxy_url_override?: boolean;
+    native_api?: NativeApi;
     position: number;
     rule_id: string;
     target_id: string;
@@ -825,6 +826,7 @@ export type ModelRouteTargetRequest = {
      * `proxy_url_override` is omitted.
      */
     has_proxy_url_override?: boolean | null;
+    native_api?: null | NativeApi;
     /**
      * Issue #368 Phase B: per-target proxy override. `None` (omitted/null)
      * means keep on PATCH / inherit on create; `Some("")` means clear to
