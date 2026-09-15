@@ -227,7 +227,6 @@ function hasEndpointSettings(): boolean {
             <ProxySettingsFields
               v-model:proxy-url="form.proxy_url"
               v-model:has-saved="form.has_saved_proxy_url"
-              :hint="t('proxyUrlHint')"
               :t="t"
             />
           </div>
@@ -250,7 +249,6 @@ function hasEndpointSettings(): boolean {
             <ScheduleWindowsFields
               v-model:windows="form.active_windows"
               v-model:touched="form.active_windows_touched"
-              :hint="t('scheduleWindowsHint')"
               :t="t"
             />
           </div>

@@ -4,7 +4,6 @@ import { computed } from 'vue'
 type ProxyScheme = 'direct' | 'http' | 'https' | 'socks5' | 'socks5h' | 'kept'
 
 const props = defineProps<{
-  hint: string
   t: TranslateFn
 }>()
 
@@ -133,30 +132,23 @@ const showClear = computed(
       <UBadge :label="t('saved')" color="neutral" />
       <span class="text-muted">{{ t('proxySavedHidden') }}</span>
     </div>
-    <label class="grid gap-1">
-      <span class="text-xs text-muted">{{ t('proxyScheme') }}</span>
-      <USelect
-        :model-value="currentScheme"
-        class="w-full"
-        :items="schemeItems"
-        label-key="label"
-        value-key="value"
-        @update:model-value="onSchemeUpdate($event as ProxyScheme)"
-      />
-    </label>
-    <label
+    <USelect
+      :model-value="currentScheme"
+      class="w-full"
+      :items="schemeItems"
+      label-key="label"
+      value-key="value"
+      :aria-label="t('proxyScheme')"
+      @update:model-value="onSchemeUpdate($event as ProxyScheme)"
+    />
+    <UInput
       v-if="currentScheme !== 'direct' && currentScheme !== 'kept'"
-      class="grid gap-1"
-    >
-      <span class="text-xs text-muted">{{ t('proxyAddress') }}</span>
-      <UInput
-        :model-value="currentAddress"
-        class="w-full"
-        :placeholder="addressPlaceholder"
-        @update:model-value="onAddressUpdate($event as string)"
-      />
-    </label>
-    <p class="text-xs leading-snug text-muted">{{ hint }}</p>
+      :model-value="currentAddress"
+      class="w-full"
+      :placeholder="addressPlaceholder"
+      :aria-label="t('proxyAddress')"
+      @update:model-value="onAddressUpdate($event as string)"
+    />
     <p v-if="hasSaved" class="text-xs leading-snug text-muted">
       {{ t('proxyKeepHint') }}
     </p>

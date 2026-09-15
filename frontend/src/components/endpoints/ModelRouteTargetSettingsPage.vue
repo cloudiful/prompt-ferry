@@ -115,7 +115,6 @@ const touched = computed({
       <ProxySettingsFields
         v-model:proxy-url="proxyUrl"
         v-model:has-saved="hasSaved"
-        :hint="t('proxyUrlOverrideHint')"
         :t="t"
       />
     </div>
@@ -138,7 +137,6 @@ const touched = computed({
       <ScheduleWindowsFields
         v-model:windows="windows"
         v-model:touched="touched"
-        :hint="t('scheduleWindowsHint')"
         :t="t"
       />
     </div>

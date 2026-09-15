@@ -4,7 +4,6 @@ import { computed } from 'vue'
 type ScheduleWindow = { start: string; end: string }
 
 const props = defineProps<{
-  hint: string
   t: TranslateFn
 }>()
 
@@ -59,7 +58,6 @@ function onTimeUpdate(
 
 <template>
   <div class="grid gap-3 text-xs">
-    <p class="text-xs leading-snug text-muted">{{ hint }}</p>
     <div v-if="(windows ?? []).length === 0" class="text-xs text-muted">
       {{ t('scheduleAllDay') }}
     </div>
