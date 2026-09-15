@@ -86,6 +86,7 @@ pub(super) fn to_chat_request_with_prefix(
     })
 }
 
+#[cfg(test)]
 pub(super) fn to_responses_request_with_prefix(
     request: &NormalizedResponsesRequest,
     prefix_items: &[Value],

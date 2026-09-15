@@ -45,15 +45,14 @@ impl RedactionConfig {
     }
 
     fn merge_normalized(&self, user_config: &RedactionConfig) -> RedactionConfig {
-        let merged = RedactionConfig {
+        RedactionConfig {
             enabled: self.enabled || user_config.enabled,
             rules: self.rules.merged_with(user_config.rules),
             custom_strings: merge_normalized_custom_strings(
                 &self.custom_strings,
                 &user_config.custom_strings,
             ),
-        };
-        merged
+        }
     }
 
     pub fn validate(&self) -> Result<(), RedactorError> {

@@ -109,16 +109,13 @@ fn mcp_handler_completes_on_bounded_worker_stack() {
             .expect("MCP handler task must complete without aborting");
         let mut saw_start = false;
         while let Ok(data) = data_rx.try_recv() {
-            match data.message {
-                BridgeMessage::McpResponseStart(start) => {
-                    saw_start = true;
-                    assert_eq!(start.request_id, request_id);
-                    assert_eq!(
-                        start.status,
-                        reqwest::StatusCode::SERVICE_UNAVAILABLE.as_u16()
-                    );
-                }
-                _ => {}
+            if let BridgeMessage::McpResponseStart(start) = data.message {
+                saw_start = true;
+                assert_eq!(start.request_id, request_id);
+                assert_eq!(
+                    start.status,
+                    reqwest::StatusCode::SERVICE_UNAVAILABLE.as_u16()
+                );
             }
         }
         assert!(saw_start, "handler must emit an MCP response start");
@@ -232,8 +229,7 @@ async fn sqlite_mcp_request_uses_unified_server_configuration() {
     let summary = standalone
         .recent_usage()
         .into_iter()
-        .rev()
-        .next()
+        .next_back()
         .expect("aggregate request summary");
     assert_eq!(summary.state, "completed", "{summary:?}");
     assert!(summary.error_code.is_none(), "{summary:?}");

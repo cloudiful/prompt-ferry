@@ -364,6 +364,7 @@ impl RawPayloadStore {
     /// Build the managed raw payload store: S3-compatible backend when a
     /// bucket is configured, otherwise a local filesystem directory. There is
     /// no PostgreSQL fallback; upload failures warn and drop that payload.
+    #[cfg(test)]
     pub(crate) fn from_config(config: &WorkerConfig) -> Result<Self> {
         let bucket = config.raw_object_store_bucket.trim();
         let store: Arc<dyn ObjectStore> = if bucket.is_empty() {
@@ -490,6 +491,7 @@ impl RawPayloadStore {
     }
 }
 
+#[cfg(test)]
 fn build_s3_store(config: &WorkerConfig, bucket: &str) -> Result<object_store::aws::AmazonS3> {
     let mut builder = AmazonS3Builder::new()
         .with_bucket_name(bucket)

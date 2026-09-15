@@ -478,7 +478,7 @@ mod tests {
         assert!(is_opencode_host(
             "https://opencode.ai:8443/v1/chat/completions"
         ));
-        assert!(is_opencode_host("https://OPENC0DE.AI") == false);
+        assert!(!is_opencode_host("https://OPENC0DE.AI"));
         assert!(is_opencode_host("https://OPencode.AI"));
         assert!(is_opencode_host("https://opencode.AI/"));
         assert!(!is_opencode_host("https://notopencode.ai"));

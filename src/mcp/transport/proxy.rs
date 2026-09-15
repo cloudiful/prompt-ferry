@@ -76,7 +76,7 @@ pub(super) fn client_for_mcp_server_with_row(
 }
 
 // Unit-test seam for env-only resolution; production uses the row-aware path.
-#[allow(dead_code)]
+#[cfg(test)]
 fn client_for_mcp_server_with_env(
     upstream_url: &str,
     get_env: &dyn Fn(&str) -> Option<String>,
@@ -138,7 +138,7 @@ fn resolve_mcp_proxy_with_row(
 }
 
 // Unit-test seam for endpoint-proxy resolution; production goes through the row helper.
-#[allow(dead_code)]
+#[cfg(test)]
 fn resolve_builtin_proxy_with_env(
     endpoint_proxy: Option<&str>,
     minimax_url: &str,
@@ -336,7 +336,7 @@ mod tests {
     fn no_proxy_bypass_is_suffix_aware() {
         let upstream = "https://api.example.test/mcp";
         let proxy = [("HTTPS_PROXY", "http://proxy.test:8080")];
-        assert_eq!(resolve_with(upstream, &proxy).unwrap().is_some(), true);
+        assert!(resolve_with(upstream, &proxy).unwrap().is_some());
         for no_proxy in [
             "api.example.test",
             ".example.test",
@@ -512,11 +512,10 @@ mod tests {
     fn injection_selection_uses_with_client_when_proxied_and_direct_when_unset() {
         // Direct arm: no proxy env means `Ok(None)` so the caller uses
         // `StreamableHttpClientTransport::from_config`.
-        assert_eq!(
+        assert!(
             client_with("https://mcp-injection.test", &[])
                 .unwrap()
-                .is_none(),
-            true
+                .is_none()
         );
         // Injected arm: proxy env means `Ok(Some)` so the caller uses
         // `StreamableHttpClientTransport::with_client`.

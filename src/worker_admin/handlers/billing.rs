@@ -427,7 +427,7 @@ fn monthly_csv(rows: Vec<db::BillingMonthlyExportRow>) -> String {
     );
     output.push('\n');
     for row in rows {
-        let fields = vec![
+        let fields = [
             row.month.format("%Y-%m").to_string(),
             "CNY".to_string(),
             row.request_count.to_string(),

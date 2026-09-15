@@ -167,26 +167,6 @@ pub(crate) fn persisted_output_items(message_json: &Value) -> Result<Vec<Value>,
     assistant_message_to_output_items(message_json)
 }
 
-pub(crate) fn persisted_assistant_message(message_json: &Value) -> Result<Value, CompatError> {
-    if let Some(version) = message_json.get("version").and_then(Value::as_i64)
-        && version == 1
-    {
-        if let Some(message) = message_json.get("assistant_message")
-            && message.is_object()
-        {
-            return Ok(message.clone());
-        }
-        let output_items = persisted_output_items(message_json)?;
-        return output_items_to_assistant_message(&output_items, None);
-    }
-    let mut message = message_json.as_object().cloned().unwrap_or_default();
-    message.insert("role".to_string(), Value::String("assistant".to_string()));
-    if !message.contains_key("content") {
-        message.insert("content".to_string(), Value::Null);
-    }
-    Ok(Value::Object(message))
-}
-
 pub(crate) fn responses_stream_output_items(chunks: &[Value]) -> Result<Vec<Value>, CompatError> {
     let mut output_by_index = HashMap::<usize, Value>::new();
     let mut completed_output = None;
@@ -420,7 +400,7 @@ mod tests {
             "summary":[{"type":"summary_text","text":"summary"}],
             "content":[{"type":"reasoning_text","text":"private"}]
         });
-        let input_items = output_items_to_input_items(&[reasoning.clone()]).unwrap();
+        let input_items = output_items_to_input_items(std::slice::from_ref(&reasoning)).unwrap();
 
         assert_eq!(input_items, vec![reasoning]);
         assert!(input_items[0].get("reasoning_content").is_none());

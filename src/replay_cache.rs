@@ -840,9 +840,11 @@ mod tests {
 
     #[tokio::test]
     async fn from_config_without_valkey_uses_local_response_affinity() {
-        let mut config = WorkerConfig::default();
-        config.session_ttl_seconds = 60;
-        config.local_session_max_entries = 2;
+        let config = WorkerConfig {
+            session_ttl_seconds: 60,
+            local_session_max_entries: 2,
+            ..Default::default()
+        };
 
         let cache = ReplayCache::from_config(&config).await;
         assert!(!cache.enabled());
@@ -866,8 +868,10 @@ mod tests {
 
     #[tokio::test]
     async fn from_config_with_invalid_valkey_url_uses_local_response_affinity() {
-        let mut config = WorkerConfig::default();
-        config.valkey_url = "not-a-valkey-url".to_string();
+        let config = WorkerConfig {
+            valkey_url: "not-a-valkey-url".to_string(),
+            ..Default::default()
+        };
 
         let cache = ReplayCache::from_config(&config).await;
         let key = "invalid-valkey-response-affinity";
@@ -898,9 +902,11 @@ mod tests {
             std::env::temp_dir().join(format!("prompt-ferry-replay-{}.sqlite", Uuid::new_v4()));
         let pool = crate::db::connect_sqlite(&path).await.unwrap();
         crate::db::migrate_standalone(&pool).await.unwrap();
-        let mut config = WorkerConfig::default();
-        config.session_ttl_seconds = 60;
-        config.valkey_ttl_seconds = 60;
+        let config = WorkerConfig {
+            session_ttl_seconds: 60,
+            valkey_ttl_seconds: 60,
+            ..Default::default()
+        };
         let cache = ReplayCache::from_config_with_sqlite(&config, Some(pool.clone())).await;
         let user = SessionUser {
             user_id: 7,

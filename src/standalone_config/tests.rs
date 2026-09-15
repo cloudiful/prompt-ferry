@@ -446,7 +446,7 @@ async fn concurrent_endpoint_writes_and_reads_use_sqlite_busy_timeout() {
         );
     }
 
-    let store = Arc::try_unwrap(store).ok().expect("only store owner");
+    let store = Arc::try_unwrap(store).expect("only store owner");
     cleanup(store, path).await;
 }
 

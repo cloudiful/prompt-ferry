@@ -31,8 +31,8 @@ pub(crate) fn glm_quota_origin(base_url: &str) -> Option<String> {
         let host = parsed.host_str()?;
         let port = parsed.port();
         let scheme = parsed.scheme();
-        if port.is_some() {
-            return Some(format!("{scheme}://{host}:{}", port.unwrap()));
+        if let Some(port) = port {
+            return Some(format!("{scheme}://{host}:{port}"));
         }
         return Some(format!("{scheme}://{host}"));
     }

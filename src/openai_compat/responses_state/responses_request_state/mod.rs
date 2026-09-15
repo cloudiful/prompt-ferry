@@ -8,7 +8,6 @@ mod validate;
 pub(crate) struct NormalizedResponsesRequest {
     object: Map<String, Value>,
     pub(crate) instructions: Option<String>,
-    pub(crate) conversation: Option<String>,
     pub(crate) items: Vec<Value>,
 }
 
@@ -52,12 +51,6 @@ impl NormalizedResponsesRequest {
             )
         })?;
         let mut items = input_items_from_object(&object)?;
-        let conversation = object
-            .get("conversation")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
         let instructions = normalize_instruction_messages(
             object
                 .get("instructions")
@@ -71,13 +64,8 @@ impl NormalizedResponsesRequest {
         Ok(Self {
             object,
             instructions,
-            conversation,
             items,
         })
-    }
-
-    pub(crate) fn validate_for_raw_responses_passthrough(&self) -> Result<(), CompatError> {
-        validate::validate_raw_responses_passthrough(&self.items)
     }
 
     pub(crate) fn validate_for_chat_compat(
@@ -95,6 +83,7 @@ impl NormalizedResponsesRequest {
         translate::to_chat_request_with_prefix(self, prefix_messages)
     }
 
+    #[cfg(test)]
     pub(crate) fn to_responses_request_with_prefix(
         &self,
         prefix_items: &[Value],

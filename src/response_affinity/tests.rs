@@ -29,15 +29,15 @@ async fn local_store_keeps_first_binding_for_concurrent_creators() {
 async fn local_store_delete_reports_whether_key_existed_and_removes_it() {
     let store = ResponseAffinityStore::for_tests();
     let key = "affinity-delete-key";
-    assert_eq!(store.delete(key).await.unwrap(), false);
+    assert!(!store.delete(key).await.unwrap());
     assert_eq!(store.get(key).await.unwrap(), None);
 
     store
         .get_or_create(key, &binding(Uuid::new_v4()))
         .await
         .unwrap();
-    assert_eq!(store.delete(key).await.unwrap(), true);
-    assert_eq!(store.delete(key).await.unwrap(), false);
+    assert!(store.delete(key).await.unwrap());
+    assert!(!store.delete(key).await.unwrap());
     assert_eq!(store.get(key).await.unwrap(), None);
     assert_eq!(store.peek(key).await.unwrap(), None);
 }
@@ -225,13 +225,13 @@ async fn redis_store_delete_reports_whether_key_existed_and_removes_it() {
     let mut connection = manager.clone();
     let _: usize = connection.del(&key).await.unwrap();
 
-    assert_eq!(store.delete(&key).await.unwrap(), false);
+    assert!(!store.delete(&key).await.unwrap());
     assert_eq!(store.get(&key).await.unwrap(), None);
 
     let first = binding(Uuid::new_v4());
     store.get_or_create(&key, &first).await.unwrap();
-    assert_eq!(store.delete(&key).await.unwrap(), true);
-    assert_eq!(store.delete(&key).await.unwrap(), false);
+    assert!(store.delete(&key).await.unwrap());
+    assert!(!store.delete(&key).await.unwrap());
     assert_eq!(store.get(&key).await.unwrap(), None);
     assert_eq!(store.peek(&key).await.unwrap(), None);
 

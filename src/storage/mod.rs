@@ -408,8 +408,8 @@ mod tests {
                 contract.backend == StorageBackend::Postgres,
                 "shared_workers capability must equal backend == Postgres",
             );
-            assert_eq!(
-                contract.capabilities.shared_workers, false,
+            assert!(
+                !contract.capabilities.shared_workers,
                 "SQLite must never advertise shared_workers",
             );
         }

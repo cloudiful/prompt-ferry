@@ -121,6 +121,7 @@ pub(super) fn invalid_continuation(message: impl Into<String>) -> CompatError {
     )
 }
 
+#[cfg(test)]
 pub(crate) fn output_items_to_input_items(
     output_items: &[Value],
 ) -> Result<Vec<Value>, CompatError> {
@@ -186,6 +187,7 @@ pub(crate) fn output_items_to_input_items(
     Ok(items)
 }
 
+#[cfg(test)]
 pub(super) fn normalize_responses_input_for_upstream(
     items: &[Value],
 ) -> Result<Vec<Value>, CompatError> {
@@ -195,6 +197,7 @@ pub(super) fn normalize_responses_input_for_upstream(
         .collect()
 }
 
+#[cfg(test)]
 fn normalize_responses_input_item_for_upstream(item: &Value) -> Result<Value, CompatError> {
     let Some(object) = item.as_object() else {
         return Ok(item.clone());
@@ -212,6 +215,7 @@ fn normalize_responses_input_item_for_upstream(item: &Value) -> Result<Value, Co
     Ok(Value::Object(normalized))
 }
 
+#[cfg(test)]
 fn normalize_assistant_content_for_upstream(content: &Value) -> Result<Value, CompatError> {
     match content {
         Value::Null => Ok(Value::Null),
@@ -245,6 +249,7 @@ fn normalize_assistant_content_for_upstream(content: &Value) -> Result<Value, Co
     }
 }
 
+#[cfg(test)]
 fn normalize_assistant_content_part_for_upstream(part: &Value) -> Result<Value, CompatError> {
     let object = part.as_object().ok_or_else(|| {
         CompatError::new(
@@ -282,6 +287,7 @@ fn normalize_assistant_content_part_for_upstream(part: &Value) -> Result<Value, 
     }
 }
 
+#[cfg(test)]
 pub(super) fn assistant_output_text_part(text: &str) -> Value {
     json!({
         "type": "output_text",

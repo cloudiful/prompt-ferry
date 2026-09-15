@@ -262,7 +262,7 @@ async fn endpoint_proxy_round_trips_with_encrypted_envelope() {
     let override_nonce: Option<Vec<u8>> = target_row
         .try_get("proxy_url_override_nonce")
         .expect("override nonce");
-    assert!(override_nonce.expect("override nonce present").len() > 0);
+    assert!(!override_nonce.expect("override nonce present").is_empty());
     let override_version: Option<i64> = target_row
         .try_get("proxy_url_override_key_version")
         .expect("override version");
@@ -816,8 +816,10 @@ async fn settings_round_trip_through_unified_repository() {
     let (store, manager, path) = open_repository().await;
     let repo = ConfigRepository::sqlite(store.clone(), manager.clone());
 
-    let mut policy = RelayIpPolicy::default();
-    policy.allowed_cidrs = vec!["10.0.0.0/8".to_string()];
+    let policy = RelayIpPolicy {
+        allowed_cidrs: vec!["10.0.0.0/8".to_string()],
+        ..Default::default()
+    };
     repo.set_json_setting("relay_ip_whitelist", &policy)
         .await
         .expect("set relay whitelist");

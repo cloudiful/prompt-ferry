@@ -377,7 +377,7 @@ mod tests {
     fn next_reset_supports_epoch_seconds_and_milliseconds() {
         let iso = json!("2026-08-22T14:00:00.000Z");
         assert!(glm_next_reset(&json!(five_hour_reset())).is_some());
-        assert!(glm_next_reset(&json!((five_hour_reset() as i64) * 1000)).is_some());
+        assert!(glm_next_reset(&json!(five_hour_reset() * 1000)).is_some());
         assert!(glm_next_reset(&iso).is_some());
         // Zero is the Unix epoch (handled by `classify_window` as a
         // sentinel for "no reset"); negative timestamps are rejected.
