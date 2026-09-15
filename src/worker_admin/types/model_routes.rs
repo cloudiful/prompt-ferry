@@ -119,12 +119,7 @@ impl ModelRouteRequest {
                 Ok(db::ModelRouteTargetCreate {
                     endpoint_id: target.endpoint_id,
                     enabled: target.enabled.unwrap_or(true),
-                    upstream_model: target
-                        .upstream_model
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_string),
+                    upstream_model: normalize_upstream_model(target.upstream_model.as_deref()),
                     // Issue #409 Phase 1: target port type, default `Auto`
                     // (always sent, no omit/carry like `dev_system_normalize`).
                     native_api: target.native_api.unwrap_or(crate::config::NativeApi::Auto),
@@ -205,25 +200,34 @@ impl ModelRouteRequest {
                 "model route requires at least one target",
             ));
         }
-        let target_ids = if targets.is_empty() {
-            self.endpoint_id.iter().copied().collect::<Vec<_>>()
+        // Issue #419: identity is `(endpoint_id, normalized upstream_model)`,
+        // so one upstream may serve several distinct models while a repeated
+        // pair (empty/omitted both mean inherit) stays rejected.
+        let target_keys = if targets.is_empty() {
+            self.endpoint_id
+                .iter()
+                .copied()
+                .map(|endpoint_id| target_dedup_key(endpoint_id, None))
+                .collect::<Vec<_>>()
         } else {
             targets
                 .iter()
-                .map(|target| target.endpoint_id)
+                .map(|target| {
+                    target_dedup_key(target.endpoint_id, target.upstream_model.as_deref())
+                })
                 .collect::<Vec<_>>()
         };
-        let unique_target_ids = target_ids
-            .iter()
-            .copied()
-            .collect::<std::collections::HashSet<_>>();
-        if unique_target_ids.len() != target_ids.len() {
+        if has_duplicate_targets(&target_keys) {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "duplicate_targets",
-                "model route target endpoints must be unique",
+                "model route targets must be unique per endpoint and upstream model",
             ));
         }
+        let unique_target_ids = target_keys
+            .iter()
+            .map(|(endpoint_id, _)| *endpoint_id)
+            .collect::<std::collections::HashSet<_>>();
         for endpoint_id in unique_target_ids {
             let endpoint = db::get_endpoint(&state.pool, endpoint_id)
                 .await
@@ -362,6 +366,27 @@ impl From<db::ModelRoutePage> for ModelRoutePageResponse {
     }
 }
 
+/// Issue #419: trim an upstream model and map whitespace-only/empty to
+/// `None` (inherit). Shared by persistence (`into_create`) and target
+/// dedup so validation and stored rows agree on what "same target" means.
+fn normalize_upstream_model(upstream_model: Option<&str>) -> Option<String> {
+    upstream_model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+/// Issue #419: dedup identity for a route target.
+fn target_dedup_key(endpoint_id: Uuid, upstream_model: Option<&str>) -> (Uuid, Option<String>) {
+    (endpoint_id, normalize_upstream_model(upstream_model))
+}
+
+/// Issue #419: `true` when two targets share the same endpoint and the same
+/// normalized upstream model.
+fn has_duplicate_targets(keys: &[(Uuid, Option<String>)]) -> bool {
+    keys.iter().collect::<std::collections::HashSet<_>>().len() != keys.len()
+}
+
 /// Issue #368 Phase B: normalize and validate an outbound proxy URL.
 /// Empty is handled by callers (clear to inherit/direct); this helper only
 /// validates non-empty values. Returns the trimmed URL on success without
@@ -381,7 +406,72 @@ fn normalize_proxy_url(trimmed: &str) -> Result<String, &'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::ModelRouteTargetRequest;
+    use super::{ModelRouteTargetRequest, has_duplicate_targets, target_dedup_key};
+
+    #[test]
+    fn target_dedup_allows_same_endpoint_different_model() {
+        // Issue #419: one upstream may serve several distinct models.
+        let endpoint = uuid::Uuid::nil();
+        let keys = vec![
+            target_dedup_key(endpoint, Some("deepseek-flash")),
+            target_dedup_key(endpoint, Some("muse-spark-1.3-contributor")),
+        ];
+        assert!(!has_duplicate_targets(&keys));
+    }
+
+    #[test]
+    fn target_dedup_rejects_same_endpoint_same_model() {
+        let endpoint = uuid::Uuid::nil();
+        let keys = vec![
+            target_dedup_key(endpoint, Some("deepseek-flash")),
+            target_dedup_key(endpoint, Some("deepseek-flash")),
+        ];
+        assert!(has_duplicate_targets(&keys));
+    }
+
+    #[test]
+    fn target_dedup_rejects_empty_and_inherited_duplicates() {
+        let endpoint = uuid::Uuid::nil();
+        // Empty string and omitted both mean inherit.
+        let empty_and_none = vec![
+            target_dedup_key(endpoint, Some("")),
+            target_dedup_key(endpoint, None),
+        ];
+        assert!(has_duplicate_targets(&empty_and_none));
+        let both_none = vec![
+            target_dedup_key(endpoint, None),
+            target_dedup_key(endpoint, None),
+        ];
+        assert!(has_duplicate_targets(&both_none));
+        let both_empty = vec![
+            target_dedup_key(endpoint, Some("")),
+            target_dedup_key(endpoint, Some("")),
+        ];
+        assert!(has_duplicate_targets(&both_empty));
+    }
+
+    #[test]
+    fn target_dedup_trims_whitespace() {
+        // Issue #419: normalization matches persistence (`trim`, blank ->
+        // inherit), so padded and bare values collide.
+        let endpoint = uuid::Uuid::nil();
+        let padded = vec![
+            target_dedup_key(endpoint, Some("  deepseek-flash  ")),
+            target_dedup_key(endpoint, Some("deepseek-flash")),
+        ];
+        assert!(has_duplicate_targets(&padded));
+        let blank = vec![
+            target_dedup_key(endpoint, Some("   ")),
+            target_dedup_key(endpoint, None),
+        ];
+        assert!(has_duplicate_targets(&blank));
+        // Distinct endpoints never collide even with the same model.
+        let distinct = vec![
+            target_dedup_key(uuid::Uuid::from_u128(1), Some("deepseek-flash")),
+            target_dedup_key(uuid::Uuid::from_u128(2), Some("deepseek-flash")),
+        ];
+        assert!(!has_duplicate_targets(&distinct));
+    }
 
     #[test]
     fn dev_system_normalize_defaults_off_and_always_serializes() {
