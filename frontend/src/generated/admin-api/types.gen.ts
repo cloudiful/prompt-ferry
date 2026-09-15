@@ -797,6 +797,11 @@ export type ModelRouteTarget = {
      * `true` when an override is stored; the secret itself is never echoed.
      */
     has_proxy_url_override?: boolean;
+    /**
+     * Issue #409 Phase 1: per-target port type. `None` (omitted/null)
+     * means `Auto` (follow the caller); an explicit value wins over the
+     * upstream endpoint `native_api`.
+     */
     native_api?: NativeApi;
     position: number;
     rule_id: string;

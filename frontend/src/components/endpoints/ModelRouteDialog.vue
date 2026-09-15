@@ -74,6 +74,8 @@ function addTarget(): void {
     active_windows: [],
     active_windows_touched: false,
     dev_system_normalize: false,
+    // Issue #409: default Auto (follow caller), like createEmptyModelRouteForm.
+    native_api: 'auto',
   })
 }
 

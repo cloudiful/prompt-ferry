@@ -90,8 +90,9 @@ pub struct ModelRouteTarget {
     pub position: i32,
     pub enabled: bool,
     pub upstream_model: Option<String>,
-    // Issue #409 Phase 1: per-target native API override. `Auto` (default)
-    // follows the caller; an explicit value wins over the endpoint setting.
+    /// Issue #409 Phase 1: per-target port type. `None` (omitted/null)
+    /// means `Auto` (follow the caller); an explicit value wins over the
+    /// upstream endpoint `native_api`.
     #[serde(default = "crate::standalone_config::default_target_native_api")]
     pub native_api: NativeApi,
     // Issue #368 Phase A: per-target proxy override (PG plaintext).

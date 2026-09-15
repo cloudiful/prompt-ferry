@@ -113,7 +113,7 @@ fn fallback_api_keys(
 }
 
 fn parse_native_api(value: &str) -> NativeApi {
-    serde_json::from_value(serde_json::Value::String(value.to_string())).unwrap_or(NativeApi::Chat)
+    serde_json::from_value(serde_json::Value::String(value.to_string())).unwrap_or(NativeApi::Auto)
 }
 
 fn parse_routing_strategy(value: &str) -> ModelRouteRoutingStrategy {

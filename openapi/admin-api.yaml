@@ -4747,6 +4747,10 @@ components:
             `true` when an override is stored; the secret itself is never echoed.
         native_api:
           $ref: '#/components/schemas/NativeApi'
+          description: |-
+            Issue #409 Phase 1: per-target port type. `None` (omitted/null)
+            means `Auto` (follow the caller); an explicit value wins over the
+            upstream endpoint `native_api`.
         position:
           type: integer
           format: int32
