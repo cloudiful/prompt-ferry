@@ -105,31 +105,7 @@ function hasEndpointSchedule(): boolean {
   return sortedEndpointWindows().length > 0
 }
 
-function formatEndpointWindow(window: { start: string; end: string }): string {
-  return `${window.start}–${window.end}`
-}
-
-function endpointScheduleSummary(): string {
-  const windows = sortedEndpointWindows()
-  if (windows.length === 0) return props.t('scheduleAllDay')
-  const first = windows[0]
-  if (!first) return props.t('scheduleAllDay')
-  if (windows.length === 1) return formatEndpointWindow(first)
-  return `${formatEndpointWindow(first)} ${props.t('scheduleMoreWindows', { count: windows.length })}`
-}
-
-function endpointScheduleTooltip(): string {
-  const windows = sortedEndpointWindows()
-  if (windows.length === 0) return props.t('scheduleAllDay')
-  return windows.map(formatEndpointWindow).join(', ')
-}
-
-// Issue #392 Phase L: concise proxy summary (plain text, no pill).
-function endpointProxySummary(): string {
-  return hasProxy.value ? props.t('proxySet') : props.t('proxyDirectShort')
-}
-
-// Issue #392 Phase L: gear highlight when anything is non-default.
+// Gear highlight when anything is non-default.
 function hasEndpointSettings(): boolean {
   return hasProxy.value || hasEndpointSchedule()
 }
@@ -184,74 +160,6 @@ function hasEndpointSettings(): boolean {
                 :title="t('endpointSettingsHint')"
                 @click="openSettings"
               />
-            </div>
-            <div
-              role="button"
-              tabindex="0"
-              class="flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-1 hover:bg-elevated"
-              @click="openSettings"
-              @keydown.enter="openSettings"
-              @keydown.space.prevent="openSettings"
-            >
-              <div class="flex min-w-0 items-center gap-1">
-                <span class="font-medium text-default">{{
-                  t('proxyUrl')
-                }}</span>
-                <UTooltip :text="t('proxyUrlHint')">
-                  <UButton
-                    type="button"
-                    size="xs"
-                    color="neutral"
-                    variant="ghost"
-                    icon="i-lucide-info"
-                    :aria-label="t('proxyUrlHint')"
-                    @click.stop
-                  />
-                </UTooltip>
-              </div>
-              <div class="flex shrink-0 items-center gap-1">
-                <span class="text-muted">{{ endpointProxySummary() }}</span>
-                <UIcon
-                  name="i-lucide-chevron-right"
-                  class="h-4 w-4 text-dimmed"
-                />
-              </div>
-            </div>
-            <div
-              role="button"
-              tabindex="0"
-              class="flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-1 hover:bg-elevated"
-              @click="openSettings"
-              @keydown.enter="openSettings"
-              @keydown.space.prevent="openSettings"
-            >
-              <div class="flex min-w-0 items-center gap-1">
-                <span class="font-medium text-default">{{
-                  t('scheduleWindows')
-                }}</span>
-                <UTooltip :text="t('scheduleWindowsHint')">
-                  <UButton
-                    type="button"
-                    size="xs"
-                    color="neutral"
-                    variant="ghost"
-                    icon="i-lucide-info"
-                    :aria-label="t('scheduleWindowsHint')"
-                    @click.stop
-                  />
-                </UTooltip>
-              </div>
-              <div class="flex shrink-0 items-center gap-1">
-                <UTooltip :text="endpointScheduleTooltip()">
-                  <span class="text-muted">{{
-                    endpointScheduleSummary()
-                  }}</span>
-                </UTooltip>
-                <UIcon
-                  name="i-lucide-chevron-right"
-                  class="h-4 w-4 text-dimmed"
-                />
-              </div>
             </div>
           </div>
           <div
