@@ -1,6 +1,4 @@
-ARG UV_VERSION=0.8.17
-
-FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+FROM ghcr.io/astral-sh/uv AS uv
 FROM debian:trixie-slim AS runtime
 
 COPY --from=uv /uv /uvx /usr/local/bin/

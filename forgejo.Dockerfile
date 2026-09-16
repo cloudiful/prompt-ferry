@@ -1,6 +1,4 @@
-ARG UV_VERSION=0.8.17
-
-FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+FROM ghcr.io/astral-sh/uv AS uv
 FROM dockerhub.cloud1ful.com/library/debian:trixie-slim AS runtime
 ARG TARGETARCH
 
