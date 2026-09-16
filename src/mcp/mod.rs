@@ -32,37 +32,24 @@ pub(crate) use transport::with_tracked_credits;
 
 /// Storage selected by the worker runtime for MCP configuration lookups.
 ///
-/// SQLite deliberately leaves `postgres_pool` empty. MCP transport code may
-/// use the pool for PostgreSQL-only provider integrations, but must use the
-/// repository for configuration and never fall back to the lazy SQLite pool.
 #[derive(Clone)]
 pub(crate) struct McpRuntimeStorage {
     repository: crate::db::ConfigRepository,
-    postgres_pool: Option<sqlx::PgPool>,
 }
 
 impl McpRuntimeStorage {
     pub(crate) fn postgres(pool: sqlx::PgPool) -> Self {
         Self {
             repository: crate::db::ConfigRepository::postgres(&pool),
-            postgres_pool: Some(pool),
         }
     }
 
     pub(crate) fn from_repository(repository: crate::db::ConfigRepository) -> Self {
-        let postgres_pool = repository.as_postgres().cloned();
-        Self {
-            repository,
-            postgres_pool,
-        }
+        Self { repository }
     }
 
     pub(crate) fn repository(&self) -> &crate::db::ConfigRepository {
         &self.repository
-    }
-
-    pub(crate) fn postgres_pool(&self) -> Option<&sqlx::PgPool> {
-        self.postgres_pool.as_ref()
     }
 }
 

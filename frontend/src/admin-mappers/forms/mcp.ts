@@ -91,8 +91,6 @@ export function createEmptyMcpForm(): McpForm {
     allowed_tools: [],
     disabled_tools: [],
     disabled_resources: [],
-    daily_max_requests: null,
-    monthly_max_requests: null,
     enabled: true,
     timeout_ms: 30000,
     lifecycle_policy: 'auto',
@@ -149,8 +147,6 @@ export function mcpServerToForm(server: McpServer): McpForm {
     allowed_tools: normalizeStringList(source.allowed_tools),
     disabled_tools: normalizeStringList(source.disabled_tools),
     disabled_resources: normalizeStringList(source.disabled_resources),
-    daily_max_requests: source.daily_max_requests ?? null,
-    monthly_max_requests: source.monthly_max_requests ?? null,
     enabled: source.enabled ?? true,
     timeout_ms: source.timeout_ms ?? 30000,
     lifecycle_policy:
@@ -252,8 +248,6 @@ export function mcpFormToRequest(form: McpForm): McpServerRequest {
     aggregate_naming_mode: form.aggregate_naming_mode,
     provider_kind:
       form.transport === 'http' ? form.provider_kind || 'generic' : null,
-    daily_max_requests: form.daily_max_requests,
-    monthly_max_requests: form.monthly_max_requests,
     timeout_ms: form.timeout_ms,
     tool_filter_mode: form.tool_filter_mode,
     transport: form.transport,

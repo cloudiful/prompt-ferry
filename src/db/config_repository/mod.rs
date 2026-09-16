@@ -158,7 +158,6 @@ mod tests {
         assert!(!Capability::RequestRecords.sqlite_supported());
         assert!(!Capability::Approvals.sqlite_supported());
         assert!(!Capability::Billing.sqlite_supported());
-        assert!(!Capability::McpQuota.sqlite_supported());
         assert!(!Capability::ConversationEndpointOverride.sqlite_supported());
         assert!(!Capability::AvailableModels.sqlite_supported());
     }

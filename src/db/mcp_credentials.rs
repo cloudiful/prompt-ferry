@@ -2,8 +2,9 @@ use anyhow::Result;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::db::types::{McpBearerToken, McpCredential, McpProviderSecret,
-                         canonical_mcp_provider_kind};
+use crate::db::types::{
+    McpBearerToken, McpCredential, McpProviderSecret, canonical_mcp_provider_kind,
+};
 
 pub async fn list_credentials_by_server(
     pool: &PgPool,

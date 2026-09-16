@@ -203,7 +203,7 @@ async fn resolve_realtime_route(
     let mut route = match resolve_route(&fake_request, config, services, &request_ctx).await? {
         super::request_routes::RouteResolution::Ready { route } => *route,
         super::request_routes::RouteResolution::Responded => {
-            return Err(anyhow!("realtime route was rejected by budget gate"));
+            return Err(anyhow!("realtime route was unexpectedly resolved"));
         }
     };
     super::request::resolve_auto_protocol(&mut route, &request.path)

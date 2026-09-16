@@ -14,8 +14,6 @@ pub(super) async fn hydrate_rules(
             owner_user_id: row.owner_user_id,
             model_pattern: row.model_pattern,
             routing_strategy: parse_routing_strategy(&row.routing_strategy),
-            daily_max_requests: row.daily_max_requests,
-            monthly_max_requests: row.monthly_max_requests,
             enabled: row.enabled,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -167,8 +165,6 @@ pub(super) async fn model_route_candidates_by_rule(
             owner_user_id: row.owner_user_id,
             model_pattern: row.model_pattern.clone(),
             routing_strategy: parse_routing_strategy(&row.routing_strategy),
-            daily_max_requests: row.daily_max_requests,
-            monthly_max_requests: row.monthly_max_requests,
             updated_at: row.updated_at,
             targets: vec![ModelRouteCandidateTarget {
                 target_id: row.target_id,

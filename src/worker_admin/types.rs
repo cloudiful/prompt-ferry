@@ -18,7 +18,7 @@ mod settings;
 #[path = "types/usage.rs"]
 mod usage;
 
-use crate::worker_admin_state::ApiError;
+#[cfg(test)]
 use axum::http::StatusCode;
 
 pub use approvals::*;
@@ -31,17 +31,6 @@ pub use model_routes::*;
 pub use relays::*;
 pub use settings::*;
 pub use usage::*;
-
-fn validate_request_budget_limit(value: Option<i32>, field_name: &str) -> Result<(), ApiError> {
-    if value.is_some_and(|limit| limit <= 0) {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_budget_limit",
-            format!("{field_name} must be greater than 0"),
-        ));
-    }
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
@@ -108,8 +97,6 @@ mod tests {
             owner_user_id: None,
             model_pattern: "gpt-*".to_string(),
             routing_strategy: None,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: None,
             endpoint_id: None,
             priority: None,
@@ -122,8 +109,6 @@ mod tests {
             owner_user_id: None,
             model_pattern: "gpt-*".to_string(),
             routing_strategy: Some(db::ModelRouteRoutingStrategy::ResponsesSessionAffinity),
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: None,
             endpoint_id: Some(Uuid::new_v4()),
             priority: None,
@@ -167,8 +152,6 @@ mod tests {
             allowed_tools: None,
             disabled_tools: None,
             disabled_resources: None,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
             lifecycle_policy: None,
@@ -206,8 +189,6 @@ mod tests {
             allowed_tools: None,
             disabled_tools: None,
             disabled_resources: None,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
             lifecycle_policy: None,
@@ -246,8 +227,6 @@ mod tests {
             allowed_tools: None,
             disabled_tools: None,
             disabled_resources: None,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
             lifecycle_policy: None,
@@ -288,8 +267,6 @@ mod tests {
             allowed_tools: serde_json::json!([]),
             disabled_tools: serde_json::json!([]),
             disabled_resources: serde_json::json!([]),
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
             lifecycle_policy: "auto".to_string(),
@@ -325,8 +302,6 @@ mod tests {
             allowed_tools: None,
             disabled_tools: None,
             disabled_resources: None,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
             lifecycle_policy: None,
@@ -362,8 +337,6 @@ mod tests {
             allowed_tools: None,
             disabled_tools: None,
             disabled_resources: None,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
             lifecycle_policy: None,
@@ -407,8 +380,6 @@ mod tests {
             allowed_tools: None,
             disabled_tools: None,
             disabled_resources: None,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
             lifecycle_policy: None,
@@ -462,8 +433,6 @@ mod tests {
                 allowed_tools: None,
                 disabled_tools: None,
                 disabled_resources: None,
-                daily_max_requests: None,
-                monthly_max_requests: None,
                 enabled: Some(true),
                 timeout_ms: None,
                 lifecycle_policy: None,
@@ -503,8 +472,6 @@ mod tests {
             allowed_tools: serde_json::json!([]),
             disabled_tools: serde_json::json!([]),
             disabled_resources: serde_json::json!([]),
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
             lifecycle_policy: "auto".to_string(),
@@ -541,8 +508,6 @@ mod tests {
             allowed_tools: None,
             disabled_tools: None,
             disabled_resources: None,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
             lifecycle_policy: None,
@@ -578,8 +543,6 @@ mod tests {
             allowed_tools: None,
             disabled_tools: None,
             disabled_resources: None,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
             lifecycle_policy: None,

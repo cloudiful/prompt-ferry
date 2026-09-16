@@ -300,8 +300,6 @@ pub(crate) async fn insert_route(
         .bind(route.owner_user_id)
         .bind(&route.model_pattern)
         .bind(route.routing_strategy.as_str())
-        .bind(route.daily_max_requests)
-        .bind(route.monthly_max_requests)
         .bind(bool_i64(route.enabled))
         .execute(&mut **transaction)
         .await?;
@@ -351,8 +349,6 @@ pub(crate) async fn insert_encrypted_route(
         .bind(route.owner_user_id)
         .bind(&route.model_pattern)
         .bind(route.routing_strategy.as_str())
-        .bind(route.daily_max_requests)
-        .bind(route.monthly_max_requests)
         .bind(bool_i64(route.enabled))
         .execute(&mut **transaction)
         .await?;

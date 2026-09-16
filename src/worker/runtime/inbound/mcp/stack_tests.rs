@@ -122,7 +122,7 @@ fn mcp_handler_completes_on_bounded_worker_stack() {
     });
 }
 
-fn mcp_input(name: &str, daily_max_requests: Option<i32>) -> McpServerInput {
+fn mcp_input(name: &str) -> McpServerInput {
     McpServerInput {
         scope: "admin".to_string(),
         owner_user_id: None,
@@ -145,8 +145,6 @@ fn mcp_input(name: &str, daily_max_requests: Option<i32>) -> McpServerInput {
         allowed_tools: serde_json::json!([]),
         disabled_tools: serde_json::json!([]),
         disabled_resources: serde_json::json!([]),
-        daily_max_requests,
-        monthly_max_requests: None,
         enabled: true,
         timeout_ms: 30_000,
         lifecycle_policy: "auto".to_string(),
@@ -156,7 +154,6 @@ fn mcp_input(name: &str, daily_max_requests: Option<i32>) -> McpServerInput {
 
 async fn sqlite_services(
     name: &str,
-    daily_max_requests: Option<i32>,
 ) -> (
     RuntimeServices,
     StandaloneRuntimeState,
@@ -169,7 +166,7 @@ async fn sqlite_services(
     let manager = RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");
     let repository = ConfigRepository::sqlite(store.clone(), manager.clone());
     repository
-        .create_mcp_server(uuid::Uuid::new_v4(), mcp_input(name, daily_max_requests))
+        .create_mcp_server(uuid::Uuid::new_v4(), mcp_input(name))
         .await
         .expect("create SQLite MCP server");
     let config = WorkerConfig {
@@ -198,7 +195,7 @@ async fn sqlite_services(
 
 #[tokio::test]
 async fn sqlite_mcp_request_uses_unified_server_configuration() {
-    let (services, standalone, path, mut _data_rx) = sqlite_services("local", None).await;
+    let (services, standalone, path, mut _data_rx) = sqlite_services("local").await;
     let request = minimal_request();
     let mut request = request;
     request.server_name = Some("local".to_string());
@@ -236,34 +233,4 @@ async fn sqlite_mcp_request_uses_unified_server_configuration() {
 
     drop(execution);
     let _ = std::fs::remove_file(path);
-}
-
-#[tokio::test]
-async fn sqlite_mcp_request_budget_returns_precise_capability_error() {
-    let (services, standalone, path, _data_rx) = sqlite_services("limited", Some(1)).await;
-    let mut request = minimal_request();
-    request.server_name = Some("limited".to_string());
-    let request_id = request.request_id.clone();
-
-    let execution = preparation::build_request_context(request, &services)
-        .await
-        .expect("request context");
-    assert!(
-        preparation::resolve_server_and_quota(execution, &services)
-            .await
-            .is_none()
-    );
-
-    let summary = standalone
-        .recent_usage()
-        .into_iter()
-        .rev()
-        .find(|summary| summary.request_id.to_string() == request_id)
-        .expect("quota rejection summary");
-    assert_eq!(
-        summary.error_code.as_deref(),
-        Some("sqlite_mcp_quota_unavailable")
-    );
-    let _ = std::fs::remove_file(path);
-    drop(standalone);
 }

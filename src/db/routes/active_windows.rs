@@ -1,9 +1,10 @@
 //! Issue #378 Phase I: per-target effective time windows.
 //!
-//! `active_windows` is a JSON array of `{start,end}` `HH:MM` pairs stored
-//! as `TEXT NULL` (`NULL`/empty means all-day). `end < start` is overnight
-//! (e.g. `22:00-06:00`); overlaps are allowed (any hit means active).
-//! All times are interpreted in the worker-local timezone; multi-machine
+//! `active_windows` is a JSON array of `{start,end,days?}` stored as
+//! `TEXT NULL` (`NULL`/empty means unrestricted). `end < start` is overnight
+//! (e.g. `22:00-06:00`, weekday decided by start day); overlaps are allowed
+//! (any hit means active). `days` is 1=Mon..7=Sun, omitted/empty means every
+//! day. All times are interpreted in the worker-local timezone; multi-machine
 //! deployments must share one timezone.
 
 use crate::db::types::ActiveWindow;
@@ -34,19 +35,32 @@ fn validate_window(start: &str, end: &str) -> Result<(u16, u16), &'static str> {
     Ok((start_min, end_min))
 }
 
+fn validate_days(days: &Option<Vec<u8>>) -> Result<(), &'static str> {
+    if let Some(values) = days {
+        for day in values {
+            if *day < 1 || *day > 7 {
+                return Err("active_windows days must be 1..7");
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Validate request windows and return the sorted-normalized clone.
-/// Empty means all-day. Overlaps are allowed; sort is by start then end.
+/// Empty means unrestricted. Overlaps are allowed; sort is by start then end.
 pub fn normalize_request_windows(
     windows: &[ActiveWindow],
 ) -> Result<Vec<ActiveWindow>, &'static str> {
     for window in windows {
         validate_window(window.start.trim(), window.end.trim())?;
+        validate_days(&window.days)?;
     }
     let mut normalized = windows
         .iter()
         .map(|window| ActiveWindow {
             start: window.start.trim().to_string(),
             end: window.end.trim().to_string(),
+            days: window.days.clone(),
         })
         .collect::<Vec<_>>();
     normalized.sort_by_key(|window| {
@@ -88,13 +102,36 @@ fn window_covers(start_min: u16, end_min: u16, now_min: u16) -> bool {
 }
 
 /// Whether `now_min` (minutes since local midnight) is inside any window.
-/// Empty means all-day. Assumes already-validated windows; unparseable
+/// Empty means unrestricted. Assumes already-validated windows; unparseable
 /// entries never match (fail-closed).
 pub fn is_active_at(windows: &[ActiveWindow], now_min: u16) -> bool {
+    is_active_now(windows, weekday_now(), now_min)
+}
+
+/// Weekday now, 1=Mon..7=Sun, worker-local.
+pub fn weekday_now() -> u8 {
+    use chrono::Datelike;
+    chrono::Local::now().weekday().number_from_monday() as u8
+}
+
+fn window_hits_day(days: &Option<Vec<u8>>, today: u8) -> bool {
+    match days {
+        None => true,
+        Some(values) if values.is_empty() => true,
+        Some(values) => values.contains(&today),
+    }
+}
+
+/// Whether windows are active at weekday+minutes. Empty means unrestricted.
+/// Overnight windows are decided by start day (Mon 22:00-06:00 does not cover Tue 01:00).
+pub fn is_active_now(windows: &[ActiveWindow], today: u8, now_min: u16) -> bool {
     if windows.is_empty() {
         return true;
     }
     windows.iter().any(|window| {
+        if !window_hits_day(&window.days, today) {
+            return false;
+        }
         match (
             parse_hhmm(window.start.trim()),
             parse_hhmm(window.end.trim()),
@@ -108,10 +145,15 @@ pub fn is_active_at(windows: &[ActiveWindow], now_min: u16) -> bool {
 }
 
 /// Whether a stored raw value is active at `now_min`. `None`/empty means
-/// all-day; corrupt stored JSON means inactive (fail-closed).
+/// unrestricted; corrupt stored JSON means inactive (fail-closed).
 pub fn stored_is_active_at(raw: Option<&str>, now_min: u16) -> bool {
+    stored_is_active_now(raw, weekday_now(), now_min)
+}
+
+/// Whether a stored raw value is active at weekday+minutes.
+pub fn stored_is_active_now(raw: Option<&str>, today: u8, now_min: u16) -> bool {
     match parse_stored_windows(raw) {
-        Ok(windows) => is_active_at(&windows, now_min),
+        Ok(windows) => is_active_now(&windows, today, now_min),
         Err(_) => false,
     }
 }
@@ -135,11 +177,11 @@ pub fn format_minutes(minutes: u16) -> String {
     format!("{:02}:{:02}", minutes / 60 % 24, minutes % 60)
 }
 
-/// Compact windows summary for fail-closed messages: `all-day` or
+/// Compact windows summary for fail-closed messages: `unrestricted` or
 /// `06:30-14:00, 18:00-20:00`.
 pub fn summarize_windows(windows: &[ActiveWindow]) -> String {
     if windows.is_empty() {
-        return "all-day".to_string();
+        return "unrestricted".to_string();
     }
     windows
         .iter()
@@ -174,14 +216,28 @@ pub fn effective_windows_raw<'a>(
 }
 
 /// Whether the effective windows are active at `now_min`.
-/// Target-nonempty else endpoint else all-day; corrupt effective JSON
+/// Target-nonempty else endpoint else unrestricted; corrupt effective JSON
 /// means inactive (fail-closed).
 pub fn effective_stored_is_active_at(
     target_raw: Option<&str>,
     endpoint_raw: Option<&str>,
     now_min: u16,
 ) -> bool {
-    stored_is_active_at(effective_windows_raw(target_raw, endpoint_raw), now_min)
+    effective_stored_is_active_now(target_raw, endpoint_raw, weekday_now(), now_min)
+}
+
+/// Whether the effective windows are active at weekday+minutes.
+pub fn effective_stored_is_active_now(
+    target_raw: Option<&str>,
+    endpoint_raw: Option<&str>,
+    today: u8,
+    now_min: u16,
+) -> bool {
+    stored_is_active_now(
+        effective_windows_raw(target_raw, endpoint_raw),
+        today,
+        now_min,
+    )
 }
 
 /// Compact summary for effective windows (corrupt reads as `invalid`).
@@ -250,6 +306,15 @@ mod tests {
         ActiveWindow {
             start: start.to_string(),
             end: end.to_string(),
+            days: None,
+        }
+    }
+
+    fn window_days(start: &str, end: &str, days: &[u8]) -> ActiveWindow {
+        ActiveWindow {
+            start: start.to_string(),
+            end: end.to_string(),
+            days: Some(days.to_vec()),
         }
     }
 
@@ -261,7 +326,32 @@ mod tests {
         assert!(stored_is_active_at(None, 720));
         assert!(stored_is_active_at(Some(""), 720));
         assert!(stored_is_active_at(Some("   "), 720));
-        assert_eq!(summarize_windows(&[]), "all-day");
+        assert_eq!(summarize_windows(&[]), "unrestricted");
+    }
+
+    #[test]
+    fn weekday_filtering() {
+        let windows = vec![window_days("00:00", "08:00", &[1, 2, 3, 4, 5])];
+        assert!(is_active_now(&windows, 3, 60));
+        assert!(!is_active_now(&windows, 7, 60));
+        assert!(!is_active_now(&windows, 6, 60));
+        // None/empty means every day
+        assert!(is_active_now(&[window("00:00", "08:00")], 7, 60));
+        assert!(is_active_now(&[window_days("00:00", "08:00", &[])], 7, 60));
+    }
+
+    #[test]
+    fn invalid_days_rejected() {
+        assert!(validate_days(&Some(vec![0])).is_err());
+        assert!(validate_days(&Some(vec![9])).is_err());
+        assert!(validate_days(&Some(vec![1, 7])).is_ok());
+    }
+
+    #[test]
+    fn overnight_uses_start_day() {
+        let windows = vec![window_days("22:00", "06:00", &[1])];
+        assert!(is_active_now(&windows, 1, 23 * 60));
+        assert!(!is_active_now(&windows, 2, 60));
     }
 
     #[test]
@@ -369,7 +459,7 @@ mod tests {
             summarize_effective_stored(None, Some(endpoint_night)),
             "22:00-23:00"
         );
-        assert_eq!(summarize_effective_stored(None, None), "all-day");
+        assert_eq!(summarize_effective_stored(None, None), "unrestricted");
     }
 
     #[test]
@@ -474,14 +564,12 @@ mod tests {
             owner_user_id: None,
             model_pattern: "gpt-*".to_string(),
             routing_strategy: crate::db::types::ModelRouteRoutingStrategy::ClientKeyRendezvous,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             updated_at: chrono::Utc::now(),
             targets: vec![active],
         };
         let message = schedule_unavailable_message(&candidate, 12 * 60);
         assert!(message.contains("gpt-*"), "{message}");
         assert!(message.contains("12:00"), "{message}");
-        assert!(message.contains("all-day"), "{message}");
+        assert!(message.contains("unrestricted"), "{message}");
     }
 }

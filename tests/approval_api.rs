@@ -353,8 +353,6 @@ async fn endpoint_key_override_and_request_snapshot_are_preserved() -> anyhow::R
             base_url: "http://endpoint-key.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "legacy-key".to_string(),
             api_keys: vec![
                 db::EndpointApiKeyCreate {
@@ -506,8 +504,6 @@ async fn endpoint_key_override_and_request_snapshot_are_preserved() -> anyhow::R
             base_url: endpoint.base_url.clone(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: endpoint.daily_max_requests,
-            monthly_max_requests: endpoint.monthly_max_requests,
             api_key: endpoint.api_key.clone(),
             api_keys: vec![db::EndpointApiKeyCreate {
                 key_label: secondary.key_label.clone(),
@@ -576,8 +572,6 @@ async fn endpoint_key_update_preserves_key_identity() -> anyhow::Result<()> {
             base_url: "http://key-identity.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "legacy-key".to_string(),
             api_keys: vec![
                 db::EndpointApiKeyCreate {
@@ -628,8 +622,6 @@ async fn endpoint_key_update_preserves_key_identity() -> anyhow::Result<()> {
             base_url: "http://key-identity.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "legacy-key".to_string(),
             api_keys: vec![
                 db::EndpointApiKeyCreate {
@@ -696,8 +688,6 @@ async fn endpoint_key_update_preserves_key_identity() -> anyhow::Result<()> {
             base_url: "http://key-identity.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "legacy-key".to_string(),
             api_keys: vec![
                 db::EndpointApiKeyCreate {
@@ -752,8 +742,6 @@ async fn endpoint_key_update_preserves_key_identity() -> anyhow::Result<()> {
             base_url: "http://key-identity.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "legacy-key".to_string(),
             api_keys: vec![db::EndpointApiKeyCreate {
                 key_label: "brand-new".to_string(),
@@ -806,8 +794,6 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
             base_url: "http://affinity-reset.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "affinity-key".to_string(),
             api_keys: vec![],
             key_lb_enabled: false,
@@ -824,8 +810,6 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
             owner_user_id: None,
             model_pattern: "gpt-affinity-reset".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -938,8 +922,6 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
             base_url: "http://affinity-both.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "affinity-key".to_string(),
             api_keys: vec![],
             key_lb_enabled: false,
@@ -956,8 +938,6 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
             owner_user_id: None,
             model_pattern: "gpt-affinity-both".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -978,8 +958,6 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
             owner_user_id: None,
             model_pattern: "gpt-affinity-both".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -1191,8 +1169,6 @@ async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow
             base_url: "http://affinity-503.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "affinity-key".to_string(),
             api_keys: vec![],
             key_lb_enabled: false,
@@ -1209,8 +1185,6 @@ async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow
             owner_user_id: None,
             model_pattern: "gpt-affinity-503".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -1293,8 +1267,6 @@ async fn session_affinity_options_fixture(
             base_url: "http://affinity-options.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "legacy-key".to_string(),
             api_keys: vec![
                 db::EndpointApiKeyCreate {
@@ -1326,8 +1298,6 @@ async fn session_affinity_options_fixture(
             owner_user_id: None,
             model_pattern: "gpt-affinity-options".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -1499,8 +1469,6 @@ async fn reset_session_affinity_clears_anonymous_record_binding_under_user_zero(
             base_url: "http://affinity-anon.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "affinity-key".to_string(),
             api_keys: vec![],
             key_lb_enabled: false,
@@ -1517,8 +1485,6 @@ async fn reset_session_affinity_clears_anonymous_record_binding_under_user_zero(
             owner_user_id: None,
             model_pattern: "gpt-affinity-anon".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -1629,8 +1595,6 @@ async fn session_route_options_surfaces_binding_when_rule_no_longer_resolves() -
                 owner_user_id: None,
                 model_pattern: "gpt-some-other-model".to_string(),
                 routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
-                daily_max_requests: None,
-                monthly_max_requests: None,
                 enabled: true,
                 targets: vec![db::ModelRouteTargetCreate {
                     endpoint_id: endpoint.endpoint_id,
@@ -1692,8 +1656,6 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
             base_url: "http://routed.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "routed-key".to_string(),
             api_keys: vec![],
             key_lb_enabled: false,
@@ -1715,8 +1677,6 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
             base_url: "http://extra.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "extra-key".to_string(),
             api_keys: vec![],
             key_lb_enabled: false,
@@ -1733,8 +1693,6 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
             owner_user_id: None,
             model_pattern: "gpt-routed".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: routed_endpoint.endpoint_id,
@@ -1812,8 +1770,6 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
             base_url: "http://glm.example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "glm-key".to_string(),
             api_keys: vec![],
             key_lb_enabled: false,
@@ -1830,8 +1786,6 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
             owner_user_id: None,
             model_pattern: "glm-5".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -2315,8 +2269,6 @@ async fn ignores_obsolete_continuation_policy_field() -> anyhow::Result<()> {
             base_url: "https://chat.example.com".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "secret".to_string(),
             api_keys: vec![],
             key_lb_enabled: false,
@@ -2384,8 +2336,6 @@ async fn model_route_response_omits_continuation_policy() -> anyhow::Result<()> 
             base_url: "https://responses.example.com".to_string(),
             native_api: NativeApi::Responses,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "secret".to_string(),
             api_keys: vec![],
             key_lb_enabled: false,
@@ -3353,8 +3303,6 @@ async fn overview_breakdown_reports_error_rate_and_upstream_breakdown() -> anyho
                 base_url: format!("http://{name}.example.test"),
                 native_api: NativeApi::Chat,
                 native_api_source: NativeApiSource::Manual,
-                daily_max_requests: None,
-                monthly_max_requests: None,
                 api_key: format!("{name}-key"),
                 api_keys: vec![],
                 key_lb_enabled: false,

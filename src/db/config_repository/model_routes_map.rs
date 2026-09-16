@@ -21,8 +21,6 @@ pub(super) fn from_postgres(rule: PgModelEndpointRule) -> UnifiedModelRoute {
         owner_user_id: rule.owner_user_id,
         model_pattern: rule.model_pattern,
         routing_strategy: rule.routing_strategy,
-        daily_max_requests: rule.daily_max_requests,
-        monthly_max_requests: rule.monthly_max_requests,
         enabled: rule.enabled,
         targets: rule.targets.into_iter().map(from_postgres_target).collect(),
     }
@@ -126,8 +124,6 @@ where
         owner_user_id: route.owner_user_id,
         model_pattern: route.model_pattern,
         routing_strategy: routing_strategy_to_pg(route.routing_strategy),
-        daily_max_requests: route.daily_max_requests,
-        monthly_max_requests: route.monthly_max_requests,
         enabled: route.enabled,
         targets,
     }
@@ -185,8 +181,6 @@ pub(super) fn sqlite_route_from_create(
         owner_user_id: input.owner_user_id,
         model_pattern: input.model_pattern,
         routing_strategy,
-        daily_max_requests: input.daily_max_requests,
-        monthly_max_requests: input.monthly_max_requests,
         enabled: input.enabled,
         targets,
     })

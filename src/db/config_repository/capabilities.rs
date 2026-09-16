@@ -20,7 +20,6 @@ pub enum Capability {
     McpServers,
     McpCredentials,
     McpCatalog,
-    McpQuota,
     ConversationEndpointOverride,
     AvailableModels,
     SnapshotPublication,
@@ -43,7 +42,6 @@ impl Capability {
             Self::McpServers => "sqlite_mcp_servers_unavailable",
             Self::McpCredentials => "sqlite_mcp_credentials_unavailable",
             Self::McpCatalog => "sqlite_mcp_catalog_unavailable",
-            Self::McpQuota => "sqlite_mcp_quota_unavailable",
             Self::ConversationEndpointOverride => {
                 "sqlite_conversation_endpoint_override_unavailable"
             }
@@ -70,7 +68,6 @@ impl Capability {
             Self::McpServers => "MCP server configuration is available on SQLite",
             Self::McpCredentials => "MCP credential configuration is available on SQLite",
             Self::McpCatalog => "MCP catalog probing is available on SQLite",
-            Self::McpQuota => "MCP quota and usage ledgers are not available on SQLite",
             Self::ConversationEndpointOverride => {
                 "conversation endpoint overrides are not yet available on SQLite"
             }
@@ -294,7 +291,6 @@ mod tests {
         assert!(!Capability::RequestRecords.sqlite_supported());
         assert!(!Capability::Approvals.sqlite_supported());
         assert!(!Capability::Billing.sqlite_supported());
-        assert!(!Capability::McpQuota.sqlite_supported());
         assert!(!Capability::ConversationEndpointOverride.sqlite_supported());
         assert!(!Capability::AvailableModels.sqlite_supported());
         assert!(!Capability::ModelRouteTest.sqlite_supported());

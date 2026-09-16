@@ -37,8 +37,6 @@ pub struct EndpointRequest {
     pub key_lb_enabled: bool,
     pub protocol_mode: EndpointProtocolMode,
     pub native_api_override: Option<NativeApi>,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     pub enabled: Option<bool>,
     #[serde(default)]
     pub mcp_enabled: Option<bool>,

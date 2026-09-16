@@ -3,17 +3,16 @@ use anyhow::anyhow;
 use crate::{config::WorkerConfig, db};
 
 use super::super::{
-    RequestExecutionContext, check_named_request_budget,
-    context::{RouteExecutionContext, RuntimeServices},
-    discover_dynamic_model_route, materialize_route_api_key_selection_with_quota,
-    request_assembly::BufferedBridgeRequest,
-    routing::clear_invalid_conversation_endpoint_key_override,
-    select_route_for_candidate,
+    RequestExecutionContext, context::RuntimeServices, discover_dynamic_model_route,
+    materialize_route_api_key_selection_with_quota, request_assembly::BufferedBridgeRequest,
+    routing::clear_invalid_conversation_endpoint_key_override, select_route_for_candidate,
 };
-use super::errors::respond_with_budget_error;
 
 pub(super) enum RouteResolution {
-    Ready { route: Box<db::RouteConfig> },
+    Ready {
+        route: Box<db::RouteConfig>,
+    },
+    #[allow(dead_code)]
     Responded,
 }
 
@@ -90,7 +89,7 @@ async fn resolve_no_state_route(
 
 async fn resolve_admin_route(
     request: &BufferedBridgeRequest,
-    config: &WorkerConfig,
+    _config: &WorkerConfig,
     services: &RuntimeServices,
     request_ctx: &RequestExecutionContext,
     state: &crate::worker_admin::AdminState,
@@ -109,50 +108,6 @@ async fn resolve_admin_route(
     .await?;
 
     if let Some(candidate) = candidate {
-        if let Some(message) = check_named_request_budget(
-            &state.pool,
-            db::RequestRecordCategory::Ai,
-            db::RequestBudgetScope::ModelRoute(candidate.rule_id),
-            "model route",
-            &candidate.model_pattern,
-            candidate.daily_max_requests,
-            candidate.monthly_max_requests,
-        )
-        .await?
-        {
-            Box::pin(respond_with_budget_error(
-                services,
-                request,
-                request_ctx,
-                RouteExecutionContext {
-                    route: db::RouteConfig {
-                        route_id: uuid::Uuid::nil(),
-                        user_id,
-                        model_route_rule_id: Some(candidate.rule_id),
-                        base_url: String::new(),
-                        api_key: String::new(),
-                        endpoint_key_id: None,
-                        endpoint_key_label: None,
-                        api_keys: Vec::new(),
-                        key_lb_enabled: false,
-                        native_api: config.upstream_native_api,
-                        upstream_model: None,
-                        route_selection_reason: db::RouteSelectionReason::Default,
-                        provider: db::EndpointProvider::Generic,
-                        service_tier: db::MinimaxServiceTier::Standard,
-                        proxy_url: None,
-                        // Issue #392 Phase K: budget-error placeholder never normalizes.
-                        dev_system_normalize: false,
-                    },
-                    endpoint_id: None,
-                    model_route_rule_id: Some(candidate.rule_id),
-                    route_selection_reason: db::RouteSelectionReason::Default,
-                },
-                message,
-            ))
-            .await?;
-            return Ok(RouteResolution::Responded);
-        }
         let selected = select_route_for_candidate(
             services,
             request_ctx,
@@ -298,8 +253,6 @@ mod tests {
                 owner_user_id: None,
                 model_pattern: "local-*".to_string(),
                 routing_strategy: RoutingStrategy::ClientKeyRendezvous,
-                daily_max_requests: None,
-                monthly_max_requests: None,
                 enabled: true,
                 targets: vec![ModelRouteTargetConfig {
                     target_id: uuid::Uuid::new_v4(),

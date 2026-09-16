@@ -8,9 +8,8 @@ use crate::mcp::targeting::extract_mcp_request_metadata;
 use crate::worker::runtime::context::{FailurePayload, RuntimeServices};
 use crate::worker::runtime::lifecycle::RequestLeaseGuard;
 use crate::worker::runtime::{
-    RequestExecutionContext, check_named_request_budget, mcp_support::McpResponseContext,
-    record_mcp_request_event, redaction_enabled, request_assembly::BufferedMcpRequest,
-    resolve_mcp_conversation_log,
+    RequestExecutionContext, mcp_support::McpResponseContext, record_mcp_request_event,
+    redaction_enabled, request_assembly::BufferedMcpRequest, resolve_mcp_conversation_log,
 };
 use crate::{
     db, mcp,
@@ -202,15 +201,6 @@ pub(super) async fn build_request_context(
     })
 }
 
-/// Rejection computed by the server-budget stage; the caller sends it and
-/// ends the request.
-struct BudgetRejection {
-    status: StatusCode,
-    code: &'static str,
-    error_message: String,
-    body_message: String,
-}
-
 /// Narrowed stage 2a: fetch the visible named server without holding the
 /// execution holder across the repository await.
 async fn fetch_visible_server(
@@ -228,44 +218,7 @@ async fn fetch_visible_server(
         .flatten()
 }
 
-/// Narrowed stage 2b: enforce the named server request budget.
-async fn check_server_request_budget(
-    state: &mcp::McpRuntimeState,
-    server: &db::McpServer,
-) -> Option<BudgetRejection> {
-    if state.storage.repository().is_sqlite() {
-        if server.daily_max_requests.is_some() || server.monthly_max_requests.is_some() {
-            let message = crate::db::Capability::McpQuota.description().to_string();
-            return Some(BudgetRejection {
-                status: StatusCode::NOT_IMPLEMENTED,
-                code: crate::db::Capability::McpQuota.as_code(),
-                error_message: message.clone(),
-                body_message: message,
-            });
-        }
-        return None;
-    }
-    let message = check_named_request_budget(
-        state.storage.postgres_pool().expect("PostgreSQL MCP state"),
-        db::RequestRecordCategory::Mcp,
-        db::RequestBudgetScope::McpServer(server.server_id),
-        "mcp server",
-        &server.name,
-        server.daily_max_requests,
-        server.monthly_max_requests,
-    )
-    .await
-    .ok()
-    .flatten()?;
-    Some(BudgetRejection {
-        status: StatusCode::TOO_MANY_REQUESTS,
-        code: "budget_exceeded",
-        error_message: message.clone(),
-        body_message: message,
-    })
-}
-
-/// Stage 2: resolve the named server and enforce its request budget.
+/// Stage 2: resolve the named server (no quota; Issue #430 removed limits).
 /// Quota groups were removed, so credential selection always follows the
 /// unconstrained legacy token path (`selected_credential` stays `None`).
 pub(super) async fn resolve_server_and_quota(
@@ -279,24 +232,6 @@ pub(super) async fn resolve_server_and_quota(
         execution.metadata.server_name.as_deref(),
     ))
     .await;
-    let rejection = match execution.server.as_ref() {
-        Some(server) => Box::pin(check_server_request_budget(state, server)).await,
-        None => None,
-    };
-    if let Some(rejection) = rejection {
-        let context = execution.response_context(services);
-        Box::pin(send_failure(
-            services,
-            &context,
-            &execution.request.request_id,
-            rejection.status,
-            rejection.code,
-            rejection.error_message,
-            rejection.body_message,
-        ))
-        .await;
-        return None;
-    }
     let conversation_id = execution
         .request
         .headers

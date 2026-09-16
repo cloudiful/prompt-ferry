@@ -1324,8 +1324,6 @@ mod tests {
             allowed_tools: json!([]),
             disabled_tools: json!([]),
             disabled_resources: json!([]),
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
             lifecycle_policy: "auto".to_string(),

@@ -379,7 +379,7 @@ async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_o
     let path = standalone_temp_path("fresh");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 17);
+    assert_eq!(standalone_schema_version(&pool).await?, 25);
 
     let ddl: String = sqlx::query(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'standalone_provider_endpoints'",
@@ -540,7 +540,7 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     let pool = db::connect_sqlite(&path).await?;
     // 0015 (issue #230) adds `glm` and 0016 (issue #287) adds `deepseek`;
     // the final schema version is 16 after the pending migrations apply.
-    assert_eq!(standalone_schema_version(&pool).await?, 17);
+    assert_eq!(standalone_schema_version(&pool).await?, 25);
     let preserved: i64 = sqlx::query(
         "SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'",
     )
@@ -572,6 +572,72 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     insert_standalone_endpoint(&pool, "glm-upgraded", "glm", None).await?;
     insert_standalone_endpoint(&pool, "ds-upgraded", "deepseek", None).await?;
 
+    pool.close().await;
+    store.close().await;
+    remove_standalone_files(&path);
+    Ok(())
+}
+
+// Issue #430: 0025 drops quota columns via DROP COLUMN (model_routes) + rebuild
+// (mcp_servers). Targets must survive; schema must be 25 with no quota cols.
+#[tokio::test]
+async fn standalone_0025_quota_cleanup_preserves_route_targets() -> anyhow::Result<()> {
+    let path = standalone_temp_path("quota25");
+    let store = StandaloneConfigStore::open(&path).await?;
+    let pool = db::connect_sqlite(&path).await?;
+    assert_eq!(standalone_schema_version(&pool).await?, 25);
+    // No quota columns remain.
+    for table in ["standalone_model_routes", "standalone_mcp_servers"] {
+        let cols: Vec<String> = if table == "standalone_model_routes" {
+            sqlx::query("SELECT name FROM pragma_table_info('standalone_model_routes')")
+                .fetch_all(&pool)
+                .await?
+                .into_iter()
+                .map(|row| row.try_get::<String, _>("name").expect("col"))
+                .collect()
+        } else {
+            sqlx::query("SELECT name FROM pragma_table_info('standalone_mcp_servers')")
+                .fetch_all(&pool)
+                .await?
+                .into_iter()
+                .map(|row| row.try_get::<String, _>("name").expect("col"))
+                .collect()
+        };
+        assert!(
+            !cols.iter().any(|c| c == "daily_max_requests"),
+            "{table} {cols:?}"
+        );
+        assert!(
+            !cols.iter().any(|c| c == "monthly_max_requests"),
+            "{table} {cols:?}"
+        );
+    }
+    // Route + target round-trip proves the FK parent survived the migration.
+    let rule_id = Uuid::new_v4().to_string();
+    let endpoint_id = Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO standalone_provider_endpoints(endpoint_id, name, provider, base_url, native_api, native_api_source, key_lb_enabled, enabled, mcp_enabled, api_key_ciphertext, api_key_nonce, api_key_key_version) VALUES (?, 'e25', 'generic', 'https://example.test', 'auto', 'auto', 0, 1, 0, x'00', x'00', 1)")
+        .bind(&endpoint_id)
+        .execute(&pool)
+        .await?;
+    // fixup: endpoint_id is first bind, not param above; use explicit values
+    sqlx::query("INSERT INTO standalone_model_routes(rule_id, scope, model_pattern, routing_strategy, enabled) VALUES (?, 'admin', 'm25*', 'client_key_rendezvous', 1)")
+        .bind(&rule_id)
+        .execute(&pool)
+        .await?;
+    let target_id = Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO standalone_model_route_targets(target_id, rule_id, endpoint_id, position, enabled) VALUES (?, ?, ?, 0, 1)")
+        .bind(&target_id)
+        .bind(&rule_id)
+        .bind(&endpoint_id)
+        .execute(&pool)
+        .await?;
+    let count: i64 =
+        sqlx::query("SELECT COUNT(*) FROM standalone_model_route_targets WHERE rule_id = ?")
+            .bind(&rule_id)
+            .fetch_one(&pool)
+            .await?
+            .try_get(0)?;
+    assert_eq!(count, 1, "route target must survive 0025");
     pool.close().await;
     store.close().await;
     remove_standalone_files(&path);

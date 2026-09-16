@@ -4,7 +4,6 @@ mod bootstrap;
 mod bridge;
 #[cfg(test)]
 mod bridge_tests;
-mod budget;
 mod connect;
 mod context;
 mod error_handling;
@@ -33,7 +32,6 @@ use std::{
 use tokio::sync::Mutex;
 
 use self::bootstrap::{build_admin_state, build_standalone_state, validate_config};
-use self::budget::check_named_request_budget;
 use self::context::RequestExecutionContext;
 use self::error_handling::{
     extract_mcp_error, format_mcp_response_body, redaction_enabled, safe_error,

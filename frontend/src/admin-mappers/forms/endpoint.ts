@@ -35,8 +35,6 @@ export function createEmptyEndpointForm(): EndpointForm {
     key_lb_enabled: false,
     protocol_mode: 'auto',
     native_api_override: null,
-    daily_max_requests: null,
-    monthly_max_requests: null,
     enabled: true,
     mcp_enabled: false,
     // Issue #368 Phase C: masked proxy default; empty + no saved means direct.
@@ -83,8 +81,6 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
         ? 'auto'
         : 'manual',
     native_api_override: nativeApiOverride,
-    daily_max_requests: source.daily_max_requests ?? null,
-    monthly_max_requests: source.monthly_max_requests ?? null,
     enabled: source.enabled ?? true,
     mcp_enabled: source.mcp_enabled ?? false,
     // Issue #368 Phase C: masked proxy input; never echo the secret.
@@ -96,6 +92,7 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
     active_windows: (source.active_windows ?? []).map((window) => ({
       start: window?.start ?? '',
       end: window?.end ?? '',
+      ...(Array.isArray((window as { days?: unknown })?.days) ? { days: [...((window as { days?: number[] }).days ?? [])] } : {}),
     })),
     active_windows_touched: false,
   }
@@ -156,8 +153,6 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
     owner_user_id: safe.scope === 'user' ? (safe.owner_user_id ?? null) : null,
     protocol_mode: safe.protocol_mode === 'manual' ? 'manual' : 'auto',
     scope: safe.scope === 'user' ? 'user' : 'admin',
-    daily_max_requests: safe.daily_max_requests ?? null,
-    monthly_max_requests: safe.monthly_max_requests ?? null,
     mcp_enabled: safe.mcp_enabled ?? false,
     proxy_url,
     active_windows,

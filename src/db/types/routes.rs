@@ -78,6 +78,10 @@ pub struct RouteConfig {
 pub struct ActiveWindow {
     pub start: String,
     pub end: String,
+    /// Issue #430: per-window weekdays, 1=Mon..7=Sun. None/empty means every day.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Vec<u8>>, example = json!([1, 2, 3, 4, 5]))]
+    pub days: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -124,8 +128,6 @@ pub struct ModelEndpointRule {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: ModelRouteRoutingStrategy,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -139,8 +141,6 @@ pub struct ModelEndpointRuleRow {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: String,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -178,8 +178,6 @@ pub struct ModelEndpointRuleCreate {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: ModelRouteRoutingStrategy,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     pub enabled: bool,
     pub targets: Vec<ModelRouteTargetCreate>,
 }
@@ -191,8 +189,6 @@ pub struct ModelRouteCandidate {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: ModelRouteRoutingStrategy,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     pub updated_at: DateTime<Utc>,
     pub targets: Vec<ModelRouteCandidateTarget>,
 }

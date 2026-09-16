@@ -2356,6 +2356,21 @@ components:
       - start
       - end
       properties:
+        days:
+          type:
+          - array
+          - 'null'
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+          description: 'Issue #430: per-window weekdays, 1=Mon..7=Sun. None/empty means every day.'
+          example:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
         end:
           type: string
         start:
@@ -3307,11 +3322,6 @@ components:
             $ref: '#/components/schemas/EndpointApiKeyRequest'
         base_url:
           type: string
-        daily_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         enabled:
           type:
           - boolean
@@ -3330,11 +3340,6 @@ components:
           type:
           - boolean
           - 'null'
-        monthly_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         name:
           type: string
         native_api_override:
@@ -3893,11 +3898,6 @@ components:
         created_at:
           type: string
           format: date-time
-        daily_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         disabled_resources: {}
         disabled_tools: {}
         enabled:
@@ -3936,11 +3936,6 @@ components:
           - 'null'
         lifecycle_policy:
           type: string
-        monthly_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         name:
           type: string
         owner_user_id:
@@ -4032,11 +4027,6 @@ components:
           type:
           - string
           - 'null'
-        daily_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         disabled_resources: {}
         disabled_tools: {}
         enabled:
@@ -4061,11 +4051,6 @@ components:
           type:
           - string
           - 'null'
-        monthly_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         name:
           type: string
         owner_user_id:
@@ -4192,20 +4177,10 @@ components:
         created_at:
           type: string
           format: date-time
-        daily_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         enabled:
           type: boolean
         model_pattern:
           type: string
-        monthly_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         owner_user_id:
           type:
           - integer
@@ -4273,11 +4248,6 @@ components:
       - scope
       - model_pattern
       properties:
-        daily_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         enabled:
           type:
           - boolean
@@ -4289,11 +4259,6 @@ components:
           format: uuid
         model_pattern:
           type: string
-        monthly_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         owner_user_id:
           type:
           - integer
@@ -4626,11 +4591,6 @@ components:
         created_at:
           type: string
           format: date-time
-        daily_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         enabled:
           type: boolean
         endpoint_id:
@@ -4645,11 +4605,6 @@ components:
           type: boolean
         mcp_enabled:
           type: boolean
-        monthly_max_requests:
-          type:
-          - integer
-          - 'null'
-          format: int32
         name:
           type: string
         native_api:

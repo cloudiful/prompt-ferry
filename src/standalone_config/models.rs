@@ -432,8 +432,6 @@ pub struct ModelRouteConfig {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: RoutingStrategy,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     pub enabled: bool,
     pub targets: Vec<ModelRouteTargetConfig>,
 }

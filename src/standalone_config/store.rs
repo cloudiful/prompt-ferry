@@ -12,7 +12,7 @@ use super::{
 };
 use crate::relay_secrets::RelaySecretManager;
 
-const CURRENT_SCHEMA_VERSION: i64 = 24;
+const CURRENT_SCHEMA_VERSION: i64 = 25;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {
@@ -387,8 +387,6 @@ impl StandaloneConfigStore {
             .bind(serde_json::to_string(&input.allowed_tools)?)
             .bind(serde_json::to_string(&input.disabled_tools)?)
             .bind(serde_json::to_string(&input.disabled_resources)?)
-            .bind(input.daily_max_requests)
-            .bind(input.monthly_max_requests)
             .bind(i64::from(input.enabled))
             .bind(input.timeout_ms)
             .bind(&input.lifecycle_policy)

@@ -159,32 +159,6 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
               <USwitch v-model="form.enabled" :aria-label="t('status')" />
             </label>
           </div>
-          <div class="grid gap-3 md:grid-cols-3">
-            <label class="grid gap-1">
-              <span class="text-xs text-muted">{{
-                t('dailyRequestLimit')
-              }}</span>
-              <UInputNumber
-                v-model="form.daily_max_requests"
-                class="w-full"
-                size="sm"
-                :min="1"
-                :use-grouping="false"
-              />
-            </label>
-            <label class="grid gap-1">
-              <span class="text-xs text-muted">{{
-                t('monthlyRequestLimit')
-              }}</span>
-              <UInputNumber
-                v-model="form.monthly_max_requests"
-                class="w-full"
-                size="sm"
-                :min="1"
-                :use-grouping="false"
-              />
-            </label>
-          </div>
           <USelect
             v-if="form.scope === 'user'"
             :model-value="form.owner_user_id ?? undefined"

@@ -42,8 +42,6 @@ pub async fn create_test_endpoint(pool: &sqlx::PgPool) -> anyhow::Result<Uuid> {
             base_url: "https://billing-test.invalid".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "billing-test-key".to_string(),
             api_keys: Vec::new(),
             key_lb_enabled: false,

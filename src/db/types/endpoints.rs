@@ -162,8 +162,6 @@ pub struct ProviderEndpointRow {
     pub base_url: String,
     pub native_api: String,
     pub native_api_source: String,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     #[serde(skip_serializing)]
     pub api_key: String,
     // Issue #368 Phase A: outbound proxy default (full URL with optional
@@ -195,8 +193,6 @@ pub struct ProviderEndpoint {
     pub base_url: String,
     pub native_api: String,
     pub native_api_source: String,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     #[serde(skip_serializing)]
     pub api_key: String,
     // Issue #368 Phase A: never echoed (mirrors `api_key` redaction).
@@ -247,8 +243,6 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             base_url: value.base_url,
             native_api: value.native_api,
             native_api_source: value.native_api_source,
-            daily_max_requests: value.daily_max_requests,
-            monthly_max_requests: value.monthly_max_requests,
             api_key: value.api_key,
             proxy_url: value.proxy_url,
             has_proxy_url,
@@ -275,8 +269,6 @@ pub struct EndpointCreate {
     pub base_url: String,
     pub native_api: NativeApi,
     pub native_api_source: NativeApiSource,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     pub api_key: String,
     pub api_keys: Vec<EndpointApiKeyCreate>,
     pub key_lb_enabled: bool,

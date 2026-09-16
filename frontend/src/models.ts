@@ -33,8 +33,6 @@ export type EndpointForm = {
   protocol_mode: 'auto' | 'manual'
   native_api_override:
     'anthropic_messages' | 'responses' | 'chat' | 'realtime' | null
-  daily_max_requests: number | null
-  monthly_max_requests: number | null
   enabled: boolean
   mcp_enabled: boolean
   // Issue #368 Phase C: masked outbound proxy default. `proxy_url` holds
@@ -44,7 +42,7 @@ export type EndpointForm = {
   has_saved_proxy_url: boolean
   // Issue #392 Phase L: endpoint default schedule. Empty means all-day;
   // `active_windows_touched` tracks omit-when-untouched like targets.
-  active_windows: Array<{ start: string; end: string }>
+  active_windows: Array<{ start: string; end: string; days?: number[] }>
   active_windows_touched: boolean
 }
 
@@ -68,7 +66,7 @@ export type ModelRouteTargetForm = {
   // Issue #378 Phase J: per-target schedule windows. Empty means all-day.
   // `active_windows_touched` tracks omit-when-untouched: false omits the key
   // (keeps the stored value on PATCH), true sends the array (empty = all-day).
-  active_windows: Array<{ start: string; end: string }>
+  active_windows: Array<{ start: string; end: string; days?: number[] }>
   active_windows_touched: boolean
   // Issue #392 Phase L: developer->system normalize switch, default off.
   // Always sent as true/false (no omit semantics).
@@ -94,8 +92,6 @@ export type ModelRouteForm = {
   owner_user_id: number | null
   model_pattern: string
   routing_strategy: 'client_key_rendezvous' | 'responses_session_affinity'
-  daily_max_requests: number | null
-  monthly_max_requests: number | null
   enabled: boolean
   targets: ModelRouteTargetForm[]
 }
@@ -127,8 +123,6 @@ export type McpForm = {
   allowed_tools: string[]
   disabled_tools: string[]
   disabled_resources: string[]
-  daily_max_requests: number | null
-  monthly_max_requests: number | null
   enabled: boolean
   timeout_ms: number
   lifecycle_policy: 'auto' | 'legacy_initialize'

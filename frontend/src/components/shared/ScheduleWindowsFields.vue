@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-type ScheduleWindow = { start: string; end: string }
+type ScheduleWindow = { start: string; end: string; days?: number[] }
 
 const props = defineProps<{
   t: TranslateFn
@@ -39,9 +39,26 @@ function removeWindow(index: number): void {
   markTouched()
 }
 
-function restoreAllDay(): void {
-  windows.value = []
+const ALL_DAYS = [1, 2, 3, 4, 5, 6, 7]
+
+function rowDays(index: number): number[] {
+  const days = windows.value?.[index]?.days
+  if (!days || days.length === 0) return [...ALL_DAYS]
+  return [...days]
+}
+
+function setRowDays(index: number, days: number[]): void {
+  const row = windows.value?.[index]
+  if (!row) return
+  row.days = [...days]
   markTouched()
+}
+
+function toggleRowDay(index: number, day: number): void {
+  const current = new Set(rowDays(index))
+  if (current.has(day)) current.delete(day)
+  else current.add(day)
+  setRowDays(index, [...current].sort((a, b) => a - b))
 }
 
 function onTimeUpdate(
@@ -59,7 +76,7 @@ function onTimeUpdate(
 <template>
   <div class="grid gap-3 text-xs">
     <div v-if="(windows ?? []).length === 0" class="text-xs text-muted">
-      {{ t('scheduleAllDay') }}
+      {{ t('scheduleEmptyHint') }}
     </div>
     <div v-for="(row, index) in windows" :key="index" class="grid gap-1">
       <div class="flex items-center gap-2">
@@ -94,6 +111,38 @@ function onTimeUpdate(
       <p v-if="rowErrors[index]" class="text-xs text-error">
         {{ rowErrors[index] }}
       </p>
+      <div class="flex flex-wrap gap-1">
+        <UButton
+          type="button"
+          size="xs"
+          variant="ghost"
+          @click="setRowDays(index, [1, 2, 3, 4, 5])"
+          >{{ t('weekdays') }}</UButton
+        >
+        <UButton
+          type="button"
+          size="xs"
+          variant="ghost"
+          @click="setRowDays(index, [6, 7])"
+          >{{ t('weekend') }}</UButton
+        >
+        <UButton
+          type="button"
+          size="xs"
+          variant="ghost"
+          @click="setRowDays(index, [1, 2, 3, 4, 5, 6, 7])"
+          >{{ t('everyDay') }}</UButton
+        >
+        <UButton
+          v-for="d in [1, 2, 3, 4, 5, 6, 7]"
+          :key="d"
+          type="button"
+          size="xs"
+          :variant="rowDays(index).includes(d) ? 'solid' : 'outline'"
+          @click="toggleRowDay(index, d)"
+          >{{ t('weekday' + d) }}</UButton
+        >
+      </div>
     </div>
     <div class="flex flex-wrap gap-2">
       <UButton
@@ -105,15 +154,6 @@ function onTimeUpdate(
         ><UIcon name="i-lucide-plus" class="h-4 w-4" />{{
           t('scheduleAddWindow')
         }}</UButton
-      >
-      <UButton
-        v-if="(windows ?? []).length > 0"
-        type="button"
-        size="sm"
-        color="neutral"
-        variant="ghost"
-        @click="restoreAllDay"
-        >{{ t('scheduleRestoreAllDay') }}</UButton
       >
     </div>
   </div>

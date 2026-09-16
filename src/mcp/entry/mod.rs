@@ -82,7 +82,7 @@ pub struct McpRequestContext<'a> {
     pub path: &'a str,
     pub headers: &'a [(String, String)],
     pub body: &'a [u8],
-    /// Credential selected and budgeted by the worker quota layer. When set,
+    /// Credential selected by the worker layer. When set,
     /// the transport uses it first and only falls back to the legacy token
     /// balancer on auth/throttle failures.
     pub selected_credential: Option<crate::db::McpCredential>,

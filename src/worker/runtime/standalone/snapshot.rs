@@ -187,8 +187,6 @@ mod tests {
                 owner_user_id: None,
                 model_pattern: "*".to_string(),
                 routing_strategy: RoutingStrategy::ClientKeyRendezvous,
-                daily_max_requests: None,
-                monthly_max_requests: None,
                 enabled: true,
                 targets: vec![ModelRouteTargetConfig {
                     target_id: Uuid::new_v4(),

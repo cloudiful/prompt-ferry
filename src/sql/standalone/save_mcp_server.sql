@@ -2,8 +2,8 @@ INSERT INTO standalone_mcp_servers(
     server_id, source_endpoint_id, scope, owner_user_id, name,
     aggregate_naming_mode, transport, provider_kind, url, command, args_json,
     http_headers_json, auth_mode, basic_username, basic_password_ciphertext, basic_password_nonce, basic_password_key_version, tool_filter_mode, allowed_tools_json,
-    disabled_tools_json, disabled_resources_json, daily_max_requests,
-    monthly_max_requests, enabled, timeout_ms, lifecycle_policy,
+    disabled_tools_json, disabled_resources_json,
+    enabled, timeout_ms, lifecycle_policy,
     lifecycle_manual_protocol_version, lifecycle_learned_mode,
     lifecycle_learned_protocol_version, lifecycle_learned_for_updated_at,
     lifecycle_learned_at, env_ciphertext, env_nonce, env_key_version,
@@ -11,7 +11,7 @@ INSERT INTO standalone_mcp_servers(
     proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version,
     created_at, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(server_id) DO UPDATE SET
     source_endpoint_id = excluded.source_endpoint_id,
     scope = excluded.scope,
@@ -33,8 +33,6 @@ ON CONFLICT(server_id) DO UPDATE SET
     allowed_tools_json = excluded.allowed_tools_json,
     disabled_tools_json = excluded.disabled_tools_json,
     disabled_resources_json = excluded.disabled_resources_json,
-    daily_max_requests = excluded.daily_max_requests,
-    monthly_max_requests = excluded.monthly_max_requests,
     enabled = excluded.enabled,
     timeout_ms = excluded.timeout_ms,
     lifecycle_policy = excluded.lifecycle_policy,

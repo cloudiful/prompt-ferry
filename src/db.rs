@@ -1,6 +1,5 @@
 mod approvals;
 mod billing;
-mod budgets;
 pub mod config_repository;
 mod connection;
 mod endpoints;
@@ -21,7 +20,6 @@ pub use approvals::{
     record_approval_webhook_result, resolve_approval_request,
 };
 pub use billing::*;
-pub use budgets::{RequestBudgetCounts, RequestBudgetScope, request_budget_counts};
 pub use config_repository::{
     Capability, ConfigRepository, ManagedRelaySecrets, PostgresConfigRepository,
     SqliteConfigRepository, UnifiedClientKey, UnifiedClientKeyCreated, UnifiedEndpointApiKey,

@@ -9,7 +9,7 @@ use crate::{
 };
 use axum::http::StatusCode;
 
-use super::{SessionUser, validate_request_budget_limit};
+use super::SessionUser;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct McpServerPageResponse {
@@ -52,8 +52,6 @@ pub struct McpServer {
     pub allowed_tools: Value,
     pub disabled_tools: Value,
     pub disabled_resources: Value,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     pub enabled: bool,
     pub timeout_ms: i32,
     pub lifecycle_policy: String,
@@ -98,8 +96,6 @@ impl From<&db::McpServer> for McpServer {
             allowed_tools: server.allowed_tools.clone(),
             disabled_tools: server.disabled_tools.clone(),
             disabled_resources: server.disabled_resources.clone(),
-            daily_max_requests: server.daily_max_requests,
-            monthly_max_requests: server.monthly_max_requests,
             enabled: server.enabled,
             timeout_ms: server.timeout_ms,
             lifecycle_policy: server.lifecycle_policy.clone(),
@@ -168,8 +164,6 @@ pub struct McpServerRequest {
     pub allowed_tools: Option<serde_json::Value>,
     pub disabled_tools: Option<serde_json::Value>,
     pub disabled_resources: Option<serde_json::Value>,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     pub enabled: Option<bool>,
     pub timeout_ms: Option<i32>,
     pub lifecycle_policy: Option<String>,
@@ -400,8 +394,6 @@ impl McpServerRequest {
             disabled_resources: self
                 .disabled_resources
                 .unwrap_or_else(|| serde_json::json!([])),
-            daily_max_requests: self.daily_max_requests,
-            monthly_max_requests: self.monthly_max_requests,
             enabled: self.enabled.unwrap_or(true),
             timeout_ms: self.timeout_ms.unwrap_or(30_000).clamp(100, 300_000),
             lifecycle_policy: self.lifecycle_policy.unwrap_or_else(|| {
@@ -427,8 +419,6 @@ impl McpServerRequest {
         existing_source_endpoint_id: Option<Uuid>,
         user: &SessionUser,
     ) -> Result<(), ApiError> {
-        validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")?;
-        validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")?;
         if !matches!(
             self.transport.as_str(),
             "http" | "stdio" | "builtin_minimax"
@@ -1059,8 +1049,6 @@ mod tests {
             allowed_tools: serde_json::json!([]),
             disabled_tools: serde_json::json!([]),
             disabled_resources: serde_json::json!([]),
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             timeout_ms: 30_000,
             lifecycle_policy: "auto".to_string(),
@@ -1106,8 +1094,6 @@ mod tests {
             allowed_tools: None,
             disabled_tools: None,
             disabled_resources: None,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: None,
             timeout_ms: None,
             lifecycle_policy: None,

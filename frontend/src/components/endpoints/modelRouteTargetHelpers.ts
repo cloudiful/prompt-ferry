@@ -2,7 +2,7 @@ import type { TableColumn } from '@nuxt/ui'
 import type { Ref } from 'vue'
 import type { ModelRouteForm, ModelRouteTargetForm } from '@/models'
 
-type ScheduleWindow = { start: string; end: string }
+type ScheduleWindow = { start: string; end: string; days?: number[] }
 
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
 
@@ -33,6 +33,7 @@ export function sortedTargetWindows(
     .map((window) => ({
       start: (window?.start ?? '').trim(),
       end: (window?.end ?? '').trim(),
+      days: Array.isArray(window?.days) ? [...(window.days as number[])] : undefined,
     }))
     .filter((window) => window.start !== '' && window.end !== '')
     .sort((a, b) =>
@@ -48,8 +49,12 @@ export function hasTargetSchedule(
   return sortedTargetWindows(target).length > 0
 }
 
-export function formatTargetWindow(window: ScheduleWindow): string {
-  return `${window.start}–${window.end}`
+export function formatTargetWindow(window: ScheduleWindow, t?: TranslateFn): string {
+  const time = `${window.start}–${window.end}`
+  const days = window.days
+  if (!days || days.length === 0 || days.length >= 7) return time
+  if (!t) return `${time} ${days.join(',')}`
+  return `${time} ${days.map((d) => t('weekday' + d)).join(', ')}`
 }
 
 export function targetScheduleSummary(
@@ -57,11 +62,11 @@ export function targetScheduleSummary(
   t: TranslateFn,
 ): string {
   const windows = sortedTargetWindows(target)
-  if (windows.length === 0) return t('scheduleAllDay')
+  if (windows.length === 0) return t('scheduleEmptyHint')
   const first = windows[0]
-  if (!first) return t('scheduleAllDay')
-  if (windows.length === 1) return formatTargetWindow(first)
-  return `${formatTargetWindow(first)} ${t('scheduleMoreWindows', { count: windows.length })}`
+  if (!first) return t('scheduleEmptyHint')
+  if (windows.length === 1) return formatTargetWindow(first, t)
+  return `${formatTargetWindow(first, t)} ${t('scheduleMoreWindows', { count: windows.length })}`
 }
 
 export function targetScheduleTooltip(
@@ -69,8 +74,8 @@ export function targetScheduleTooltip(
   t: TranslateFn,
 ): string {
   const windows = sortedTargetWindows(target)
-  if (windows.length === 0) return t('scheduleAllDay')
-  return windows.map(formatTargetWindow).join(', ')
+  if (windows.length === 0) return t('scheduleEmptyHint')
+  return windows.map((w) => formatTargetWindow(w, t)).join(', ')
 }
 
 export function hasTargetSettings(

@@ -70,8 +70,6 @@ fn candidate_from_route(
                 db::ModelRouteRoutingStrategy::ResponsesSessionAffinity
             }
         },
-        daily_max_requests: route.daily_max_requests,
-        monthly_max_requests: route.monthly_max_requests,
         updated_at: Utc::now(),
         targets,
     })
@@ -216,8 +214,6 @@ mod tests {
                     owner_user_id: None,
                     model_pattern: "gpt-*".to_string(),
                     routing_strategy: RoutingStrategy::ClientKeyRendezvous,
-                    daily_max_requests: None,
-                    monthly_max_requests: None,
                     enabled: true,
                     targets: vec![ModelRouteTargetConfig {
                         target_id: Uuid::new_v4(),
@@ -237,8 +233,6 @@ mod tests {
                     owner_user_id: None,
                     model_pattern: "gpt-5".to_string(),
                     routing_strategy: RoutingStrategy::ClientKeyRendezvous,
-                    daily_max_requests: None,
-                    monthly_max_requests: None,
                     enabled: true,
                     targets: vec![ModelRouteTargetConfig {
                         target_id: Uuid::new_v4(),
@@ -291,8 +285,6 @@ mod tests {
                 owner_user_id: None,
                 model_pattern: "*".to_string(),
                 routing_strategy: RoutingStrategy::ClientKeyRendezvous,
-                daily_max_requests: None,
-                monthly_max_requests: None,
                 enabled: true,
                 targets: vec![ModelRouteTargetConfig {
                     target_id: Uuid::new_v4(),

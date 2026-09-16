@@ -17,10 +17,9 @@ async fn insert_mcp_server(pool: &PgPool, name: &str) -> Uuid {
         r#"INSERT INTO mcp_servers(
             server_id, scope, owner_user_id, name, transport, url, command, args, env_json,
             bearer_tokens_json, http_headers_json, tool_filter_mode, allowed_tools,
-            disabled_tools, disabled_resources, aggregate_naming_mode, enabled, timeout_ms,
-            daily_max_requests, monthly_max_requests
+            disabled_tools, disabled_resources, aggregate_naming_mode, enabled, timeout_ms
         ) VALUES ($1, 'admin', NULL, $2, 'http', NULL, NULL, '[]', '{}', '[]', '{}',
-            'blacklist', '[]', '[]', '[]', 'passthrough_preferred', TRUE, 30000, NULL, NULL)"#,
+            'blacklist', '[]', '[]', '[]', 'passthrough_preferred', TRUE, 30000)"#,
     )
     .bind(server_id)
     .bind(name)
@@ -73,11 +72,10 @@ async fn insert_mcp_server_with_provider(pool: &PgPool, name: &str, provider_kin
         r#"INSERT INTO mcp_servers(
             server_id, scope, owner_user_id, name, provider_kind, transport, url, command, args,
             env_json, bearer_tokens_json, http_headers_json, tool_filter_mode, allowed_tools,
-            disabled_tools, disabled_resources, aggregate_naming_mode, enabled, timeout_ms,
-            daily_max_requests, monthly_max_requests
+            disabled_tools, disabled_resources, aggregate_naming_mode, enabled, timeout_ms
         ) VALUES ($1, 'admin', NULL, $2, $3, 'http', 'https://example.test/mcp', NULL, '[]',
             '{}', '[]', '{}', 'blacklist', '[]', '[]', '[]', 'passthrough_preferred', TRUE,
-            30000, NULL, NULL)"#,
+            30000)"#,
     )
     .bind(server_id)
     .bind(name)

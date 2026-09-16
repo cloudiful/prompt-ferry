@@ -8,16 +8,12 @@ use crate::{
 };
 use axum::http::StatusCode;
 
-use super::validate_request_budget_limit;
-
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ModelRouteRequest {
     pub scope: String,
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: Option<crate::db::ModelRouteRoutingStrategy>,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     pub enabled: Option<bool>,
     pub endpoint_id: Option<Uuid>,
     pub priority: Option<i32>,
@@ -135,8 +131,6 @@ impl ModelRouteRequest {
             owner_user_id: self.owner_user_id,
             model_pattern: self.model_pattern,
             routing_strategy: self.routing_strategy.unwrap_or_default(),
-            daily_max_requests: self.daily_max_requests,
-            monthly_max_requests: self.monthly_max_requests,
             enabled: self.enabled.unwrap_or(true),
             targets,
         })
@@ -147,8 +141,6 @@ impl ModelRouteRequest {
         state: &AdminState,
         existing_rule_id: Option<Uuid>,
     ) -> Result<(), ApiError> {
-        validate_request_budget_limit(self.daily_max_requests, "daily_max_requests")?;
-        validate_request_budget_limit(self.monthly_max_requests, "monthly_max_requests")?;
         let pattern = self.model_pattern.trim();
         if pattern.is_empty() {
             return Err(ApiError::new(
@@ -531,9 +523,6 @@ mod tests {
             "native_api": "chat"
         }))
         .expect("parse explicit");
-        assert_eq!(
-            explicit.native_api,
-            Some(crate::config::NativeApi::Chat)
-        );
+        assert_eq!(explicit.native_api, Some(crate::config::NativeApi::Chat));
     }
 }

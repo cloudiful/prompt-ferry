@@ -9,7 +9,6 @@ import type { McpForm } from '@/models'
 import McpBearerTokensEditor from '@/components/mcp/McpBearerTokensEditor.vue'
 import McpEnvironmentEditor from '@/components/mcp/McpEnvironmentEditor.vue'
 import ProxySettingsDialog from '@/components/shared/ProxySettingsDialog.vue'
-import RequestLimitFields from '@/components/shared/RequestLimitFields.vue'
 
 const props = defineProps<{
   busy: boolean
@@ -467,12 +466,6 @@ const hasProxy = computed(() => {
             :t="t"
             @save="onProxySave"
             @clear="clearProxyUrl"
-          />
-          <RequestLimitFields
-            v-model:form="form"
-            daily-label="dailyCallLimit"
-            monthly-label="monthlyCallLimit"
-            :t="t"
           />
           <div :class="settingsSectionClass">
             <div class="grid gap-3 md:grid-cols-[repeat(3,minmax(0,1fr))]">

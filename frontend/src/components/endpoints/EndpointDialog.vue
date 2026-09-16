@@ -6,7 +6,6 @@ import EndpointApiKeysEditor from '@/components/endpoints/EndpointApiKeysEditor.
 import EndpointProviderFields from '@/components/endpoints/EndpointProviderFields.vue'
 import ProxySettingsFields from '@/components/shared/ProxySettingsFields.vue'
 import ScheduleWindowsFields from '@/components/shared/ScheduleWindowsFields.vue'
-import RequestLimitFields from '@/components/shared/RequestLimitFields.vue'
 
 const props = defineProps<{
   busy: boolean
@@ -186,12 +185,6 @@ function hasEndpointSettings(): boolean {
             </div>
             <USwitch id="endpoint-minimax-mcp" v-model="form.mcp_enabled" />
           </div>
-          <RequestLimitFields
-            v-model:form="form"
-            daily-label="dailyRequestLimit"
-            monthly-label="monthlyRequestLimit"
-            :t="t"
-          />
         </template>
         <template v-else>
           <div class="flex items-center gap-1">

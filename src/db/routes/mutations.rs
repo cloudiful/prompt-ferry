@@ -14,8 +14,6 @@ pub async fn create_model_endpoint_rule(
         input.owner_user_id,
         &input.model_pattern,
         input.routing_strategy.as_str(),
-        input.daily_max_requests,
-        input.monthly_max_requests,
         legacy_endpoint_id,
         input.enabled,
     )
@@ -44,8 +42,6 @@ pub async fn update_model_endpoint_rule(
         input.owner_user_id,
         &input.model_pattern,
         input.routing_strategy.as_str(),
-        input.daily_max_requests,
-        input.monthly_max_requests,
         legacy_endpoint_id,
         input.enabled,
     )

@@ -5,7 +5,7 @@ use std::error::Error as _;
 use crate::{db, openai_compat::CompatError};
 
 use super::super::{
-    RequestExecutionContext, check_named_request_budget,
+    RequestExecutionContext,
     context::{RouteExecutionContext, RuntimeServices},
     materialize_route_api_key_selection_with_quota,
     request_assembly::{BufferedBridgeRequest, RequestCancellation},
@@ -79,11 +79,6 @@ impl std::error::Error for UpstreamAttemptFailure {
 pub(super) enum ForwardOutcome {
     Handled,
     CompatError(CompatError),
-    BudgetError {
-        endpoint_id: Option<uuid::Uuid>,
-        message: String,
-        model_route_rule_id: Option<uuid::Uuid>,
-    },
     TransportError {
         error: anyhow::Error,
         terminal_recorded: bool,
@@ -115,26 +110,6 @@ pub(super) async fn forward_route_request(
         raw_content_logging_enabled,
     } = input;
     let mut route = route.clone();
-    if let Some(state) = services.admin_state()
-        && !route.route_id.is_nil()
-        && let Some(endpoint) = db::get_endpoint(&state.pool, route.route_id).await?
-        && let Some(message) = check_named_request_budget(
-            &state.pool,
-            db::RequestRecordCategory::Ai,
-            db::RequestBudgetScope::Endpoint(endpoint.endpoint_id),
-            "endpoint",
-            &endpoint.name,
-            endpoint.daily_max_requests,
-            endpoint.monthly_max_requests,
-        )
-        .await?
-    {
-        return Ok(ForwardOutcome::BudgetError {
-            endpoint_id: Some(endpoint.endpoint_id),
-            message,
-            model_route_rule_id: route.model_route_rule_id,
-        });
-    }
 
     let prepared = match prepare_upstream_request_for_route(
         services.admin_state(),

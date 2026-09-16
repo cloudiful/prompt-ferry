@@ -1,5 +1,4 @@
-SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy,
-       r.daily_max_requests, r.monthly_max_requests, r.updated_at,
+SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy, r.updated_at,
        t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, COALESCE(t.native_api, 'auto') AS target_native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,
        t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override,
        t.active_windows, e.active_windows AS endpoint_active_windows,

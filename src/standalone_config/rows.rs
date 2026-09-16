@@ -56,19 +56,6 @@ pub(crate) fn bool_value(row: &SqliteRow, column: &str) -> Result<bool> {
     }
 }
 
-pub(crate) fn optional_i32(row: &SqliteRow, column: &str) -> Result<Option<i32>> {
-    let value = row.try_get::<Option<i64>, _>(column)?;
-    value
-        .map(|value| {
-            i32::try_from(value).map_err(|_| {
-                StandaloneConfigError::CorruptDatabase(format!(
-                    "column {column} is outside the i32 range"
-                ))
-            })
-        })
-        .transpose()
-}
-
 pub(crate) fn envelope(row: &SqliteRow, prefix: &str) -> Result<Option<EncryptedSecretEnvelope>> {
     let ciphertext_column = format!("{prefix}_ciphertext");
     let nonce_column = format!("{prefix}_nonce");
@@ -269,8 +256,6 @@ pub(crate) fn mcp_server(row: &SqliteRow) -> Result<McpServerRow> {
             allowed_tools: json_value(row, "allowed_tools_json")?,
             disabled_tools: json_value(row, "disabled_tools_json")?,
             disabled_resources: json_value(row, "disabled_resources_json")?,
-            daily_max_requests: optional_i32(row, "daily_max_requests")?,
-            monthly_max_requests: optional_i32(row, "monthly_max_requests")?,
             enabled: bool_value(row, "enabled")?,
             timeout_ms: i32::try_from(row.try_get::<i64, _>("timeout_ms")?).map_err(|_| {
                 StandaloneConfigError::CorruptDatabase(
@@ -356,8 +341,6 @@ pub(crate) fn route(row: &SqliteRow) -> Result<ModelRouteConfig> {
         owner_user_id: row.try_get("owner_user_id")?,
         model_pattern: required_string(row, "model_pattern")?,
         routing_strategy: RoutingStrategy::parse(&required_string(row, "routing_strategy")?)?,
-        daily_max_requests: optional_i32(row, "daily_max_requests")?,
-        monthly_max_requests: optional_i32(row, "monthly_max_requests")?,
         enabled: bool_value(row, "enabled")?,
         targets: Vec::new(),
     })

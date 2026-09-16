@@ -581,8 +581,6 @@ fn sample_candidate() -> ModelRouteCandidate {
         owner_user_id: None,
         model_pattern: "gpt-*".to_string(),
         routing_strategy: crate::db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
-        daily_max_requests: None,
-        monthly_max_requests: None,
         updated_at: Utc::now(),
         targets: vec![
             ModelRouteCandidateTarget {

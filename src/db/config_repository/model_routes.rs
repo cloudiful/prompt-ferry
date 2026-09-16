@@ -18,8 +18,6 @@ pub struct UnifiedModelRoute {
     pub owner_user_id: Option<i64>,
     pub model_pattern: String,
     pub routing_strategy: crate::db::ModelRouteRoutingStrategy,
-    pub daily_max_requests: Option<i32>,
-    pub monthly_max_requests: Option<i32>,
     pub enabled: bool,
     pub targets: Vec<UnifiedModelRouteTarget>,
 }
@@ -72,8 +70,6 @@ fn rule_to_pg(route: UnifiedModelRoute) -> crate::db::ModelEndpointRule {
         owner_user_id: route.owner_user_id,
         model_pattern: route.model_pattern,
         routing_strategy: route.routing_strategy,
-        daily_max_requests: route.daily_max_requests,
-        monthly_max_requests: route.monthly_max_requests,
         enabled: route.enabled,
         created_at: now,
         updated_at: now,

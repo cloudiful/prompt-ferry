@@ -1,0 +1,118 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE model_endpoint_rules\nSET\n    scope = $2,\n    owner_user_id = $3,\n    model_pattern = $4,\n    routing_strategy = $5,\n    endpoint_id = $6,\n    priority = 0,\n    enabled = $7,\n    updated_at = NOW()\nWHERE rule_id = $1\nRETURNING rule_id, scope, owner_user_id, model_pattern, routing_strategy, enabled, created_at, updated_at\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rule_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "rule_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "owner_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "model_pattern",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "model_pattern"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "routing_strategy",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "routing_strategy"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "model_endpoint_rules",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fcc48957fb5e67049ffa07f0b274e07fe2d225ce5fb22a3029eef2eba2ac231c"
+}

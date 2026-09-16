@@ -27,8 +27,6 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
     owner_user_id: null,
     model_pattern: '',
     routing_strategy: 'client_key_rendezvous',
-    daily_max_requests: null,
-    monthly_max_requests: null,
     enabled: true,
     targets: [
       {
@@ -88,8 +86,6 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
     owner_user_id: source.owner_user_id ?? null,
     model_pattern: source.model_pattern ?? '',
     routing_strategy: source.routing_strategy ?? 'client_key_rendezvous',
-    daily_max_requests: source.daily_max_requests ?? null,
-    monthly_max_requests: source.monthly_max_requests ?? null,
     enabled: source.enabled ?? true,
     targets: targets.map((target) => ({
       endpoint_id: target?.endpoint_id ?? '',
@@ -104,6 +100,7 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
       active_windows: (target?.active_windows ?? []).map((window) => ({
         start: window?.start ?? '',
         end: window?.end ?? '',
+        ...(Array.isArray((window as { days?: unknown })?.days) ? { days: [...((window as { days?: number[] }).days ?? [])] } : {}),
       })),
       active_windows_touched: false,
       // Issue #392 Phase L: default-off normalize; legacy payloads miss it.
@@ -132,8 +129,6 @@ export function modelRouteFormToRequest(
         ? 'responses_session_affinity'
         : 'client_key_rendezvous',
     scope: safe.scope === 'user' ? 'user' : 'admin',
-    daily_max_requests: safe.daily_max_requests ?? null,
-    monthly_max_requests: safe.monthly_max_requests ?? null,
     targets: targets
       .filter((target) => (target?.endpoint_id ?? '').trim() !== '')
       .map((target) => {

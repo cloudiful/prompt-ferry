@@ -5,6 +5,10 @@ export type ClientOptions = {
 };
 
 export type ActiveWindow = {
+    /**
+     * Issue #430: per-window weekdays, 1=Mon..7=Sun. None/empty means every day.
+     */
+    days?: Array<number> | null;
     end: string;
     start: string;
 };
@@ -336,7 +340,6 @@ export type EndpointRequest = {
     api_key: string;
     api_keys?: Array<EndpointApiKeyRequest>;
     base_url: string;
-    daily_max_requests?: number | null;
     enabled?: boolean | null;
     /**
      * Issue #368 Phase B: carry hint for the proxy secret. Accepted for
@@ -346,7 +349,6 @@ export type EndpointRequest = {
     has_proxy_url?: boolean | null;
     key_lb_enabled?: boolean;
     mcp_enabled?: boolean | null;
-    monthly_max_requests?: number | null;
     name: string;
     native_api_override?: null | NativeApi;
     owner_user_id?: number | null;
@@ -560,7 +562,6 @@ export type McpServer = {
     bearer_tokens: Array<McpBearerToken>;
     command?: string | null;
     created_at: string;
-    daily_max_requests?: number | null;
     disabled_resources: unknown;
     disabled_tools: unknown;
     enabled: boolean;
@@ -579,7 +580,6 @@ export type McpServer = {
     lifecycle_learned_protocol_version?: string | null;
     lifecycle_manual_protocol_version?: string | null;
     lifecycle_policy: string;
-    monthly_max_requests?: number | null;
     name: string;
     owner_user_id?: number | null;
     /**
@@ -612,7 +612,6 @@ export type McpServerRequest = {
     basic_username?: string | null;
     bearer_tokens?: Array<McpBearerToken> | null;
     command?: string | null;
-    daily_max_requests?: number | null;
     disabled_resources?: unknown;
     disabled_tools?: unknown;
     enabled?: boolean | null;
@@ -626,7 +625,6 @@ export type McpServerRequest = {
     http_headers_json?: unknown;
     lifecycle_manual_protocol_version?: string | null;
     lifecycle_policy?: string | null;
-    monthly_max_requests?: number | null;
     name: string;
     owner_user_id?: number | null;
     /**
@@ -672,10 +670,8 @@ export type MinimaxServiceTier = 'standard' | 'priority';
 
 export type ModelEndpointRule = {
     created_at: string;
-    daily_max_requests?: number | null;
     enabled: boolean;
     model_pattern: string;
-    monthly_max_requests?: number | null;
     owner_user_id?: number | null;
     routing_strategy: ModelRouteRoutingStrategy;
     rule_id: string;
@@ -699,11 +695,9 @@ export type ModelRoutePageResponse = {
 };
 
 export type ModelRouteRequest = {
-    daily_max_requests?: number | null;
     enabled?: boolean | null;
     endpoint_id?: string | null;
     model_pattern: string;
-    monthly_max_requests?: number | null;
     owner_user_id?: number | null;
     priority?: number | null;
     routing_strategy?: null | ModelRouteRoutingStrategy;
@@ -838,7 +832,6 @@ export type ProviderEndpoint = {
     api_keys?: Array<EndpointApiKey>;
     base_url: string;
     created_at: string;
-    daily_max_requests?: number | null;
     enabled: boolean;
     endpoint_id: string;
     /**
@@ -848,7 +841,6 @@ export type ProviderEndpoint = {
     has_proxy_url?: boolean;
     key_lb_enabled: boolean;
     mcp_enabled: boolean;
-    monthly_max_requests?: number | null;
     name: string;
     native_api: string;
     native_api_source: string;

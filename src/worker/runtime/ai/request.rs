@@ -6,10 +6,7 @@ use super::super::{
     routing::RouteAffinityError,
 };
 use super::{
-    errors::{
-        respond_with_affinity_error, respond_with_budget_error, respond_with_client_error,
-        respond_with_local_error,
-    },
+    errors::{respond_with_affinity_error, respond_with_client_error, respond_with_local_error},
     models::{ModelsRequestContext, process_models_request},
     request_attempts::{ForwardOutcome, RouteForwardRequest, forward_route_request},
     request_init::initialize_request,
@@ -122,25 +119,6 @@ pub(in crate::worker::runtime) async fn process_request(
         ForwardOutcome::CompatError(err) => {
             return respond_with_client_error(services, &request, &request_ctx, &route_ctx, err)
                 .await;
-        }
-        ForwardOutcome::BudgetError {
-            endpoint_id,
-            message,
-            model_route_rule_id,
-        } => {
-            return Box::pin(respond_with_budget_error(
-                services,
-                &request,
-                &request_ctx,
-                RouteExecutionContext {
-                    route: route.clone(),
-                    endpoint_id,
-                    model_route_rule_id,
-                    route_selection_reason: route.route_selection_reason,
-                },
-                message,
-            ))
-            .await;
         }
         ForwardOutcome::TransportError {
             error,

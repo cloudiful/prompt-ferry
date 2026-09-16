@@ -158,8 +158,6 @@ pub(super) fn candidate(targets: Vec<db::ModelRouteCandidateTarget>) -> db::Mode
         owner_user_id: None,
         model_pattern: "opencode-go".to_string(),
         routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
-        daily_max_requests: None,
-        monthly_max_requests: None,
         updated_at: Utc::now(),
         targets,
     }

@@ -37,8 +37,6 @@ pub(super) fn from_postgres(endpoint: PgProviderEndpoint) -> UnifiedProviderEndp
         base_url: endpoint.base_url,
         native_api: parse_native_api(&endpoint.native_api),
         native_api_source: endpoint.native_api_source,
-        daily_max_requests: endpoint.daily_max_requests,
-        monthly_max_requests: endpoint.monthly_max_requests,
         key_lb_enabled: endpoint.key_lb_enabled,
         enabled: endpoint.enabled,
         mcp_enabled: endpoint.mcp_enabled,
@@ -82,8 +80,6 @@ pub(super) fn from_sqlite(endpoint: ScProviderEndpoint) -> Result<UnifiedProvide
         base_url: endpoint.base_url,
         native_api: endpoint.native_api,
         native_api_source: endpoint.native_api_source.as_str().to_string(),
-        daily_max_requests: None,
-        monthly_max_requests: None,
         key_lb_enabled: endpoint.key_lb_enabled,
         enabled: endpoint.enabled,
         mcp_enabled: endpoint.mcp_enabled,
@@ -201,8 +197,6 @@ pub(super) fn unified_to_pg(endpoint: UnifiedProviderEndpoint) -> crate::db::Pro
         base_url: endpoint.base_url,
         native_api: endpoint.native_api.as_str().to_string(),
         native_api_source: endpoint.native_api_source,
-        daily_max_requests: endpoint.daily_max_requests,
-        monthly_max_requests: endpoint.monthly_max_requests,
         api_key: String::new(),
         // Issue #368 Phase A: Unified is the redacted admin shape; the
         // proxy secret never leaves the store via this path (mirrors

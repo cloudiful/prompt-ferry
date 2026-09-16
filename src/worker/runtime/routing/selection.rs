@@ -590,8 +590,7 @@ mod tests {
         assert_eq!(explicit.target_native_api, NativeApi::Chat);
         assert_eq!(route_for_target(&explicit).native_api, NativeApi::Chat);
 
-        let realtime =
-            candidate_target_with_native_api(NativeApi::Realtime, NativeApi::Chat);
+        let realtime = candidate_target_with_native_api(NativeApi::Realtime, NativeApi::Chat);
         assert_eq!(realtime.native_api, NativeApi::Realtime);
     }
 
@@ -600,8 +599,7 @@ mod tests {
         // Issue #409 Phase 1: target `Auto` keeps endpoint/global logic
         // unchanged; both `Auto` stays `Auto` for per-caller resolution.
         use crate::config::NativeApi;
-        let fallback =
-            candidate_target_with_native_api(NativeApi::Auto, NativeApi::Responses);
+        let fallback = candidate_target_with_native_api(NativeApi::Auto, NativeApi::Responses);
         assert_eq!(fallback.native_api, NativeApi::Responses);
         assert_eq!(route_for_target(&fallback).native_api, NativeApi::Responses);
 

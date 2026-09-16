@@ -21,8 +21,6 @@ async fn endpoint_api_key_keep_patch_preserves_existing_secret() {
         base_url: "https://upstream.example".to_string(),
         native_api: NativeApi::Chat,
         native_api_source: DbNativeApiSource::Manual,
-        daily_max_requests: None,
-        monthly_max_requests: None,
         api_key: "initial-secret".to_string(),
         api_keys: vec![crate::db::EndpointApiKeyCreate {
             key_label: "primary".to_string(),
@@ -72,8 +70,6 @@ async fn endpoint_api_key_keep_patch_preserves_existing_secret() {
         base_url: "https://upstream.example".to_string(),
         native_api: NativeApi::Chat,
         native_api_source: DbNativeApiSource::Manual,
-        daily_max_requests: None,
-        monthly_max_requests: None,
         api_key: existing_secret.clone(),
         api_keys: vec![crate::db::EndpointApiKeyCreate {
             key_label: "primary".to_string(),

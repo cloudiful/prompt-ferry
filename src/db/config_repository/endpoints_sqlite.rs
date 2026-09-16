@@ -158,8 +158,6 @@ mod tests {
                 base_url: "https://example.test".to_string(),
                 native_api: crate::config::NativeApi::Chat,
                 native_api_source: crate::config::NativeApiSource::Manual,
-                daily_max_requests: None,
-                monthly_max_requests: None,
                 api_key: "secret".to_string(),
                 api_keys: vec![],
                 key_lb_enabled: false,

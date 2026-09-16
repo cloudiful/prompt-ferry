@@ -73,8 +73,6 @@ pub(super) async fn resolve_endpoint_input(
     validate_mcp_provider(body.mcp_enabled, body.provider).map_err(|message| {
         ApiError::new(StatusCode::BAD_REQUEST, "invalid_mcp_provider", message)
     })?;
-    validate_request_budget_limit(body.daily_max_requests, "daily_max_requests")?;
-    validate_request_budget_limit(body.monthly_max_requests, "monthly_max_requests")?;
     if !matches!(body.scope.as_str(), "admin" | "user") {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -293,8 +291,6 @@ pub(super) async fn resolve_endpoint_input(
         base_url,
         native_api,
         native_api_source,
-        daily_max_requests: body.daily_max_requests,
-        monthly_max_requests: body.monthly_max_requests,
         api_key,
         api_keys,
         key_lb_enabled: body.key_lb_enabled,
@@ -335,20 +331,6 @@ pub(super) fn normalize_endpoint_base_url(base_url: &str) -> String {
         }
     }
     v
-}
-
-pub(super) fn validate_request_budget_limit(
-    value: Option<i32>,
-    field_name: &str,
-) -> Result<(), ApiError> {
-    if value.is_some_and(|limit| limit <= 0) {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_budget_limit",
-            format!("{field_name} must be greater than 0"),
-        ));
-    }
-    Ok(())
 }
 
 pub(super) fn validate_mcp_provider(

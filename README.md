@@ -247,10 +247,10 @@ NO_PROXY=127.0.0.1,localhost
 
 ### Route target schedules
 
-Each model-route target has optional daily active windows (`[{start,end}]`
-`HH:MM`); empty means all-day. A target outside its windows never participates
+Each model-route target has optional active windows (`[{start,end,days?}]`
+`HH:MM`, `days` 1=Mon..7=Sun omitted/empty means every day); empty means unrestricted. A target outside its windows never participates
 in routing. Windows are evaluated in worker-local time: `end` before `start`
-wraps overnight (e.g. `22:00–06:00` covers midnight), the start minute is
+wraps overnight (e.g. `22:00–06:00`, weekday decided by start day), the start minute is
 inclusive and the end minute is exclusive, and matching any window activates
 the target. `enabled=false` targets never participate, even inside a window.
 
@@ -258,17 +258,17 @@ Run every worker in the same timezone when schedules matter; multi-worker
 deployments with mixed local timezones evaluate the same windows differently.
 Filtering is fail-closed: when no target is active the request fails instead
 of falling back to an out-of-window target, and an invalid stored schedule
-never silently becomes all-day.
+never silently becomes unrestricted.
 
 ```text
-no route target is active for route 'summarizer' at 03:12 (worker-local time; windows: primary(enabled): 06:30–14:00, 18:00–20:00; night(disabled): all-day)
+no route target is active for route 'summarizer' at 03:12 (worker-local time; windows: primary(enabled): 06:30–14:00, 18:00–20:00; night(disabled): unrestricted)
 ```
 
 ### Endpoint default schedules and target normalize
 
-Each endpoint has optional daily default windows (`[{start,end}]` `HH:MM`);
-empty means all-day. A target with empty windows inherits its endpoint
-default; a non-empty target overrides it; empty on both means all-day.
+Each endpoint has optional default windows (`[{start,end,days?}]` `HH:MM`);
+empty means unrestricted. A target with empty windows inherits its endpoint
+default; a non-empty target overrides it; empty on both means unrestricted.
 The same `HH:MM` validation applies to both levels.
 
 Target normalize (`dev_system_normalize`, default off) controls Chat

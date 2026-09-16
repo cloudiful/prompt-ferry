@@ -20,8 +20,6 @@ pub async fn spawn_worker(
             base_url: format!("http://{upstream_addr}"),
             native_api: prompt_ferry::config::NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             api_key: "upstream-key".to_string(),
             api_keys: vec![],
             key_lb_enabled: false,
@@ -39,8 +37,6 @@ pub async fn spawn_worker(
             owner_user_id: None,
             model_pattern: "*".to_string(),
             routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
-            daily_max_requests: None,
-            monthly_max_requests: None,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
