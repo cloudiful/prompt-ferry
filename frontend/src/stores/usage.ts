@@ -57,7 +57,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     sortOrder: ref<-1 | 0 | 1>(-1),
     start: ref(''),
     total: ref(0),
-    range: ref<RequestRecordOverviewRange>('month'),
+    range: ref<RequestRecordOverviewRange>('24h'),
   }
   const recordState = {
     facets: ref<RequestRecordFacets>({ dates: [], users: [], models: [] }),
