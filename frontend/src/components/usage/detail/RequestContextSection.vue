@@ -44,6 +44,9 @@ function extractReasoningEffort(value: unknown): string | null {
 <template>
   <FlatSection :title="t('requestContext')">
     <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <DetailKeyValue :label="t('model')">
+        {{ event.model_display }}
+      </DetailKeyValue>
       <DetailKeyValue :label="t('upstream')">
         {{ event.target }}
       </DetailKeyValue>

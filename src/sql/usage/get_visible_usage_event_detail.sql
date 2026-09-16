@@ -21,6 +21,8 @@ SELECT
     ue.mcp_operation_name,
     ue.path AS "path!",
     ue.model,
+    ue.requested_model,
+    ue.upstream_model,
     ue.request_state AS "request_state!: _",
     ue.status,
     ue.ok,

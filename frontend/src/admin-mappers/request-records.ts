@@ -11,6 +11,19 @@ import type {
   SessionRouteOptionsView,
 } from '../models'
 
+export function deriveModelDisplay(record: {
+  model?: string | null
+  requested_model?: string | null
+  upstream_model?: string | null
+}): string {
+  const requested = record.requested_model || record.model || '-'
+  const upstream = (record.upstream_model || '').trim()
+  if (upstream && upstream !== requested) {
+    return `${requested} (${upstream})`
+  }
+  return requested
+}
+
 export function createRequestRecordRowView(
   record: RequestRecordListRow,
 ): RequestRecordRowView {
@@ -27,6 +40,7 @@ export function createRequestRecordRowView(
     is_first_turn: firstTurn,
     is_session_recognized: sessionRecognized,
     model_key: record.model || '-',
+    model_display: deriveModelDisplay(record),
     request_date: record.created_at.slice(0, 10),
     session_state: sessionRecognized ? 'recognized' : 'unrecognized',
     session_short_id: record.conversation_id?.slice(0, 8) || '-',
@@ -60,6 +74,7 @@ export function createRequestRecordDetailView(
     is_first_turn: firstTurn,
     is_session_recognized: sessionRecognized,
     model_key: record.model || '-',
+    model_display: deriveModelDisplay(record),
     request_date: record.created_at.slice(0, 10),
     request_user_agent: recordWithUserAgent.request_user_agent ?? null,
     session_state: sessionRecognized ? 'recognized' : 'unrecognized',

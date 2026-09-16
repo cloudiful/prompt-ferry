@@ -195,6 +195,7 @@ export type RequestRecordRowView = RequestRecordListRow & {
   is_first_turn: boolean
   target: string
   model_key: string
+  model_display: string
   session_short_id: string
   session_state: 'recognized' | 'unrecognized'
   user_key: string
@@ -210,6 +211,7 @@ export type RequestRecordDetailView = RequestRecordDetail & {
   is_first_turn: boolean
   target: string
   model_key: string
+  model_display: string
   request_user_agent?: string | null
   session_short_id: string
   session_state: 'recognized' | 'unrecognized'

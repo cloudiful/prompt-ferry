@@ -1095,6 +1095,7 @@ export type RequestRecordDetail = {
     request_state: RequestRecordState;
     request_storage_mode: string;
     request_user_agent?: string | null;
+    requested_model?: string | null;
     response_capture_truncated: boolean;
     response_prompt?: string | null;
     response_raw_body?: string | null;
@@ -1106,6 +1107,7 @@ export type RequestRecordDetail = {
     total_tokens?: number | null;
     ttft_ms?: number | null;
     upstream_error_body?: string | null;
+    upstream_model?: string | null;
     user_id?: number | null;
     user_login_name?: string | null;
 };
@@ -1201,6 +1203,7 @@ export type RequestRecordListRow = {
     request_category: RequestRecordCategory;
     request_id: string;
     request_state: RequestRecordState;
+    requested_model?: string | null;
     route_selection_reason: RouteSelectionReason;
     /**
      * Canonical MCP provider preset id for the row's server
@@ -1213,6 +1216,7 @@ export type RequestRecordListRow = {
     storage_sanitized_nul_count: number;
     total_tokens?: number | null;
     ttft_ms?: number | null;
+    upstream_model?: string | null;
     user_id?: number | null;
     user_login_name?: string | null;
 };

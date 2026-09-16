@@ -5399,6 +5399,10 @@ components:
           type:
           - string
           - 'null'
+        requested_model:
+          type:
+          - string
+          - 'null'
         response_capture_truncated:
           type: boolean
         response_prompt:
@@ -5436,6 +5440,10 @@ components:
           - 'null'
           format: int64
         upstream_error_body:
+          type:
+          - string
+          - 'null'
+        upstream_model:
           type:
           - string
           - 'null'
@@ -5724,6 +5732,10 @@ components:
           format: uuid
         request_state:
           $ref: '#/components/schemas/RequestRecordState'
+        requested_model:
+          type:
+          - string
+          - 'null'
         route_selection_reason:
           $ref: '#/components/schemas/RouteSelectionReason'
         server_provider_kind:
@@ -5754,6 +5766,10 @@ components:
           - integer
           - 'null'
           format: int64
+        upstream_model:
+          type:
+          - string
+          - 'null'
         user_id:
           type:
           - integer

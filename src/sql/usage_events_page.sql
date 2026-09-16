@@ -14,6 +14,8 @@ SELECT
     rr.mcp_operation_name,
     rr.path,
     rr.model,
+    rr.requested_model,
+    rr.upstream_model,
     rr.request_state,
     rr.status,
     rr.ok,

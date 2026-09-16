@@ -141,7 +141,7 @@ const sorting = computed<SortingState>({
         }}</template>
         <template #model_key-cell="{ row }">
           <span class="font-semibold text-highlighted">{{
-            row.original.model_key
+            row.original.model_display
           }}</span>
         </template>
         <template #target-cell="{ row }">
