@@ -1,4 +1,4 @@
-FROM astral-sh/uv AS uv
+FROM dockerhub.cloud1ful.com/astral-sh/uv AS uv
 FROM dockerhub.cloud1ful.com/library/debian:trixie-slim AS runtime
 ARG TARGETARCH
 
