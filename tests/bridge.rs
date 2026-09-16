@@ -12,7 +12,8 @@ use prompt_ferry::{
     bridge_wire,
     config::{self, BridgeEncryptionMode, NativeApi, WorkerTlsMode},
     protocol::{
-        BridgeMessage, ConfigSnapshot, RelayIpPolicy, ResponseChunk, ResponseEnd, ResponseStart,
+        BridgeMessage, ClientRoute, ConfigSnapshot, RelayIpPolicy, ResponseChunk, ResponseEnd,
+        ResponseStart,
     },
     relay::{self, RelayHandle},
     worker,
@@ -1327,10 +1328,11 @@ async fn relay_allows_direct_ip_matching_cidr_rule() {
 #[tokio::test]
 async fn relay_denies_direct_ip_outside_whitelist() {
     let (relay_addr, worker_addr, handle) = spawn_relay().await;
-    push_snapshot(
+    let _socket = send_config_snapshot(
         worker_addr,
         &handle,
         1,
+        Vec::new(),
         RelayIpPolicy {
             allowed_cidrs: vec!["10.0.0.0/8".to_string()],
             trusted_proxy_cidrs: vec![],
@@ -1347,10 +1349,11 @@ async fn relay_denies_direct_ip_outside_whitelist() {
 #[tokio::test]
 async fn relay_denies_spoofed_forwarded_for_when_peer_is_not_trusted() {
     let (relay_addr, worker_addr, handle) = spawn_relay().await;
-    push_snapshot(
+    let _socket = send_config_snapshot(
         worker_addr,
         &handle,
         1,
+        Vec::new(),
         RelayIpPolicy {
             allowed_cidrs: vec!["10.0.0.0/8".to_string()],
             trusted_proxy_cidrs: vec![],
@@ -1371,10 +1374,11 @@ async fn relay_denies_spoofed_forwarded_for_when_peer_is_not_trusted() {
 #[tokio::test]
 async fn relay_honors_forwarded_for_when_peer_is_trusted() {
     let (relay_addr, worker_addr, handle) = spawn_relay().await;
-    push_snapshot(
+    let _socket = send_config_snapshot(
         worker_addr,
         &handle,
         1,
+        Vec::new(),
         RelayIpPolicy {
             allowed_cidrs: vec!["10.0.0.0/8".to_string()],
             trusted_proxy_cidrs: vec!["127.0.0.0/8".to_string()],
@@ -1395,10 +1399,11 @@ async fn relay_honors_forwarded_for_when_peer_is_trusted() {
 #[tokio::test]
 async fn relay_applies_ip_policy_to_public_routes_but_not_worker_ws() {
     let (relay_addr, worker_addr, handle) = spawn_relay().await;
-    push_snapshot(
+    let socket = send_config_snapshot(
         worker_addr,
         &handle,
         1,
+        Vec::new(),
         RelayIpPolicy {
             allowed_cidrs: vec!["10.0.0.0/8".to_string()],
             trusted_proxy_cidrs: vec![],
@@ -1429,14 +1434,9 @@ async fn relay_applies_ip_policy_to_public_routes_but_not_worker_ws() {
         .unwrap();
     assert_eq!(mcp.status(), StatusCode::FORBIDDEN);
 
-    let mut request = format!("ws://{worker_addr}/ws/worker")
-        .into_client_request()
-        .unwrap();
-    request.headers_mut().insert(
-        header::AUTHORIZATION,
-        HeaderValue::from_static("Bearer worker-token"),
-    );
-    let (socket, _) = connect_async(request).await.unwrap();
+    // The worker bridge is authenticated by WORKER_TOKEN, not by the public IP
+    // policy: this socket is still connected while the public routes above are
+    // denied.
     assert_eq!(handle.worker_count().await, 1);
     drop(socket);
 }
@@ -1444,17 +1444,26 @@ async fn relay_applies_ip_policy_to_public_routes_but_not_worker_ws() {
 #[tokio::test]
 async fn relay_applies_snapshot_updates_without_restart() {
     let (relay_addr, worker_addr, handle) = spawn_relay().await;
-    push_snapshot(worker_addr, &handle, 1, RelayIpPolicy::default()).await;
+    let mut socket = open_worker_socket(worker_addr).await;
+    send_snapshot_on(
+        &mut socket,
+        &handle,
+        1,
+        Vec::new(),
+        RelayIpPolicy::default(),
+    )
+    .await;
 
     let allowed = reqwest::get(format!("http://{relay_addr}/healthz"))
         .await
         .unwrap();
     assert_eq!(allowed.status(), StatusCode::OK);
 
-    push_snapshot(
-        worker_addr,
+    send_snapshot_on(
+        &mut socket,
         &handle,
         2,
+        Vec::new(),
         RelayIpPolicy {
             allowed_cidrs: vec!["10.0.0.0/8".to_string()],
             trusted_proxy_cidrs: vec![],
@@ -1466,10 +1475,11 @@ async fn relay_applies_snapshot_updates_without_restart() {
         .unwrap();
     assert_eq!(denied.status(), StatusCode::FORBIDDEN);
 
-    push_snapshot(
-        worker_addr,
+    send_snapshot_on(
+        &mut socket,
         &handle,
         3,
+        Vec::new(),
         RelayIpPolicy {
             allowed_cidrs: vec!["127.0.0.0/8".to_string()],
             trusted_proxy_cidrs: vec![],
@@ -1488,6 +1498,15 @@ async fn push_snapshot(
     version: i64,
     relay_ip_policy: RelayIpPolicy,
 ) {
+    let mut socket =
+        send_config_snapshot(worker_addr, handle, version, Vec::new(), relay_ip_policy).await;
+    socket.close(None).await.unwrap();
+}
+
+type WorkerSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+async fn open_worker_socket(worker_addr: SocketAddr) -> WorkerSocket {
     let mut request = format!("ws://{worker_addr}/ws/worker")
         .into_client_request()
         .unwrap();
@@ -1495,12 +1514,22 @@ async fn push_snapshot(
         header::AUTHORIZATION,
         HeaderValue::from_static("Bearer worker-token"),
     );
-    let (mut socket, _) = connect_async(request).await.unwrap();
+    let (socket, _) = connect_async(request).await.unwrap();
+    socket
+}
+
+async fn send_snapshot_on(
+    socket: &mut WorkerSocket,
+    handle: &RelayHandle,
+    version: i64,
+    keys: Vec<ClientRoute>,
+    relay_ip_policy: RelayIpPolicy,
+) {
     socket
         .send(Message::Binary(
             bridge_wire::encode_message(&BridgeMessage::ConfigSnapshot(ConfigSnapshot {
                 version,
-                keys: vec![],
+                keys,
                 relay_ip_policy,
             }))
             .unwrap()
@@ -1509,7 +1538,42 @@ async fn push_snapshot(
         .await
         .unwrap();
     wait_for_config(handle, version).await;
-    socket.close(None).await.unwrap();
+}
+
+/// Connect a worker, apply one snapshot, and keep the socket open so the relay
+/// stays ready for the assertions that follow.
+async fn send_config_snapshot(
+    worker_addr: SocketAddr,
+    handle: &RelayHandle,
+    version: i64,
+    keys: Vec<ClientRoute>,
+    relay_ip_policy: RelayIpPolicy,
+) -> WorkerSocket {
+    let mut socket = open_worker_socket(worker_addr).await;
+    send_snapshot_on(&mut socket, handle, version, keys, relay_ip_policy).await;
+    socket
+}
+
+fn client_route(secret: &str, user_id: i64) -> ClientRoute {
+    ClientRoute {
+        key_hash: prompt_ferry::keys::hash_client_key(secret),
+        key_prefix: secret.chars().take(8).collect(),
+        user_id,
+        route_id: "relay-ready-route".to_string(),
+    }
+}
+
+async fn wait_for_not_ready(handle: &RelayHandle) {
+    for _ in 0..40 {
+        if !handle.is_ready().await {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(
+        !handle.is_ready().await,
+        "relay stayed ready without a worker"
+    );
 }
 
 async fn wait_for_config(handle: &RelayHandle, version: i64) {
@@ -1520,6 +1584,103 @@ async fn wait_for_config(handle: &RelayHandle, version: i64) {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     panic!("relay did not apply config snapshot {version}");
+}
+
+#[tokio::test]
+async fn relay_ready_returns_503_when_no_worker() {
+    let (relay_addr, _worker_addr, _handle) = spawn_relay().await;
+    let response = reqwest::get(format!("http://{relay_addr}/ready"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        response.headers().contains_key(header::RETRY_AFTER),
+        "not-ready response must advertise Retry-After"
+    );
+    let body = response.text().await.unwrap();
+    assert!(body.contains("not_ready"), "body={body}");
+}
+
+#[tokio::test]
+async fn relay_healthz_stays_liveness_only_without_worker() {
+    let (relay_addr, _worker_addr, _handle) = spawn_relay().await;
+    let response = reqwest::get(format!("http://{relay_addr}/healthz"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn relay_ready_returns_200_after_first_snapshot() {
+    let (relay_addr, worker_addr, handle) = spawn_relay().await;
+
+    let before = reqwest::get(format!("http://{relay_addr}/ready"))
+        .await
+        .unwrap();
+    assert_eq!(before.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let _socket = send_config_snapshot(
+        worker_addr,
+        &handle,
+        1,
+        vec![client_route("pfy_ready_key", 7)],
+        RelayIpPolicy::default(),
+    )
+    .await;
+
+    assert!(handle.is_ready().await);
+    let after = reqwest::get(format!("http://{relay_addr}/ready"))
+        .await
+        .unwrap();
+    assert_eq!(after.status(), StatusCode::OK);
+    assert_eq!(after.text().await.unwrap(), "ok");
+}
+
+#[tokio::test]
+async fn relay_clears_routes_after_last_worker_disconnects() {
+    let (relay_addr, worker_addr, handle) = spawn_relay().await;
+    let socket = send_config_snapshot(
+        worker_addr,
+        &handle,
+        1,
+        vec![client_route("pfy_ready_key", 7)],
+        RelayIpPolicy::default(),
+    )
+    .await;
+    assert!(handle.is_ready().await);
+
+    drop(socket);
+    wait_for_worker_count(&handle, 0).await;
+    wait_for_not_ready(&handle).await;
+    assert_eq!(handle.config_version().await, None);
+
+    let response = reqwest::get(format!("http://{relay_addr}/ready"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().contains_key(header::RETRY_AFTER));
+}
+
+#[tokio::test]
+async fn relay_503_uses_retry_after_header() {
+    let (relay_addr, _worker_addr, _handle) = spawn_relay().await;
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://{relay_addr}/v1/chat/completions"))
+        .bearer_auth("pfy_unknown_key")
+        .json(&serde_json::json!({
+            "model": "fake",
+            "messages": [{"role": "user", "content": "hi"}],
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().contains_key(header::RETRY_AFTER));
+    let body = response.text().await.unwrap();
+    assert!(body.contains("not_ready"), "body={body}");
+    assert!(!body.contains("invalid token"), "body={body}");
 }
 
 #[test]

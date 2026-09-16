@@ -70,6 +70,7 @@ fn skip_websocket_upgrade(
 pub(super) fn public_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(public_healthz))
+        .route("/ready", get(public_ready))
         .route("/v1/models", get(proxy_models))
         .route(
             "/v1/messages",
@@ -191,12 +192,18 @@ pub(super) fn anthropic_error_response(
         .into_response()
 }
 
+/// Seconds advertised through `Retry-After` while the relay is not ready:
+/// cold start, no worker, or no config snapshot yet. Clients fail fast and
+/// retry instead of being queued server-side.
+pub(super) const RELAY_RETRY_AFTER_SECONDS: u64 = 5;
+
 #[derive(Debug, Clone)]
 pub(super) struct ApiError {
     status: StatusCode,
     code: String,
     message: String,
     anthropic: bool,
+    retry_after_seconds: Option<u64>,
 }
 
 impl ApiError {
@@ -210,6 +217,7 @@ impl ApiError {
             code: code.into(),
             message: message.into(),
             anthropic: false,
+            retry_after_seconds: None,
         }
     }
 
@@ -223,22 +231,103 @@ impl ApiError {
             code: code.into(),
             message: message.into(),
             anthropic: true,
+            retry_after_seconds: None,
         }
     }
 
     pub(super) fn status(&self) -> StatusCode {
         self.status
     }
+
+    pub(super) fn with_retry_after(mut self, seconds: u64) -> Self {
+        self.retry_after_seconds = Some(seconds);
+        self
+    }
 }
 
 impl From<ApiError> for Response {
     fn from(err: ApiError) -> Response {
-        if err.anthropic {
+        let retry_after_seconds = err.retry_after_seconds;
+        let mut response = if err.anthropic {
             anthropic_error_response(err.status, &err.code, &err.message)
         } else {
             error_response(err.status, &err.code, &err.message)
+        };
+        if let Some(seconds) = retry_after_seconds {
+            insert_retry_after(&mut response, seconds);
         }
+        response
     }
+}
+
+pub(super) fn insert_retry_after(response: &mut Response, seconds: u64) {
+    if let Ok(value) = header::HeaderValue::from_str(&seconds.to_string()) {
+        response.headers_mut().insert(header::RETRY_AFTER, value);
+    }
+}
+
+pub(super) fn with_retry_after(mut response: Response, seconds: u64) -> Response {
+    insert_retry_after(&mut response, seconds);
+    response
+}
+
+/// True only when the relay can authenticate managed client keys, i.e. at
+/// least one worker is connected and client routes have been loaded.
+pub(super) async fn state_ready(state: &AppState) -> bool {
+    state.inner.is_ready().await
+}
+
+pub(super) fn not_ready_error(anthropic_format: bool) -> ApiError {
+    let error = if anthropic_format {
+        ApiError::anthropic(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "not_ready",
+            "relay not ready, retry",
+        )
+    } else {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "not_ready",
+            "relay not ready, retry",
+        )
+    };
+    error.with_retry_after(RELAY_RETRY_AFTER_SECONDS)
+}
+
+/// Readiness body for `GET /ready`. Ops probes only inspect the status and the
+/// `Retry-After` header, so the payload stays a plain `{code,message}` pair
+/// rather than the nested error envelope used by the proxy endpoints.
+pub(super) fn not_ready_response() -> Response {
+    with_retry_after(
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({
+                "code": "not_ready",
+                "message": "relay not ready, retry",
+            })),
+        )
+            .into_response(),
+        RELAY_RETRY_AFTER_SECONDS,
+    )
+}
+
+/// A worker is registered but gone by the time a request picks one; keep the
+/// outward code and status compatible with the auth guard so clients retry.
+pub(super) fn no_worker_response(anthropic_format: bool) -> Response {
+    let response = if anthropic_format {
+        anthropic_error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "api_error",
+            "no worker is connected",
+        )
+    } else {
+        crate::auth::error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no_worker",
+            "no worker is connected",
+        )
+    };
+    with_retry_after(response, RELAY_RETRY_AFTER_SECONDS)
 }
 
 impl IntoResponse for ApiError {
@@ -438,6 +527,17 @@ async fn public_healthz(
     Response::new(Body::from("ok"))
 }
 
+/// Readiness probe: `200 ok` only when at least one worker is connected and a
+/// client route snapshot has been applied. Kept separate from `/healthz` so a
+/// liveness check never restarts a relay that is merely waiting for a worker.
+async fn public_ready(State(state): State<AppState>) -> Response {
+    if state_ready(&state).await {
+        Response::new(Body::from("ok"))
+    } else {
+        not_ready_response()
+    }
+}
+
 async fn authorize_client(
     state: &AppState,
     headers: &HeaderMap,
@@ -487,28 +587,23 @@ async fn authorize_client_with_format(
         };
         if state.config.client_token.is_empty() {
             warn!("client auth failed: relay client_token is not configured");
-            return Err(auth_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "auth_not_configured",
-                "authentication token is not configured",
-            ));
+            return Err(not_ready_error(anthropic_format));
         }
         if token != state.config.client_token {
+            // No route snapshot yet (cold start, or a worker-only rolling
+            // upgrade before the first `ConfigSnapshot`). A managed `pfy_` key
+            // cannot be authenticated here, and replying `invalid token` would
+            // make clients treat a rolling upgrade as a permanent error; fail
+            // fast so SDKs retry instead of queuing server-side. The configured
+            // legacy client token keeps working because it does not depend on
+            // the snapshot.
             warn!(
-                mode = "legacy_client_token",
+                mode = "not_ready",
                 token_len = token.len(),
                 token_hash_prefix = %token_hash_prefix(&token),
-                "client auth failed: invalid token"
+                "client auth deferred: relay has no route snapshot"
             );
-            return Err(auth_error(
-                StatusCode::FORBIDDEN,
-                if anthropic_format {
-                    "authentication_error"
-                } else {
-                    "forbidden"
-                },
-                "invalid token",
-            ));
+            return Err(not_ready_error(anthropic_format));
         }
         Ok(None)
     } else {

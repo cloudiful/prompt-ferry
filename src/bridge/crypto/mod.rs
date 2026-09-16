@@ -23,6 +23,8 @@ pub(crate) const VERSION: u8 = 1;
 /// Encrypted frame envelope version, fixed independently of the wire payload
 /// schema: existing encrypted deployments validate this byte, so it stays 3
 /// while payload schemas evolve via [`bridge_wire::BRIDGE_WIRE_VERSION`].
+/// Bumping either version forces a joint rollout of relay and worker; a pinned
+/// relay can only survive a worker-only roll while both versions are unchanged.
 pub(crate) const FRAME_VERSION: u8 = 3;
 pub(crate) const KEY_BYTES: usize = 32;
 pub(crate) const HANDSHAKE_NONCE_BYTES: usize = 32;

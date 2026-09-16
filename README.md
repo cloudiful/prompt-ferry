@@ -32,6 +32,9 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 - Native Responses passthrough, including DeepSeek v4 Flash; Responses requests
   require Responses-native targets and are forwarded without cross-protocol conversion.
 - Bounded relay response buffering with configurable queue and byte limits.
+- Relay readiness: `GET /ready` returns `200` only while a worker is connected and client routes are
+  loaded; otherwise it fails fast with `503` and `Retry-After: 5` so SDKs retry during a rolling
+  upgrade, while `/healthz` stays liveness-only.
 
 ## Deploy
 

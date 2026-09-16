@@ -7,6 +7,17 @@
 #
 # stop_grace_period lines up with PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS
 # plus a small headroom; raise them together if you raise the drain budget.
+#
+# Readiness: GET /ready returns 200 only while a worker is connected and client
+# routes are loaded; 503 + Retry-After: 5 means the relay is still rolling, so
+# clients retry. Liveness stays /healthz. Never gate `worker.depends_on.relay`
+# on /ready: the relay waits for a worker, so gating on readiness deadlocks the
+# first start. The relay healthcheck below therefore keeps probing /healthz.
+#
+# Upgrade order: stop worker (--timeout 30) -> stop relay (--timeout 20) ->
+# pull -> up. A worker-only roll may keep the relay pinned ONLY while
+# BRIDGE_WIRE_VERSION / FRAME_VERSION are unchanged; bumping either requires a
+# joint rollout of relay and worker.
 
 services:
   postgres:

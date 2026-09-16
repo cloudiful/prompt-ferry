@@ -7,7 +7,11 @@ use anyhow::{Context, anyhow};
 use crate::protocol::BridgeMessage;
 
 /// Current plaintext wire envelope version. Bump when the payload schema
-/// changes; peers reject envelopes with other versions.
+/// changes; peers reject envelopes with other versions. A bump forces a joint
+/// rollout of relay and worker: a pinned relay cannot talk to a bumped worker
+/// (or vice versa), so a worker-only roll may keep the relay pinned ONLY while
+/// this value is unchanged. New pipeline fields in [`payload`] must be optional
+/// (`#[serde(default)]`) so mixed-version peers keep decoding.
 pub const BRIDGE_WIRE_VERSION: u8 = 4;
 pub const PUBLIC_API_BODY_LIMIT_BYTES: usize = 256 * 1024 * 1024;
 pub const BRIDGE_WS_MAX_MESSAGE_BYTES: usize = PUBLIC_API_BODY_LIMIT_BYTES + 1024 * 1024;

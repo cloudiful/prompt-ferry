@@ -114,8 +114,20 @@ async fn handle_worker_socket(state: AppState, socket: WebSocket) {
     }
 
     write_task.abort();
-    state.inner.workers.lock().await.remove(&worker_id);
+    let last_worker_gone = {
+        let mut workers = state.inner.workers.lock().await;
+        workers.remove(&worker_id);
+        workers.is_empty()
+    };
     state.inner.worker_loads.lock().await.remove(&worker_id);
+    if last_worker_gone {
+        // The relay is no longer serviceable. Drop the stale snapshot so
+        // `/ready` flips red immediately and a managed key is never matched
+        // against routes from a worker that is gone.
+        state.inner.routes.lock().await.clear();
+        *state.inner.relay_ip_policy.lock().await = ip_acl::CompiledRelayIpPolicy::default();
+        *state.inner.config_version.lock().await = None;
+    }
     warn!(
         category = "mcp_bridge_diag",
         worker_id, "worker bridge connection ended; pending requests will be failed"

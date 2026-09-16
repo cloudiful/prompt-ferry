@@ -12,7 +12,7 @@ use super::super::{
 };
 use super::{
     ApiError, DownstreamStreamDiag, authorize_client, enforce_public_ip_policy, header_value,
-    sse_error_event,
+    no_worker_response, sse_error_event,
 };
 use axum::{
     body::Body,
@@ -118,17 +118,7 @@ async fn proxy_mcp_request(
     };
     let selection = match choose_worker(&state).await {
         Some(selection) => selection,
-        None => {
-            return drain_body_then(
-                body,
-                crate::auth::error_response(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "no_worker",
-                    "no worker is connected",
-                ),
-            )
-            .await;
-        }
+        None => return drain_body_then(body, no_worker_response(false)).await,
     };
     let request_id = Uuid::new_v4().to_string();
     let (start_tx, start_rx) = oneshot::channel();

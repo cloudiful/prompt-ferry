@@ -10,7 +10,7 @@ use super::super::{
     router::drain_body_then,
     state::{AppState, PendingRequest, RemoteAddr},
 };
-use super::{ai::stream_request_body, enforce_public_ip_policy};
+use super::{ai::stream_request_body, enforce_public_ip_policy, no_worker_response};
 use axum::{
     body::Body,
     extract::{ConnectInfo, Extension, State},
@@ -59,17 +59,7 @@ async fn proxy_request(
     let request_id = Uuid::new_v4().to_string();
     let selection = match choose_worker(&state).await {
         Some(selection) => selection,
-        None => {
-            return drain_body_then(
-                body,
-                crate::auth::error_response(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "no_worker",
-                    "no worker is connected",
-                ),
-            )
-            .await;
-        }
+        None => return drain_body_then(body, no_worker_response(false)).await,
     };
 
     let (start_tx, start_rx) = oneshot::channel();

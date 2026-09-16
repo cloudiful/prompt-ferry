@@ -24,7 +24,7 @@ use super::super::{
 use super::{
     ApiError, DownstreamStreamDiag, anthropic_error_response, anthropic_sse_error_event,
     authorize_anthropic_client, authorize_client, enforce_public_ip_policy,
-    enforce_public_ip_policy_for,
+    enforce_public_ip_policy_for, no_worker_response,
 };
 use axum::{
     Json,
@@ -283,11 +283,7 @@ pub(super) async fn proxy_realtime(
     let selection = match choose_worker(&state).await {
         Some(selection) => selection,
         None => {
-            return crate::auth::error_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "no_worker",
-                "no worker is connected",
-            );
+            return no_worker_response(false);
         }
     };
     let request_id = Uuid::new_v4().to_string();
@@ -398,22 +394,7 @@ async fn proxy_request_with_options(options: ProxyRequestOptions) -> Response {
     let request_id = Uuid::new_v4().to_string();
     let selection = match choose_worker(&state).await {
         Some(selection) => selection,
-        None => {
-            let response = if anthropic_format {
-                anthropic_error_response(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "api_error",
-                    "no worker is connected",
-                )
-            } else {
-                crate::auth::error_response(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "no_worker",
-                    "no worker is connected",
-                )
-            };
-            return drain_body_then(body, response).await;
-        }
+        None => return drain_body_then(body, no_worker_response(anthropic_format)).await,
     };
 
     let (start_tx, start_rx) = oneshot::channel();

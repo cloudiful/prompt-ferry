@@ -89,6 +89,22 @@ impl RelayHandle {
     pub async fn config_version(&self) -> Option<i64> {
         *self.inner.config_version.lock().await
     }
+
+    /// Ready to serve when at least one worker is connected and a config
+    /// snapshot has populated client routes. A connected worker with no routes
+    /// (cold start before the first snapshot) stays not-ready on purpose so
+    /// managed `pfy_` keys never fall through to the legacy token branch.
+    pub async fn is_ready(&self) -> bool {
+        self.inner.is_ready().await
+    }
+}
+
+impl RelayState {
+    pub(crate) async fn is_ready(&self) -> bool {
+        let workers_empty = self.workers.lock().await.is_empty();
+        let routes_empty = self.routes.lock().await.is_empty();
+        !workers_empty && !routes_empty
+    }
 }
 
 pub(crate) struct RelayState {
