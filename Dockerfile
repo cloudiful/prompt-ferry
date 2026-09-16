@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv AS uv
+FROM astral-sh/uv AS uv
 FROM debian:trixie-slim AS runtime
 
 COPY --from=uv /uv /uvx /usr/local/bin/
