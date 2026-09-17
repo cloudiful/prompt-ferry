@@ -119,6 +119,7 @@ const sorting = computed<SortingState>({
         :columns="columns"
         :loading="workspace.records_loading"
         class="min-w-[72rem] overflow-visible"
+        :ui="{ th: 'whitespace-nowrap' }"
       >
         <template #empty>{{ t('noMcpCallRecords') }}</template>
         <template #details-cell="{ row }">

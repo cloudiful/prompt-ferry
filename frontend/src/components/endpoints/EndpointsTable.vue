@@ -146,6 +146,7 @@ const EndpointUsageBadges = defineComponent({
       :loading="busy"
       :get-row-id="(row: EndpointListItemView) => row.endpoint_id"
       class="min-w-0"
+      :ui="{ th: 'whitespace-nowrap' }"
     >
       <template #name-cell="{ row }">
         <EndpointNameCell

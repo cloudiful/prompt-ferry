@@ -86,7 +86,7 @@ function setSource(index: number, source: 'worker' | 'value'): void {
         {{ t('addEnvironmentVariable') }}
       </UButton>
     </div>
-    <UTable :data="rows" :columns="columns" class="min-w-0">
+    <UTable :data="rows" :columns="columns" class="min-w-0" :ui="{ th: 'whitespace-nowrap' }">
       <template #name-cell="{ row }">
         <UInput
           v-model="variables[row.original.index].name"

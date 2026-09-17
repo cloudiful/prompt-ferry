@@ -144,6 +144,7 @@ function commitLabel(keyItem: ApiKeyItemView): void {
       :data="workspace.key_items"
       :columns="columns"
       class="hidden min-w-0 md:block"
+      :ui="{ th: 'whitespace-nowrap' }"
     >
       <template #label-cell="{ row }">
         <UInput

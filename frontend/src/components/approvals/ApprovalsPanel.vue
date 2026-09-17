@@ -252,6 +252,7 @@ onBeforeUnmount(() => {
           :columns="columns"
           :loading="busy"
           class="min-w-0"
+          :ui="{ th: 'whitespace-nowrap' }"
         >
           <template #client_key_label-cell="{ row }">{{
             row.original.client_key_label || '-'

@@ -128,6 +128,7 @@ const tableToggleLabelClass =
       :data="workspace.user_items"
       :columns="columns"
       class="hidden min-w-0 md:block"
+      :ui="{ th: 'whitespace-nowrap' }"
     >
       <template #empty>
         <div class="px-4 py-6 text-sm text-dimmed">

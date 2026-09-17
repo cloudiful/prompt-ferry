@@ -63,6 +63,7 @@ function statusColor(
         :columns="columns"
         :loading="loading"
         class="min-w-[60rem]"
+        :ui="{ th: 'whitespace-nowrap' }"
       >
         <template #empty>{{ t('noBillingCharges') }}</template>
         <template #details-cell="{ row }">

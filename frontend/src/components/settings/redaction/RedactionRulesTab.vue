@@ -134,7 +134,7 @@ function formatUpdatedAt(value: string | null): string {
           </UButton>
         </div>
       </div>
-      <UTable :data="customStrings" :columns="columns" class="min-w-0">
+      <UTable :data="customStrings" :columns="columns" class="min-w-0" :ui="{ th: 'whitespace-nowrap' }">
         <template #empty>{{ t('noCustomStrings') }}</template>
         <template #pattern-cell="{ row }">
           <UInput

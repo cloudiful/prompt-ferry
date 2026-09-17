@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue'
+import type { TableColumn, TableRow } from '@nuxt/ui'
 import type {
   RequestRecordOverviewResponse,
   RequestRecordOverviewBreakdownRow,
@@ -131,6 +132,38 @@ function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
   })
 }
 
+function onBreakdownSelect(
+  _event: Event,
+  row: TableRow<RequestRecordOverviewBreakdownRow>,
+): void {
+  emitBreakdownDrilldown(row.original)
+}
+
+const aiColumns = computed<
+  TableColumn<RequestRecordOverviewBreakdownRow>[]
+>(() => [
+  { accessorKey: 'label', header: t('overviewObject') },
+  { accessorKey: 'request_count', header: t('requests') },
+  { accessorKey: 'request_share', header: t('overviewRequestShare') },
+  { id: 'tokens', header: t('overviewTotalTokens') },
+  { accessorKey: 'token_share', header: t('overviewTokenShare') },
+  { id: 'cache_rate', header: t('overviewCacheRate') },
+  { accessorKey: 'error_rate', header: t('overviewErrorRate') },
+  {
+    accessorKey: 'avg_output_tokens_per_second',
+    header: t('overviewAvgOutputRate'),
+  },
+])
+
+const mcpColumns = computed<
+  TableColumn<RequestRecordOverviewBreakdownRow>[]
+>(() => [
+  { accessorKey: 'label', header: t('overviewObject') },
+  { accessorKey: 'request_count', header: t('requests') },
+  { accessorKey: 'request_share', header: t('overviewRequestShare') },
+  { accessorKey: 'success_rate', header: t('overviewSuccessRate') },
+])
+
 function providerBadge(row: RequestRecordOverviewBreakdownRow): string {
   const provider = row.server_provider_kind ?? 'generic'
   return row.usage_unit ? `${provider} · ${row.usage_unit}` : provider
@@ -184,88 +217,64 @@ function providerBadge(row: RequestRecordOverviewBreakdownRow): string {
           }}
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full min-w-[38rem] text-left text-sm">
-            <thead class="bg-muted text-muted">
-              <tr>
-                <th class="px-4 py-2">{{ t('overviewObject') }}</th>
-                <th class="px-4 py-2">{{ t('requests') }}</th>
-                <th class="px-4 py-2">{{ t('overviewRequestShare') }}</th>
-                <th class="px-4 py-2">
-                  {{
-                    category === 'ai'
-                      ? t('overviewTotalTokens')
-                      : t('overviewSuccessRate')
-                  }}
-                </th>
-                <th v-if="category === 'ai'" class="px-4 py-2">
-                  {{ t('overviewTokenShare') }}
-                </th>
-                <th v-if="category === 'ai'" class="px-4 py-2">
-                  {{ t('overviewCacheRate') }}
-                </th>
-                <th v-if="category === 'ai'" class="px-4 py-2">
-                  {{ t('overviewErrorRate') }}
-                </th>
-                <th v-if="category === 'ai'" class="px-4 py-2">
-                  {{ t('overviewAvgOutputRate') }}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in breakdownRows"
-                :key="`${row.label}:${row.model ?? row.mcp_server_id ?? ''}`"
-                class="cursor-pointer border-t border-default transition hover:bg-muted"
-                @click="emitBreakdownDrilldown(row)"
-              >
-                <td class="px-4 py-2 font-medium text-highlighted">
-                  <span class="inline-flex items-center gap-1">
-                    <span>{{ row.label }}</span>
-                    <BreakdownUpstreamPopover
-                      v-if="category === 'ai'"
-                      :row="row"
-                      :formatting="formatting"
-                    />
-                    <UBadge
-                      v-if="category === 'mcp'"
-                      :label="providerBadge(row)"
-                      color="neutral"
-                      size="sm"
-                    />
-                  </span>
-                </td>
-                <td class="px-4 py-2">
-                  {{ formatting.formatCount(row.request_count) }}
-                </td>
-                <td class="px-4 py-2">
-                  {{ formatting.formatPercent(row.request_share) }}
-                </td>
-                <td class="px-4 py-2">
-                  {{
-                    category === 'ai'
-                      ? formatting.formatTokenQuantity(row.tokens.total_tokens)
-                      : formatting.formatPercent(row.success_rate)
-                  }}
-                </td>
-                <td v-if="category === 'ai'" class="px-4 py-2">
-                  {{ formatting.formatPercent(row.token_share) }}
-                </td>
-                <td v-if="category === 'ai'" class="px-4 py-2">
-                  {{ formatting.formatPercent(row.tokens.cache_rate) }}
-                </td>
-                <td v-if="category === 'ai'" class="px-4 py-2">
-                  {{ formatting.formatPercent(row.error_rate) }}
-                </td>
-                <td v-if="category === 'ai'" class="px-4 py-2">
-                  {{
-                    formatting.formatTokensPerSecond(
-                      row.avg_output_tokens_per_second,
-                    )
-                  }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <UTable
+            :data="breakdownRows"
+            :columns="category === 'ai' ? aiColumns : mcpColumns"
+            class="min-w-[38rem]"
+            :ui="{
+              thead: 'bg-muted',
+              th: 'whitespace-nowrap px-4 py-2 text-muted',
+              td: 'px-4 py-2 text-default',
+              tr: 'cursor-pointer',
+            }"
+            @select="onBreakdownSelect"
+          >
+            <template #empty>-</template>
+            <template #label-cell="{ row }">
+              <span class="inline-flex items-center gap-1">
+                <span class="font-medium text-highlighted">{{
+                  row.original.label
+                }}</span>
+                <BreakdownUpstreamPopover
+                  v-if="category === 'ai'"
+                  :row="row.original"
+                  :formatting="formatting"
+                />
+                <UBadge
+                  v-if="category === 'mcp'"
+                  :label="providerBadge(row.original)"
+                  color="neutral"
+                  size="sm"
+                />
+              </span>
+            </template>
+            <template #request_count-cell="{ row }">{{
+              formatting.formatCount(row.original.request_count)
+            }}</template>
+            <template #request_share-cell="{ row }">{{
+              formatting.formatPercent(row.original.request_share)
+            }}</template>
+            <template #tokens-cell="{ row }">{{
+              formatting.formatTokenQuantity(row.original.tokens.total_tokens)
+            }}</template>
+            <template #token_share-cell="{ row }">{{
+              formatting.formatPercent(row.original.token_share)
+            }}</template>
+            <template #cache_rate-cell="{ row }">{{
+              formatting.formatPercent(row.original.tokens.cache_rate)
+            }}</template>
+            <template #error_rate-cell="{ row }">{{
+              formatting.formatPercent(row.original.error_rate)
+            }}</template>
+            <template #avg_output_tokens_per_second-cell="{ row }">{{
+              formatting.formatTokensPerSecond(
+                row.original.avg_output_tokens_per_second,
+              )
+            }}</template>
+            <template #success_rate-cell="{ row }">{{
+              formatting.formatPercent(row.original.success_rate)
+            }}</template>
+          </UTable>
         </div>
       </section>
     </div>

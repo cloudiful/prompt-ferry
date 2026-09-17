@@ -168,6 +168,7 @@ onMounted(refresh)
         :columns="relayColumns"
         :loading="relayStore.loading"
         class="min-w-0"
+        :ui="{ th: 'whitespace-nowrap' }"
       >
         <template #empty>
           <div class="px-4 py-6 text-sm text-dimmed">

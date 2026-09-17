@@ -189,6 +189,7 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
               :columns="targetColumns"
               :meta="targetTableMeta"
               class="min-w-0"
+              :ui="{ th: 'whitespace-nowrap' }"
             >
               <template #order-cell="{ row }">
                 <div
