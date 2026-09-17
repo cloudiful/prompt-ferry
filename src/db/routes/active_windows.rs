@@ -6,10 +6,18 @@
 //! (any hit means active). `days` is 1=Mon..7=Sun, omitted/empty means every
 //! day. All times are interpreted in the worker-local timezone; multi-machine
 //! deployments must share one timezone.
+//!
+//! `start` is `00:00-23:59`; `end` additionally accepts `24:00` (=1440,
+//! exclusive midnight), so `00:00-24:00` is a full day and `18:00-24:00`
+//! covers the `23:59` minute. Windows stay start-inclusive/end-exclusive and
+//! seconds are dropped.
 
 use crate::db::types::ActiveWindow;
 
-fn parse_hhmm(value: &str) -> Option<u16> {
+/// Parse `HH:MM` into minutes since midnight. `allow_end_of_day` accepts the
+/// single extra value `24:00` (1440) for `end`, meaning exclusive midnight;
+/// `start` keeps it rejected.
+fn parse_hhmm(value: &str, allow_end_of_day: bool) -> Option<u16> {
     let (hour_str, min_str) = value.split_once(':')?;
     if hour_str.len() != 2 || min_str.len() != 2 {
         return None;
@@ -20,17 +28,26 @@ fn parse_hhmm(value: &str) -> Option<u16> {
     }
     let hour: u16 = hour_str.parse().ok()?;
     let min: u16 = min_str.parse().ok()?;
-    if hour > 23 || min > 59 {
+    if min > 59 {
+        return None;
+    }
+    if hour > 23 {
+        // Only `end` may use `24:00`; anything past it (`24:01`..) stays invalid.
+        if allow_end_of_day && hour == 24 && min == 0 {
+            return Some(1440);
+        }
         return None;
     }
     Some(hour * 60 + min)
 }
 
 fn validate_window(start: &str, end: &str) -> Result<(u16, u16), &'static str> {
-    let start_min = parse_hhmm(start).ok_or("active_windows start must be HH:MM (00:00-23:59)")?;
-    let end_min = parse_hhmm(end).ok_or("active_windows end must be HH:MM (00:00-23:59)")?;
+    let start_min =
+        parse_hhmm(start, false).ok_or("active_windows start must be HH:MM (00:00-23:59)")?;
+    let end_min = parse_hhmm(end, true)
+        .ok_or("active_windows end must be HH:MM (00:00-24:00; 24:00 means midnight)")?;
     if start_min == end_min {
-        return Err("active_windows start must not equal end");
+        return Err("active_windows start must not equal end (use 00:00-24:00 for all day)");
     }
     Ok((start_min, end_min))
 }
@@ -65,8 +82,8 @@ pub fn normalize_request_windows(
         .collect::<Vec<_>>();
     normalized.sort_by_key(|window| {
         (
-            parse_hhmm(&window.start).unwrap_or(u16::MAX),
-            parse_hhmm(&window.end).unwrap_or(u16::MAX),
+            parse_hhmm(&window.start, false).unwrap_or(u16::MAX),
+            parse_hhmm(&window.end, true).unwrap_or(u16::MAX),
         )
     });
     Ok(normalized)
@@ -93,6 +110,8 @@ pub fn parse_stored_windows(raw: Option<&str>) -> Result<Vec<ActiveWindow>, Stri
     normalize_request_windows(&windows).map_err(str::to_string)
 }
 
+/// `end_min` may be 1440 for `24:00` (exclusive midnight); `now_min` is
+/// always 0..=1439. `end < start` is overnight, `end` is exclusive.
 fn window_covers(start_min: u16, end_min: u16, now_min: u16) -> bool {
     if end_min > start_min {
         now_min >= start_min && now_min < end_min
@@ -133,8 +152,8 @@ pub fn is_active_now(windows: &[ActiveWindow], today: u8, now_min: u16) -> bool 
             return false;
         }
         match (
-            parse_hhmm(window.start.trim()),
-            parse_hhmm(window.end.trim()),
+            parse_hhmm(window.start.trim(), false),
+            parse_hhmm(window.end.trim(), true),
         ) {
             (Some(start_min), Some(end_min)) if start_min != end_min => {
                 window_covers(start_min, end_min, now_min)
@@ -372,6 +391,47 @@ mod tests {
         assert!(is_active_at(&windows, 5 * 60 + 59));
         assert!(!is_active_at(&windows, 6 * 60));
         assert!(!is_active_at(&windows, 12 * 60));
+    }
+
+    #[test]
+    fn end_2400_is_midnight_and_only_valid_as_end() {
+        // Issue #457: `end` may use `24:00` (=1440); `start` may not.
+        assert!(normalize_request_windows(&[window("00:00", "24:00")]).is_ok());
+        assert!(normalize_request_windows(&[window("18:00", "24:00")]).is_ok());
+        assert!(normalize_request_windows(&[window("23:59", "24:00")]).is_ok());
+        assert!(normalize_request_windows(&[window("24:00", "23:59")]).is_err());
+        assert!(normalize_request_windows(&[window("24:01", "23:59")]).is_err());
+        assert!(normalize_request_windows(&[window("00:00", "24:01")]).is_err());
+        // `00:00-00:00` stays rejected; full day is `00:00-24:00`.
+        assert!(normalize_request_windows(&[window("00:00", "00:00")]).is_err());
+    }
+
+    #[test]
+    fn full_day_window_covers_every_minute() {
+        let windows = vec![window("00:00", "24:00")];
+        assert!(is_active_at(&windows, 0));
+        assert!(is_active_at(&windows, 720));
+        assert!(is_active_at(&windows, 1439));
+    }
+
+    #[test]
+    fn evening_window_ending_2400_covers_2359() {
+        let windows = vec![window("18:00", "24:00")];
+        assert!(is_active_at(&windows, 18 * 60));
+        assert!(is_active_at(&windows, 1080));
+        assert!(is_active_at(&windows, 1439));
+        assert!(!is_active_at(&windows, 17 * 60 + 59));
+        assert!(!is_active_at(&windows, 0));
+    }
+
+    #[test]
+    fn end_0000_keeps_overnight_compatibility() {
+        // Issue #457: `18:00-00:00` keeps its prior overnight semantics
+        // (evening only, `24:00` is the way to express midnight).
+        let windows = vec![window("18:00", "00:00")];
+        assert!(is_active_at(&windows, 18 * 60));
+        assert!(is_active_at(&windows, 1439));
+        assert!(!is_active_at(&windows, 0));
     }
 
     #[test]
