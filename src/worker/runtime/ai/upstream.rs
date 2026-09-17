@@ -51,6 +51,8 @@ pub(super) fn build_upstream_request(
     // only owned allocation is the final one reqwest takes ownership of.
     let body = apply_minimax_service_tier(route, raw);
     let body = apply_minimax_reasoning_split(route, body.as_ref());
+    let body = apply_minimax_reasoning_echo_restore(route, body.as_ref());
+    let body = apply_deepseek_thinking(route, body.as_ref());
     let body = apply_anthropic_cache_control(route, body);
     request_builder.body(body.into_owned())
 }
@@ -132,6 +134,74 @@ pub(super) fn apply_minimax_reasoning_split<'a>(
     }
     object.insert("reasoning_split".to_string(), serde_json::Value::Bool(true));
     Cow::Owned(serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec()))
+}
+
+/// Restore ferry-minted reasoning echoes on the MiniMax request path
+/// (issue #459). Only MiniMax Responses routes are eligible; the shared
+/// [`crate::openai_compat::restore_reasoning_echoes`] helper rewrites
+/// `minimax-<id>` tokens back to a provider-plausible `id`/`content[]` pair
+/// and borrows the body byte-for-byte when no ferry token is present.
+pub(super) fn apply_minimax_reasoning_echo_restore<'a>(
+    route: &db::RouteConfig,
+    body: &'a [u8],
+) -> Cow<'a, [u8]> {
+    if route.provider != crate::db::EndpointProvider::Minimax {
+        return Cow::Borrowed(body);
+    }
+    if route.native_api != crate::config::NativeApi::Responses {
+        return Cow::Borrowed(body);
+    }
+    crate::openai_compat::restore_reasoning_echoes(body)
+}
+
+/// Default DeepSeek Chat requests to `thinking: {"type":"enabled"}`.
+///
+/// DeepSeek enables thinking by default, so this is a zero-cost belt-and-
+/// suspenders guard for direct Chat requests: only DeepSeek Chat routes are
+/// touched, only when the object omits `thinking`, and any caller-supplied
+/// value (including `disabled`) is preserved byte-for-byte, borrowing the
+/// original bytes instead of re-serializing. The existing `reasoning_effort`
+/// field is untouched, so effort control keeps working. `top_p` is never
+/// injected or lowered here: DeepSeek's thinking floor is 0.95, but ferry
+/// forwards the caller's value verbatim and lets DeepSeek raise it, keeping
+/// the prefix cache byte-stable. All other providers/protocols and
+/// non-JSON/non-object bodies are returned unchanged.
+pub(super) fn apply_deepseek_thinking<'a>(
+    route: &db::RouteConfig,
+    body: &'a [u8],
+) -> Cow<'a, [u8]> {
+    if route.provider != crate::db::EndpointProvider::DeepSeek {
+        return Cow::Borrowed(body);
+    }
+    if route.native_api != crate::config::NativeApi::Chat {
+        return Cow::Borrowed(body);
+    }
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return Cow::Borrowed(body);
+    };
+    let Some(object) = value.as_object_mut() else {
+        return Cow::Borrowed(body);
+    };
+    if object.contains_key("thinking") {
+        return Cow::Borrowed(body);
+    }
+    object.insert(
+        "thinking".to_string(),
+        serde_json::json!({"type": "enabled"}),
+    );
+    Cow::Owned(serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec()))
+}
+
+/// Whether an upstream response body on this route should mint
+/// `minimax-<original id>` reasoning echo tokens (issue #459). Reserved for
+/// MiniMax Responses-native routes; all other providers/protocols keep the
+/// upstream `encrypted_content` verbatim.
+pub(super) fn should_mint_minimax_reasoning_echo(
+    provider: crate::db::EndpointProvider,
+    native_api: crate::config::NativeApi,
+) -> bool {
+    provider == crate::db::EndpointProvider::Minimax
+        && native_api == crate::config::NativeApi::Responses
 }
 
 pub(super) fn is_opencode_host(url: &str) -> bool {
@@ -1038,6 +1108,174 @@ mod tests {
         for body in [b"not-json".as_slice(), b"[1,2,3]".as_slice()] {
             assert_eq!(apply_minimax_reasoning_split(&minimax, body).as_ref(), body);
         }
+    }
+
+    #[test]
+    fn minimax_responses_reasoning_echo_restore_rewrites_own_token_only() {
+        let responses = RouteConfig {
+            native_api: NativeApi::Responses,
+            proxy_url: None,
+            dev_system_normalize: false,
+            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+        };
+        let echo = br#"{"include":["reasoning.encrypted_content"],"input":[{"id":"resp_1_rs","type":"reasoning","encrypted_content":"minimax-resp_1_rs","summary":[{"type":"summary_text","text":"think"}]}]}"#;
+        let out = apply_minimax_reasoning_echo_restore(&responses, echo);
+        assert!(matches!(&out, Cow::Owned(_)));
+        let value: serde_json::Value = serde_json::from_slice(out.as_ref()).unwrap();
+        let item = &value["input"][0];
+        assert!(item.get("encrypted_content").is_none());
+        assert_eq!(item["id"], "resp_1_rs");
+        assert_eq!(item["content"][0]["text"], "think");
+
+        // A body without ferry tokens is borrowed byte-for-byte (prefix cache).
+        let opaque = br#"{"input":[{"type":"reasoning","encrypted_content":"6e4bd8b4-b70d-4f22-aef6-cb5b905790b5-0","summary":[]}]}"#;
+        let out = apply_minimax_reasoning_echo_restore(&responses, opaque);
+        assert!(matches!(&out, Cow::Borrowed(_)));
+        assert_eq!(out.as_ref(), opaque);
+    }
+
+    #[test]
+    fn minimax_reasoning_echo_restore_is_limited_to_responses_routes() {
+        let chat = minimax_route(crate::db::MinimaxServiceTier::Standard);
+        let echo = br#"{"messages":[{"role":"user","content":"hi"}]}"#;
+        assert_eq!(
+            apply_minimax_reasoning_echo_restore(&chat, echo).as_ref(),
+            echo
+        );
+
+        let anthropic = minimax_anthropic_route("https://api.minimaxi.com");
+        assert_eq!(
+            apply_minimax_reasoning_echo_restore(&anthropic, echo).as_ref(),
+            echo
+        );
+
+        let generic = generic_route();
+        assert_eq!(
+            apply_minimax_reasoning_echo_restore(&generic, echo).as_ref(),
+            echo
+        );
+    }
+
+    fn deepseek_route(native_api: NativeApi) -> RouteConfig {
+        RouteConfig {
+            base_url: "https://api.deepseek.com".to_string(),
+            native_api,
+            provider: crate::db::EndpointProvider::DeepSeek,
+            proxy_url: None,
+            dev_system_normalize: false,
+
+            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+        }
+    }
+
+    #[test]
+    fn deepseek_chat_defaults_thinking_enabled() {
+        let route = deepseek_route(NativeApi::Chat);
+        let injected = apply_deepseek_thinking(&route, br#"{"model":"deepseek-flash"}"#);
+        assert!(matches!(&injected, Cow::Owned(_)));
+        let value: serde_json::Value = serde_json::from_slice(injected.as_ref()).unwrap();
+        assert_eq!(value["thinking"]["type"], "enabled");
+        assert_eq!(value["model"], "deepseek-flash");
+    }
+
+    #[test]
+    fn deepseek_chat_preserves_explicit_thinking_and_never_touches_top_p() {
+        let route = deepseek_route(NativeApi::Chat);
+        let disabled = br#"{"model":"m","thinking":{"type":"disabled"}}"#;
+        let out = apply_deepseek_thinking(&route, disabled);
+        assert!(matches!(&out, Cow::Borrowed(_)));
+        assert_eq!(out.as_ref(), disabled);
+
+        // Caller-supplied top_p is forwarded verbatim; ferry never injects or
+        // raises it, so DeepSeek's own 0.95 thinking floor applies upstream.
+        let with_top_p = br#"{"model":"m","top_p":0.7,"reasoning_effort":"high"}"#;
+        let out = apply_deepseek_thinking(&route, with_top_p);
+        let value: serde_json::Value = serde_json::from_slice(out.as_ref()).unwrap();
+        assert_eq!(value["top_p"], 0.7);
+        assert_eq!(value["reasoning_effort"], "high");
+        assert_eq!(value["thinking"]["type"], "enabled");
+
+        // An omitted top_p must stay omitted: ferry adds no sampling parameter
+        // that could pin DeepSeek below its 0.95 thinking-mode floor.
+        let omitted = br#"{"model":"m"}"#;
+        let out = apply_deepseek_thinking(&route, omitted);
+        let value: serde_json::Value = serde_json::from_slice(out.as_ref()).unwrap();
+        assert!(
+            value.get("top_p").is_none(),
+            "ferry must not inject top_p into DeepSeek requests"
+        );
+    }
+
+    #[test]
+    fn deepseek_thinking_injection_is_limited_to_chat_and_other_providers() {
+        let responses = deepseek_route(NativeApi::Responses);
+        let body = br#"{"model":"deepseek-flash"}"#;
+        let out = apply_deepseek_thinking(&responses, body);
+        assert!(matches!(&out, Cow::Borrowed(_)));
+        assert_eq!(out.as_ref(), body);
+
+        for provider in [
+            crate::db::EndpointProvider::Generic,
+            crate::db::EndpointProvider::Minimax,
+        ] {
+            let route = RouteConfig {
+                provider,
+                proxy_url: None,
+                dev_system_normalize: false,
+                ..deepseek_route(NativeApi::Chat)
+            };
+            assert_eq!(apply_deepseek_thinking(&route, body).as_ref(), body);
+        }
+
+        for body in [b"not-json".as_slice(), b"[1,2,3]".as_slice()] {
+            assert_eq!(
+                apply_deepseek_thinking(&deepseek_route(NativeApi::Chat), body).as_ref(),
+                body
+            );
+        }
+    }
+
+    #[test]
+    fn build_upstream_request_injects_deepseek_thinking_for_buffered_and_passthrough() {
+        let route = deepseek_route(NativeApi::Chat);
+        for body in [
+            PreparedRequestBody::BufferedBytes(br#"{"model":"deepseek-flash"}"#.to_vec()),
+            PreparedRequestBody::PassthroughStream(br#"{"model":"deepseek-flash"}"#.to_vec()),
+        ] {
+            let request = build_upstream_request(
+                &Client::new(),
+                &Method::POST,
+                "https://api.deepseek.com/v1/chat/completions",
+                &route,
+                &body,
+                &[],
+                None,
+            )
+            .build()
+            .unwrap();
+            let bytes = request
+                .body()
+                .and_then(|body| body.as_bytes())
+                .expect("deepseek body bytes");
+            let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+            assert_eq!(value["thinking"]["type"], "enabled");
+        }
+    }
+
+    #[test]
+    fn should_mint_minimax_reasoning_echo_is_responses_only() {
+        assert!(should_mint_minimax_reasoning_echo(
+            crate::db::EndpointProvider::Minimax,
+            NativeApi::Responses
+        ));
+        assert!(!should_mint_minimax_reasoning_echo(
+            crate::db::EndpointProvider::Minimax,
+            NativeApi::Chat
+        ));
+        assert!(!should_mint_minimax_reasoning_echo(
+            crate::db::EndpointProvider::DeepSeek,
+            NativeApi::Responses
+        ));
     }
 
     #[test]

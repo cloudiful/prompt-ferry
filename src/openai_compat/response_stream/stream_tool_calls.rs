@@ -146,11 +146,7 @@ impl ChatResponseStreamAdapter {
         {
             items.push((
                 output_index,
-                reasoning_item_with_status(
-                    &self.reasoning_id,
-                    &self.full_reasoning_text,
-                    "completed",
-                ),
+                self.reasoning_item_with_echo(&self.full_reasoning_text, "completed"),
             ));
         }
         if let Some(output_index) = self.message_output_index.filter(|_| self.content_started) {

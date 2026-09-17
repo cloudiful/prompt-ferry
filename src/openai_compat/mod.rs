@@ -12,6 +12,7 @@ mod response_stream_tests;
 mod response_stream_utf8_tests;
 #[cfg(test)]
 mod response_tests;
+mod responses_reasoning_echo;
 mod responses_reasoning_summary;
 mod responses_state;
 
@@ -29,8 +30,12 @@ pub use response_stream::{
     AnthropicResponseStreamAdapter, ChatResponseStreamAdapter, ResponsesChatResponseStreamAdapter,
 };
 pub(crate) use response_stream_state::sse_event;
+pub(crate) use responses_reasoning_echo::{
+    bridge_reasoning_encrypted_token, minimax_reasoning_encrypted_token,
+    mint_reasoning_encrypted_content, restore_reasoning_echoes,
+};
 pub(crate) use responses_reasoning_summary::{
-    ensure_reasoning_summary, normalize_responses_reasoning_summaries_body,
+    ensure_reasoning_summary, normalize_responses_reasoning_body,
 };
 pub(crate) use responses_state::{
     NormalizedResponsesRequest, assistant_message_to_output_items,

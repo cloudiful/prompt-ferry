@@ -1,9 +1,11 @@
 use super::{conversation_key, previous_response_id, request_parse, request_validate};
-use crate::openai_compat::{CompatError, NormalizedResponsesRequest};
+use crate::openai_compat::{CompatError, NormalizedResponsesRequest, restore_reasoning_echoes};
 #[cfg(test)]
 use serde_json::Value;
 
 pub fn responses_request_to_chat(body: &[u8]) -> Result<Vec<u8>, CompatError> {
+    let body = restore_reasoning_echoes(body);
+    let body = body.as_ref();
     let object = request_parse::parse_request_object(body)?;
     request_validate::reject_unsupported_root_fields(&object)?;
     let request = NormalizedResponsesRequest::from_body(body)?;
@@ -23,7 +25,14 @@ pub fn responses_request_to_chat(body: &[u8]) -> Result<Vec<u8>, CompatError> {
 /// `reasoning.effort` (including `xhigh`) as `reasoning_effort`.
 /// Item references and orphan `function_call_output` reuse the existing
 /// `validate_for_chat_compat` continuation checks with no replay context.
+///
+/// Issue #459: self-describing ferry reasoning echoes
+/// (`minimax-<id>` / `ferry-<id>`) are normalized back into provider-plausible
+/// reasoning items before translation; every other body is borrowed
+/// byte-for-byte.
 pub fn responses_stateless_request_to_chat(body: &[u8]) -> Result<Vec<u8>, CompatError> {
+    let body = restore_reasoning_echoes(body);
+    let body = body.as_ref();
     let object = request_parse::parse_request_object(body)?;
     request_validate::reject_unsupported_root_fields_for_stateless(&object)?;
     let request = NormalizedResponsesRequest::from_body(body)?;
