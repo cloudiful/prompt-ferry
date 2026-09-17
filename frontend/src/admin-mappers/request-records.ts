@@ -24,14 +24,25 @@ export function deriveModelDisplay(record: {
   return requested
 }
 
+export function upstreamLabel(row: {
+  mcp_server_name?: string | null;
+  endpoint_name?: string | null;
+  endpoint_id?: string | null;
+  upstream_model?: string | null;
+  path?: string | null;
+}): string {
+  const base = row.mcp_server_name || row.endpoint_name || row.endpoint_id || row.path || "-";
+  const model = (row.upstream_model || "").trim();
+  if (!model) return base;
+  if (row.mcp_server_name) return base;
+  if (model.toLowerCase() === base.trim().toLowerCase()) return base;
+  return `${base} / ${model}`;
+}
+
 export function createRequestRecordRowView(
   record: RequestRecordListRow,
 ): RequestRecordRowView {
-  const upstreamLabel =
-    record.mcp_server_name ||
-    record.endpoint_name ||
-    record.endpoint_id ||
-    record.path
+  const label = upstreamLabel(record);
   const sessionRecognized = Boolean(record.conversation_id)
   const firstTurn = sessionRecognized && (record.conversation_seq ?? 1) <= 1
   return {
@@ -44,8 +55,8 @@ export function createRequestRecordRowView(
     request_date: record.created_at.slice(0, 10),
     session_state: sessionRecognized ? 'recognized' : 'unrecognized',
     session_short_id: record.conversation_id?.slice(0, 8) || '-',
-    target: upstreamLabel,
-    upstream_label: upstreamLabel,
+    target: label,
+    upstream_label: label,
     user_key: record.user_login_name || '-',
   }
 }
@@ -56,11 +67,7 @@ export function createRequestRecordDetailView(
   const recordWithUserAgent = record as RequestRecordDetail & {
     request_user_agent?: string | null
   }
-  const upstreamLabel =
-    record.mcp_server_name ||
-    record.endpoint_name ||
-    record.endpoint_id ||
-    record.path
+  const label = upstreamLabel(record);
   const sessionRecognized = Boolean(record.conversation_id)
   const firstTurn = sessionRecognized && (record.conversation_seq ?? 1) <= 1
   const installationShort = record.client_installation_id
@@ -79,8 +86,8 @@ export function createRequestRecordDetailView(
     request_user_agent: recordWithUserAgent.request_user_agent ?? null,
     session_state: sessionRecognized ? 'recognized' : 'unrecognized',
     session_short_id: record.conversation_id?.slice(0, 8) || '-',
-    target: upstreamLabel,
-    upstream_label: upstreamLabel,
+    target: label,
+    upstream_label: label,
     user_key: record.user_login_name || '-',
   }
 }

@@ -459,8 +459,7 @@ impl UsageLog {
 
     pub fn with_model(mut self, model: Option<String>) -> Self {
         if model.is_some() {
-            self.model = model.clone();
-            self.upstream_model = model;
+            self.model = model;
         }
         self
     }
