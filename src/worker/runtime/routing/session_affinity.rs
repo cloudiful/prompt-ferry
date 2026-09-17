@@ -186,6 +186,30 @@ pub(super) async fn select<'a>(
                     }
                 }
                 BindingSelection::Unavailable => {
+                    // 仅 StaleEndpoint/StaleKey 走自动重绑；QuotaExhausted 已在上一个分支处理，conflict 已提前 return。
+                    if !matches!(
+                        crate::routing::bound_binding_state(candidate, &current_binding),
+                        crate::routing::BoundBindingState::Active
+                    ) {
+                        match store.delete(&cache_key).await {
+                            Ok(_) => {
+                                tracing::warn!(
+                                    event = "session_affinity_auto_rebind",
+                                    model_route_rule_id = %candidate.rule_id,
+                                    stale_endpoint_id = %current_binding.endpoint_id,
+                                    "stale session binding cleared, rebuilding",
+                                );
+                                binding = None;
+                                continue;
+                            }
+                            Err(err) => {
+                                crate::response_affinity::log_unavailable(&err);
+                                return Err(anyhow::Error::new(
+                                    RouteAffinityError::backend_unavailable(),
+                                ));
+                            }
+                        }
+                    }
                     return Err(anyhow::Error::new(RouteAffinityError::target_unavailable(
                         audit,
                     )));
