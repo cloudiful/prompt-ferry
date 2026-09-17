@@ -8,7 +8,7 @@ import type {
 import type { McpForm } from '@/models'
 import McpBearerTokensEditor from '@/components/mcp/McpBearerTokensEditor.vue'
 import McpEnvironmentEditor from '@/components/mcp/McpEnvironmentEditor.vue'
-import ProxySettingsDialog from '@/components/shared/ProxySettingsDialog.vue'
+import ProxySettingsFields from '@/components/shared/ProxySettingsFields.vue'
 
 const props = defineProps<{
   busy: boolean
@@ -177,29 +177,39 @@ defineEmits<{
   save: []
 }>()
 
-// Issue #375 Phase F: clear the saved row proxy so the next save sends `""`
-// (clear to inherit). Leaving the field blank while `has_saved_proxy_url`
-// is true omits the key and keeps the stored value (see `mcpFormToRequest`).
-function clearProxyUrl(): void {
-  if (!form.value) return
-  form.value.proxy_url = ''
-  form.value.has_saved_proxy_url = false
+// Whole-dialog two-level drill (mirrors EndpointDialog 968c869): the proxy
+// editor swaps the entire modal content instead of nesting a UModal inside
+// a UModal, so no inner popover survives the save. Draft lives in `form`
+// so edits persist across view switches and save via the outer button.
+const view = ref<'main' | 'proxy'>('main')
+
+function openProxy(): void {
+  view.value = 'proxy'
 }
 
-function onProxySave(value: string): void {
-  if (!form.value) return
-  const trimmed = (value ?? '').trim()
-  form.value.proxy_url = trimmed
-  if (trimmed === '') form.value.has_saved_proxy_url = false
+function backToMain(): void {
+  view.value = 'main'
 }
 
-const proxyModalOpen = ref(false)
+watch(visible, (open) => {
+  if (!open) view.value = 'main'
+})
 
 // INLINE-proxy-ui-a1: active state for the ghost globe button.
 const hasProxy = computed(() => {
   const typed = (form.value?.proxy_url ?? '').trim() !== ''
   const saved = form.value?.has_saved_proxy_url ?? false
   return typed || saved
+})
+
+// Mirrors EndpointDialog: `scheme://` with an empty address is an unfinished
+// inline edit and must block the outer save.
+const isProxyValid = computed(() => {
+  const trimmed = (form.value?.proxy_url ?? '').trim()
+  if (!trimmed) return true
+  const match = trimmed.match(/^(http|https|socks5h|socks5):\/\/(.*)$/i)
+  if (match) return (match[2] ?? '').trim() !== ''
+  return true
 })
 </script>
 
@@ -221,6 +231,7 @@ const hasProxy = computed(() => {
           class="grid min-h-0 gap-3 overflow-x-hidden overflow-y-auto pr-1"
           @submit.prevent="$emit('save')"
         >
+          <template v-if="view === 'main'">
           <div
             v-if="isAdmin"
             class="grid gap-3 md:grid-cols-[10rem_minmax(0,1fr)_minmax(0,1fr)]"
@@ -453,20 +464,10 @@ const hasProxy = computed(() => {
                 icon="i-lucide-globe"
                 :aria-label="t('proxyUrl')"
                 :aria-pressed="hasProxy"
-                @click="proxyModalOpen = true"
+                @click="openProxy"
               />
             </UTooltip>
           </div>
-          <ProxySettingsDialog
-            v-if="form.transport === 'http'"
-            v-model:visible="proxyModalOpen"
-            :initial-value="form?.proxy_url ?? ''"
-            :has-saved="form?.has_saved_proxy_url ?? false"
-            :hint="t('mcpProxyUrlHint')"
-            :t="t"
-            @save="onProxySave"
-            @clear="clearProxyUrl"
-          />
           <div :class="settingsSectionClass">
             <div class="grid gap-3 md:grid-cols-[repeat(3,minmax(0,1fr))]">
               <div class="grid min-w-0 gap-2">
@@ -647,6 +648,45 @@ const hasProxy = computed(() => {
               </div>
             </div>
           </div>
+          </template>
+          <template v-else>
+            <div class="flex items-center gap-1">
+              <UButton
+                type="button"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-arrow-left"
+                :aria-label="t('cancel')"
+                @click="backToMain"
+              />
+              <span class="text-sm font-medium text-default">{{
+                t('proxySettings')
+              }}</span>
+            </div>
+            <div class="grid gap-2 rounded border border-default bg-muted p-3">
+              <div class="flex items-center gap-1">
+                <span class="text-xs font-medium text-default">{{
+                  t('proxyUrl')
+                }}</span>
+                <UTooltip :text="t('mcpProxyUrlHint')">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-info"
+                    :aria-label="t('mcpProxyUrlHint')"
+                  />
+                </UTooltip>
+              </div>
+              <ProxySettingsFields
+                v-model:proxy-url="form.proxy_url"
+                v-model:has-saved="form.has_saved_proxy_url"
+                :t="t"
+              />
+            </div>
+          </template>
         </form>
         <div class="flex justify-end gap-2 border-t border-default pt-3">
           <UButton
@@ -665,6 +705,7 @@ const hasProxy = computed(() => {
             form="mcp-server-form"
             size="sm"
             :loading="busy"
+            :disabled="!isProxyValid"
             ><UIcon name="i-lucide-save" class="h-4 w-4" />{{
               t('save')
             }}</UButton
