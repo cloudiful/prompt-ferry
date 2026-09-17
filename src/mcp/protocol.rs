@@ -1,6 +1,6 @@
 use anyhow::Context;
 use rmcp::model::{
-    ClientCapabilities, ClientInfo, Implementation, InitializeResult, ProtocolVersion,
+    ClientCapabilities, ClientConfig, Implementation, InitializeResult, ProtocolVersion,
     ServerCapabilities,
 };
 use serde_json::{Value, json};
@@ -30,8 +30,8 @@ pub(super) fn json_error_value(id: Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
-pub(super) fn client_info() -> ClientInfo {
-    ClientInfo::new(
+pub(super) fn client_info() -> ClientConfig {
+    ClientConfig::new(
         ClientCapabilities::default(),
         Implementation::new(MCP_IMPLEMENTATION_NAME, env!("CARGO_PKG_VERSION")),
     )

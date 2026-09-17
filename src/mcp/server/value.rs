@@ -2,7 +2,7 @@ use rmcp::{
     ErrorData,
     model::{
         CallToolResponse, GetPromptResponse, Implementation, InitializeResult,
-        ReadResourceResponse, RequestId, RequestMetaObject, ServerCapabilities, ServerInfo,
+        ReadResourceResponse, RequestId, RequestMetaObject, ServerCapabilities, ServerConfig,
         ServerResult,
     },
 };
@@ -13,7 +13,7 @@ use crate::naming::MCP_SERVER_NAME;
 
 use super::super::protocol::{DEFAULT_PROTOCOL_VERSION, DEFAULT_PROTOCOL_VERSION_STR};
 
-pub(super) fn server_info() -> ServerInfo {
+pub(super) fn server_info() -> ServerConfig {
     let capabilities = ServerCapabilities::builder()
         .enable_tools()
         .enable_resources()

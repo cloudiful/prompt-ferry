@@ -7,7 +7,7 @@ use rmcp::{
         GetPromptRequestParams, GetPromptResponse, InitializeRequestParams, InitializeResult,
         ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
         PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
-        ServerInfo,
+        ServerConfig,
     },
     service::{NotificationContext, RequestContext, RoleServer},
 };
@@ -263,7 +263,7 @@ impl ServerHandler for ProxyService {
             .await
     }
 
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         server_info()
     }
 }

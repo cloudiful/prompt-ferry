@@ -990,7 +990,7 @@ impl rmcp::ServerHandler for EntryUpstream {
         )
     }
 
-    fn get_info(&self) -> rmcp::model::ServerInfo {
+    fn get_info(&self) -> rmcp::model::ServerConfig {
         rmcp::model::InitializeResult::new(
             rmcp::model::ServerCapabilities::builder()
                 .enable_tools()

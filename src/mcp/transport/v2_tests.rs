@@ -7,7 +7,7 @@ use rmcp::{
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, InitializeResult,
         InputRequiredResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
-        ServerCapabilities, ServerInfo, Tool,
+        ServerCapabilities, ServerConfig, Tool,
     },
     service::RequestContext,
     service::RoleServer,
@@ -121,7 +121,7 @@ impl ServerHandler for V2TestServer {
         .into())
     }
 
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let capabilities = ServerCapabilities::builder().enable_tools().build();
         InitializeResult::new(capabilities)
             .with_server_info(rmcp::model::Implementation::new("v2-test-upstream", "1.0"))
@@ -162,7 +162,7 @@ impl ServerHandler for LegacyV2TestServer {
         .into())
     }
 
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let capabilities = ServerCapabilities::builder().enable_tools().build();
         InitializeResult::new(capabilities)
             .with_server_info(rmcp::model::Implementation::new("legacy-v2-test", "1.0"))

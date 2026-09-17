@@ -211,7 +211,7 @@ pub(super) async fn connect(
     storage: Option<&super::McpRuntimeStorage>,
     server: &McpServer,
     conversation_id: Option<&str>,
-) -> anyhow::Result<rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientInfo>> {
+) -> anyhow::Result<rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientConfig>> {
     if server.effective_auth_mode() != crate::db::MCP_AUTH_MODE_BEARER {
         let selected = SelectedToken {
             value: None,

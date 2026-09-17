@@ -61,7 +61,7 @@ prompt-ferry-redact = { version = "0.1.0", path = "crates/prompt-ferry-redact" }
 prompt-ferry-redact-upstream = { version = "0.1.0", path = "crates/prompt-ferry-redact-upstream" }
 prompt-ferry-runtime-env = { version = "0.1.0", path = "crates/prompt-ferry-runtime-env" }
 prompt-ferry-upstream-presets = { version = "0.1.0", path = "crates/prompt-ferry-upstream-presets" }
-rmcp = { version = "3.3.0", features = ["client", "transport-streamable-http-client-reqwest", "transport-child-process", "transport-streamable-http-server"] }
+rmcp = { version = "3.4.0", features = ["client", "transport-streamable-http-client-reqwest", "transport-child-process", "transport-streamable-http-server"] }
 scheduler = { package = "cloudiful-scheduler", version = "0.4.12", features = ["valkey-store"] }
 rustls = { version = "0.23.44", features = ["aws-lc-rs"] }
 rustls-native-certs = "0.8.4"
