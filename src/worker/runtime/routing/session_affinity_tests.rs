@@ -137,14 +137,27 @@ async fn concurrent_first_requests_share_binding_and_follow_key_rotation() {
     assert_eq!(rotated.route.endpoint_key_id, left.route.endpoint_key_id);
     assert_eq!(rotated.route.api_key, "rotated-key");
 
-    rotated_candidate
+    let stale_endpoint_id = left.route.route_id;
+    let other_endpoint_id = rotated_candidate
+        .targets
+        .iter()
+        .find(|target| target.endpoint_id != stale_endpoint_id)
+        .expect("candidate should have another endpoint")
+        .endpoint_id;
+    let bound_target = rotated_candidate
         .targets
         .iter_mut()
-        .find(|target| target.endpoint_id == left.route.route_id)
-        .expect("bound target exists")
-        .api_keys[0]
-        .enabled = false;
-    let unavailable = match select_route_for_candidate(
+        .find(|target| target.endpoint_id == stale_endpoint_id)
+        .expect("bound target exists");
+    bound_target.api_keys[0].enabled = false;
+    // Clear the legacy secret as well: otherwise the stale endpoint would
+    // linger in the rebuild pool via the secret fallback and the draw could
+    // stay on it (see key_pool::target_units_mode). Clearing mirrors the
+    // key-deletion path covered by auto_rebind_after_stale_key.
+    bound_target.api_key.clear();
+    // Issue #444: disabled bound key is StaleKey and must auto-rebind to the
+    // remaining healthy endpoint instead of reporting target_unavailable.
+    let rebound = select_route_for_candidate(
         &services_b,
         &request_ctx_b,
         &rotated_candidate,
@@ -153,16 +166,9 @@ async fn concurrent_first_requests_share_binding_and_follow_key_rotation() {
         Some("key-a"),
     )
     .await
-    {
-        Ok(_) => panic!("disabled bound key must not fail over"),
-        Err(error) => error,
-    };
-    assert_eq!(
-        unavailable
-            .downcast_ref::<RouteAffinityError>()
-            .map(|error| error.code),
-        Some("responses_session_affinity_target_unavailable")
-    );
+    .unwrap()
+    .expect("disabled bound key must auto-rebind");
+    assert_eq!(rebound.route.route_id, other_endpoint_id);
 }
 
 #[tokio::test]
