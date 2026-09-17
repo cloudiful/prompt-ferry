@@ -948,6 +948,93 @@ mod tests {
     }
 
     #[test]
+    fn stateless_restores_bridge_reasoning_echo_before_tool_call() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_stateless_request_to_chat(
+                br#"{
+                    "model":"deepseek-flash",
+                    "input":[
+                        {"type":"reasoning","id":"rs_9","encrypted_content":"ferry-rs_9","summary":[{"type":"summary_text","text":"think via summary"}]},
+                        {"type":"function_call","call_id":"call_1","name":"bash","arguments":"{}"},
+                        {"type":"function_call_output","call_id":"call_1","output":"ok"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let messages = value["messages"].as_array().unwrap();
+        let assistant = messages
+            .iter()
+            .find(|message| message.get("tool_calls").is_some())
+            .unwrap();
+        assert_eq!(
+            assistant["reasoning_content"].as_str(),
+            Some("think via summary"),
+            "minted bridge echo must be restored into reasoning_content"
+        );
+        assert!(assistant.get("encrypted_content").is_none());
+    }
+
+    #[test]
+    fn stateless_restores_minimax_echo_when_routed_to_chat_upstream() {
+        // A conversation originally served by MiniMax Responses passthrough
+        // may later route to a chat-native upstream; the `minimax-<id>` token
+        // is ferry-owned and must still restore the reasoning echo.
+        let value = serde_json::from_slice::<Value>(
+            &responses_stateless_request_to_chat(
+                br#"{
+                    "model":"deepseek-flash",
+                    "input":[
+                        {"type":"reasoning","id":"resp_1_rs","encrypted_content":"minimax-resp_1_rs","summary":[{"type":"summary_text","text":"think"}]},
+                        {"type":"function_call","call_id":"call_2","name":"read","arguments":"{}"},
+                        {"type":"function_call_output","call_id":"call_2","output":"ok"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let messages = value["messages"].as_array().unwrap();
+        let assistant = messages
+            .iter()
+            .find(|message| message.get("tool_calls").is_some())
+            .unwrap();
+        assert_eq!(assistant["reasoning_content"].as_str(), Some("think"));
+    }
+
+    #[test]
+    fn stateless_leaves_opaque_encrypted_reasoning_untouched() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_stateless_request_to_chat(
+                br#"{
+                    "model":"deepseek-flash",
+                    "input":[
+                        {"type":"reasoning","encrypted_content":"6e4bd8b4-b70d-4f22-aef6-cb5b905790b5-0","summary":[{"type":"summary_text","text":"opaque"}]},
+                        {"type":"function_call","call_id":"call_3","name":"read","arguments":"{}"},
+                        {"type":"function_call_output","call_id":"call_3","output":"ok"}
+                    ]
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let messages = value["messages"].as_array().unwrap();
+        let assistant = messages
+            .iter()
+            .find(|message| message.get("tool_calls").is_some())
+            .unwrap();
+        assert!(
+            assistant.get("reasoning_content").is_none()
+                || assistant["reasoning_content"].as_str() == Some(""),
+            "foreign opaque encrypted_content must not be treated as a ferry echo"
+        );
+    }
+
+    #[test]
     fn rejects_unsupported_reasoning_fields() {
         let err = responses_request_to_chat(br#"{"input":"hi","reasoning":{"summary":"auto"}}"#)
             .unwrap_err();

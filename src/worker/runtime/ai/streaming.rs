@@ -338,8 +338,16 @@ pub(super) async fn forward_streaming_response(
                 PassthroughSseFilter::new()
             }
         });
-    let mut responses_summary_filter =
-        responses_passthrough.then(ResponsesReasoningSummarySseFilter::new);
+    // Issue #459: only MiniMax Responses passthrough mints
+    // `minimax-<original reasoning id>` tokens; every other Responses-native
+    // upstream keeps its own `encrypted_content` verbatim.
+    let mint_minimax_reasoning_encrypted_content = responses_passthrough
+        && super::upstream::should_mint_minimax_reasoning_echo(
+            route_ctx.route.provider,
+            route_ctx.route.native_api,
+        );
+    let mut responses_summary_filter = responses_passthrough
+        .then(|| ResponsesReasoningSummarySseFilter::new(mint_minimax_reasoning_encrypted_content));
     let mut sse_restore_filter = upstream_restore_session.as_ref().map(|session| {
         if responses_passthrough {
             SseRestoreFilter::new_responses(session)
