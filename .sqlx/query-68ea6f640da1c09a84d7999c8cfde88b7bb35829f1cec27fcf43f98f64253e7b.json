@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM usage_charges\nWHERE event_id = $1;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "68ea6f640da1c09a84d7999c8cfde88b7bb35829f1cec27fcf43f98f64253e7b"
+}

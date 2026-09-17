@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    EXISTS (\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_schema = current_schema()\n          AND table_name = 'request_records'\n          AND column_name = 'ttft_ms'\n    ) AS \"ttft_exists!\",\n    NOT EXISTS (\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_schema = current_schema()\n          AND table_name = 'request_records'\n          AND column_name = 'first_chunk_ms'\n    ) AS \"first_chunk_absent!\"\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ttft_exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "first_chunk_absent!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "c364b3291ed8e939fd2ea48a3b229b733403419ff0905d124d18dbf8b4532d05"
+}
