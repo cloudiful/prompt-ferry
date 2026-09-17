@@ -40,6 +40,7 @@ const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
       :columns="columns"
       :loading="busy"
       class="min-w-0"
+      :ui="{ th: 'whitespace-nowrap' }"
     >
       <template #empty>
         <div class="px-4 py-6 text-sm text-dimmed">

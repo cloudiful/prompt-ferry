@@ -120,7 +120,7 @@ function setApiKeyEnabled(index: number, value: boolean): void {
         </UButton>
       </div>
     </div>
-    <UTable :data="rows" :columns="columns" class="min-w-0">
+    <UTable :data="rows" :columns="columns" class="min-w-0" :ui="{ th: 'whitespace-nowrap' }">
       <template #key-cell="{ row }">
         <div class="flex min-w-0 items-center gap-2">
           <div v-if="rowHasSavedKey(row.original.index)" class="shrink-0">

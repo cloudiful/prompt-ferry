@@ -63,6 +63,7 @@ const columns = computed<TableColumn<BillingPriceRuleResponse>[]>(() => [
         :columns="columns"
         :loading="loading"
         class="min-w-[64rem]"
+        :ui="{ th: 'whitespace-nowrap' }"
       >
         <template #empty>{{ t('noPriceRules') }}</template>
         <template #input_rate-cell="{ row }">{{

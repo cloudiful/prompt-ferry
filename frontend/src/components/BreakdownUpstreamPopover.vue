@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { RequestRecordOverviewBreakdownRow } from '@/generated/admin-api'
+import type { TableColumn } from '@nuxt/ui'
+import type {
+  RequestRecordOverviewBreakdownRow,
+  RequestRecordOverviewUpstreamBreakdown,
+} from '@/generated/admin-api'
 import { useLocale } from '@/composables/useLocale'
 import type { RequestRecordFormatting } from '../models/request-record-formatting'
 
@@ -14,6 +18,18 @@ const { t } = useLocale()
 const visible = computed(() => (props.row.upstream_count ?? 0) > 1)
 const entries = computed(() => props.row.upstream_breakdown ?? [])
 const hasEntries = computed(() => entries.value.length > 0)
+
+const upstreamColumns = computed<
+  TableColumn<RequestRecordOverviewUpstreamBreakdown>[]
+>(() => [
+  { accessorKey: 'endpoint_name', header: t('overviewUpstreamEndpoint') },
+  { accessorKey: 'error_rate', header: t('overviewErrorRate') },
+  { accessorKey: 'total_tokens', header: t('overviewTotalTokens') },
+  {
+    accessorKey: 'avg_output_tokens_per_second',
+    header: t('overviewAvgOutputRate'),
+  },
+])
 
 function endpointLabel(
   endpointName: string | null | undefined,
@@ -52,40 +68,33 @@ function endpointLabel(
         <div class="mb-2 text-xs font-semibold text-highlighted">
           {{ t('overviewUpstreamBreakdown') }}
         </div>
-        <table v-if="hasEntries" class="w-full text-left text-xs">
-          <thead class="text-muted">
-            <tr>
-              <th class="px-2 py-1">{{ t('overviewUpstreamEndpoint') }}</th>
-              <th class="px-2 py-1">{{ t('overviewErrorRate') }}</th>
-              <th class="px-2 py-1">{{ t('overviewTotalTokens') }}</th>
-              <th class="px-2 py-1">{{ t('overviewAvgOutputRate') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="entry in entries"
-              :key="entry.endpoint_id ?? entry.endpoint_name ?? ''"
-              class="border-t border-default"
-            >
-              <td class="px-2 py-1 font-medium text-highlighted">
-                {{ endpointLabel(entry.endpoint_name, entry.endpoint_id) }}
-              </td>
-              <td class="px-2 py-1">
-                {{ formatting.formatPercent(entry.error_rate) }}
-              </td>
-              <td class="px-2 py-1">
-                {{ formatting.formatTokenQuantity(entry.total_tokens) }}
-              </td>
-              <td class="px-2 py-1">
-                {{
-                  formatting.formatTokensPerSecond(
-                    entry.avg_output_tokens_per_second,
-                  )
-                }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <UTable
+          v-if="hasEntries"
+          :data="entries"
+          :columns="upstreamColumns"
+          class="w-full"
+          :ui="{
+            th: 'whitespace-nowrap px-2 py-1 text-xs',
+            td: 'px-2 py-1 text-xs',
+          }"
+        >
+          <template #endpoint_name-cell="{ row }">
+            <span class="font-medium text-highlighted">{{
+              endpointLabel(row.original.endpoint_name, row.original.endpoint_id)
+            }}</span>
+          </template>
+          <template #error_rate-cell="{ row }">{{
+            formatting.formatPercent(row.original.error_rate)
+          }}</template>
+          <template #total_tokens-cell="{ row }">{{
+            formatting.formatTokenQuantity(row.original.total_tokens)
+          }}</template>
+          <template #avg_output_tokens_per_second-cell="{ row }">{{
+            formatting.formatTokensPerSecond(
+              row.original.avg_output_tokens_per_second,
+            )
+          }}</template>
+        </UTable>
         <div v-else class="text-xs text-dimmed">
           {{ t('overviewUpstreamEmpty') }}
         </div>

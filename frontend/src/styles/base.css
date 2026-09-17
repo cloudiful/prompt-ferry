@@ -85,8 +85,3 @@ select {
     display: none;
   }
 }
-
-/* Data tables: keep header text on a single line (covers UTable and plain tables). */
-table thead th {
-  white-space: nowrap;
-}

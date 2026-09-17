@@ -182,6 +182,7 @@ defineEmits<{
             :data="previewResult?.findings ?? []"
             :columns="findingColumns"
             class="min-w-0"
+            :ui="{ th: 'whitespace-nowrap' }"
           >
             <template #empty>{{ t('noFindings') }}</template>
           </UTable>
@@ -197,6 +198,7 @@ defineEmits<{
             :data="previewResult?.applied_replacements ?? []"
             :columns="replacementColumns"
             class="min-w-0"
+            :ui="{ th: 'whitespace-nowrap' }"
           >
             <template #empty>{{ t('noReplacements') }}</template>
           </UTable>
