@@ -4,7 +4,10 @@ import type { ModelRouteForm, ModelRouteTargetForm } from '@/models'
 
 type ScheduleWindow = { start: string; end: string; days?: number[] }
 
+// Issue #457: `end` may additionally be `24:00` (exclusive midnight);
+// `start` stays within `00:00-23:59`.
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
+const HHMM_END_RE = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/
 
 export function hasTargetProxy(
   target: ModelRouteTargetForm | null | undefined,
@@ -106,7 +109,7 @@ export function isTargetScheduleValid(
     const start = (window?.start ?? '').trim()
     const end = (window?.end ?? '').trim()
     if (!start || !end) return false
-    if (!HHMM_RE.test(start) || !HHMM_RE.test(end)) return false
+    if (!HHMM_RE.test(start) || !HHMM_END_RE.test(end)) return false
     return start !== end
   })
 }

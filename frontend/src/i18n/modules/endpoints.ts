@@ -149,7 +149,7 @@ export const endpointMessages = {
     scheduleStart: '开始',
     scheduleEnd: '结束',
     scheduleRequired: '开始与结束必填',
-    scheduleInvalid: '需为 HH:MM（00:00–23:59）',
+    scheduleInvalid: '需为 HH:MM（00:00–24:00，24:00 仅可作结束=午夜）',
     scheduleEqual: '开始与结束不能相同',
     scheduleMoreWindows: '等{count}段',
     targetSettings: '目标设置',
@@ -316,7 +316,8 @@ export const endpointMessages = {
     scheduleStart: 'Start',
     scheduleEnd: 'End',
     scheduleRequired: 'Start and end are required',
-    scheduleInvalid: 'Must be HH:MM (00:00–23:59)',
+    scheduleInvalid:
+      'Must be HH:MM (00:00–24:00; 24:00 only as end = midnight)',
     scheduleEqual: 'Start must not equal end',
     scheduleMoreWindows: '+{count} windows',
     targetSettings: 'Target settings',
