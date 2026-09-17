@@ -7,22 +7,22 @@ test('upstreamLabel returns endpoint name when upstream_model is empty', () => {
   ).toBe('opencode go')
 })
 
-test('upstreamLabel appends upstream model after endpoint name', () => {
+test('upstreamLabel ignores upstream model and returns endpoint name', () => {
   expect(
     upstreamLabel({
       endpoint_name: 'opencode go',
       upstream_model: 'muse-spark-1.3-contri',
     }),
-  ).toBe('opencode go / muse-spark-1.3-contri')
+  ).toBe('opencode go')
 })
 
-test('upstreamLabel does not duplicate when model equals endpoint name', () => {
-  expect(
-    upstreamLabel({ endpoint_name: 'glm', upstream_model: 'glm' }),
-  ).toBe('glm')
-  expect(
-    upstreamLabel({ endpoint_name: 'glm', upstream_model: ' GLM ' }),
-  ).toBe('glm')
+test('upstreamLabel ignores upstream model even when different from endpoint name', () => {
+  expect(upstreamLabel({ endpoint_name: 'glm', upstream_model: 'glm' })).toBe(
+    'glm',
+  )
+  expect(upstreamLabel({ endpoint_name: 'glm', upstream_model: ' GLM ' })).toBe(
+    'glm',
+  )
 })
 
 test('upstreamLabel keeps MCP rows untouched', () => {

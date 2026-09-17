@@ -31,12 +31,7 @@ export function upstreamLabel(row: {
   upstream_model?: string | null;
   path?: string | null;
 }): string {
-  const base = row.mcp_server_name || row.endpoint_name || row.endpoint_id || row.path || "-";
-  const model = (row.upstream_model || "").trim();
-  if (!model) return base;
-  if (row.mcp_server_name) return base;
-  if (model.toLowerCase() === base.trim().toLowerCase()) return base;
-  return `${base} / ${model}`;
+  return row.mcp_server_name || row.endpoint_name || row.endpoint_id || row.path || "-";
 }
 
 export function createRequestRecordRowView(
