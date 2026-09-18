@@ -192,13 +192,13 @@ pub(super) fn resolve_auto_protocol(
     }
     route.native_api = match request_path {
         "/v1/chat/completions" => NativeApi::Chat,
-        "/v1/responses" => NativeApi::Responses,
+        "/v1/responses" | "/v1/responses/compact" => NativeApi::Responses,
         "/v1/messages" => NativeApi::AnthropicMessages,
         _ => {
             return Err(CompatError::new(
                 StatusCode::BAD_REQUEST,
                 "unsupported_auto_protocol",
-                "automatic endpoints support only /v1/chat/completions, /v1/responses, and /v1/messages",
+                "automatic endpoints support only /v1/chat/completions, /v1/responses, /v1/responses/compact, and /v1/messages",
             ));
         }
     };
@@ -229,6 +229,7 @@ mod auto_protocol_tests {
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
+            compact_mode: crate::db::CompactMode::Passthrough,
         }
     }
 
@@ -268,5 +269,19 @@ mod auto_protocol_tests {
         let mut route = route(NativeApi::Responses);
         resolve_auto_protocol(&mut route, "/v1/chat/completions").unwrap();
         assert_eq!(route.native_api, NativeApi::Responses);
+    }
+
+    #[test]
+    fn resolves_auto_compact_to_responses() {
+        let mut route = route(NativeApi::Auto);
+        resolve_auto_protocol(&mut route, "/v1/responses/compact").unwrap();
+        assert_eq!(route.native_api, NativeApi::Responses);
+    }
+
+    #[test]
+    fn leaves_fixed_protocols_unchanged_for_compact() {
+        let mut route = route(NativeApi::Chat);
+        resolve_auto_protocol(&mut route, "/v1/responses/compact").unwrap();
+        assert_eq!(route.native_api, NativeApi::Chat);
     }
 }

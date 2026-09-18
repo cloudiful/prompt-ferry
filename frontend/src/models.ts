@@ -76,6 +76,11 @@ export type ModelRouteTargetForm = {
   // none/minimal/low/medium/high/xhigh/max and force-replaces the caller
   // value. Always sent as string|null (no omit).
   thinking_effort_override: string | null
+  // Issue #502 Task 5: per-target compact mode. 'passthrough' (default)
+  // keeps native passthrough; 'self_summarize' enables ferry-side handoff
+  // summarization for non-Responses targets; 'off' rejects compact.
+  // Always sent (no omit).
+  compact_mode: string
   // Issue #409 Phase 2: per-target port type. Optional for legacy forms
   // (ModelRouteDialog addTarget); missing means Auto (follow caller).
   // Mapper normalizes to Auto and always sends the value.

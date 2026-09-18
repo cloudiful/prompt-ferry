@@ -127,6 +127,8 @@ fn target_from_endpoint(
         dev_system_normalize: target.dev_system_normalize,
         // Issue #464: per-target thinking effort override; None = inherit.
         thinking_effort_override: target.thinking_effort_override.clone(),
+        // Issue #502 Task 5: per-target compact mode; missing = passthrough.
+        compact_mode: db::resolve_target_compact_mode(Some(target.compact_mode.as_str())),
     }
 }
 
@@ -226,6 +228,7 @@ mod tests {
                         active_windows: None,
                         dev_system_normalize: false,
                         thinking_effort_override: None,
+                        compact_mode: "passthrough".to_string(),
                     }],
                 },
                 ModelRouteConfig {
@@ -246,6 +249,7 @@ mod tests {
                         active_windows: None,
                         dev_system_normalize: false,
                         thinking_effort_override: None,
+                        compact_mode: "passthrough".to_string(),
                     }],
                 },
             ],
@@ -299,6 +303,7 @@ mod tests {
                     active_windows: None,
                     dev_system_normalize: false,
                     thinking_effort_override: None,
+                    compact_mode: "passthrough".to_string(),
                 }],
             }],
             ..StandaloneConfig::default()

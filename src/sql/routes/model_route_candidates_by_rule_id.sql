@@ -3,7 +3,8 @@ SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy,
        t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override,
         t.active_windows, e.active_windows AS endpoint_active_windows,
         COALESCE(t.dev_system_normalize, FALSE) AS "dev_system_normalize!",
-        t.thinking_effort_override
+        t.thinking_effort_override,
+        t.compact_mode
 FROM model_endpoint_rules r
 JOIN model_route_targets t ON t.rule_id = r.rule_id
 JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id

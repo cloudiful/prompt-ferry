@@ -64,6 +64,7 @@ struct ModelRouteCandidateRow {
     endpoint_active_windows: Option<String>,
     dev_system_normalize: bool,
     thinking_effort_override: Option<String>,
+    compact_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -81,6 +82,7 @@ struct ModelRouteTargetRow {
     active_windows: Option<String>,
     dev_system_normalize: bool,
     thinking_effort_override: Option<String>,
+    compact_mode: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }

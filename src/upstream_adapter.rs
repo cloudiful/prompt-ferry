@@ -5,7 +5,8 @@ use crate::{
     config::NativeApi,
     openai_compat::{
         CompatError, chat_request_to_responses, normalize_chat_request_for_native,
-        responses_stateless_request_to_chat, validate_raw_responses_request_body,
+        responses_stateless_request_to_chat, validate_raw_compact_request_body,
+        validate_raw_responses_request_body,
     },
     redact_upstream::UpstreamRedactionSession,
     usage::upstream_body,
@@ -17,6 +18,10 @@ pub enum ResponseAdapter {
     ChatToResponses,
     ResponsesToChat,
     AnthropicMessagesToResponses,
+    /// Issue #502 Task 4: `/v1/responses/compact` on a non-Responses target
+    /// with `compact_mode=self_summarize`. No upstream compact call is made;
+    /// the worker runs the ferry-side prune + LLM handoff flow instead.
+    SelfSummarizeLocal,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +46,47 @@ pub fn prepare_upstream_request(
     dev_system_normalize: bool,
     thinking_effort_override: Option<&str>,
 ) -> Result<PreparedUpstreamRequest, CompatError> {
+    prepare_upstream_request_with_compact(
+        request_path,
+        request_body,
+        native_api,
+        dev_system_normalize,
+        thinking_effort_override,
+        crate::db::CompactMode::Passthrough,
+    )
+}
+
+/// Issue #502 Task 5: compact-mode-aware dispatch. `passthrough` (default)
+/// keeps the Task 3 behavior byte-for-byte; `off` rejects compact on any
+/// target; `self_summarize` lets non-Responses targets run the ferry-side
+/// handoff flow instead of the cross-protocol 400.
+pub fn prepare_upstream_request_with_compact(
+    request_path: &str,
+    request_body: &[u8],
+    native_api: NativeApi,
+    dev_system_normalize: bool,
+    thinking_effort_override: Option<&str>,
+    compact_mode: crate::db::CompactMode,
+) -> Result<PreparedUpstreamRequest, CompatError> {
+    if request_path == "/v1/responses/compact" {
+        if compact_mode == crate::db::CompactMode::Off {
+            return Err(CompatError::new(
+                StatusCode::BAD_REQUEST,
+                "compact_disabled",
+                "POST /v1/responses/compact is disabled for this target (compact_mode=off)",
+            ));
+        }
+        if compact_mode.is_self_summarize() && !matches!(native_api, NativeApi::Responses) {
+            validate_raw_compact_request_body(request_body)?;
+            return Ok(PreparedUpstreamRequest {
+                path: request_path.to_string(),
+                body: PreparedRequestBody::BufferedBytes(request_body.to_vec()),
+                response_adapter: ResponseAdapter::SelfSummarizeLocal,
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+            });
+        }
+    }
     let prepared = prepare_upstream_request_inner(
         request_path,
         request_body,
@@ -109,7 +155,7 @@ fn apply_thinking_effort_override_for_path(
     let Some(object) = value.as_object_mut() else {
         return body;
     };
-    if request_path == "/v1/responses" {
+    if request_path == "/v1/responses" || request_path == "/v1/responses/compact" {
         let reasoning = object
             .entry("reasoning")
             .or_insert_with(|| serde_json::json!({}));
@@ -160,6 +206,24 @@ fn prepare_upstream_request_inner(
                 upstream_restore_session: None,
             })
         }
+        ("/v1/responses/compact", NativeApi::Responses) => {
+            validate_raw_compact_request_body(request_body)?;
+            Ok(PreparedUpstreamRequest {
+                path: request_path.to_string(),
+                body: PreparedRequestBody::PassthroughStream(request_body.to_vec()),
+                response_adapter: ResponseAdapter::Passthrough,
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+            })
+        }
+        (
+            "/v1/responses/compact",
+            NativeApi::Chat | NativeApi::AnthropicMessages | NativeApi::Auto,
+        ) => Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "responses_cross_protocol_unsupported",
+            "POST /v1/responses/compact requires a responses-native endpoint target; enable per-target self_summarize to compact without upstream support",
+        )),
         ("/v1/responses", NativeApi::Chat) => {
             let translated = responses_stateless_request_to_chat(request_body)?;
             Ok(PreparedUpstreamRequest {
@@ -458,5 +522,100 @@ mod tests {
         };
         let body: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["reasoning_effort"].as_str(), Some("high"));
+    }
+
+    #[test]
+    fn compact_passes_through_for_responses_native_upstreams() {
+        let body = br#"{"model":"m","input":[{"type":"message","role":"user","content":"hi"}]}"#;
+        let prepared = prepare_upstream_request(
+            "/v1/responses/compact",
+            body,
+            NativeApi::Responses,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(prepared.path, "/v1/responses/compact");
+        assert_eq!(prepared.response_adapter, ResponseAdapter::Passthrough);
+        let PreparedRequestBody::PassthroughStream(forwarded) = prepared.body else {
+            panic!("compact requests should stream unchanged");
+        };
+        assert_eq!(forwarded, body);
+    }
+
+    #[test]
+    fn compact_rejects_chat_native_upstreams() {
+        let error = prepare_upstream_request(
+            "/v1/responses/compact",
+            br#"{"model":"m","input":[{"type":"message","role":"user","content":"hi"}]}"#,
+            NativeApi::Chat,
+            false,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "responses_cross_protocol_unsupported");
+    }
+
+    #[test]
+    fn compact_off_rejects_all_targets() {
+        use super::prepare_upstream_request_with_compact;
+        use crate::db::CompactMode;
+        for native_api in [
+            NativeApi::Responses,
+            NativeApi::Chat,
+            NativeApi::AnthropicMessages,
+        ] {
+            let error = prepare_upstream_request_with_compact(
+                "/v1/responses/compact",
+                br#"{"model":"m","input":"hi"}"#,
+                native_api,
+                false,
+                None,
+                CompactMode::Off,
+            )
+            .unwrap_err();
+            assert_eq!(error.code, "compact_disabled");
+        }
+    }
+
+    #[test]
+    fn compact_self_summarize_routes_chat_to_local_flow() {
+        use super::prepare_upstream_request_with_compact;
+        use crate::db::CompactMode;
+        let body = br#"{"model":"m","input":[{"type":"message","role":"user","content":"hi"}]}"#;
+        let prepared = prepare_upstream_request_with_compact(
+            "/v1/responses/compact",
+            body,
+            NativeApi::Chat,
+            false,
+            None,
+            CompactMode::SelfSummarize,
+        )
+        .unwrap();
+        assert_eq!(
+            prepared.response_adapter,
+            ResponseAdapter::SelfSummarizeLocal
+        );
+        let PreparedRequestBody::BufferedBytes(forwarded) = prepared.body else {
+            panic!("self-summarize compact should buffer the request body");
+        };
+        assert_eq!(forwarded, body);
+    }
+
+    #[test]
+    fn compact_self_summarize_keeps_responses_passthrough() {
+        use super::prepare_upstream_request_with_compact;
+        use crate::db::CompactMode;
+        let body = br#"{"model":"m","input":"hi"}"#;
+        let prepared = prepare_upstream_request_with_compact(
+            "/v1/responses/compact",
+            body,
+            NativeApi::Responses,
+            false,
+            None,
+            CompactMode::SelfSummarize,
+        )
+        .unwrap();
+        assert_eq!(prepared.response_adapter, ResponseAdapter::Passthrough);
     }
 }

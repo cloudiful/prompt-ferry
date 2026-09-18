@@ -6,6 +6,7 @@ SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,
         t.active_windows,
         COALESCE(t.dev_system_normalize, FALSE) AS "dev_system_normalize!",
         t.thinking_effort_override,
+        t.compact_mode,
        t.created_at, t.updated_at
 FROM model_route_targets t
 LEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id

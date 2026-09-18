@@ -42,6 +42,21 @@ fn is_present_encrypted_content(value: Option<&Value>) -> bool {
     }
 }
 
+/// Issue #502 Task 4: strip one item's `encrypted_content` for the
+/// self-summarize path. Both ferry-minted echoes (`minimax-`/`ferry-`) and
+/// opaque upstream blobs are dropped and never forwarded; ferry never
+/// fabricates `encrypted_content`. Returns true when a blob was present.
+pub(crate) fn strip_encrypted_content_for_compact(item: &mut Value) -> bool {
+    let Some(object) = item.as_object_mut() else {
+        return false;
+    };
+    let present = is_present_encrypted_content(object.get("encrypted_content"));
+    if present {
+        object.remove("encrypted_content");
+    }
+    present
+}
+
 /// Original id embedded in one of ferry's self-describing reasoning tokens,
 /// or `None` when `value` is an opaque/absent upstream token. Both mint
 /// prefixes are ferry-defined and never collide with a provider's own opaque
@@ -142,6 +157,7 @@ mod tests {
     use super::{
         bridge_reasoning_encrypted_token, minimax_reasoning_encrypted_token,
         mint_reasoning_encrypted_content, restore_reasoning_echoes,
+        strip_encrypted_content_for_compact,
     };
     use serde_json::{Value, json};
 
@@ -216,5 +232,16 @@ mod tests {
         let value: Value = serde_json::from_slice(out.as_ref()).unwrap();
         assert_eq!(value["input"][0]["id"], "rs_2");
         assert_eq!(value["input"][0]["content"][0]["text"], "keep");
+    }
+
+    #[test]
+    fn compact_strip_drops_both_blob_classes_without_fabrication() {
+        for token in ["ferry-rs_9", "minimax-resp_1_rs", "6e4bd8b4-opaque"] {
+            let mut item = json!({"type": "reasoning", "encrypted_content": token});
+            assert!(strip_encrypted_content_for_compact(&mut item));
+            assert!(item.get("encrypted_content").is_none());
+        }
+        let mut plain = json!({"type": "message", "role": "user", "content": "hi"});
+        assert!(!strip_encrypted_content_for_compact(&mut plain));
     }
 }

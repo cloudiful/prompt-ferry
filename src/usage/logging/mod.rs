@@ -1,3 +1,8 @@
+//! Usage event ledger for AI/MCP requests.
+//!
+//! Issue #502 Task 6: `/v1/responses/compact` is recorded under its own
+//! request path verbatim (prompt normalization and request text share the
+//! `/v1/responses` bore); no path remapping happens here.
 mod inference;
 mod models;
 mod persistence;

@@ -4,6 +4,7 @@ mod bootstrap;
 mod bridge;
 #[cfg(test)]
 mod bridge_tests;
+pub(super) mod compaction;
 mod connect;
 mod context;
 mod error_handling;

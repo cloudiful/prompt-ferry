@@ -11,7 +11,7 @@ pub fn normalize_prompt_request(path: &str, body: &[u8]) -> Option<NormalizedPro
     let value = serde_json::from_slice::<Value>(body).ok()?;
     match path {
         "/v1/chat/completions" => normalize_chat_request(&value),
-        "/v1/responses" => normalize_responses_request(&value),
+        "/v1/responses" | "/v1/responses/compact" => normalize_responses_request(&value),
         "/v1/messages" => normalize_anthropic_request(&value),
         _ => None,
     }

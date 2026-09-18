@@ -90,6 +90,7 @@ fn sample_config() -> StandaloneConfig {
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: "passthrough".to_string(),
             }],
         }],
         client_keys: vec![ClientKeyConfig {
@@ -591,7 +592,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 27);
+    assert_eq!(version, 28);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -689,7 +690,7 @@ async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_nine() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 27);
+    assert_eq!(version, 28);
     assert!(
         store
             .list_usage_summaries(64)
@@ -1582,7 +1583,7 @@ async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_nine() 
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 27);
+    assert_eq!(version, 28);
     let pool = store.pool().clone();
     for (column, declared_type) in [
         ("conversation_id", "TEXT"),
@@ -1705,7 +1706,7 @@ async fn upgrade_from_schema_eight_creates_request_lease_table() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 27);
+    assert_eq!(version, 28);
 
     // Confirm migration 0008 took effect before the new lease table
     // arrived so the test really exercises the schema-8 -> schema-9

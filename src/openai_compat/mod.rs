@@ -33,6 +33,7 @@ pub(crate) use response_stream_state::sse_event;
 pub(crate) use responses_reasoning_echo::{
     bridge_reasoning_encrypted_token, minimax_reasoning_encrypted_token,
     mint_reasoning_encrypted_content, restore_reasoning_echoes,
+    strip_encrypted_content_for_compact,
 };
 pub(crate) use responses_reasoning_summary::{
     ensure_reasoning_summary, normalize_responses_reasoning_body,
@@ -41,7 +42,8 @@ pub(crate) use responses_state::{
     NormalizedResponsesRequest, assistant_message_to_output_items,
     extract_output_items_from_responses_value, normalize_response_error,
     output_items_to_assistant_message, persisted_artifact, persisted_output_items,
-    responses_stream_output_items, validate_raw_responses_request_body,
+    responses_stream_output_items, validate_raw_compact_request_body,
+    validate_raw_responses_request_body,
 };
 
 #[derive(Debug, Clone)]

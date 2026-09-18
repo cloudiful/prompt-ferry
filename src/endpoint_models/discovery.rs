@@ -79,6 +79,7 @@ mod tests {
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
+            compact_mode: crate::db::CompactMode::Passthrough,
         }
     }
 

@@ -208,6 +208,7 @@ async fn available_models(state: &AdminState, user_id: i64) -> anyhow::Result<Ve
                     dev_system_normalize: false,
                     // Issue #464: model listing follows the caller.
                     thinking_effort_override: None,
+                    compact_mode: crate::db::CompactMode::Passthrough,
                 };
                 let snapshot = state
                     .endpoint_model_cache

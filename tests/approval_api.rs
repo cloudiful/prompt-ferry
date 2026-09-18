@@ -820,6 +820,7 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -949,6 +950,7 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -970,6 +972,7 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -1198,6 +1201,7 @@ async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -1312,6 +1316,7 @@ async fn session_affinity_options_fixture(
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -1500,6 +1505,7 @@ async fn reset_session_affinity_clears_anonymous_record_binding_under_user_zero(
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -1611,6 +1617,7 @@ async fn session_route_options_surfaces_binding_when_rule_no_longer_resolves() -
                     active_windows: None,
                     dev_system_normalize: false,
                     thinking_effort_override: None,
+                    compact_mode: db::CompactMode::Passthrough,
                 }],
             },
         )
@@ -1710,6 +1717,7 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -1804,6 +1812,7 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -2919,7 +2928,9 @@ async fn request_record_facets_omit_user_login_for_non_admin() -> anyhow::Result
 #[tokio::test]
 async fn request_record_facets_converge_on_selected_time_window() -> anyhow::Result<()> {
     if !test_database_configured() {
-        eprintln!("skipping request records facets window test: {TEST_DATABASE_URL_ENV} is not set");
+        eprintln!(
+            "skipping request records facets window test: {TEST_DATABASE_URL_ENV} is not set"
+        );
         return Ok(());
     }
     let schema = TestSchema::new().await?;

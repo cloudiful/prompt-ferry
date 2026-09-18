@@ -77,6 +77,9 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
                 // Issue #464: per-target thinking effort override; None
                 // means inherit (follow the caller).
                 thinking_effort_override: row.thinking_effort_override,
+                // Issue #502 Task 5: per-target compact mode; missing
+                // reads as `passthrough` (no new default semantics).
+                compact_mode: crate::db::resolve_target_compact_mode(row.compact_mode.as_deref()),
                 created_at: row.created_at,
                 updated_at: row.updated_at,
             }
@@ -160,6 +163,7 @@ pub(super) async fn model_route_candidates_by_rule(
                 endpoint_active_windows: row.endpoint_active_windows.clone(),
                 dev_system_normalize: row.dev_system_normalize,
                 thinking_effort_override: row.thinking_effort_override.clone(),
+                compact_mode: crate::db::resolve_target_compact_mode(row.compact_mode.as_deref()),
             });
             continue;
         }
@@ -191,6 +195,7 @@ pub(super) async fn model_route_candidates_by_rule(
                 endpoint_active_windows: row.endpoint_active_windows,
                 dev_system_normalize: row.dev_system_normalize,
                 thinking_effort_override: row.thinking_effort_override,
+                compact_mode: crate::db::resolve_target_compact_mode(row.compact_mode.as_deref()),
             }],
         });
     }

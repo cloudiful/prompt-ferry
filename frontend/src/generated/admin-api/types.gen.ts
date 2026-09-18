@@ -230,6 +230,8 @@ export type CommandCodeWindowUsage = {
     used_percent?: number | null;
 };
 
+export type CompactMode = 'passthrough' | 'self_summarize' | 'off';
+
 export type ConversationEndpointOverride = {
     conversation_id: string;
     created_at: string;
@@ -713,6 +715,12 @@ export type ModelRouteTarget = {
      * Empty means all-day.
      */
     active_windows?: Array<ActiveWindow>;
+    /**
+     * Issue #502 Task 5: per-target compact mode. Defaults to
+     * `passthrough`; `self_summarize` enables ferry-side handoff
+     * summarization for non-Responses targets. Always sent (no omit).
+     */
+    compact_mode?: CompactMode;
     created_at: string;
     /**
      * Issue #392 Phase K: developer->system normalization switch.
@@ -756,6 +764,15 @@ export type ModelRouteTargetRequest = {
      * means all-day; `Some([...])` replaces after validation.
      */
     active_windows?: Array<ActiveWindow> | null;
+    /**
+     * Issue #502 Task 5: per-target compact mode. `None`
+     * (omitted/null/empty) means `passthrough` (no new default
+     * semantics); `Some("self_summarize")` enables ferry-side handoff
+     * summarization for non-Responses targets; `Some("off")` rejects
+     * compact explicitly. Always sent (no omit/carry); unknown values
+     * normalize to `passthrough`.
+     */
+    compact_mode?: string | null;
     /**
      * Issue #392 Phase K: developer->system normalization switch.
      * Always sent (no omit semantics); `false` (default) skips

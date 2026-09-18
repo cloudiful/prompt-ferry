@@ -149,6 +149,7 @@ pub(super) fn target(
         endpoint_active_windows: None,
         dev_system_normalize: false,
         thinking_effort_override: None,
+        compact_mode: crate::db::CompactMode::Passthrough,
     }
 }
 

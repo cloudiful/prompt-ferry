@@ -166,6 +166,7 @@ mod tests {
             proxy_url: proxy.map(str::to_string),
             dev_system_normalize: false,
             thinking_effort_override: None,
+            compact_mode: crate::db::CompactMode::Passthrough,
         }
     }
 

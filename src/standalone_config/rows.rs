@@ -390,6 +390,17 @@ pub(crate) fn route_target(
             Err(sqlx::Error::ColumnNotFound(_)) => None,
             Err(error) => return Err(error.into()),
         };
+    // Issue #502 Task 5: 0028 `compact_mode` TEXT NOT NULL DEFAULT
+    // 'passthrough'; pre-migration rows lack the column and read as
+    // `passthrough` (no new default semantics).
+    let compact_mode = match row.try_get::<Option<String>, _>("compact_mode") {
+        Ok(value) => value
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "passthrough".to_string()),
+        Err(sqlx::Error::ColumnNotFound(_)) => "passthrough".to_string(),
+        Err(error) => return Err(error.into()),
+    };
     Ok((
         uuid(row, "rule_id")?,
         ModelRouteTargetConfig {
@@ -407,6 +418,7 @@ pub(crate) fn route_target(
             active_windows,
             dev_system_normalize,
             thinking_effort_override,
+            compact_mode,
         },
         envelope_opt(row, "proxy_url_override")?,
     ))

@@ -31,5 +31,6 @@ pub(crate) use responses_output::{
     responses_stream_output_items,
 };
 pub(crate) use responses_request_state::{
-    NormalizedResponsesRequest, validate_raw_responses_request_body,
+    NormalizedResponsesRequest, validate_raw_compact_request_body,
+    validate_raw_responses_request_body,
 };

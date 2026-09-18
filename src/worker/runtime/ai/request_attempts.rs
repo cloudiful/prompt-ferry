@@ -2,7 +2,12 @@ use anyhow::anyhow;
 use http::Method;
 use std::error::Error as _;
 
-use crate::{db, openai_compat::CompatError};
+use crate::{
+    db,
+    openai_compat::CompatError,
+    protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseStart},
+    upstream_adapter::{PreparedRequestBody, PreparedUpstreamRequest},
+};
 
 use super::super::{
     RequestExecutionContext,
@@ -17,7 +22,7 @@ use super::{
     },
     proxy,
     request_logging::log_prepared_upstream_summary,
-    request_support::prepare_upstream_request_for_route,
+    request_support::{ai_route_usage_log, prepare_upstream_request_for_route},
     upstream::{build_upstream_request, upstream_url_for_route},
 };
 
@@ -139,6 +144,25 @@ pub(super) async fn forward_route_request(
         .await;
     }
     log_prepared_upstream_summary(&route, &prepared);
+    // Issue #502 Task 4: ferry-side self-summarize compact. Non-Responses
+    // targets with `compact_mode=self_summarize` never call upstream
+    // compact; prune + one same-route summarize call produce the plaintext
+    // `response.compaction` body instead.
+    if prepared.response_adapter == crate::upstream_adapter::ResponseAdapter::SelfSummarizeLocal {
+        return Box::pin(handle_self_summarize_compact(
+            services,
+            request,
+            request_ctx,
+            &route,
+            &prepared,
+            ResponseLoggingContext {
+                redact_content,
+                content_logging_enabled,
+                raw_content_logging_enabled,
+            },
+        ))
+        .await;
+    }
     let cancellation = services
         .runtime_state
         .request_cancellation(request.request_id.as_str())
@@ -314,6 +338,142 @@ enum AttemptOutcome {
     Handled,
     Failure(UpstreamAttemptFailure),
     QuotaFailover(QuotaFailoverSignal),
+}
+
+/// Issue #502 Task 4: ferry-side self-summarize compact for non-Responses
+/// targets with `compact_mode=self_summarize`. Prunes the compact input
+/// (drops all `encrypted_content`, trims tool history), runs one same-route
+/// upstream summarize call, and returns the plaintext `response.compaction`
+/// body. The summarize call targets the native path (never compact), so
+/// compact never recurses.
+async fn handle_self_summarize_compact(
+    services: &RuntimeServices,
+    request: &BufferedBridgeRequest,
+    request_ctx: &RequestExecutionContext,
+    route: &db::RouteConfig,
+    prepared: &PreparedUpstreamRequest,
+    logging: ResponseLoggingContext,
+) -> anyhow::Result<ForwardOutcome> {
+    let route_ctx = RouteExecutionContext::new(route);
+    let fail = |code: &'static str, message: String| {
+        ForwardOutcome::CompatError(CompatError::new(
+            reqwest::StatusCode::BAD_GATEWAY,
+            code,
+            message,
+        ))
+    };
+    let request_bytes = match &prepared.body {
+        PreparedRequestBody::PassthroughStream(bytes)
+        | PreparedRequestBody::BufferedBytes(bytes) => bytes.clone(),
+    };
+    let summarize_path = route.native_api.path().to_string();
+    let summarize_url = upstream_url_for_route(route, &summarize_path);
+    let proxy_client = match proxy::client_for_route(&services.client, route) {
+        Ok(client) => client,
+        Err(message) => return Ok(fail("invalid_proxy_url", message)),
+    };
+    let model_fallback = route
+        .upstream_model
+        .as_deref()
+        .or(request_ctx.request_model.as_deref());
+    let (body, summary) = match super::super::compaction::run_self_summarize_compact(
+        &proxy_client,
+        &summarize_url,
+        &route.api_key,
+        route.native_api,
+        &request_bytes,
+        model_fallback,
+    )
+    .await
+    {
+        Ok(ok) => ok,
+        Err(err) => {
+            return Ok(fail(
+                "compact_summarize_failed",
+                format!("self-summarize compact failed: {err}"),
+            ));
+        }
+    };
+    if let Err(err) = send_compact_json(services, &request.request_id, body.clone()).await {
+        return Ok(ForwardOutcome::TransportError {
+            error: err,
+            terminal_recorded: false,
+        });
+    }
+    let response_prompt = logging
+        .content_logging_enabled
+        .then(|| {
+            super::super::error_handling::maybe_redact_text(
+                &summary,
+                logging.redact_content,
+                request_ctx.user_id,
+            )
+        })
+        .filter(|text| !text.is_empty());
+    let response_raw_body = logging
+        .raw_content_logging_enabled
+        .then(|| String::from_utf8_lossy(&body).to_string())
+        .filter(|text| !text.trim().is_empty());
+    services
+        .record_usage_event(
+            ai_route_usage_log(request_ctx, request, &route_ctx)
+                .with_upstream_redaction(
+                    prepared.upstream_restore_session.is_some(),
+                    prepared.upstream_redacted_request_json.clone(),
+                    prepared.upstream_restore_session.clone(),
+                )
+                .with_state(
+                    db::UsageEventKind::Request,
+                    db::RequestRecordState::Completed,
+                )
+                .with_model(request_ctx.request_model.clone())
+                .with_status(Some(200), Some(true), Some(request_ctx.elapsed_ms()), None)
+                .with_response(
+                    None,
+                    request_ctx
+                        .request_prompt_log
+                        .request_conversation_key
+                        .clone(),
+                    response_prompt,
+                    response_raw_body,
+                ),
+        )
+        .await;
+    Ok(ForwardOutcome::Handled)
+}
+
+async fn send_compact_json(
+    services: &RuntimeServices,
+    request_id: &str,
+    body: Vec<u8>,
+) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    services
+        .out_tx
+        .send(BridgeMessage::ResponseStart(ResponseStart {
+            request_id: request_id.to_string(),
+            status: 200,
+            content_type: Some("application/json".to_string()),
+            headers: Vec::new(),
+        }))
+        .await
+        .context("relay response channel closed")?;
+    services
+        .out_tx
+        .send(BridgeMessage::ResponseChunk(ResponseChunk {
+            request_id: request_id.to_string(),
+            data: body,
+        }))
+        .await
+        .context("relay response channel closed")?;
+    services
+        .out_tx
+        .send(BridgeMessage::ResponseEnd(ResponseEnd {
+            request_id: request_id.to_string(),
+        }))
+        .await
+        .context("relay response channel closed")?;
+    Ok(())
 }
 
 async fn handle_attempt_response(

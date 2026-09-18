@@ -89,7 +89,8 @@ export function hasTargetSettings(
     hasTargetProxy(target) ||
     hasTargetSchedule(target) ||
     (target.dev_system_normalize ?? false) ||
-    hasTargetThinkingEffort(target)
+    hasTargetThinkingEffort(target) ||
+    hasTargetCompactMode(target)
   )
 }
 
@@ -97,6 +98,13 @@ export function hasTargetThinkingEffort(
   target: ModelRouteTargetForm | null | undefined,
 ): boolean {
   return (target?.thinking_effort_override ?? '').trim() !== ''
+}
+
+export function hasTargetCompactMode(
+  target: ModelRouteTargetForm | null | undefined,
+): boolean {
+  const mode = (target?.compact_mode ?? '').trim()
+  return mode !== '' && mode !== 'passthrough'
 }
 
 export function isTargetProxyValid(

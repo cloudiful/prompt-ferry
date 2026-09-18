@@ -10,6 +10,53 @@ use crate::db::types::endpoints::{EndpointProvider, MinimaxServiceTier};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
+pub enum CompactMode {
+    #[default]
+    Passthrough,
+    SelfSummarize,
+    Off,
+}
+
+impl CompactMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Passthrough => "passthrough",
+            Self::SelfSummarize => "self_summarize",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s.trim() {
+            "self_summarize" => Self::SelfSummarize,
+            "off" => Self::Off,
+            _ => Self::Passthrough,
+        }
+    }
+
+    pub fn is_self_summarize(self) -> bool {
+        matches!(self, Self::SelfSummarize)
+    }
+}
+
+/// Issue #502 Task 5: validate a per-target compact mode. Unknown/empty
+/// values fall back to `passthrough` (no new default semantics); the
+/// trimmed canonical value is returned for storage.
+pub fn normalize_compact_mode(raw: Option<&str>) -> CompactMode {
+    let Some(value) = raw.map(str::trim).filter(|v| !v.is_empty()) else {
+        return CompactMode::Passthrough;
+    };
+    CompactMode::parse(value)
+}
+
+/// Issue #502 Task 5: resolve the effective compact mode for a target.
+/// `None`/empty inherits `passthrough`; explicit values parse leniently.
+pub fn resolve_target_compact_mode(raw: Option<&str>) -> CompactMode {
+    normalize_compact_mode(raw)
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ModelRouteRoutingStrategy {
     #[default]
     ResponsesSessionAffinity,
@@ -74,6 +121,10 @@ pub struct RouteConfig {
     // inherit (follow the caller). `Some(effort)` force-replaces
     // `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
     pub thinking_effort_override: Option<String>,
+    // Issue #502 Task 5: resolved per-target compact mode; defaults to
+    // `passthrough` (no new default semantics). `self_summarize` triggers
+    // ferry-side handoff summarization for non-Responses targets.
+    pub compact_mode: CompactMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -125,6 +176,11 @@ pub struct ModelRouteTarget {
     /// Validated against `none/minimal/low/medium/high/xhigh/max`.
     #[serde(default)]
     pub thinking_effort_override: Option<String>,
+    /// Issue #502 Task 5: per-target compact mode. Defaults to
+    /// `passthrough`; `self_summarize` enables ferry-side handoff
+    /// summarization for non-Responses targets. Always sent (no omit).
+    #[serde(default)]
+    pub compact_mode: CompactMode,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -184,6 +240,11 @@ pub struct ModelRouteTargetCreate {
     /// Validated against `none/minimal/low/medium/high/xhigh/max`.
     #[serde(default)]
     pub thinking_effort_override: Option<String>,
+    /// Issue #502 Task 5: per-target compact mode. Defaults to
+    /// `passthrough`; `self_summarize` enables ferry-side handoff
+    /// summarization for non-Responses targets. Always sent (no omit).
+    #[serde(default)]
+    pub compact_mode: CompactMode,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -248,6 +309,9 @@ pub struct ModelRouteCandidateTarget {
     /// `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
     /// Validated against `none/minimal/low/medium/high/xhigh/max`.
     pub thinking_effort_override: Option<String>,
+    /// Issue #502 Task 5: resolved per-target compact mode; defaults to
+    /// `passthrough`.
+    pub compact_mode: CompactMode,
 }
 
 #[derive(Debug, Clone)]
@@ -369,4 +433,38 @@ pub struct ModelRoutePage {
     pub routes: Vec<ModelEndpointRule>,
     pub first: i64,
     pub rows: i64,
+}
+
+#[cfg(test)]
+mod compact_mode_tests {
+    use super::{CompactMode, normalize_compact_mode, resolve_target_compact_mode};
+
+    #[test]
+    fn defaults_to_passthrough_and_round_trips() {
+        assert_eq!(CompactMode::default(), CompactMode::Passthrough);
+        assert_eq!(CompactMode::Passthrough.as_str(), "passthrough");
+        assert_eq!(CompactMode::SelfSummarize.as_str(), "self_summarize");
+        assert_eq!(CompactMode::Off.as_str(), "off");
+        assert_eq!(
+            CompactMode::parse("self_summarize"),
+            CompactMode::SelfSummarize
+        );
+        assert_eq!(CompactMode::parse("off"), CompactMode::Off);
+        assert_eq!(CompactMode::parse("passthrough"), CompactMode::Passthrough);
+    }
+
+    #[test]
+    fn resolve_target_compact_mode_missing_or_unknown_means_passthrough() {
+        for raw in [None, Some(""), Some("   "), Some("bogus")] {
+            assert_eq!(resolve_target_compact_mode(raw), CompactMode::Passthrough);
+            assert_eq!(normalize_compact_mode(raw), CompactMode::Passthrough);
+        }
+        assert_eq!(
+            resolve_target_compact_mode(Some(" self_summarize ")),
+            CompactMode::SelfSummarize
+        );
+        assert!(CompactMode::SelfSummarize.is_self_summarize());
+        assert!(!CompactMode::Passthrough.is_self_summarize());
+        assert!(!CompactMode::Off.is_self_summarize());
+    }
 }

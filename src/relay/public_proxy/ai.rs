@@ -165,6 +165,25 @@ pub(super) async fn proxy_responses(
     .await
 }
 
+pub(super) async fn proxy_compact(
+    State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<RemoteAddr>,
+    Extension(compression): Extension<HttpRequestCompressionContext>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    proxy_request(
+        state,
+        peer_addr.0.ip(),
+        headers,
+        compression,
+        Method::POST,
+        "/v1/responses/compact",
+        body,
+    )
+    .await
+}
+
 pub(super) async fn proxy_conversations(
     State(state): State<AppState>,
     ConnectInfo(peer_addr): ConnectInfo<RemoteAddr>,
@@ -517,7 +536,10 @@ async fn proxy_request_with_options(options: ProxyRequestOptions) -> Response {
         }
     });
     let is_event_stream = content_type.contains("text/event-stream");
-    let is_responses_stream = path == "/v1/responses" && is_event_stream;
+    // Issue #502 Task 4 (P3): compact SSE error events render through the
+    // Responses error shape, not the Anthropic one.
+    let is_responses_stream =
+        (path == "/v1/responses" || path == "/v1/responses/compact") && is_event_stream;
     let is_chat_stream = path == "/v1/chat/completions" && is_event_stream;
 
     let stream_state = state.clone();

@@ -170,6 +170,7 @@ fn response_adapter_name(adapter: ResponseAdapter) -> &'static str {
         ResponseAdapter::ChatToResponses => "chat_to_responses",
         ResponseAdapter::ResponsesToChat => "responses_to_chat",
         ResponseAdapter::AnthropicMessagesToResponses => "anthropic_messages_to_responses",
+        ResponseAdapter::SelfSummarizeLocal => "self_summarize_local",
     }
 }
 
@@ -327,7 +328,11 @@ pub(super) async fn forward_streaming_response(
     let mut anthropic_stream_adapter = (response_adapter
         == ResponseAdapter::AnthropicMessagesToResponses)
         .then(AnthropicResponseStreamAdapter::new);
-    let responses_passthrough = request.path == "/v1/responses"
+    // Issue #502 Task 4 (P3): compact SSE responses engage the same
+    // Responses-specific filter chain (encrypted echo + reasoning summary +
+    // restore) as `/v1/responses` so native passthrough stays byte-identical.
+    let responses_passthrough = (request.path == "/v1/responses"
+        || request.path == "/v1/responses/compact")
         && response_adapter == ResponseAdapter::Passthrough
         && is_sse;
     let mut passthrough_sse_filter = (response_adapter == ResponseAdapter::Passthrough && is_sse)

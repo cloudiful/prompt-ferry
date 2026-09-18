@@ -1,5 +1,49 @@
 use super::*;
 
+pub(super) fn validate_raw_compact_request_body(body: &[u8]) -> Result<(), CompatError> {
+    let value: Value = serde_json::from_slice(body).map_err(|e| {
+        CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_compact_body",
+            format!("compact body must be JSON object: {e}"),
+        )
+    })?;
+    let obj = value.as_object().ok_or_else(|| {
+        CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_compact_body",
+            "compact body must be JSON object",
+        )
+    })?;
+    match obj.get("input") {
+        Some(v) if v.is_array() || v.is_string() => {}
+        _ => {
+            return Err(CompatError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_compact_body",
+                "compact.input must be array or string",
+            ));
+        }
+    }
+    if let Some(m) = obj.get("model")
+        && !m.is_string()
+    {
+        return Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_compact_body",
+            "compact.model must be string",
+        ));
+    }
+    if obj.contains_key("previous_response_id") || obj.contains_key("conversation") {
+        return Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_responses_continuation",
+            "compact with previous_response_id/conversation is not supported in stateless ferry; send full input array",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_raw_responses_passthrough(items: &[Value]) -> Result<(), CompatError> {
     for item in items {
         let object = item.as_object().ok_or_else(|| {
