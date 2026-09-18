@@ -791,7 +791,62 @@ async fn rejects_input_image_file_id_for_chat_native_upstream() {
 }
 
 #[tokio::test]
-async fn rejects_non_text_function_call_output_for_chat_native_upstream() {
+async fn forwards_image_function_call_output_to_chat_native_upstream() {
+    let upstream_log = Arc::new(ChatRequestLog::default());
+    let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
+    let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
+    let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
+    let mut worker_handle = tokio::spawn(async move {
+        worker::connect_for_test(worker_config, reqwest::Client::new()).await
+    });
+
+    wait_for_worker(&relay_handle, &mut worker_handle).await;
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://{relay_addr}/v1/responses"))
+        .bearer_auth("client-token")
+        .json(&serde_json::json!({
+            "model": "gpt-test",
+            "input": [
+                {"role":"user","content":"check weather"},
+                {"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Boston\"}"},
+                {"type":"function_call_output","call_id":"call_1","output":[
+                    {"type":"input_text","text":"sky photo:"},
+                    {"type":"input_image","image_url":"https://example.com/image.png"}
+                ]}
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let requests = upstream_log.bodies.lock().await;
+    assert_eq!(requests.len(), 1);
+    let tool_msg = requests[0]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["role"] == "tool")
+        .cloned()
+        .expect("upstream tool message");
+    let content = tool_msg["content"].as_array().unwrap();
+    assert!(content.iter().any(|p| p["type"] == "text"));
+    assert_eq!(
+        content
+            .iter()
+            .find(|p| p["type"] == "image_url")
+            .unwrap()["image_url"]["url"],
+        "https://example.com/image.png"
+    );
+
+    worker_handle.abort();
+}
+
+#[tokio::test]
+async fn rejects_input_file_function_call_output_for_chat_native_upstream() {
     let upstream_addr = spawn_chat_only_upstream(Arc::new(ChatRequestLog::default())).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
     let worker_config = worker_config(worker_addr, upstream_addr, NativeApi::Chat);
@@ -810,7 +865,7 @@ async fn rejects_non_text_function_call_output_for_chat_native_upstream() {
             "input": [
                 {"role":"user","content":"check weather"},
                 {"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Boston\"}"},
-                {"type":"function_call_output","call_id":"call_1","output":[{"type":"input_image","image_url":"https://example.com/image.png"}]}
+                {"type":"function_call_output","call_id":"call_1","output":[{"type":"input_file","file_id":"file_123"}]}
             ]
         }))
         .send()

@@ -110,13 +110,13 @@ pub(crate) fn translate_tool_output_content(value: &Value) -> Result<Value, Comp
             Err(CompatError::new(
                 StatusCode::BAD_REQUEST,
                 "unsupported_feature",
-                "function_call_output content must be text or supported text parts",
+                "function_call_output content must be text/image or supported parts",
             ))
         }
         _ => Err(CompatError::new(
             StatusCode::BAD_REQUEST,
             "unsupported_feature",
-            "function_call_output content must be a string or supported part array",
+            "function_call_output content must be a string or supported text/image parts",
         )),
     }
 }
@@ -434,12 +434,45 @@ fn translate_tool_output_part(value: &Value) -> Result<Value, CompatError> {
                 "text": text,
             }))
         }
-        "input_image" | "input_file" => Err(CompatError::new(
+        // Chat `role:tool` messages accept text/image_url content arrays;
+        // pass image URLs through exactly like user-side input_image parts.
+        "input_image" => {
+            let image_url = match object.get("image_url") {
+                Some(Value::String(url)) => json!({ "url": url }),
+                Some(Value::Object(image)) => {
+                    if image.get("file_id").is_some() {
+                        return Err(CompatError::new(
+                            StatusCode::BAD_REQUEST,
+                            "unsupported_feature",
+                            "input_image file_id is not supported for chat-native endpoints",
+                        ));
+                    }
+                    if image.get("url").is_none() {
+                        return Err(CompatError::new(
+                            StatusCode::BAD_REQUEST,
+                            "unsupported_feature",
+                            "image_url objects require a url field",
+                        ));
+                    }
+                    Value::Object(image.clone())
+                }
+                _ => {
+                    return Err(CompatError::new(
+                        StatusCode::BAD_REQUEST,
+                        "unsupported_feature",
+                        "image parts require image_url",
+                    ));
+                }
+            };
+            Ok(json!({
+                "type": "image_url",
+                "image_url": image_url,
+            }))
+        }
+        "input_file" => Err(CompatError::new(
             StatusCode::BAD_REQUEST,
             "unsupported_feature",
-            format!(
-                "function_call_output content part type `{part_type}` is not supported for chat-native endpoints"
-            ),
+            "function_call_output content part type `input_file` is not supported for chat-native endpoints",
         )),
         other => Err(CompatError::new(
             StatusCode::BAD_REQUEST,
