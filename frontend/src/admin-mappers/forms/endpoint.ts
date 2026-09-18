@@ -119,10 +119,21 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
   const endpointTouched = safe.active_windows_touched ?? false
   const active_windows = endpointTouched
     ? [...(safe.active_windows ?? [])]
-        .map((window) => ({
-          start: (window?.start ?? '').trim(),
-          end: (window?.end ?? '').trim(),
-        }))
+        .map((window) => {
+          const start = (window?.start ?? '').trim()
+          const end = (window?.end ?? '').trim()
+          const rawDays = Array.isArray((window as { days?: unknown })?.days)
+            ? ([...((window as { days?: number[] }).days ?? [])] as number[])
+            : undefined
+          const days = rawDays
+            ? [...new Set(rawDays.filter((d) => Number.isInteger(d) && (d as number) >= 1 && (d as number) <= 7))].sort((a, b) => (a as number) - (b as number))
+            : undefined
+          return {
+            start,
+            end,
+            ...(days && days.length > 0 && days.length < 7 ? { days } : {}),
+          }
+        })
         .sort((a, b) =>
           a.start === b.start
             ? a.end.localeCompare(b.end)

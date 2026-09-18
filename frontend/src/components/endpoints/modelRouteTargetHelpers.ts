@@ -65,9 +65,9 @@ export function targetScheduleSummary(
   t: TranslateFn,
 ): string {
   const windows = sortedTargetWindows(target)
-  if (windows.length === 0) return t('scheduleEmptyHint')
+  if (windows.length === 0) return ''
   const first = windows[0]
-  if (!first) return t('scheduleEmptyHint')
+  if (!first) return ''
   if (windows.length === 1) return formatTargetWindow(first, t)
   return `${formatTargetWindow(first, t)} ${t('scheduleMoreWindows', { count: windows.length })}`
 }
@@ -77,7 +77,7 @@ export function targetScheduleTooltip(
   t: TranslateFn,
 ): string {
   const windows = sortedTargetWindows(target)
-  if (windows.length === 0) return t('scheduleEmptyHint')
+  if (windows.length === 0) return ''
   return windows.map((w) => formatTargetWindow(w, t)).join(', ')
 }
 
