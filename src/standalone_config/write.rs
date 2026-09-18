@@ -332,6 +332,14 @@ pub(crate) async fn insert_route(
             .bind(envelope_version(&proxy_envelope))
             .bind(active_windows)
             .bind(bool_i64(target.dev_system_normalize))
+            .bind(
+                target
+                    .thinking_effort_override
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string),
+            )
             .execute(&mut **transaction)
             .await?;
     }
@@ -372,6 +380,7 @@ pub(crate) async fn insert_encrypted_route(
             .bind(envelope_version(&target.proxy_url_override))
             .bind(target.target.active_windows.clone())
             .bind(bool_i64(target.target.dev_system_normalize))
+            .bind(target.target.thinking_effort_override.as_deref())
             .execute(&mut **transaction)
             .await?;
     }

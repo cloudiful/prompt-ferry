@@ -111,6 +111,7 @@ fn route(endpoint_id: Uuid, keys: Vec<db::EndpointApiKey>) -> db::RouteConfig {
         service_tier: db::MinimaxServiceTier::Standard,
         proxy_url: None,
         dev_system_normalize: false,
+        thinking_effort_override: None,
     }
 }
 

@@ -474,6 +474,7 @@ mod tests {
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         };
         let response = send_upstream_request(
             &Client::new(),
@@ -508,6 +509,7 @@ mod tests {
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -585,6 +587,7 @@ mod tests {
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         };
         let conversation_id =
             uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
@@ -641,6 +644,7 @@ mod tests {
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         };
         let conversation_id =
             uuid::Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
@@ -695,6 +699,7 @@ mod tests {
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         };
         let conversation_id =
             uuid::Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
@@ -752,6 +757,7 @@ mod tests {
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -796,6 +802,7 @@ mod tests {
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         };
         let conversation_id =
             uuid::Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
@@ -851,6 +858,7 @@ mod tests {
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         };
         let conversation_id =
             uuid::Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
@@ -888,6 +896,7 @@ mod tests {
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -934,6 +943,7 @@ mod tests {
             service_tier: tier,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         }
     }
 
@@ -943,6 +953,7 @@ mod tests {
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
 
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         }
@@ -1116,6 +1127,7 @@ mod tests {
             native_api: NativeApi::Responses,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         };
         let echo = br#"{"include":["reasoning.encrypted_content"],"input":[{"id":"resp_1_rs","type":"reasoning","encrypted_content":"minimax-resp_1_rs","summary":[{"type":"summary_text","text":"think"}]}]}"#;
@@ -1163,6 +1175,7 @@ mod tests {
             provider: crate::db::EndpointProvider::DeepSeek,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
 
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         }
@@ -1222,6 +1235,7 @@ mod tests {
                 provider,
                 proxy_url: None,
                 dev_system_normalize: false,
+                thinking_effort_override: None,
                 ..deepseek_route(NativeApi::Chat)
             };
             assert_eq!(apply_deepseek_thinking(&route, body).as_ref(), body);
@@ -1299,6 +1313,7 @@ mod tests {
                 native_api,
                 proxy_url: None,
                 dev_system_normalize: false,
+                thinking_effort_override: None,
                 ..minimax_route(crate::db::MinimaxServiceTier::Standard)
             };
             assert_eq!(
@@ -1436,6 +1451,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Minimax,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
 
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         }
@@ -1446,6 +1462,7 @@ mod tests {
             base_url: base_url.to_string(),
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
 
             ..route.clone()
         }
@@ -1498,6 +1515,7 @@ mod tests {
             native_api: NativeApi::Chat,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         };
         assert_eq!(
@@ -1508,6 +1526,7 @@ mod tests {
             native_api: NativeApi::Responses,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         };
         assert_eq!(
@@ -1583,6 +1602,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Glm,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
 
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         }

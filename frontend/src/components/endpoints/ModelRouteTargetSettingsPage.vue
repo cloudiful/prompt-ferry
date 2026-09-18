@@ -56,6 +56,17 @@ const touched = computed({
     if (target.value) target.value.active_windows_touched = value
   },
 })
+
+// Issue #464: per-target thinking effort override, default inherit
+// (follow caller). An explicit value force-replaces the caller value on
+// Chat (`reasoning_effort`) and Responses (`reasoning.effort`).
+const thinkingEffort = computed({
+  get: () => target.value?.thinking_effort_override ?? 'inherit',
+  set: (value: string) => {
+    if (target.value)
+      target.value.thinking_effort_override = value === 'inherit' ? null : value
+  },
+})
 </script>
 
 <template>
@@ -138,6 +149,39 @@ const touched = computed({
         v-model:windows="windows"
         v-model:touched="touched"
         :t="t"
+      />
+    </div>
+    <div class="grid gap-2 border-t border-default pt-3">
+      <div class="flex items-center gap-1">
+        <span class="text-xs font-medium text-default">{{
+          t('thinkingEffortOverride')
+        }}</span>
+        <UTooltip :text="t('thinkingEffortOverrideHint')">
+          <UButton
+            type="button"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-info"
+            :aria-label="t('thinkingEffortOverrideHint')"
+          />
+        </UTooltip>
+      </div>
+      <USelect
+        v-model="thinkingEffort"
+        class="w-full"
+        :items="[
+          { label: t('thinkingEffortInherit'), value: 'inherit' },
+          { label: 'none', value: 'none' },
+          { label: 'minimal', value: 'minimal' },
+          { label: 'low', value: 'low' },
+          { label: 'medium', value: 'medium' },
+          { label: 'high', value: 'high' },
+          { label: 'xhigh', value: 'xhigh' },
+          { label: 'max', value: 'max' },
+        ]"
+        label-key="label"
+        value-key="value"
       />
     </div>
     <div

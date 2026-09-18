@@ -75,6 +75,8 @@ impl ModelRouteRequest {
                         active_windows: None,
                         // Issue #392 Phase K: default-off passthrough.
                         dev_system_normalize: false,
+                        // Issue #464: inherit (follow the caller).
+                        thinking_effort_override: None,
                     })
                     .collect()
             })
@@ -112,6 +114,14 @@ impl ModelRouteRequest {
                         })?)
                     }
                 };
+                // Issue #464: always sent (`None`/empty means inherit);
+                // non-allowlist values reject with `invalid_thinking_effort`.
+                let thinking_effort_override = db::normalize_thinking_effort_override(
+                    target.thinking_effort_override.as_deref(),
+                )
+                .map_err(|message| {
+                    ApiError::new(StatusCode::BAD_REQUEST, "invalid_thinking_effort", message)
+                })?;
                 Ok(db::ModelRouteTargetCreate {
                     endpoint_id: target.endpoint_id,
                     enabled: target.enabled.unwrap_or(true),
@@ -123,6 +133,7 @@ impl ModelRouteRequest {
                     active_windows,
                     // Issue #392 Phase K: always sent (no omit/carry).
                     dev_system_normalize: target.dev_system_normalize,
+                    thinking_effort_override,
                 })
             });
         let targets = futures::future::try_join_all(targets).await?;
@@ -256,6 +267,17 @@ impl ModelRouteRequest {
                     message,
                 ));
             }
+            // Issue #464: allowlist for per-target thinking effort.
+            // Empty/`None` means inherit; non-allowlist rejects.
+            if let Err(message) =
+                db::normalize_thinking_effort_override(target.thinking_effort_override.as_deref())
+            {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_thinking_effort",
+                    message,
+                ));
+            }
         }
         let rules = db::list_model_endpoint_rules(&state.pool)
             .await
@@ -306,6 +328,15 @@ pub struct ModelRouteTargetRequest {
     /// `normalize_chat_request_for_native` in Chat passthrough.
     #[serde(default)]
     pub dev_system_normalize: bool,
+    /// Issue #464: per-target thinking effort override. `None`
+    /// (omitted/null/empty) means inherit (follow the caller);
+    /// `Some(effort)` must be one of
+    /// `none/minimal/low/medium/high/xhigh/max` and force-replaces the
+    /// caller value on Chat (`reasoning_effort`) and Responses
+    /// (`reasoning.effort`). Always sent (no omit/carry); `None` clears
+    /// to inherit.
+    #[serde(default)]
+    pub thinking_effort_override: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -486,6 +517,7 @@ mod tests {
             has_proxy_url_override: None,
             active_windows: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         })
         .expect("serialize off");
         assert_eq!(
@@ -501,6 +533,7 @@ mod tests {
             has_proxy_url_override: None,
             active_windows: None,
             dev_system_normalize: true,
+            thinking_effort_override: Some("high".to_string()),
         })
         .expect("serialize on");
         assert_eq!(
@@ -524,5 +557,31 @@ mod tests {
         }))
         .expect("parse explicit");
         assert_eq!(explicit.native_api, Some(crate::config::NativeApi::Chat));
+    }
+
+    #[test]
+    fn thinking_effort_override_inherit_and_allowlist() {
+        // Issue #464: `None` (omitted/null/empty) means inherit (follow
+        // the caller); explicit values must hit the 7-level allowlist.
+        let omitted: ModelRouteTargetRequest = serde_json::from_value(serde_json::json!({
+            "endpoint_id": "00000000-0000-0000-0000-000000000000"
+        }))
+        .expect("missing effort means inherit");
+        assert_eq!(omitted.thinking_effort_override, None);
+        assert!(
+            crate::db::normalize_thinking_effort_override(Some(" high ")).unwrap()
+                == Some("high".to_string())
+        );
+        assert!(
+            crate::db::normalize_thinking_effort_override(Some(""))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            crate::db::normalize_thinking_effort_override(None)
+                .unwrap()
+                .is_none()
+        );
+        assert!(crate::db::normalize_thinking_effort_override(Some("ultra")).is_err());
     }
 }

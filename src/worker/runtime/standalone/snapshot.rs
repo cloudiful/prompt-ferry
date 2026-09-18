@@ -198,6 +198,7 @@ mod tests {
                     proxy_url_override: None,
                     active_windows: None,
                     dev_system_normalize: false,
+                    thinking_effort_override: None,
                 }],
             }],
             client_keys: vec![ClientKeyConfig {

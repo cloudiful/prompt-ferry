@@ -47,6 +47,7 @@ pub(super) fn from_postgres_target(target: crate::db::ModelRouteTarget) -> Unifi
         has_proxy_url_override,
         active_windows: target.active_windows,
         dev_system_normalize: target.dev_system_normalize,
+        thinking_effort_override: target.thinking_effort_override,
     }
 }
 
@@ -115,6 +116,7 @@ where
                 has_proxy_url_override,
                 active_windows,
                 dev_system_normalize: target.dev_system_normalize,
+                thinking_effort_override: target.thinking_effort_override,
             }
         })
         .collect();
@@ -172,6 +174,13 @@ pub(super) fn sqlite_route_from_create(
                 active_windows,
                 // Issue #392 Phase K: always sent (no omit); direct carry.
                 dev_system_normalize: target.dev_system_normalize,
+                // Issue #464: always sent (`None`/empty means inherit);
+                // trim/empty normalizes to `None` (the admin layer already
+                // allowlist-validates; storage keeps the trimmed value).
+                thinking_effort_override: target
+                    .thinking_effort_override
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty()),
             })
         })
         .collect::<Result<Vec<_>>>()?;

@@ -819,6 +819,7 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
                 proxy_url_override: None,
                 active_windows: None,
                 dev_system_normalize: false,
+                thinking_effort_override: None,
             }],
         },
     )
@@ -947,6 +948,7 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 proxy_url_override: None,
                 active_windows: None,
                 dev_system_normalize: false,
+                thinking_effort_override: None,
             }],
         },
     )
@@ -967,6 +969,7 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 proxy_url_override: None,
                 active_windows: None,
                 dev_system_normalize: false,
+                thinking_effort_override: None,
             }],
         },
     )
@@ -1194,6 +1197,7 @@ async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow
                 proxy_url_override: None,
                 active_windows: None,
                 dev_system_normalize: false,
+                thinking_effort_override: None,
             }],
         },
     )
@@ -1307,6 +1311,7 @@ async fn session_affinity_options_fixture(
                 proxy_url_override: None,
                 active_windows: None,
                 dev_system_normalize: false,
+                thinking_effort_override: None,
             }],
         },
     )
@@ -1494,6 +1499,7 @@ async fn reset_session_affinity_clears_anonymous_record_binding_under_user_zero(
                 proxy_url_override: None,
                 active_windows: None,
                 dev_system_normalize: false,
+                thinking_effort_override: None,
             }],
         },
     )
@@ -1604,6 +1610,7 @@ async fn session_route_options_surfaces_binding_when_rule_no_longer_resolves() -
                     proxy_url_override: None,
                     active_windows: None,
                     dev_system_normalize: false,
+                    thinking_effort_override: None,
                 }],
             },
         )
@@ -1702,6 +1709,7 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
                 proxy_url_override: None,
                 active_windows: None,
                 dev_system_normalize: false,
+                thinking_effort_override: None,
             }],
         },
     )
@@ -1795,6 +1803,7 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
                 proxy_url_override: None,
                 active_windows: None,
                 dev_system_normalize: false,
+                thinking_effort_override: None,
             }],
         },
     )

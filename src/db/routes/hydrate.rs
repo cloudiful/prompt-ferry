@@ -74,6 +74,9 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
                 // Issue #392 Phase K: normalize switch, default-off for
                 // pre-migration rows (COALESCE in SQL already defaults).
                 dev_system_normalize: row.dev_system_normalize,
+                // Issue #464: per-target thinking effort override; None
+                // means inherit (follow the caller).
+                thinking_effort_override: row.thinking_effort_override,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
             }
@@ -156,6 +159,7 @@ pub(super) async fn model_route_candidates_by_rule(
                 active_windows: row.active_windows.clone(),
                 endpoint_active_windows: row.endpoint_active_windows.clone(),
                 dev_system_normalize: row.dev_system_normalize,
+                thinking_effort_override: row.thinking_effort_override.clone(),
             });
             continue;
         }
@@ -186,6 +190,7 @@ pub(super) async fn model_route_candidates_by_rule(
                 active_windows: row.active_windows,
                 endpoint_active_windows: row.endpoint_active_windows,
                 dev_system_normalize: row.dev_system_normalize,
+                thinking_effort_override: row.thinking_effort_override,
             }],
         });
     }

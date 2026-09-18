@@ -88,8 +88,15 @@ export function hasTargetSettings(
   return (
     hasTargetProxy(target) ||
     hasTargetSchedule(target) ||
-    (target.dev_system_normalize ?? false)
+    (target.dev_system_normalize ?? false) ||
+    hasTargetThinkingEffort(target)
   )
+}
+
+export function hasTargetThinkingEffort(
+  target: ModelRouteTargetForm | null | undefined,
+): boolean {
+  return (target?.thinking_effort_override ?? '').trim() !== ''
 }
 
 export function isTargetProxyValid(

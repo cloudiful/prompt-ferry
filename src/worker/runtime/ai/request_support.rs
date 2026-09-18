@@ -147,11 +147,14 @@ pub(super) async fn prepare_upstream_request_for_route(
     // never silently stripped here. Responses -> Anthropic/Auto remains rejected.
     // Issue #392 Phase K: thread the per-target normalize switch; false
     // skips Chat developer->system rewriting (default-off passthrough).
+    // Issue #464: thread the per-target thinking effort override; None
+    // means inherit (follow the caller).
     let mut prepared = prepare_upstream_request(
         &request.path,
         prepared_body,
         route.native_api,
         route.dev_system_normalize,
+        route.thinking_effort_override.as_deref(),
     )?;
     prepared.upstream_redacted_request_json = redacted_request
         .as_ref()

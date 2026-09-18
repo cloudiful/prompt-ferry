@@ -264,6 +264,7 @@ mod tests {
                     proxy_url_override: None,
                     active_windows: None,
                     dev_system_normalize: false,
+                    thinking_effort_override: None,
                 }],
             }],
             ..StandaloneConfig::default()
@@ -359,5 +360,7 @@ fn default_route_for_user(config: &WorkerConfig, user_id: i64) -> db::RouteConfi
         proxy_url: None,
         // Issue #392 Phase K: legacy direct routes never normalize.
         dev_system_normalize: false,
+        // Issue #464: direct routes follow the caller.
+        thinking_effort_override: None,
     }
 }

@@ -549,6 +549,7 @@ mod tests {
                 active_windows: target_raw.map(str::to_string),
                 endpoint_active_windows: endpoint_raw.map(str::to_string),
                 dev_system_normalize: false,
+                thinking_effort_override: None,
             }
         }
         let day = r#"[{"start":"06:00","end":"07:00"}]"#;
@@ -616,6 +617,7 @@ mod tests {
             active_windows: None,
             endpoint_active_windows: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         };
         assert!(!candidate_target_is_active(&active, 720));
         let candidate = crate::db::types::ModelRouteCandidate {

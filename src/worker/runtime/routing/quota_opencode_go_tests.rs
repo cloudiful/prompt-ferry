@@ -120,6 +120,7 @@ fn opencode_go_route(endpoint_id: Uuid, keys: Vec<db::EndpointApiKey>) -> db::Ro
         service_tier: db::MinimaxServiceTier::Standard,
         proxy_url: None,
         dev_system_normalize: false,
+        thinking_effort_override: None,
     }
 }
 

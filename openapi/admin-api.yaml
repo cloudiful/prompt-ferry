@@ -4345,6 +4345,15 @@ components:
         target_id:
           type: string
           format: uuid
+        thinking_effort_override:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #464: per-target thinking effort override. `None` (null/empty)
+            means inherit (follow the caller); `Some(effort)` force-replaces
+            `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
+            Validated against `none/minimal/low/medium/high/xhigh/max`.
         updated_at:
           type: string
           format: date-time
@@ -4404,6 +4413,18 @@ components:
             Issue #368 Phase B: per-target proxy override. `None` (omitted/null)
             means keep on PATCH / inherit on create; `Some("")` means clear to
             inherit; `Some(url)` must use `http/https/socks5/socks5h`.
+        thinking_effort_override:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #464: per-target thinking effort override. `None`
+            (omitted/null/empty) means inherit (follow the caller);
+            `Some(effort)` must be one of
+            `none/minimal/low/medium/high/xhigh/max` and force-replaces the
+            caller value on Chat (`reasoning_effort`) and Responses
+            (`reasoning.effort`). Always sent (no omit/carry); `None` clears
+            to inherit.
         upstream_model:
           type:
           - string
