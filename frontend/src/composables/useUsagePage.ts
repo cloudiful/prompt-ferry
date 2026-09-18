@@ -63,6 +63,7 @@ export function useUsagePage() {
       await Promise.all([
         requestRecordsStore.refreshOverview(),
         requestRecordsStore.refreshRecords(),
+        requestRecordsStore.refreshFacets(),
       ])
     } catch (cause) {
       notifyApiError(cause)

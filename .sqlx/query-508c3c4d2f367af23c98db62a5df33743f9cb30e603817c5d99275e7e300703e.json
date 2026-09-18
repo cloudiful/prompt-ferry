@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, COALESCE(t.native_api, 'auto') AS target_native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override,\n       t.active_windows, e.active_windows AS endpoint_active_windows,\n       COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\"\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\n  AND (\n      (r.scope = 'user' AND r.owner_user_id = $1)\n      OR (r.scope = 'admin' AND r.owner_user_id IS NULL)\n  )\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
+  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, COALESCE(t.native_api, 'auto') AS target_native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override,\n        t.active_windows, e.active_windows AS endpoint_active_windows,\n        COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\",\n        t.thinking_effort_override\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.rule_id = $1\n  AND r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
   "describe": {
     "columns": [
       {
@@ -251,11 +251,22 @@
         "name": "dev_system_normalize!",
         "type_info": "Bool",
         "origin": "Expression"
+      },
+      {
+        "ordinal": 24,
+        "name": "thinking_effort_override",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_route_targets",
+            "name": "thinking_effort_override"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -282,8 +293,9 @@
       true,
       true,
       true,
-      null
+      null,
+      true
     ]
   },
-  "hash": "579f0308959af815c6eb987a8938a002dffd5a02679aa601ef86a2768a52f224"
+  "hash": "508c3c4d2f367af23c98db62a5df33743f9cb30e603817c5d99275e7e300703e"
 }

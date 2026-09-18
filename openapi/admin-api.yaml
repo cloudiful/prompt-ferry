@@ -1223,6 +1223,18 @@ paths:
         required: false
         schema:
           $ref: '#/components/schemas/RequestRecordCategory'
+      - name: start
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: end
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
       responses:
         '200':
           description: Request record facets
@@ -5447,6 +5459,14 @@ components:
           items:
             type: string
         models:
+          type: array
+          items:
+            type: string
+        redactions:
+          type: array
+          items:
+            type: boolean
+        states:
           type: array
           items:
             type: string

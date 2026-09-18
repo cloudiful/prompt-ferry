@@ -66,14 +66,17 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
   const detailState = createRequestRecordDetailState()
 
   const requestStateOptions = computed(() =>
-    createUsageStateOptions({
-      received: t('requestStateReceived'),
-      awaiting_approval: t('requestStateAwaitingApproval'),
-      upstream_processing: t('requestStateUpstreamProcessing'),
-      completed: t('requestStateCompleted'),
-      failed: t('requestStateFailed'),
-      aborted: t('requestStateAborted'),
-    }),
+    createUsageStateOptions(
+      {
+        received: t('requestStateReceived'),
+        awaiting_approval: t('requestStateAwaitingApproval'),
+        upstream_processing: t('requestStateUpstreamProcessing'),
+        completed: t('requestStateCompleted'),
+        failed: t('requestStateFailed'),
+        aborted: t('requestStateAborted'),
+      },
+      recordState.facets.value.states ?? [],
+    ),
   )
   const facetOptionsView = computed(() =>
     createUsageFacetOptionsView(
@@ -181,6 +184,8 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
   async function refreshFacets(): Promise<void> {
     recordState.facets.value = await fetchUsageFacets(
       queryState.requestCategory.value,
+      queryState.start.value,
+      queryState.end.value,
     )
   }
 
@@ -240,6 +245,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     range: queryState.range,
     recordsLoading: loadingState.records,
     refreshAll,
+    refreshFacets,
     refreshOverview,
     refreshPage,
     refreshRecords,

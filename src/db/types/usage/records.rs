@@ -189,6 +189,10 @@ pub struct RequestRecordFacets {
     pub dates: Vec<String>,
     #[serde(default)]
     pub client_keys: Vec<ClientKeyFacet>,
+    #[serde(default)]
+    pub states: Vec<String>,
+    #[serde(default)]
+    pub redactions: Vec<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
