@@ -158,7 +158,7 @@ pub(super) fn candidate(targets: Vec<db::ModelRouteCandidateTarget>) -> db::Mode
         scope: "admin".to_string(),
         owner_user_id: None,
         model_pattern: "opencode-go".to_string(),
-        routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+        routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
         updated_at: Utc::now(),
         targets,
     }

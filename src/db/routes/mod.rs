@@ -117,6 +117,8 @@ fn parse_native_api(value: &str) -> NativeApi {
 }
 
 fn parse_routing_strategy(value: &str) -> ModelRouteRoutingStrategy {
+    // Issue #466: strict parse, no silent mapping. Only
+    // `responses_session_affinity` remains; anything else is corrupt.
     serde_json::from_value(serde_json::Value::String(value.to_string()))
-        .unwrap_or(ModelRouteRoutingStrategy::ClientKeyRendezvous)
+        .expect("unknown routing strategy")
 }

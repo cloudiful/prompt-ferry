@@ -218,7 +218,7 @@ async fn endpoint_proxy_round_trips_with_encrypted_envelope() {
         scope: "admin".to_string(),
         owner_user_id: None,
         model_pattern: "gpt-*".to_string(),
-        routing_strategy: ModelRouteRoutingStrategy::ClientKeyRendezvous,
+        routing_strategy: ModelRouteRoutingStrategy::ResponsesSessionAffinity,
         enabled: true,
         targets: vec![ModelRouteTargetCreate {
             endpoint_id,
@@ -610,7 +610,7 @@ async fn model_route_crud_round_trips_with_target_persistence() {
         scope: "admin".to_string(),
         owner_user_id: None,
         model_pattern: "gpt-*".to_string(),
-        routing_strategy: ModelRouteRoutingStrategy::ClientKeyRendezvous,
+        routing_strategy: ModelRouteRoutingStrategy::ResponsesSessionAffinity,
         enabled: true,
         targets: vec![ModelRouteTargetCreate {
             endpoint_id,

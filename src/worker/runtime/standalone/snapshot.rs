@@ -186,7 +186,7 @@ mod tests {
                 scope: RouteScope::Admin,
                 owner_user_id: None,
                 model_pattern: "*".to_string(),
-                routing_strategy: RoutingStrategy::ClientKeyRendezvous,
+                routing_strategy: RoutingStrategy::ResponsesSessionAffinity,
                 enabled: true,
                 targets: vec![ModelRouteTargetConfig {
                     target_id: Uuid::new_v4(),

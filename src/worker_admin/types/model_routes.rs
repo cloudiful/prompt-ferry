@@ -181,19 +181,8 @@ impl ModelRouteRequest {
                 "user route requires owner",
             ));
         }
-        let routing_strategy = self.routing_strategy.unwrap_or_default();
-        if routing_strategy == db::ModelRouteRoutingStrategy::ResponsesSessionAffinity
-            && self
-                .targets
-                .as_ref()
-                .map_or(self.endpoint_id.is_none(), |targets| targets.len() < 2)
-        {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "invalid_routing_strategy",
-                "responses_session_affinity requires at least two route targets",
-            ));
-        }
+        // Issue #466: single target + multi-key is the pinned key-level
+        // stickiness scenario; no minimum-target check on the strategy.
         let targets = self.targets.as_deref().unwrap_or(&[]);
         let has_legacy_endpoint = self.endpoint_id.is_some();
         if targets.is_empty() && !has_legacy_endpoint {
@@ -583,5 +572,29 @@ mod tests {
                 .is_none()
         );
         assert!(crate::db::normalize_thinking_effort_override(Some("ultra")).is_err());
+    }
+
+    #[test]
+    fn routing_strategy_defaults_to_affinity_allowing_single_target() {
+        // Issue #466: the removed legacy variant leaves a
+        // single-variant enum; the default is affinity and single-target
+        // routes (key-level stickiness, e.g. `minimax-m3`) are valid.
+        assert_eq!(
+            crate::db::ModelRouteRoutingStrategy::default(),
+            crate::db::ModelRouteRoutingStrategy::ResponsesSessionAffinity
+        );
+        let omitted: super::ModelRouteRequest = serde_json::from_value(serde_json::json!({
+            "scope": "admin",
+            "model_pattern": "minimax-m3",
+            "targets": [{
+                "endpoint_id": "00000000-0000-0000-0000-000000000000"
+            }]
+        }))
+        .expect("parse single-target route");
+        assert_eq!(
+            omitted.routing_strategy.unwrap_or_default(),
+            crate::db::ModelRouteRoutingStrategy::ResponsesSessionAffinity
+        );
+        assert_eq!(omitted.targets.map(|targets| targets.len()), Some(1));
     }
 }

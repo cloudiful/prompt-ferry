@@ -199,21 +199,18 @@ impl RouteScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutingStrategy {
-    ClientKeyRendezvous,
     ResponsesSessionAffinity,
 }
 
 impl RoutingStrategy {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::ClientKeyRendezvous => "client_key_rendezvous",
             Self::ResponsesSessionAffinity => "responses_session_affinity",
         }
     }
 
     pub(crate) fn parse(value: &str) -> Result<Self> {
         match value {
-            "client_key_rendezvous" => Ok(Self::ClientKeyRendezvous),
             "responses_session_affinity" => Ok(Self::ResponsesSessionAffinity),
             _ => Err(StandaloneConfigError::CorruptDatabase(format!(
                 "unknown routing strategy {value:?}"

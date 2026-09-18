@@ -29,9 +29,6 @@ const targetsLabel = computed(
         <div class="text-[0.88rem] leading-[1.2] font-bold text-highlighted">
           {{ item.model_pattern }}
         </div>
-        <div class="mt-px break-words text-[0.7rem] leading-[1.35] text-dimmed">
-          {{ item.routing_strategy_label }}
-        </div>
       </div>
     </div>
 

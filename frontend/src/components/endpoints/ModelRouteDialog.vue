@@ -4,7 +4,6 @@ import ProviderIcon from '@/components/providers/ProviderIcon.vue'
 import ModelRouteTargetSettingsPage from '@/components/endpoints/ModelRouteTargetSettingsPage.vue'
 import {
   canSaveTargets,
-  createRoutingOptions,
   createTargetColumns,
   createTargetMeta,
   hasTargetSettings,
@@ -123,7 +122,6 @@ const {
   onGripKeydown,
 } = useModelRouteTargetDrag(form)
 
-const routingStrategyOptions = computed(() => createRoutingOptions(props.t))
 const targetColumns = computed(() => createTargetColumns(props.t))
 const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
 </script>
@@ -147,13 +145,6 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
               v-model="form.model_pattern"
               class="min-w-40 flex-1"
               :placeholder="t('modelPattern')"
-            />
-            <USelect
-              v-model="form.routing_strategy"
-              class="min-w-44 flex-1"
-              :items="routingStrategyOptions"
-              label-key="label"
-              value-key="value"
             />
             <label
               class="inline-flex min-h-8 shrink-0 items-center justify-end pb-1 text-[0.75rem] text-default"

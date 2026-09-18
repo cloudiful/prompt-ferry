@@ -129,16 +129,6 @@ export function canSaveTargets(
   )
 }
 
-export function createRoutingOptions(t: TranslateFn) {
-  return [
-    { label: t('routingStrategyClientKey'), value: 'client_key_rendezvous' },
-    {
-      label: t('routingStrategySessionAffinity'),
-      value: 'responses_session_affinity',
-    },
-  ]
-}
-
 export function createTargetColumns(
   t: TranslateFn,
 ): TableColumn<ModelRouteForm['targets'][number]>[] {

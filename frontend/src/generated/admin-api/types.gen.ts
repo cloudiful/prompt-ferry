@@ -705,7 +705,7 @@ export type ModelRouteRequest = {
     targets?: Array<ModelRouteTargetRequest> | null;
 };
 
-export type ModelRouteRoutingStrategy = 'client_key_rendezvous' | 'responses_session_affinity';
+export type ModelRouteRoutingStrategy = 'responses_session_affinity';
 
 export type ModelRouteTarget = {
     /**

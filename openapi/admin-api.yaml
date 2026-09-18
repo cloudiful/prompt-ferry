@@ -4284,7 +4284,6 @@ components:
     ModelRouteRoutingStrategy:
       type: string
       enum:
-      - client_key_rendezvous
       - responses_session_affinity
     ModelRouteTarget:
       type: object

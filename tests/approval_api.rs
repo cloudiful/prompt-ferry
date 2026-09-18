@@ -1699,7 +1699,7 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: "gpt-routed".to_string(),
-            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: routed_endpoint.endpoint_id,
@@ -1793,7 +1793,7 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: "glm-5".to_string(),
-            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,

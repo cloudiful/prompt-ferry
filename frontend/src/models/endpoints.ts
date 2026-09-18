@@ -49,7 +49,6 @@ export type ModelRouteListItemView = {
   scope_label: string
   enabled: boolean
   owner_label: string
-  routing_strategy_label: string
   targets: ModelRouteTargetItemView[]
   testing: boolean
   toggling: boolean
@@ -86,8 +85,6 @@ type EndpointViewLabels = {
   nativeApiResponses: string
   nativeApiRealtime: string
   owner: string
-  routingStrategyClientKey: string
-  routingStrategySessionAffinity: string
   scopeAdmin: string
   scopeUser: string
 }
@@ -142,9 +139,6 @@ export function createEndpointsWorkspaceView(options: {
   const modelRouteLabels: ModelRouteViewItemLabels = {
     endpointTestIdle: options.labels.endpointTestIdle,
     ownerLabel: options.labels.owner,
-    routingStrategyClientKey: options.labels.routingStrategyClientKey,
-    routingStrategySessionAffinity:
-      options.labels.routingStrategySessionAffinity,
     scopeAdmin: options.labels.scopeAdmin,
     scopeUser: options.labels.scopeUser,
   }

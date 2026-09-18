@@ -59,8 +59,8 @@ pub(super) fn scope_to_string(scope: ScRouteScope) -> String {
 }
 
 pub(super) fn routing_strategy_to_pg(strategy: ScRoutingStrategy) -> ModelRouteRoutingStrategy {
+    // Issue #466: only `responses_session_affinity` remains.
     match strategy {
-        ScRoutingStrategy::ClientKeyRendezvous => ModelRouteRoutingStrategy::ClientKeyRendezvous,
         ScRoutingStrategy::ResponsesSessionAffinity => {
             ModelRouteRoutingStrategy::ResponsesSessionAffinity
         }
@@ -68,8 +68,8 @@ pub(super) fn routing_strategy_to_pg(strategy: ScRoutingStrategy) -> ModelRouteR
 }
 
 pub(super) fn routing_strategy_from_pg(strategy: ModelRouteRoutingStrategy) -> ScRoutingStrategy {
+    // Issue #466: only `responses_session_affinity` remains.
     match strategy {
-        ModelRouteRoutingStrategy::ClientKeyRendezvous => ScRoutingStrategy::ClientKeyRendezvous,
         ModelRouteRoutingStrategy::ResponsesSessionAffinity => {
             ScRoutingStrategy::ResponsesSessionAffinity
         }

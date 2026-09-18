@@ -379,7 +379,7 @@ async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_o
     let path = standalone_temp_path("fresh");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 25);
+    assert_eq!(standalone_schema_version(&pool).await?, 27);
 
     let ddl: String = sqlx::query(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'standalone_provider_endpoints'",
@@ -539,8 +539,8 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
     // 0015 (issue #230) adds `glm` and 0016 (issue #287) adds `deepseek`;
-    // the final schema version is 16 after the pending migrations apply.
-    assert_eq!(standalone_schema_version(&pool).await?, 25);
+    // the final schema version is 27 after the pending migrations apply.
+    assert_eq!(standalone_schema_version(&pool).await?, 27);
     let preserved: i64 = sqlx::query(
         "SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'",
     )
@@ -585,7 +585,7 @@ async fn standalone_0025_quota_cleanup_preserves_route_targets() -> anyhow::Resu
     let path = standalone_temp_path("quota25");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 25);
+    assert_eq!(standalone_schema_version(&pool).await?, 27);
     // No quota columns remain.
     for table in ["standalone_model_routes", "standalone_mcp_servers"] {
         let cols: Vec<String> = if table == "standalone_model_routes" {
@@ -620,7 +620,7 @@ async fn standalone_0025_quota_cleanup_preserves_route_targets() -> anyhow::Resu
         .execute(&pool)
         .await?;
     // fixup: endpoint_id is first bind, not param above; use explicit values
-    sqlx::query("INSERT INTO standalone_model_routes(rule_id, scope, model_pattern, routing_strategy, enabled) VALUES (?, 'admin', 'm25*', 'client_key_rendezvous', 1)")
+    sqlx::query("INSERT INTO standalone_model_routes(rule_id, scope, model_pattern, routing_strategy, enabled) VALUES (?, 'admin', 'm25*', 'responses_session_affinity', 1)")
         .bind(&rule_id)
         .execute(&pool)
         .await?;

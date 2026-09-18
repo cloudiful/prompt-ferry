@@ -90,11 +90,6 @@ defineEmits<{
               "
             />
           </label>
-          <UBadge
-            :label="row.original.routing_strategy_label"
-            color="neutral"
-            variant="subtle"
-          />
         </div>
       </template>
       <template #test-cell="{ row }">

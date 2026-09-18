@@ -36,7 +36,6 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
     scope: 'admin',
     owner_user_id: null,
     model_pattern: '',
-    routing_strategy: 'client_key_rendezvous',
     enabled: true,
     targets: [
       {
@@ -97,7 +96,6 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
     scope: source.scope === 'user' ? 'user' : 'admin',
     owner_user_id: source.owner_user_id ?? null,
     model_pattern: source.model_pattern ?? '',
-    routing_strategy: source.routing_strategy ?? 'client_key_rendezvous',
     enabled: source.enabled ?? true,
     targets: targets.map((target) => ({
       endpoint_id: target?.endpoint_id ?? '',
@@ -141,10 +139,6 @@ export function modelRouteFormToRequest(
     enabled: safe.enabled ?? true,
     model_pattern: (safe.model_pattern ?? '').trim(),
     owner_user_id: safe.scope === 'user' ? (safe.owner_user_id ?? null) : null,
-    routing_strategy:
-      safe.routing_strategy === 'responses_session_affinity'
-        ? 'responses_session_affinity'
-        : 'client_key_rendezvous',
     scope: safe.scope === 'user' ? 'user' : 'admin',
     targets: targets
       .filter((target) => (target?.endpoint_id ?? '').trim() !== '')

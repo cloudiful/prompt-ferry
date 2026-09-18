@@ -46,7 +46,7 @@ pub(super) use crate::{
         ApprovalResolution, ApprovalStatus, LLM_REVIEW_SETTINGS_KEY, LlmReviewSettings,
         spawn_approval_webhook,
     },
-    naming::{MODEL_ROUTE_TEST_ROUTING_KEY, MODEL_ROUTE_TEST_SESSION_KEY, SESSION_COOKIE_NAME},
+    naming::{MODEL_ROUTE_TEST_SESSION_KEY, SESSION_COOKIE_NAME},
     protocol::{BridgeMessage, ConfigSnapshot, RelayIpPolicy},
     redact,
     routing::choose_preferred_target,
