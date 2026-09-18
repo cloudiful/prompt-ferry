@@ -282,6 +282,17 @@ need the switch turned on explicitly per target. The toggle lives in the
 target-row gear popover alongside proxy and schedule, and is always sent as
 `true`/`false`.
 
+### Responses compact
+
+- `POST /v1/responses/compact` forwards to Responses-native upstreams
+  byte-for-byte; feed the returned `output` back as the next
+  `POST /v1/responses` `input` to continue the conversation.
+- Targets without native compact support fall back to ferry-side
+  summarization when `compact_mode=self_summarize` is set on the target
+  (drops `encrypted_content`, trims old tool outputs, returns a plaintext
+  handoff). The default `passthrough` rejects non-Responses targets with
+  `400`; `off` disables compact for the target.
+
 ### Single-host binary
 
 Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases)

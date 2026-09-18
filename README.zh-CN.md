@@ -236,6 +236,15 @@ no route target is active for route 'summarizer' at 03:12 (worker-local time; wi
 重写的行为变更：严格校验 `developer` 的上游需按目标手动开启。开关位于目标行
 齿轮 popover，与代理、排期同处，恒以 `true`/`false` 全量下发。
 
+### Responses compact
+
+- `POST /v1/responses/compact` 对 Responses 原生上游逐字节透传；把返回的
+  `output` 原样作为下一次 `POST /v1/responses` 的 `input` 即可继续对话。
+- 无原生 compact 支持的目标，可在目标上设置 `compact_mode=self_summarize`
+  启用 ferry 侧摘要兜底（丢弃 `encrypted_content`、裁剪旧 tool 输出、返回
+  明文 handoff）。默认 `passthrough` 对非 Responses 目标返回 `400`；
+  `off` 则按目标禁用 compact。
+
 ### 单机二进制
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的
