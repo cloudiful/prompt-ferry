@@ -5,7 +5,8 @@ use crate::{
     config::NativeApi,
     openai_compat::{
         CompatError, chat_request_to_responses, normalize_chat_request_for_native,
-        responses_stateless_request_to_chat, validate_raw_responses_request_body,
+        responses_stateless_request_to_chat, validate_raw_compact_request_body,
+        validate_raw_responses_request_body,
     },
     redact_upstream::UpstreamRedactionSession,
     usage::upstream_body,
@@ -109,7 +110,7 @@ fn apply_thinking_effort_override_for_path(
     let Some(object) = value.as_object_mut() else {
         return body;
     };
-    if request_path == "/v1/responses" {
+    if request_path == "/v1/responses" || request_path == "/v1/responses/compact" {
         let reasoning = object
             .entry("reasoning")
             .or_insert_with(|| serde_json::json!({}));
@@ -159,6 +160,23 @@ fn prepare_upstream_request_inner(
                 upstream_redacted_request_json: None,
                 upstream_restore_session: None,
             })
+        }
+        ("/v1/responses/compact", NativeApi::Responses) => {
+            validate_raw_compact_request_body(request_body)?;
+            Ok(PreparedUpstreamRequest {
+                path: request_path.to_string(),
+                body: PreparedRequestBody::PassthroughStream(request_body.to_vec()),
+                response_adapter: ResponseAdapter::Passthrough,
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+            })
+        }
+        ("/v1/responses/compact", NativeApi::Chat | NativeApi::AnthropicMessages | NativeApi::Auto) => {
+            Err(CompatError::new(
+                StatusCode::BAD_REQUEST,
+                "responses_cross_protocol_unsupported",
+                "POST /v1/responses/compact requires a responses-native endpoint target; enable per-target self_summarize to compact without upstream support",
+            ))
         }
         ("/v1/responses", NativeApi::Chat) => {
             let translated = responses_stateless_request_to_chat(request_body)?;
@@ -458,5 +476,37 @@ mod tests {
         };
         let body: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["reasoning_effort"].as_str(), Some("high"));
+    }
+
+    #[test]
+    fn compact_passes_through_for_responses_native_upstreams() {
+        let body = br#"{"model":"m","input":[{"type":"message","role":"user","content":"hi"}]}"#;
+        let prepared = prepare_upstream_request(
+            "/v1/responses/compact",
+            body,
+            NativeApi::Responses,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(prepared.path, "/v1/responses/compact");
+        assert_eq!(prepared.response_adapter, ResponseAdapter::Passthrough);
+        let PreparedRequestBody::PassthroughStream(forwarded) = prepared.body else {
+            panic!("compact requests should stream unchanged");
+        };
+        assert_eq!(forwarded, body);
+    }
+
+    #[test]
+    fn compact_rejects_chat_native_upstreams() {
+        let error = prepare_upstream_request(
+            "/v1/responses/compact",
+            br#"{"model":"m","input":[{"type":"message","role":"user","content":"hi"}]}"#,
+            NativeApi::Chat,
+            false,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "responses_cross_protocol_unsupported");
     }
 }

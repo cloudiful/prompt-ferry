@@ -41,7 +41,8 @@ pub(crate) use responses_state::{
     NormalizedResponsesRequest, assistant_message_to_output_items,
     extract_output_items_from_responses_value, normalize_response_error,
     output_items_to_assistant_message, persisted_artifact, persisted_output_items,
-    responses_stream_output_items, validate_raw_responses_request_body,
+    responses_stream_output_items, validate_raw_compact_request_body,
+    validate_raw_responses_request_body,
 };
 
 #[derive(Debug, Clone)]

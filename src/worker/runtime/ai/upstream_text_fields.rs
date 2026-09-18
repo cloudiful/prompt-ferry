@@ -6,7 +6,9 @@ pub(super) fn should_process_ai_string_field(
 ) -> bool {
     match request_path {
         "/v1/chat/completions" => should_process_chat_string_field(json_path, key),
-        "/v1/responses" => should_process_responses_string_field(json_path, object_type, key),
+        "/v1/responses" | "/v1/responses/compact" => {
+            should_process_responses_string_field(json_path, object_type, key)
+        }
         "/v1/messages" => should_process_anthropic_string_field(json_path, object_type, key),
         _ => false,
     }

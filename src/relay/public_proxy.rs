@@ -32,7 +32,7 @@ use self::{
     admin::proxy_admin_ui,
     ai::{
         create_realtime_client_secret_handler, proxy_anthropic_messages, proxy_chat,
-        proxy_conversations, proxy_models, proxy_realtime, proxy_responses,
+        proxy_compact, proxy_conversations, proxy_models, proxy_realtime, proxy_responses,
     },
     mcp::{proxy_mcp_root, proxy_mcp_server},
 };
@@ -87,6 +87,12 @@ pub(super) fn public_router(state: AppState) -> Router {
         .route(
             "/v1/responses",
             post(proxy_responses).layer(DefaultBodyLimit::max(
+                bridge_wire::PUBLIC_API_BODY_LIMIT_BYTES,
+            )),
+        )
+        .route(
+            "/v1/responses/compact",
+            post(proxy_compact).layer(DefaultBodyLimit::max(
                 bridge_wire::PUBLIC_API_BODY_LIMIT_BYTES,
             )),
         )

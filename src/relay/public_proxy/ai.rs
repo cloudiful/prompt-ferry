@@ -165,6 +165,25 @@ pub(super) async fn proxy_responses(
     .await
 }
 
+pub(super) async fn proxy_compact(
+    State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<RemoteAddr>,
+    Extension(compression): Extension<HttpRequestCompressionContext>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    proxy_request(
+        state,
+        peer_addr.0.ip(),
+        headers,
+        compression,
+        Method::POST,
+        "/v1/responses/compact",
+        body,
+    )
+    .await
+}
+
 pub(super) async fn proxy_conversations(
     State(state): State<AppState>,
     ConnectInfo(peer_addr): ConnectInfo<RemoteAddr>,

@@ -34,6 +34,10 @@ pub(crate) fn validate_raw_responses_request_body(body: &[u8]) -> Result<(), Com
     validate::validate_raw_responses_passthrough(&items)
 }
 
+pub(crate) fn validate_raw_compact_request_body(body: &[u8]) -> Result<(), CompatError> {
+    validate::validate_raw_compact_request_body(body)
+}
+
 impl NormalizedResponsesRequest {
     pub(crate) fn from_body(body: &[u8]) -> Result<Self, CompatError> {
         let value = serde_json::from_slice::<Value>(body).map_err(|_| {

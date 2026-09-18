@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use super::{
     NormalizedResponsesRequest, normalize_response_error, raw_responses_input_items_from_body,
-    validate_raw_responses_request_body,
+    validate_raw_compact_request_body, validate_raw_responses_request_body,
 };
 
 #[test]
@@ -157,4 +157,32 @@ fn wraps_detail_errors_in_openai_shape() {
         value["error"]["message"].as_str(),
         Some("Unsupported parameter: previous_response_id")
     );
+}
+
+#[test]
+fn compact_accepts_array_input() {
+    validate_raw_compact_request_body(
+        br#"{"model":"gpt-5","input":[{"type":"message","role":"user","content":"hi"}]}"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn compact_accepts_string_input() {
+    validate_raw_compact_request_body(br#"{"model":"gpt-5","input":"summarize this"}"#).unwrap();
+}
+
+#[test]
+fn compact_rejects_missing_input() {
+    let err = validate_raw_compact_request_body(br#"{"model":"gpt-5"}"#).unwrap_err();
+    assert_eq!(err.code, "invalid_compact_body");
+}
+
+#[test]
+fn compact_rejects_previous_response_id() {
+    let err = validate_raw_compact_request_body(
+        br#"{"model":"gpt-5","input":[{"type":"message","role":"user","content":"hi"}],"previous_response_id":"resp_1"}"#,
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "invalid_responses_continuation");
 }

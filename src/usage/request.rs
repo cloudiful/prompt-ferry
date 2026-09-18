@@ -66,7 +66,7 @@ pub fn extract_request_prompt(path: &str, body: &[u8]) -> Option<String> {
                     .join("\n")
             })
             .unwrap_or_default(),
-        "/v1/responses" => text::value_text(value.get("input")?),
+        "/v1/responses" | "/v1/responses/compact" => text::value_text(value.get("input")?),
         "/v1/messages" => {
             let system = value
                 .get("system")
