@@ -310,7 +310,9 @@ fn should_capture_responses_artifact(
     response_adapter: ResponseAdapter,
     native_api: crate::config::NativeApi,
 ) -> bool {
-    (request_path == "/v1/responses" || response_adapter != ResponseAdapter::Passthrough)
+    (request_path == "/v1/responses"
+        || request_path == "/v1/responses/compact"
+        || response_adapter != ResponseAdapter::Passthrough)
         && matches!(
             response_adapter,
             ResponseAdapter::Passthrough

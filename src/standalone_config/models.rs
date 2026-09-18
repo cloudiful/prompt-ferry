@@ -407,6 +407,12 @@ pub struct ModelRouteTargetConfig {
     // TEXT column. Always sent as string|null (no omit).
     #[serde(default)]
     pub thinking_effort_override: Option<String>,
+    // Issue #502 Task 5: per-target compact mode. Defaults to
+    // `passthrough`; `self_summarize` enables ferry-side handoff
+    // summarization for non-Responses targets. SQLite persists the 0028
+    // `compact_mode` TEXT column. Always sent (no omit).
+    #[serde(default = "default_target_compact_mode")]
+    pub compact_mode: String,
 }
 
 impl fmt::Debug for ModelRouteTargetConfig {
@@ -426,6 +432,7 @@ impl fmt::Debug for ModelRouteTargetConfig {
             .field("active_windows", &self.active_windows)
             .field("dev_system_normalize", &self.dev_system_normalize)
             .field("thinking_effort_override", &self.thinking_effort_override)
+            .field("compact_mode", &self.compact_mode)
             .finish()
     }
 }
@@ -547,6 +554,12 @@ fn redacted_secret(value: &str) -> String {
 /// required for both the standalone config and the admin create payload.
 pub fn default_target_native_api() -> NativeApi {
     NativeApi::Auto
+}
+
+/// Issue #502 Task 5: new targets default to `passthrough` compact mode
+/// (no new default semantics).
+pub fn default_target_compact_mode() -> String {
+    "passthrough".to_string()
 }
 
 fn redacted_optional_secret(value: Option<&str>) -> Option<String> {

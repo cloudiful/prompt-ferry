@@ -164,6 +164,12 @@ export const endpointMessages = {
     thinkingEffortOverrideHint:
       '按目标覆盖调用端思考强度；继承表示沿用调用端传值，显式值强制替换 Chat 的 reasoning_effort 与 Responses 的 reasoning.effort。',
     thinkingEffortInherit: '继承（沿用调用端）',
+    compactMode: '压缩模式',
+    compactModeHint:
+      'Responses 原生目标默认透传；非 Responses 目标开启自研摘要后由 ferry 生成明文 handoff，关闭则拒绝压缩请求。',
+    compactModePassthrough: '透传（原生）',
+    compactModeSelfSummarize: '自研摘要',
+    compactModeOff: '关闭',
   },
   'en-US': {
     addTarget: 'Add target',
@@ -334,5 +340,11 @@ export const endpointMessages = {
     thinkingEffortOverrideHint:
       'Override the caller thinking effort for this target; inherit follows the caller, an explicit value force-replaces Chat reasoning_effort and Responses reasoning.effort.',
     thinkingEffortInherit: 'Inherit (follow caller)',
+    compactMode: 'Compact mode',
+    compactModeHint:
+      'Responses-native targets passthrough by default; non-Responses targets with self-summarize get a ferry-generated plaintext handoff, off rejects compact requests.',
+    compactModePassthrough: 'Passthrough (native)',
+    compactModeSelfSummarize: 'Self-summarize',
+    compactModeOff: 'Off',
   },
 } as const

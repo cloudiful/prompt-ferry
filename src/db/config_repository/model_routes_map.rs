@@ -48,6 +48,7 @@ pub(super) fn from_postgres_target(target: crate::db::ModelRouteTarget) -> Unifi
         active_windows: target.active_windows,
         dev_system_normalize: target.dev_system_normalize,
         thinking_effort_override: target.thinking_effort_override,
+        compact_mode: target.compact_mode,
     }
 }
 
@@ -117,6 +118,9 @@ where
                 active_windows,
                 dev_system_normalize: target.dev_system_normalize,
                 thinking_effort_override: target.thinking_effort_override,
+                // Issue #502 Task 5: 0028 plaintext compact mode; unknown
+                // reads as `passthrough`.
+                compact_mode: crate::db::CompactMode::parse(&target.compact_mode),
             }
         })
         .collect();
@@ -181,6 +185,8 @@ pub(super) fn sqlite_route_from_create(
                     .thinking_effort_override
                     .map(|v| v.trim().to_string())
                     .filter(|v| !v.is_empty()),
+                // Issue #502 Task 5: always sent; `passthrough` default.
+                compact_mode: target.compact_mode.as_str().to_string(),
             })
         })
         .collect::<Result<Vec<_>>>()?;

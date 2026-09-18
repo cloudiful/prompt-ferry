@@ -48,6 +48,7 @@ pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<R
             dev_system_normalize: false,
             // Issue #464: direct routes follow the caller.
             thinking_effort_override: None,
+            compact_mode: crate::db::CompactMode::Passthrough,
         })
         .collect::<Vec<_>>();
     attach_route_config_api_keys(pool, routes).await

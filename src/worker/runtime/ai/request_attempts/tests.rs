@@ -75,6 +75,7 @@ fn test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
         proxy_url: None,
         dev_system_normalize: false,
         thinking_effort_override: None,
+        compact_mode: crate::db::CompactMode::Passthrough,
     }
 }
 
@@ -635,6 +636,7 @@ fn glm_test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
         proxy_url: None,
         dev_system_normalize: false,
         thinking_effort_override: None,
+        compact_mode: crate::db::CompactMode::Passthrough,
     }
 }
 
@@ -1161,6 +1163,7 @@ fn quota_failover_route(base_url: &str) -> RouteConfig {
         proxy_url: None,
         dev_system_normalize: false,
         thinking_effort_override: None,
+        compact_mode: crate::db::CompactMode::Passthrough,
     }
 }
 

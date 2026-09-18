@@ -28,6 +28,7 @@ pub async fn get_route(pool: &PgPool, route_id: uuid::Uuid) -> Result<Option<Rou
             dev_system_normalize: false,
             // Issue #464: direct lookup follows the caller.
             thinking_effort_override: None,
+            compact_mode: crate::db::CompactMode::Passthrough,
         });
     match route {
         Some(route) => Ok(

@@ -281,6 +281,9 @@ fn route_from_target(
         // Issue #464: carry the per-target thinking effort override;
         // `None` means inherit (follow the caller).
         thinking_effort_override: target.thinking_effort_override.clone(),
+        // Issue #502 Task 5: carry the per-target compact mode;
+        // `passthrough` is the default (no new default semantics).
+        compact_mode: target.compact_mode,
     }
 }
 
@@ -449,6 +452,7 @@ mod tests {
             endpoint_active_windows: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
+            compact_mode: crate::db::CompactMode::Passthrough,
         }
     }
 
@@ -478,6 +482,7 @@ mod tests {
             endpoint_active_windows: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
+            compact_mode: crate::db::CompactMode::Passthrough,
         }
     }
 

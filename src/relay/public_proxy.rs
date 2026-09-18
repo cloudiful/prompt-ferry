@@ -31,8 +31,8 @@ use tracing::{info, warn};
 use self::{
     admin::proxy_admin_ui,
     ai::{
-        create_realtime_client_secret_handler, proxy_anthropic_messages, proxy_chat,
-        proxy_compact, proxy_conversations, proxy_models, proxy_realtime, proxy_responses,
+        create_realtime_client_secret_handler, proxy_anthropic_messages, proxy_chat, proxy_compact,
+        proxy_conversations, proxy_models, proxy_realtime, proxy_responses,
     },
     mcp::{proxy_mcp_root, proxy_mcp_server},
 };

@@ -75,6 +75,8 @@ function addTarget(): void {
     dev_system_normalize: false,
     // Issue #464: inherit (follow caller) by default.
     thinking_effort_override: null,
+    // Issue #502 Task 5: passthrough (native) by default.
+    compact_mode: 'passthrough',
     // Issue #409: default Auto (follow caller), like createEmptyModelRouteForm.
     native_api: 'auto',
   })

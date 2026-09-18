@@ -199,6 +199,7 @@ mod tests {
                     active_windows: None,
                     dev_system_normalize: false,
                     thinking_effort_override: None,
+                    compact_mode: "passthrough".to_string(),
                 }],
             }],
             client_keys: vec![ClientKeyConfig {

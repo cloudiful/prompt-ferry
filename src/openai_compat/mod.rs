@@ -33,6 +33,7 @@ pub(crate) use response_stream_state::sse_event;
 pub(crate) use responses_reasoning_echo::{
     bridge_reasoning_encrypted_token, minimax_reasoning_encrypted_token,
     mint_reasoning_encrypted_content, restore_reasoning_echoes,
+    strip_encrypted_content_for_compact,
 };
 pub(crate) use responses_reasoning_summary::{
     ensure_reasoning_summary, normalize_responses_reasoning_body,

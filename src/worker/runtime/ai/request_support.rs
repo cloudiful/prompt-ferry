@@ -7,7 +7,7 @@ use crate::{
     openai_compat::CompatError,
     redact,
     redact_upstream::{UpstreamRedactionSession, decrypt_upstream_session},
-    upstream_adapter::{PreparedUpstreamRequest, prepare_upstream_request},
+    upstream_adapter::{PreparedUpstreamRequest, prepare_upstream_request_with_compact},
     worker_admin::AdminState,
     worker_usage::UsageLog,
 };
@@ -149,12 +149,16 @@ pub(super) async fn prepare_upstream_request_for_route(
     // skips Chat developer->system rewriting (default-off passthrough).
     // Issue #464: thread the per-target thinking effort override; None
     // means inherit (follow the caller).
-    let mut prepared = prepare_upstream_request(
+    // Issue #502 Task 5: thread the per-target compact mode; `passthrough`
+    // keeps Task 3 behavior, `self_summarize` enables the ferry-side
+    // handoff flow for non-Responses targets, `off` rejects compact.
+    let mut prepared = prepare_upstream_request_with_compact(
         &request.path,
         prepared_body,
         route.native_api,
         route.dev_system_normalize,
         route.thinking_effort_override.as_deref(),
+        route.compact_mode,
     )?;
     prepared.upstream_redacted_request_json = redacted_request
         .as_ref()

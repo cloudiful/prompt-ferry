@@ -3042,6 +3042,12 @@ components:
           - number
           - 'null'
           format: double
+    CompactMode:
+      type: string
+      enum:
+      - passthrough
+      - self_summarize
+      - off
     ConversationEndpointOverride:
       type: object
       required:
@@ -4316,6 +4322,12 @@ components:
           description: |-
             Issue #378 Phase I: per-target effective windows (`HH:MM` pairs).
             Empty means all-day.
+        compact_mode:
+          $ref: '#/components/schemas/CompactMode'
+          description: |-
+            Issue #502 Task 5: per-target compact mode. Defaults to
+            `passthrough`; `self_summarize` enables ferry-side handoff
+            summarization for non-Responses targets. Always sent (no omit).
         created_at:
           type: string
           format: date-time
@@ -4387,6 +4399,17 @@ components:
             Issue #378 Phase I: effective windows (`[{start,end}]` `HH:MM`).
             `None` (omitted) keeps the stored value on PATCH; `Some([])`
             means all-day; `Some([...])` replaces after validation.
+        compact_mode:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #502 Task 5: per-target compact mode. `None`
+            (omitted/null/empty) means `passthrough` (no new default
+            semantics); `Some("self_summarize")` enables ferry-side handoff
+            summarization for non-Responses targets; `Some("off")` rejects
+            compact explicitly. Always sent (no omit/carry); unknown values
+            normalize to `passthrough`.
         dev_system_normalize:
           type: boolean
           description: |-

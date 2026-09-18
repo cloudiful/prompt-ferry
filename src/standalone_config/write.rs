@@ -340,6 +340,15 @@ pub(crate) async fn insert_route(
                     .filter(|v| !v.is_empty())
                     .map(str::to_string),
             )
+            .bind({
+                // Issue #502 Task 5: empty normalizes to `passthrough`.
+                let trimmed = target.compact_mode.trim();
+                if trimmed.is_empty() {
+                    "passthrough".to_string()
+                } else {
+                    trimmed.to_string()
+                }
+            })
             .execute(&mut **transaction)
             .await?;
     }
@@ -381,6 +390,15 @@ pub(crate) async fn insert_encrypted_route(
             .bind(target.target.active_windows.clone())
             .bind(bool_i64(target.target.dev_system_normalize))
             .bind(target.target.thinking_effort_override.as_deref())
+            .bind({
+                // Issue #502 Task 5: empty normalizes to `passthrough`.
+                let trimmed = target.target.compact_mode.trim();
+                if trimmed.is_empty() {
+                    "passthrough".to_string()
+                } else {
+                    trimmed.to_string()
+                }
+            })
             .execute(&mut **transaction)
             .await?;
     }

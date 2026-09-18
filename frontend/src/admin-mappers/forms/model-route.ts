@@ -24,6 +24,18 @@ function normalizeTargetNativeApi(value: unknown): NativeApi {
 // allowlist survives; anything else normalizes to null (inherit).
 const THINKING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
+// Issue #502 Task 5: per-target compact mode. Only the 3-level allowlist
+// survives; anything else normalizes to passthrough (default).
+const COMPACT_MODES = ['passthrough', 'self_summarize', 'off'] as const
+
+function normalizeCompactMode(value: unknown): string {
+  if (typeof value !== 'string') return 'passthrough'
+  const trimmed = value.trim()
+  return (COMPACT_MODES as readonly string[]).includes(trimmed)
+    ? trimmed
+    : 'passthrough'
+}
+
 function normalizeThinkingEffort(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
@@ -53,6 +65,8 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         dev_system_normalize: false,
         // Issue #464: inherit (follow caller) by default.
         thinking_effort_override: null,
+        // Issue #502 Task 5: passthrough (native) by default.
+        compact_mode: 'passthrough',
         // Issue #409 Phase 2: default Auto (follow caller).
         native_api: 'auto',
       },
@@ -120,6 +134,11 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
       thinking_effort_override: normalizeThinkingEffort(
         (target as { thinking_effort_override?: unknown } | undefined)?.thinking_effort_override,
       ),
+      // Issue #502 Task 5: compact mode; legacy payloads miss it
+      // (means passthrough).
+      compact_mode: normalizeCompactMode(
+        (target as { compact_mode?: unknown } | undefined)?.compact_mode,
+      ),
       // Issue #409 Phase 2: per-target port type; legacy payloads miss it
       // (means Auto). Round-trips Auto default.
       native_api: normalizeTargetNativeApi(
@@ -179,6 +198,8 @@ export function modelRouteFormToRequest(
           dev_system_normalize: target?.dev_system_normalize ?? false,
           // Issue #464: always sent (null means inherit).
           thinking_effort_override: normalizeThinkingEffort(target?.thinking_effort_override),
+          // Issue #502 Task 5: always sent (passthrough default).
+          compact_mode: normalizeCompactMode(target?.compact_mode),
           // Issue #409 Phase 2: always sent (Auto default follows caller;
           // explicit wins over endpoint). Normalize legacy/undefined to Auto.
           native_api: normalizeTargetNativeApi(target?.native_api),

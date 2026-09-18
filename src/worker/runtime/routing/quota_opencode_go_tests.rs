@@ -121,6 +121,7 @@ fn opencode_go_route(endpoint_id: Uuid, keys: Vec<db::EndpointApiKey>) -> db::Ro
         proxy_url: None,
         dev_system_normalize: false,
         thinking_effort_override: None,
+        compact_mode: crate::db::CompactMode::Passthrough,
     }
 }
 

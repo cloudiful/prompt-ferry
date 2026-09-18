@@ -96,6 +96,7 @@ async fn sync_model_route_targets(
             active_windows,
             target.dev_system_normalize,
             target.thinking_effort_override,
+            target.compact_mode.as_str(),
         )
         .execute(&mut **tx)
         .await?;

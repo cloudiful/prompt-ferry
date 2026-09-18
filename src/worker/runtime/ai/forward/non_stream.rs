@@ -153,7 +153,9 @@ pub(super) async fn forward_non_stream_chat_response(
         }
     };
     let restored_body = if let Some(session) = upstream_restore_session.clone() {
-        restore_ai_response_json_blocking("/v1/responses".to_string(), transformed, session).await?
+        // Issue #502 Task 4 (P3): forward the actual request path instead of
+        // the `/v1/responses` literal so compact restores stay honest.
+        restore_ai_response_json_blocking(request.path.clone(), transformed, session).await?
     } else {
         transformed
     };
@@ -417,7 +419,7 @@ pub(super) async fn forward_non_stream_anthropic_response(
     let transformed = anthropic_response_to_responses(&body)
         .map_err(|err| anyhow::anyhow!("failed translating anthropic response: {}", err.message))?;
     let restored_body = if let Some(session) = upstream_restore_session.clone() {
-        restore_ai_response_json_blocking("/v1/responses".to_string(), transformed, session).await?
+        restore_ai_response_json_blocking(request.path.clone(), transformed, session).await?
     } else {
         transformed
     };

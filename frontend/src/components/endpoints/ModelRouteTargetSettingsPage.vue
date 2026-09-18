@@ -67,6 +67,18 @@ const thinkingEffort = computed({
       target.value.thinking_effort_override = value === 'inherit' ? null : value
   },
 })
+
+// Issue #502 Task 5: per-target compact mode, default passthrough
+// (no new default semantics). self_summarize enables ferry-side handoff
+// summarization for non-Responses targets; off rejects compact explicitly.
+const compactMode = computed({
+  get: () => target.value?.compact_mode ?? 'passthrough',
+  set: (value: string) => {
+    if (target.value)
+      target.value.compact_mode =
+        value === 'self_summarize' || value === 'off' ? value : 'passthrough'
+  },
+})
 </script>
 
 <template>
@@ -179,6 +191,34 @@ const thinkingEffort = computed({
           { label: 'high', value: 'high' },
           { label: 'xhigh', value: 'xhigh' },
           { label: 'max', value: 'max' },
+        ]"
+        label-key="label"
+        value-key="value"
+      />
+    </div>
+    <div class="grid gap-2 border-t border-default pt-3">
+      <div class="flex items-center gap-1">
+        <span class="text-xs font-medium text-default">{{
+          t('compactMode')
+        }}</span>
+        <UTooltip :text="t('compactModeHint')">
+          <UButton
+            type="button"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-info"
+            :aria-label="t('compactModeHint')"
+          />
+        </UTooltip>
+      </div>
+      <USelect
+        v-model="compactMode"
+        class="w-full"
+        :items="[
+          { label: t('compactModePassthrough'), value: 'passthrough' },
+          { label: t('compactModeSelfSummarize'), value: 'self_summarize' },
+          { label: t('compactModeOff'), value: 'off' },
         ]"
         label-key="label"
         value-key="value"

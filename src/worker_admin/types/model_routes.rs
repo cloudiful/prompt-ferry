@@ -77,6 +77,7 @@ impl ModelRouteRequest {
                         dev_system_normalize: false,
                         // Issue #464: inherit (follow the caller).
                         thinking_effort_override: None,
+                        compact_mode: None,
                     })
                     .collect()
             })
@@ -122,6 +123,9 @@ impl ModelRouteRequest {
                 .map_err(|message| {
                     ApiError::new(StatusCode::BAD_REQUEST, "invalid_thinking_effort", message)
                 })?;
+                // Issue #502 Task 5: always sent; unknown/empty normalizes
+                // to `passthrough` (no new default semantics, no reject).
+                let compact_mode = db::normalize_compact_mode(target.compact_mode.as_deref());
                 Ok(db::ModelRouteTargetCreate {
                     endpoint_id: target.endpoint_id,
                     enabled: target.enabled.unwrap_or(true),
@@ -134,6 +138,7 @@ impl ModelRouteRequest {
                     // Issue #392 Phase K: always sent (no omit/carry).
                     dev_system_normalize: target.dev_system_normalize,
                     thinking_effort_override,
+                    compact_mode,
                 })
             });
         let targets = futures::future::try_join_all(targets).await?;
@@ -326,6 +331,14 @@ pub struct ModelRouteTargetRequest {
     /// to inherit.
     #[serde(default)]
     pub thinking_effort_override: Option<String>,
+    /// Issue #502 Task 5: per-target compact mode. `None`
+    /// (omitted/null/empty) means `passthrough` (no new default
+    /// semantics); `Some("self_summarize")` enables ferry-side handoff
+    /// summarization for non-Responses targets; `Some("off")` rejects
+    /// compact explicitly. Always sent (no omit/carry); unknown values
+    /// normalize to `passthrough`.
+    #[serde(default)]
+    pub compact_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -507,6 +520,7 @@ mod tests {
             active_windows: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
+            compact_mode: None,
         })
         .expect("serialize off");
         assert_eq!(
@@ -523,6 +537,9 @@ mod tests {
             active_windows: None,
             dev_system_normalize: true,
             thinking_effort_override: Some("high".to_string()),
+            // Issue #502 Task 5: compact mode round-trips; omitted means
+            // passthrough.
+            compact_mode: Some("self_summarize".to_string()),
         })
         .expect("serialize on");
         assert_eq!(

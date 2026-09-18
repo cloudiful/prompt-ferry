@@ -8,6 +8,7 @@ INSERT INTO model_route_targets(
     proxy_url_override,
     active_windows,
     dev_system_normalize,
-    thinking_effort_override
+    thinking_effort_override,
+    compact_mode
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)

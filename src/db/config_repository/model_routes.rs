@@ -44,6 +44,10 @@ pub struct UnifiedModelRouteTarget {
     // Issue #464: per-target thinking effort override. `None` means
     // inherit (follow the caller); `Some(effort)` force-replaces.
     pub thinking_effort_override: Option<String>,
+    // Issue #502 Task 5: per-target compact mode. Defaults to
+    // `passthrough`; `self_summarize` enables ferry-side handoff
+    // summarization for non-Responses targets.
+    pub compact_mode: crate::db::CompactMode,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -104,6 +108,8 @@ fn target_to_pg(target: UnifiedModelRouteTarget) -> PgModelRouteTarget {
         dev_system_normalize: target.dev_system_normalize,
         // Issue #464: carry thinking effort override through unified shape.
         thinking_effort_override: target.thinking_effort_override,
+        // Issue #502 Task 5: carry compact mode through unified shape.
+        compact_mode: target.compact_mode,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }

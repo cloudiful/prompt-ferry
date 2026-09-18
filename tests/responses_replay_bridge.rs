@@ -204,6 +204,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -344,6 +345,7 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
                     active_windows: None,
                     dev_system_normalize: false,
                     thinking_effort_override: None,
+                    compact_mode: db::CompactMode::Passthrough,
                 },
                 db::ModelRouteTargetCreate {
                     endpoint_id: right_code.endpoint_id,
@@ -354,6 +356,7 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
                     active_windows: None,
                     dev_system_normalize: false,
                     thinking_effort_override: None,
+                    compact_mode: db::CompactMode::Passthrough,
                 },
             ],
         },
@@ -464,6 +467,7 @@ async fn raw_passthrough_keeps_previous_response_id_without_replay_state() -> an
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -555,6 +559,7 @@ async fn raw_passthrough_keeps_conversation_without_replay_state() -> anyhow::Re
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -642,6 +647,7 @@ async fn rejects_stateful_responses_routed_to_chat_native_target() -> anyhow::Re
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )
@@ -732,6 +738,7 @@ async fn rejects_responses_routed_to_anthropic_native_target() -> anyhow::Result
                 active_windows: None,
                 dev_system_normalize: false,
                 thinking_effort_override: None,
+                compact_mode: db::CompactMode::Passthrough,
             }],
         },
     )

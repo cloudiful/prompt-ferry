@@ -24,6 +24,8 @@ pub async fn effective_route(pool: &PgPool, user_id: i64) -> Result<Option<Route
             dev_system_normalize: false,
             // Issue #464: direct fallback follows the caller.
             thinking_effort_override: None,
+            // Issue #502 Task 5: direct fallback uses passthrough compact.
+            compact_mode: crate::db::CompactMode::Passthrough,
         });
     match route {
         Some(route) => Ok(
