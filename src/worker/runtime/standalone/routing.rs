@@ -62,10 +62,8 @@ fn candidate_from_route(
         },
         owner_user_id: route.owner_user_id,
         model_pattern: route.model_pattern.clone(),
+        // Issue #466: only `responses_session_affinity` remains.
         routing_strategy: match route.routing_strategy {
-            RoutingStrategy::ClientKeyRendezvous => {
-                db::ModelRouteRoutingStrategy::ClientKeyRendezvous
-            }
             RoutingStrategy::ResponsesSessionAffinity => {
                 db::ModelRouteRoutingStrategy::ResponsesSessionAffinity
             }
@@ -215,7 +213,7 @@ mod tests {
                     scope: RouteScope::Admin,
                     owner_user_id: None,
                     model_pattern: "gpt-*".to_string(),
-                    routing_strategy: RoutingStrategy::ClientKeyRendezvous,
+                    routing_strategy: RoutingStrategy::ResponsesSessionAffinity,
                     enabled: true,
                     targets: vec![ModelRouteTargetConfig {
                         target_id: Uuid::new_v4(),
@@ -235,7 +233,7 @@ mod tests {
                     scope: RouteScope::Admin,
                     owner_user_id: None,
                     model_pattern: "gpt-5".to_string(),
-                    routing_strategy: RoutingStrategy::ClientKeyRendezvous,
+                    routing_strategy: RoutingStrategy::ResponsesSessionAffinity,
                     enabled: true,
                     targets: vec![ModelRouteTargetConfig {
                         target_id: Uuid::new_v4(),
@@ -288,7 +286,7 @@ mod tests {
                 scope: RouteScope::Admin,
                 owner_user_id: None,
                 model_pattern: "*".to_string(),
-                routing_strategy: RoutingStrategy::ClientKeyRendezvous,
+                routing_strategy: RoutingStrategy::ResponsesSessionAffinity,
                 enabled: true,
                 targets: vec![ModelRouteTargetConfig {
                     target_id: Uuid::new_v4(),

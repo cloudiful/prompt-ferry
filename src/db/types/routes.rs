@@ -12,14 +12,12 @@ use crate::db::types::endpoints::{EndpointProvider, MinimaxServiceTier};
 #[serde(rename_all = "snake_case")]
 pub enum ModelRouteRoutingStrategy {
     #[default]
-    ClientKeyRendezvous,
     ResponsesSessionAffinity,
 }
 
 impl ModelRouteRoutingStrategy {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::ClientKeyRendezvous => "client_key_rendezvous",
             Self::ResponsesSessionAffinity => "responses_session_affinity",
         }
     }

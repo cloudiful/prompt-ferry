@@ -96,7 +96,7 @@ mod tests {
             scope: "user".to_string(),
             owner_user_id: Some(1),
             model_pattern: "gpt-*".to_string(),
-            routing_strategy: crate::db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: crate::db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             updated_at: Utc::now(),
             targets: Vec::new(),
         };
@@ -118,7 +118,7 @@ mod tests {
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: String::new(),
-            routing_strategy: crate::db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: crate::db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             updated_at: Utc::now(),
             targets: Vec::new(),
         };

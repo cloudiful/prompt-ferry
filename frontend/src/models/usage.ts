@@ -71,15 +71,12 @@ type UsageWorkspaceDetailInput = {
 
 export function createUsageStateOptions(
   labels: UsageStateLabels,
+  states: readonly string[],
 ): Option<RequestRecordState>[] {
-  return [
-    { label: labels.received, value: 'received' },
-    { label: labels.awaiting_approval, value: 'awaiting_approval' },
-    { label: labels.upstream_processing, value: 'upstream_processing' },
-    { label: labels.completed, value: 'completed' },
-    { label: labels.failed, value: 'failed' },
-    { label: labels.aborted, value: 'aborted' },
-  ]
+  return states.map((state) => ({
+    label: (labels as Record<string, string>)[state] ?? state,
+    value: state as RequestRecordState,
+  }))
 }
 
 export function createUsageFacetOptionsView(
@@ -99,10 +96,10 @@ export function createUsageFacetOptionsView(
       facets.client_keys ?? [],
     ),
     request_state_options: requestStateOptions,
-    request_redaction_options: [
-      { label: 'Yes', value: true },
-      { label: 'No', value: false },
-    ],
+    request_redaction_options: (facets.redactions ?? []).map((value) => ({
+      label: value ? 'Yes' : 'No',
+      value,
+    })),
   }
 }
 

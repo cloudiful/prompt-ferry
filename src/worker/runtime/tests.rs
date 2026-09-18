@@ -489,6 +489,11 @@ async fn selected_route_carries_target_upstream_model_override() {
         ResponseLimits::default(),
     );
     let mut candidate = sample_candidate();
+    // Issue #466: `sample_candidate` is now affinity-only; use a
+    // non-session path so this override test exercises the unified pool
+    // without requiring a session-affinity backend.
+    let mut affinity_bypass = sample_request();
+    affinity_bypass.path = "/v1/embeddings".to_string();
     let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {
         request_id: uuid::Uuid::new_v4(),
         started: Instant::now(),
@@ -503,7 +508,7 @@ async fn selected_route_carries_target_upstream_model_override() {
         &services,
         &request_ctx,
         &candidate,
-        &sample_request(),
+        &affinity_bypass,
         1,
         Some("key-a"),
     )
@@ -520,7 +525,7 @@ async fn selected_route_carries_target_upstream_model_override() {
         &services,
         &request_ctx,
         &candidate,
-        &sample_request(),
+        &affinity_bypass,
         1,
         Some("key-a"),
     )
@@ -580,7 +585,7 @@ fn sample_candidate() -> ModelRouteCandidate {
         scope: "admin".to_string(),
         owner_user_id: None,
         model_pattern: "gpt-*".to_string(),
-        routing_strategy: crate::db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+        routing_strategy: crate::db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
         updated_at: Utc::now(),
         targets: vec![
             ModelRouteCandidateTarget {

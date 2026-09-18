@@ -68,11 +68,17 @@ export async function fetchUsageRecords(input: {
 
 export async function fetchUsageFacets(
   requestCategory: RequestRecordCategory,
+  start?: string,
+  end?: string,
 ): Promise<RequestRecordFacets> {
   return expectData(
     await requestRecordFacets<true>(
       withData({
-        query: { request_category: requestCategory },
+        query: {
+          request_category: requestCategory,
+          start: start || undefined,
+          end: end || undefined,
+        },
       }),
     ),
   )

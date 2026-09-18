@@ -1699,7 +1699,7 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: "gpt-routed".to_string(),
-            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: routed_endpoint.endpoint_id,
@@ -1793,7 +1793,7 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: "glm-5".to_string(),
-            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -2911,6 +2911,166 @@ async fn request_record_facets_omit_user_login_for_non_admin() -> anyhow::Result
             || client_keys[0]["user_login_name"].is_null(),
         "non-admin facets must not leak user_login_name metadata"
     );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn request_record_facets_converge_on_selected_time_window() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping request records facets window test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    let admin = create_user(&schema.pool, "admin-facet-window", true).await?;
+    let base = chrono::Utc::now() - chrono::Duration::hours(1);
+
+    async fn insert_window_record(
+        pool: &PgPool,
+        user_id: i64,
+        model: &str,
+        state: db::RequestRecordState,
+        redaction_applied: bool,
+        created_at: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<()> {
+        let event_id = db::record_request_record(
+            pool,
+            db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+                .with_state(db::UsageEventKind::Request, state)
+                .with_request_actor(Some(user_id), None, None, None)
+                .with_model(Some(model.to_string()))
+                .with_timing(Some(200), Some(true), Some(10), Some(1))
+                .with_usage(Some(1), Some(2), Some(3), Some(0), None, None),
+        )
+        .await?;
+        sqlx::query("UPDATE request_records SET created_at = $2, redaction_applied = $3 WHERE event_id = $1")
+            .bind(event_id)
+            .bind(created_at)
+            .bind(redaction_applied)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    insert_window_record(
+        &schema.pool,
+        admin.user_id,
+        "gpt-facet-in",
+        db::RequestRecordState::Completed,
+        false,
+        base + chrono::Duration::minutes(15),
+    )
+    .await?;
+    insert_window_record(
+        &schema.pool,
+        admin.user_id,
+        "gpt-facet-old",
+        db::RequestRecordState::Failed,
+        true,
+        base - chrono::Duration::days(7),
+    )
+    .await?;
+    insert_window_record(
+        &schema.pool,
+        admin.user_id,
+        "gpt-facet-new",
+        db::RequestRecordState::Aborted,
+        true,
+        base + chrono::Duration::days(7),
+    )
+    .await?;
+
+    let state = admin_state(schema.pool.clone(), &admin).await;
+    let app = worker_admin::router(state);
+
+    // Windowed call: only the in-window record's values may appear.
+    let start = (base - chrono::Duration::minutes(15)).to_rfc3339();
+    let end = (base + chrono::Duration::hours(2)).to_rfc3339();
+    let path = format!(
+        "/api/v1/admin/request-records/facets?start={}&end={}",
+        urlencoding(&start),
+        urlencoding(&end)
+    );
+    let response = app
+        .clone()
+        .oneshot(auth_request("GET", path))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["models"], serde_json::json!(["gpt-facet-in"]));
+    assert_eq!(value["states"], serde_json::json!(["completed"]));
+    assert_eq!(value["redactions"], serde_json::json!([false]));
+
+    // Empty window: zero rows converge every dropdown to empty.
+    let empty_start = (base + chrono::Duration::days(30)).to_rfc3339();
+    let empty_end = (base + chrono::Duration::days(31)).to_rfc3339();
+    let path = format!(
+        "/api/v1/admin/request-records/facets?start={}&end={}",
+        urlencoding(&empty_start),
+        urlencoding(&empty_end)
+    );
+    let response = app
+        .clone()
+        .oneshot(auth_request("GET", path))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(
+        value["models"].as_array().map(Vec::len),
+        Some(0),
+        "empty window must converge models to empty"
+    );
+    assert_eq!(
+        value["states"].as_array().map(Vec::len),
+        Some(0),
+        "empty window must converge states to empty"
+    );
+    assert_eq!(
+        value["redactions"].as_array().map(Vec::len),
+        Some(0),
+        "empty window must converge redactions to empty"
+    );
+
+    // Param-less call keeps the legacy 30-day lookback: all three records
+    // (each within 30 days) remain visible.
+    let response = app
+        .oneshot(auth_request(
+            "GET",
+            "/api/v1/admin/request-records/facets".to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    let models = value["models"]
+        .as_array()
+        .expect("models facet must be present");
+    for expected in ["gpt-facet-in", "gpt-facet-old", "gpt-facet-new"] {
+        assert!(
+            models.iter().any(|item| item.as_str() == Some(expected)),
+            "legacy 30-day facets must still contain {expected}"
+        );
+    }
+    let states = value["states"]
+        .as_array()
+        .expect("states facet must be present");
+    for expected in ["completed", "failed", "aborted"] {
+        assert!(
+            states.iter().any(|item| item.as_str() == Some(expected)),
+            "legacy 30-day facets must still contain state {expected}"
+        );
+    }
+    let redactions = value["redactions"]
+        .as_array()
+        .expect("redactions facet must be present");
+    assert!(redactions.iter().any(|item| item.as_bool() == Some(true)));
+    assert!(redactions.iter().any(|item| item.as_bool() == Some(false)));
 
     schema.cleanup().await?;
     Ok(())

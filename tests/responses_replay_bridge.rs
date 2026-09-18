@@ -193,7 +193,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: "deepseek-v4-flash".to_string(),
-            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -453,7 +453,7 @@ async fn raw_passthrough_keeps_previous_response_id_without_replay_state() -> an
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: "gpt-test".to_string(),
-            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -544,7 +544,7 @@ async fn raw_passthrough_keeps_conversation_without_replay_state() -> anyhow::Re
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: "gpt-test".to_string(),
-            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -631,7 +631,7 @@ async fn rejects_stateful_responses_routed_to_chat_native_target() -> anyhow::Re
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: "gpt-test".to_string(),
-            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,
@@ -721,7 +721,7 @@ async fn rejects_responses_routed_to_anthropic_native_target() -> anyhow::Result
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: "gpt-test".to_string(),
-            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,

@@ -81,8 +81,6 @@ export const useEndpointsStore = defineStore('endpoints', () => {
         nativeApiResponses: t('nativeApiResponses'),
         nativeApiRealtime: t('nativeApiRealtime'),
         owner: t('owner'),
-        routingStrategyClientKey: t('routingStrategyClientKey'),
-        routingStrategySessionAffinity: t('routingStrategySessionAffinity'),
         scopeAdmin: t('scopeAdmin'),
         scopeUser: t('scopeUser'),
       },

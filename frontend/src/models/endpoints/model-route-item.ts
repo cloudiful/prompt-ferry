@@ -8,8 +8,6 @@ import type { ModelRouteListItemView } from '../endpoints'
 export type ModelRouteViewItemLabels = {
   endpointTestIdle: string
   ownerLabel: string
-  routingStrategyClientKey: string
-  routingStrategySessionAffinity: string
   scopeAdmin: string
   scopeUser: string
 }
@@ -32,10 +30,6 @@ export function createModelRouteListItemView(
     owner_label: route.owner_user_id
       ? `${options.ownerLabel} ${route.owner_user_id}`
       : '',
-    routing_strategy_label:
-      route.routing_strategy === 'responses_session_affinity'
-        ? options.routingStrategySessionAffinity
-        : options.routingStrategyClientKey,
     targets: route.targets.map((target) => ({
       target_id: target.target_id,
       endpoint_label: target.endpoint_name || target.endpoint_id,

@@ -625,7 +625,7 @@ mod tests {
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: "gpt-*".to_string(),
-            routing_strategy: crate::db::types::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: crate::db::types::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             updated_at: chrono::Utc::now(),
             targets: vec![active],
         };

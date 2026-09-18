@@ -36,7 +36,7 @@ pub async fn spawn_worker(
             scope: "admin".to_string(),
             owner_user_id: None,
             model_pattern: "*".to_string(),
-            routing_strategy: db::ModelRouteRoutingStrategy::ClientKeyRendezvous,
+            routing_strategy: db::ModelRouteRoutingStrategy::ResponsesSessionAffinity,
             enabled: true,
             targets: vec![db::ModelRouteTargetCreate {
                 endpoint_id: endpoint.endpoint_id,

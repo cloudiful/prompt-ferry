@@ -96,7 +96,6 @@ export type ModelRouteForm = {
   scope: 'admin' | 'user'
   owner_user_id: number | null
   model_pattern: string
-  routing_strategy: 'client_key_rendezvous' | 'responses_session_affinity'
   enabled: boolean
   targets: ModelRouteTargetForm[]
 }

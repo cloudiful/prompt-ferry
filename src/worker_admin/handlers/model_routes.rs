@@ -546,8 +546,8 @@ fn select_test_model(pattern: &str, models_body: &str) -> Option<String> {
 }
 
 fn model_route_test_routing_key(candidate: &db::ModelRouteCandidate) -> Option<&'static str> {
+    // Issue #466: only `responses_session_affinity` remains.
     match candidate.routing_strategy {
-        db::ModelRouteRoutingStrategy::ClientKeyRendezvous => Some(MODEL_ROUTE_TEST_ROUTING_KEY),
         db::ModelRouteRoutingStrategy::ResponsesSessionAffinity => {
             Some(MODEL_ROUTE_TEST_SESSION_KEY)
         }

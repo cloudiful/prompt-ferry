@@ -364,7 +364,7 @@ async fn unified_pool_skips_a_target_with_no_remaining_quota() {
     let runtime_state = super::super::WorkerRuntimeState::default();
     let services = session_affinity_services(runtime_state.clone(), replay_cache);
     let mut candidate = session_affinity_candidate();
-    candidate.routing_strategy = db::ModelRouteRoutingStrategy::ClientKeyRendezvous;
+    candidate.routing_strategy = db::ModelRouteRoutingStrategy::ResponsesSessionAffinity;
     let exhausted_endpoint = candidate.targets[0].endpoint_id;
     let exhausted_key_id = candidate.targets[0].api_keys[0].key_id;
     services
@@ -401,8 +401,10 @@ async fn unified_pool_skips_a_target_with_no_remaining_quota() {
         selected.route.route_id, exhausted_endpoint,
         "a pool unit with no remaining quota must be skipped",
     );
+    // Issue #466: single-variant affinity; the unified pool is reached via
+    // the affinity path, so the reason is session-pinned.
     assert_eq!(
         selected.route.route_selection_reason,
-        db::RouteSelectionReason::Default
+        db::RouteSelectionReason::SessionAffinity
     );
 }

@@ -705,7 +705,7 @@ export type ModelRouteRequest = {
     targets?: Array<ModelRouteTargetRequest> | null;
 };
 
-export type ModelRouteRoutingStrategy = 'client_key_rendezvous' | 'responses_session_affinity';
+export type ModelRouteRoutingStrategy = 'responses_session_affinity';
 
 export type ModelRouteTarget = {
     /**
@@ -1125,6 +1125,8 @@ export type RequestRecordFacets = {
     client_keys?: Array<ClientKeyFacet>;
     dates: Array<string>;
     models: Array<string>;
+    redactions?: Array<boolean>;
+    states?: Array<string>;
     users: Array<string>;
 };
 
@@ -2539,6 +2541,8 @@ export type RequestRecordFacetsData = {
     path?: never;
     query?: {
         request_category?: RequestRecordCategory;
+        start?: string;
+        end?: string;
     };
     url: '/api/v1/admin/request-records/facets';
 };

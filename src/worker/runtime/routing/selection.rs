@@ -227,7 +227,7 @@ fn target_secret(target: &db::ModelRouteCandidateTarget) -> db::EndpointApiKeySe
 
 /// Session identity first (conversation / previous response / provider
 /// conversation / session header), then the caller-supplied routing key
-/// (the client key for rendezvous routing), then a stable constant.
+/// (the client key), then a stable constant.
 fn routing_stable_key(
     request: &BufferedBridgeRequest,
     request_prompt_log: &RequestPromptLog,

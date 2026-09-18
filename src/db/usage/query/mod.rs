@@ -12,8 +12,7 @@ const REQUEST_RECORDS_PAGE_SQL: &str = include_str!("../../../sql/usage_events_p
 
 /// Facet dropdowns only need recent values; an unbounded GROUP BY over the
 /// whole `request_records` table was 2.27s (issue #277). Bound the lookback
-/// window and cap each facet branch.
-const FACET_LOOKBACK_DAYS: i64 = 30;
+/// window (default 30d, see `usage_event_facets.sql`) and cap each facet branch.
 const FACET_LIMIT: i64 = 200;
 
 #[derive(sqlx::FromRow)]
@@ -217,13 +216,16 @@ pub async fn list_request_record_facets(
     visible_user_id: Option<i64>,
     request_category: RequestRecordCategory,
     is_admin: bool,
+    start: Option<chrono::DateTime<chrono::Utc>>,
+    end: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<RequestRecordFacets> {
     let facets = sqlx::query_file_as!(
         crate::db::types::UsageFacet,
         "src/sql/usage_event_facets.sql",
         visible_user_id,
         request_category.as_str(),
-        chrono::Utc::now() - chrono::Duration::days(FACET_LOOKBACK_DAYS),
+        start,
+        end,
         FACET_LIMIT,
     )
     .fetch_all(pool)
@@ -235,6 +237,8 @@ pub async fn list_request_record_facets(
             "model" => values.models.push(facet.value),
             "target" => values.models.push(facet.value),
             "date" => values.dates.push(facet.value),
+            "state" => values.states.push(facet.value),
+            "redaction" => values.redactions.push(facet.value == "true"),
             "client_key" => {
                 let Some(key_id) = facet.key_id else {
                     continue;

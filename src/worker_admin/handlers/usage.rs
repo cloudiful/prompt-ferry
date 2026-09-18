@@ -172,6 +172,8 @@ pub(super) async fn usage_facets(
             .request_category
             .unwrap_or(db::RequestRecordCategory::Ai),
         user.is_admin,
+        query.start,
+        query.end,
     )
     .await
     {
