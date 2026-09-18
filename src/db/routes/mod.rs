@@ -63,6 +63,7 @@ struct ModelRouteCandidateRow {
     active_windows: Option<String>,
     endpoint_active_windows: Option<String>,
     dev_system_normalize: bool,
+    thinking_effort_override: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -79,6 +80,7 @@ struct ModelRouteTargetRow {
     proxy_url_override: Option<String>,
     active_windows: Option<String>,
     dev_system_normalize: bool,
+    thinking_effort_override: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }

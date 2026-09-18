@@ -403,6 +403,13 @@ pub struct ModelRouteTargetConfig {
     // persists the 0022 `dev_system_normalize` INTEGER column.
     #[serde(default)]
     pub dev_system_normalize: bool,
+    // Issue #464: per-target thinking effort override. `None` (null/empty)
+    // means inherit (follow the caller); `Some(effort)` is one of
+    // none/minimal/low/medium/high/xhigh/max and force-replaces the
+    // caller value. SQLite persists the 0026 `thinking_effort_override`
+    // TEXT column. Always sent as string|null (no omit).
+    #[serde(default)]
+    pub thinking_effort_override: Option<String>,
 }
 
 impl fmt::Debug for ModelRouteTargetConfig {
@@ -421,6 +428,7 @@ impl fmt::Debug for ModelRouteTargetConfig {
             )
             .field("active_windows", &self.active_windows)
             .field("dev_system_normalize", &self.dev_system_normalize)
+            .field("thinking_effort_override", &self.thinking_effort_override)
             .finish()
     }
 }

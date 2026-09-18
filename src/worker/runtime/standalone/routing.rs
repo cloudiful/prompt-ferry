@@ -127,6 +127,8 @@ fn target_from_endpoint(
         // Issue #392 Phase K: endpoint default for inheritance + normalize.
         endpoint_active_windows: endpoint.active_windows.clone(),
         dev_system_normalize: target.dev_system_normalize,
+        // Issue #464: per-target thinking effort override; None = inherit.
+        thinking_effort_override: target.thinking_effort_override.clone(),
     }
 }
 
@@ -225,6 +227,7 @@ mod tests {
                         proxy_url_override: None,
                         active_windows: None,
                         dev_system_normalize: false,
+                        thinking_effort_override: None,
                     }],
                 },
                 ModelRouteConfig {
@@ -244,6 +247,7 @@ mod tests {
                         proxy_url_override: None,
                         active_windows: None,
                         dev_system_normalize: false,
+                        thinking_effort_override: None,
                     }],
                 },
             ],
@@ -296,6 +300,7 @@ mod tests {
                     proxy_url_override: None,
                     active_windows: None,
                     dev_system_normalize: false,
+                    thinking_effort_override: None,
                 }],
             }],
             ..StandaloneConfig::default()

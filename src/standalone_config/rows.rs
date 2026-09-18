@@ -379,6 +379,17 @@ pub(crate) fn route_target(
         Err(sqlx::Error::ColumnNotFound(_)) => NativeApi::Auto,
         Err(error) => return Err(error.into()),
     };
+    // Issue #464: 0026 `thinking_effort_override` TEXT NULL;
+    // pre-migration rows lack the column and read as inherit (`None`).
+    // Empty/whitespace also normalizes to `None`.
+    let thinking_effort_override =
+        match row.try_get::<Option<String>, _>("thinking_effort_override") {
+            Ok(value) => value
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
+            Err(sqlx::Error::ColumnNotFound(_)) => None,
+            Err(error) => return Err(error.into()),
+        };
     Ok((
         uuid(row, "rule_id")?,
         ModelRouteTargetConfig {
@@ -395,6 +406,7 @@ pub(crate) fn route_target(
             proxy_url_override: None,
             active_windows,
             dev_system_normalize,
+            thinking_effort_override,
         },
         envelope_opt(row, "proxy_url_override")?,
     ))

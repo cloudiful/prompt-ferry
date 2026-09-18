@@ -78,6 +78,7 @@ mod tests {
             service_tier: crate::db::MinimaxServiceTier::Standard,
             proxy_url: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         }
     }
 

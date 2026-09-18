@@ -41,6 +41,9 @@ pub struct UnifiedModelRouteTarget {
     // Issue #392 Phase K: developer->system normalization switch.
     // Always sent (no omit); `false` skips passthrough normalization.
     pub dev_system_normalize: bool,
+    // Issue #464: per-target thinking effort override. `None` means
+    // inherit (follow the caller); `Some(effort)` force-replaces.
+    pub thinking_effort_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -99,6 +102,8 @@ fn target_to_pg(target: UnifiedModelRouteTarget) -> PgModelRouteTarget {
         active_windows: target.active_windows,
         // Issue #392 Phase K: carry normalize switch through unified shape.
         dev_system_normalize: target.dev_system_normalize,
+        // Issue #464: carry thinking effort override through unified shape.
+        thinking_effort_override: target.thinking_effort_override,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }

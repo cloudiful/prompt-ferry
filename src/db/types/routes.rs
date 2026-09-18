@@ -72,6 +72,10 @@ pub struct RouteConfig {
     // Chat->Chat passthrough. `false` (default) leaves `developer`
     // untouched; `true` rewrites to `system`. Always sent (no omit).
     pub dev_system_normalize: bool,
+    // Issue #464: resolved per-target thinking effort override; None means
+    // inherit (follow the caller). `Some(effort)` force-replaces
+    // `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
+    pub thinking_effort_override: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -117,6 +121,12 @@ pub struct ModelRouteTarget {
     /// `true` rewrites `developer` to `system`. Always sent (no omit).
     #[serde(default)]
     pub dev_system_normalize: bool,
+    /// Issue #464: per-target thinking effort override. `None` (null/empty)
+    /// means inherit (follow the caller); `Some(effort)` force-replaces
+    /// `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
+    /// Validated against `none/minimal/low/medium/high/xhigh/max`.
+    #[serde(default)]
+    pub thinking_effort_override: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -170,6 +180,12 @@ pub struct ModelRouteTargetCreate {
     // normalization. Carried as plain bool so PATCH never inherits.
     #[serde(default)]
     pub dev_system_normalize: bool,
+    /// Issue #464: per-target thinking effort override. `None` (null/empty)
+    /// means inherit (follow the caller); `Some(effort)` force-replaces
+    /// `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
+    /// Validated against `none/minimal/low/medium/high/xhigh/max`.
+    #[serde(default)]
+    pub thinking_effort_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -229,6 +245,11 @@ pub struct ModelRouteCandidateTarget {
     // Issue #392 Phase K: developer->system normalization switch.
     // `false` (default) skips Chat passthrough normalization.
     pub dev_system_normalize: bool,
+    /// Issue #464: per-target thinking effort override. `None` (null/empty)
+    /// means inherit (follow the caller); `Some(effort)` force-replaces
+    /// `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
+    /// Validated against `none/minimal/low/medium/high/xhigh/max`.
+    pub thinking_effort_override: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -266,6 +287,23 @@ pub fn resolve_proxy_url(
                 .filter(|value| !value.is_empty())
                 .map(str::to_string)
         })
+}
+
+/// Issue #464: validate a thinking effort override. `None`/empty/whitespace
+/// means inherit. Returns the trimmed effort or a static error for the
+/// allowlist.
+pub fn normalize_thinking_effort_override(
+    raw: Option<&str>,
+) -> Result<Option<String>, &'static str> {
+    let Some(value) = raw.map(str::trim).filter(|v| !v.is_empty()) else {
+        return Ok(None);
+    };
+    match value {
+        "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" => {
+            Ok(Some(value.to_string()))
+        }
+        _ => Err("thinking_effort must be one of none, minimal, low, medium, high, xhigh, max"),
+    }
 }
 
 /// Issue #368 Phase D: validate a non-empty outbound proxy URL.

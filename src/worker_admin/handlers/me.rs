@@ -206,6 +206,8 @@ async fn available_models(state: &AdminState, user_id: i64) -> anyhow::Result<Ve
                         .or_else(|| target.proxy_url.clone()),
                     // Issue #392 Phase K: model listing never normalizes.
                     dev_system_normalize: false,
+                    // Issue #464: model listing follows the caller.
+                    thinking_effort_override: None,
                 };
                 let snapshot = state
                     .endpoint_model_cache

@@ -230,6 +230,7 @@ async fn endpoint_proxy_round_trips_with_encrypted_envelope() {
             ),
             active_windows: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         }],
     };
     repo.create_model_route(rule_id, route_input)
@@ -619,6 +620,7 @@ async fn model_route_crud_round_trips_with_target_persistence() {
             proxy_url_override: None,
             active_windows: None,
             dev_system_normalize: false,
+            thinking_effort_override: None,
         }],
     };
     let rule = repo

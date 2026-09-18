@@ -95,6 +95,7 @@ async fn sync_model_route_targets(
             proxy_override,
             active_windows,
             target.dev_system_normalize,
+            target.thinking_effort_override,
         )
         .execute(&mut **tx)
         .await?;

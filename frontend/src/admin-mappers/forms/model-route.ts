@@ -20,6 +20,16 @@ function normalizeTargetNativeApi(value: unknown): NativeApi {
     : 'auto'
 }
 
+// Issue #464: per-target thinking effort override. Only the 7-level
+// allowlist survives; anything else normalizes to null (inherit).
+const THINKING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+
+function normalizeThinkingEffort(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return (THINKING_EFFORTS as readonly string[]).includes(trimmed) ? trimmed : null
+}
+
 export function createEmptyModelRouteForm(): ModelRouteForm {
   return {
     rule_id: '',
@@ -42,6 +52,8 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         active_windows_touched: false,
         // Issue #392 Phase L: default-off normalize.
         dev_system_normalize: false,
+        // Issue #464: inherit (follow caller) by default.
+        thinking_effort_override: null,
         // Issue #409 Phase 2: default Auto (follow caller).
         native_api: 'auto',
       },
@@ -105,6 +117,11 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
       active_windows_touched: false,
       // Issue #392 Phase L: default-off normalize; legacy payloads miss it.
       dev_system_normalize: target?.dev_system_normalize ?? false,
+      // Issue #464: thinking effort override; legacy payloads miss it
+      // (means inherit). Null/empty means inherit.
+      thinking_effort_override: normalizeThinkingEffort(
+        (target as { thinking_effort_override?: unknown } | undefined)?.thinking_effort_override,
+      ),
       // Issue #409 Phase 2: per-target port type; legacy payloads miss it
       // (means Auto). Round-trips Auto default.
       native_api: normalizeTargetNativeApi(
@@ -166,6 +183,8 @@ export function modelRouteFormToRequest(
           active_windows,
           // Issue #392 Phase L: booleans always sent (no omit semantics).
           dev_system_normalize: target?.dev_system_normalize ?? false,
+          // Issue #464: always sent (null means inherit).
+          thinking_effort_override: normalizeThinkingEffort(target?.thinking_effort_override),
           // Issue #409 Phase 2: always sent (Auto default follows caller;
           // explicit wins over endpoint). Normalize legacy/undefined to Auto.
           native_api: normalizeTargetNativeApi(target?.native_api),

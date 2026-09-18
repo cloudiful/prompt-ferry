@@ -115,6 +115,8 @@ pub async fn list_visible_model_route_endpoints_strict(
             proxy_url: row.proxy_url,
             // Issue #392 Phase K: direct endpoint routes never normalize.
             dev_system_normalize: false,
+            // Issue #464: direct routes follow the caller.
+            thinking_effort_override: None,
         })
         .collect::<Vec<_>>();
     crate::db::endpoints::attach_route_config_api_keys(pool, routes).await

@@ -738,6 +738,13 @@ export type ModelRouteTarget = {
     position: number;
     rule_id: string;
     target_id: string;
+    /**
+     * Issue #464: per-target thinking effort override. `None` (null/empty)
+     * means inherit (follow the caller); `Some(effort)` force-replaces
+     * `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
+     * Validated against `none/minimal/low/medium/high/xhigh/max`.
+     */
+    thinking_effort_override?: string | null;
     updated_at: string;
     upstream_model?: string | null;
 };
@@ -770,6 +777,16 @@ export type ModelRouteTargetRequest = {
      * inherit; `Some(url)` must use `http/https/socks5/socks5h`.
      */
     proxy_url_override?: string | null;
+    /**
+     * Issue #464: per-target thinking effort override. `None`
+     * (omitted/null/empty) means inherit (follow the caller);
+     * `Some(effort)` must be one of
+     * `none/minimal/low/medium/high/xhigh/max` and force-replaces the
+     * caller value on Chat (`reasoning_effort`) and Responses
+     * (`reasoning.effort`). Always sent (no omit/carry); `None` clears
+     * to inherit.
+     */
+    thinking_effort_override?: string | null;
     upstream_model?: string | null;
 };
 

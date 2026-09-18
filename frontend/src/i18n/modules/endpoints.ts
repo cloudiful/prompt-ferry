@@ -162,6 +162,10 @@ export const endpointMessages = {
     normalizeLabel: '归一 developer→system',
     normalizeHint:
       '默认关闭；开启后 Chat 透传将 developer 重写为 system，关闭则原样透传。严格校验 developer 的上游需手动开启。',
+    thinkingEffortOverride: '思考强度覆盖',
+    thinkingEffortOverrideHint:
+      '按目标覆盖调用端思考强度；继承表示沿用调用端传值，显式值强制替换 Chat 的 reasoning_effort 与 Responses 的 reasoning.effort。',
+    thinkingEffortInherit: '继承（沿用调用端）',
   },
   'en-US': {
     addTarget: 'Add target',
@@ -330,5 +334,9 @@ export const endpointMessages = {
     normalizeLabel: 'Normalize developer→system',
     normalizeHint:
       'Off by default; when on, Chat passthrough rewrites developer to system, otherwise passes through unchanged. Strict upstreams that reject developer need this on.',
+    thinkingEffortOverride: 'Thinking effort override',
+    thinkingEffortOverrideHint:
+      'Override the caller thinking effort for this target; inherit follows the caller, an explicit value force-replaces Chat reasoning_effort and Responses reasoning.effort.',
+    thinkingEffortInherit: 'Inherit (follow caller)',
   },
 } as const
