@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type {
   AppliedReplacementSchema,
   RedactionFindingSchema,
@@ -9,6 +9,7 @@ import type {
 } from '@/generated/admin-api'
 import type { RedactionWorkspaceView } from '@/models/redaction'
 import FlatSection from '@/components/shared/FlatSection.vue'
+import { copyText } from '@/composables/useClipboard'
 
 const props = defineProps<{
   busy: boolean
@@ -45,6 +46,89 @@ const previewResult = defineModel<RedactionPreviewSchema | null>(
   },
 )
 const activePreviewPane = ref<'input' | 'output'>('input')
+const activeFindingIndex = ref<number | null>(null)
+const copyState = ref<'idle' | 'copied'>('idle')
+
+const selectedFinding = computed<RedactionFindingSchema | null>(() => {
+  if (activeFindingIndex.value === null) return null
+  return previewResult.value?.findings[activeFindingIndex.value] ?? null
+})
+
+const highlightedOutputSegments = computed(() => {
+  const text = previewResult.value?.redacted_text ?? ''
+  if (!selectedFinding.value) {
+    return [{ text, highlighted: false }]
+  }
+  const { start, end } = selectedFinding.value
+  if (
+    typeof start !== 'number' ||
+    typeof end !== 'number' ||
+    start < 0 ||
+    end <= start ||
+    start >= text.length
+  ) {
+    return [{ text, highlighted: false }]
+  }
+  const clampedEnd = Math.min(end, text.length)
+  const before = text.slice(0, start)
+  const hit = text.slice(start, clampedEnd)
+  const after = text.slice(clampedEnd)
+  const segments: Array<{ text: string; highlighted: boolean }> = []
+  if (before) segments.push({ text: before, highlighted: false })
+  if (hit) segments.push({ text: hit, highlighted: true })
+  if (after) segments.push({ text: after, highlighted: false })
+  return segments
+})
+
+const highlightedInputSegments = computed(() => {
+  const text = previewText.value
+  if (!selectedFinding.value) {
+    return [{ text, highlighted: false }]
+  }
+  const { match_text, start } = selectedFinding.value
+  if (typeof start !== 'number' || !match_text || !text.includes(match_text)) {
+    return [{ text, highlighted: false }]
+  }
+  const hitIndex = text.indexOf(match_text, start)
+  if (hitIndex < 0) {
+    return [{ text, highlighted: false }]
+  }
+  const before = text.slice(0, hitIndex)
+  const after = text.slice(hitIndex + match_text.length)
+  const segments: Array<{ text: string; highlighted: boolean }> = []
+  if (before) segments.push({ text: before, highlighted: false })
+  segments.push({ text: match_text, highlighted: true })
+  if (after) segments.push({ text: after, highlighted: false })
+  return segments
+})
+
+watch(
+  () => previewResult.value?.findings ?? null,
+  () => {
+    activeFindingIndex.value = null
+    copyState.value = 'idle'
+  },
+)
+
+function selectFinding(index: number): void {
+  activeFindingIndex.value = index
+  activePreviewPane.value = 'output'
+}
+
+async function copyOutput(): Promise<void> {
+  const text = previewResult.value?.redacted_text ?? ''
+  if (!text) return
+  await copyText(text)
+  copyState.value = 'copied'
+}
+
+watch(copyState, (state) => {
+  if (state !== 'copied') return
+  const timer = setTimeout(() => {
+    copyState.value = 'idle'
+  }, 1500)
+  return () => clearTimeout(timer)
+})
 
 defineEmits<{
   runPreview: []
@@ -125,12 +209,30 @@ defineEmits<{
           >
             <span class="text-xs text-muted">{{ t('redactionInput') }}</span>
             <UTextarea
+              v-if="!selectedFinding"
               id="redaction-preview-input"
               v-model="previewText"
               :rows="7"
               class="w-full font-mono text-[13px] leading-6"
               name="redaction-preview-input"
             />
+            <div
+              v-else
+              id="redaction-preview-input"
+              class="min-h-[13rem] w-full overflow-auto whitespace-pre-wrap rounded-md border border-default bg-default px-3 py-2 font-mono text-[13px] leading-6"
+              name="redaction-preview-input"
+            >
+              <span
+                v-for="(segment, index) in highlightedInputSegments"
+                :key="`in-${index}`"
+                :class="
+                  segment.highlighted
+                    ? 'rounded bg-warning/20 px-0.5 text-warning'
+                    : ''
+                "
+                >{{ segment.text }}</span
+              >
+            </div>
           </label>
           <div
             class="grid min-w-0 gap-2 max-[767px]:hidden"
@@ -138,6 +240,24 @@ defineEmits<{
           >
             <div class="flex flex-wrap items-center justify-between gap-2">
               <span class="text-xs text-muted">{{ t('redactionOutput') }}</span>
+              <UButton
+                v-if="previewResult"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                :aria-label="t('copyOutput')"
+                @click="copyOutput"
+              >
+                <UIcon
+                  :name="
+                    copyState === 'copied'
+                      ? 'i-lucide-clipboard-check'
+                      : 'i-lucide-copy'
+                  "
+                  class="h-3.5 w-3.5"
+                />
+                {{ copyState === 'copied' ? t('copied') : t('copy') }}
+              </UButton>
             </div>
             <div
               v-if="
@@ -149,15 +269,31 @@ defineEmits<{
               {{ previewResult.stats.llm_error }}
             </div>
             <div class="min-h-full">
-              <UTextarea
-                v-if="previewResult"
+              <div
+                v-if="previewResult && !selectedFinding"
                 id="redaction-preview-output"
-                :model-value="previewResult.redacted_text"
-                :rows="7"
-                class="h-full min-h-[13rem] w-full font-mono text-[13px] leading-6"
+                class="min-h-[13rem] w-full overflow-auto whitespace-pre-wrap rounded-md border border-default bg-default px-3 py-2 font-mono text-[13px] leading-6"
                 name="redaction-preview-output"
-                readonly
-              />
+              >
+                {{ previewResult.redacted_text }}
+              </div>
+              <div
+                v-else-if="previewResult"
+                id="redaction-preview-output"
+                class="min-h-[13rem] w-full overflow-auto whitespace-pre-wrap rounded-md border border-default bg-default px-3 py-2 font-mono text-[13px] leading-6"
+                name="redaction-preview-output"
+              >
+                <span
+                  v-for="(segment, index) in highlightedOutputSegments"
+                  :key="`out-${index}`"
+                  :class="
+                    segment.highlighted
+                      ? 'rounded bg-warning/20 px-0.5 text-warning'
+                      : ''
+                  "
+                  >{{ segment.text }}</span
+                >
+              </div>
               <div
                 v-else
                 class="flex min-h-[11rem] items-center justify-center rounded border border-dashed border-default bg-muted p-6 text-center text-[0.75rem] text-muted"
@@ -182,9 +318,25 @@ defineEmits<{
             :data="previewResult?.findings ?? []"
             :columns="findingColumns"
             class="min-w-0"
-            :ui="{ th: 'whitespace-nowrap' }"
+            :ui="{
+              th: 'whitespace-nowrap',
+              tr: 'cursor-pointer',
+            }"
+            @select="(_event, row) => selectFinding(row.index)"
           >
             <template #empty>{{ t('noFindings') }}</template>
+            <template #match_text-cell="{ row }">
+              <span
+                class="rounded px-0.5"
+                :class="
+                  activeFindingIndex === row.index
+                    ? 'bg-primary/15 text-primary'
+                    : ''
+                "
+              >
+                {{ row.original.match_text }}
+              </span>
+            </template>
           </UTable>
         </section>
 
