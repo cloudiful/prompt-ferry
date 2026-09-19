@@ -20,6 +20,19 @@ pub struct RedactionCustomStringRuleListItem {
     pub pattern: String,
     pub match_type: String,
     pub scope: String,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+/// Timestamps are display metadata written by us; tolerate hand-edited or
+/// legacy junk by treating an unparsable value as missing.
+fn parse_rfc3339_utc(value: Option<String>) -> Option<DateTime<Utc>> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc))
 }
 
 pub const REQUEST_CONTENT_LOGGING_SETTINGS_KEY: &str = "request_content_logging";
@@ -96,6 +109,21 @@ pub async fn set_redaction_config(pool: &PgPool, config: &RedactionConfig) -> Re
     Ok(())
 }
 
+pub async fn get_redaction_config_updated_at(
+    pool: &PgPool,
+    global: bool,
+    user_id: Option<i64>,
+) -> Result<Option<DateTime<Utc>>> {
+    let row = sqlx::query_file!(
+        "src/sql/settings/get_redaction_config_updated_at.sql",
+        global,
+        user_id,
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(row.updated_at)
+}
+
 pub async fn get_user_redaction_config(pool: &PgPool, user_id: i64) -> Result<RedactionConfig> {
     let value = sqlx::query_file!("src/sql/settings/get_user_redaction_config.sql", user_id,)
         .fetch_optional(pool)
@@ -146,11 +174,7 @@ pub async fn list_redaction_custom_string_rules(
     first: i64,
     rows: i64,
     search: Option<&str>,
-) -> Result<(
-    Vec<RedactionCustomStringRuleListItem>,
-    i64,
-    Option<DateTime<Utc>>,
-)> {
+) -> Result<(Vec<RedactionCustomStringRuleListItem>, i64)> {
     let total = sqlx::query_file!(
         "src/sql/settings/count_redaction_custom_string_rules.sql",
         global,
@@ -176,10 +200,11 @@ pub async fn list_redaction_custom_string_rules(
                 pattern: row.pattern,
                 match_type: row.match_type,
                 scope: row.scope,
+                created_at: parse_rfc3339_utc(row.created_at),
+                updated_at: parse_rfc3339_utc(row.updated_at),
             })
             .collect(),
         total.total,
-        total.updated_at,
     ))
 }
 
@@ -367,4 +392,21 @@ pub async fn set_raw_object_store_config(
     let persisted = RawObjectStorePersisted::from_config(config, manager)?;
     set_raw_object_store_persisted(pool, &persisted).await?;
     Ok(persisted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_rfc3339_utc;
+
+    #[test]
+    fn parse_rfc3339_utc_handles_valid_blank_junk_and_missing() {
+        assert_eq!(
+            parse_rfc3339_utc(Some("2026-01-02T03:04:05Z".to_string()))
+                .map(|value| value.to_rfc3339()),
+            Some("2026-01-02T03:04:05+00:00".to_string())
+        );
+        assert_eq!(parse_rfc3339_utc(Some("   ".to_string())), None);
+        assert_eq!(parse_rfc3339_utc(Some("garbage".to_string())), None);
+        assert_eq!(parse_rfc3339_utc(None), None);
+    }
 }

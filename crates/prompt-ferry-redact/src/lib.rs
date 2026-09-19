@@ -7,11 +7,49 @@ use std::{
     sync::{LazyLock, RwLock},
 };
 
+use chrono::{DateTime, Utc};
 use redactor::{
-    AppliedReplacement, CustomStringRule, Finding, InputKind, RedactionPolicy, RedactionResult,
-    RedactionRules, RedactionStats, Redactor, RedactorBuilder, RedactorError,
+    AppliedReplacement, CustomStringMatch, CustomStringRule, CustomStringScope, Finding, InputKind,
+    RedactionPolicy, RedactionResult, RedactionRules, RedactionStats, Redactor, RedactorBuilder,
+    RedactorError,
 };
 use serde::{Deserialize, Serialize};
+
+/// Persisted per-rule shape for [`RedactionConfig::custom_strings`].
+///
+/// `pattern` / `match_type` / `scope` are the fields the redactor runs on;
+/// `created_at` / `updated_at` are per-rule bookkeeping for the admin console
+/// (this blob is the only storage for custom string rules). They never reach
+/// [`RedactionPolicy`]: call [`RedactionCustomStringRule::runtime`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RedactionCustomStringRule {
+    pub pattern: String,
+    #[serde(default)]
+    pub match_type: CustomStringMatch,
+    #[serde(default)]
+    pub scope: CustomStringScope,
+    #[serde(default)]
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+impl RedactionCustomStringRule {
+    pub fn runtime(&self) -> CustomStringRule {
+        CustomStringRule {
+            pattern: self.pattern.clone(),
+            match_type: self.match_type,
+            scope: self.scope,
+        }
+    }
+
+    /// Runtime-relevant fields are equal; timestamps are ignored.
+    pub fn same_content(&self, other: &Self) -> bool {
+        self.pattern == other.pattern
+            && self.match_type == other.match_type
+            && self.scope == other.scope
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RedactionConfig {
@@ -19,7 +57,7 @@ pub struct RedactionConfig {
     #[serde(default)]
     pub rules: RedactionRules,
     #[serde(default)]
-    pub custom_strings: Vec<CustomStringRule>,
+    pub custom_strings: Vec<RedactionCustomStringRule>,
 }
 
 impl RedactionConfig {
@@ -34,7 +72,11 @@ impl RedactionConfig {
     pub fn policy(&self) -> RedactionPolicy {
         RedactionPolicy {
             rules: self.rules,
-            custom_strings: self.custom_strings.clone(),
+            custom_strings: self
+                .custom_strings
+                .iter()
+                .map(RedactionCustomStringRule::runtime)
+                .collect(),
             custom_files: Vec::new(),
         }
     }
@@ -69,7 +111,7 @@ pub struct RedactionPreviewRequest {
     #[serde(default)]
     pub rules: RedactionRules,
     #[serde(default)]
-    pub custom_strings: Vec<CustomStringRule>,
+    pub custom_strings: Vec<RedactionCustomStringRule>,
 }
 
 impl RedactionPreviewRequest {
@@ -233,34 +275,28 @@ pub fn apply_user_config(user_id: i64, config: &RedactionConfig) -> Result<(), R
     Ok(())
 }
 
-fn normalize_custom_strings(custom_strings: &[CustomStringRule]) -> Vec<CustomStringRule> {
-    let mut seen = HashSet::<(
-        String,
-        redactor::CustomStringMatch,
-        redactor::CustomStringScope,
-    )>::new();
+fn normalize_custom_strings(
+    custom_strings: &[RedactionCustomStringRule],
+) -> Vec<RedactionCustomStringRule> {
+    let mut seen = HashSet::<(String, CustomStringMatch, CustomStringScope)>::new();
     let mut normalized = Vec::new();
     for rule in custom_strings {
-        let pattern = rule.pattern.trim().to_owned();
-        if pattern.is_empty() {
+        let mut rule = rule.clone();
+        rule.pattern = rule.pattern.trim().to_owned();
+        if rule.pattern.is_empty() {
             continue;
         }
-        let key = (pattern.clone(), rule.match_type, rule.scope);
-        if seen.insert(key) {
-            normalized.push(CustomStringRule {
-                pattern,
-                match_type: rule.match_type,
-                scope: rule.scope,
-            });
+        if seen.insert((rule.pattern.clone(), rule.match_type, rule.scope)) {
+            normalized.push(rule);
         }
     }
     normalized
 }
 
 fn merge_normalized_custom_strings(
-    global: &[CustomStringRule],
-    user: &[CustomStringRule],
-) -> Vec<CustomStringRule> {
+    global: &[RedactionCustomStringRule],
+    user: &[RedactionCustomStringRule],
+) -> Vec<RedactionCustomStringRule> {
     let mut seen = HashSet::new();
     global
         .iter()
@@ -413,10 +449,14 @@ pub fn truncate(text: &str, max_chars: usize) -> String {
 mod tests {
     use std::collections::HashMap;
 
+    use chrono::{DateTime, Utc};
     use redactor::{CustomStringMatch, InputKind};
 
     use crate::test_support::{apply as apply_test_config, lock, secret_redaction};
-    use crate::{RedactionConfig, RedactionPreviewRequest, apply_configs, redact_text_for_user};
+    use crate::{
+        RedactionConfig, RedactionCustomStringRule, RedactionPreviewRequest, apply_configs,
+        redact_text_for_user,
+    };
 
     #[test]
     fn redacts_secrets_in_text() {
@@ -446,10 +486,11 @@ mod tests {
             input_kind: InputKind::Text,
             enabled: true,
             rules: Default::default(),
-            custom_strings: vec![redactor::CustomStringRule {
+            custom_strings: vec![RedactionCustomStringRule {
                 pattern: "acme".to_string(),
                 match_type: CustomStringMatch::Exact,
                 scope: redactor::CustomStringScope::Text,
+                ..Default::default()
             }],
         })
         .expect("preview should succeed");
@@ -464,10 +505,11 @@ mod tests {
         apply_configs(
             &RedactionConfig {
                 enabled: true,
-                custom_strings: vec![redactor::CustomStringRule {
+                custom_strings: vec![RedactionCustomStringRule {
                     pattern: "global-secret".to_string(),
                     match_type: CustomStringMatch::Exact,
                     scope: redactor::CustomStringScope::Text,
+                    ..Default::default()
                 }],
                 ..Default::default()
             },
@@ -475,10 +517,11 @@ mod tests {
                 42,
                 RedactionConfig {
                     enabled: true,
-                    custom_strings: vec![redactor::CustomStringRule {
+                    custom_strings: vec![RedactionCustomStringRule {
                         pattern: "private-secret".to_string(),
                         match_type: CustomStringMatch::Exact,
                         scope: redactor::CustomStringScope::Text,
+                        ..Default::default()
                     }],
                     ..Default::default()
                 },
@@ -500,20 +543,23 @@ mod tests {
         let config = RedactionConfig {
             enabled: true,
             custom_strings: vec![
-                redactor::CustomStringRule {
+                RedactionCustomStringRule {
                     pattern: "  acme  ".to_string(),
                     match_type: CustomStringMatch::Exact,
                     scope: redactor::CustomStringScope::Text,
+                    ..Default::default()
                 },
-                redactor::CustomStringRule {
+                RedactionCustomStringRule {
                     pattern: "acme".to_string(),
                     match_type: CustomStringMatch::Exact,
                     scope: redactor::CustomStringScope::Text,
+                    ..Default::default()
                 },
-                redactor::CustomStringRule {
+                RedactionCustomStringRule {
                     pattern: "   ".to_string(),
                     match_type: CustomStringMatch::Contains,
                     scope: redactor::CustomStringScope::Line,
+                    ..Default::default()
                 },
             ],
             ..Default::default()
@@ -533,15 +579,17 @@ mod tests {
             enabled: true,
             rules: Default::default(),
             custom_strings: vec![
-                redactor::CustomStringRule {
+                RedactionCustomStringRule {
                     pattern: " acme ".to_string(),
                     match_type: CustomStringMatch::Exact,
                     scope: redactor::CustomStringScope::Text,
+                    ..Default::default()
                 },
-                redactor::CustomStringRule {
+                RedactionCustomStringRule {
                     pattern: "acme".to_string(),
                     match_type: CustomStringMatch::Exact,
                     scope: redactor::CustomStringScope::Text,
+                    ..Default::default()
                 },
             ],
         };
@@ -550,5 +598,53 @@ mod tests {
 
         assert_eq!(normalized.custom_strings.len(), 1);
         assert_eq!(normalized.custom_strings[0].pattern, "acme");
+    }
+
+    #[test]
+    fn normalization_preserves_rule_timestamps() {
+        let created = DateTime::parse_from_rfc3339("2026-01-02T03:04:05Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let updated = DateTime::parse_from_rfc3339("2026-02-03T04:05:06Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let config = RedactionConfig {
+            enabled: true,
+            custom_strings: vec![
+                RedactionCustomStringRule {
+                    pattern: "  acme  ".to_string(),
+                    match_type: CustomStringMatch::Exact,
+                    scope: redactor::CustomStringScope::Text,
+                    created_at: Some(created),
+                    updated_at: Some(updated),
+                },
+                RedactionCustomStringRule {
+                    pattern: "acme".to_string(),
+                    match_type: CustomStringMatch::Exact,
+                    scope: redactor::CustomStringScope::Text,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let normalized = config.normalized();
+        assert_eq!(normalized.custom_strings.len(), 1);
+        assert_eq!(normalized.custom_strings[0].pattern, "acme");
+        assert_eq!(normalized.custom_strings[0].created_at, Some(created));
+        assert_eq!(normalized.custom_strings[0].updated_at, Some(updated));
+    }
+
+    #[test]
+    fn legacy_config_without_rule_timestamps_still_parses() {
+        let config: RedactionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "custom_strings": [{ "pattern": "acme", "match_type": "exact", "scope": "text" }]
+        }))
+        .expect("legacy config parses");
+
+        assert_eq!(config.custom_strings.len(), 1);
+        assert_eq!(config.custom_strings[0].created_at, None);
+        assert_eq!(config.custom_strings[0].updated_at, None);
     }
 }

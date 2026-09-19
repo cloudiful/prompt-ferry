@@ -241,7 +241,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        redact::RedactionConfig,
+        redact::{RedactionConfig, RedactionCustomStringRule},
         relay_secrets::RelaySecretManager,
         standalone_config::{
             ClientKeyConfig, SettingConfig, StandaloneConfigStore, StandaloneUsageSummaryRecord,
@@ -315,10 +315,11 @@ mod tests {
         let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
         let config = RedactionConfig {
             enabled: true,
-            custom_strings: vec![redactor::CustomStringRule {
+            custom_strings: vec![RedactionCustomStringRule {
                 pattern: "standalone-secret".to_string(),
                 match_type: redactor::CustomStringMatch::Exact,
                 scope: redactor::CustomStringScope::Text,
+                ..RedactionCustomStringRule::default()
             }],
             ..RedactionConfig::default()
         };

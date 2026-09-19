@@ -27,7 +27,7 @@ pub(super) use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-pub(super) use chrono::NaiveDate;
+pub(super) use chrono::{NaiveDate, Utc};
 pub(super) use serde_json::Value;
 pub(super) use std::{
     collections::HashMap,
@@ -51,6 +51,7 @@ pub(super) use crate::{
     redact,
     routing::choose_preferred_target,
     usage_prompt::{REQUEST_CHAIN_DEPTH_LIMIT, RenderedPromptMessage, render_prompt_text},
+    worker_admin::redaction_rule_timestamps::stamp_custom_string_timestamps,
     worker_admin_state::{
         ApiError, bad_request, current_user, ensure_admin, error, internal, maybe_redact,
         new_session_id, session_id,
