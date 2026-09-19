@@ -14,6 +14,27 @@ fn token_for(session: &UpstreamRedactionSession, original: &str) -> String {
 }
 
 #[test]
+fn session_budget_downgrades_to_none() {
+    let _guard = domain_redaction();
+    let text = (0..super::MAX_ENTRIES + 100)
+        .map(|index| format!("budget{index}.example.com"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let result = redact_text_with_stateful_session(
+        &text,
+        redactor::InputKind::Text,
+        None,
+        Some("conv-budget"),
+        None,
+    )
+    .expect("redact");
+
+    assert!(result.redacted_text.contains("[[RDX:v2:"));
+    assert!(result.applied);
+    assert!(result.session.is_none());
+}
+
+#[test]
 fn stateful_tokens_reused_across_turns() {
     let _guard = domain_redaction();
     let first = redact_text_with_stateful_session(

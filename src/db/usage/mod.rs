@@ -61,7 +61,8 @@ pub use prompt_blocks::{
 };
 pub use query::{list_request_record_facets, list_request_records, request_record_summary};
 pub use redaction_sessions::{
-    get_conversation_redaction_session, upsert_conversation_redaction_session,
+    delete_conversation_redaction_session, get_conversation_redaction_session,
+    upsert_conversation_redaction_session,
 };
 pub use replay_snapshots::{
     insert_replay_snapshot, latest_replay_snapshot, replay_snapshot_before_or_at_seq,

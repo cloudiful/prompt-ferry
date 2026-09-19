@@ -12,6 +12,12 @@ use redactor::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Session budget ceilings. A restore state that exceeds any of these is not
+/// persisted; the caller degrades to irreversible one-shot redaction.
+const MAX_ENTRIES: usize = 2000;
+const MAX_PERMITS: usize = 500;
+const MAX_BYTES: usize = 256 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UpstreamRedactionSession {
     pub restore_state: RestoreState,
@@ -27,6 +33,18 @@ pub struct UpstreamRedactedRequest {
 impl UpstreamRedactionSession {
     pub fn request_session(&self) -> &RedactionSession {
         self.restore_state.session()
+    }
+
+    fn exceeds_budget(&self) -> bool {
+        if self.restore_state.session().entries.len() > MAX_ENTRIES {
+            return true;
+        }
+        if self.restore_state.permits().len() > MAX_PERMITS {
+            return true;
+        }
+        serde_json::to_vec(self)
+            .map(|serialized| serialized.len() > MAX_BYTES)
+            .unwrap_or(false)
     }
 }
 
@@ -90,7 +108,11 @@ impl UpstreamRedactionProcessor {
             None => RestoreState::new(request_session),
         }
         .map_err(|err| RedactorError::Validation(err.to_string()))?;
-        Ok(Some(UpstreamRedactionSession { restore_state }))
+        let session = UpstreamRedactionSession { restore_state };
+        if session.exceeds_budget() {
+            return Ok(None);
+        }
+        Ok(Some(session))
     }
 }
 

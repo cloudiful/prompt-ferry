@@ -34,3 +34,16 @@ pub async fn upsert_conversation_redaction_session(
     .await?;
     Ok(())
 }
+
+pub async fn delete_conversation_redaction_session(
+    pool: &PgPool,
+    conversation_id: Uuid,
+) -> Result<u64> {
+    let result = sqlx::query_file!(
+        "src/sql/usage/delete_conversation_redaction_session.sql",
+        conversation_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}

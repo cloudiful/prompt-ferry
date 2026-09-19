@@ -168,29 +168,48 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
     .await
     {
         Ok(event_id) => {
-            if let (Some(conversation_id), Some(session), Ok(manager)) = (
-                conversation_id,
-                log.upstream_restore_session.as_ref(),
-                state.relay_secret_manager(),
-            ) && let Ok(encrypted) = encrypt_upstream_session(manager, session)
-                && let Err(err) = db::upsert_conversation_redaction_session(
-                    &state.pool,
-                    db::ConversationRedactionSessionCreate {
-                        conversation_id,
-                        session_ciphertext: encrypted.ciphertext,
-                        session_nonce: encrypted.nonce,
-                        session_key_version: encrypted.key_version,
-                        last_event_id: Some(event_id),
-                    },
-                )
-                .await
-            {
-                warn!(
-                    error = %err,
-                    conversation_id = %conversation_id,
-                    event_id,
-                    "failed to persist conversation redaction session"
-                );
+            if let Some(conversation_id) = conversation_id {
+                match log.upstream_restore_session.as_ref() {
+                    Some(session) => {
+                        if let Ok(manager) = state.relay_secret_manager()
+                            && let Ok(encrypted) = encrypt_upstream_session(manager, session)
+                            && let Err(err) = db::upsert_conversation_redaction_session(
+                                &state.pool,
+                                db::ConversationRedactionSessionCreate {
+                                    conversation_id,
+                                    session_ciphertext: encrypted.ciphertext,
+                                    session_nonce: encrypted.nonce,
+                                    session_key_version: encrypted.key_version,
+                                    last_event_id: Some(event_id),
+                                },
+                            )
+                            .await
+                        {
+                            warn!(
+                                error = %err,
+                                conversation_id = %conversation_id,
+                                event_id,
+                                "failed to persist conversation redaction session"
+                            );
+                        }
+                    }
+                    None => {
+                        // Budget overflow or redaction disabled: degrade to
+                        // irreversible redaction and drop the persisted session
+                        // so it cannot keep growing.
+                        if let Err(err) =
+                            db::delete_conversation_redaction_session(&state.pool, conversation_id)
+                                .await
+                        {
+                            warn!(
+                                error = %err,
+                                conversation_id = %conversation_id,
+                                event_id,
+                                "failed to delete conversation redaction session"
+                            );
+                        }
+                    }
+                }
             }
             if storage_sanitized_nul_count > 0 {
                 warn!(
