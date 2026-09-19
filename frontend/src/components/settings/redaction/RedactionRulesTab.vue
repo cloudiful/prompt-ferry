@@ -21,6 +21,7 @@ const columns = computed<TableColumn<RedactionCustomStringRuleRowSchema>[]>(
     { id: 'pattern', header: props.t('pattern') },
     { id: 'matchType', header: props.t('matchType') },
     { id: 'scope', header: props.t('scopeField') },
+    { id: 'createdAt', header: props.t('createdAt') },
     { id: 'updatedAt', header: props.t('updatedAt') },
     { id: 'actions' },
   ],
@@ -65,7 +66,6 @@ const {
   customStringRows,
   customStringSearch,
   customStringTotal,
-  customStringUpdatedAt,
   customStrings,
 } = storeToRefs(redactionStore)
 
@@ -80,7 +80,7 @@ function onCustomStringPage(event: TablePageChange): void {
   void redactionStore.setCustomStringPage(event.first, event.rows)
 }
 
-function formatUpdatedAt(value: string | null): string {
+function formatDateTime(value: string | null | undefined): string {
   if (!value) return '-'
   const date = new Date(value)
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString()
@@ -219,9 +219,14 @@ function formatUpdatedAt(value: string | null): string {
             "
           />
         </template>
-        <template #updatedAt-cell>
+        <template #createdAt-cell="{ row }">
           <span class="text-xs text-dimmed">
-            {{ formatUpdatedAt(customStringUpdatedAt) }}
+            {{ formatDateTime(row.original.created_at) }}
+          </span>
+        </template>
+        <template #updatedAt-cell="{ row }">
+          <span class="text-xs text-dimmed">
+            {{ formatDateTime(row.original.updated_at) }}
           </span>
         </template>
         <template #actions-cell="{ row }">

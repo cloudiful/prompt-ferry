@@ -30,6 +30,8 @@ SELECT
     rule ->> 'pattern' AS "pattern!",
     rule ->> 'match_type' AS "match_type!",
     rule ->> 'scope' AS "scope!",
+    NULLIF(rule ->> 'created_at', '') AS "created_at?",
+    NULLIF(rule ->> 'updated_at', '') AS "updated_at?",
     array_index AS "array_index!"
 FROM rules
 ORDER BY array_index DESC

@@ -14,6 +14,7 @@ pub(crate) mod openrouter_parsing;
 pub(crate) mod openrouter_usage;
 pub(crate) mod quota_urgency;
 pub(crate) mod quota_window_weight;
+pub(crate) mod redaction_rule_timestamps;
 pub mod state;
 mod token_plan;
 pub(crate) mod token_plan_cache;

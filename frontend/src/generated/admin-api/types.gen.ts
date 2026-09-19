@@ -272,9 +272,11 @@ export type CreateUserRequest = {
 export type CustomStringMatchSchema = 'exact' | 'contains' | 'regex';
 
 export type CustomStringRuleSchema = {
+    created_at?: string | null;
     match_type: CustomStringMatchSchema;
     pattern: string;
     scope: CustomStringScopeSchema;
+    updated_at?: string | null;
 };
 
 export type CustomStringScopeSchema = 'text' | 'line';
@@ -940,14 +942,15 @@ export type RedactionCustomStringRulePageResponseSchema = {
     items: Array<RedactionCustomStringRuleRowSchema>;
     rows: number;
     total: number;
-    updated_at?: string | null;
 };
 
 export type RedactionCustomStringRuleRowSchema = {
     array_index: number;
+    created_at?: string | null;
     match_type: string;
     pattern: string;
     scope: string;
+    updated_at?: string | null;
 };
 
 export type RedactionFindingSchema = {

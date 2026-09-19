@@ -57,6 +57,8 @@ pub struct RedactionCustomStringRuleRow {
     pub pattern: String,
     pub match_type: String,
     pub scope: String,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -65,7 +67,6 @@ pub struct RedactionCustomStringRulePageResponse {
     pub total: i64,
     pub first: i64,
     pub rows: i64,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]

@@ -57,6 +57,8 @@ pub(super) struct CustomStringRuleSchema {
     pub pattern: String,
     pub match_type: CustomStringMatchSchema,
     pub scope: CustomStringScopeSchema,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -86,6 +88,8 @@ pub(super) struct RedactionCustomStringRuleRowSchema {
     pub pattern: String,
     pub match_type: String,
     pub scope: String,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -94,7 +98,6 @@ pub(super) struct RedactionCustomStringRulePageResponseSchema {
     pub total: i64,
     pub first: i64,
     pub rows: i64,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

@@ -53,7 +53,38 @@ pub(super) async fn set_redaction_setting(
         Ok(target) => target,
         Err(response) => return response.into_response(),
     };
-    let config = body.0.normalized();
+    let previous = match scope {
+        RedactionScope::Global => db::get_redaction_config(&state.pool).await,
+        RedactionScope::User => {
+            db::get_user_redaction_config(
+                &state.pool,
+                user_id.expect("user redaction scope requires user id"),
+            )
+            .await
+        }
+    };
+    let previous = match previous {
+        Ok(config) => config,
+        Err(err) => return internal(&state, err),
+    };
+    let previous_blob_updated_at = match db::get_redaction_config_updated_at(
+        &state.pool,
+        matches!(scope, RedactionScope::Global),
+        user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(err) => return internal(&state, err),
+    };
+
+    let mut config = body.0.normalized();
+    stamp_custom_string_timestamps(
+        &previous.normalized().custom_strings,
+        previous_blob_updated_at,
+        &mut config.custom_strings,
+        Utc::now(),
+    );
     if let Err(err) = config.validate() {
         return bad_request(&err.to_string());
     }
@@ -139,7 +170,7 @@ pub(super) async fn list_redaction_custom_strings(
     )
     .await
     {
-        Ok((items, total, updated_at)) => Json(RedactionCustomStringRulePageResponse {
+        Ok((items, total)) => Json(RedactionCustomStringRulePageResponse {
             items: items
                 .into_iter()
                 .map(|item| RedactionCustomStringRuleRow {
@@ -147,12 +178,13 @@ pub(super) async fn list_redaction_custom_strings(
                     pattern: item.pattern,
                     match_type: item.match_type,
                     scope: item.scope,
+                    created_at: item.created_at,
+                    updated_at: item.updated_at,
                 })
                 .collect(),
             total,
             first,
             rows,
-            updated_at,
         })
         .into_response(),
         Err(err) => internal(&state, err),

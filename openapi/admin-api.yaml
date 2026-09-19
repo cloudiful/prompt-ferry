@@ -3164,12 +3164,22 @@ components:
       - match_type
       - scope
       properties:
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
         match_type:
           $ref: '#/components/schemas/CustomStringMatchSchema'
         pattern:
           type: string
         scope:
           $ref: '#/components/schemas/CustomStringScopeSchema'
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
     CustomStringScopeSchema:
       type: string
       enum:
@@ -4827,11 +4837,6 @@ components:
         total:
           type: integer
           format: int64
-        updated_at:
-          type:
-          - string
-          - 'null'
-          format: date-time
     RedactionCustomStringRuleRowSchema:
       type: object
       required:
@@ -4843,12 +4848,22 @@ components:
         array_index:
           type: integer
           format: int64
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
         match_type:
           type: string
         pattern:
           type: string
         scope:
           type: string
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
     RedactionFindingSchema:
       type: object
       required:

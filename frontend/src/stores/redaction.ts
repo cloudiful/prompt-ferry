@@ -32,11 +32,7 @@ function normalizeCustomStrings(
     const dedupeKey = `${pattern}::${rule.match_type}::${rule.scope}`
     if (seen.has(dedupeKey)) continue
     seen.add(dedupeKey)
-    normalized.push({
-      pattern,
-      match_type: rule.match_type,
-      scope: rule.scope,
-    })
+    normalized.push({ ...rule, pattern })
   }
   return normalized
 }
@@ -65,6 +61,8 @@ function paginateCustomStrings(
       pattern: rule.pattern,
       match_type: rule.match_type,
       scope: rule.scope,
+      created_at: rule.created_at ?? null,
+      updated_at: rule.updated_at ?? null,
     }))
     .filter((rule) =>
       !query ? true : rule.pattern.toLowerCase().includes(query),
@@ -91,7 +89,6 @@ export const useRedactionStore = defineStore('redaction', () => {
   )
   const customStringFirst = ref(0)
   const customStringTotal = ref(0)
-  const customStringUpdatedAt = ref<string | null>(null)
   const customStringSearch = ref('')
   const customStringPage = ref<RedactionCustomStringRuleRowSchema[]>([])
   const customStringDirty = ref(false)
@@ -153,7 +150,6 @@ export const useRedactionStore = defineStore('redaction', () => {
     customStringTotal.value = response.total
     customStringFirst.value = response.first
     customStringRows.value = response.rows
-    customStringUpdatedAt.value = response.updated_at ?? null
     if (
       response.items.length === 0 &&
       response.total > 0 &&
@@ -328,7 +324,6 @@ export const useRedactionStore = defineStore('redaction', () => {
     customStringRows,
     customStringSearch,
     customStringTotal: visibleCustomStringTotal,
-    customStringUpdatedAt,
     customStrings: visibleCustomStrings,
     isCustomStringRevealed,
     loading,
