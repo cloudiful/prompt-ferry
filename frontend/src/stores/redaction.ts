@@ -19,6 +19,7 @@ import type {
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
 import { createRedactionDefaults } from '../admin-mappers'
+import { createRowRevealState } from '../redaction-reveal'
 
 function normalizeCustomStrings(
   customStrings: RedactionConfigSchema['custom_strings'],
@@ -94,6 +95,7 @@ export const useRedactionStore = defineStore('redaction', () => {
   const customStringSearch = ref('')
   const customStringPage = ref<RedactionCustomStringRuleRowSchema[]>([])
   const customStringDirty = ref(false)
+  const customStringReveal = createRowRevealState()
 
   function query() {
     return {
@@ -173,6 +175,7 @@ export const useRedactionStore = defineStore('redaction', () => {
       targetUserId.value = response.user_id ?? targetUserId.value
       config.value = normalizeConfig(createRedactionDefaults(response.config))
       customStringDirty.value = false
+      customStringReveal.clear()
       await loadCustomStringPage()
     } finally {
       loading.value = false
@@ -192,6 +195,7 @@ export const useRedactionStore = defineStore('redaction', () => {
       targetUserId.value = response.user_id ?? targetUserId.value
       config.value = normalizeConfig(createRedactionDefaults(response.config))
       customStringDirty.value = false
+      customStringReveal.clear()
       await loadCustomStringPage()
     } finally {
       loading.value = false
@@ -250,6 +254,7 @@ export const useRedactionStore = defineStore('redaction', () => {
       match_type: 'contains',
       scope: 'text',
     })
+    customStringReveal.reveal(config.value.custom_strings.length - 1)
     customStringDirty.value = true
     customStringFirst.value = 0
     reflowCustomStringPage()
@@ -269,9 +274,18 @@ export const useRedactionStore = defineStore('redaction', () => {
   }
 
   function removeCustomStringRule(arrayIndex: number): void {
+    customStringReveal.remove(arrayIndex)
     config.value.custom_strings.splice(arrayIndex, 1)
     customStringDirty.value = true
     reflowCustomStringPage()
+  }
+
+  function isCustomStringRevealed(arrayIndex: number): boolean {
+    return customStringReveal.isRevealed(arrayIndex)
+  }
+
+  function toggleCustomStringRevealed(arrayIndex: number): void {
+    customStringReveal.toggle(arrayIndex)
   }
 
   async function setCustomStringPage(
@@ -316,6 +330,7 @@ export const useRedactionStore = defineStore('redaction', () => {
     customStringTotal: visibleCustomStringTotal,
     customStringUpdatedAt,
     customStrings: visibleCustomStrings,
+    isCustomStringRevealed,
     loading,
     previewInputKind,
     previewResult,
@@ -329,6 +344,7 @@ export const useRedactionStore = defineStore('redaction', () => {
     setCustomStringSearch,
     setTarget,
     targetUserId,
+    toggleCustomStringRevealed,
     updateCustomStringRule,
   }
 })
