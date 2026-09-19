@@ -129,6 +129,7 @@ pub struct ConversationRedactionSessionRow {
     pub session_nonce: Vec<u8>,
     pub session_key_version: i16,
     pub last_event_id: Option<i64>,
+    pub policy_version: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -140,4 +141,5 @@ pub struct ConversationRedactionSessionCreate {
     pub session_nonce: Vec<u8>,
     pub session_key_version: i16,
     pub last_event_id: Option<i64>,
+    pub policy_version: i64,
 }

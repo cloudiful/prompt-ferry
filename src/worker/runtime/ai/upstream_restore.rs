@@ -112,9 +112,7 @@ mod tests {
             .expect("redact");
         let token = artifact.session.issued_tokens[0].clone();
         (
-            UpstreamRedactionSession {
-                restore_state: RestoreState::new(artifact.session).expect("state"),
-            },
+            UpstreamRedactionSession::current(RestoreState::new(artifact.session).expect("state")),
             token,
         )
     }

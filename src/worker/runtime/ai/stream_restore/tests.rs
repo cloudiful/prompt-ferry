@@ -23,9 +23,7 @@ fn session(original: &str) -> (UpstreamRedactionSession, String) {
         .expect("redact");
     let token = artifact.session.issued_tokens[0].clone();
     (
-        UpstreamRedactionSession {
-            restore_state: RestoreState::new(artifact.session).expect("state"),
-        },
+        UpstreamRedactionSession::current(RestoreState::new(artifact.session).expect("state")),
         token,
     )
 }
@@ -84,9 +82,8 @@ fn restores_chat_delta_and_reserializes_special_characters() {
         )
         .expect("redact");
     let token = artifact.session.issued_tokens[0].clone();
-    let session = UpstreamRedactionSession {
-        restore_state: RestoreState::new(artifact.session).expect("state"),
-    };
+    let session =
+        UpstreamRedactionSession::current(RestoreState::new(artifact.session).expect("state"));
     let mut filter = SseRestoreFilter::new(&session);
     let event = serde_json::json!({
         "choices": [{"index": 0, "delta": {"content": token}}]

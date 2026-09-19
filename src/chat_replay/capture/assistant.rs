@@ -9,14 +9,15 @@ use super::{
     artifact_types::{StreamAssistantMessage, StreamToolCallState},
     shared::{
         extract_text, finish_json_capture, finish_sse_line, has_meaningful_value,
-        observe_json_chunk,
+        observe_json_chunk, redact_message_json_for_user,
     },
 };
 
 impl AssistantArtifactCapture {
-    pub fn new(is_sse: bool) -> Self {
+    pub fn new(is_sse: bool, user_id: Option<i64>) -> Self {
         Self {
             is_sse,
+            user_id,
             ..Self::default()
         }
     }
@@ -38,6 +39,9 @@ impl AssistantArtifactCapture {
                 self.observe_sse_line(&line);
             }
             self.finalized_message = self.stream_message.build_message();
+            if let Some(message) = self.finalized_message.as_mut() {
+                redact_message_json_for_user(message, self.user_id);
+            }
             return;
         }
         if self.json_body_truncated {
@@ -45,6 +49,9 @@ impl AssistantArtifactCapture {
         }
         if let Some(value) = finish_json_capture(&self.json_body) {
             self.finalized_message = extract_chat_message(&value);
+        }
+        if let Some(message) = self.finalized_message.as_mut() {
+            redact_message_json_for_user(message, self.user_id);
         }
     }
 

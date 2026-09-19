@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    policy_version,\n    session_key_version,\n    last_event_id,\n    sha256(session_ciphertext) AS \"session_ciphertext_sha256!\"\nFROM conversation_redaction_sessions\nWHERE conversation_id = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "policy_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "conversation_redaction_sessions",
+            "name": "policy_version"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "session_key_version",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "conversation_redaction_sessions",
+            "name": "session_key_version"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "last_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "conversation_redaction_sessions",
+            "name": "last_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "session_ciphertext_sha256!",
+        "type_info": "Bytea",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "33bb683570080b15613a01930b2340e71e0858b4baa3236ad54cb8281e099931"
+}

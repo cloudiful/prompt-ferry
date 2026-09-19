@@ -6,7 +6,7 @@ use crate::{
     db,
     openai_compat::CompatError,
     redact,
-    redact_upstream::{UpstreamRedactionSession, decrypt_upstream_session},
+    redact_upstream::{UpstreamRedactionSession, current_policy_version, decrypt_upstream_session},
     upstream_adapter::{PreparedUpstreamRequest, prepare_upstream_request_with_compact},
     worker_admin::AdminState,
     worker_usage::UsageLog,
@@ -179,15 +179,19 @@ async fn load_prior_session(
     let Some(conversation_id) = conversation_id else {
         return Ok(None);
     };
-    let row = db::get_conversation_redaction_session(&state.pool, conversation_id)
-        .await
-        .map_err(|err| {
-            CompatError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "redaction_session_load_failed",
-                format!("failed to load upstream redaction session: {err}"),
-            )
-        })?;
+    let row = db::get_conversation_redaction_session(
+        &state.pool,
+        conversation_id,
+        current_policy_version(),
+    )
+    .await
+    .map_err(|err| {
+        CompatError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "redaction_session_load_failed",
+            format!("failed to load upstream redaction session: {err}"),
+        )
+    })?;
     let Some(row) = row else {
         return Ok(None);
     };

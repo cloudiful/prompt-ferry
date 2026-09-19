@@ -12,6 +12,7 @@ pub struct AssistantArtifact {
 #[derive(Debug, Default)]
 pub struct AssistantArtifactCapture {
     pub(super) is_sse: bool,
+    pub(super) user_id: Option<i64>,
     pub(super) sse_decoder: Utf8LineDecoder,
     pub(super) sse_decode_failed: bool,
     pub(super) json_body: Vec<u8>,
@@ -23,6 +24,7 @@ pub struct AssistantArtifactCapture {
 #[derive(Debug, Default)]
 pub struct ResponsesArtifactCapture {
     pub(super) is_sse: bool,
+    pub(super) user_id: Option<i64>,
     pub(super) sse_decoder: Utf8LineDecoder,
     pub(super) sse_decode_failed: bool,
     pub(super) json_body: Vec<u8>,

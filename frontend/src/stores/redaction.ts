@@ -12,6 +12,7 @@ import {
 } from '../generated/admin-api'
 import type {
   RedactionConfigSchema,
+  CustomStringRuleSchema,
   RedactionCustomStringRuleRowSchema,
   RedactionInputKindSchema,
   RedactionPreviewSchema,
@@ -20,6 +21,11 @@ import type {
 import { expectData, withData } from '../api'
 import { createRedactionDefaults } from '../admin-mappers'
 import { createRowRevealState } from '../redaction-reveal'
+import {
+  type CustomStringRuleWarning,
+  findRuleWarnings,
+  validateCustomStringRule,
+} from '../redaction-rules'
 
 function normalizeCustomStrings(
   customStrings: RedactionConfigSchema['custom_strings'],
@@ -74,6 +80,10 @@ function paginateCustomStrings(
   }
 }
 
+export type { CustomStringRuleWarning } from '../redaction-rules'
+
+export { findRuleWarnings, validateCustomStringRule }
+
 export const useRedactionStore = defineStore('redaction', () => {
   const loading = ref(false)
   const config = ref<RedactionConfigSchema>(createRedactionDefaults())
@@ -122,6 +132,16 @@ export const useRedactionStore = defineStore('redaction', () => {
       customStringSearch.value,
     ).total
   })
+
+  const isDirty = computed(() => customStringDirty.value)
+
+  const customStringWarnings = computed<CustomStringRuleWarning[]>(() =>
+    findRuleWarnings(config.value.custom_strings),
+  )
+
+  function hasInvalidCustomStringRule(): boolean {
+    return customStringWarnings.value.some((warning) => warning.invalidRegex)
+  }
 
   function setTarget(nextScope: RedactionScopeSchema, userId?: number | null) {
     scope.value = nextScope
@@ -179,6 +199,9 @@ export const useRedactionStore = defineStore('redaction', () => {
   }
 
   async function save(): Promise<void> {
+    if (hasInvalidCustomStringRule()) {
+      throw new Error('invalid custom string regex')
+    }
     loading.value = true
     try {
       config.value = normalizeConfig(config.value)
@@ -258,7 +281,7 @@ export const useRedactionStore = defineStore('redaction', () => {
 
   function updateCustomStringRule(
     arrayIndex: number,
-    patch: Partial<RedactionConfigSchema['custom_strings'][number]>,
+    patch: Partial<CustomStringRuleSchema>,
   ): void {
     if (!config.value.custom_strings[arrayIndex]) return
     config.value.custom_strings[arrayIndex] = {
@@ -324,8 +347,11 @@ export const useRedactionStore = defineStore('redaction', () => {
     customStringRows,
     customStringSearch,
     customStringTotal: visibleCustomStringTotal,
+    customStringWarnings,
     customStrings: visibleCustomStrings,
+    hasInvalidCustomStringRule,
     isCustomStringRevealed,
+    isDirty,
     loading,
     previewInputKind,
     previewResult,

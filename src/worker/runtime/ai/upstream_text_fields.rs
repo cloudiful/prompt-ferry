@@ -28,6 +28,19 @@ fn should_process_anthropic_string_field(
             && object_type == Some("tool_use"))
 }
 
+fn is_reasoning_field(key: &str) -> bool {
+    matches!(
+        key,
+        "reasoning_content"
+            | "reasoning"
+            | "reasoning_text"
+            | "reasoning_details"
+            | "thinking"
+            | "chain_of_thought"
+            | "summary"
+    )
+}
+
 fn should_process_chat_string_field(json_path: &str, key: &str) -> bool {
     (key == "content" && json_path.contains("/messages/"))
         || (key == "text" && json_path.contains("/messages/") && json_path.contains("/content/"))
@@ -36,6 +49,8 @@ fn should_process_chat_string_field(json_path: &str, key: &str) -> bool {
                 || json_path.ends_with("/function_call")
                 || json_path.contains("/tool_calls/")))
         || (key == "output" && json_path.contains("/messages/"))
+        || is_reasoning_field(key)
+        || (key == "text" && json_path.contains("/reasoning_details/"))
 }
 
 fn should_process_responses_string_field(
@@ -48,12 +63,17 @@ fn should_process_responses_string_field(
         "input" => json_path == "/input",
         "text" => matches!(
             object_type,
-            Some("input_text") | Some("output_text") | Some("summary_text") | Some("refusal")
+            Some("input_text")
+                | Some("output_text")
+                | Some("summary_text")
+                | Some("reasoning_text")
+                | Some("refusal")
         ),
         "content" => json_path.contains("/input/") || json_path.contains("/output/"),
         "arguments" => object_type == Some("function_call"),
         "output" => object_type == Some("function_call_output"),
-        _ => false,
+        "summary" => object_type == Some("reasoning"),
+        _ => is_reasoning_field(key),
     }
 }
 
@@ -112,6 +132,84 @@ mod tests {
             "/messages/0/content/1/input",
             Some("text"),
             "input",
+        ));
+    }
+
+    #[test]
+    fn reasoning_fields_are_redacted() {
+        for path in [
+            "/messages/0/reasoning_content",
+            "/messages/0/reasoning",
+            "/messages/0/reasoning_text",
+            "/messages/0/thinking",
+            "/messages/0/chain_of_thought",
+            "/messages/0/summary",
+            "/choices/0/message/reasoning_content",
+        ] {
+            let key = path.rsplit('/').next().expect("field name");
+            assert!(
+                should_process_ai_string_field("/v1/chat/completions", path, None, key),
+                "chat field {path} must be redacted",
+            );
+        }
+        assert!(should_process_ai_string_field(
+            "/v1/chat/completions",
+            "/messages/0/reasoning_details/0/text",
+            None,
+            "text",
+        ));
+        assert!(should_process_ai_string_field(
+            "/v1/chat/completions",
+            "/choices/0/delta/reasoning_details/0/text",
+            None,
+            "text",
+        ));
+
+        for (path, object_type, key) in [
+            ("/output/0/content/0/text", Some("reasoning_text"), "text"),
+            ("/output/0/summary", Some("reasoning"), "summary"),
+            (
+                "/input/0/reasoning_content",
+                Some("reasoning"),
+                "reasoning_content",
+            ),
+            (
+                "/input/0/reasoning_text",
+                Some("reasoning_text"),
+                "reasoning_text",
+            ),
+            ("/input/0/thinking", None, "thinking"),
+            ("/input/0/chain_of_thought", None, "chain_of_thought"),
+        ] {
+            assert!(
+                should_process_ai_string_field("/v1/responses", path, object_type, key),
+                "responses field {path} must be redacted",
+            );
+        }
+
+        assert!(!should_process_ai_string_field(
+            "/v1/responses",
+            "/reasoning/summary",
+            None,
+            "summary",
+        ));
+        assert!(!should_process_ai_string_field(
+            "/v1/responses",
+            "/reasoning/effort",
+            None,
+            "effort",
+        ));
+        assert!(!should_process_ai_string_field(
+            "/v1/responses",
+            "/input/0/type",
+            Some("reasoning"),
+            "type",
+        ));
+        assert!(!should_process_ai_string_field(
+            "/v1/chat/completions",
+            "/model",
+            None,
+            "model",
         ));
     }
 }

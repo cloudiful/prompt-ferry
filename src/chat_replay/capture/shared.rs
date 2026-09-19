@@ -1,11 +1,33 @@
 use serde_json::{Value, json};
+use tracing::warn;
 
 use crate::openai_compat::{assistant_message_to_output_items, persisted_artifact};
 use crate::stream_text::Utf8LineDecoder;
+use crate::worker::json_walker::walk_json_strings;
 
 use super::AssistantArtifact;
 
 pub(super) const MAX_JSON_CAPTURE: usize = 1024 * 1024;
+
+/// Issue #524 Task 4: walk every string inside the assistant artifact
+/// `message_json` and apply the user-scoped redactor before persistence.
+///
+/// `redact_text_for_user` is already fail-open inside, so a missing runtime
+/// or redactor error falls back to the original text. Any failure in the
+/// walker itself is logged via `warn!` and the value is left untouched so
+/// the chat-replay pipeline never aborts because of a redaction blip.
+pub(super) fn redact_message_json_for_user(value: &mut Value, user_id: Option<i64>) {
+    let result = walk_json_strings(value, |_, text| {
+        Ok(Some(crate::redact::redact_text_for_user(text, user_id)))
+    });
+    if let Err(err) = result {
+        warn!(
+            error = %err,
+            user_id = user_id.unwrap_or(0),
+            "failed to walk assistant artifact message_json for redaction; leaving as-is"
+        );
+    }
+}
 
 pub fn fallback_text_artifact(text: &str) -> Option<AssistantArtifact> {
     let content = text.trim();

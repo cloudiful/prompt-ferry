@@ -11,7 +11,7 @@ mod error_handling;
 #[cfg(test)]
 mod error_handling_tests;
 mod inbound;
-mod json_walker;
+pub(crate) mod json_walker;
 mod lifecycle;
 mod lifecycle_standalone;
 #[cfg(test)]

@@ -3,7 +3,7 @@
 // the Phase 3 runtime-env envelope types; the root crate re-exports this
 // crate so `prompt_ferry::redact_upstream::*` paths are unchanged.
 use anyhow::Result;
-use prompt_ferry_redact::redactor_snapshot_for_user;
+use prompt_ferry_redact::{policy_generation, redactor_snapshot_for_user};
 use prompt_ferry_runtime_env::relay_secrets::{EncryptedSecretEnvelope, RelaySecretManager};
 use redactor::{
     InputKind, RedactionSession, RedactorError, RestoreResult, RestoreState, SessionRedactor,
@@ -12,9 +12,20 @@ use redactor::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Session budget ceilings. A restore state that exceeds any of these is not
+/// persisted; the caller degrades to irreversible one-shot redaction.
+const MAX_ENTRIES: usize = 2000;
+const MAX_PERMITS: usize = 500;
+const MAX_BYTES: usize = 256 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UpstreamRedactionSession {
     pub restore_state: RestoreState,
+    /// Policy generation these tokens were minted under. `0` is the
+    /// deserialization default, so sessions persisted before Issue #524 Task 5
+    /// never match a live generation and are rebuilt.
+    #[serde(default)]
+    pub policy_generation: u64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -25,8 +36,35 @@ pub struct UpstreamRedactedRequest {
 }
 
 impl UpstreamRedactionSession {
+    /// State stamped with the running policy generation, for callers that build
+    /// session state directly instead of going through
+    /// [`UpstreamRedactionProcessor`].
+    pub fn current(restore_state: RestoreState) -> Self {
+        Self {
+            restore_state,
+            policy_generation: policy_generation(),
+        }
+    }
+
     pub fn request_session(&self) -> &RedactionSession {
         self.restore_state.session()
+    }
+
+    /// Persisted `BIGINT` form of [`Self::policy_generation`].
+    pub fn policy_version(&self) -> i64 {
+        i64::try_from(self.policy_generation).unwrap_or(i64::MAX)
+    }
+
+    fn exceeds_budget(&self) -> bool {
+        if self.restore_state.session().entries.len() > MAX_ENTRIES {
+            return true;
+        }
+        if self.restore_state.permits().len() > MAX_PERMITS {
+            return true;
+        }
+        serde_json::to_vec(self)
+            .map(|serialized| serialized.len() > MAX_BYTES)
+            .unwrap_or(false)
     }
 }
 
@@ -41,6 +79,7 @@ pub struct UpstreamRedactionProcessor {
     redactor: redactor::Redactor,
     session: SessionRedactor,
     prior_state: Option<RestoreState>,
+    policy_generation: u64,
 }
 
 impl UpstreamRedactionProcessor {
@@ -52,12 +91,17 @@ impl UpstreamRedactionProcessor {
         let redactor = redactor_snapshot_for_user(user_id).ok_or_else(|| {
             RedactorError::Validation("redaction is disabled for this user".to_string())
         })?;
+        // Single-request snapshot: the generation and the redactor are read
+        // once, so a config change mid-request cannot split the session state.
+        let generation = policy_generation();
+        let prior = prior.filter(|session| session.policy_generation == generation);
         let prior_session = prior.map(UpstreamRedactionSession::request_session);
         let session = SessionRedactor::with_prior_session(prior_session, external_id)?;
         Ok(Self {
             redactor,
             session,
             prior_state: prior.map(|value| value.restore_state.clone()),
+            policy_generation: generation,
         })
     }
 
@@ -90,7 +134,14 @@ impl UpstreamRedactionProcessor {
             None => RestoreState::new(request_session),
         }
         .map_err(|err| RedactorError::Validation(err.to_string()))?;
-        Ok(Some(UpstreamRedactionSession { restore_state }))
+        let session = UpstreamRedactionSession {
+            restore_state,
+            policy_generation: self.policy_generation,
+        };
+        if session.exceeds_budget() {
+            return Ok(None);
+        }
+        Ok(Some(session))
     }
 }
 
@@ -133,6 +184,12 @@ pub fn restore_text(text: &str, session: &UpstreamRedactionSession) -> Result<Re
     let restored = context.restore_text(text);
     ensure_restore_valid(&restored)?;
     Ok(restored)
+}
+
+/// Persisted `BIGINT` form of the running policy generation, used to gate
+/// `conversation_redaction_sessions.policy_version` reads.
+pub fn current_policy_version() -> i64 {
+    i64::try_from(policy_generation()).unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]
