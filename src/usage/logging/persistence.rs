@@ -5,8 +5,10 @@ use crate::{
     storage_sanitization::{
         SanitizationStats, sanitize_optional_json_for_storage, sanitize_optional_text_for_storage,
     },
+    worker::json_walker::walk_json_strings,
     worker_admin_state::AdminState,
 };
+use serde_json::Value;
 use tracing::warn;
 
 use super::{UsageLog, inference::infer_failure_family};
@@ -31,6 +33,31 @@ pub(crate) fn usage_recording_mode(
     }
 }
 
+/// Issue #524 Task 4: redact every string inside `request_raw_json` using the
+/// user-scoped runtime before the payload lands in `usage_records`. This is
+/// the last line of defense for request bodies that were not gated through
+/// `worker::runtime::ai::upstream_text_fields` (e.g. raw REST captures that
+/// skip the reasoning-field walker).
+///
+/// Fail-open with `warn!`: any walker error leaves the original payload
+/// untouched so the usage pipeline never aborts because of a redaction blip,
+/// but operators see a signal that a particular request slipped past
+/// redaction.
+fn redact_request_raw_json(value: Option<Value>, user_id: Option<i64>) -> Option<Value> {
+    let mut value = value?;
+    let result = walk_json_strings(&mut value, |_, text| {
+        Ok(Some(crate::redact::redact_text_for_user(text, user_id)))
+    });
+    if let Err(err) = result {
+        warn!(
+            error = %err,
+            user_id = user_id.unwrap_or(0),
+            "failed to walk request_raw_json for redaction; persisting original payload"
+        );
+    }
+    Some(value)
+}
+
 pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog) -> Option<i64> {
     let state = admin_state?;
     let failure_family = log.failure_family.or_else(|| infer_failure_family(&log));
@@ -42,7 +69,10 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
     let (request_delta_json, request_delta_json_stats) =
         sanitize_optional_json_for_storage(log.request_delta_json);
     let (request_raw_json, request_raw_json_stats) =
-        sanitize_optional_json_for_storage(log.request_raw_json);
+        sanitize_optional_json_for_storage(redact_request_raw_json(
+            log.request_raw_json,
+            log.user_id,
+        ));
     let (response_prompt, response_prompt_stats) =
         sanitize_optional_text_for_storage(log.response_prompt);
     let (response_raw_body, response_raw_body_stats) =

@@ -7,13 +7,14 @@ use crate::openai_compat::{
 
 use super::{
     AssistantArtifact, ResponsesArtifactCapture,
-    shared::{finish_json_capture, finish_sse_line, observe_json_chunk},
+    shared::{finish_json_capture, finish_sse_line, observe_json_chunk, redact_message_json_for_user},
 };
 
 impl ResponsesArtifactCapture {
-    pub fn new(is_sse: bool) -> Self {
+    pub fn new(is_sse: bool, user_id: Option<i64>) -> Self {
         Self {
             is_sse,
+            user_id,
             ..Self::default()
         }
     }
@@ -48,8 +49,9 @@ impl ResponsesArtifactCapture {
     pub fn artifact(&self) -> Option<AssistantArtifact> {
         let output_items = self.finalized_output.clone()?;
         let assistant_message = output_items_to_assistant_message(&output_items, None).ok()?;
-        let (message_json, has_reasoning_content, has_tool_calls) =
+        let (mut message_json, has_reasoning_content, has_tool_calls) =
             persisted_artifact(Some(assistant_message), output_items)?;
+        redact_message_json_for_user(&mut message_json, self.user_id);
         Some(AssistantArtifact {
             message_json,
             has_reasoning_content,

@@ -115,12 +115,13 @@ pub(super) async fn forward_upstream_response(
         .as_deref()
         .is_some_and(|value| value.contains("text/event-stream"));
     let mut assistant_capture = (route.native_api == crate::config::NativeApi::Chat)
-        .then(|| AssistantArtifactCapture::new(is_sse));
+        .then(|| AssistantArtifactCapture::new(is_sse, request_ctx.user_id));
     let mut responses_capture =
         should_capture_responses_artifact(&request.path, response_adapter, route.native_api).then(
             || {
                 ResponsesArtifactCapture::new(
                     is_sse || response_adapter == ResponseAdapter::AnthropicMessagesToResponses,
+                    request_ctx.user_id,
                 )
             },
         );

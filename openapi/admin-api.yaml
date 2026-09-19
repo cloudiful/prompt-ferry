@@ -5222,6 +5222,11 @@ components:
           type:
           - boolean
           - 'null'
+        # Persisted as the user-scoped redacted view (see Issue #524 Task 4):
+        # every string inside `assistant_message` (content, reasoning_content,
+        # reasoning_details[*].text, tool_calls[*].function.arguments, refusal,
+        # phase) is rewritten via `redact_text_for_user` before storage.
+        # `assistant_output_items_json` follows the same contract.
         assistant_message_json: {}
         assistant_output_items_json: {}
         cache_rate:

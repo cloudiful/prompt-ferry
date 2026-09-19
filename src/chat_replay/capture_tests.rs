@@ -2,7 +2,7 @@ use super::capture::{AssistantArtifactCapture, ResponsesArtifactCapture, fallbac
 
 #[test]
 fn captures_non_stream_reasoning_content() {
-    let mut capture = AssistantArtifactCapture::new(false);
+    let mut capture = AssistantArtifactCapture::new(false, None);
     capture.observe_chunk(
         br#"{"choices":[{"message":{"content":"hello","reasoning_content":"hidden","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]}}]}"#,
     );
@@ -23,7 +23,7 @@ fn captures_non_stream_reasoning_content() {
 
 #[test]
 fn captures_non_stream_reasoning_details() {
-    let mut capture = AssistantArtifactCapture::new(false);
+    let mut capture = AssistantArtifactCapture::new(false, None);
     capture.observe_chunk(
         br#"{"choices":[{"message":{"content":"hello","reasoning_details":[{"text":"hidden"}]}}]}"#,
     );
@@ -43,7 +43,7 @@ fn captures_non_stream_reasoning_details() {
 
 #[test]
 fn captures_streaming_split_reasoning_content() {
-    let mut capture = AssistantArtifactCapture::new(true);
+    let mut capture = AssistantArtifactCapture::new(true, None);
     capture.observe_chunk(
         br#"data: {"choices":[{"delta":{"reasoning_content":"rea"}}]}
 data: {"choices":[{"delta":{"reasoning_content":"son"}}]}
@@ -65,7 +65,7 @@ data: {"choices":[{"delta":{"content":"done"}}]}
 
 #[test]
 fn captures_streaming_reasoning_details() {
-    let mut capture = AssistantArtifactCapture::new(true);
+    let mut capture = AssistantArtifactCapture::new(true, None);
     capture.observe_chunk(
         br#"data: {"choices":[{"delta":{"reasoning_details":[{"text":"rea"}]}}]}
 data: {"choices":[{"delta":{"reasoning_details":[{"text":"son"}]}}]}
@@ -87,7 +87,7 @@ data: {"choices":[{"delta":{"content":"done"}}]}
 
 #[test]
 fn captures_streaming_tool_calls_and_reasoning() {
-    let mut capture = AssistantArtifactCapture::new(true);
+    let mut capture = AssistantArtifactCapture::new(true, None);
     capture.observe_chunk(
         br#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"ci"}}],"reasoning_content":"h"}}]}
 data: {"choices":[{"delta":{"tool_calls":[{"index":0,"type":"function","function":{"arguments":"ty\":\"Bos"}}],"reasoning_content":"i"}}]}
@@ -110,7 +110,7 @@ data: {"choices":[{"delta":{"tool_calls":[{"index":0,"type":"function","function
 
 #[test]
 fn captures_streaming_tool_calls_when_provider_reuses_index() {
-    let mut capture = AssistantArtifactCapture::new(true);
+    let mut capture = AssistantArtifactCapture::new(true, None);
     capture.observe_chunk(
         br#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"first_tool","arguments":"{"}}]}}]}
 data: {"choices":[{"delta":{"tool_calls":[{"index":0,"type":"function","function":{"arguments":"}"}}]}}]}
@@ -141,7 +141,7 @@ data: {"choices":[{"delta":{"tool_calls":[{"index":0,"type":"function","function
 
 #[test]
 fn captures_repaired_streaming_tool_call_arguments_in_artifact() {
-    let mut capture = AssistantArtifactCapture::new(true);
+    let mut capture = AssistantArtifactCapture::new(true, None);
     capture.observe_chunk(
         br#"data: {"choices":[{"delta":{"content":"<tool_call>\n<function=search_stocks>\n<parameter=query>\u6b63\u6cf0\u7535\u6e90</parameter>\n<parameter=limit>5</parameter>\n</function>\n</tool_call>","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"search_stocks","arguments":"{\"query\": "}}]}}]}
 "#,
@@ -168,7 +168,7 @@ fn captures_repaired_streaming_tool_call_arguments_in_artifact() {
 
 #[test]
 fn captures_responses_reasoning_with_tool_calls_in_one_assistant_message() {
-    let mut capture = ResponsesArtifactCapture::new(false);
+    let mut capture = ResponsesArtifactCapture::new(false, None);
     capture.observe_chunk(
         br#"{"output":[
             {"type":"reasoning","summary":[{"type":"summary_text","text":"short summary"}],"content":[{"type":"reasoning_text","text":"complete reasoning"}]},
@@ -196,7 +196,7 @@ fn captures_responses_reasoning_with_tool_calls_in_one_assistant_message() {
 
 #[test]
 fn does_not_turn_responses_summary_into_reasoning_content() {
-    let mut capture = ResponsesArtifactCapture::new(false);
+    let mut capture = ResponsesArtifactCapture::new(false, None);
     capture.observe_chunk(
         br#"{"output":[
             {"type":"reasoning","summary":[{"type":"summary_text","text":"summary only"}]},
@@ -217,7 +217,7 @@ fn does_not_turn_responses_summary_into_reasoning_content() {
 
 #[test]
 fn captures_streaming_responses_reasoning_delta_with_tool_call() {
-    let mut capture = ResponsesArtifactCapture::new(true);
+    let mut capture = ResponsesArtifactCapture::new(true, None);
     capture.observe_chunk(
         br#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","content":[{"type":"reasoning_text","text":""}]}}
 data: {"type":"response.reasoning_text.delta","output_index":0,"delta":"complete reasoning"}
@@ -240,7 +240,7 @@ data: {"type":"response.function_call_arguments.delta","output_index":1,"call_id
 
 #[test]
 fn captures_refusal_and_phase_for_replay_guarding() {
-    let mut capture = AssistantArtifactCapture::new(false);
+    let mut capture = AssistantArtifactCapture::new(false, None);
     capture.observe_chunk(
         br#"{"choices":[{"message":{"content":null,"refusal":"cannot help","phase":"analysis"}}]}"#,
     );
@@ -270,4 +270,42 @@ fn builds_fallback_text_artifact() {
     );
     assert!(!artifact.has_reasoning_content);
     assert!(!artifact.has_tool_calls);
+}
+
+/// Issue #524 Task 4: any string under the assistant artifact `message_json`
+/// must be passed through the user-scoped redactor before persistence, so
+/// reasoning text that happens to carry a secret (provider echoes a token in
+/// `reasoning_content` or `reasoning_details[*].text`) is never written to
+/// `usage_records.assistant_message_json` as the original plaintext.
+#[test]
+fn reasoning_is_redacted() {
+    use crate::redact_test_support::secret_redaction;
+
+    let _guard = secret_redaction();
+    // 28-char alphanumeric with mixed case + digits matches the
+    // `looks_like_secret` validator even when no assignment key is present,
+    // so we exercise the unconditional branch of the redactor.
+    let secret = "sk_secret_EJ2QEVC6AKELW0k2kkV";
+    let secret_safe = "sk_secret_EJ2QEVC6AKELW0k2kkV";
+
+    let mut capture = AssistantArtifactCapture::new(false, Some(7));
+    capture.observe_chunk(format!(
+        r#"{{"choices":[{{"message":{{"content":"ok","reasoning_content":"{secret}","reasoning_details":[{{"text":"{secret_safe}","signature":"sig"}}]}}}}]}}"#
+    ).as_bytes());
+    capture.finish();
+
+    let artifact = capture.artifact().expect("artifact should be present");
+    let message_json = serde_json::to_string(&artifact.message_json).expect("serialize");
+    assert!(
+        !message_json.contains(secret),
+        "reasoning_content must not leak original secret; got: {message_json}"
+    );
+    assert!(
+        !message_json.contains(secret_safe),
+        "reasoning_details[*].text must not leak original secret; got: {message_json}"
+    );
+    assert!(
+        message_json.contains("ok"),
+        "non-secret content should survive redaction; got: {message_json}"
+    );
 }
