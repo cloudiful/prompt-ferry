@@ -98,6 +98,13 @@ impl RedactionConfig {
     }
 
     pub fn validate(&self) -> Result<(), RedactorError> {
+        for rule in &self.custom_strings {
+            if rule.pattern.contains("[[RDX:v2:") {
+                return Err(RedactorError::Validation(
+                    "pattern must not contain redaction token [[RDX:v2:".to_string(),
+                ));
+            }
+        }
         self.policy().validate().map_err(RedactorError::Validation)
     }
 }
@@ -450,7 +457,7 @@ mod tests {
     use std::collections::HashMap;
 
     use chrono::{DateTime, Utc};
-    use redactor::{CustomStringMatch, InputKind};
+    use redactor::{CustomStringMatch, InputKind, RedactorError};
 
     use crate::test_support::{apply as apply_test_config, lock, secret_redaction};
     use crate::{
@@ -646,5 +653,32 @@ mod tests {
         assert_eq!(config.custom_strings.len(), 1);
         assert_eq!(config.custom_strings[0].created_at, None);
         assert_eq!(config.custom_strings[0].updated_at, None);
+    }
+
+    #[test]
+    fn config_rejects_rdx_token() {
+        let config = RedactionConfig {
+            enabled: true,
+            custom_strings: vec![RedactionCustomStringRule {
+                pattern: "leak [[RDX:v2:abcdef]] more".to_string(),
+                match_type: CustomStringMatch::Exact,
+                scope: redactor::CustomStringScope::Text,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let err = config
+            .validate()
+            .expect_err("pattern containing [[RDX:v2: must be rejected");
+        match err {
+            RedactorError::Validation(message) => {
+                assert!(
+                    message.contains("pattern must not contain redaction token [[RDX:v2:"),
+                    "unexpected validation message: {message}",
+                );
+            }
+            other => panic!("expected RedactorError::Validation, got {other:?}"),
+        }
     }
 }
