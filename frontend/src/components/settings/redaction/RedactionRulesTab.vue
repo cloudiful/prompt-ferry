@@ -134,21 +134,56 @@ function formatUpdatedAt(value: string | null): string {
           </UButton>
         </div>
       </div>
-      <UTable :data="customStrings" :columns="columns" class="min-w-0" :ui="{ th: 'whitespace-nowrap' }">
+      <UTable
+        :data="customStrings"
+        :columns="columns"
+        class="min-w-0"
+        :ui="{ th: 'whitespace-nowrap' }"
+      >
         <template #empty>{{ t('noCustomStrings') }}</template>
         <template #pattern-cell="{ row }">
-          <UInput
-            :model-value="row.original.pattern"
-            type="password"
-            class="w-full"
-            name="redaction-custom-pattern"
-            size="sm"
-            @update:model-value="
-              redactionStore.updateCustomStringRule(row.original.array_index, {
-                pattern: String($event ?? ''),
-              })
-            "
-          />
+          <div class="flex min-w-0 items-center gap-1">
+            <UInput
+              :model-value="row.original.pattern"
+              :type="
+                redactionStore.isCustomStringRevealed(row.original.array_index)
+                  ? 'text'
+                  : 'password'
+              "
+              class="min-w-0 flex-1"
+              name="redaction-custom-pattern"
+              size="sm"
+              @update:model-value="
+                redactionStore.updateCustomStringRule(
+                  row.original.array_index,
+                  {
+                    pattern: String($event ?? ''),
+                  },
+                )
+              "
+            />
+            <UButton
+              type="button"
+              size="sm"
+              color="neutral"
+              variant="ghost"
+              :icon="
+                redactionStore.isCustomStringRevealed(row.original.array_index)
+                  ? 'i-lucide-eye-off'
+                  : 'i-lucide-eye'
+              "
+              :aria-label="
+                redactionStore.isCustomStringRevealed(row.original.array_index)
+                  ? t('hidePlaintext')
+                  : t('showPlaintext')
+              "
+              @click="
+                redactionStore.toggleCustomStringRevealed(
+                  row.original.array_index,
+                )
+              "
+            />
+          </div>
         </template>
         <template #matchType-cell="{ row }">
           <USelect
