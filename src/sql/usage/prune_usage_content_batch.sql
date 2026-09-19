@@ -78,6 +78,19 @@ WITH expired_conversations AS (
     USING expired_conversations expired
     WHERE sessions.conversation_id = expired.conversation_id
     RETURNING sessions.conversation_id
+), deleted_idle_sessions AS (
+    -- Issue #524 Task 6: bound session storage independently of content
+    -- retention. Sessions idle for over a week are dead weight even when their
+    -- conversation has no expired request rows yet. The NOT EXISTS keeps each
+    -- row owned by exactly one data-modifying CTE in this statement.
+    DELETE FROM conversation_redaction_sessions sessions
+    WHERE sessions.updated_at < NOW() - INTERVAL '7 days'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM expired_conversations expired
+          WHERE expired.conversation_id = sessions.conversation_id
+      )
+    RETURNING sessions.conversation_id
 )
 SELECT
     (SELECT COUNT(*) FROM marked)::BIGINT AS "expired_events!",
@@ -86,4 +99,7 @@ SELECT
     (SELECT COUNT(*) FROM deleted_tool_calls)::BIGINT AS "deleted_tool_calls!",
     (SELECT COUNT(*) FROM deleted_snapshots)::BIGINT AS "deleted_snapshots!",
     (SELECT COUNT(*) FROM deleted_tool_calls WHERE had_arguments)::BIGINT AS "cleared_tool_arguments!",
-    (SELECT COUNT(*) FROM deleted_redaction_sessions)::BIGINT AS "deleted_redaction_sessions!"
+    (
+        (SELECT COUNT(*) FROM deleted_redaction_sessions)
+        + (SELECT COUNT(*) FROM deleted_idle_sessions)
+    )::BIGINT AS "deleted_redaction_sessions!"
