@@ -14,7 +14,7 @@ use crate::worker::runtime::{
 use crate::{
     db, mcp,
     protocol::{BridgeMessage, McpResponseStart},
-    redact_upstream::{UpstreamRedactionSession, decrypt_upstream_session},
+    redact_upstream::{UpstreamRedactionSession, current_policy_version, decrypt_upstream_session},
     worker_admin_types::{RequestContentLoggingMode, RequestContentLoggingResponse},
 };
 
@@ -331,15 +331,19 @@ async fn load_prior_session(
     let Some(conversation_id) = conversation_id else {
         return Ok(None);
     };
-    let row = db::get_conversation_redaction_session(&state.pool, conversation_id)
-        .await
-        .map_err(|err| {
-            crate::openai_compat::CompatError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "redaction_session_load_failed",
-                format!("failed to load upstream redaction session: {err}"),
-            )
-        })?;
+    let row = db::get_conversation_redaction_session(
+        &state.pool,
+        conversation_id,
+        current_policy_version(),
+    )
+    .await
+    .map_err(|err| {
+        crate::openai_compat::CompatError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "redaction_session_load_failed",
+            format!("failed to load upstream redaction session: {err}"),
+        )
+    })?;
     let Some(row) = row else {
         return Ok(None);
     };

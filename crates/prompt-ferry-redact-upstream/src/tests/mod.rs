@@ -3,6 +3,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use prompt_ferry_redact::test_support::domain_redaction;
 use prompt_ferry_runtime_env::relay_secrets::RelaySecretManager;
 
+mod toggle;
+
 fn token_for(session: &UpstreamRedactionSession, original: &str) -> String {
     session
         .request_session()

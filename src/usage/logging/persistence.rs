@@ -68,11 +68,9 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         sanitize_optional_json_for_storage(log.request_full_json);
     let (request_delta_json, request_delta_json_stats) =
         sanitize_optional_json_for_storage(log.request_delta_json);
-    let (request_raw_json, request_raw_json_stats) =
-        sanitize_optional_json_for_storage(redact_request_raw_json(
-            log.request_raw_json,
-            log.user_id,
-        ));
+    let (request_raw_json, request_raw_json_stats) = sanitize_optional_json_for_storage(
+        redact_request_raw_json(log.request_raw_json, log.user_id),
+    );
     let (response_prompt, response_prompt_stats) =
         sanitize_optional_text_for_storage(log.response_prompt);
     let (response_raw_body, response_raw_body_stats) =
@@ -203,30 +201,39 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
                     Some(session) => {
                         if let Ok(manager) = state.relay_secret_manager()
                             && let Ok(encrypted) = encrypt_upstream_session(manager, session)
-                            && let Err(err) = db::upsert_conversation_redaction_session(
-                                &state.pool,
-                                db::ConversationRedactionSessionCreate {
-                                    conversation_id,
-                                    session_ciphertext: encrypted.ciphertext,
-                                    session_nonce: encrypted.nonce,
-                                    session_key_version: encrypted.key_version,
-                                    last_event_id: Some(event_id),
-                                },
-                            )
-                            .await
                         {
-                            warn!(
-                                error = %err,
-                                conversation_id = %conversation_id,
-                                event_id,
-                                "failed to persist conversation redaction session"
-                            );
+                            let create = db::ConversationRedactionSessionCreate {
+                                conversation_id,
+                                session_ciphertext: encrypted.ciphertext,
+                                session_nonce: encrypted.nonce,
+                                session_key_version: encrypted.key_version,
+                                last_event_id: Some(event_id),
+                                policy_version: session.policy_version(),
+                            };
+                            match db::upsert_conversation_redaction_session(&state.pool, create)
+                                .await
+                            {
+                                Ok(0) => warn!(
+                                    conversation_id = %conversation_id,
+                                    event_id,
+                                    "stale conversation redaction session write ignored"
+                                ),
+                                Ok(_) => {}
+                                Err(err) => warn!(
+                                    error = %err,
+                                    conversation_id = %conversation_id,
+                                    event_id,
+                                    "failed to persist conversation redaction session"
+                                ),
+                            }
                         }
                     }
                     None => {
-                        // Budget overflow or redaction disabled: degrade to
-                        // irreversible redaction and drop the persisted session
-                        // so it cannot keep growing.
+                        // Issue #524 Task 5: `None` means redaction is disabled
+                        // for this request (disable deletes the row) or the
+                        // session exceeded its budget (Task 2). Both drop the
+                        // persisted row so re-enabling starts from a fresh token
+                        // counter instead of reviving the old mapping.
                         if let Err(err) =
                             db::delete_conversation_redaction_session(&state.pool, conversation_id)
                                 .await

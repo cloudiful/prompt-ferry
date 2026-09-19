@@ -189,6 +189,10 @@ struct RedactionRuntimeStore {
     global_runtime: RedactionRuntime,
     user_configs: HashMap<i64, RedactionConfig>,
     user_runtimes: HashMap<i64, RedactionRuntime>,
+    /// Monotonic policy generation; bumped on every config mutation so upstream
+    /// redaction sessions created under an older policy are rebuilt instead of
+    /// reusing their token counter (Issue #524 Task 5).
+    generation: u64,
 }
 
 impl Default for RedactionRuntimeStore {
@@ -201,6 +205,7 @@ impl Default for RedactionRuntimeStore {
             global_runtime,
             user_configs: HashMap::new(),
             user_runtimes: HashMap::new(),
+            generation: 0,
         }
     }
 }
@@ -244,6 +249,7 @@ pub fn apply_config(config: &RedactionConfig) -> Result<(), RedactorError> {
     store.global_config = normalized;
     store.global_runtime = runtime;
     store.user_runtimes = user_runtimes;
+    store.generation = store.generation.wrapping_add(1);
     Ok(())
 }
 
@@ -259,13 +265,16 @@ pub fn apply_configs(
     let global_runtime = RedactionRuntime::from_config(&normalized_global)?;
     let user_runtimes =
         RedactionRuntimeStore::build_user_runtimes(&normalized_global, &normalized_users)?;
-    *REDACTION_RUNTIME
+    let mut store = REDACTION_RUNTIME
         .write()
-        .expect("redaction runtime lock poisoned") = RedactionRuntimeStore {
+        .expect("redaction runtime lock poisoned");
+    let generation = store.generation.wrapping_add(1);
+    *store = RedactionRuntimeStore {
         global_config: normalized_global,
         global_runtime,
         user_configs: normalized_users,
         user_runtimes,
+        generation,
     };
     Ok(())
 }
@@ -279,6 +288,7 @@ pub fn apply_user_config(user_id: i64, config: &RedactionConfig) -> Result<(), R
     let runtime = RedactionRuntime::from_config(&effective)?;
     store.user_configs.insert(user_id, normalized);
     store.user_runtimes.insert(user_id, runtime);
+    store.generation = store.generation.wrapping_add(1);
     Ok(())
 }
 
@@ -338,6 +348,16 @@ pub fn redaction_enabled_for_user(user_id: Option<i64>) -> bool {
         .and_then(|value| store.user_runtimes.get(&value))
         .unwrap_or(&store.global_runtime)
         .enabled
+}
+
+/// Current redaction policy generation. It changes on every config mutation;
+/// callers stamp it onto persisted state so state from an older policy is
+/// rebuilt rather than reused (Issue #524 Task 5).
+pub fn policy_generation() -> u64 {
+    REDACTION_RUNTIME
+        .read()
+        .expect("redaction runtime lock poisoned")
+        .generation
 }
 
 pub fn redact_text(text: &str) -> String {

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n    conversation_id,\n    session_ciphertext,\n    session_nonce,\n    session_key_version,\n    last_event_id,\n    created_at,\n    updated_at\nFROM conversation_redaction_sessions\nWHERE conversation_id = $1\n",
+  "query": "SELECT\n    conversation_id,\n    session_ciphertext,\n    session_nonce,\n    session_key_version,\n    last_event_id,\n    policy_version,\n    created_at,\n    updated_at\nFROM conversation_redaction_sessions\nWHERE conversation_id = $1\n  AND policy_version = $2\n",
   "describe": {
     "columns": [
       {
@@ -60,6 +60,17 @@
       },
       {
         "ordinal": 5,
+        "name": "policy_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "conversation_redaction_sessions",
+            "name": "policy_version"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -70,7 +81,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -83,7 +94,8 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Int8"
       ]
     },
     "nullable": [
@@ -93,8 +105,9 @@
       false,
       true,
       false,
+      false,
       false
     ]
   },
-  "hash": "b1d629d21fa4b8d3acf28fc2e365a2376eccceffe99a5fc912e65e263775c3fe"
+  "hash": "4bf13d4e905c1b4f896fcd24b1a388fa084bb72abfc6c17f1328f88d1921391f"
 }
