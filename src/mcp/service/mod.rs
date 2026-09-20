@@ -13,6 +13,7 @@ use super::{
     protocol::{encode_resource_template_uri, encode_resource_uri},
 };
 use crate::mcp::filtering::{is_disabled_item, is_tool_allowed};
+use crate::mcp::output_schema::normalize_tool_output_schema;
 
 mod catalog;
 mod snapshot;
@@ -146,6 +147,9 @@ async fn aggregate_prefixed_items(
         .map(|entry| {
             let mut item = entry.item;
             item[kind.name_key()] = Value::String(entry.qualified_name);
+            if kind == AggregateKind::Tools {
+                normalize_tool_output_schema(&mut item);
+            }
             item
         })
         .collect())

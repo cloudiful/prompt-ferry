@@ -65,6 +65,48 @@ async fn aggregate_reads_cached_servers_only() {
 }
 
 #[tokio::test]
+async fn aggregate_normalizes_union_output_schema_without_touching_cache() {
+    let cache = McpCatalogCache::new();
+    let server_cfg = server("alpha");
+    let snapshot = ServerCatalogSnapshot {
+        tools: vec![
+            json!({
+                "name": "db_query",
+                "description": "query",
+                "inputSchema": {"type": "object"},
+                "outputSchema": {"oneOf": [{"type": "object"}, {"type": "object"}]},
+            }),
+            json!({"name": "plain_tool"}),
+        ],
+        resources: Vec::new(),
+        resource_templates: Vec::new(),
+        prompts: Vec::new(),
+    };
+    cache.put(&server_cfg, snapshot).await;
+
+    let tools = aggregate_tools(&cache, std::slice::from_ref(&server_cfg))
+        .await
+        .unwrap();
+
+    let query = tools
+        .iter()
+        .find(|tool| tool["name"] == "alpha__db_query")
+        .expect("db_query tool");
+    assert_eq!(query["outputSchema"]["type"], "object");
+    assert_eq!(query["outputSchema"]["oneOf"].as_array().unwrap().len(), 2);
+    assert_eq!(query["description"], "query");
+    let plain = tools
+        .iter()
+        .find(|tool| tool["name"] == "alpha__plain_tool")
+        .expect("plain tool");
+    assert!(plain.get("outputSchema").is_none());
+
+    // McpCatalogCache keeps the raw upstream payload for admin catalog use.
+    let cached = cache.get(&server_cfg).await.unwrap();
+    assert!(cached.tools[0]["outputSchema"].get("type").is_none());
+}
+
+#[tokio::test]
 async fn server_catalog_requires_warm_cache() {
     let cache = McpCatalogCache::new();
     let server = server("alpha");
