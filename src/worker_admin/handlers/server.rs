@@ -312,10 +312,12 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
 
     let frontend_assets = ServeDir::new(frontend_dist.join("assets"));
     let frontend_index = ServeFile::new(frontend_dist.join("index.html"));
+    let frontend_favicon = ServeFile::new(frontend_dist.join("favicon.svg"));
 
     Router::new()
         .nest("/api/v1", api)
         .nest_service("/assets", frontend_assets)
+        .route_service("/favicon.svg", frontend_favicon)
         .fallback_service(frontend_index)
         .layer(CorsLayer::permissive())
         .layer(response_compression_layer())
