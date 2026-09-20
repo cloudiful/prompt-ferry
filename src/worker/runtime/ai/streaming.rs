@@ -362,12 +362,12 @@ pub(super) async fn forward_streaming_response(
     });
     let stream_delta_batching = services
         .admin_state()
-        .map(|state| {
-            state
-                .stream_delta_batching
-                .try_read()
-                .map(|value| value.clone())
-                .unwrap_or_default()
+        .map(|state| match state.stream_delta_batching.try_read() {
+            Ok(v) => v.clone(),
+            Err(_) => {
+                tracing::warn!(category = "stream_diag", "stream_delta_batching lock contended; falling back to disabled");
+                Default::default()
+            }
         })
         .unwrap_or_default();
     let mut stream_delta_batcher = StreamDeltaBatcher::new(stream_delta_batching);

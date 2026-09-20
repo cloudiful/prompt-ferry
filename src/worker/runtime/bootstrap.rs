@@ -318,6 +318,18 @@ pub(super) async fn build_admin_state(
             ReplayCache::from_config_with_sqlite(config, sqlite_pool.clone()),
             crate::mcp::McpSessionStore::from_config_with_sqlite(config, sqlite_pool),
         );
+        let stream_delta_batching: db::StreamDeltaBatchingSettings = config_repository
+            .get_json_setting::<db::StreamDeltaBatchingSettings>("stream_delta_batching")
+            .await?
+            .map(|v| db::StreamDeltaBatchingSettings {
+                enabled: v.enabled,
+                flush_window_ms: v.flush_window_ms.clamp(1, 1_000),
+                max_buffer_chars: v.max_buffer_chars.clamp(1, 8_192),
+                max_buffer_bytes: v.max_buffer_bytes.clamp(1, 65_536),
+                flush_on_line_break: v.flush_on_line_break,
+                flush_on_sentence_end: v.flush_on_sentence_end,
+            })
+            .unwrap_or_default();
         let state = AdminState::new(crate::worker_admin_state::AdminStateInit {
             pool: pool.clone(),
             lease_pool,
@@ -333,7 +345,7 @@ pub(super) async fn build_admin_state(
             },
             usage_retention: crate::worker_admin_types::UsageRetentionSettings::default(),
             raw_payload_store: None,
-            stream_delta_batching: db::StreamDeltaBatchingSettings::default(),
+            stream_delta_batching,
             llm_review_settings: llm_review::LlmReviewSettings::default(),
             mcp_catalog_cache: mcp_catalog_cache.clone(),
             mcp_catalog_service: crate::mcp::McpCatalogService::new_with_repository(

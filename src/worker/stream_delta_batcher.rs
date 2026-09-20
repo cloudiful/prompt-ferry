@@ -18,6 +18,7 @@ struct PendingEvent {
     key: BatchingKey,
     payload: Value,
     delta: String,
+    last_sequence_number: Option<i64>,
     started_at: Instant,
 }
 
@@ -68,7 +69,7 @@ impl StreamDeltaBatcher {
             return Ok(output);
         };
 
-        let Some((key, delta)) = extract_mergeable_text_delta(&event) else {
+        let Some((key, delta, sequence_number)) = extract_mergeable_text_delta(&event) else {
             output.extend(self.flush_pending()?);
             output.push(chunk);
             return Ok(output);
@@ -77,6 +78,12 @@ impl StreamDeltaBatcher {
         match self.pending.as_mut() {
             Some(pending) if pending.key == key => {
                 pending.delta.push_str(&delta);
+                if let Some(seq) = sequence_number {
+                    pending.last_sequence_number = Some(seq);
+                    if let Some(obj) = pending.payload.as_object_mut() {
+                        obj.insert("sequence_number".to_string(), serde_json::json!(seq));
+                    }
+                }
                 pending.payload["delta"] = Value::String(pending.delta.clone());
                 if should_flush_pending(&self.settings, &pending.delta) {
                     output.extend(self.flush_pending()?);
@@ -88,6 +95,7 @@ impl StreamDeltaBatcher {
                     key,
                     payload: event,
                     delta,
+                    last_sequence_number: sequence_number,
                     started_at: Instant::now(),
                 });
                 if self
@@ -103,6 +111,7 @@ impl StreamDeltaBatcher {
                     key,
                     payload: event,
                     delta,
+                    last_sequence_number: sequence_number,
                     started_at: Instant::now(),
                 });
                 if self
@@ -122,9 +131,14 @@ impl StreamDeltaBatcher {
     }
 
     fn flush_pending(&mut self) -> Result<Vec<Vec<u8>>> {
-        let Some(pending) = self.pending.take() else {
+        let Some(mut pending) = self.pending.take() else {
             return Ok(Vec::new());
         };
+        if let Some(seq) = pending.last_sequence_number {
+            if let Some(obj) = pending.payload.as_object_mut() {
+                obj.insert("sequence_number".to_string(), serde_json::json!(seq));
+            }
+        }
         Ok(vec![
             sse_event(&pending.payload).map_err(|err| anyhow::anyhow!(err.message))?,
         ])
@@ -149,7 +163,7 @@ fn parse_sse_json_event(chunk: &[u8]) -> Result<Option<Value>> {
     ))
 }
 
-fn extract_mergeable_text_delta(event: &Value) -> Option<(BatchingKey, String)> {
+fn extract_mergeable_text_delta(event: &Value) -> Option<(BatchingKey, String, Option<i64>)> {
     let event_type = event.get("type")?.as_str()?;
     if !matches!(
         event_type,
@@ -161,6 +175,7 @@ fn extract_mergeable_text_delta(event: &Value) -> Option<(BatchingKey, String)> 
     let output_index = event.get("output_index")?.as_i64()?;
     let content_index = event.get("content_index")?.as_i64()?;
     let delta = event.get("delta")?.as_str()?.to_string();
+    let sequence_number = event.get("sequence_number").and_then(|value| value.as_i64());
     Some((
         BatchingKey {
             event_type: event_type.to_string(),
@@ -169,6 +184,7 @@ fn extract_mergeable_text_delta(event: &Value) -> Option<(BatchingKey, String)> 
             content_index,
         },
         delta,
+        sequence_number,
     ))
 }
 
@@ -262,6 +278,81 @@ mod tests {
         assert_eq!(output.len(), 2);
         let merged = parse_sse_json_event(&output[0]).unwrap().unwrap();
         assert_eq!(merged["delta"].as_str(), Some("hello"));
+        // Sequence number must follow the most recent merged input so downstream
+        // consumers keep a strictly monotonic numbering when chunks are batched.
+        assert_eq!(merged["sequence_number"].as_i64(), Some(4));
+    }
+
+    #[test]
+    fn keeps_sequence_number_when_key_changes_and_continues_monotonic() {
+        // A three-shot merge of the same key followed by a key change should
+        // leave the merged event carrying the last input's sequence number;
+        // the new key should then track its own latest sequence number.
+        let mut batcher = StreamDeltaBatcher::new(StreamDeltaBatchingSettings {
+            enabled: true,
+            flush_window_ms: 1_000,
+            max_buffer_chars: 160,
+            max_buffer_bytes: 1024,
+            flush_on_line_break: true,
+            flush_on_sentence_end: false,
+        });
+        assert!(
+            batcher
+                .push_chunk(event_bytes(json!({
+                    "type": "response.output_text.delta",
+                    "item_id": "msg_1",
+                    "output_index": 0,
+                    "content_index": 0,
+                    "delta": "a",
+                    "sequence_number": 10
+                })))
+                .unwrap()
+                .is_empty()
+        );
+        let output = batcher
+            .push_chunk(event_bytes(json!({
+                "type": "response.output_text.delta",
+                "item_id": "msg_1",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "b",
+                "sequence_number": 11
+            })))
+            .unwrap();
+        assert!(output.is_empty());
+        let output = batcher
+            .push_chunk(event_bytes(json!({
+                "type": "response.output_text.delta",
+                "item_id": "msg_1",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "c",
+                "sequence_number": 12
+            })))
+            .unwrap();
+        assert!(output.is_empty());
+        // Key change flushes the three-shot merged payload carrying seq 12.
+        let output = batcher
+            .push_chunk(event_bytes(json!({
+                "type": "response.output_text.delta",
+                "item_id": "msg_2",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "x",
+                "sequence_number": 13
+            })))
+            .unwrap();
+        assert_eq!(output.len(), 1);
+        let merged = parse_sse_json_event(&output[0]).unwrap().unwrap();
+        assert_eq!(merged["delta"].as_str(), Some("abc"));
+        assert_eq!(merged["sequence_number"].as_i64(), Some(12));
+        // The new key pending carries its own latest sequence number.
+        let output = batcher.finish().unwrap();
+        assert_eq!(output.len(), 1);
+        let flushed = parse_sse_json_event(&output[0]).unwrap().unwrap();
+        assert_eq!(flushed["item_id"].as_str(), Some("msg_2"));
+        assert_eq!(flushed["delta"].as_str(), Some("x"));
+        assert_eq!(flushed["sequence_number"].as_i64(), Some(13));
     }
 
     #[test]
