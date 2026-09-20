@@ -321,6 +321,15 @@ pub(super) async fn set_usage_retention(
     Json(body).into_response()
 }
 
+fn normalize_stream_delta_batching_settings(
+    mut value: db::StreamDeltaBatchingSettings,
+) -> db::StreamDeltaBatchingSettings {
+    value.flush_window_ms = value.flush_window_ms.clamp(1, 1_000);
+    value.max_buffer_chars = value.max_buffer_chars.clamp(1, 8_192);
+    value.max_buffer_bytes = value.max_buffer_bytes.clamp(1, 65_536);
+    value
+}
+
 pub(super) async fn get_stream_delta_batching(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -328,15 +337,7 @@ pub(super) async fn get_stream_delta_batching(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response.into_response();
     }
-    match state
-        .config_repository
-        .get_json_setting::<db::StreamDeltaBatchingSettings>("stream_delta_batching")
-        .await
-    {
-        Ok(Some(config)) => Json(config).into_response(),
-        Ok(None) => Json(db::StreamDeltaBatchingSettings::default()).into_response(),
-        Err(err) => internal(&state, err),
-    }
+    Json(state.stream_delta_batching.read().await.clone()).into_response()
 }
 
 pub(super) async fn set_stream_delta_batching(
@@ -347,12 +348,16 @@ pub(super) async fn set_stream_delta_batching(
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response.into_response();
     }
+    let normalized = normalize_stream_delta_batching_settings(body);
     match state
         .config_repository
-        .set_json_setting("stream_delta_batching", &body)
+        .set_json_setting("stream_delta_batching", &normalized)
         .await
     {
-        Ok(()) => Json(body).into_response(),
+        Ok(()) => {
+            *state.stream_delta_batching.write().await = normalized.clone();
+            Json(normalized).into_response()
+        }
         Err(err) => internal(&state, err),
     }
 }

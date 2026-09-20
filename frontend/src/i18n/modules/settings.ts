@@ -71,7 +71,7 @@ export const settingsMessages = {
     storageLocalHint: '本地文件直接写入该目录。',
     streamDeltaBatching: '流式批处理',
     streamBuffering: '缓冲',
-    streamDeltaBatchingSummary: '只影响 Responses 文本流。',
+    streamDeltaBatchingSummary: '影响 Responses-shape 的流式文本增量（含 Chat/Anthropic 适配器）。',
     reviewBaseUrl: '审核 Base URL',
     reviewBaseUrlPlaceholder: 'https://api.openai.com',
     reviewExecution: '执行策略',
@@ -160,7 +160,8 @@ export const settingsMessages = {
     storageLocalHint: 'Files are written directly to this directory.',
     streamDeltaBatching: 'Stream batching',
     streamBuffering: 'Buffering',
-    streamDeltaBatchingSummary: 'Affects Responses text streams only.',
+    streamDeltaBatchingSummary:
+      'Affects streaming output text deltas in Responses-shape (incl. Chat/Anthropic adapters).',
     reviewBaseUrl: 'Review base URL',
     reviewBaseUrlPlaceholder: 'https://api.openai.com',
     reviewExecution: 'Execution',
