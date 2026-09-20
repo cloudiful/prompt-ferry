@@ -56,17 +56,54 @@ impl UpstreamRedactionSession {
     }
 
     fn exceeds_budget(&self) -> bool {
-        if self.restore_state.session().entries.len() > MAX_ENTRIES {
-            return true;
+        let started = std::time::Instant::now();
+        let (exceeds, entries) = self.exceeds_budget_with_entries();
+        if let Some(elapsed_us) =
+            timing_sample(started.elapsed().as_micros() as u64, &BUDGET_CHECKS)
+        {
+            tracing::debug!(
+                path = "budget",
+                elapsed_us,
+                entries,
+                has_session = true,
+                "redaction path timing"
+            );
+        }
+        exceeds
+    }
+
+    fn exceeds_budget_with_entries(&self) -> (bool, usize) {
+        let entries = self.restore_state.session().entries.len();
+        if entries > MAX_ENTRIES {
+            return (true, entries);
         }
         if self.restore_state.permits().len() > MAX_PERMITS {
-            return true;
+            return (true, entries);
         }
-        serde_json::to_vec(self)
-            .map(|serialized| serialized.len() > MAX_BYTES)
-            .unwrap_or(false)
+        let serialized_len = serde_json::to_vec(self)
+            .map(|serialized| serialized.len())
+            .unwrap_or(0);
+        (serialized_len > MAX_BYTES, entries)
     }
 }
+
+static BUDGET_CHECKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Issue #528 Task 2: same sampled critical-path timing as the root crate's
+/// `redaction_timing` module, inlined because the workspace root crate cannot
+/// be a dependency here.
+mod timing {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    const SLOW_US: u64 = 10_000;
+    const SAMPLE_EVERY: u64 = 100;
+
+    pub(super) fn timing_sample(elapsed_us: u64, counter: &AtomicU64) -> Option<u64> {
+        let call = counter.fetch_add(1, Ordering::Relaxed);
+        (elapsed_us > SLOW_US || call % SAMPLE_EVERY == 0).then_some(elapsed_us)
+    }
+}
+use timing::timing_sample;
 
 #[derive(Debug, Clone, Default)]
 pub struct UpstreamRedactionResult {
@@ -116,6 +153,16 @@ impl UpstreamRedactionProcessor {
 
     pub fn has_applied_replacements(&self) -> bool {
         self.session.has_applied_replacements()
+    }
+
+    /// Prior-session entry count carried into this request (`0` without a
+    /// prior session). Issue #528 Task 2 observation field; the in-flight
+    /// entry count is only materialized in `finish_session`.
+    pub fn prior_entry_count(&self) -> usize {
+        self.prior_state
+            .as_ref()
+            .map(|state| state.session().entries.len())
+            .unwrap_or(0)
     }
 
     pub fn finish_state(

@@ -12,6 +12,9 @@ use serde_json::Value;
 use tracing::warn;
 
 use super::{UsageLog, inference::infer_failure_family};
+use crate::redaction_timing::{PATH_PERSIST, timing_sample};
+
+static PERSIST_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UsageRecordingMode {
@@ -199,6 +202,7 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
             if let Some(conversation_id) = conversation_id {
                 match log.upstream_restore_session.as_ref() {
                     Some(session) => {
+                        let persist_started = std::time::Instant::now();
                         if let Ok(manager) = state.relay_secret_manager()
                             && let Ok(encrypted) = encrypt_upstream_session(manager, session)
                         {
@@ -225,6 +229,18 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
                                     event_id,
                                     "failed to persist conversation redaction session"
                                 ),
+                            }
+                            if let Some((elapsed_us, _)) = timing_sample(
+                                persist_started.elapsed().as_micros() as u64,
+                                &PERSIST_CALLS,
+                            ) {
+                                tracing::debug!(
+                                    path = PATH_PERSIST,
+                                    elapsed_us,
+                                    entries = session.request_session().entries.len(),
+                                    has_session = true,
+                                    "redaction path timing"
+                                );
                             }
                         }
                     }
