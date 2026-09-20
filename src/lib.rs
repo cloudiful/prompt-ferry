@@ -18,6 +18,7 @@ pub mod openai_compat;
 pub mod openapi_export;
 pub mod raw_payload_store;
 pub mod realtime;
+pub(crate) mod redaction_timing;
 pub use prompt_ferry_redact as redact;
 #[cfg(test)]
 pub(crate) use prompt_ferry_redact::test_support as redact_test_support;

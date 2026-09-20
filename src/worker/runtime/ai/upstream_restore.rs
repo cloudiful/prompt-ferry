@@ -2,13 +2,36 @@ use anyhow::{Result, anyhow};
 use serde_json::Value;
 use tracing::warn;
 
+use super::upstream_text_fields::should_process_ai_string_field;
 use crate::redact_upstream::UpstreamRedactionSession;
+use crate::redaction_timing::{PATH_RESTORE, timing_sample};
 use crate::worker::runtime::json_walker::walk_json_strings;
 use redactor::ensure_restore_valid;
 
-use super::upstream_text_fields::should_process_ai_string_field;
+static RESTORE_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 pub(crate) fn restore_ai_response_json(
+    path: &str,
+    body: &[u8],
+    session: &UpstreamRedactionSession,
+) -> Result<Vec<u8>> {
+    let started = std::time::Instant::now();
+    let outcome = restore_ai_response_json_inner(path, body, session);
+    if let Some((elapsed_us, _)) =
+        timing_sample(started.elapsed().as_micros() as u64, &RESTORE_CALLS)
+    {
+        tracing::debug!(
+            path = PATH_RESTORE,
+            elapsed_us,
+            entries = session.restore_state.session().entries.len(),
+            has_session = true,
+            "redaction path timing"
+        );
+    }
+    outcome
+}
+
+fn restore_ai_response_json_inner(
     path: &str,
     body: &[u8],
     session: &UpstreamRedactionSession,
