@@ -19,6 +19,7 @@ use super::{
         parse_read_resource_response, parse_result, parse_result_field, required_params, with_meta,
     },
 };
+use crate::mcp::output_schema::normalize_tools_list_result;
 use crate::mcp::targeting::{
     PrefixedTarget, parse_prefixed_name, parse_resource_target, parse_resource_template_target,
 };
@@ -388,11 +389,17 @@ impl ProxyService {
         };
         let mut result = serde_json::Map::new();
         result.insert(field.to_string(), Value::Array(items));
-        Ok(json!({
+        let mut response = json!({
             "jsonrpc": "2.0",
             "id": serde_json::to_value(request_id).map_err(super::internal_error)?,
             "result": result,
-        }))
+        });
+        // `outputSchema` only exists on tools; upstream union schemas without a
+        // top-level `type` make strict clients reject the whole list (#531).
+        if field == "tools" {
+            normalize_tools_list_result(&mut response);
+        }
+        Ok(response)
     }
 
     async fn dispatch_result<T, P, Parse>(
@@ -570,6 +577,114 @@ impl CacheMetadataSettable for ListPromptsResult {
 mod tests {
     use super::*;
     use rmcp::model::{ReadResourceResult, ResourceContents};
+
+    use crate::{
+        db::{ConfigRepository, McpServerInput},
+        mcp::{McpCatalogCache, ServerCatalogSnapshot},
+        relay_secrets::RelaySecretManager,
+        standalone_config::StandaloneConfigStore,
+    };
+
+    fn cached_server_input(name: &str) -> McpServerInput {
+        McpServerInput {
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            source_endpoint_id: None,
+            name: name.to_string(),
+            aggregate_naming_mode: "qualified_only".to_string(),
+            transport: "http".to_string(),
+            provider_kind: None,
+            url: Some("http://127.0.0.1:1/mcp".to_string()),
+            command: None,
+            args: json!([]),
+            env_json: json!({}),
+            bearer_tokens_json: json!([]),
+            http_headers_json: json!({}),
+            auth_mode: "none".to_string(),
+            basic_username: None,
+            basic_password: None,
+            proxy_url: None,
+            tool_filter_mode: "blacklist".to_string(),
+            allowed_tools: json!([]),
+            disabled_tools: json!([]),
+            disabled_resources: json!([]),
+            enabled: true,
+            timeout_ms: 30_000,
+            lifecycle_policy: "auto".to_string(),
+            lifecycle_manual_protocol_version: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn cached_server_list_normalizes_union_output_schema() {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+        let path = std::env::temp_dir().join(format!(
+            "prompt-ferry-cached-server-list-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let store = std::sync::Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
+        let manager =
+            RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");
+        let repository = ConfigRepository::sqlite(store, manager);
+        repository
+            .create_mcp_server(uuid::Uuid::new_v4(), cached_server_input("alpha"))
+            .await
+            .expect("create MCP server");
+        let server = repository
+            .get_visible_mcp_server(None, "alpha")
+            .await
+            .expect("load MCP server")
+            .expect("alpha server");
+
+        let cache = McpCatalogCache::new();
+        cache
+            .put(
+                &server,
+                ServerCatalogSnapshot {
+                    tools: vec![json!({
+                        "name": "db_query",
+                        "description": "query",
+                        "inputSchema": {"type": "object"},
+                        "outputSchema": {"oneOf": [{"type": "object"}, {"type": "object"}]},
+                    })],
+                    resources: Vec::new(),
+                    resource_templates: Vec::new(),
+                    prompts: Vec::new(),
+                },
+            )
+            .await;
+
+        let scope = RequestScope {
+            user_id: None,
+            server_name: Some("alpha".to_string()),
+            conversation_id: None,
+            storage: McpRuntimeStorage::from_repository(repository),
+            cache: cache.clone(),
+            selected_credential: None,
+        };
+        let response = ProxyService::new()
+            .cached_server_list(&scope, &RequestId::Number(1), "tools")
+            .await
+            .expect("cached tools list");
+
+        let tool = &response["result"]["tools"][0];
+        assert_eq!(tool["name"], "db_query");
+        assert_eq!(tool["inputSchema"], json!({"type": "object"}));
+        assert_eq!(tool["outputSchema"]["type"], "object");
+        assert_eq!(tool["outputSchema"]["oneOf"].as_array().unwrap().len(), 2);
+
+        // The catalog snapshot keeps the raw upstream schema for admin/diagnostics.
+        let cached = cache.get(&server).await.expect("cached snapshot");
+        assert!(cached.tools[0]["outputSchema"].get("type").is_none());
+        assert_eq!(
+            cached.tools[0]["outputSchema"]["oneOf"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
 
     #[test]
     fn peer_expects_cache_metadata_accepts_2026_07_28() {

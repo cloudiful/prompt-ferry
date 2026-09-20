@@ -3,6 +3,7 @@ mod builtin;
 mod cache;
 mod entry;
 mod filtering;
+mod output_schema;
 mod protocol;
 mod provider_usage;
 mod routing;

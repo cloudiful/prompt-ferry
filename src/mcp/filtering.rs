@@ -41,9 +41,10 @@ pub(super) async fn call_server_filtered(
         return Ok(json_error_value(id, -32602, "resource is disabled"));
     }
     let mut response = call_server(storage, server, request, conversation_id, forced).await?;
-    if method == "tools/list" {
-        filter_tool_items(&mut response, server, "name");
-    } else if method == "resources/list" {
+    // `tools/list` never reaches this call: named-server lists are served from
+    // `McpCatalogCache` by `server::ops::cached_server_list`, and aggregate
+    // lists are composed by `aggregate::aggregate`.
+    if method == "resources/list" {
         filter_result_items(&mut response, server, "resources", "uri");
     } else if method == "resources/templates/list" {
         if let Some(items) = response
@@ -74,20 +75,6 @@ pub(super) fn is_disabled_item(server: &McpServer, kind: &str, name: &str) -> bo
         _ => return false,
     })
     .contains(name)
-}
-
-fn filter_tool_items(response: &mut Value, server: &McpServer, name_key: &str) {
-    let Some(items) = response
-        .pointer_mut("/result/tools")
-        .and_then(Value::as_array_mut)
-    else {
-        return;
-    };
-    items.retain(|item| {
-        item.get(name_key)
-            .and_then(Value::as_str)
-            .is_none_or(|name| is_tool_allowed(server, name))
-    });
 }
 
 fn filter_result_items(response: &mut Value, server: &McpServer, kind: &str, name_key: &str) {
