@@ -309,6 +309,30 @@ resend once. Both fallbacks emit structured warnings
 (`event=chat_to_responses_missing_tool_output`,
 `event=upstream_invalid_continuation`).
 
+### Thinking downgrade
+
+Thinking-mode upstreams reject a tool-bearing turn when the parent assistant
+tool-call message has no reasoning to pass back (`reasoning_content` /
+`reasoning_text` in the thinking mode must be passed back). Ferry keeps those
+turns working:
+
+- Pre-flight: when the stored parent artifact proves the parent turn produced no
+  reasoning, the turn requests thinking, carries tools, and nothing restorable
+  is present, ferry disables thinking for that single turn. Chat bodies get
+  `thinking: {"type":"disabled"}` with `reasoning_effort` dropped (overriding a
+  per-target thinking effort override); Responses bodies get
+  `reasoning.effort: "none"`.
+- Retry: an upstream `400` whose body contains `must be passed back` resends the
+  same turn once with thinking off; if that resend is rejected too, the original
+  upstream error is returned.
+
+Neither path fabricates reasoning, stores anything new, or edits target config,
+and a turn that can pass its reasoning back is forwarded byte-for-byte.
+Observability events: `event=thinking_downgrade`, `event=thinking_echo_retry`,
+`event=thinking_echo_retry_sent`, and `event=thinking_echo_retry_rejected`, each
+carrying `conversation_id`, `provider`, `native_api`, `disposition`, and
+`attempt`. Set `PROMPT_FERRY_DISABLE_THINKING_DOWNGRADE=1` to bypass both paths.
+
 ### Single-host binary
 
 Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases)
