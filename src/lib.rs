@@ -39,6 +39,7 @@ pub mod tls;
 pub mod upstream_adapter;
 pub(crate) mod upstream_error;
 pub use prompt_ferry_upstream_presets as upstream_presets;
+pub use upstream_error::{MappedInvalid, map_upstream_invalid_request};
 pub mod usage;
 pub mod worker;
 pub mod worker_admin;

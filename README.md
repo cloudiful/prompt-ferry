@@ -293,6 +293,22 @@ target-row gear popover alongside proxy and schedule, and is always sent as
   handoff). The default `passthrough` rejects non-Responses targets with
   `400`; `off` disables compact for the target.
 
+### Responses stateless fallback
+
+When a Chat-compatible request carries a `tool_calls` turn whose `tool` output
+was pruned or truncated, ferry inserts a `function_call_output` placeholder
+(`[Missing tool output: pruned or truncated, call_id=<id>]`) right after the
+call, so the upstream Responses API no longer rejects the request with
+`No tool output found for function call`.
+
+If the upstream still rejects a continuation (`No tool output found ...` or
+`Referenced reasoning item ... was not found or has expired`), ferry answers
+with `code=retryable_invalid_continuation` and a retry hint: drop
+`previous_response_id`, truncate history before the orphan `call_*`, then
+resend once. Both fallbacks emit structured warnings
+(`event=chat_to_responses_missing_tool_output`,
+`event=upstream_invalid_continuation`).
+
 ### Single-host binary
 
 Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases)

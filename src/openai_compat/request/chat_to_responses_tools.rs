@@ -1,4 +1,53 @@
 use super::*;
+use std::collections::{HashMap, HashSet};
+
+/// Chat history can lose a `tool` message (client-side prune or truncation)
+/// while the assistant `tool_calls` turn survives. Responses rejects such a
+/// request with `No tool output found for function call`, so synthesize the
+/// placeholder output right after the orphan call.
+pub(super) fn ensure_tool_pairing(input: Vec<Value>) -> (Vec<Value>, Vec<String>) {
+    let mut calls: Vec<(usize, String)> = Vec::new();
+    let mut outputs: HashSet<String> = HashSet::new();
+    for (index, item) in input.iter().enumerate() {
+        let Some(object) = item.as_object() else {
+            continue;
+        };
+        match object.get("type").and_then(Value::as_str) {
+            Some("function_call") => {
+                if let Some(id) = object.get("call_id").and_then(Value::as_str) {
+                    calls.push((index, id.to_string()));
+                }
+            }
+            Some("function_call_output") => {
+                if let Some(id) = object.get("call_id").and_then(Value::as_str) {
+                    outputs.insert(id.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    let missing: Vec<(usize, String)> = calls
+        .into_iter()
+        .filter(|(_, id)| !outputs.contains(id))
+        .collect();
+    if missing.is_empty() {
+        return (input, Vec::new());
+    }
+    let insert_at: HashMap<usize, String> = missing.iter().cloned().collect();
+    let synthesized: Vec<String> = missing.iter().map(|(_, id)| id.clone()).collect();
+    let mut result = Vec::with_capacity(input.len() + synthesized.len());
+    for (index, item) in input.into_iter().enumerate() {
+        result.push(item);
+        if let Some(id) = insert_at.get(&index) {
+            result.push(json!({
+                "type": "function_call_output",
+                "call_id": id,
+                "output": format!("[Missing tool output: pruned or truncated, call_id={id}]"),
+            }));
+        }
+    }
+    (result, synthesized)
+}
 
 pub(super) fn translate_chat_tool_calls(value: Option<&Value>) -> Result<Vec<Value>, CompatError> {
     let Some(value) = value else {

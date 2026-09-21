@@ -59,9 +59,33 @@ fn scalar_is_2056(value: &Value) -> bool {
     }
 }
 
+/// A recoverable upstream `invalid_request` caused by a stale Responses
+/// continuation: the client kept `previous_response_id` (or a thread-scoped
+/// `rs_*` item) that the upstream has already expired or pruned.
+pub struct MappedInvalid {
+    pub code: &'static str,
+    pub hint: String,
+    pub retryable: bool,
+}
+
+pub fn map_upstream_invalid_request(body: &str) -> Option<MappedInvalid> {
+    let has_missing_output = body.contains("No tool output found for function call");
+    let has_expired_reasoning =
+        body.contains("was not found or has expired") && body.contains("reasoning item");
+    if !has_missing_output && !has_expired_reasoning {
+        return None;
+    }
+    Some(MappedInvalid {
+        code: "retryable_invalid_continuation",
+        hint: "drop previous_response_id, truncate before the orphan call_*, then retry once"
+            .to_string(),
+        retryable: true,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_quota_exhaustion;
+    use super::{is_quota_exhaustion, map_upstream_invalid_request};
 
     #[test]
     fn recognizes_quota_markers_across_provider_formats() {
@@ -95,5 +119,26 @@ mod tests {
         assert!(!is_quota_exhaustion(
             r#"{"error":{"message":"temporary provider failure"}}"#
         ));
+    }
+
+    #[test]
+    fn maps_missing_tool_output_and_expired_reasoning_to_retryable() {
+        for body in [
+            "No tool output found for function call call_abc.",
+            "Referenced reasoning item 'rs_thread:rs_xyz' was not found or has expired",
+        ] {
+            let mapped = map_upstream_invalid_request(body).expect("retryable invalid request");
+            assert_eq!(mapped.code, "retryable_invalid_continuation");
+            assert!(mapped.retryable);
+            assert!(mapped.hint.contains("previous_response_id"));
+        }
+    }
+
+    #[test]
+    fn does_not_map_unrelated_invalid_requests() {
+        assert!(map_upstream_invalid_request("Missing required parameter: input").is_none());
+        // The reasoning branch needs both markers; an expired non-reasoning
+        // item must keep the upstream semantics untouched.
+        assert!(map_upstream_invalid_request("item was not found or has expired").is_none());
     }
 }

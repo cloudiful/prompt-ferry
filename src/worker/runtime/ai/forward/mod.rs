@@ -1,3 +1,4 @@
+mod invalid_continuation;
 mod non_stream;
 mod responses_to_chat;
 
@@ -21,9 +22,10 @@ use crate::{
     db,
     openai_compat::normalize_response_error,
     upstream_adapter::ResponseAdapter,
-    upstream_error::is_quota_exhaustion,
+    upstream_error::{is_quota_exhaustion, map_upstream_invalid_request},
 };
 use http::header;
+use invalid_continuation::apply_hint;
 use non_stream::{
     forward_non_stream_anthropic_response, forward_non_stream_chat_response,
     forward_non_stream_responses_response, send_json_response_with_headers,
@@ -259,11 +261,21 @@ pub(super) async fn respond_upstream_error(
     let client_status = client_status_for_upstream_error(status, &body_text);
     let error_body = (!body_text.trim().is_empty())
         .then(|| maybe_redact_text(&body_text, redact_content, request_ctx.user_id));
-    let normalized_error = if request.path == "/v1/messages" {
+    let mut normalized_error = if request.path == "/v1/messages" {
         anthropic_error_body(&body_text, client_status)
     } else {
         normalize_response_error(&body_text)
     };
+    if let Some(mapped) = map_upstream_invalid_request(&body_text) {
+        apply_hint(&mut normalized_error, &mapped);
+        warn!(
+            event = "upstream_invalid_continuation",
+            status = status.as_u16(),
+            code = mapped.code,
+            endpoint_id = %route.route_id,
+            "mapped upstream invalid_request to retryable continuation"
+        );
+    }
     let normalized_bytes = serde_json::to_vec(&normalized_error).unwrap_or_else(|_| body.clone());
     send_json_response_with_headers(
         services,
