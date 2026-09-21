@@ -10,6 +10,10 @@ use crate::db::{RequestRecordCategory, RequestRecordOverviewResponse};
 mod presentation;
 mod queries;
 
+/// Cache-rate presentation shared with the continuous-session cache alert
+/// monitor so both surfaces agree on the fold-aware `cache_read / full_input`
+/// semantics and the `[0, 1]` clamp.
+pub(crate) use self::presentation::overview_cache_rate;
 pub use self::queries::OverviewBucket;
 
 /// Admin overview responses are cached briefly because the four aggregate

@@ -87,7 +87,7 @@ pub(super) fn opt_error_rate(error_count: Option<i64>, request_count: i64) -> Op
 /// guard on the aggregate SUM was always false and double-counted (49% instead of 98.58%).
 /// Here we only divide `cache_read / full_input`, clamped to `[0, 1]`. Returns `None`
 /// when the denominator is non-positive, matching the SQL `NULL` semantics.
-pub(super) fn overview_cache_rate(full_input_tokens: i64, cache_read_tokens: i64) -> Option<f64> {
+pub(crate) fn overview_cache_rate(full_input_tokens: i64, cache_read_tokens: i64) -> Option<f64> {
     let full_input = full_input_tokens.max(0);
     let read = cache_read_tokens.max(0);
     if full_input <= 0 {

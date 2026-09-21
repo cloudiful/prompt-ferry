@@ -1025,6 +1025,83 @@ async fn request_record_detail_keeps_thinking_effort_override_snapshot() -> anyh
     Ok(())
 }
 
+// Issue #548: the continuous-session cache alert monitor stores one cooldown
+// fingerprint per conversation; the migration must create the table with the
+// alert clock and the last observed rate/turn counts.
+#[tokio::test]
+async fn migrate_creates_cache_alert_state_table() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    db::migrate(&schema.pool).await?;
+
+    let matching_columns = sqlx::query_scalar::<_, i64>(
+        r#"
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'cache_alert_state'
+              AND (
+                    (column_name = 'conversation_id'
+                        AND data_type = 'uuid'
+                        AND is_nullable = 'NO')
+                 OR (column_name = 'last_alerted_at'
+                        AND data_type = 'timestamp with time zone'
+                        AND is_nullable = 'NO')
+                 OR (column_name = 'last_cache_rate'
+                        AND data_type = 'double precision'
+                        AND is_nullable = 'NO')
+                 OR (column_name = 'last_turns'
+                        AND data_type = 'integer'
+                        AND is_nullable = 'NO')
+              )
+            "#,
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    assert_eq!(matching_columns, 4);
+
+    let alert_clock_default = sqlx::query_scalar::<_, bool>(
+        r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'cache_alert_state'
+                  AND column_name = 'last_alerted_at'
+                  AND column_default LIKE 'now()%'
+            )
+            "#,
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    assert!(alert_clock_default);
+
+    let primary_key_on_conversation = sqlx::query_scalar::<_, bool>(
+        r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                  ON kcu.constraint_name = tc.constraint_name
+                 AND kcu.table_schema = tc.table_schema
+                WHERE tc.table_schema = current_schema()
+                  AND tc.table_name = 'cache_alert_state'
+                  AND tc.constraint_type = 'PRIMARY KEY'
+                  AND kcu.column_name = 'conversation_id'
+            )
+            "#,
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    assert!(primary_key_on_conversation);
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
 fn legacy_input_clone(server: &db::McpServer) -> db::McpServerInput {
     db::McpServerInput {
         scope: server.scope.clone(),

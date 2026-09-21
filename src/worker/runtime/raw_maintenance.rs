@@ -1,23 +1,19 @@
+use super::background_job::{
+    connect_coordinated_store, coordinated_scheduler, run_coordinated_scheduler, run_scheduler,
+    try_postgres_advisory_lease,
+};
 use super::lifecycle::RuntimeControl;
 use crate::raw_payload_store::RawPayloadStore;
 use crate::worker_admin_types::UsageRetentionSettings;
 use crate::{config::WorkerConfig, db};
-use redis::{AsyncCommands, aio::ConnectionManager};
-use scheduler::{
-    CoordinatedLeaseConfig, InMemoryStateStore, Job, Schedule, Scheduler, SchedulerConfig, Task,
-    TaskContext, ValkeyCoordinatedStateStore,
-};
-use sqlx::{PgPool, Postgres, pool::PoolConnection};
+use scheduler::{InMemoryStateStore, Job, Schedule, Scheduler, SchedulerConfig, Task, TaskContext};
+use sqlx::PgPool;
 use std::{sync::Arc, time::Duration};
-use tokio::{sync::RwLock, task::JoinHandle, time::timeout};
+use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::{info, warn};
 
 const RAW_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const RAW_SCHEDULER_JOB_ID: &str = "prompt-ferry:raw-payload-maintenance";
-const VALKEY_HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(15);
-const VALKEY_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
-const VALKEY_HEALTH_FAILURE_LIMIT: usize = 3;
-const VALKEY_HEALTH_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 struct RawMaintenanceDependencies {
@@ -53,26 +49,7 @@ pub(super) fn spawn(
             return;
         }
 
-        let store = match timeout(
-            VALKEY_HEALTH_CHECK_TIMEOUT,
-            ValkeyCoordinatedStateStore::new(&valkey_url),
-        )
-        .await
-        {
-            Ok(Ok(store)) => Some(store),
-            Ok(Err(error)) => {
-                warn!(error = %error, capability = "maintenance_coordination", "raw maintenance disabled because Valkey coordination is unavailable");
-                None
-            }
-            Err(_) => {
-                warn!(
-                    capability = "maintenance_coordination",
-                    "raw maintenance disabled because Valkey coordination initialization timed out"
-                );
-                None
-            }
-        };
-        let Some(store) = store else {
+        let Some(store) = connect_coordinated_store(&valkey_url).await else {
             return;
         };
 
@@ -80,17 +57,10 @@ pub(super) fn spawn(
             warn!(error = %error, "initial raw payload maintenance failed");
         }
 
-        let scheduler = Scheduler::with_coordinated_state_store(
-            SchedulerConfig::default(),
-            store,
-            CoordinatedLeaseConfig {
-                ttl: Duration::from_secs(30 * 60),
-                renew_interval: Duration::from_secs(60),
-            },
-        );
+        let scheduler = coordinated_scheduler(store);
         if let Err(error) = run_coordinated_scheduler(
             scheduler,
-            dependencies.clone(),
+            raw_maintenance_job(dependencies.clone()),
             valkey_url.clone(),
             control.clone(),
         )
@@ -115,68 +85,6 @@ async fn run_local_scheduler(
     }
 }
 
-async fn run_coordinated_scheduler(
-    scheduler: Scheduler<
-        InMemoryStateStore,
-        scheduler::NoopExecutionGuard,
-        ValkeyCoordinatedStateStore,
-    >,
-    dependencies: Arc<RawMaintenanceDependencies>,
-    valkey_url: String,
-    control: RuntimeControl,
-) -> Result<(), String> {
-    let handle = scheduler.handle();
-    let run = run_scheduler(
-        scheduler,
-        raw_maintenance_job(dependencies),
-        control.clone(),
-    );
-    tokio::pin!(run);
-    let health = monitor_valkey_health(valkey_url);
-    tokio::pin!(health);
-
-    tokio::select! {
-        result = &mut run => result.map(|_| ()).map_err(|error| error.to_string()),
-        _ = control.wait_for_shutdown() => {
-            handle.shutdown();
-            (&mut run).await.map(|_| ()).map_err(|error| error.to_string())
-        }
-        result = &mut health => {
-            let error = match result {
-                Ok(()) => "Valkey health monitor stopped unexpectedly".to_string(),
-                Err(error) => error.to_string(),
-            };
-            handle.shutdown();
-            let _ = (&mut run).await;
-            Err(error)
-        }
-    }
-}
-
-async fn run_scheduler<S, G, C, D>(
-    scheduler: Scheduler<S, G, C>,
-    job: Job<D>,
-    control: RuntimeControl,
-) -> Result<(), scheduler::SchedulerError>
-where
-    S: scheduler::StateStore + Send + Sync + 'static,
-    G: scheduler::ExecutionGuard + Send + Sync + 'static,
-    C: scheduler::CoordinatedStateStore + Send + Sync + 'static,
-    D: Send + Sync + 'static,
-{
-    let handle = scheduler.handle();
-    let run = scheduler.run(job);
-    tokio::pin!(run);
-
-    tokio::select! {
-        result = &mut run => result.map(|_| ()),
-        _ = control.wait_for_shutdown() => {
-            handle.shutdown();
-            (&mut run).await.map(|_| ())
-        }
-    }
-}
-
 fn raw_maintenance_job(
     dependencies: Arc<RawMaintenanceDependencies>,
 ) -> Job<RawMaintenanceDependencies> {
@@ -194,49 +102,10 @@ fn raw_maintenance_job(
     )
 }
 
-async fn monitor_valkey_health(url: String) -> anyhow::Result<()> {
-    let client = redis::Client::open(url.as_str())?;
-    let mut manager: ConnectionManager =
-        timeout(VALKEY_HEALTH_CHECK_TIMEOUT, client.get_connection_manager())
-            .await
-            .map_err(|_| {
-                anyhow::anyhow!("timed out connecting to Valkey for scheduler health check")
-            })??;
-
-    loop {
-        tokio::time::sleep(VALKEY_HEALTH_CHECK_INTERVAL).await;
-        let mut backoff = VALKEY_HEALTH_RETRY_BACKOFF;
-        let mut last_error = None;
-        let mut healthy = false;
-        for attempt in 0..VALKEY_HEALTH_FAILURE_LIMIT {
-            match timeout(VALKEY_HEALTH_CHECK_TIMEOUT, manager.ping()).await {
-                Ok(Ok(())) => {
-                    healthy = true;
-                    break;
-                }
-                Ok(Err(error)) => last_error = Some(error.to_string()),
-                Err(_) => {
-                    last_error = Some("Valkey health check timed out".to_string());
-                }
-            }
-            if attempt + 1 < VALKEY_HEALTH_FAILURE_LIMIT {
-                tokio::time::sleep(backoff).await;
-                backoff = backoff.saturating_mul(2);
-            }
-        }
-        if !healthy {
-            return Err(anyhow::anyhow!(
-                "Valkey scheduler health check failed after {} attempts: {}",
-                VALKEY_HEALTH_FAILURE_LIMIT,
-                last_error.unwrap_or_else(|| "unknown error".to_string())
-            ));
-        }
-    }
-}
-
 async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<()> {
     let mut postgres_lease = if dependencies.postgres_coordination {
-        match try_postgres_maintenance_lease(&dependencies.pool).await? {
+        match try_postgres_advisory_lease(&dependencies.pool, POSTGRES_MAINTENANCE_LOCK_KEY).await?
+        {
             Some(lease) => Some(lease),
             None => return Ok(()),
         }
@@ -321,39 +190,6 @@ async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<(
     Ok(())
 }
 
-struct PostgresMaintenanceLease {
-    connection: PoolConnection<Postgres>,
-}
-
-impl PostgresMaintenanceLease {
-    async fn release(mut self) -> anyhow::Result<()> {
-        sqlx::query_file_unchecked!(
-            "src/sql/standalone/postgres_release_advisory_lock.sql",
-            POSTGRES_MAINTENANCE_LOCK_KEY
-        )
-        .fetch_one(&mut *self.connection)
-        .await?;
-        Ok(())
-    }
-}
-
-async fn try_postgres_maintenance_lease(
-    pool: &PgPool,
-) -> anyhow::Result<Option<PostgresMaintenanceLease>> {
-    let mut connection = pool.acquire().await?;
-    let row = sqlx::query_file!(
-        "src/sql/standalone/postgres_try_advisory_lock.sql",
-        POSTGRES_MAINTENANCE_LOCK_KEY
-    )
-    .fetch_one(&mut *connection)
-    .await?;
-    if row.acquired.unwrap_or(false) {
-        Ok(Some(PostgresMaintenanceLease { connection }))
-    } else {
-        Ok(None)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,11 +230,5 @@ mod tests {
         let result = task.await.expect("scheduler task should not panic");
         assert!(result.is_ok());
         assert!(executions.load(Ordering::Relaxed) > 0);
-    }
-
-    #[test]
-    fn scheduler_health_retry_is_bounded() {
-        assert_eq!(VALKEY_HEALTH_FAILURE_LIMIT, 3);
-        assert!(VALKEY_HEALTH_RETRY_BACKOFF < VALKEY_HEALTH_CHECK_TIMEOUT);
     }
 }

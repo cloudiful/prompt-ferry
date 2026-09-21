@@ -236,6 +236,28 @@ no route target is active for route 'summarizer' at 03:12 (worker-local time; wi
 重写的行为变更：严格校验 `developer` 的上游需按目标手动开启。开关位于目标行
 齿轮 popover，与代理、排期同处，恒以 `true`/`false` 全量下发。
 
+### 连续会话缓存率报警
+
+PostgreSQL 部署可以对持续重读上下文的会话报警（SQLite 单机模式不做聚合与
+报警，请使用 PostgreSQL）。
+
+监控任务按 `conversation_id` 统计最近 `window_minutes` 内 `completed` 的 AI
+轮次：去重轮次数达到 `min_turns` 且 fold-aware 缓存读取率低于 `threshold`
+时，发送一条钉钉机器人消息。该比率与用量总览一致
+（`SUM(cache_read) / SUM(fold-aware 完整输入)`，截断到 `0..1`），失败和进行中
+的行不计入；每个会话还有独立的 `cooldown_minutes` 冷却时钟，冷却期内不重复
+报警。
+
+在管理控制台通过 `GET`/`PUT /api/v1/settings/cache-alert` 配置 `enabled`、
+`window_minutes`（5–1440，默认 30）、`min_turns`（2–100，默认 5）、
+`threshold`（0–1，默认 0.2）、`cooldown_minutes`（5–1440，默认 60），以及钉钉
+机器人 `dingtalk_webhook_url` 和可选 `dingtalk_secret`（加签机器人）。密钥只写
+不回显，留空表示保留已存值。监控任务每 `min(window_minutes, 60)` 分钟执行
+一次检测，同一时刻只有一个 worker 参与。
+
+消息只包含会话元数据——`conversation_id`、`model`、`window`、`turns`、
+`cache_rate`、`threshold`——不含请求正文与用户信息。
+
 ### Responses compact
 
 - `POST /v1/responses/compact` 对 Responses 原生上游逐字节透传；把返回的

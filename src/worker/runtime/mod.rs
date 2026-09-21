@@ -1,9 +1,11 @@
 mod admin_proxy;
 mod ai;
+mod background_job;
 mod bootstrap;
 mod bridge;
 #[cfg(test)]
 mod bridge_tests;
+mod cache_alert_monitor;
 pub(super) mod compaction;
 mod connect;
 mod context;
@@ -22,6 +24,10 @@ mod raw_maintenance;
 mod request_assembly;
 mod routing;
 mod standalone;
+
+/// Issue #548: the cache alert check is public so integration tests can drive
+/// one alerting pass without standing up the scheduler.
+pub use self::cache_alert_monitor::{CacheAlertDependencies, run_cache_alert_check};
 
 use crate::{config::WorkerConfig, worker_admin::AdminState};
 use reqwest::Client;

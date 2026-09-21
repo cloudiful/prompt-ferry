@@ -3,9 +3,10 @@ use crate::{
     llm_review::LlmReviewSettings,
     protocol::RelayIpPolicy,
     worker_admin_types::{
-        EndpointSettingRequest, ModelRouteWhitelistRequest, ModelRouteWhitelistResponse,
-        RawObjectStoreSettingsRequest, RawObjectStoreSettingsResponse, RelayIpPolicyResponse,
-        RequestContentLoggingRequest, RequestContentLoggingResponse, UsageRetentionSettings,
+        CacheAlertSettings, EndpointSettingRequest, ModelRouteWhitelistRequest,
+        ModelRouteWhitelistResponse, RawObjectStoreSettingsRequest, RawObjectStoreSettingsResponse,
+        RelayIpPolicyResponse, RequestContentLoggingRequest, RequestContentLoggingResponse,
+        UsageRetentionSettings,
     },
 };
 
@@ -122,6 +123,23 @@ pub(super) fn get_usage_retention() {}
     tag = "settings"
 )]
 pub(super) fn set_usage_retention() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/cache-alert",
+    responses((status = 200, body = CacheAlertSettings, description = "Continuous-session cache alert settings; the stored DingTalk secret is never echoed back")),
+    tag = "settings"
+)]
+pub(super) fn get_cache_alert_setting() {}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/settings/cache-alert",
+    request_body = CacheAlertSettings,
+    responses((status = 200, body = CacheAlertSettings, description = "Updated cache alert settings; a blank dingtalk_secret keeps the stored value")),
+    tag = "settings"
+)]
+pub(super) fn set_cache_alert_setting() {}
 
 #[utoipa::path(
     get,

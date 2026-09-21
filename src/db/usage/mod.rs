@@ -13,6 +13,7 @@ use crate::db::types::{
 
 mod artifacts;
 mod buckets;
+mod cache_alert;
 mod cleanup;
 mod content_maintenance;
 mod detail;
@@ -30,6 +31,10 @@ mod runtime;
 
 pub use artifacts::{get_usage_assistant_artifacts, upsert_usage_assistant_artifact};
 pub use buckets::usage_buckets;
+pub use cache_alert::{
+    CACHE_ALERT_SETTINGS_KEY, LowCacheConversation, find_low_cache_conversations,
+    get_cache_alert_settings, last_cache_alert_at, record_cache_alert, set_cache_alert_settings,
+};
 pub(crate) use cleanup::run_raw_payload_maintenance_with_store;
 pub use cleanup::{RawPayloadMaintenanceReport, run_raw_payload_maintenance};
 pub use content_maintenance::{UsageContentMaintenanceReport, run_usage_content_maintenance};

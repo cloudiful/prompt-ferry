@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO cache_alert_state (\n    conversation_id,\n    last_alerted_at,\n    last_cache_rate,\n    last_turns\n)\nVALUES ($1, NOW(), $2, $3)\nON CONFLICT (conversation_id)\nDO UPDATE SET\n    last_alerted_at = EXCLUDED.last_alerted_at,\n    last_cache_rate = EXCLUDED.last_cache_rate,\n    last_turns = EXCLUDED.last_turns\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d39f4011339c87c0b610f0e8c125ab6d8f51b68f9f912ae1110586972f842089"
+}

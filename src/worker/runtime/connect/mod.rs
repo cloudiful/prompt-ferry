@@ -86,6 +86,17 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
     } else {
         None
     };
+    let cache_alert_task = if let Some(state) = runtime_admin_state.as_ref() {
+        Some(super::cache_alert_monitor::spawn_cache_alert_monitor(
+            &config,
+            state.pool.clone(),
+            state.cache_alert.clone(),
+            client.clone(),
+            runtime_state.control.clone(),
+        ))
+    } else {
+        None
+    };
     let shutdown_state = runtime_state.clone();
     let admin_shutdown = worker_shutdown.clone();
     tokio::spawn(async move {
@@ -143,6 +154,19 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
                 Err(_) => warn!(
                     budget_seconds = drain_budget.as_secs(),
                     "raw maintenance task did not stop within drain budget; exiting anyway",
+                ),
+            }
+        }
+        if let Some(task) = cache_alert_task {
+            match tokio::time::timeout(drain_budget, task).await {
+                Ok(Ok(())) => {}
+                Ok(Err(join_error)) => warn!(
+                    error = %join_error,
+                    "cache alert task join failed during shutdown",
+                ),
+                Err(_) => warn!(
+                    budget_seconds = drain_budget.as_secs(),
+                    "cache alert task did not stop within drain budget; exiting anyway",
                 ),
             }
         }

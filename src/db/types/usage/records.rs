@@ -128,6 +128,11 @@ pub struct RequestRecordDetail {
     pub has_parent: bool,
     pub response_prompt: Option<String>,
     pub response_raw_body: Option<String>,
+    /// Persisted as the user-scoped redacted view (issue #524 Task 4): every
+    /// string inside the assistant message (content, `reasoning_content`,
+    /// `reasoning_details[*].text`, `tool_calls[*].function.arguments`,
+    /// refusal, phase) was rewritten via the user redaction rules before
+    /// storage. `assistant_output_items_json` follows the same contract.
     pub assistant_message_json: Option<Value>,
     pub assistant_output_items_json: Option<Value>,
     pub has_reasoning_content: Option<bool>,

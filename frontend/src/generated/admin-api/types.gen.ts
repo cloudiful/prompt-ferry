@@ -191,6 +191,21 @@ export type BridgeStatus = {
     snapshot_version: number;
 };
 
+/**
+ * Continuous-session cache alert policy. DingTalk is the only delivery
+ * channel for now; `dingtalk_secret` is stored but never echoed back by the
+ * admin API, and an empty value on write keeps the stored one.
+ */
+export type CacheAlertSettings = {
+    cooldown_minutes?: number;
+    dingtalk_secret?: string;
+    dingtalk_webhook_url?: string;
+    enabled?: boolean;
+    min_turns?: number;
+    threshold?: number;
+    window_minutes?: number;
+};
+
 export type ClientKey = {
     created_at: string;
     enabled: boolean;
@@ -1077,6 +1092,13 @@ export type RequestRecordDetail = {
      * the stored snapshot.
      */
     applied_thinking_effort_override?: string | null;
+    /**
+     * Persisted as the user-scoped redacted view (issue #524 Task 4): every
+     * string inside the assistant message (content, `reasoning_content`,
+     * `reasoning_details[*].text`, `tool_calls[*].function.arguments`,
+     * refusal, phase) was rewritten via the user redaction rules before
+     * storage. `assistant_output_items_json` follows the same contract.
+     */
     assistant_message_json?: unknown;
     assistant_output_items_json?: unknown;
     cache_rate?: number | null;
@@ -3285,6 +3307,38 @@ export type MeListModelsResponses = {
 };
 
 export type MeListModelsResponse = MeListModelsResponses[keyof MeListModelsResponses];
+
+export type GetCacheAlertSettingData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/settings/cache-alert';
+};
+
+export type GetCacheAlertSettingResponses = {
+    /**
+     * Continuous-session cache alert settings; the stored DingTalk secret is never echoed back
+     */
+    200: CacheAlertSettings;
+};
+
+export type GetCacheAlertSettingResponse = GetCacheAlertSettingResponses[keyof GetCacheAlertSettingResponses];
+
+export type SetCacheAlertSettingData = {
+    body: CacheAlertSettings;
+    path?: never;
+    query?: never;
+    url: '/api/v1/settings/cache-alert';
+};
+
+export type SetCacheAlertSettingResponses = {
+    /**
+     * Updated cache alert settings; a blank dingtalk_secret keeps the stored value
+     */
+    200: CacheAlertSettings;
+};
+
+export type SetCacheAlertSettingResponse = SetCacheAlertSettingResponses[keyof SetCacheAlertSettingResponses];
 
 export type GetEndpointSettingData = {
     body?: never;

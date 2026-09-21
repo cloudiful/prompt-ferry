@@ -13,6 +13,7 @@ mod relays;
 mod server;
 mod session_routing;
 mod settings;
+mod settings_cache_alert;
 mod support;
 mod usage;
 mod usage_support;
@@ -62,7 +63,7 @@ use tower_http::cors::CorsLayer;
 
 use self::{
     approvals::*, auth::*, billing::*, endpoint_usage::*, endpoints::*, mcp::*, model_routes::*,
-    relays::*, session_routing::*, settings::*, usage::*, users::*,
+    relays::*, session_routing::*, settings::*, settings_cache_alert::*, usage::*, users::*,
 };
 
 pub(super) use self::support::*;
