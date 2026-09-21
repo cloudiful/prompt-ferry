@@ -245,6 +245,20 @@ no route target is active for route 'summarizer' at 03:12 (worker-local time; wi
   明文 handoff）。默认 `passthrough` 对非 Responses 目标返回 `400`；
   `off` 则按目标禁用 compact。
 
+### Responses 无状态降级
+
+Chat 请求里的 `tool_calls` 回合若丢失 `tool` 输出（历史被 prune 或截断），
+ferry 会在该 call 后紧邻插入 `function_call_output` 占位
+（`[Missing tool output: pruned or truncated, call_id=<id>]`），上游 Responses
+不再以 `No tool output found for function call` 拒绝请求。
+
+上游仍拒绝续写（`No tool output found ...` 或
+`Referenced reasoning item ... was not found or has expired`）时，ferry 返回
+`code=retryable_invalid_continuation` 与重试提示：丢掉
+`previous_response_id`，从孤儿 `call_*` 之前截断，重试一次。两处降级均输出
+结构化日志（`event=chat_to_responses_missing_tool_output`、
+`event=upstream_invalid_continuation`）。
+
 ### 单机二进制
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的

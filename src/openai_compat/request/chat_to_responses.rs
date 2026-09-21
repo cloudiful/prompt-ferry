@@ -10,8 +10,8 @@ use chat_to_responses_content::{
     chat_content_to_responses_parts, chat_content_to_text, chat_reasoning_to_responses_item,
 };
 use chat_to_responses_tools::{
-    translate_chat_tool_calls, translate_chat_tool_choice, translate_chat_tool_output,
-    translate_chat_tools,
+    ensure_tool_pairing, translate_chat_tool_calls, translate_chat_tool_choice,
+    translate_chat_tool_output, translate_chat_tools,
 };
 
 pub fn chat_request_to_responses(body: &[u8]) -> Result<Vec<u8>, CompatError> {
@@ -91,6 +91,15 @@ pub fn chat_request_to_responses(body: &[u8]) -> Result<Vec<u8>, CompatError> {
                 ));
             }
         }
+    }
+    let (input, synthesized) = ensure_tool_pairing(input);
+    if !synthesized.is_empty() {
+        tracing::warn!(
+            event = "chat_to_responses_missing_tool_output",
+            synthesized = ?synthesized,
+            count = synthesized.len(),
+            "synthesized placeholder tool outputs for pruned chat tool results"
+        );
     }
     if input.is_empty() && instructions.is_empty() {
         return Err(CompatError::new(
