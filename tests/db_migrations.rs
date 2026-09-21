@@ -982,6 +982,49 @@ async fn mcp_provider_kind_persists_and_defaults_to_null() -> anyhow::Result<()>
     Ok(())
 }
 
+// Issue #546: the route target override snapshot is persisted with the
+// request record and surfaced by the visible detail query. The first
+// non-null snapshot wins so later lifecycle upserts cannot rewrite it.
+#[tokio::test]
+async fn request_record_detail_keeps_thinking_effort_override_snapshot() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    db::migrate(&schema.pool).await?;
+
+    let request_id = Uuid::new_v4();
+    let mut input = db::RequestRecordCreate::ai_request(request_id, "/v1/chat/completions");
+    input.applied_thinking_effort_override = Some("high".to_string());
+    let event_id = db::record_request_record(&schema.pool, input).await?;
+
+    // A later lifecycle event without a snapshot keeps the request-time value.
+    let mut completed = db::RequestRecordCreate::ai_request(request_id, "/v1/chat/completions");
+    completed.request_state = db::RequestRecordState::Completed;
+    db::record_request_record(&schema.pool, completed).await?;
+
+    let detail = db::get_visible_usage_event_detail(&schema.pool, event_id, None)
+        .await?
+        .expect("detail");
+    assert_eq!(
+        detail.applied_thinking_effort_override.as_deref(),
+        Some("high")
+    );
+
+    // The column check constraint backstops the allowlist.
+    let mut invalid = db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/chat/completions");
+    invalid.applied_thinking_effort_override = Some("ultra".to_string());
+    assert!(
+        db::record_request_record(&schema.pool, invalid)
+            .await
+            .is_err()
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
 fn legacy_input_clone(server: &db::McpServer) -> db::McpServerInput {
     db::McpServerInput {
         scope: server.scope.clone(),

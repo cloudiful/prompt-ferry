@@ -177,6 +177,7 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         response_prompt,
         response_raw_body: response_raw_body.clone(),
         response_capture_truncated: log.response_capture_truncated,
+        applied_thinking_effort_override: log.applied_thinking_effort_override,
     })
     .with_provider_response(log.provider_response_id, log.provider_conversation_key)
     .with_error(upstream_error_body, log.error_code, error_message)

@@ -140,6 +140,11 @@ pub struct RequestRecordDetail {
     pub failure_family: Option<RequestFailureFamily>,
     pub mcp_bearer_token_slot: Option<i16>,
     pub route_selection_reason: RouteSelectionReason,
+    /// Snapshot of the routed target's `thinking_effort_override` taken when
+    /// the request was routed; `None` means the target had no override (or
+    /// the request never reached a route). Later target edits do not rewrite
+    /// the stored snapshot.
+    pub applied_thinking_effort_override: Option<String>,
     pub response_capture_truncated: bool,
     #[serde(default)]
     pub tool_call_events: Vec<RequestRecordToolCall>,

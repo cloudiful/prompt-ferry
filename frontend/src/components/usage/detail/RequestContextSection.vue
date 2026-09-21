@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import DetailKeyValue from './DetailKeyValue.vue'
 import FlatSection from '@/components/shared/FlatSection.vue'
 import type { RequestRecordFullResponse } from '@/generated/admin-api'
+import { deriveReasoningEffortDisplay } from '@/admin-mappers'
 import type { RequestRecordDetailView } from '@/models'
 
 const props = defineProps<{
@@ -22,6 +23,14 @@ const reasoningEffort = computed(() => {
   }
   return null
 })
+
+const reasoningEffortDisplay = computed(() =>
+  deriveReasoningEffortDisplay(
+    reasoningEffort.value,
+    props.event.applied_thinking_effort_override,
+    props.event.path,
+  ),
+)
 
 function extractReasoningEffort(value: unknown): string | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -81,11 +90,15 @@ function extractReasoningEffort(value: unknown): string | null {
         </span>
         <span v-else>-</span>
       </DetailKeyValue>
-      <DetailKeyValue v-if="reasoningEffort" :label="t('reasoningEffort')">
-        {{ reasoningEffort }}
+      <DetailKeyValue
+        v-if="reasoningEffortDisplay"
+        :label="t('reasoningEffort')"
+      >
+        {{ reasoningEffortDisplay }}
       </DetailKeyValue>
       <!-- Reasoning effort is hidden when unavailable: neither the record nor
-        the stored request payload carries reasoning_effort / reasoning.effort. -->
+        the stored request payload carries reasoning_effort / reasoning.effort.
+        Issue #546: a route target override renders as `caller → override`. -->
     </div>
   </FlatSection>
 </template>

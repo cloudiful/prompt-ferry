@@ -55,6 +55,44 @@ mock.module('../src/composables/useLocale', () => ({
 
 const { createRequestRecordDetailState } =
   await import('../src/stores/request-record-detail')
+const { deriveReasoningEffortDisplay } =
+  await import('../src/admin-mappers/request-records')
+
+test('reasoning effort keeps the caller value without a route override', () => {
+  expect(
+    deriveReasoningEffortDisplay('low', null, '/v1/chat/completions'),
+  ).toBe('low')
+  expect(deriveReasoningEffortDisplay('low', '  ', '/v1/responses')).toBe('low')
+})
+
+test('reasoning effort shows the override arrow', () => {
+  expect(
+    deriveReasoningEffortDisplay('low', 'high', '/v1/chat/completions'),
+  ).toBe('low → high')
+  expect(deriveReasoningEffortDisplay(' low ', ' high ', '/v1/responses')).toBe(
+    'low → high',
+  )
+})
+
+test('reasoning effort skips the arrow for equal values', () => {
+  expect(deriveReasoningEffortDisplay('high', 'high', '/v1/responses')).toBe(
+    'high',
+  )
+  expect(deriveReasoningEffortDisplay('high', ' HIGH ', '/v1/responses')).toBe(
+    'high → HIGH',
+  )
+})
+
+test('reasoning effort never shows the arrow for anthropic messages', () => {
+  expect(deriveReasoningEffortDisplay('low', 'high', '/v1/messages')).toBe(
+    'low',
+  )
+})
+
+test('reasoning effort stays hidden without a caller value', () => {
+  expect(deriveReasoningEffortDisplay(null, 'high', '/v1/responses')).toBeNull()
+  expect(deriveReasoningEffortDisplay('  ', 'high', '/v1/responses')).toBeNull()
+})
 
 function detailStateWithRecord(recordId: number) {
   const state = createRequestRecordDetailState()

@@ -83,6 +83,7 @@ struct RequestRecordDetailRow {
     failure_family: Option<RequestFailureFamily>,
     mcp_bearer_token_slot: Option<i16>,
     route_selection_reason: Option<RouteSelectionReason>,
+    applied_thinking_effort_override: Option<String>,
     response_capture_truncated: Option<bool>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -171,6 +172,7 @@ impl From<RequestRecordDetailRow> for RequestRecordDetail {
             failure_family: row.failure_family,
             mcp_bearer_token_slot: row.mcp_bearer_token_slot,
             route_selection_reason: row.route_selection_reason.unwrap_or_default(),
+            applied_thinking_effort_override: row.applied_thinking_effort_override,
             response_capture_truncated: row.response_capture_truncated.unwrap_or(false),
             tool_call_events: Vec::new(),
             created_at: row.created_at.unwrap_or_else(|| Utc::now()),

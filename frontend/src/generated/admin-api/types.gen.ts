@@ -1070,6 +1070,13 @@ export type RequestRecordDetail = {
     abort_from_state?: null | RequestRecordState;
     abort_reason?: null | RequestAbortReason;
     abort_response_started?: boolean | null;
+    /**
+     * Snapshot of the routed target's `thinking_effort_override` taken when
+     * the request was routed; `None` means the target had no override (or
+     * the request never reached a route). Later target edits do not rewrite
+     * the stored snapshot.
+     */
+    applied_thinking_effort_override?: string | null;
     assistant_message_json?: unknown;
     assistant_output_items_json?: unknown;
     cache_rate?: number | null;
