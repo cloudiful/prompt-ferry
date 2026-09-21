@@ -24,6 +24,27 @@ export function deriveModelDisplay(record: {
   return requested
 }
 
+/**
+ * Issue #546: render the reasoning effort the upstream actually received.
+ * The route target override is a request-time snapshot, so a later target
+ * edit never rewrites the shown value. The arrow marks a real override:
+ * missing caller value, empty/equal override, and Anthropic `/v1/messages`
+ * (never overridden) all keep the single value.
+ */
+export function deriveReasoningEffortDisplay(
+  original: string | null | undefined,
+  appliedOverride: string | null | undefined,
+  path: string | null | undefined,
+): string | null {
+  const callerValue = (original ?? '').trim()
+  if (!callerValue) return null
+  const override = (appliedOverride ?? '').trim()
+  if (!override || override === callerValue || path === '/v1/messages') {
+    return callerValue
+  }
+  return `${callerValue} → ${override}`
+}
+
 export function upstreamLabel(row: {
   mcp_server_name?: string | null;
   endpoint_name?: string | null;

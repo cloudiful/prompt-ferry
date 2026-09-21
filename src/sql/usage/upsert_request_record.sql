@@ -16,7 +16,8 @@ INSERT INTO request_records(
     response_prompt, upstream_error_body, error_code, error_message,
     failure_family, mcp_bearer_token_slot, route_selection_reason, owner_worker_id,
     lease_expires_at, last_heartbeat_at, response_capture_truncated,
-    client_key_id, requested_model, upstream_model
+    client_key_id, requested_model, upstream_model,
+    applied_thinking_effort_override
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
@@ -24,7 +25,7 @@ VALUES (
     $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44,
     $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58,
     $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72,
-    $73, $74
+    $73, $74, $75
 )
 ON CONFLICT (request_id) WHERE event_kind = 'request'
 DO UPDATE SET
@@ -116,5 +117,6 @@ DO UPDATE SET
     client_key_id = COALESCE(EXCLUDED.client_key_id, request_records.client_key_id),
     requested_model = COALESCE(EXCLUDED.requested_model, request_records.requested_model),
     upstream_model = COALESCE(EXCLUDED.upstream_model, request_records.upstream_model),
+    applied_thinking_effort_override = COALESCE(EXCLUDED.applied_thinking_effort_override, request_records.applied_thinking_effort_override),
     updated_at = NOW()
 RETURNING event_id

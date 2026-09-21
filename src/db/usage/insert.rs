@@ -83,6 +83,7 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
         input.client_key_id,
         input.requested_model,
         input.upstream_model,
+        input.applied_thinking_effort_override.as_deref(),
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -273,7 +274,7 @@ mod tests {
     fn request_record_sql_placeholders_match_bind_count() {
         let upsert_sql = include_str!("../../sql/usage/upsert_request_record.sql");
 
-        assert_eq!(insert_column_count(upsert_sql), 74);
-        assert_eq!(max_placeholder(upsert_sql), 74);
+        assert_eq!(insert_column_count(upsert_sql), 75);
+        assert_eq!(max_placeholder(upsert_sql), 75);
     }
 }

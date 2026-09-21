@@ -32,6 +32,7 @@ pub(super) fn ai_route_usage_log(
         )
         .with_route_selection(route_ctx.route_selection_reason)
         .with_upstream_model(route_ctx.route.upstream_model.clone())
+        .with_applied_thinking_effort_override(route_ctx.applied_thinking_effort_override.clone())
         .with_upstream_redaction(
             request_ctx.request_prompt_log.upstream_redaction_enabled,
             request_ctx

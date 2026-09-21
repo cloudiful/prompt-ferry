@@ -60,6 +60,9 @@ pub struct UsageRequestMetadata {
     pub upstream_redaction_enabled: bool,
     pub upstream_redacted_request_json: Option<Value>,
     pub upstream_restore_session: Option<UpstreamRedactionSession>,
+    /// Issue #546: route target `thinking_effort_override` snapshot taken when
+    /// the request was routed; `None` means no override.
+    pub applied_thinking_effort_override: Option<String>,
     pub owner_worker_id: Option<uuid::Uuid>,
     pub lease_expires_at: Option<DateTime<Utc>>,
     pub last_heartbeat_at: Option<DateTime<Utc>>,
@@ -104,6 +107,7 @@ impl Default for UsageRequestMetadata {
             upstream_redaction_enabled: false,
             upstream_redacted_request_json: None,
             upstream_restore_session: None,
+            applied_thinking_effort_override: None,
             owner_worker_id: None,
             lease_expires_at: None,
             last_heartbeat_at: None,
@@ -179,6 +183,9 @@ pub struct UsageLog {
     pub failure_family: Option<RequestFailureFamily>,
     pub mcp_bearer_token_slot: Option<i16>,
     pub route_selection_reason: RouteSelectionReason,
+    /// Issue #546: route target `thinking_effort_override` snapshot taken when
+    /// the request was routed; `None` means no override.
+    pub applied_thinking_effort_override: Option<String>,
     pub owner_worker_id: Option<uuid::Uuid>,
     pub lease_expires_at: Option<DateTime<Utc>>,
     pub last_heartbeat_at: Option<DateTime<Utc>>,
@@ -407,6 +414,7 @@ impl UsageLog {
             failure_family: None,
             mcp_bearer_token_slot: None,
             route_selection_reason: RouteSelectionReason::Default,
+            applied_thinking_effort_override: metadata.applied_thinking_effort_override,
             owner_worker_id: metadata.owner_worker_id,
             lease_expires_at: metadata.lease_expires_at,
             last_heartbeat_at: metadata.last_heartbeat_at,
@@ -550,6 +558,16 @@ impl UsageLog {
 
     pub fn with_route_selection(mut self, route_selection_reason: RouteSelectionReason) -> Self {
         self.route_selection_reason = route_selection_reason;
+        self
+    }
+
+    /// Issue #546: attach the route target override snapshot taken at request
+    /// time. `None` keeps the column NULL (single-value display).
+    pub fn with_applied_thinking_effort_override(
+        mut self,
+        applied_thinking_effort_override: Option<String>,
+    ) -> Self {
+        self.applied_thinking_effort_override = applied_thinking_effort_override;
         self
     }
 

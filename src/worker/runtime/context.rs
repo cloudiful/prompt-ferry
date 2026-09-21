@@ -312,6 +312,7 @@ impl RequestExecutionContext {
                 .upstream_redacted_request_json
                 .clone(),
             upstream_restore_session: self.request_prompt_log.upstream_restore_session.clone(),
+            applied_thinking_effort_override: None,
             owner_worker_id: Some(self.owner_worker_id),
             lease_expires_at: Some(lease_expires_at),
             last_heartbeat_at: Some(last_heartbeat_at),
@@ -325,6 +326,19 @@ pub(super) struct RouteExecutionContext {
     pub(super) endpoint_id: Option<Uuid>,
     pub(super) model_route_rule_id: Option<Uuid>,
     pub(super) route_selection_reason: db::RouteSelectionReason,
+    /// Issue #546: snapshot of the resolved target's `thinking_effort_override`
+    /// at request time. `None` means no override (or an invalid stored value
+    /// that the upstream adapter ignores). Persisted on the request record so
+    /// later target edits never rewrite the shown value.
+    pub(super) applied_thinking_effort_override: Option<String>,
+}
+
+/// Issue #546: normalize the resolved target override into the snapshot value
+/// that is safe to persist. `None`/blank/invalid values collapse to `None`,
+/// matching `apply_thinking_effort_override_for_path`'s ignore behavior and
+/// the `request_records` check constraint.
+pub(super) fn snapshot_thinking_effort_override(raw: Option<&str>) -> Option<String> {
+    db::normalize_thinking_effort_override(raw).ok().flatten()
 }
 
 impl RouteExecutionContext {
@@ -334,6 +348,9 @@ impl RouteExecutionContext {
             endpoint_id: Some(route.route_id).filter(|id| !id.is_nil()),
             model_route_rule_id: route.model_route_rule_id,
             route_selection_reason: route.route_selection_reason,
+            applied_thinking_effort_override: snapshot_thinking_effort_override(
+                route.thinking_effort_override.as_deref(),
+            ),
         }
     }
 }
@@ -348,13 +365,29 @@ mod tests {
 
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-    use super::{ResponseLimits, RuntimeServices};
+    use super::{ResponseLimits, RuntimeServices, snapshot_thinking_effort_override};
     use crate::{
         relay_secrets::RelaySecretManager,
         standalone_config::{StandaloneConfig, StandaloneConfigStore},
         worker::runtime::{WorkerRuntimeState, standalone::StandaloneRuntimeState},
         worker_usage::{UsageLog, UsageRequestMetadata},
     };
+
+    #[test]
+    fn thinking_effort_snapshot_keeps_only_valid_overrides() {
+        assert_eq!(
+            snapshot_thinking_effort_override(Some(" high ")).as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            snapshot_thinking_effort_override(Some("max")).as_deref(),
+            Some("max")
+        );
+        assert_eq!(snapshot_thinking_effort_override(Some("")), None);
+        assert_eq!(snapshot_thinking_effort_override(Some("   ")), None);
+        assert_eq!(snapshot_thinking_effort_override(Some("ultra")), None);
+        assert_eq!(snapshot_thinking_effort_override(None), None);
+    }
 
     fn database_path() -> PathBuf {
         let suffix = SystemTime::now()

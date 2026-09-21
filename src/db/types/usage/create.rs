@@ -85,6 +85,9 @@ pub struct RequestRecordCreate {
     pub failure_family: Option<RequestFailureFamily>,
     pub mcp_bearer_token_slot: Option<i16>,
     pub route_selection_reason: RouteSelectionReason,
+    /// Issue #546: route target `thinking_effort_override` snapshot taken when
+    /// the request was routed; `None` means no override.
+    pub applied_thinking_effort_override: Option<String>,
     pub owner_worker_id: Option<Uuid>,
     pub lease_expires_at: Option<DateTime<Utc>>,
     pub last_heartbeat_at: Option<DateTime<Utc>>,
@@ -125,6 +128,9 @@ pub struct RequestRecordStorageInput {
     pub response_prompt: Option<String>,
     pub response_raw_body: Option<String>,
     pub response_capture_truncated: bool,
+    /// Issue #546: route target `thinking_effort_override` snapshot taken when
+    /// the request was routed; `None` means no override.
+    pub applied_thinking_effort_override: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -231,6 +237,7 @@ impl RequestRecordCreate {
             failure_family: None,
             mcp_bearer_token_slot: None,
             route_selection_reason: RouteSelectionReason::Default,
+            applied_thinking_effort_override: None,
             owner_worker_id: None,
             lease_expires_at: None,
             last_heartbeat_at: None,
@@ -397,6 +404,7 @@ impl RequestRecordCreate {
         self.response_prompt = storage.response_prompt;
         self.response_raw_body = storage.response_raw_body;
         self.response_capture_truncated = storage.response_capture_truncated;
+        self.applied_thinking_effort_override = storage.applied_thinking_effort_override;
         self
     }
 

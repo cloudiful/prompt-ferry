@@ -6,6 +6,29 @@ use super::{
 };
 
 #[test]
+fn route_override_snapshot_flows_into_usage_log() {
+    let log = UsageLog::ai_request(
+        uuid::Uuid::new_v4(),
+        UsageRequestMetadata {
+            applied_thinking_effort_override: Some("high".to_string()),
+            ..UsageRequestMetadata::default()
+        },
+        None,
+    );
+    assert_eq!(
+        log.applied_thinking_effort_override.as_deref(),
+        Some("high")
+    );
+
+    let log = log.with_applied_thinking_effort_override(Some("low".to_string()));
+    assert_eq!(log.applied_thinking_effort_override.as_deref(), Some("low"));
+
+    let inherited =
+        UsageLog::ai_request(uuid::Uuid::new_v4(), UsageRequestMetadata::default(), None);
+    assert_eq!(inherited.applied_thinking_effort_override, None);
+}
+
+#[test]
 fn ai_request_constructor_sets_ai_defaults() {
     let log = UsageLog::ai_request(
         uuid::Uuid::new_v4(),

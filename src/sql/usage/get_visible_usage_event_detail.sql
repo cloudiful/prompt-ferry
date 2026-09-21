@@ -117,6 +117,7 @@ SELECT
     ue.failure_family AS "failure_family: _",
     ue.mcp_bearer_token_slot,
     ue.route_selection_reason AS "route_selection_reason!: _",
+    ue.applied_thinking_effort_override,
     ue.created_at AS "created_at!",
     ue.response_capture_truncated AS "response_capture_truncated!"
 FROM request_records ue
