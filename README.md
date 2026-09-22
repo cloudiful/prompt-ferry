@@ -342,15 +342,19 @@ tool-call message has no reasoning to pass back (`reasoning_content` /
 `reasoning_text` in the thinking mode must be passed back). Ferry keeps those
 turns working:
 
-- Pre-flight: when the stored parent artifact proves the parent turn produced no
-  reasoning, the turn requests thinking, carries tools, and nothing restorable
-  is present, ferry disables thinking for that single turn. Chat bodies get
+- Pre-flight (only upstreams that require the echo, currently DeepSeek): when
+  the stored parent artifact proves the parent turn produced no reasoning, the
+  turn requests thinking, carries tools, and nothing restorable is present,
+  ferry disables thinking for that single turn. Chat bodies get
   `thinking: {"type":"disabled"}` with `reasoning_effort` dropped (overriding a
   per-target thinking effort override); Responses bodies get
-  `reasoning.effort: "none"`.
+  `reasoning.effort: "none"`. Every other upstream (for example opencode go)
+  keeps the requested thinking — including a per-target effort override — and
+  its outbound body is never rewritten to `reasoning.effort: "none"`.
 - Retry: an upstream `400` whose body contains `must be passed back` resends the
   same turn once with thinking off; if that resend is rejected too, the original
-  upstream error is returned.
+  upstream error is returned. This path is provider-independent and stays active
+  for every upstream.
 
 Neither path fabricates reasoning, stores anything new, or edits target config,
 and a turn that can pass its reasoning back is forwarded byte-for-byte.

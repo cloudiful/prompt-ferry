@@ -73,6 +73,17 @@ impl EndpointProvider {
             _ => Self::Generic,
         }
     }
+
+    /// Issue #562: whether a tool-bearing thinking turn must pass the parent
+    /// reasoning back to this upstream. Only DeepSeek is confirmed by a 400
+    /// fingerprint (`reasoning_content in the thinking mode must be passed
+    /// back`, issue #556), so the pre-flight thinking downgrade gates on this
+    /// bit and every other upstream forwards the requested thinking unchanged.
+    /// The table stays conservative: a new provider needs its own fingerprint
+    /// evidence before it can flip this.
+    pub fn requires_reasoning_echo(self) -> bool {
+        matches!(self, Self::DeepSeek)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -441,6 +452,28 @@ mod tests {
             EndpointProvider::from_optional(None),
             EndpointProvider::Generic
         );
+    }
+
+    #[test]
+    fn provider_capabilities_are_scoped() {
+        // Issue #562: the pre-flight thinking downgrade only applies to the
+        // upstream confirmed to reject a tool-bearing thinking turn without a
+        // reasoning echo (DeepSeek, issue #556 fingerprint). Every other
+        // provider forwards the requested thinking unchanged.
+        assert!(EndpointProvider::DeepSeek.requires_reasoning_echo());
+        for provider in [
+            EndpointProvider::Generic,
+            EndpointProvider::Minimax,
+            EndpointProvider::CommandCode,
+            EndpointProvider::OpencodeGo,
+            EndpointProvider::OpenRouter,
+            EndpointProvider::Glm,
+        ] {
+            assert!(
+                !provider.requires_reasoning_echo(),
+                "{provider:?} must not be pre-flight downgraded"
+            );
+        }
     }
 
     #[test]
