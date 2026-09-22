@@ -380,6 +380,7 @@ pub(super) async fn build_admin_state(
     }
 
     let usage_retention = db::get_usage_retention(&pool).await?;
+    let cache_alert = db::get_cache_alert_settings(&pool).await?;
     // Raw payloads always go to the managed store (bucket or local fallback);
     // when a persisted raw object-store setting exists it replaces the
     // environment-based fallback without a restart.
@@ -480,7 +481,8 @@ pub(super) async fn build_admin_state(
             config.endpoint_model_cache_ttl_seconds.max(1),
         )),
     })
-    .with_user_store(user_store);
+    .with_user_store(user_store)
+    .with_cache_alert(cache_alert);
     if spawn_admin_server {
         let admin_config = config.clone();
         let admin_state = state.clone();

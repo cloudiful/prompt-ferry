@@ -282,6 +282,32 @@ need the switch turned on explicitly per target. The toggle lives in the
 target-row gear popover alongside proxy and schedule, and is always sent as
 `true`/`false`.
 
+### Continuous-session cache alerts
+
+PostgreSQL deployments can alert on conversations that keep rereading their
+prompt context. (Standalone SQLite does not aggregate or alert; use
+PostgreSQL.)
+
+The monitor aggregates completed AI turns per `conversation_id` over the last
+`window_minutes`: a conversation whose distinct-turn count reaches `min_turns`
+and whose fold-aware cache read rate stays below `threshold` triggers one
+DingTalk robot message. The rate is the usage overview rate
+(`SUM(cache_read) / SUM(fold-aware full input)`, clamped to `0..1`), failed
+and in-flight rows are ignored, and each conversation has its own
+`cooldown_minutes` clock before it can alert again.
+
+Configure it in the admin console (`GET`/`PUT /api/v1/settings/cache-alert`)
+with `enabled`, `window_minutes` (5–1440, default 30), `min_turns` (2–100,
+default 5), `threshold` (0–1, default 0.2), `cooldown_minutes` (5–1440,
+default 60), plus the DingTalk robot `dingtalk_webhook_url` and optional
+`dingtalk_secret` (signed robots). The secret is stored write-only and never
+echoed back; leave it blank to keep the stored value. The monitor runs one
+alerting pass per `min(window_minutes, 60)` minutes and only one worker
+evaluates each pass.
+
+Messages carry conversation metadata only — `conversation_id`, `model`,
+`window`, `turns`, `cache_rate`, `threshold` — never request or user content.
+
 ### Responses compact
 
 - `POST /v1/responses/compact` forwards to Responses-native upstreams

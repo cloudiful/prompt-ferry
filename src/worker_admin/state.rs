@@ -31,7 +31,9 @@ use crate::{
     redact,
     relay_secrets::RelaySecretManager,
     replay_cache::ReplayCache,
-    worker_admin_types::{RequestContentLoggingResponse, SessionUser, UsageRetentionSettings},
+    worker_admin_types::{
+        CacheAlertSettings, RequestContentLoggingResponse, SessionUser, UsageRetentionSettings,
+    },
 };
 
 #[derive(Debug)]
@@ -99,6 +101,7 @@ pub struct AdminState {
     pub model_route_whitelist_enabled: Arc<AtomicBool>,
     pub request_content_logging: Arc<RwLock<RequestContentLoggingResponse>>,
     pub usage_retention: Arc<RwLock<UsageRetentionSettings>>,
+    pub cache_alert: Arc<RwLock<CacheAlertSettings>>,
     pub raw_payload_store: Arc<RwLock<Option<Arc<RawPayloadStore>>>>,
     pub stream_delta_batching: Arc<RwLock<StreamDeltaBatchingSettings>>,
     pub llm_review_settings: Arc<RwLock<LlmReviewSettings>>,
@@ -155,6 +158,7 @@ impl AdminState {
             )),
             request_content_logging: Arc::new(RwLock::new(init.request_content_logging)),
             usage_retention: Arc::new(RwLock::new(init.usage_retention)),
+            cache_alert: Arc::new(RwLock::new(CacheAlertSettings::default())),
             raw_payload_store: Arc::new(RwLock::new(init.raw_payload_store)),
             stream_delta_batching: Arc::new(RwLock::new(init.stream_delta_batching)),
             llm_review_settings: Arc::new(RwLock::new(init.llm_review_settings)),
@@ -205,6 +209,13 @@ impl AdminState {
 
     pub fn with_config_repository(mut self, repository: ConfigRepository) -> Self {
         self.config_repository = repository;
+        self
+    }
+
+    /// Attach the persisted continuous-session cache alert policy loaded from
+    /// `worker_settings`; without it the monitor starts from the defaults.
+    pub fn with_cache_alert(mut self, settings: CacheAlertSettings) -> Self {
+        self.cache_alert = Arc::new(RwLock::new(settings));
         self
     }
 

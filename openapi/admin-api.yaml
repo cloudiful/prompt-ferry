@@ -2011,6 +2011,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/settings/cache-alert:
+    get:
+      tags:
+      - settings
+      operationId: get_cache_alert_setting
+      responses:
+        '200':
+          description: Continuous-session cache alert settings; the stored DingTalk secret is never echoed back
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheAlertSettings'
+    put:
+      tags:
+      - settings
+      operationId: set_cache_alert_setting
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CacheAlertSettings'
+        required: true
+      responses:
+        '200':
+          description: Updated cache alert settings; a blank dingtalk_secret keeps the stored value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheAlertSettings'
   /api/v1/settings/endpoint:
     get:
       tags:
@@ -2925,6 +2954,38 @@ components:
         snapshot_version:
           type: integer
           format: int64
+    CacheAlertSettings:
+      type: object
+      description: |-
+        Continuous-session cache alert policy. DingTalk is the only delivery
+        channel for now; `dingtalk_secret` is stored but never echoed back by the
+        admin API, and an empty value on write keeps the stored one.
+      properties:
+        cooldown_minutes:
+          type: integer
+          format: int32
+          default: 60
+        dingtalk_secret:
+          type: string
+          default: ''
+        dingtalk_webhook_url:
+          type: string
+          default: ''
+        enabled:
+          type: boolean
+          default: false
+        min_turns:
+          type: integer
+          format: int32
+          default: 5
+        threshold:
+          type: number
+          format: double
+          default: 0.2
+        window_minutes:
+          type: integer
+          format: int32
+          default: 30
     ClientKey:
       type: object
       required:
@@ -5231,12 +5292,13 @@ components:
             the request was routed; `None` means the target had no override (or
             the request never reached a route). Later target edits do not rewrite
             the stored snapshot.
-        # Persisted as the user-scoped redacted view (see Issue #524 Task 4):
-        # every string inside `assistant_message` (content, reasoning_content,
-        # reasoning_details[*].text, tool_calls[*].function.arguments, refusal,
-        # phase) is rewritten via `redact_text_for_user` before storage.
-        # `assistant_output_items_json` follows the same contract.
-        assistant_message_json: {}
+        assistant_message_json:
+          description: |-
+            Persisted as the user-scoped redacted view (issue #524 Task 4): every
+            string inside the assistant message (content, `reasoning_content`,
+            `reasoning_details[*].text`, `tool_calls[*].function.arguments`,
+            refusal, phase) was rewritten via the user redaction rules before
+            storage. `assistant_output_items_json` follows the same contract.
         assistant_output_items_json: {}
         cache_rate:
           type:

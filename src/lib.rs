@@ -14,6 +14,7 @@ pub mod keys;
 pub use prompt_ferry_llm_review as llm_review;
 pub mod mcp;
 pub use prompt_ferry_runtime_env::naming;
+pub mod notify;
 pub mod openai_compat;
 pub mod openapi_export;
 pub mod raw_payload_store;

@@ -4,6 +4,8 @@ mod approvals;
 mod auth_users;
 #[path = "types/billing.rs"]
 mod billing;
+#[path = "types/cache_alert.rs"]
+mod cache_alert;
 #[path = "types/endpoints.rs"]
 mod endpoints;
 #[path = "types/mcp.rs"]
@@ -24,6 +26,7 @@ use axum::http::StatusCode;
 pub use approvals::*;
 pub use auth_users::*;
 pub use billing::*;
+pub use cache_alert::*;
 pub use endpoints::*;
 pub use mcp::*;
 pub use mcp_provider::*;

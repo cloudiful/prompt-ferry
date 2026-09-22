@@ -134,6 +134,7 @@ impl Capability {
             | "/settings/redaction/preview" => return Some(Self::Settings),
             "/settings/request-content-logging"
             | "/settings/usage-retention"
+            | "/settings/cache-alert"
             | "/settings/stream-delta-batching"
             | "/settings/model-route-whitelist"
             | "/settings/relay-ip-whitelist"
@@ -224,6 +225,10 @@ mod tests {
         );
         assert_eq!(
             Capability::for_path("/settings/usage-retention"),
+            Some(Capability::Settings)
+        );
+        assert_eq!(
+            Capability::for_path("/settings/cache-alert"),
             Some(Capability::Settings)
         );
         assert_eq!(

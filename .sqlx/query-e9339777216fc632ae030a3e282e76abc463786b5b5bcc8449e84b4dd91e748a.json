@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #548 Task 1: cache-rate alert candidates per conversation.\n--\n-- One row per conversation whose completed AI turns inside the window reach\n-- `min_turns`. The caller turns `cache_read`/`full_input` into a rate with the\n-- shared `overview_cache_rate` semantics and applies the threshold, so this\n-- query never decides the alert rate itself.\n--\n-- The denominator is the fold-aware `normalized_full_input_tokens` from\n-- `overview/metrics.sql` (ordinary + read + write, with the 0072/0073\n-- still-folded `max` fallback) summed row by row, so still-folded history is\n-- not double-counted. Only `request_state = 'completed'` AI request rows are\n-- counted; failed, aborted, and in-flight rows are ignored. Turns are counted\n-- once per `conversation_seq` so a repeated lifecycle row for the same turn\n-- cannot inflate the count, and `model` is the most recent turn's model for\n-- the conversation (a mid-conversation model switch never splits one alert\n-- into two).\nWITH normalized AS (\n    SELECT rr.event_id,\n           rr.conversation_id,\n           rr.conversation_seq,\n           rr.model,\n           rr.created_at,\n           COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,\n           CASE\n               WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0\n                   AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)\n                   AND COALESCE(rr.input_tokens, 0)\n                       >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)\n               THEN GREATEST(\n                   COALESCE(rr.input_tokens, 0),\n                   GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)\n                       + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),\n                   0\n               )\n               ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)\n                   + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)\n                   + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)\n           END::BIGINT AS normalized_full_input_tokens\n    FROM request_records rr\n    WHERE rr.event_kind = 'request'\n      AND rr.request_category = 'ai'\n      AND rr.request_state = 'completed'\n      AND rr.conversation_id IS NOT NULL\n      AND rr.created_at >= NOW() - make_interval(mins => $1::INT)\n), turns AS (\n    SELECT DISTINCT ON (conversation_id, COALESCE(conversation_seq::BIGINT, -event_id))\n           conversation_id,\n           model,\n           created_at,\n           normalized_cache_read_tokens,\n           normalized_full_input_tokens\n    FROM normalized\n    ORDER BY conversation_id,\n             COALESCE(conversation_seq::BIGINT, -event_id),\n             created_at DESC\n)\nSELECT conversation_id AS \"conversation_id!\",\n       (ARRAY_AGG(model ORDER BY created_at DESC) FILTER (WHERE model IS NOT NULL))[1] AS model,\n       COUNT(*)::INT AS \"turns!\",\n       COALESCE(SUM(normalized_cache_read_tokens), 0)::BIGINT AS \"cache_read!\",\n       COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS \"full_input!\",\n       NOW() - make_interval(mins => $1::INT) AS \"window_start!\",\n       NOW() AS \"window_end!\"\nFROM turns\nGROUP BY conversation_id\nHAVING COUNT(*) >= $2::INT\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "conversation_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "model",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "turns!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "cache_read!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "full_input!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "window_start!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "window_end!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "e9339777216fc632ae030a3e282e76abc463786b5b5bcc8449e84b4dd91e748a"
+}

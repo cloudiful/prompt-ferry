@@ -273,6 +273,10 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             get(get_usage_retention).patch(set_usage_retention),
         )
         .route(
+            "/settings/cache-alert",
+            get(get_cache_alert_setting).put(set_cache_alert_setting),
+        )
+        .route(
             "/settings/stream-delta-batching",
             get(get_stream_delta_batching).patch(set_stream_delta_batching),
         )

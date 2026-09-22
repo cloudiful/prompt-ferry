@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT last_alerted_at AS \"last_alerted_at!\"\nFROM cache_alert_state\nWHERE conversation_id = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "last_alerted_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "cache_alert_state",
+            "name": "last_alerted_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "73d256fbdbe0506a1b98c3f4ea3e23ad0a8f69e67881273ce9105c6a780f083b"
+}
