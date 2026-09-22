@@ -125,6 +125,8 @@ fn target_from_endpoint(
         // Issue #392 Phase K: endpoint default for inheritance + normalize.
         endpoint_active_windows: endpoint.active_windows.clone(),
         dev_system_normalize: target.dev_system_normalize,
+        // Issue #566: per-target thinking adaptation switch; default off.
+        thinking_downgrade_enabled: target.thinking_downgrade_enabled,
         // Issue #464: per-target thinking effort override; None = inherit.
         thinking_effort_override: target.thinking_effort_override.clone(),
         // Issue #502 Task 5: per-target compact mode; missing = passthrough.
@@ -229,6 +231,7 @@ mod tests {
                         dev_system_normalize: false,
                         thinking_effort_override: None,
                         compact_mode: "passthrough".to_string(),
+                        thinking_downgrade_enabled: false,
                     }],
                 },
                 ModelRouteConfig {
@@ -250,6 +253,7 @@ mod tests {
                         dev_system_normalize: false,
                         thinking_effort_override: None,
                         compact_mode: "passthrough".to_string(),
+                        thinking_downgrade_enabled: false,
                     }],
                 },
             ],
@@ -304,6 +308,7 @@ mod tests {
                     dev_system_normalize: false,
                     thinking_effort_override: None,
                     compact_mode: "passthrough".to_string(),
+                    thinking_downgrade_enabled: false,
                 }],
             }],
             ..StandaloneConfig::default()

@@ -92,7 +92,9 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
     active_windows: (source.active_windows ?? []).map((window) => ({
       start: window?.start ?? '',
       end: window?.end ?? '',
-      ...(Array.isArray((window as { days?: unknown })?.days) ? { days: [...((window as { days?: number[] }).days ?? [])] } : {}),
+      ...(Array.isArray((window as { days?: unknown })?.days)
+        ? { days: [...((window as { days?: number[] }).days ?? [])] }
+        : {}),
     })),
     active_windows_touched: false,
   }

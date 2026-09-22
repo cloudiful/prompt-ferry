@@ -115,6 +115,8 @@ pub async fn list_visible_model_route_endpoints_strict(
             proxy_url: row.proxy_url,
             // Issue #392 Phase K: direct endpoint routes never normalize.
             dev_system_normalize: false,
+            // Issue #566: direct routes never enable the thinking adaption.
+            thinking_downgrade_enabled: false,
             // Issue #464: direct routes follow the caller.
             thinking_effort_override: None,
             // Issue #502 Task 5: direct routes use passthrough compact.

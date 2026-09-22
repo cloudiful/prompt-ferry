@@ -46,6 +46,8 @@ pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<R
             proxy_url: row.proxy_url,
             // Issue #392 Phase K: direct endpoint routes never normalize.
             dev_system_normalize: false,
+            // Issue #566: direct endpoint routes never enable the adaption.
+            thinking_downgrade_enabled: false,
             // Issue #464: direct routes follow the caller.
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,

@@ -369,6 +369,14 @@ pub(crate) fn route_target(
         Err(sqlx::Error::ColumnNotFound(_)) => false,
         Err(error) => return Err(error.into()),
     };
+    // Issue #566: 0030 `thinking_downgrade_enabled` INTEGER 0/1;
+    // pre-migration rows lack the column and read as disabled.
+    let thinking_downgrade_enabled =
+        match row.try_get::<Option<i64>, _>("thinking_downgrade_enabled") {
+            Ok(value) => value.unwrap_or(0) != 0,
+            Err(sqlx::Error::ColumnNotFound(_)) => false,
+            Err(error) => return Err(error.into()),
+        };
     // Issue #409 Phase 1: 0023 `native_api` TEXT; pre-migration rows lack
     // the column and read as `Auto` (follow the caller).
     let native_api = match row.try_get::<Option<String>, _>("native_api") {
@@ -417,6 +425,7 @@ pub(crate) fn route_target(
             proxy_url_override: None,
             active_windows,
             dev_system_normalize,
+            thinking_downgrade_enabled,
             thinking_effort_override,
             compact_mode,
         },

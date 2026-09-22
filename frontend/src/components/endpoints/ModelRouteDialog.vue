@@ -73,6 +73,8 @@ function addTarget(): void {
     active_windows: [],
     active_windows_touched: false,
     dev_system_normalize: false,
+    // Issue #566: default-off thinking adaptation.
+    thinking_downgrade_enabled: false,
     // Issue #464: inherit (follow caller) by default.
     thinking_effort_override: null,
     // Issue #502 Task 5: passthrough (native) by default.

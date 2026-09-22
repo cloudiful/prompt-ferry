@@ -4439,6 +4439,13 @@ components:
         target_id:
           type: string
           format: uuid
+        thinking_downgrade_enabled:
+          type: boolean
+          description: |-
+            Issue #566: per-target thinking adaptation switch (pre-flight
+            downgrade + reasoning-echo fingerprint retry). `false` (default)
+            keeps the pre-#556 byte-identical passthrough; `true` enables the
+            #562 behavior. Always sent (no omit).
         thinking_effort_override:
           type:
           - string
@@ -4518,6 +4525,13 @@ components:
             Issue #368 Phase B: per-target proxy override. `None` (omitted/null)
             means keep on PATCH / inherit on create; `Some("")` means clear to
             inherit; `Some(url)` must use `http/https/socks5/socks5h`.
+        thinking_downgrade_enabled:
+          type: boolean
+          description: |-
+            Issue #566: per-target thinking adaptation switch (pre-flight
+            downgrade + reasoning-echo fingerprint retry). Always sent (no omit
+            semantics); `false` (default) keeps the pre-#556 byte-identical
+            passthrough while the env escape hatch still forces a full bypass.
         thinking_effort_override:
           type:
           - string

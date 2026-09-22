@@ -42,6 +42,7 @@ async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
         dev_system_normalize: false,
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
+        thinking_downgrade_enabled: false,
     };
     let cache = TokenPlanQuotaCache::default();
     cache
@@ -221,6 +222,7 @@ fn command_code_route(
         dev_system_normalize: false,
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
+        thinking_downgrade_enabled: false,
     }
 }
 
@@ -336,6 +338,7 @@ async fn quota_key_lb_still_routes_payg_command_code_key_without_windows() {
         dev_system_normalize: false,
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
+        thinking_downgrade_enabled: false,
     };
     let cache = TokenPlanQuotaCache::default();
     cache

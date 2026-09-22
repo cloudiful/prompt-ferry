@@ -22,6 +22,8 @@ pub async fn effective_route(pool: &PgPool, user_id: i64) -> Result<Option<Route
             proxy_url: row.proxy_url,
             // Issue #392 Phase K: direct fallback never normalizes.
             dev_system_normalize: false,
+            // Issue #566: direct fallback never enables the thinking adaption.
+            thinking_downgrade_enabled: false,
             // Issue #464: direct fallback follows the caller.
             thinking_effort_override: None,
             // Issue #502 Task 5: direct fallback uses passthrough compact.

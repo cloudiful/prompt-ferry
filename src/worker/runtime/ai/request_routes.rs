@@ -266,6 +266,7 @@ mod tests {
                     dev_system_normalize: false,
                     thinking_effort_override: None,
                     compact_mode: "passthrough".to_string(),
+                    thinking_downgrade_enabled: false,
                 }],
             }],
             ..StandaloneConfig::default()
@@ -364,5 +365,6 @@ fn default_route_for_user(config: &WorkerConfig, user_id: i64) -> db::RouteConfi
         // Issue #464: direct routes follow the caller.
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
+        thinking_downgrade_enabled: false,
     }
 }

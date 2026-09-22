@@ -117,6 +117,11 @@ pub struct RouteConfig {
     // Chat->Chat passthrough. `false` (default) leaves `developer`
     // untouched; `true` rewrites to `system`. Always sent (no omit).
     pub dev_system_normalize: bool,
+    // Issue #566: per-target thinking adaptation switch (pre-flight
+    // downgrade + reasoning-echo fingerprint retry). `false` (default)
+    // keeps the pre-#556 byte-identical passthrough; `true` enables the
+    // #562 behavior. Always sent (no omit).
+    pub thinking_downgrade_enabled: bool,
     // Issue #464: resolved per-target thinking effort override; None means
     // inherit (follow the caller). `Some(effort)` force-replaces
     // `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
@@ -170,6 +175,12 @@ pub struct ModelRouteTarget {
     /// `true` rewrites `developer` to `system`. Always sent (no omit).
     #[serde(default)]
     pub dev_system_normalize: bool,
+    /// Issue #566: per-target thinking adaptation switch (pre-flight
+    /// downgrade + reasoning-echo fingerprint retry). `false` (default)
+    /// keeps the pre-#556 byte-identical passthrough; `true` enables the
+    /// #562 behavior. Always sent (no omit).
+    #[serde(default)]
+    pub thinking_downgrade_enabled: bool,
     /// Issue #464: per-target thinking effort override. `None` (null/empty)
     /// means inherit (follow the caller); `Some(effort)` force-replaces
     /// `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
@@ -234,6 +245,12 @@ pub struct ModelRouteTargetCreate {
     // normalization. Carried as plain bool so PATCH never inherits.
     #[serde(default)]
     pub dev_system_normalize: bool,
+    // Issue #566: per-target thinking adaptation switch. Always sent (no
+    // omit semantics); `false` (default) keeps the pre-#556 passthrough
+    // and `true` enables the #562 downgrade + fingerprint retry. Carried
+    // as plain bool so PATCH never inherits.
+    #[serde(default)]
+    pub thinking_downgrade_enabled: bool,
     /// Issue #464: per-target thinking effort override. `None` (null/empty)
     /// means inherit (follow the caller); `Some(effort)` force-replaces
     /// `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
@@ -304,6 +321,10 @@ pub struct ModelRouteCandidateTarget {
     // Issue #392 Phase K: developer->system normalization switch.
     // `false` (default) skips Chat passthrough normalization.
     pub dev_system_normalize: bool,
+    /// Issue #566: per-target thinking adaptation switch (pre-flight
+    /// downgrade + reasoning-echo fingerprint retry). `false` (default)
+    /// keeps the pre-#556 byte-identical passthrough.
+    pub thinking_downgrade_enabled: bool,
     /// Issue #464: per-target thinking effort override. `None` (null/empty)
     /// means inherit (follow the caller); `Some(effort)` force-replaces
     /// `reasoning_effort` (Chat) and `reasoning.effort` (Responses).

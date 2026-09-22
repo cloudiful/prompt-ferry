@@ -179,8 +179,11 @@ pub(super) async fn forward_upstream_response(
         // Issue #556: hand the thinking-echo rejection to the retry loop so it
         // can resend this turn once with thinking off. The buffered read above
         // runs before any `ResponseStart`, so a streaming request is eligible
-        // too.
-        if is_thinking_echo_rejection(status.as_u16(), &body_text) {
+        // too. Issue #566: the retry is opt-in per target, so a target with
+        // the switch off surfaces the rejection unchanged.
+        if is_thinking_echo_rejection(status.as_u16(), &body_text)
+            && route.thinking_downgrade_enabled
+        {
             return Err(anyhow::Error::new(ThinkingEchoRetrySignal {
                 status,
                 body,

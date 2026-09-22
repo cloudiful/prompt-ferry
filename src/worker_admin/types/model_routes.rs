@@ -75,6 +75,8 @@ impl ModelRouteRequest {
                         active_windows: None,
                         // Issue #392 Phase K: default-off passthrough.
                         dev_system_normalize: false,
+                        // Issue #566: default-off thinking adaptation.
+                        thinking_downgrade_enabled: false,
                         // Issue #464: inherit (follow the caller).
                         thinking_effort_override: None,
                         compact_mode: None,
@@ -137,6 +139,8 @@ impl ModelRouteRequest {
                     active_windows,
                     // Issue #392 Phase K: always sent (no omit/carry).
                     dev_system_normalize: target.dev_system_normalize,
+                    // Issue #566: always sent (no omit/carry).
+                    thinking_downgrade_enabled: target.thinking_downgrade_enabled,
                     thinking_effort_override,
                     compact_mode,
                 })
@@ -322,6 +326,12 @@ pub struct ModelRouteTargetRequest {
     /// `normalize_chat_request_for_native` in Chat passthrough.
     #[serde(default)]
     pub dev_system_normalize: bool,
+    /// Issue #566: per-target thinking adaptation switch (pre-flight
+    /// downgrade + reasoning-echo fingerprint retry). Always sent (no omit
+    /// semantics); `false` (default) keeps the pre-#556 byte-identical
+    /// passthrough while the env escape hatch still forces a full bypass.
+    #[serde(default)]
+    pub thinking_downgrade_enabled: bool,
     /// Issue #464: per-target thinking effort override. `None`
     /// (omitted/null/empty) means inherit (follow the caller);
     /// `Some(effort)` must be one of
@@ -503,11 +513,14 @@ mod tests {
         // Issue #392 Phase K: booleans always sent (no omit semantics).
         // Omitted input defaults to false for backward compat, but
         // serialization always carries the key so `false` means off.
+        // Issue #566 mirrors this contract for `thinking_downgrade_enabled`.
         let omitted: ModelRouteTargetRequest = serde_json::from_value(serde_json::json!({
             "endpoint_id": "00000000-0000-0000-0000-000000000000"
         }))
         .expect("missing normalize defaults to false");
         assert!(!omitted.dev_system_normalize);
+        // Issue #566: the thinking adaptation switch defaults off too.
+        assert!(!omitted.thinking_downgrade_enabled);
         // Issue #409 Phase 1: omitted target port type defaults to `Auto`.
         assert_eq!(omitted.native_api, None);
         let off = serde_json::to_value(&ModelRouteTargetRequest {
@@ -519,12 +532,18 @@ mod tests {
             has_proxy_url_override: None,
             active_windows: None,
             dev_system_normalize: false,
+            thinking_downgrade_enabled: false,
             thinking_effort_override: None,
             compact_mode: None,
         })
         .expect("serialize off");
         assert_eq!(
             off.get("dev_system_normalize").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            off.get("thinking_downgrade_enabled")
+                .and_then(|v| v.as_bool()),
             Some(false)
         );
         let on = serde_json::to_value(&ModelRouteTargetRequest {
@@ -536,6 +555,7 @@ mod tests {
             has_proxy_url_override: None,
             active_windows: None,
             dev_system_normalize: true,
+            thinking_downgrade_enabled: true,
             thinking_effort_override: Some("high".to_string()),
             // Issue #502 Task 5: compact mode round-trips; omitted means
             // passthrough.
@@ -544,6 +564,11 @@ mod tests {
         .expect("serialize on");
         assert_eq!(
             on.get("dev_system_normalize").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            on.get("thinking_downgrade_enabled")
+                .and_then(|v| v.as_bool()),
             Some(true)
         );
     }

@@ -60,7 +60,8 @@ export const useUsersStore = defineStore('users', () => {
         total.value > 0 &&
         first.value >= total.value
       ) {
-        const previousFirst = Math.floor((total.value - 1) / rows.value) * rows.value
+        const previousFirst =
+          Math.floor((total.value - 1) / rows.value) * rows.value
         await loadPage(previousFirst, rows.value)
       }
     } finally {

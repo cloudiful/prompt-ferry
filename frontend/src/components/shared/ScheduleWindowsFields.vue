@@ -61,7 +61,10 @@ function toggleRowDay(index: number, day: number): void {
   const current = new Set(rowDays(index))
   if (current.has(day)) current.delete(day)
   else current.add(day)
-  setRowDays(index, [...current].sort((a, b) => a - b))
+  setRowDays(
+    index,
+    [...current].sort((a, b) => a - b),
+  )
 }
 
 function onTimeUpdate(

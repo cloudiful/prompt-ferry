@@ -61,7 +61,13 @@ onMounted(async () => {
         </UButton>
       </template>
     </PageIntro>
-    <UTable :data="models" :columns="columns" :loading="busy" class="min-w-0" :ui="{ th: 'whitespace-nowrap' }" />
+    <UTable
+      :data="models"
+      :columns="columns"
+      :loading="busy"
+      class="min-w-0"
+      :ui="{ th: 'whitespace-nowrap' }"
+    />
     <TablePagination
       :first="availableModelsStore.first"
       :rows="availableModelsStore.rows"

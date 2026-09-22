@@ -764,6 +764,13 @@ export type ModelRouteTarget = {
     rule_id: string;
     target_id: string;
     /**
+     * Issue #566: per-target thinking adaptation switch (pre-flight
+     * downgrade + reasoning-echo fingerprint retry). `false` (default)
+     * keeps the pre-#556 byte-identical passthrough; `true` enables the
+     * #562 behavior. Always sent (no omit).
+     */
+    thinking_downgrade_enabled?: boolean;
+    /**
      * Issue #464: per-target thinking effort override. `None` (null/empty)
      * means inherit (follow the caller); `Some(effort)` force-replaces
      * `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
@@ -811,6 +818,13 @@ export type ModelRouteTargetRequest = {
      * inherit; `Some(url)` must use `http/https/socks5/socks5h`.
      */
     proxy_url_override?: string | null;
+    /**
+     * Issue #566: per-target thinking adaptation switch (pre-flight
+     * downgrade + reasoning-echo fingerprint retry). Always sent (no omit
+     * semantics); `false` (default) keeps the pre-#556 byte-identical
+     * passthrough while the env escape hatch still forces a full bypass.
+     */
+    thinking_downgrade_enabled?: boolean;
     /**
      * Issue #464: per-target thinking effort override. `None`
      * (omitted/null/empty) means inherit (follow the caller);

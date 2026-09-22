@@ -34,7 +34,13 @@ defineEmits<{
 
 <template>
   <div class="hidden min-w-0 md:block">
-    <UTable :data="items" :columns="columns" :loading="busy" class="min-w-0" :ui="{ th: 'whitespace-nowrap' }">
+    <UTable
+      :data="items"
+      :columns="columns"
+      :loading="busy"
+      class="min-w-0"
+      :ui="{ th: 'whitespace-nowrap' }"
+    >
       <template #empty>
         <div class="px-4 py-6 text-sm text-dimmed">
           {{ t('noModelRoutes') }}

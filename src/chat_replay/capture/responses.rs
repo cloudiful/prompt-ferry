@@ -7,7 +7,9 @@ use crate::openai_compat::{
 
 use super::{
     AssistantArtifact, ResponsesArtifactCapture,
-    shared::{finish_json_capture, finish_sse_line, observe_json_chunk, redact_message_json_for_user},
+    shared::{
+        finish_json_capture, finish_sse_line, observe_json_chunk, redact_message_json_for_user,
+    },
 };
 
 impl ResponsesArtifactCapture {

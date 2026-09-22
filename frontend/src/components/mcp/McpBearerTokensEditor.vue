@@ -76,7 +76,12 @@ function removeToken(index: number): void {
         {{ t('addBearerToken') }}
       </UButton>
     </div>
-    <UTable :data="rows" :columns="columns" class="min-w-0" :ui="{ th: 'whitespace-nowrap' }">
+    <UTable
+      :data="rows"
+      :columns="columns"
+      class="min-w-0"
+      :ui="{ th: 'whitespace-nowrap' }"
+    >
       <template #index-header>{{ t('id') }}</template>
       <template #index-cell="{ row }">
         <span class="text-xs font-medium text-default">{{

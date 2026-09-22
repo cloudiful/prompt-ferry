@@ -245,5 +245,28 @@ const compactMode = computed({
         :aria-label="t('normalizeLabel')"
       />
     </div>
+    <div
+      class="flex items-center justify-between gap-2 border-t border-default pt-3"
+    >
+      <div class="flex min-w-0 items-center gap-1">
+        <span class="font-medium text-default">{{
+          t('thinkingDowngradeLabel')
+        }}</span>
+        <UTooltip :text="t('thinkingDowngradeHint')">
+          <UButton
+            type="button"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-info"
+            :aria-label="t('thinkingDowngradeHint')"
+          />
+        </UTooltip>
+      </div>
+      <USwitch
+        v-model="target.thinking_downgrade_enabled"
+        :aria-label="t('thinkingDowngradeLabel')"
+      />
+    </div>
   </div>
 </template>

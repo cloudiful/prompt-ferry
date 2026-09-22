@@ -48,6 +48,7 @@ pub async fn spawn_worker(
                 dev_system_normalize: false,
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
+                thinking_downgrade_enabled: false,
             }],
         },
     )

@@ -175,7 +175,9 @@ fn extract_mergeable_text_delta(event: &Value) -> Option<(BatchingKey, String, O
     let output_index = event.get("output_index")?.as_i64()?;
     let content_index = event.get("content_index")?.as_i64()?;
     let delta = event.get("delta")?.as_str()?.to_string();
-    let sequence_number = event.get("sequence_number").and_then(|value| value.as_i64());
+    let sequence_number = event
+        .get("sequence_number")
+        .and_then(|value| value.as_i64());
     Some((
         BatchingKey {
             event_type: event_type.to_string(),

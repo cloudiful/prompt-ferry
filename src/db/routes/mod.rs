@@ -63,6 +63,7 @@ struct ModelRouteCandidateRow {
     active_windows: Option<String>,
     endpoint_active_windows: Option<String>,
     dev_system_normalize: bool,
+    thinking_downgrade_enabled: bool,
     thinking_effort_override: Option<String>,
     compact_mode: Option<String>,
 }
@@ -81,6 +82,7 @@ struct ModelRouteTargetRow {
     proxy_url_override: Option<String>,
     active_windows: Option<String>,
     dev_system_normalize: bool,
+    thinking_downgrade_enabled: bool,
     thinking_effort_override: Option<String>,
     compact_mode: Option<String>,
     created_at: DateTime<Utc>,

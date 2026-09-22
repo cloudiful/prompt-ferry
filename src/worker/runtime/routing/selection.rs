@@ -278,6 +278,9 @@ fn route_from_target(
         // Issue #392 Phase K: carry the per-target normalize switch;
         // `false` skips Chat developer->system rewriting.
         dev_system_normalize: target.dev_system_normalize,
+        // Issue #566: carry the per-target thinking adaptation switch;
+        // `false` keeps the pre-#556 passthrough.
+        thinking_downgrade_enabled: target.thinking_downgrade_enabled,
         // Issue #464: carry the per-target thinking effort override;
         // `None` means inherit (follow the caller).
         thinking_effort_override: target.thinking_effort_override.clone(),
@@ -451,6 +454,7 @@ mod tests {
             active_windows: None,
             endpoint_active_windows: None,
             dev_system_normalize: false,
+            thinking_downgrade_enabled: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
         }
@@ -481,6 +485,7 @@ mod tests {
             active_windows: None,
             endpoint_active_windows: None,
             dev_system_normalize: false,
+            thinking_downgrade_enabled: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
         }
