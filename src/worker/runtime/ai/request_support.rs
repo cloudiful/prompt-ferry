@@ -18,6 +18,31 @@ use tracing::warn;
 
 use super::upstream_redaction::redact_ai_request_json_blocking;
 
+/// Issue #564 Task 1: the upstream redaction outcome for one prepared request.
+/// The prepared body travels in [`PreparedRouteRequest::prepared`]; this side
+/// channel tells the request context what to persist, so every record for the
+/// turn (admission, success, failure, terminal) can carry the same session
+/// instead of dropping it and deleting the conversation row.
+#[derive(Debug, Clone, Default)]
+pub(super) struct RouteRedactionState {
+    /// Whether upstream redaction was enabled for this user/request at all.
+    pub(super) enabled: bool,
+    /// The session minted or advanced by this turn, when there is one.
+    pub(super) session: Option<UpstreamRedactionSession>,
+    /// Redacted request JSON, only present when replacements were applied.
+    pub(super) redacted_request_json: Option<Value>,
+    /// The existing session must be dropped: redaction was explicitly disabled
+    /// for this request, or a prior session was refused (budget overflow or a
+    /// policy-generation change). This is the only path that deletes the
+    /// persisted row.
+    pub(super) reset: bool,
+}
+
+pub(super) struct PreparedRouteRequest {
+    pub(super) prepared: PreparedUpstreamRequest,
+    pub(super) redaction: RouteRedactionState,
+}
+
 pub(super) fn ai_route_usage_log(
     request_ctx: &RequestExecutionContext,
     request: &BufferedBridgeRequest,
@@ -112,7 +137,7 @@ pub(super) async fn prepare_upstream_request_for_route(
     route: &db::RouteConfig,
     request: &BufferedBridgeRequest,
     conversation_id: Option<uuid::Uuid>,
-) -> Result<PreparedUpstreamRequest, CompatError> {
+) -> Result<PreparedRouteRequest, CompatError> {
     let effective_request_body = effective_request_body(route, request.body.as_slice());
     let redaction_enabled =
         redact::redaction_enabled_for_user(request.user_id.filter(|id| *id > 0));
@@ -121,6 +146,7 @@ pub(super) async fn prepare_upstream_request_for_route(
     } else {
         None
     };
+    let had_prior_session = prior_session.is_some();
     let (plain_request_body, redacted_request) = if redaction_enabled {
         let redacted = redact_ai_request_json_blocking(
             request.path.clone(),
@@ -167,7 +193,47 @@ pub(super) async fn prepare_upstream_request_for_route(
     prepared.upstream_restore_session = redacted_request
         .as_ref()
         .and_then(|value| value.restore_session.clone());
-    Ok(prepared)
+    let redaction = route_redaction_state(
+        redaction_enabled,
+        had_prior_session,
+        redacted_request
+            .as_ref()
+            .is_some_and(|value| value.redacted_request_json.is_some()),
+        prepared.upstream_restore_session.clone(),
+        prepared.upstream_redacted_request_json.clone(),
+    );
+    Ok(PreparedRouteRequest {
+        prepared,
+        redaction,
+    })
+}
+
+/// Issue #564 Task 2: classify why a prepared request carries no redaction
+/// session. A missing session is only a reset signal when the caller proved
+/// there was state to drop (explicit disable, a refused prior session, or
+/// replacements that could not be finalized). Everything else is
+/// `no_session_available` and must never delete a still-valid row.
+fn route_redaction_state(
+    redaction_enabled: bool,
+    had_prior_session: bool,
+    applied_replacements: bool,
+    session: Option<UpstreamRedactionSession>,
+    redacted_request_json: Option<Value>,
+) -> RouteRedactionState {
+    if !redaction_enabled {
+        return RouteRedactionState {
+            enabled: false,
+            session: None,
+            redacted_request_json: None,
+            reset: true,
+        };
+    }
+    RouteRedactionState {
+        enabled: true,
+        reset: session.is_none() && (had_prior_session || applied_replacements),
+        session,
+        redacted_request_json,
+    }
 }
 
 async fn load_prior_session(
@@ -241,4 +307,75 @@ fn extract_function_call_output_ids(input: &[Value]) -> Vec<String> {
                 .map(str::to_string)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use redactor::{FindingKind, InputKind, RedactionPolicy, RedactorBuilder, RestoreState};
+
+    use super::route_redaction_state;
+    use crate::redact_upstream::UpstreamRedactionSession;
+
+    fn session(original: &str) -> UpstreamRedactionSession {
+        let redactor = RedactorBuilder::new()
+            .with_redaction_policy(RedactionPolicy::default().with_kind(FindingKind::Domain, true))
+            .build();
+        let artifact = redactor
+            .redact_artifact_with_input_kind_source_and_prior_session(
+                original,
+                InputKind::Text,
+                None,
+                None,
+                Some("conversation"),
+            )
+            .expect("redact");
+        UpstreamRedactionSession::current(RestoreState::new(artifact.session).expect("state"))
+    }
+
+    #[test]
+    fn explicit_disable_requests_a_reset() {
+        let state = route_redaction_state(false, false, false, None, None);
+        assert!(!state.enabled);
+        assert!(state.reset);
+        assert!(state.session.is_none());
+    }
+
+    #[test]
+    fn missing_session_without_prior_state_is_not_a_reset() {
+        // First redaction of a conversation that matched nothing: there is no
+        // row to drop, so the persistence layer must keep whatever exists.
+        let state = route_redaction_state(true, false, false, None, None);
+        assert!(state.enabled);
+        assert!(!state.reset);
+    }
+
+    #[test]
+    fn refused_prior_session_is_a_reset() {
+        // Budget overflow (or a policy-generation change) drops the session
+        // while prior state existed, so the persisted row must be cleared.
+        let state = route_redaction_state(true, true, false, None, None);
+        assert!(state.reset);
+    }
+
+    #[test]
+    fn unfinalized_replacements_are_a_reset() {
+        let state = route_redaction_state(true, false, true, None, None);
+        assert!(state.reset);
+    }
+
+    #[test]
+    fn carried_session_is_never_a_reset() {
+        let session = session("a.example.com");
+        let state = route_redaction_state(
+            true,
+            true,
+            true,
+            Some(session),
+            Some(serde_json::json!({"instructions": "[[RDX:v2:x]]"})),
+        );
+        assert!(state.enabled);
+        assert!(!state.reset);
+        assert!(state.session.is_some());
+        assert!(state.redacted_request_json.is_some());
+    }
 }

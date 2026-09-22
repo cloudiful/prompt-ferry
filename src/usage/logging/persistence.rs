@@ -246,20 +246,42 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
                         }
                     }
                     None => {
-                        // Issue #524 Task 5: `None` means redaction is disabled
-                        // for this request (disable deletes the row) or the
-                        // session exceeded its budget (Task 2). Both drop the
-                        // persisted row so re-enabling starts from a fresh token
-                        // counter instead of reviving the old mapping.
-                        if let Err(err) =
-                            db::delete_conversation_redaction_session(&state.pool, conversation_id)
-                                .await
-                        {
-                            warn!(
-                                error = %err,
+                        // Issue #564 Task 2: a missing session is only a reset
+                        // signal when the record proved there was state to
+                        // drop — upstream redaction was explicitly disabled for
+                        // this request, or a prior session was refused (budget
+                        // overflow / policy-generation change). Otherwise the
+                        // turn simply carried no session (admission events,
+                        // first redaction before any replacement) and deleting
+                        // the row would mint fresh tokens on the next turn and
+                        // invalidate the upstream prefix cache.
+                        if log.upstream_redaction_reset {
+                            // Issue #524 Task 5: explicit disable and budget
+                            // overflow drop the persisted row so re-enabling
+                            // starts from a fresh token counter instead of
+                            // reviving the old mapping.
+                            if let Err(err) = db::delete_conversation_redaction_session(
+                                &state.pool,
+                                conversation_id,
+                            )
+                            .await
+                            {
+                                warn!(
+                                    error = %err,
+                                    conversation_id = %conversation_id,
+                                    event_id,
+                                    "failed to delete conversation redaction session"
+                                );
+                            }
+                        } else {
+                            tracing::debug!(
+                                event = "redaction_session_missing",
+                                request_id = %log.request_id,
                                 conversation_id = %conversation_id,
                                 event_id,
-                                "failed to delete conversation redaction session"
+                                upstream_redaction_enabled = log.upstream_redaction_enabled,
+                                reason = "no_session_available",
+                                "usage record carried no upstream redaction session; keeping the persisted session"
                             );
                         }
                     }

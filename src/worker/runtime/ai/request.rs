@@ -35,7 +35,7 @@ pub(in crate::worker::runtime) async fn process_request(
     let raw_content_logging_enabled = initialized.raw_content_logging_enabled;
     let method = initialized.method;
     let redact_content = initialized.redact_content;
-    let request_ctx = initialized.request_ctx;
+    let mut request_ctx = initialized.request_ctx;
     let _request_lease = services.runtime_state.spawn_request_lease_guard(
         services.admin_state(),
         services.standalone_state(),
@@ -105,7 +105,7 @@ pub(in crate::worker::runtime) async fn process_request(
     let outcome = Box::pin(forward_route_request(RouteForwardRequest {
         services,
         request: &request,
-        request_ctx: &request_ctx,
+        request_ctx: &mut request_ctx,
         route: &route,
         method: &method,
         redact_content,

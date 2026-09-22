@@ -153,3 +153,33 @@ fn runtime_usage_routing_prefers_postgres_then_standalone_then_noop() {
     );
     assert_eq!(usage_recording_mode(false, false), UsageRecordingMode::Noop);
 }
+
+#[test]
+fn usage_metadata_redaction_reset_defaults_to_false() {
+    let log = UsageLog::ai_request(uuid::Uuid::new_v4(), UsageRequestMetadata::default(), None);
+    assert!(!log.upstream_redaction_reset);
+    assert!(log.upstream_restore_session.is_none());
+}
+
+#[test]
+fn redaction_reset_flag_is_opt_in_and_independent_of_session() {
+    // Issue #564 Task 2: a record that carries no session but never proved the
+    // row must be dropped (admission events, first redaction before any
+    // replacement) keeps `reset = false`, so persistence leaves the session
+    // alone instead of deleting a still-valid row.
+    let without_session = UsageLog::ai_request(
+        uuid::Uuid::new_v4(),
+        UsageRequestMetadata {
+            conversation_id: Some(uuid::Uuid::new_v4()),
+            upstream_restore_session: None,
+            ..UsageRequestMetadata::default()
+        },
+        None,
+    );
+    assert!(without_session.upstream_restore_session.is_none());
+    assert!(!without_session.upstream_redaction_reset);
+
+    // Only an explicit reset authorizes the delete path.
+    let reset = without_session.with_upstream_redaction_reset(true);
+    assert!(reset.upstream_redaction_reset);
+}
