@@ -160,6 +160,12 @@ impl<'a> SseRestoreFilter<'a> {
             "response.reasoning_summary_part.added" | "response.reasoning_summary_part.done" => {
                 self.restore_complete_pointer(value, "/part/text")?;
             }
+            "response.content_part.added" | "response.content_part.done" => {
+                self.restore_complete_pointer(value, "/part/text")?;
+            }
+            "response.output_item.added" | "response.output_item.done" => {
+                self.restore_output_item(value)?;
+            }
             "response.completed" | "response.incomplete" | "response.failed" => {
                 self.restore_terminal_snapshot(value)?;
             }
@@ -207,6 +213,17 @@ impl<'a> SseRestoreFilter<'a> {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Restore the text-bearing fields inside a single Responses output item,
+    /// as carried by `response.output_item.added|done`. The walk reuses the
+    /// terminal snapshot field set so every restore path covers the same
+    /// fields.
+    fn restore_output_item(&self, value: &mut Value) -> Result<()> {
+        let Some(item) = value.get_mut("item") else {
+            return Ok(());
+        };
+        self.restore_snapshot_value(item)
     }
 
     fn restore_complete_value(&self, value: &mut Value) -> Result<()> {

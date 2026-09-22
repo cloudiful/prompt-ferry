@@ -119,6 +119,104 @@ fn passes_through_truncated_token_at_done_event() {
 }
 
 #[test]
+fn restores_content_part_done_token() {
+    let (session, token) = session("a.example.com");
+    let mut filter = SseRestoreFilter::new(&session);
+    let event = format!(
+        "data: {{\"type\":\"response.content_part.done\",\"output_index\":1,\"content_index\":0,\"item_id\":\"msg\",\"part\":{{\"type\":\"output_text\",\"text\":{:?},\"annotations\":[]}}}}\n\n",
+        token
+    );
+    let output = filter.push_chunk(event.as_bytes()).expect("restore");
+    filter.finish().expect("finish");
+    assert_eq!(data_json(&output[0])["part"]["text"], "a.example.com");
+}
+
+#[test]
+fn restores_output_item_done_token() {
+    let (session, token) = session("a.example.com");
+    let mut filter = SseRestoreFilter::new(&session);
+    let message = serde_json::json!({
+        "type": "response.output_item.done",
+        "output_index": 1,
+        "item": {
+            "id": "msg_1", "type": "message", "status": "completed", "role": "assistant",
+            "content": [{"type": "output_text", "text": token}]
+        }
+    });
+    let output = filter
+        .push_chunk(format!("data: {message}\n\n").as_bytes())
+        .expect("message");
+    assert_eq!(
+        data_json(&output[0])["item"]["content"][0]["text"],
+        "a.example.com"
+    );
+    let reasoning = serde_json::json!({
+        "type": "response.output_item.done",
+        "output_index": 0,
+        "item": {
+            "id": "rs_1", "type": "reasoning", "status": "completed",
+            "summary": [{"type": "summary_text", "text": token}]
+        }
+    });
+    let output = filter
+        .push_chunk(format!("data: {reasoning}\n\n").as_bytes())
+        .expect("reasoning");
+    filter.finish().expect("finish");
+    assert_eq!(
+        data_json(&output[0])["item"]["summary"][0]["text"],
+        "a.example.com"
+    );
+}
+
+#[test]
+fn passes_through_token_free_done_events_unchanged() {
+    let (session, _) = session("a.example.com");
+    let mut filter = SseRestoreFilter::new(&session);
+    let part = "data: {\"type\":\"response.content_part.done\",\"output_index\":1,\"content_index\":0,\"item_id\":\"msg\",\"part\":{\"type\":\"output_text\",\"text\":\"hello\",\"annotations\":[]}}\n\n";
+    let output = filter.push_chunk(part.as_bytes()).expect("part");
+    assert_eq!(data_json(&output[0])["part"]["text"], "hello");
+    let item = serde_json::json!({
+        "type": "response.output_item.done",
+        "output_index": 1,
+        "item": {
+            "id": "msg_1", "type": "message", "status": "completed", "role": "assistant",
+            "content": [{"type": "output_text", "text": "hello"}]
+        }
+    });
+    let output = filter
+        .push_chunk(format!("data: {item}\n\n").as_bytes())
+        .expect("item");
+    filter.finish().expect("finish");
+    assert_eq!(data_json(&output[0])["item"]["content"][0]["text"], "hello");
+}
+
+#[test]
+fn restores_split_deltas_and_done_consistently() {
+    let (session, token) = session("a.example.com");
+    assert!(token.len() > 22, "token long enough for a mid-scope split");
+    let mut filter = SseRestoreFilter::new(&session);
+    let first = format!(
+        "data: {{\"type\":\"response.output_text.delta\",\"item_id\":\"msg\",\"output_index\":1,\"content_index\":0,\"delta\":{:?}}}\n\n",
+        &token[..20]
+    );
+    let second = format!(
+        "data: {{\"type\":\"response.output_text.delta\",\"item_id\":\"msg\",\"output_index\":1,\"content_index\":0,\"delta\":{:?}}}\n\n",
+        &token[20..]
+    );
+    let done = format!(
+        "data: {{\"type\":\"response.content_part.done\",\"output_index\":1,\"content_index\":0,\"item_id\":\"msg\",\"part\":{{\"type\":\"output_text\",\"text\":{:?},\"annotations\":[]}}}}\n\n",
+        token
+    );
+    let first = filter.push_chunk(first.as_bytes()).expect("first");
+    let second = filter.push_chunk(second.as_bytes()).expect("second");
+    let done = filter.push_chunk(done.as_bytes()).expect("done");
+    filter.finish().expect("finish");
+    assert_eq!(data_json(&first[0])["delta"], "");
+    assert_eq!(data_json(&second[0])["delta"], "a.example.com");
+    assert_eq!(data_json(&done[0])["part"]["text"], "a.example.com");
+}
+
+#[test]
 fn passes_through_malformed_tokens_without_aborting_stream() {
     let (session, _) = session("a.example.com");
     let malformed = "before [[RDX:v2:...]] after";
