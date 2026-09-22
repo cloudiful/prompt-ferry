@@ -24,6 +24,7 @@ use tokio_tungstenite::{
     connect_async,
     tungstenite::{Message, client::IntoClientRequest},
 };
+use uuid::Uuid;
 
 const BRIDGE_KEY: &str = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
 const OTHER_BRIDGE_KEY: &str = "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg=";
@@ -34,6 +35,17 @@ async fn worker_serves_multiple_relays_concurrently() {
     let (relay_a_addr, worker_a_addr, relay_a_handle) = spawn_relay().await;
     let (relay_b_addr, worker_b_addr, relay_b_handle) = spawn_relay().await;
 
+    // The embedded standalone worker reconciles persisted relays from its
+    // SQLite store ahead of `relay_urls`, so this test must own an isolated
+    // store; otherwise a developer machine or a previous run leaves
+    // `standalone_relays` rows pointing at dead relay ports and the worker
+    // never dials the relays started here.
+    let standalone_path = std::env::temp_dir().join(format!(
+        "prompt-ferry-bridge-multi-relay-{}-{}.sqlite3",
+        std::process::id(),
+        Uuid::new_v4().simple()
+    ));
+    let _ = std::fs::remove_file(&standalone_path);
     let worker_config = config::WorkerConfig {
         relay_urls: vec![
             format!("ws://{worker_a_addr}/ws/worker"),
@@ -44,6 +56,7 @@ async fn worker_serves_multiple_relays_concurrently() {
         upstream_api_key: "upstream-key".to_string(),
         upstream_native_api: NativeApi::Chat,
         connect_timeout_seconds: 5,
+        standalone_database_path: standalone_path.to_string_lossy().into_owned(),
         ..config::WorkerConfig::default()
     };
 
@@ -58,6 +71,7 @@ async fn worker_serves_multiple_relays_concurrently() {
     );
 
     worker_handle.abort();
+    let _ = std::fs::remove_file(&standalone_path);
 }
 
 #[tokio::test]
@@ -1223,7 +1237,10 @@ async fn wait_for_worker(
     handle: &RelayHandle,
     worker_handle: &mut tokio::task::JoinHandle<anyhow::Result<()>>,
 ) {
-    for _ in 0..20 {
+    // The embedded standalone worker bootstraps its SQLite store before it
+    // dials the relays; 1s is not enough headroom for that on a cold or busy
+    // runner, so match the 10s budget of the shared replay harness.
+    for _ in 0..200 {
         if handle.worker_count().await > 0 {
             return;
         }

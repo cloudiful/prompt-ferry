@@ -31,10 +31,12 @@ WITH expired_conversations AS (
               AND rr.created_at < NOW() - ($1::BIGINT * INTERVAL '1 day')
           )
       )
-      AND NOT (
-          rr.request_state IN ('received', 'awaiting_approval', 'upstream_processing')
-          OR rr.lease_expires_at > NOW()
-      )
+      AND rr.request_state NOT IN ('received', 'awaiting_approval', 'upstream_processing')
+      -- NULL means "no lease was ever attached", which must count as inactive:
+      -- the bare `NOT (lease_expires_at > NOW())` form evaluates to NULL (not
+      -- TRUE) for those rows and silently kept them out of retention forever.
+      -- `prune_usage_events.sql` uses the same NULL-safe shape.
+      AND (rr.lease_expires_at IS NULL OR rr.lease_expires_at <= NOW())
     ORDER BY rr.created_at ASC, rr.event_id ASC
     LIMIT $2
     FOR UPDATE SKIP LOCKED

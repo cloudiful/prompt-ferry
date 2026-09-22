@@ -285,48 +285,48 @@ fn request_time_status(stream_err: &StreamableHttpError<reqwest::Error>) -> Opti
 /// Auth/throttling failures during the connect/initialize handshake surface as
 /// `ClientInitializeError::TransportError` (before any request is dispatched);
 /// they are retryable with the next bearer token just like request-time
-/// 401/403/429s.
+/// 401/403/429s. rmcp converts a 4xx answer to a `server/discover` probe into a
+/// JSON-RPC error, so for that shape the message is the only place the HTTP
+/// status survives.
 fn handshake_status(err: &anyhow::Error) -> Option<StatusCode> {
-    let Some(rmcp::service::ClientInitializeError::TransportError { error, .. }) =
-        err.downcast_ref::<rmcp::service::ClientInitializeError>()
-    else {
-        return None;
-    };
-    let stream_err = error
-        .error
-        .downcast_ref::<StreamableHttpError<reqwest::Error>>()?;
-    match stream_err {
-        StreamableHttpError::Client(reqwest_err) => reqwest_err.status().filter(|status| {
-            matches!(
-                *status,
-                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS
-            )
-        }),
-        StreamableHttpError::AuthRequired(_) => Some(StatusCode::UNAUTHORIZED),
-        StreamableHttpError::InsufficientScope(_) => Some(StatusCode::FORBIDDEN),
-        StreamableHttpError::UnexpectedServerResponse(message) => {
-            parse_status_from_message(message.as_ref()).filter(|status| {
-                matches!(
-                    *status,
-                    StatusCode::UNAUTHORIZED
-                        | StatusCode::FORBIDDEN
-                        | StatusCode::TOO_MANY_REQUESTS
-                )
-            })
+    match err.downcast_ref::<rmcp::service::ClientInitializeError>()? {
+        rmcp::service::ClientInitializeError::TransportError { error, .. } => {
+            let stream_err = error
+                .error
+                .downcast_ref::<StreamableHttpError<reqwest::Error>>()?;
+            match stream_err {
+                StreamableHttpError::Client(reqwest_err) => {
+                    reqwest_err.status().filter(is_retryable_status)
+                }
+                StreamableHttpError::AuthRequired(_) => Some(StatusCode::UNAUTHORIZED),
+                StreamableHttpError::InsufficientScope(_) => Some(StatusCode::FORBIDDEN),
+                StreamableHttpError::UnexpectedServerResponse(message) => {
+                    parse_status_from_message(message.as_ref()).filter(is_retryable_status)
+                }
+                _ => None,
+            }
+        }
+        rmcp::service::ClientInitializeError::JsonRpcError(error_data) => {
+            parse_status_from_message(&error_data.message).filter(is_retryable_status)
         }
         _ => None,
     }
 }
 
+/// The HTTP status named in a transport or discover-rejection message. rmcp
+/// prefixes the transport form with `HTTP <code>:` and embeds the
+/// discover-rejection form as `server/discover rejected with HTTP <code> ...`.
 fn parse_status_from_message(message: &str) -> Option<StatusCode> {
-    let code = message
-        .strip_prefix("HTTP ")?
-        .split_whitespace()
-        .next()?
-        .trim_end_matches(':');
-    code.parse::<u16>()
-        .ok()
-        .and_then(|value| StatusCode::from_u16(value).ok())
+    message
+        .split("HTTP ")
+        .skip(1)
+        .filter_map(|rest| rest.split_whitespace().next())
+        .find_map(|code| {
+            code.trim_end_matches(':')
+                .parse::<u16>()
+                .ok()
+                .and_then(|value| StatusCode::from_u16(value).ok())
+        })
 }
 
 fn record_token_slot(selected: &SelectedToken) {
@@ -370,6 +370,12 @@ mod tests {
             Some(StatusCode::TOO_MANY_REQUESTS)
         );
         assert_eq!(parse_status_from_message("boom"), None);
+        assert_eq!(
+            parse_status_from_message(
+                "server/discover rejected with HTTP 429 Too Many Requests: throttled"
+            ),
+            Some(StatusCode::TOO_MANY_REQUESTS)
+        );
     }
 
     #[test]

@@ -74,6 +74,11 @@ pub async fn abort_request_record(
     )
     .execute(pool)
     .await?;
+    // The aborted record is terminal, so its in-flight lease must not survive:
+    // `abort_stale_request_records` and `abort_request_records_by_ids` already
+    // drop it, and a leftover row would keep the request listed as leased until
+    // the next sweep.
+    delete_request_record_lease(pool, request_id).await?;
     Ok(result.rows_affected())
 }
 

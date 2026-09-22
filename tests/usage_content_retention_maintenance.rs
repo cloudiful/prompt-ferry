@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::db_harness::{TEST_DATABASE_URL_ENV, TestSchema, test_database_configured};
 
-async fn create_completed_record(pool: &sqlx::PgPool) -> anyhow::Result<i64> {
+async fn create_completed_record(pool: &sqlx::PgPool, user_id: i64) -> anyhow::Result<i64> {
     db::record_request_record(
         pool,
         db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
@@ -15,7 +15,7 @@ async fn create_completed_record(pool: &sqlx::PgPool) -> anyhow::Result<i64> {
                 db::UsageEventKind::Request,
                 db::RequestRecordState::Completed,
             )
-            .with_request_actor(Some(1), None, None, None),
+            .with_request_actor(Some(user_id), None, None, None),
     )
     .await
 }
@@ -30,7 +30,17 @@ async fn content_retention_deletes_assistant_tool_call_children_with_artifacts()
 
     let schema = TestSchema::new().await?;
     db::migrate(&schema.pool).await?;
-    let event_id = create_completed_record(&schema.pool).await?;
+    let user = db::create_user(
+        &schema.pool,
+        db::UserCreate {
+            login_name: "usage-content-retention".to_string(),
+            password_hash: prompt_ferry::keys::hash_password("password-123")?,
+            display_name: "usage-content-retention".to_string(),
+            is_admin: false,
+        },
+    )
+    .await?;
+    let event_id = create_completed_record(&schema.pool, user.user_id).await?;
     db::upsert_usage_assistant_artifact(
         &schema.pool,
         db::UsageAssistantArtifactCreate {

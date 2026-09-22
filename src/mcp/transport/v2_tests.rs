@@ -788,6 +788,7 @@ async fn spawn_token_failover_upstream() -> (String, std::sync::Arc<std::sync::M
 async fn bearer_token_failover_tries_all_tokens_and_recovers_on_third() {
     let (url, seen) = spawn_token_failover_upstream().await;
     let mut server = v2_server(&url);
+    server.auth_mode = crate::db::MCP_AUTH_MODE_BEARER.to_string();
     server.bearer_tokens_json = json!([
         {"token": "first-token", "enabled": true},
         {"token": "second-token", "enabled": true},

@@ -134,16 +134,15 @@ pub(super) async fn connect_with_selected(
 /// legacy `initialize` handshake only when the upstream explicitly rejects the
 /// discover probe because it cannot speak the requested protocol versions.
 ///
-/// The rmcp `Auto` mode only falls back when the peer answers discover with a
-/// JSON-RPC `METHOD_NOT_FOUND` error. Servers built on older SDKs (e.g. rmcp
-/// <= 2.2.0) reject the `2026-07-28` probe at the HTTP layer with a 400
-/// "Unsupported MCP-Protocol-Version" response, and other non-standard
-/// servers wrap the rejection in arbitrary JSON-RPC errors; both surface as
-/// transport/JSON-RPC errors that would otherwise never recover, so they are
-/// classified by [`is_protocol_rejection`] and retried once with the legacy
-/// lifecycle. Authentication, DNS, timeout and other transient failures are
-/// NOT retried as a full handshake here: they are left for the caller's token
-/// failover, which does not replay the lifecycle.
+/// The probe is explicit so a rejection always stays visible here. Servers
+/// built on older SDKs (e.g. rmcp <= 2.2.0) reject the `2026-07-28` probe at
+/// the HTTP layer with a 400 "Unsupported MCP-Protocol-Version" response, and
+/// other non-standard servers wrap the rejection in arbitrary JSON-RPC errors;
+/// both are classified by [`is_protocol_rejection`] and retried once with the
+/// legacy lifecycle at the newest version the rejection advertises.
+/// Authentication, DNS, timeout and other transient failures are NOT retried
+/// as a full handshake here: they are left for the caller's token failover,
+/// which does not replay the lifecycle.
 ///
 /// The lifecycle that actually works is cached per server (keyed by
 /// `updated_at`) so subsequent requests skip the rejected probe instead of
@@ -176,7 +175,11 @@ where
         LifecyclePreference {
             mode: UpstreamLifecycle::Auto,
             ..
-        } => (auto_lifecycle_mode(), false, ProtocolVersion::V_2025_11_25),
+        } => (
+            discover_lifecycle_mode(),
+            false,
+            ProtocolVersion::V_2025_11_25,
+        ),
     };
     let first_label = lifecycle_mode_label(&first_mode);
     match connect(first_mode, first_version).await {
@@ -194,7 +197,11 @@ where
             let rejection = protocol_rejection(&first_err).unwrap_or_default();
             let fallback_version = select_fallback_protocol_version(server, &rejection);
             let (second_mode, second_is_legacy, second_version) = if first_is_legacy {
-                (auto_lifecycle_mode(), false, ProtocolVersion::V_2025_11_25)
+                (
+                    discover_lifecycle_mode(),
+                    false,
+                    ProtocolVersion::V_2025_11_25,
+                )
             } else {
                 (ClientLifecycleMode::Initialize, true, fallback_version)
             };
@@ -217,10 +224,14 @@ where
     }
 }
 
-fn auto_lifecycle_mode() -> ClientLifecycleMode {
-    ClientLifecycleMode::Auto {
+fn discover_lifecycle_mode() -> ClientLifecycleMode {
+    // The explicit `Discover` mode is used instead of rmcp's `Auto`: `Auto`
+    // retries the legacy handshake on its own (with a fixed version and a
+    // folded error), which would hide the rejection from `protocol_rejection`,
+    // skip `select_fallback_protocol_version`, and cache a modern lifecycle for
+    // a peer that only speaks `initialize`.
+    ClientLifecycleMode::Discover {
         preferred_versions: PREFERRED_PROTOCOL_VERSIONS.to_vec(),
-        legacy_version: Some(ProtocolVersion::V_2025_11_25),
     }
 }
 
@@ -520,10 +531,11 @@ fn is_rejection_code(code: i64) -> bool {
 /// Message check for rejections carried by non-standard JSON-RPC codes
 /// (e.g. `-32000 Bad Request` from a gateway) that still name the protocol.
 /// Matches both the participle ("not supported") and base form ("does not
-/// support") phrasing.
+/// support") phrasing, and both the spaced and hyphenated header spellings.
 fn message_mentions_unsupported_protocol(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
-    lower.contains("protocol version")
+    let names_protocol = lower.contains("protocol version") || lower.contains("protocol-version");
+    names_protocol
         && (lower.contains("unsupported")
             || lower.contains("not supported")
             || lower.contains("does not support"))
@@ -596,9 +608,23 @@ fn supported_versions_from_error_data(error_data: &rmcp::ErrorData) -> Vec<Proto
     error_data
         .data
         .as_ref()
-        .and_then(|data| data.get("supported"))
-        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .and_then(find_supported_versions)
+        .or_else(|| parse_supported_versions_from_message(&error_data.message))
         .unwrap_or_default()
+}
+
+/// Depth-first search for a `supported` protocol-version list, because
+/// gateways wrap the real rejection (and its list, or the naming message) in an
+/// outer error's `data`.
+fn find_supported_versions(value: &Value) -> Option<Vec<ProtocolVersion>> {
+    match value {
+        Value::Object(map) => map
+            .get("supported")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .or_else(|| map.values().find_map(find_supported_versions)),
+        Value::Array(items) => items.iter().find_map(find_supported_versions),
+        _ => None,
+    }
 }
 
 fn supported_versions_from_transport_error(

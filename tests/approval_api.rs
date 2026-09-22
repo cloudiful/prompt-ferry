@@ -256,7 +256,7 @@ async fn approve_endpoint_wakes_waiter_and_clears_payload() -> anyhow::Result<()
 }
 
 #[tokio::test]
-async fn login_succeeds_with_local_session_fallback_when_session_backend_is_disabled()
+async fn login_rejects_with_service_unavailable_when_session_backend_is_disabled()
 -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
@@ -303,12 +303,9 @@ async fn login_succeeds_with_local_session_fallback_when_session_backend_is_disa
         ))
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    let set_cookie = response
-        .headers()
-        .get(header::SET_COOKIE)
-        .expect("set-cookie header");
-    assert!(set_cookie.to_str()?.contains("prompt_ferry_session="));
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    assert_eq!(body["error"]["code"], "service_unavailable");
     schema.cleanup().await?;
     Ok(())
 }
@@ -1764,7 +1761,10 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
             "models": [{
                 "id": "gpt-routed",
                 "name": "gpt-routed"
-            }]
+            }],
+            "total": 1,
+            "first": 0,
+            "rows": 20
         })
     );
 
@@ -1857,7 +1857,10 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
             "models": [{
                 "id": "glm-5",
                 "name": "glm-5"
-            }]
+            }],
+            "total": 1,
+            "first": 0,
+            "rows": 20
         })
     );
 
@@ -2264,7 +2267,14 @@ async fn usage_event_detail_serializes_null_request_has_previous_response_id_as_
     );
 
     // Restore the current schema constraint for consistency (the test schema is
-    // dropped on cleanup regardless).
+    // dropped on cleanup regardless). The forced NULL row must be backfilled
+    // first, otherwise the NOT NULL re-add fails on its own fixture.
+    sqlx::query(
+        "UPDATE request_records SET request_has_previous_response_id = FALSE \
+         WHERE request_has_previous_response_id IS NULL",
+    )
+    .execute(&schema.pool)
+    .await?;
     sqlx::query(
         "ALTER TABLE request_records ALTER COLUMN request_has_previous_response_id SET NOT NULL",
     )

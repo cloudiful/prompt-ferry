@@ -92,6 +92,7 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
     let response = client
         .post(format!("http://{relay_addr}/v1/responses"))
         .bearer_auth("client-token")
+        .header("X-Session-Id", "nul-bytes-session")
         .json(&serde_json::json!({
             "model": "gpt-test",
             "input": [{
@@ -111,15 +112,15 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
     );
     drop(requests);
 
-    let row = sqlx::query_as::<_, (bool, i32, Option<String>)>(
+    // The body columns were dropped from PostgreSQL in 0066 (raw bodies live in
+    // the configured object store, not in these tables), so the sanitized-text
+    // invariant is asserted through `usage_prompt_blocks` below; here only the
+    // record-level sanitization flags remain.
+    let row = sqlx::query_as::<_, (bool, i32)>(
         r#"
         SELECT rr.storage_sanitized,
-               rr.storage_sanitized_nul_count,
-               raw.request_raw_json #>> '{input,0,content}'
+               rr.storage_sanitized_nul_count
         FROM request_records rr
-        JOIN request_record_raw_payloads raw
-          ON raw.event_id = rr.event_id
-          AND raw.created_at = rr.created_at
         WHERE rr.event_kind = 'request'
         ORDER BY rr.created_at DESC
         LIMIT 1
@@ -129,7 +130,6 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
     .await?;
     assert!(row.0);
     assert!(row.1 > 0);
-    assert_eq!(row.2.as_deref(), Some("beforeafter"));
 
     let prompt_block = sqlx::query_as::<_, (String, String)>(
         r#"
@@ -216,6 +216,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
     let turn1 = client
         .post(format!("http://{relay_addr}/v1/chat/completions"))
         .bearer_auth("client-token")
+        .header("X-Session-Id", "opencode-go-history")
         .json(&serde_json::json!({
             "model": "deepseek-v4-flash",
             "messages": [{"role":"user","content":"need weather"}],
@@ -229,6 +230,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
     let turn2 = client
         .post(format!("http://{relay_addr}/v1/chat/completions"))
         .bearer_auth("client-token")
+        .header("X-Session-Id", "opencode-go-history")
         .json(&serde_json::json!({
             "model": "deepseek-v4-flash",
             "messages": [
@@ -732,7 +734,12 @@ async fn rejects_responses_routed_to_anthropic_native_target() -> anyhow::Result
             provider_region: None,
             service_tier: Default::default(),
             base_url: format!("http://{upstream_addr}"),
-            native_api: prompt_ferry::config::NativeApi::AnthropicMessages,
+            // The anthropic protocol is carried by the route target below: the
+            // endpoint-level `native_api` CHECK cannot be widened without a
+            // migration (`provider_endpoints_native_api_check` from the initial
+            // schema is still live), and target-level `native_api` already wins
+            // over the endpoint default in `resolve_target_native_api`.
+            native_api: prompt_ferry::config::NativeApi::Chat,
             native_api_source: NativeApiSource::Manual,
             api_key: "upstream-key".to_string(),
             api_keys: vec![],
@@ -755,7 +762,7 @@ async fn rejects_responses_routed_to_anthropic_native_target() -> anyhow::Result
                 endpoint_id: endpoint.endpoint_id,
                 enabled: true,
                 upstream_model: None,
-                native_api: prompt_ferry::config::NativeApi::Auto,
+                native_api: prompt_ferry::config::NativeApi::AnthropicMessages,
                 proxy_url_override: None,
                 active_windows: None,
                 dev_system_normalize: false,
