@@ -3122,6 +3122,30 @@ fn urlencoding(value: &str) -> String {
     encoded
 }
 
+/// Wait (bounded) until every committed fixture row is inside the overview window.
+///
+/// `request_records.created_at` is stamped by the database clock while the
+/// `range=24h` window ends at this process's clock: on the shared mock
+/// database the database clock leads the process clock by ~30 ms, so a row
+/// inserted right before the request can still carry a `created_at` after the
+/// window end (`created_at < end`) and intermittently vanish from the response.
+/// Re-reading the newest row after its commit turns the write-then-read race
+/// into an explicit wait; the deadline only bounds a stalled clock.
+async fn sync_overview_window(pool: &PgPool) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let newest: Option<chrono::DateTime<chrono::Utc>> =
+            sqlx::query_scalar("SELECT MAX(created_at) FROM request_records")
+                .fetch_one(pool)
+                .await?;
+        let now = chrono::Utc::now();
+        if newest.is_none_or(|at| at <= now) || std::time::Instant::now() >= deadline {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
 #[tokio::test]
 async fn overview_summary_exposes_avg_output_tokens_per_second_for_ai() -> anyhow::Result<()> {
     if !test_database_configured() {
@@ -3188,6 +3212,8 @@ async fn overview_summary_exposes_avg_output_tokens_per_second_for_ai() -> anyho
             .with_usage(Some(10), Some(0), Some(10), Some(0), None, None),
     )
     .await?;
+
+    sync_overview_window(&schema.pool).await?;
 
     let response = worker_admin::router(state)
         .oneshot(auth_request(
@@ -3260,6 +3286,8 @@ async fn overview_summary_avg_output_tokens_per_second_is_null_for_mcp_only_wind
     )
     .await?;
 
+    sync_overview_window(&schema.pool).await?;
+
     let response = worker_admin::router(state)
         .oneshot(auth_request(
             "GET",
@@ -3323,6 +3351,8 @@ async fn overview_breakdown_avg_output_tokens_per_second_per_model_valid_average
             .with_usage(Some(10), Some(300), Some(310), Some(0), None, None),
     )
     .await?;
+
+    sync_overview_window(&schema.pool).await?;
 
     let response = worker_admin::router(state)
         .oneshot(auth_request(
@@ -3392,6 +3422,8 @@ async fn overview_breakdown_avg_output_tokens_per_second_null_when_no_valid_samp
     )
     .await?;
 
+    sync_overview_window(&schema.pool).await?;
+
     let response = worker_admin::router(state)
         .oneshot(auth_request(
             "GET",
@@ -3448,6 +3480,8 @@ async fn overview_breakdown_mcp_rows_have_null_avg_and_compatibility() -> anyhow
             .with_timing(Some(200), Some(true), Some(1000), None),
     )
     .await?;
+
+    sync_overview_window(&schema.pool).await?;
 
     let response = worker_admin::router(state)
         .oneshot(auth_request(
@@ -3613,6 +3647,8 @@ async fn overview_breakdown_reports_error_rate_and_upstream_breakdown() -> anyho
         None,
     )
     .await?;
+
+    sync_overview_window(&schema.pool).await?;
 
     let response = worker_admin::router(state)
         .oneshot(auth_request(
