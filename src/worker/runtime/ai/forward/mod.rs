@@ -95,6 +95,36 @@ impl std::fmt::Display for QuotaFailoverSignal {
 
 impl std::error::Error for QuotaFailoverSignal {}
 
+/// An upstream thinking-mode rejection of a request whose parent tool-call
+/// turn has no reasoning to pass back (issue #556). Buffered by
+/// `forward_upstream_response` before `ResponseStart` so the retry loop can
+/// resend the same request once with thinking off; when no retry is possible
+/// the buffered response is surfaced exactly like any other upstream error.
+#[derive(Debug)]
+pub(super) struct ThinkingEchoRetrySignal {
+    pub(super) status: http::StatusCode,
+    pub(super) body: Vec<u8>,
+    pub(super) response_headers: Vec<(String, String)>,
+}
+
+impl std::fmt::Display for ThinkingEchoRetrySignal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "upstream thinking reasoning echo rejection")
+    }
+}
+
+impl std::error::Error for ThinkingEchoRetrySignal {}
+
+/// Substring the upstream uses to reject a thinking request that failed to
+/// pass the parent turn's reasoning back. Matched case-sensitively.
+pub(super) const THINKING_ECHO_FINGERPRINT: &str = "must be passed back";
+
+/// Whether a non-success upstream response is the thinking-mode
+/// reasoning-echo rejection: HTTP 400 plus the fingerprint body.
+pub(super) fn is_thinking_echo_rejection(status: u16, body: &str) -> bool {
+    status == 400 && body.contains(THINKING_ECHO_FINGERPRINT)
+}
+
 pub(super) async fn forward_upstream_response(
     response: reqwest::Response,
     context: ResponseForwardContext<'_>,
@@ -141,6 +171,17 @@ pub(super) async fn forward_upstream_response(
         // a committed stream.
         if quota_exhausted && context.quota_failover_enabled {
             return Err(anyhow::Error::new(QuotaFailoverSignal {
+                status,
+                body,
+                response_headers: upstream_response_headers,
+            }));
+        }
+        // Issue #556: hand the thinking-echo rejection to the retry loop so it
+        // can resend this turn once with thinking off. The buffered read above
+        // runs before any `ResponseStart`, so a streaming request is eligible
+        // too.
+        if is_thinking_echo_rejection(status.as_u16(), &body_text) {
+            return Err(anyhow::Error::new(ThinkingEchoRetrySignal {
                 status,
                 body,
                 response_headers: upstream_response_headers,
@@ -428,7 +469,7 @@ pub(super) fn logged_response_raw_body(
 
 #[cfg(test)]
 mod status_tests {
-    use super::client_status_for_upstream_error;
+    use super::{client_status_for_upstream_error, is_thinking_echo_rejection};
     use http::StatusCode;
 
     #[test]
@@ -449,6 +490,23 @@ mod status_tests {
         );
 
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn detects_the_thinking_echo_rejection_fingerprint() {
+        let body = r#"{"error":{"message":"reasoning_content in the thinking mode must be passed back to the model."}}"#;
+        assert!(is_thinking_echo_rejection(400, body));
+        // Only HTTP 400 with the exact case-sensitive substring.
+        assert!(!is_thinking_echo_rejection(500, body));
+        assert!(!is_thinking_echo_rejection(422, body));
+        assert!(!is_thinking_echo_rejection(
+            400,
+            r#"{"error":{"message":"no tool output found"}}"#
+        ));
+        assert!(!is_thinking_echo_rejection(
+            400,
+            r#"{"error":{"message":"Must be passed back"}}"#
+        ));
     }
 }
 

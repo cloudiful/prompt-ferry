@@ -18,11 +18,12 @@ use super::super::{
 use super::{
     forward::{
         QuotaFailoverSignal, ResponseForwardContext, ResponseLoggingContext,
-        forward_upstream_response, respond_upstream_error,
+        ThinkingEchoRetrySignal, forward_upstream_response, respond_upstream_error,
     },
     proxy,
     request_logging::log_prepared_upstream_summary,
     request_support::{ai_route_usage_log, prepare_upstream_request_for_route},
+    thinking_downgrade::{self, ThinkingDisposition},
     upstream::{build_upstream_request, upstream_url_for_route},
 };
 
@@ -167,6 +168,45 @@ pub(super) async fn forward_route_request(
         .runtime_state
         .request_cancellation(request.request_id.as_str())
         .await;
+    // Issue #556: pre-flight thinking downgrade. The decision reads the final
+    // outbound body (translation and the `teo` effort override already
+    // applied) plus the parent artifact chain, and only rewrites a second body
+    // copy: the first attempt keeps its requested thinking unless the decision
+    // proves this turn has no reasoning to pass back.
+    let thinking_downgrade = thinking_downgrade::resolve_thinking_disposition(
+        services.admin_state(),
+        request_ctx.request_prompt_log.parent_event_id,
+        &route,
+        prepared_body_bytes(&prepared.body),
+    )
+    .await;
+    if thinking_downgrade.is_downgraded() {
+        tracing::info!(
+            event = "thinking_downgrade",
+            request_id = %request_ctx.request_id,
+            conversation_id = %conversation_id_for_log(request_ctx),
+            endpoint_id = %route.route_id,
+            provider = route.provider.as_str(),
+            native_api = route.native_api.as_str(),
+            disposition = thinking_downgrade.as_str(),
+            "parent turn carries no reasoning to pass back; disabling thinking for this turn"
+        );
+    }
+    // The escape hatch keeps both the pre-flight rewrite and the fingerprint
+    // retry off, so a bypassed deployment forwards byte-identical requests.
+    let thinking_downgrade_bypassed = thinking_downgrade::thinking_downgrade_bypassed();
+    // The downgraded copy is only materialized when a downgrade is actually
+    // going to be sent: the pre-flight decision here, or a fingerprint
+    // rejection later.
+    let mut downgraded_body = if !thinking_downgrade_bypassed && thinking_downgrade.is_downgraded()
+    {
+        downgrade_prepared_body(&route, &prepared.body)
+    } else {
+        None
+    };
+    let mut thinking_off = downgraded_body.is_some();
+    let mut thinking_retried = false;
+    let mut pending_thinking_echo: Option<ThinkingEchoRetrySignal> = None;
     let mut retried = false;
     let mut last_retried_phase = None;
     let mut attempt = 0usize;
@@ -224,7 +264,7 @@ pub(super) async fn forward_route_request(
             method,
             &upstream_url,
             &route,
-            &prepared.body,
+            attempt_body(&prepared, downgraded_body.as_ref(), thinking_off),
             &request.headers,
             request_ctx.request_prompt_log.conversation_id,
         )
@@ -273,6 +313,63 @@ pub(super) async fn forward_route_request(
                                 last_retried_phase,
                             );
                         }
+                        if thinking_retried {
+                            tracing::info!(
+                                event = "thinking_echo_retry_sent",
+                                request_id = %request_ctx.request_id,
+                                conversation_id = %conversation_id_for_log(request_ctx),
+                                endpoint_id = %route.route_id,
+                                attempt = attempt_number,
+                                disposition = ThinkingDisposition::DowngradedNoReasoning.as_str(),
+                                "thinking-off resend was no longer rejected by the reasoning-echo fingerprint"
+                            );
+                        }
+                        return Ok(ForwardOutcome::Handled);
+                    }
+                    AttemptOutcome::ThinkingEchoRetry(signal) => {
+                        if !thinking_retried && !thinking_off && !thinking_downgrade_bypassed {
+                            if downgraded_body.is_none() {
+                                downgraded_body = downgrade_prepared_body(&route, &prepared.body);
+                            }
+                            if downgraded_body.is_some() {
+                                thinking_retried = true;
+                                thinking_off = true;
+                                tracing::warn!(
+                                    event = "thinking_echo_retry",
+                                    request_id = %request_ctx.request_id,
+                                    conversation_id = %conversation_id_for_log(request_ctx),
+                                    endpoint_id = %route.route_id,
+                                    provider = route.provider.as_str(),
+                                    native_api = route.native_api.as_str(),
+                                    attempt = attempt_number,
+                                    status = signal.status.as_u16(),
+                                    disposition =
+                                        ThinkingDisposition::DowngradedNoReasoning.as_str(),
+                                    "upstream rejected the turn for a missing reasoning echo; resending once with thinking off"
+                                );
+                                pending_thinking_echo = Some(signal);
+                                attempt += 1;
+                                continue;
+                            }
+                        }
+                        tracing::warn!(
+                            event = "thinking_echo_retry_rejected",
+                            request_id = %request_ctx.request_id,
+                            conversation_id = %conversation_id_for_log(request_ctx),
+                            endpoint_id = %route.route_id,
+                            attempt = attempt_number,
+                            status = signal.status.as_u16(),
+                            thinking_retried,
+                            "thinking-off resend was not available or was rejected again; returning the original upstream error"
+                        );
+                        let signal = pending_thinking_echo.take().unwrap_or(signal);
+                        Box::pin(respond_upstream_error(
+                            &response_ctx,
+                            signal.status,
+                            signal.body,
+                            signal.response_headers,
+                        ))
+                        .await?;
                         return Ok(ForwardOutcome::Handled);
                     }
                     AttemptOutcome::QuotaFailover(signal) => {
@@ -338,6 +435,7 @@ enum AttemptOutcome {
     Handled,
     Failure(UpstreamAttemptFailure),
     QuotaFailover(QuotaFailoverSignal),
+    ThinkingEchoRetry(ThinkingEchoRetrySignal),
 }
 
 /// Issue #502 Task 4: ferry-side self-summarize compact for non-Responses
@@ -442,6 +540,54 @@ async fn handle_self_summarize_compact(
     Ok(ForwardOutcome::Handled)
 }
 
+/// Issue #556: bytes of the prepared outbound body, independent of the
+/// passthrough/buffered classification.
+fn prepared_body_bytes(body: &PreparedRequestBody) -> &[u8] {
+    match body {
+        PreparedRequestBody::PassthroughStream(bytes)
+        | PreparedRequestBody::BufferedBytes(bytes) => bytes.as_slice(),
+    }
+}
+
+/// Issue #556: a copy of the outbound body with thinking turned off, or
+/// `None` when the route's protocol (or the body itself) cannot be rewritten
+/// — the retry is only useful when the resend actually differs.
+fn downgrade_prepared_body(
+    route: &db::RouteConfig,
+    body: &PreparedRequestBody,
+) -> Option<PreparedRequestBody> {
+    match body {
+        PreparedRequestBody::PassthroughStream(bytes) => {
+            let rewritten = thinking_downgrade::apply_thinking_off(route.native_api, bytes.clone());
+            (rewritten != *bytes).then_some(PreparedRequestBody::PassthroughStream(rewritten))
+        }
+        PreparedRequestBody::BufferedBytes(bytes) => {
+            let rewritten = thinking_downgrade::apply_thinking_off(route.native_api, bytes.clone());
+            (rewritten != *bytes).then_some(PreparedRequestBody::BufferedBytes(rewritten))
+        }
+    }
+}
+
+fn attempt_body<'a>(
+    prepared: &'a PreparedUpstreamRequest,
+    downgraded: Option<&'a PreparedRequestBody>,
+    thinking_off: bool,
+) -> &'a PreparedRequestBody {
+    if thinking_off {
+        downgraded.unwrap_or(&prepared.body)
+    } else {
+        &prepared.body
+    }
+}
+
+fn conversation_id_for_log(request_ctx: &RequestExecutionContext) -> String {
+    request_ctx
+        .request_prompt_log
+        .conversation_id
+        .map(|id| id.to_string())
+        .unwrap_or_default()
+}
+
 async fn send_compact_json(
     services: &RuntimeServices,
     request_id: &str,
@@ -486,18 +632,21 @@ async fn handle_attempt_response(
             Ok(failure) => Ok(AttemptOutcome::Failure(failure)),
             Err(err) => match err.downcast::<QuotaFailoverSignal>() {
                 Ok(signal) => Ok(AttemptOutcome::QuotaFailover(signal)),
-                Err(err) => {
-                    let phase = if super::super::context::is_bridge_send_error(&err) {
-                        UpstreamFailurePhase::RelayBridge
-                    } else {
-                        UpstreamFailurePhase::LocalProcessing
-                    };
-                    Ok(AttemptOutcome::Failure(UpstreamAttemptFailure {
-                        phase,
-                        error: err,
-                        retryable: false,
-                    }))
-                }
+                Err(err) => match err.downcast::<ThinkingEchoRetrySignal>() {
+                    Ok(signal) => Ok(AttemptOutcome::ThinkingEchoRetry(signal)),
+                    Err(err) => {
+                        let phase = if super::super::context::is_bridge_send_error(&err) {
+                            UpstreamFailurePhase::RelayBridge
+                        } else {
+                            UpstreamFailurePhase::LocalProcessing
+                        };
+                        Ok(AttemptOutcome::Failure(UpstreamAttemptFailure {
+                            phase,
+                            error: err,
+                            retryable: false,
+                        }))
+                    }
+                },
             },
         },
     }

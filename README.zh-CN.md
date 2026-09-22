@@ -259,6 +259,26 @@ ferry 会在该 call 后紧邻插入 `function_call_output` 占位
 结构化日志（`event=chat_to_responses_missing_tool_output`、
 `event=upstream_invalid_continuation`）。
 
+### 思考降级
+
+思考模式的上游在“父轮 assistant tool-call 消息没有可回传的 reasoning”（
+thinking 模式下 `reasoning_content` / `reasoning_text` 必须回传）时，会拒绝带
+tools 的一轮请求。ferry 让这类轮次继续可用：
+
+- 事前降级：已落盘的父轮 artifact 证明父轮没有产生 reasoning，且本轮请求思考、
+  带 tools、也没有可回填内容时，ferry 只对这一轮关掉思考。Chat 请求体写入
+  `thinking: {"type":"disabled"}` 并删除 `reasoning_effort`（覆盖按目标的思考
+  强度覆盖值）；Responses 请求体写入 `reasoning.effort: "none"`。
+- 指纹重试：上游返回 `400` 且响应体包含 `must be passed back` 时，同一轮会关闭
+  思考重发一次；重发仍被拒绝则返回原始上游错误。
+
+两条路径都不会伪造 reasoning、不新增落盘字段、不改动目标配置；能回传 reasoning
+的轮次按原字节转发。观测事件：`event=thinking_downgrade`、
+`event=thinking_echo_retry`、`event=thinking_echo_retry_sent`、
+`event=thinking_echo_retry_rejected`，均带 `conversation_id`、`provider`、
+`native_api`、`disposition`、`attempt`。设置
+`PROMPT_FERRY_DISABLE_THINKING_DOWNGRADE=1` 可同时旁路两条路径。
+
 ### 单机二进制
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的

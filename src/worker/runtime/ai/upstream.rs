@@ -426,6 +426,7 @@ mod tests {
     use crate::{
         config::NativeApi,
         db::{RouteConfig, RouteSelectionReason},
+        worker::runtime::ai::thinking_downgrade,
     };
     use axum::{Router, http::StatusCode, routing::post};
     use std::sync::{
@@ -1287,6 +1288,37 @@ mod tests {
                 .expect("deepseek body bytes");
             let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
             assert_eq!(value["thinking"]["type"], "enabled");
+        }
+    }
+
+    #[test]
+    fn downgraded_thinking_survives_the_deepseek_injection_for_both_body_shapes() {
+        let route = deepseek_route(NativeApi::Chat);
+        let requested =
+            br#"{"model":"deepseek-flash","reasoning_effort":"high","messages":[]}"#.to_vec();
+        let downgraded = thinking_downgrade::apply_thinking_off(NativeApi::Chat, requested);
+        for body in [
+            PreparedRequestBody::BufferedBytes(downgraded.clone()),
+            PreparedRequestBody::PassthroughStream(downgraded.clone()),
+        ] {
+            let request = build_upstream_request(
+                &Client::new(),
+                &Method::POST,
+                "https://api.deepseek.com/v1/chat/completions",
+                &route,
+                &body,
+                &[],
+                None,
+            )
+            .build()
+            .unwrap();
+            let bytes = request
+                .body()
+                .and_then(|body| body.as_bytes())
+                .expect("deepseek body bytes");
+            let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+            assert_eq!(value["thinking"]["type"], "disabled");
+            assert!(value.get("reasoning_effort").is_none());
         }
     }
 
