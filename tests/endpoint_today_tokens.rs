@@ -40,7 +40,7 @@ async fn record_ai_usage(
     endpoint_id: Uuid,
     total_tokens: i64,
 ) -> anyhow::Result<i64> {
-    Ok(db::record_request_record(
+    db::record_request_record(
         pool,
         db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/chat/completions")
             .with_state(
@@ -52,7 +52,7 @@ async fn record_ai_usage(
             .with_timing(Some(200), Some(true), Some(10), Some(1))
             .with_usage(None, None, Some(total_tokens), None, None, None),
     )
-    .await?)
+    .await
 }
 
 #[tokio::test]

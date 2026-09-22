@@ -127,14 +127,14 @@ pub(super) fn build_snapshot_keys_sqlite(
             routes.push((route.scope, route.owner_user_id, target.endpoint_id));
         }
     }
-    if routes.is_empty() {
-        if let Some(endpoint) = snapshot.endpoints.iter().find(|endpoint| endpoint.enabled) {
-            routes.push((
-                crate::standalone_config::RouteScope::Admin,
-                None,
-                endpoint.endpoint_id,
-            ));
-        }
+    if routes.is_empty()
+        && let Some(endpoint) = snapshot.endpoints.iter().find(|endpoint| endpoint.enabled)
+    {
+        routes.push((
+            crate::standalone_config::RouteScope::Admin,
+            None,
+            endpoint.endpoint_id,
+        ));
     }
     let mut keys = Vec::new();
     for key in snapshot.client_keys.iter().filter(|key| key.enabled) {

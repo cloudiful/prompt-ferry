@@ -133,7 +133,7 @@ pub(super) async fn model_route_candidates_by_rule(
             .unwrap_or_else(|| {
                 fallback_api_keys(row.endpoint_id, &row.endpoint_name, &row.api_key)
             });
-        let provider = crate::db::EndpointProvider::from_str(&row.provider);
+        let provider = crate::db::EndpointProvider::from_str_or_default(&row.provider);
         let service_tier =
             crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref());
         // Issue #409 Phase 1: target explicit wins, else endpoint fallback.

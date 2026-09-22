@@ -144,7 +144,7 @@ pub(super) async fn handle_llm_review_gate(
             match wait_result {
                 ApprovalResolution::Approved => Ok(true),
                 ApprovalResolution::Rejected => {
-                    respond_with_local_error(
+                    Box::pin(respond_with_local_error(
                         services,
                         request,
                         request_ctx,
@@ -156,7 +156,7 @@ pub(super) async fn handle_llm_review_gate(
                             upstream_error_body: None,
                             response_body: None,
                         },
-                    )
+                    ))
                     .await?;
                     Ok(false)
                 }
@@ -182,7 +182,7 @@ pub(super) async fn handle_llm_review_gate(
                             expired,
                         );
                     }
-                    respond_with_local_error(
+                    Box::pin(respond_with_local_error(
                         services,
                         request,
                         request_ctx,
@@ -194,7 +194,7 @@ pub(super) async fn handle_llm_review_gate(
                             upstream_error_body: None,
                             response_body: None,
                         },
-                    )
+                    ))
                     .await?;
                     Ok(false)
                 }
@@ -204,7 +204,7 @@ pub(super) async fn handle_llm_review_gate(
                         .lock()
                         .await
                         .remove(&approval.approval_id);
-                    respond_with_local_error(
+                    Box::pin(respond_with_local_error(
                         services,
                         request,
                         request_ctx,
@@ -215,7 +215,7 @@ pub(super) async fn handle_llm_review_gate(
                             upstream_error_body: None,
                             response_body: None,
                         },
-                    )
+                    ))
                     .await?;
                     Ok(false)
                 }
@@ -229,7 +229,7 @@ pub(super) async fn handle_llm_review_gate(
                     ReviewFailure::Timeout => "review request timed out",
                     ReviewFailure::Error(_) => "review request failed",
                 };
-                respond_with_local_error(
+                Box::pin(respond_with_local_error(
                     services,
                     request,
                     request_ctx,
@@ -240,7 +240,7 @@ pub(super) async fn handle_llm_review_gate(
                         upstream_error_body: None,
                         response_body: None,
                     },
-                )
+                ))
                 .await?;
                 Ok(false)
             }

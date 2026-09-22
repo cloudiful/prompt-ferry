@@ -99,7 +99,7 @@ pub fn router(state: AdminState) -> Router {
     router_with_frontend_dist(state, frontend_dist_dir())
 }
 
-fn response_compression_layer() -> CompressionLayer<impl Predicate + Clone + Send + 'static> {
+fn response_compression_layer() -> CompressionLayer<impl Predicate + Send + 'static> {
     let predicate = DefaultPredicate::new()
         .and(NotForContentType::SSE)
         .and(skip_websocket_upgrade);

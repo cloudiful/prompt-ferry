@@ -190,7 +190,13 @@ pub(super) async fn forward_upstream_response(
                 response_headers: upstream_response_headers,
             }));
         }
-        return respond_upstream_error(&context, status, body, upstream_response_headers).await;
+        return Box::pin(respond_upstream_error(
+            &context,
+            status,
+            body,
+            upstream_response_headers,
+        ))
+        .await;
     }
 
     if response_adapter == ResponseAdapter::ChatToResponses && !is_sse {

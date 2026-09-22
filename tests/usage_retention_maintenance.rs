@@ -13,13 +13,13 @@ async fn create_record(
     user_id: Option<i64>,
     state: db::RequestRecordState,
 ) -> anyhow::Result<i64> {
-    Ok(db::record_request_record(
+    db::record_request_record(
         pool,
         db::RequestRecordCreate::ai_request(request_id, "/v1/responses")
             .with_state(db::UsageEventKind::Request, state)
             .with_request_actor(user_id, None, None, None),
     )
-    .await?)
+    .await
 }
 
 async fn mark_record_old(pool: &sqlx::PgPool, event_id: i64) -> anyhow::Result<()> {

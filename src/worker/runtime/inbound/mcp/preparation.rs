@@ -274,7 +274,7 @@ pub(super) async fn prepare_upstream(
                     &context,
                     &execution.request.request_id,
                     err.status,
-                    &err.code,
+                    err.code,
                     err.message.clone(),
                     err.message,
                 ))

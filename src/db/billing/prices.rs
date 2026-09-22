@@ -114,7 +114,7 @@ pub(super) async fn match_price_rule(
     public_model: &str,
     at: chrono::DateTime<chrono::Utc>,
 ) -> Result<Option<BillingPriceRuleRow>> {
-    Ok(sqlx::query_file_as!(
+    sqlx::query_file_as!(
         BillingPriceRuleRow,
         "src/sql/billing/match_price_rule.sql",
         public_model,
@@ -124,5 +124,5 @@ pub(super) async fn match_price_rule(
     .await
     .with_context(|| {
         format!("billing price rule lookup failed: public_model={public_model} billing_at={at}")
-    })?)
+    })
 }

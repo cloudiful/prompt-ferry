@@ -319,11 +319,11 @@ fn sqlite_timestamp(row: &SqliteRow, column: &str) -> Result<chrono::DateTime<ch
 }
 
 fn parse_timestamp(value: &str, column: &str) -> Result<chrono::DateTime<chrono::Utc>> {
-    if let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(&value) {
+    if let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(value) {
         return Ok(timestamp.with_timezone(&chrono::Utc));
     }
     let timestamp =
-        chrono::NaiveDateTime::parse_from_str(&value, "%Y-%m-%d %H:%M:%S").map_err(|error| {
+        chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S").map_err(|error| {
             StandaloneConfigError::CorruptDatabase(format!(
                 "column {column} is not a timestamp: {error}"
             ))
@@ -382,7 +382,7 @@ pub(crate) fn route_target(
     let native_api = match row.try_get::<Option<String>, _>("native_api") {
         Ok(value) => value
             .as_deref()
-            .map(|v| parse_native_api_lossy(v))
+            .map(parse_native_api_lossy)
             .unwrap_or(NativeApi::Auto),
         Err(sqlx::Error::ColumnNotFound(_)) => NativeApi::Auto,
         Err(error) => return Err(error.into()),

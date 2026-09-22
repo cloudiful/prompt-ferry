@@ -58,6 +58,10 @@ pub async fn spawn_worker(
 
     let config = worker_config(worker_addr, upstream_addr, database_url);
     tokio::spawn(async move {
-        worker::connect_for_test_with_admin(config, reqwest::Client::new()).await
+        Box::pin(worker::connect_for_test_with_admin(
+            config,
+            reqwest::Client::new(),
+        ))
+        .await
     })
 }

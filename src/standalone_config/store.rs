@@ -48,16 +48,17 @@ impl StandaloneConfigStore {
                 message: "must not be empty".to_string(),
             });
         }
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() && !parent.exists() {
-                return Err(StandaloneConfigError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!(
-                        "SQLite parent directory does not exist: {}",
-                        parent.display()
-                    ),
-                )));
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+            && !parent.exists()
+        {
+            return Err(StandaloneConfigError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "SQLite parent directory does not exist: {}",
+                    parent.display()
+                ),
+            )));
         }
         let pool = crate::db::connect_sqlite(path).await?;
         let store = Self {
@@ -395,14 +396,12 @@ impl StandaloneConfigStore {
             .bind(existing.and_then(|server| server.lifecycle_learned_protocol_version.as_deref()))
             .bind(
                 existing
-                    .map(|server| server.lifecycle_learned_for_updated_at)
-                    .flatten()
+                    .and_then(|server| server.lifecycle_learned_for_updated_at)
                     .map(|value| value.to_rfc3339()),
             )
             .bind(
                 existing
-                    .map(|server| server.lifecycle_learned_at)
-                    .flatten()
+                    .and_then(|server| server.lifecycle_learned_at)
                     .map(|value| value.to_rfc3339()),
             )
             .bind(env.ciphertext)

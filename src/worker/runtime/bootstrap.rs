@@ -54,16 +54,14 @@ fn publish_bootstrap_password(
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    Err(last_error.unwrap_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::Other, "file is empty or unreadable")
-    }))
-    .with_context(|| {
-        format!(
-            "bootstrap admin password file {} already exists but could not be read after \
+    Err(last_error.unwrap_or_else(|| std::io::Error::other("file is empty or unreadable")))
+        .with_context(|| {
+            format!(
+                "bootstrap admin password file {} already exists but could not be read after \
              retries; remove the file or restore its contents",
-            password_path.display()
-        )
-    })
+                password_path.display()
+            )
+        })
 }
 
 pub(super) fn validate_config(config: &WorkerConfig) -> anyhow::Result<()> {
@@ -425,11 +423,7 @@ pub(super) async fn build_admin_state(
                     .unwrap_or_default(),
             )
         },
-        async {
-            Ok::<_, anyhow::Error>(
-                db::get_bool_setting(&pool, "model_route_whitelist_enabled", true).await?,
-            )
-        },
+        async { db::get_bool_setting(&pool, "model_route_whitelist_enabled", true).await },
         db::get_request_content_logging(&pool),
         db::get_stream_delta_batching(&pool),
     );

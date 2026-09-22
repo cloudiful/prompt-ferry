@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::db_harness::{TEST_DATABASE_URL_ENV, TestSchema, test_database_configured};
 
 async fn create_completed_record(pool: &sqlx::PgPool) -> anyhow::Result<i64> {
-    Ok(db::record_request_record(
+    db::record_request_record(
         pool,
         db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
             .with_state(
@@ -17,7 +17,7 @@ async fn create_completed_record(pool: &sqlx::PgPool) -> anyhow::Result<i64> {
             )
             .with_request_actor(Some(1), None, None, None),
     )
-    .await?)
+    .await
 }
 
 #[tokio::test]

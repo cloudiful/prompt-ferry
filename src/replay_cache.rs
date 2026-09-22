@@ -433,7 +433,7 @@ impl ReplayCache {
                     }
                 }
                 if let Some(current) = inner.coordinator.get("replay", &key).await? {
-                    return Ok(inner
+                    return inner
                         .coordinator
                         .replace_if_current(
                             "replay",
@@ -442,7 +442,7 @@ impl ReplayCache {
                             &payload,
                             inner.replay_ttl_seconds,
                         )
-                        .await?);
+                        .await;
                 }
                 let stored = inner
                     .coordinator

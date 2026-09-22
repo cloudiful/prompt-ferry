@@ -41,7 +41,7 @@ pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<R
             native_api: parse_native_api(&row.native_api),
             upstream_model: None,
             route_selection_reason: crate::db::RouteSelectionReason::Default,
-            provider: crate::db::EndpointProvider::from_str(&row.provider),
+            provider: crate::db::EndpointProvider::from_str_or_default(&row.provider),
             service_tier: MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
             proxy_url: row.proxy_url,
             // Issue #392 Phase K: direct endpoint routes never normalize.

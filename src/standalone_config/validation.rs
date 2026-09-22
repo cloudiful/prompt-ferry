@@ -50,7 +50,8 @@ impl StandaloneConfig {
             // Issue #248: preset providers derive their official base
             // server-side and ignore any stored value; Generic keeps the
             // normalized stored base.
-            let provider = crate::db::EndpointProvider::from_str(endpoint.provider.as_str());
+            let provider =
+                crate::db::EndpointProvider::from_str_or_default(endpoint.provider.as_str());
             let region = endpoint.provider_region.map(|region| match region {
                 super::models::EndpointRegion::Cn => crate::db::EndpointRegion::Cn,
                 super::models::EndpointRegion::Global => crate::db::EndpointRegion::Global,
@@ -273,7 +274,8 @@ mod tests {
     fn preset_providers_derive_a_valid_base_without_a_stored_one() {
         // Issue #248: a preset row with an empty stored base still validates
         // because the base is derived from the provider/protocol.
-        let provider = crate::db::EndpointProvider::from_str(EndpointProvider::Glm.as_str());
+        let provider =
+            crate::db::EndpointProvider::from_str_or_default(EndpointProvider::Glm.as_str());
         let derived = crate::upstream_presets::preset_base_url(
             provider.into(),
             None,

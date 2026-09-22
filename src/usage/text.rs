@@ -114,6 +114,112 @@ fn non_negative(value: i64) -> i64 {
     value.max(0)
 }
 
+pub(super) fn extract_output_text(value: &Value) -> String {
+    let mut parts = Vec::new();
+    if let Some(text) = value
+        .get("delta")
+        .filter(|_| is_visible_delta_event(value))
+        .or_else(|| value.get("text"))
+        .or_else(|| value.get("output_text"))
+        .and_then(Value::as_str)
+    {
+        parts.push(text.to_string());
+    }
+    if let Some(text) = value
+        .get("delta")
+        .and_then(|delta| delta.get("text").or_else(|| delta.get("thinking")))
+        .and_then(Value::as_str)
+    {
+        parts.push(text.to_string());
+    }
+    if let Some(choices) = value.get("choices").and_then(Value::as_array) {
+        for choice in choices {
+            if let Some(content) = choice
+                .get("delta")
+                .or_else(|| choice.get("message"))
+                .and_then(|message| message.get("content"))
+            {
+                let text = value_text(content);
+                if !text.is_empty() {
+                    parts.push(text);
+                }
+            }
+        }
+    }
+    if let Some(output) = value.get("output").and_then(Value::as_array) {
+        for item in output {
+            if let Some(content) = item.get("content").and_then(Value::as_array) {
+                for part in content {
+                    let text = value_text(
+                        part.get("text")
+                            .or_else(|| part.get("output_text"))
+                            .unwrap_or(part),
+                    );
+                    if !text.is_empty() {
+                        parts.push(text);
+                    }
+                }
+            }
+        }
+    }
+    if let Some(content) = value.get("content").and_then(Value::as_array) {
+        for part in content {
+            let text = value_text(
+                part.get("text")
+                    .or_else(|| part.get("thinking"))
+                    .unwrap_or(part),
+            );
+            if !text.is_empty() {
+                parts.push(text);
+            }
+        }
+    }
+    parts.join("")
+}
+
+pub(super) fn value_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Array(items) => items
+            .iter()
+            .map(value_text)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Value::Object(object) => object
+            .get("text")
+            .or_else(|| object.get("content"))
+            .or_else(|| object.get("input_text"))
+            .or_else(|| object.get("output_text"))
+            .map(value_text)
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+pub(super) fn append_text(target: &mut String, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    target.push_str(text);
+}
+
+pub fn truncate_chars(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_string();
+    }
+    let mut value = text.chars().take(limit).collect::<String>();
+    value.push('…');
+    value
+}
+
+fn is_visible_delta_event(value: &Value) -> bool {
+    value
+        .get("type")
+        .and_then(Value::as_str)
+        .is_none_or(|event_type| event_type == "response.output_text.delta")
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -348,110 +454,4 @@ mod tests {
         assert_eq!(usage.output_tokens, Some(5499));
         assert_eq!(usage.cache_read_tokens, Some(4534));
     }
-}
-
-pub(super) fn extract_output_text(value: &Value) -> String {
-    let mut parts = Vec::new();
-    if let Some(text) = value
-        .get("delta")
-        .filter(|_| is_visible_delta_event(value))
-        .or_else(|| value.get("text"))
-        .or_else(|| value.get("output_text"))
-        .and_then(Value::as_str)
-    {
-        parts.push(text.to_string());
-    }
-    if let Some(text) = value
-        .get("delta")
-        .and_then(|delta| delta.get("text").or_else(|| delta.get("thinking")))
-        .and_then(Value::as_str)
-    {
-        parts.push(text.to_string());
-    }
-    if let Some(choices) = value.get("choices").and_then(Value::as_array) {
-        for choice in choices {
-            if let Some(content) = choice
-                .get("delta")
-                .or_else(|| choice.get("message"))
-                .and_then(|message| message.get("content"))
-            {
-                let text = value_text(content);
-                if !text.is_empty() {
-                    parts.push(text);
-                }
-            }
-        }
-    }
-    if let Some(output) = value.get("output").and_then(Value::as_array) {
-        for item in output {
-            if let Some(content) = item.get("content").and_then(Value::as_array) {
-                for part in content {
-                    let text = value_text(
-                        part.get("text")
-                            .or_else(|| part.get("output_text"))
-                            .unwrap_or(part),
-                    );
-                    if !text.is_empty() {
-                        parts.push(text);
-                    }
-                }
-            }
-        }
-    }
-    if let Some(content) = value.get("content").and_then(Value::as_array) {
-        for part in content {
-            let text = value_text(
-                part.get("text")
-                    .or_else(|| part.get("thinking"))
-                    .unwrap_or(part),
-            );
-            if !text.is_empty() {
-                parts.push(text);
-            }
-        }
-    }
-    parts.join("")
-}
-
-pub(super) fn value_text(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        Value::Array(items) => items
-            .iter()
-            .map(value_text)
-            .filter(|text| !text.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n"),
-        Value::Object(object) => object
-            .get("text")
-            .or_else(|| object.get("content"))
-            .or_else(|| object.get("input_text"))
-            .or_else(|| object.get("output_text"))
-            .map(value_text)
-            .unwrap_or_default(),
-        _ => String::new(),
-    }
-}
-
-pub(super) fn append_text(target: &mut String, text: &str) {
-    if text.is_empty() {
-        return;
-    }
-    target.push_str(text);
-}
-
-pub fn truncate_chars(text: &str, limit: usize) -> String {
-    if text.chars().count() <= limit {
-        return text.to_string();
-    }
-    let mut value = text.chars().take(limit).collect::<String>();
-    value.push('…');
-    value
-}
-
-fn is_visible_delta_event(value: &Value) -> bool {
-    value
-        .get("type")
-        .and_then(Value::as_str)
-        .is_none_or(|event_type| event_type == "response.output_text.delta")
 }

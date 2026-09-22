@@ -59,7 +59,7 @@ pub(in crate::worker::runtime) async fn process_request(
             .headers
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("anthropic-version"));
-        return process_models_request(ModelsRequestContext {
+        return Box::pin(process_models_request(ModelsRequestContext {
             state,
             client: &services.client,
             out_tx: &services.out_tx,
@@ -70,7 +70,7 @@ pub(in crate::worker::runtime) async fn process_request(
             owner_worker_id: services.runtime_state.worker_instance_id(),
             anthropic,
             request_headers: &request.headers,
-        })
+        }))
         .await;
     }
 
@@ -85,12 +85,12 @@ pub(in crate::worker::runtime) async fn process_request(
         Ok(RouteResolution::Responded) => return Ok(()),
         Err(err) => {
             if let Some(affinity_error) = err.downcast_ref::<RouteAffinityError>() {
-                return respond_with_affinity_error(
+                return Box::pin(respond_with_affinity_error(
                     services,
                     &request,
                     &request_ctx,
                     affinity_error.clone(),
-                )
+                ))
                 .await;
             }
             return Err(err);
@@ -128,7 +128,7 @@ pub(in crate::worker::runtime) async fn process_request(
                 return Ok(());
             }
             if error.to_string().contains("upstream_response_too_large") {
-                return respond_with_local_error(
+                return Box::pin(respond_with_local_error(
                     services,
                     &request,
                     &request_ctx,
@@ -140,7 +140,7 @@ pub(in crate::worker::runtime) async fn process_request(
                         upstream_error_body: None,
                         response_body: None,
                     },
-                )
+                ))
                 .await;
             }
             error

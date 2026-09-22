@@ -404,12 +404,12 @@ pub(super) async fn forward_route_request(
                             attempt += 1;
                             continue;
                         }
-                        respond_upstream_error(
+                        Box::pin(respond_upstream_error(
                             &response_ctx,
                             signal.status,
                             signal.body,
                             signal.response_headers,
-                        )
+                        ))
                         .await?;
                         return Ok(ForwardOutcome::Handled);
                     }

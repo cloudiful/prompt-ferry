@@ -130,7 +130,7 @@ pub(super) async fn respond_with_client_error(
         serde_json::json!({
             "type": "error",
             "error": {
-                "type": anthropic_error_type(err.status, &err.code),
+                "type": anthropic_error_type(err.status, err.code),
                 "message": err.message,
             },
         })

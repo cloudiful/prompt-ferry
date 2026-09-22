@@ -18,7 +18,7 @@ use uuid::Uuid;
 fn provider_wire_values_match_minimax_convention() {
     assert_eq!(EndpointProvider::DeepSeek.as_str(), "deepseek");
     assert_eq!(
-        EndpointProvider::from_str("deepseek"),
+        EndpointProvider::from_str_or_default("deepseek"),
         EndpointProvider::DeepSeek
     );
     assert_eq!(
@@ -34,7 +34,7 @@ fn provider_wire_values_match_minimax_convention() {
     assert_eq!(deserialized, EndpointProvider::DeepSeek);
     // Unknown providers keep the legacy generic fallback.
     assert_eq!(
-        EndpointProvider::from_str("legacy-unknown"),
+        EndpointProvider::from_str_or_default("legacy-unknown"),
         EndpointProvider::Generic
     );
 }
@@ -91,10 +91,10 @@ fn key_usage_serde_omits_absent_deepseek_balance() {
         }
     }
     // A key carrying no DeepSeek section must not serialize it.
-    let absent = serde_json::to_value(&key(None)).expect("serialize key");
+    let absent = serde_json::to_value(key(None)).expect("serialize key");
     assert!(absent.get("deepseek_balance").is_none());
     // A key with balance serializes each field under its section.
-    let present = serde_json::to_value(&key(Some(balance()))).expect("serialize key");
+    let present = serde_json::to_value(key(Some(balance()))).expect("serialize key");
     assert_eq!(present["deepseek_balance"]["is_available"], json!(true));
     assert_eq!(present["deepseek_balance"]["currency"], json!("CNY"));
     assert_eq!(present["deepseek_balance"]["total_balance"], json!(110.0));

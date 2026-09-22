@@ -100,7 +100,7 @@ mod timing {
 
     pub(super) fn timing_sample(elapsed_us: u64, counter: &AtomicU64) -> Option<u64> {
         let call = counter.fetch_add(1, Ordering::Relaxed);
-        (elapsed_us > SLOW_US || call % SAMPLE_EVERY == 0).then_some(elapsed_us)
+        (elapsed_us > SLOW_US || call.is_multiple_of(SAMPLE_EVERY)).then_some(elapsed_us)
     }
 }
 use timing::timing_sample;

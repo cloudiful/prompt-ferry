@@ -129,10 +129,10 @@ pub(super) async fn call_with_storage(
             let result =
                 client::call_once(storage, server, selected, request.clone(), conversation_id)
                     .await;
-            if let Ok(value) = &result {
-                if let Some(credits) = scan_credits_used(value) {
-                    record_credits_used(credits);
-                }
+            if let Ok(value) = &result
+                && let Some(credits) = scan_credits_used(value)
+            {
+                record_credits_used(credits);
             }
             return result;
         }

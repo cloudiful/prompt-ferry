@@ -122,27 +122,26 @@ async fn load_existing_route_carry(
         }
         return (HashMap::new(), HashMap::new());
     }
-    if let Some(repo) = state.config_repository.as_sqlite() {
-        if let Ok(Some(route)) = repo
+    if let Some(repo) = state.config_repository.as_sqlite()
+        && let Ok(Some(route)) = repo
             .store()
             .get_route(repo.manager(), rule_id)
             .await
             .map_err(|_| anyhow::anyhow!("sqlite lookup failed"))
-        {
-            return carry_from_targets(
-                route
-                    .targets
-                    .iter()
-                    .map(|target| {
-                        (
-                            target.endpoint_id,
-                            target.proxy_url_override.clone(),
-                            parse_sqlite_windows(&target.active_windows),
-                        )
-                    })
-                    .collect(),
-            );
-        }
+    {
+        return carry_from_targets(
+            route
+                .targets
+                .iter()
+                .map(|target| {
+                    (
+                        target.endpoint_id,
+                        target.proxy_url_override.clone(),
+                        parse_sqlite_windows(&target.active_windows),
+                    )
+                })
+                .collect(),
+        );
     }
     (HashMap::new(), HashMap::new())
 }

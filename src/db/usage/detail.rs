@@ -175,7 +175,7 @@ impl From<RequestRecordDetailRow> for RequestRecordDetail {
             applied_thinking_effort_override: row.applied_thinking_effort_override,
             response_capture_truncated: row.response_capture_truncated.unwrap_or(false),
             tool_call_events: Vec::new(),
-            created_at: row.created_at.unwrap_or_else(|| Utc::now()),
+            created_at: row.created_at.unwrap_or_else(Utc::now),
         }
     }
 }

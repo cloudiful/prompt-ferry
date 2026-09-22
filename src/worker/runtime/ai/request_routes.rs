@@ -170,6 +170,36 @@ async fn resolve_admin_route(
     })
 }
 
+fn default_route(config: &WorkerConfig, request: &BufferedBridgeRequest) -> db::RouteConfig {
+    default_route_for_user(config, request.user_id.unwrap_or_default())
+}
+
+fn default_route_for_user(config: &WorkerConfig, user_id: i64) -> db::RouteConfig {
+    db::RouteConfig {
+        route_id: uuid::Uuid::nil(),
+        user_id,
+        model_route_rule_id: None,
+        base_url: config.upstream_base_url.clone(),
+        api_key: config.upstream_api_key.clone(),
+        endpoint_key_id: None,
+        endpoint_key_label: None,
+        api_keys: Vec::new(),
+        key_lb_enabled: false,
+        native_api: config.upstream_native_api,
+        upstream_model: None,
+        route_selection_reason: db::RouteSelectionReason::Default,
+        provider: db::EndpointProvider::Generic,
+        service_tier: db::MinimaxServiceTier::Standard,
+        proxy_url: None,
+        // Issue #392 Phase K: legacy direct routes never normalize.
+        dev_system_normalize: false,
+        // Issue #464: direct routes follow the caller.
+        thinking_effort_override: None,
+        compact_mode: crate::db::CompactMode::Passthrough,
+        thinking_downgrade_enabled: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,35 +366,5 @@ mod tests {
                 Self::Responded => panic!("route unexpectedly responded"),
             }
         }
-    }
-}
-
-fn default_route(config: &WorkerConfig, request: &BufferedBridgeRequest) -> db::RouteConfig {
-    default_route_for_user(config, request.user_id.unwrap_or_default())
-}
-
-fn default_route_for_user(config: &WorkerConfig, user_id: i64) -> db::RouteConfig {
-    db::RouteConfig {
-        route_id: uuid::Uuid::nil(),
-        user_id,
-        model_route_rule_id: None,
-        base_url: config.upstream_base_url.clone(),
-        api_key: config.upstream_api_key.clone(),
-        endpoint_key_id: None,
-        endpoint_key_label: None,
-        api_keys: Vec::new(),
-        key_lb_enabled: false,
-        native_api: config.upstream_native_api,
-        upstream_model: None,
-        route_selection_reason: db::RouteSelectionReason::Default,
-        provider: db::EndpointProvider::Generic,
-        service_tier: db::MinimaxServiceTier::Standard,
-        proxy_url: None,
-        // Issue #392 Phase K: legacy direct routes never normalize.
-        dev_system_normalize: false,
-        // Issue #464: direct routes follow the caller.
-        thinking_effort_override: None,
-        compact_mode: crate::db::CompactMode::Passthrough,
-        thinking_downgrade_enabled: false,
     }
 }

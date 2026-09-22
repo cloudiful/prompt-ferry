@@ -7,7 +7,9 @@ use crate::config::{NativeApi, NativeApiSource};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum EndpointProvider {
+    #[default]
     Generic,
     Minimax,
     CommandCode,
@@ -31,12 +33,6 @@ pub enum EndpointProvider {
     DeepSeek,
 }
 
-impl Default for EndpointProvider {
-    fn default() -> Self {
-        Self::Generic
-    }
-}
-
 impl EndpointProvider {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -50,7 +46,9 @@ impl EndpointProvider {
         }
     }
 
-    pub fn from_str(value: &str) -> Self {
+    /// Maps a stored provider value to its variant; unknown values are the
+    /// generic provider rather than an error.
+    pub fn from_str_or_default(value: &str) -> Self {
         match value {
             "minimax" => Self::Minimax,
             "command_code" => Self::CommandCode,
@@ -126,7 +124,9 @@ impl MinimaxServiceTier {
         }
     }
 
-    pub fn from_str(value: &str) -> Self {
+    /// Maps a stored service tier to its variant; unknown values fall back to
+    /// the standard tier rather than an error.
+    pub fn from_str_or_default(value: &str) -> Self {
         match value {
             "priority" => Self::Priority,
             _ => Self::Standard,
@@ -248,7 +248,7 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             scope: value.scope,
             owner_user_id: value.owner_user_id,
             name: value.name,
-            provider: EndpointProvider::from_str(&value.provider),
+            provider: EndpointProvider::from_str_or_default(&value.provider),
             provider_region: EndpointRegion::from_str(value.provider_region.as_deref()),
             service_tier: MinimaxServiceTier::from_optional(value.service_tier.as_deref()),
             base_url: value.base_url,
@@ -320,7 +320,7 @@ mod tests {
     fn command_code_provider_round_trips_as_snake_case() {
         assert_eq!(EndpointProvider::CommandCode.as_str(), "command_code");
         assert_eq!(
-            EndpointProvider::from_str("command_code"),
+            EndpointProvider::from_str_or_default("command_code"),
             EndpointProvider::CommandCode
         );
         assert_eq!(
@@ -337,7 +337,7 @@ mod tests {
         assert_eq!(deserialized, EndpointProvider::CommandCode);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
-            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::from_str_or_default("legacy-unknown"),
             EndpointProvider::Generic
         );
     }
@@ -346,7 +346,7 @@ mod tests {
     fn opencode_go_provider_round_trips_as_snake_case() {
         assert_eq!(EndpointProvider::OpencodeGo.as_str(), "opencode_go");
         assert_eq!(
-            EndpointProvider::from_str("opencode_go"),
+            EndpointProvider::from_str_or_default("opencode_go"),
             EndpointProvider::OpencodeGo
         );
         assert_eq!(
@@ -363,7 +363,7 @@ mod tests {
         assert_eq!(deserialized, EndpointProvider::OpencodeGo);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
-            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::from_str_or_default("legacy-unknown"),
             EndpointProvider::Generic
         );
     }
@@ -372,7 +372,7 @@ mod tests {
     fn openrouter_provider_round_trips_as_snake_case() {
         assert_eq!(EndpointProvider::OpenRouter.as_str(), "openrouter");
         assert_eq!(
-            EndpointProvider::from_str("openrouter"),
+            EndpointProvider::from_str_or_default("openrouter"),
             EndpointProvider::OpenRouter
         );
         assert_eq!(
@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(deserialized, EndpointProvider::OpenRouter);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
-            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::from_str_or_default("legacy-unknown"),
             EndpointProvider::Generic
         );
     }
@@ -401,7 +401,10 @@ mod tests {
         // CHECKs and the admin API contract), and `from_optional(None)`
         // must keep the legacy generic fallback for legacy rows.
         assert_eq!(EndpointProvider::Glm.as_str(), "glm");
-        assert_eq!(EndpointProvider::from_str("glm"), EndpointProvider::Glm);
+        assert_eq!(
+            EndpointProvider::from_str_or_default("glm"),
+            EndpointProvider::Glm
+        );
         assert_eq!(
             EndpointProvider::from_optional(Some("glm")),
             EndpointProvider::Glm
@@ -414,7 +417,7 @@ mod tests {
         assert_eq!(deserialized, EndpointProvider::Glm);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
-            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::from_str_or_default("legacy-unknown"),
             EndpointProvider::Generic
         );
         assert_eq!(
@@ -430,7 +433,7 @@ mod tests {
         // contract), not the derived `deep_seek`.
         assert_eq!(EndpointProvider::DeepSeek.as_str(), "deepseek");
         assert_eq!(
-            EndpointProvider::from_str("deepseek"),
+            EndpointProvider::from_str_or_default("deepseek"),
             EndpointProvider::DeepSeek
         );
         assert_eq!(
@@ -445,7 +448,7 @@ mod tests {
         assert_eq!(deserialized, EndpointProvider::DeepSeek);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
-            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::from_str_or_default("legacy-unknown"),
             EndpointProvider::Generic
         );
         assert_eq!(

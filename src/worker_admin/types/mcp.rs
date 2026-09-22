@@ -255,9 +255,7 @@ impl McpServerRequest {
                     }
                 });
         // Non-http transports never carry HTTP auth.
-        if self.transport != "http" {
-            auth_mode = db::MCP_AUTH_MODE_NONE.to_string();
-        } else if !db::is_valid_auth_mode(&auth_mode) {
+        if self.transport != "http" || !db::is_valid_auth_mode(&auth_mode) {
             auth_mode = db::MCP_AUTH_MODE_NONE.to_string();
         }
         let bearer_tokens_json = self
@@ -450,30 +448,31 @@ impl McpServerRequest {
         // standard http transport; the managed MiniMax projection stays on
         // builtin_minimax and keeps its source_endpoint_id binding. Unknown
         // ids are rejected instead of being stored.
-        if let Some(provider_kind) = self.provider_kind.as_deref().map(str::trim) {
-            if !provider_kind.is_empty() && provider_kind != db::MCP_PROVIDER_GENERIC {
-                if !db::is_known_mcp_provider(provider_kind) {
+        if let Some(provider_kind) = self.provider_kind.as_deref().map(str::trim)
+            && !provider_kind.is_empty()
+            && provider_kind != db::MCP_PROVIDER_GENERIC
+        {
+            if !db::is_known_mcp_provider(provider_kind) {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_provider_kind",
+                    "provider_kind must be one of generic, minimax, context7, firecrawl",
+                ));
+            }
+            if provider_kind == db::MCP_PROVIDER_MINIMAX {
+                if self.transport != "builtin_minimax" {
                     return Err(ApiError::new(
                         StatusCode::BAD_REQUEST,
                         "invalid_provider_kind",
-                        "provider_kind must be one of generic, minimax, context7, firecrawl",
+                        "provider_kind minimax requires the builtin_minimax transport",
                     ));
                 }
-                if provider_kind == db::MCP_PROVIDER_MINIMAX {
-                    if self.transport != "builtin_minimax" {
-                        return Err(ApiError::new(
-                            StatusCode::BAD_REQUEST,
-                            "invalid_provider_kind",
-                            "provider_kind minimax requires the builtin_minimax transport",
-                        ));
-                    }
-                } else if self.transport != "http" {
-                    return Err(ApiError::new(
-                        StatusCode::BAD_REQUEST,
-                        "invalid_provider_kind",
-                        "provider_kind presets require the http transport",
-                    ));
-                }
+            } else if self.transport != "http" {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_provider_kind",
+                    "provider_kind presets require the http transport",
+                ));
             }
         }
         // Hosted preset consistency (issue #296 Phase 2): explicit or

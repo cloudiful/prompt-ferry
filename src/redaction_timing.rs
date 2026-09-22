@@ -18,7 +18,7 @@ pub(crate) const PATH_RESTORE: &str = "restore";
 pub(crate) fn timing_sample(elapsed_us: u64, counter: &AtomicU64) -> Option<(u64, bool)> {
     let call = counter.fetch_add(1, Ordering::Relaxed);
     let is_slow = elapsed_us > SLOW_US;
-    let sampled = call % SAMPLE_EVERY == 0;
+    let sampled = call.is_multiple_of(SAMPLE_EVERY);
     (is_slow || sampled).then_some((elapsed_us, is_slow))
 }
 
