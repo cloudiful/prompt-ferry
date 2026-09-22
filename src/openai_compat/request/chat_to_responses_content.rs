@@ -1,3 +1,5 @@
+use sha2::{Digest, Sha256};
+
 use super::*;
 
 pub(super) fn chat_content_to_responses_parts(
@@ -31,7 +33,7 @@ pub(super) fn chat_reasoning_to_responses_item(message: &Map<String, Value>) -> 
         return None;
     }
     Some(json!({
-        "id": crate::openai_compat::response_items::generate_reasoning_id(),
+        "id": deterministic_reasoning_id(&text),
         "type": "reasoning",
         "status": "completed",
         "summary": [],
@@ -40,6 +42,19 @@ pub(super) fn chat_reasoning_to_responses_item(message: &Map<String, Value>) -> 
             "text": text,
         }],
     }))
+}
+
+/// Responses replay the whole conversation on every turn, so a per-turn random
+/// `rs_` id rewrote the replayed prefix and broke upstream prompt caching. The
+/// id is therefore derived from the reasoning text itself: the same reasoning
+/// block keeps the same id across turns.
+fn deterministic_reasoning_id(text: &str) -> String {
+    let digest = Sha256::digest(text.as_bytes());
+    let mut id = String::from("rs_");
+    for byte in digest.iter().take(8) {
+        id.push_str(&format!("{byte:02x}"));
+    }
+    id
 }
 
 fn chat_part_to_responses(part: &Value, assistant: bool) -> Result<Value, CompatError> {
@@ -148,5 +163,77 @@ pub(super) fn chat_content_to_text(content: &Value) -> Result<String, CompatErro
             "unsupported_feature",
             "system/developer content must be text",
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Map, Value, json};
+    use sha2::{Digest, Sha256};
+
+    use super::{chat_reasoning_to_responses_item, deterministic_reasoning_id};
+
+    fn reasoning_message(text: &str) -> Map<String, Value> {
+        json!({"role": "assistant", "reasoning_content": text})
+            .as_object()
+            .expect("message object")
+            .clone()
+    }
+
+    #[test]
+    fn reasoning_item_id_is_deterministic_for_the_same_text() {
+        let first = chat_reasoning_to_responses_item(&reasoning_message("plan then answer"))
+            .expect("first item");
+        let replayed = chat_reasoning_to_responses_item(&reasoning_message("plan then answer"))
+            .expect("replayed item");
+
+        assert_eq!(
+            first["id"], replayed["id"],
+            "a replayed reasoning block must keep its id"
+        );
+        assert_eq!(
+            first["id"],
+            json!(deterministic_reasoning_id("plan then answer"))
+        );
+    }
+
+    #[test]
+    fn reasoning_item_id_is_derived_from_the_text_digest() {
+        let digest = Sha256::digest("plan then answer".as_bytes());
+        let expected = format!(
+            "rs_{}",
+            digest
+                .iter()
+                .take(8)
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
+
+        let id = deterministic_reasoning_id("plan then answer");
+
+        assert_eq!(id, expected);
+        assert_eq!(id.len(), 19);
+        assert!(id.starts_with("rs_"));
+        assert!(
+            id[3..]
+                .chars()
+                .all(|character| character.is_ascii_hexdigit())
+        );
+    }
+
+    #[test]
+    fn reasoning_item_ids_differ_for_different_text() {
+        let first = chat_reasoning_to_responses_item(&reasoning_message("first thought"))
+            .expect("first item");
+        let second = chat_reasoning_to_responses_item(&reasoning_message("second thought"))
+            .expect("second item");
+
+        assert_ne!(first["id"], second["id"]);
+    }
+
+    #[test]
+    fn blank_or_absent_reasoning_content_has_no_item() {
+        assert!(chat_reasoning_to_responses_item(&reasoning_message("   ")).is_none());
+        assert!(chat_reasoning_to_responses_item(&Map::new()).is_none());
     }
 }

@@ -189,9 +189,11 @@ struct RedactionRuntimeStore {
     global_runtime: RedactionRuntime,
     user_configs: HashMap<i64, RedactionConfig>,
     user_runtimes: HashMap<i64, RedactionRuntime>,
-    /// Monotonic policy generation; bumped on every config mutation so upstream
-    /// redaction sessions created under an older policy are rebuilt instead of
-    /// reusing their token counter (Issue #524 Task 5).
+    /// Monotonic policy generation, bumped only when a config mutation changes
+    /// runtime-relevant content, so upstream redaction sessions created under an
+    /// older policy are rebuilt instead of reusing their token counter
+    /// (Issue #524 Task 5) while an unchanged re-publish (restart, settings
+    /// write) keeps every persisted session valid.
     generation: u64,
 }
 
@@ -238,18 +240,47 @@ static REDACTION_RUNTIME: LazyLock<RwLock<RedactionRuntimeStore>> =
 pub static TEST_REDACTION_LOCK: LazyLock<tokio::sync::Mutex<()>> =
     LazyLock::new(|| tokio::sync::Mutex::new(()));
 
+/// Runtime-relevant config equality. Custom string timestamps are admin-console
+/// bookkeeping and never reach the redactor, so re-publishing the same rules
+/// with fresh timestamps must not look like a policy change.
+fn config_content_eq(left: &RedactionConfig, right: &RedactionConfig) -> bool {
+    left.enabled == right.enabled
+        && left.rules == right.rules
+        && left.custom_strings.len() == right.custom_strings.len()
+        && left
+            .custom_strings
+            .iter()
+            .zip(&right.custom_strings)
+            .all(|(left, right)| left.same_content(right))
+}
+
+fn user_configs_content_eq(
+    left: &HashMap<i64, RedactionConfig>,
+    right: &HashMap<i64, RedactionConfig>,
+) -> bool {
+    left.len() == right.len()
+        && left.iter().all(|(user_id, config)| {
+            right
+                .get(user_id)
+                .is_some_and(|other| config_content_eq(config, other))
+        })
+}
+
 pub fn apply_config(config: &RedactionConfig) -> Result<(), RedactorError> {
     let normalized = config.normalized();
     let runtime = RedactionRuntime::from_config(&normalized)?;
     let mut store = REDACTION_RUNTIME
         .write()
         .expect("redaction runtime lock poisoned");
+    let changed = !config_content_eq(&store.global_config, &normalized);
     let user_runtimes =
         RedactionRuntimeStore::build_user_runtimes(&normalized, &store.user_configs)?;
     store.global_config = normalized;
     store.global_runtime = runtime;
     store.user_runtimes = user_runtimes;
-    store.generation = store.generation.wrapping_add(1);
+    if changed {
+        store.generation = store.generation.wrapping_add(1);
+    }
     Ok(())
 }
 
@@ -268,7 +299,13 @@ pub fn apply_configs(
     let mut store = REDACTION_RUNTIME
         .write()
         .expect("redaction runtime lock poisoned");
-    let generation = store.generation.wrapping_add(1);
+    let changed = !config_content_eq(&store.global_config, &normalized_global)
+        || !user_configs_content_eq(&store.user_configs, &normalized_users);
+    let generation = if changed {
+        store.generation.wrapping_add(1)
+    } else {
+        store.generation
+    };
     *store = RedactionRuntimeStore {
         global_config: normalized_global,
         global_runtime,
@@ -284,11 +321,17 @@ pub fn apply_user_config(user_id: i64, config: &RedactionConfig) -> Result<(), R
     let mut store = REDACTION_RUNTIME
         .write()
         .expect("redaction runtime lock poisoned");
+    let changed = store
+        .user_configs
+        .get(&user_id)
+        .is_none_or(|existing| !config_content_eq(existing, &normalized));
     let effective = store.global_config.merge_normalized(&normalized);
     let runtime = RedactionRuntime::from_config(&effective)?;
     store.user_configs.insert(user_id, normalized);
     store.user_runtimes.insert(user_id, runtime);
-    store.generation = store.generation.wrapping_add(1);
+    if changed {
+        store.generation = store.generation.wrapping_add(1);
+    }
     Ok(())
 }
 
@@ -350,9 +393,9 @@ pub fn redaction_enabled_for_user(user_id: Option<i64>) -> bool {
         .enabled
 }
 
-/// Current redaction policy generation. It changes on every config mutation;
-/// callers stamp it onto persisted state so state from an older policy is
-/// rebuilt rather than reused (Issue #524 Task 5).
+/// Current redaction policy generation. It changes when a config mutation
+/// changes runtime-relevant content; callers stamp it onto persisted state so
+/// state from an older policy is rebuilt rather than reused (Issue #524 Task 5).
 pub fn policy_generation() -> u64 {
     REDACTION_RUNTIME
         .read()
@@ -481,9 +524,22 @@ mod tests {
 
     use crate::test_support::{apply as apply_test_config, lock, secret_redaction};
     use crate::{
-        RedactionConfig, RedactionCustomStringRule, RedactionPreviewRequest, apply_configs,
-        redact_text_for_user,
+        RedactionConfig, RedactionCustomStringRule, RedactionPreviewRequest, apply_config,
+        apply_configs, apply_user_config, policy_generation, redact_text_for_user,
     };
+
+    fn custom_string_config(pattern: &str) -> RedactionConfig {
+        RedactionConfig {
+            enabled: true,
+            custom_strings: vec![RedactionCustomStringRule {
+                pattern: pattern.to_string(),
+                match_type: CustomStringMatch::Exact,
+                scope: redactor::CustomStringScope::Text,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn redacts_secrets_in_text() {
@@ -673,6 +729,86 @@ mod tests {
         assert_eq!(config.custom_strings.len(), 1);
         assert_eq!(config.custom_strings[0].created_at, None);
         assert_eq!(config.custom_strings[0].updated_at, None);
+    }
+
+    #[test]
+    fn identical_global_config_reapply_keeps_the_generation() {
+        let _guard = lock();
+        let config = custom_string_config("acme");
+        apply_config(&config).expect("first apply");
+        let generation = policy_generation();
+        assert!(redact_text_for_user("tenant=acme", None).contains("[[RDX:v2:"));
+
+        apply_config(&config).expect("repeat apply");
+        assert_eq!(
+            policy_generation(),
+            generation,
+            "re-publishing identical config must keep the generation"
+        );
+        assert!(redact_text_for_user("tenant=acme", None).contains("[[RDX:v2:"));
+
+        let mut retimestamped = config.clone();
+        retimestamped.custom_strings[0].created_at = Some(Utc::now());
+        retimestamped.custom_strings[0].updated_at = Some(Utc::now());
+        apply_config(&retimestamped).expect("timestamp-only apply");
+        assert_eq!(
+            policy_generation(),
+            generation,
+            "admin-console timestamps are not runtime content"
+        );
+
+        let changed = custom_string_config("globex");
+        apply_config(&changed).expect("changed apply");
+        assert!(policy_generation() > generation);
+        assert!(!redact_text_for_user("tenant=globex", None).contains("globex"));
+    }
+
+    #[test]
+    fn apply_configs_bumps_only_on_content_change() {
+        let _guard = lock();
+        let global = custom_string_config("acme");
+        let user = custom_string_config("private-secret");
+        apply_configs(&global, HashMap::from([(707, user.clone())])).expect("first apply");
+        let generation = policy_generation();
+        assert!(!redact_text_for_user("private-secret", Some(707)).contains("private-secret"));
+
+        apply_configs(&global, HashMap::from([(707, user.clone())])).expect("repeat apply");
+        assert_eq!(policy_generation(), generation);
+
+        let mut changed_user = user;
+        changed_user.custom_strings[0].pattern = "renamed-secret".to_string();
+        apply_configs(&global, HashMap::from([(707, changed_user)])).expect("changed user apply");
+        assert!(policy_generation() > generation);
+        assert!(!redact_text_for_user("renamed-secret", Some(707)).contains("renamed-secret"));
+
+        let generation = policy_generation();
+        apply_configs(&global, HashMap::new()).expect("dropped user apply");
+        assert!(
+            policy_generation() > generation,
+            "removing a user config changes the effective policy"
+        );
+    }
+
+    #[test]
+    fn apply_user_config_bumps_only_on_content_change() {
+        let _guard = lock();
+        apply_config(&custom_string_config("acme")).expect("global apply");
+        let generation = policy_generation();
+
+        let user = custom_string_config("private-secret");
+        apply_user_config(708, &user).expect("first user apply");
+        let generation_with_user = policy_generation();
+        assert!(generation_with_user > generation);
+        assert!(!redact_text_for_user("private-secret", Some(708)).contains("private-secret"));
+
+        apply_user_config(708, &user).expect("repeat user apply");
+        assert_eq!(policy_generation(), generation_with_user);
+
+        let mut changed_user = user;
+        changed_user.custom_strings[0].pattern = "renamed-secret".to_string();
+        apply_user_config(708, &changed_user).expect("changed user apply");
+        assert!(policy_generation() > generation_with_user);
+        assert!(!redact_text_for_user("renamed-secret", Some(708)).contains("renamed-secret"));
     }
 
     #[test]

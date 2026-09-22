@@ -12,11 +12,15 @@ use redactor::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Session budget ceilings. A restore state that exceeds any of these is not
-/// persisted; the caller degrades to irreversible one-shot redaction.
+/// Session budget ceilings. The byte ceiling must hold a whole large
+/// conversation: the serialized restore state carries the full redacted text
+/// (~400KB per 100K tokens), so a tight ceiling dropped the state on every turn
+/// and minted fresh tokens for the next one. A state that still exceeds a
+/// ceiling is not persisted: the prior state is kept when one exists, and the
+/// caller degrades to irreversible one-shot redaction only without one.
 const MAX_ENTRIES: usize = 2000;
 const MAX_PERMITS: usize = 500;
-const MAX_BYTES: usize = 256 * 1024;
+const MAX_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UpstreamRedactionSession {
@@ -165,6 +169,11 @@ impl UpstreamRedactionProcessor {
             .unwrap_or(0)
     }
 
+    /// Finalize the request's redaction state. A state over budget is refused,
+    /// but a refused state never drops the conversation's token map: the prior
+    /// state is returned unchanged when there is one, so every entity already
+    /// mapped keeps its token and only this turn's new mappings are re-minted
+    /// next turn. `None` is reserved for a turn with no prior state at all.
     pub fn finish_state(
         &self,
         original_text: &str,
@@ -186,9 +195,31 @@ impl UpstreamRedactionProcessor {
             policy_generation: self.policy_generation,
         };
         if session.exceeds_budget() {
-            return Ok(None);
+            return Ok(self.prior_session_after_budget_overflow(&session));
         }
         Ok(Some(session))
+    }
+
+    /// Budget overflow must not drop the prefix: the prior state still maps
+    /// every entity already in the conversation, so it is returned as-is, and
+    /// `None` only when there is no prior state to keep.
+    fn prior_session_after_budget_overflow(
+        &self,
+        session: &UpstreamRedactionSession,
+    ) -> Option<UpstreamRedactionSession> {
+        tracing::debug!(
+            path = "budget",
+            entries = session.restore_state.session().entries.len(),
+            permits = session.restore_state.permits().len(),
+            has_prior = self.prior_state.is_some(),
+            "redaction session exceeded its budget"
+        );
+        self.prior_state
+            .as_ref()
+            .map(|prior| UpstreamRedactionSession {
+                restore_state: prior.clone(),
+                policy_generation: self.policy_generation,
+            })
     }
 }
 
