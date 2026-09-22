@@ -54,6 +54,31 @@ pub(super) struct RequestPromptLog {
     pub(super) upstream_redaction_enabled: bool,
     pub(super) upstream_redacted_request_json: Option<Value>,
     pub(super) upstream_restore_session: Option<UpstreamRedactionSession>,
+    /// Issue #564 Task 2: the turn proved the persisted session must be dropped
+    /// (explicit disable, budget overflow, or a policy-generation change). Only
+    /// this flag authorizes the persistence layer to delete the row.
+    pub(super) upstream_redaction_reset: bool,
+}
+
+impl RequestPromptLog {
+    /// Issue #564 Task 1: record the upstream redaction outcome of the turn the
+    /// request actually took. Redaction is prepared after the prompt log is
+    /// built (it needs the resolved `conversation_id`), so this is the only
+    /// write point for `upstream_restore_session` on the AI side; without it
+    /// every downstream record reads `None` and the persistence layer treats
+    /// the turn as a session reset.
+    pub(super) fn apply_upstream_redaction(
+        &mut self,
+        enabled: bool,
+        reset: bool,
+        redacted_request_json: Option<Value>,
+        restore_session: Option<UpstreamRedactionSession>,
+    ) {
+        self.upstream_redaction_enabled = enabled;
+        self.upstream_redaction_reset = reset;
+        self.upstream_redacted_request_json = redacted_request_json;
+        self.upstream_restore_session = restore_session;
+    }
 }
 
 impl Default for RequestPromptLog {
@@ -90,6 +115,7 @@ impl Default for RequestPromptLog {
             upstream_redaction_enabled: false,
             upstream_redacted_request_json: None,
             upstream_restore_session: None,
+            upstream_redaction_reset: false,
         }
     }
 }

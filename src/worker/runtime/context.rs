@@ -312,6 +312,7 @@ impl RequestExecutionContext {
                 .upstream_redacted_request_json
                 .clone(),
             upstream_restore_session: self.request_prompt_log.upstream_restore_session.clone(),
+            upstream_redaction_reset: self.request_prompt_log.upstream_redaction_reset,
             applied_thinking_effort_override: None,
             owner_worker_id: Some(self.owner_worker_id),
             lease_expires_at: Some(lease_expires_at),

@@ -22,7 +22,9 @@ use super::{
     },
     proxy,
     request_logging::log_prepared_upstream_summary,
-    request_support::{ai_route_usage_log, prepare_upstream_request_for_route},
+    request_support::{
+        PreparedRouteRequest, ai_route_usage_log, prepare_upstream_request_for_route,
+    },
     thinking_downgrade::{self, ThinkingDisposition},
     upstream::{build_upstream_request, upstream_url_for_route},
 };
@@ -94,7 +96,7 @@ pub(super) enum ForwardOutcome {
 pub(super) struct RouteForwardRequest<'a> {
     pub(super) services: &'a RuntimeServices,
     pub(super) request: &'a BufferedBridgeRequest,
-    pub(super) request_ctx: &'a RequestExecutionContext,
+    pub(super) request_ctx: &'a mut RequestExecutionContext,
     pub(super) route: &'a db::RouteConfig,
     pub(super) method: &'a Method,
     pub(super) redact_content: bool,
@@ -128,6 +130,19 @@ pub(super) async fn forward_route_request(
         Ok(prepared) => prepared,
         Err(err) => return Ok(ForwardOutcome::CompatError(err)),
     };
+    // Issue #564 Task 1: the prepared turn owns the redaction session; publish
+    // it on the request context before any record is written so the failure and
+    // terminal paths reuse the same session instead of reporting `None`.
+    let PreparedRouteRequest {
+        prepared,
+        redaction,
+    } = prepared;
+    request_ctx.request_prompt_log.apply_upstream_redaction(
+        redaction.enabled,
+        redaction.reset,
+        redaction.redacted_request_json,
+        redaction.session,
+    );
     let upstream_url = upstream_url_for_route(&route, &prepared.path);
     if let Some(state) = services.admin_state() {
         let _ = db::record_request_state(
@@ -217,7 +232,7 @@ pub(super) async fn forward_route_request(
         let response_ctx = ResponseForwardContext {
             route_ctx: &route_ctx,
             request,
-            request_ctx,
+            request_ctx: &*request_ctx,
             upstream_redacted_request_json: prepared.upstream_redacted_request_json.clone(),
             upstream_restore_session: prepared.upstream_restore_session.clone(),
             logging: ResponseLoggingContext {

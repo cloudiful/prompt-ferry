@@ -97,11 +97,11 @@ async fn forward_test_request(
     route: &RouteConfig,
 ) -> anyhow::Result<ForwardOutcome> {
     let request = test_request();
-    let request_ctx = test_request_ctx(&services.runtime_state);
+    let mut request_ctx = test_request_ctx(&services.runtime_state);
     Box::pin(forward_route_request(RouteForwardRequest {
         services,
         request: &request,
-        request_ctx: &request_ctx,
+        request_ctx: &mut request_ctx,
         route,
         method: &http::Method::POST,
         redact_content: false,
@@ -492,7 +492,7 @@ async fn stops_retrying_when_request_is_cancelled_during_backoff() {
     let services = test_services(out_tx);
     let runtime_state = services.runtime_state.clone();
     let request = test_request();
-    let request_ctx = test_request_ctx(&runtime_state);
+    let mut request_ctx = test_request_ctx(&runtime_state);
     let route = test_route(&format!("http://{addr}"), NativeApi::Responses);
     let cancellation = runtime_state
         .test_register_request_cancellation(&request.request_id)
@@ -501,7 +501,7 @@ async fn stops_retrying_when_request_is_cancelled_during_backoff() {
     let wait = forward_route_request(RouteForwardRequest {
         services: &services,
         request: &request,
-        request_ctx: &request_ctx,
+        request_ctx: &mut request_ctx,
         route: &route,
         method: &http::Method::POST,
         redact_content: false,
@@ -833,11 +833,11 @@ async fn forward_chat_completions_request(
     stream: bool,
 ) -> anyhow::Result<ForwardOutcome> {
     let request = chat_completions_request(stream);
-    let request_ctx = test_request_ctx(&services.runtime_state);
+    let mut request_ctx = test_request_ctx(&services.runtime_state);
     Box::pin(forward_route_request(RouteForwardRequest {
         services,
         request: &request,
-        request_ctx: &request_ctx,
+        request_ctx: &mut request_ctx,
         route,
         method: &http::Method::POST,
         redact_content: false,
