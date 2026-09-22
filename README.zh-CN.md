@@ -287,12 +287,15 @@ ferry 会在该 call 后紧邻插入 `function_call_output` 占位
 thinking 模式下 `reasoning_content` / `reasoning_text` 必须回传）时，会拒绝带
 tools 的一轮请求。ferry 让这类轮次继续可用：
 
-- 事前降级：已落盘的父轮 artifact 证明父轮没有产生 reasoning，且本轮请求思考、
-  带 tools、也没有可回填内容时，ferry 只对这一轮关掉思考。Chat 请求体写入
-  `thinking: {"type":"disabled"}` 并删除 `reasoning_effort`（覆盖按目标的思考
-  强度覆盖值）；Responses 请求体写入 `reasoning.effort: "none"`。
+- 事前降级（仅对需要回传思考的上游，当前为 DeepSeek）：已落盘的父轮 artifact 证明
+  父轮没有产生 reasoning，且本轮请求思考、带 tools、也没有可回填内容时，ferry 只对
+  这一轮关掉思考。Chat 请求体写入 `thinking: {"type":"disabled"}` 并删除
+  `reasoning_effort`（覆盖按目标的思考强度覆盖值）；Responses 请求体写入
+  `reasoning.effort: "none"`。其余上游（例如 opencode go）保持请求的思考（含按目标的
+  强度覆盖值），出站请求体不会被改写为 `reasoning.effort: "none"`。
 - 指纹重试：上游返回 `400` 且响应体包含 `must be passed back` 时，同一轮会关闭
-  思考重发一次；重发仍被拒绝则返回原始上游错误。
+  思考重发一次；重发仍被拒绝则返回原始上游错误。该路径不区分上游，对所有上游
+  始终生效。
 
 两条路径都不会伪造 reasoning、不新增落盘字段、不改动目标配置；能回传 reasoning
 的轮次按原字节转发。观测事件：`event=thinking_downgrade`、

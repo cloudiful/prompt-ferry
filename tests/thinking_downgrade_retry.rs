@@ -3,9 +3,12 @@
 //! A mock upstream rejects the first tool-bearing turn with the reasoning-echo
 //! fingerprint (`... must be passed back`). Ferry must resend that one turn
 //! with thinking off, keep every non-fingerprint error untouched, and return
-//! the original upstream error when the resend is rejected again. The last
-//! case covers the pre-flight downgrade: a parent turn whose artifact proves
-//! it produced no reasoning downgrades the next turn before the first attempt.
+//! the original upstream error when the resend is rejected again. The pre-flight
+//! downgrade case covers a parent turn whose artifact proves it produced no
+//! reasoning: ferry downgrades the next turn before the first attempt on the
+//! upstream that requires the echo (DeepSeek, issue #556). Issue #562 adds the
+//! counterpart: on every other upstream the same conditions leave the outbound
+//! body untouched and only the fingerprint retry remains.
 //!
 //! Database-backed like the other worker integration tests; skipped when
 //! `PROMPT_FERRY_TEST_DATABASE_URL` is unset.
@@ -206,6 +209,7 @@ struct ThinkingHarness {
 
 impl ThinkingHarness {
     async fn spawn(
+        provider: db::EndpointProvider,
         native_api: NativeApi,
         mode: UpstreamMode,
         tool_call_first: bool,
@@ -213,13 +217,16 @@ impl ThinkingHarness {
         let schema = TestSchema::new().await?;
         enable_prompt_logging(&schema).await?;
         let (upstream_addr, upstream) = spawn_upstream(mode, tool_call_first).await;
+        // The mock upstream is a local host, so every provider keeps the plain
+        // `base + path` join and the stored base drives the request. Only the
+        // provider identity (hence the thinking-downgrade gate) changes.
         let endpoint = db::create_endpoint(
             &schema.pool,
             db::EndpointCreate {
                 scope: "admin".to_string(),
                 owner_user_id: None,
                 name: "thinking-downgrade-upstream".to_string(),
-                provider: db::EndpointProvider::Generic,
+                provider,
                 provider_region: None,
                 service_tier: Default::default(),
                 base_url: format!("http://{upstream_addr}"),
@@ -374,9 +381,13 @@ async fn chat_fingerprint_400_retries_once_with_thinking_disabled() -> anyhow::R
         return Ok(());
     }
     let _lock = ENV_LOCK.lock().await;
-    let harness =
-        ThinkingHarness::spawn(NativeApi::Chat, UpstreamMode::FingerprintFirstThenOk, false)
-            .await?;
+    let harness = ThinkingHarness::spawn(
+        db::EndpointProvider::Generic,
+        NativeApi::Chat,
+        UpstreamMode::FingerprintFirstThenOk,
+        false,
+    )
+    .await?;
 
     let response = harness.post_chat("chat-fingerprint-retry").await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -402,6 +413,7 @@ async fn responses_fingerprint_400_retries_once_with_effort_none() -> anyhow::Re
     }
     let _lock = ENV_LOCK.lock().await;
     let harness = ThinkingHarness::spawn(
+        db::EndpointProvider::Generic,
         NativeApi::Responses,
         UpstreamMode::FingerprintFirstThenOk,
         false,
@@ -426,8 +438,13 @@ async fn non_fingerprint_400_is_not_retried() -> anyhow::Result<()> {
         return Ok(());
     }
     let _lock = ENV_LOCK.lock().await;
-    let harness =
-        ThinkingHarness::spawn(NativeApi::Chat, UpstreamMode::OtherBadRequest, false).await?;
+    let harness = ThinkingHarness::spawn(
+        db::EndpointProvider::Generic,
+        NativeApi::Chat,
+        UpstreamMode::OtherBadRequest,
+        false,
+    )
+    .await?;
 
     let response = harness.post_chat("chat-other-400").await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -446,8 +463,13 @@ async fn fingerprint_400_after_retry_returns_the_original_error() -> anyhow::Res
         return Ok(());
     }
     let _lock = ENV_LOCK.lock().await;
-    let harness =
-        ThinkingHarness::spawn(NativeApi::Chat, UpstreamMode::AlwaysFingerprint, false).await?;
+    let harness = ThinkingHarness::spawn(
+        db::EndpointProvider::Generic,
+        NativeApi::Chat,
+        UpstreamMode::AlwaysFingerprint,
+        false,
+    )
+    .await?;
 
     let response = harness.post_chat("chat-original-error").await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -473,8 +495,13 @@ async fn env_bypass_disables_the_fingerprint_retry() -> anyhow::Result<()> {
     let _lock = ENV_LOCK.lock().await;
     unsafe { std::env::set_var(DISABLE_ENV, "1") };
     let _bypass = DisableThinkingDowngrade;
-    let harness =
-        ThinkingHarness::spawn(NativeApi::Chat, UpstreamMode::AlwaysFingerprint, false).await?;
+    let harness = ThinkingHarness::spawn(
+        db::EndpointProvider::Generic,
+        NativeApi::Chat,
+        UpstreamMode::AlwaysFingerprint,
+        false,
+    )
+    .await?;
 
     let response = harness.post_chat("chat-env-bypass").await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -499,7 +526,15 @@ async fn parent_turn_without_reasoning_downgrades_before_the_first_attempt() -> 
         return Ok(());
     }
     let _lock = ENV_LOCK.lock().await;
-    let harness = ThinkingHarness::spawn(NativeApi::Chat, UpstreamMode::AlwaysOk, true).await?;
+    // DeepSeek is the upstream that requires the reasoning echo, so the
+    // pre-flight downgrade applies to the very first attempt (issue #556).
+    let harness = ThinkingHarness::spawn(
+        db::EndpointProvider::DeepSeek,
+        NativeApi::Chat,
+        UpstreamMode::AlwaysOk,
+        true,
+    )
+    .await?;
 
     // Turn 1 answers with a tool call and no reasoning content, so the stored
     // artifact proves the parent turn has nothing to pass back.
@@ -518,6 +553,50 @@ async fn parent_turn_without_reasoning_downgrades_before_the_first_attempt() -> 
     assert_eq!(bodies[0]["thinking"]["type"], "enabled");
     assert_eq!(bodies[1]["thinking"]["type"], "disabled");
     assert!(bodies[1].get("reasoning_effort").is_none());
+
+    harness.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn parent_turn_without_reasoning_keeps_thinking_on_a_non_echo_upstream() -> anyhow::Result<()>
+{
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let _lock = ENV_LOCK.lock().await;
+    // Issue #562 repro: opencode go rejects `reasoning.effort = "none"` with a
+    // hard 400 and does not need the reasoning echo, so the same body/artifact
+    // conditions must leave the outbound body untouched.
+    let harness = ThinkingHarness::spawn(
+        db::EndpointProvider::OpencodeGo,
+        NativeApi::Responses,
+        UpstreamMode::AlwaysOk,
+        false,
+    )
+    .await?;
+
+    // There is no replayable parent turn on this path, so the stored artifact
+    // check is not the signal under test; the provider gate is. Send the
+    // tool-bearing thinking turn twice to cover both the "no parent" and
+    // "parent turn without reasoning" shapes.
+    let first = harness.post_responses("opencode-go-thinking").await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let second = harness.post_responses("opencode-go-thinking").await;
+    assert_eq!(second.status(), StatusCode::OK);
+
+    let bodies = harness.upstream.bodies().await;
+    assert_eq!(bodies.len(), 2);
+    // The requested effort survives the `teo` override and the pre-flight
+    // decision: no `none` rewrite happens on a non-echo upstream.
+    for (index, body) in bodies.iter().enumerate() {
+        assert_eq!(
+            body["reasoning"]["effort"], "high",
+            "attempt {index} must forward the requested thinking effort"
+        );
+        assert_eq!(body["tools"][0]["type"], "function");
+    }
 
     harness.shutdown().await?;
     Ok(())
