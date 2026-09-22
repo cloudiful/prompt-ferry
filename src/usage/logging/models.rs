@@ -60,6 +60,11 @@ pub struct UsageRequestMetadata {
     pub upstream_redaction_enabled: bool,
     pub upstream_redacted_request_json: Option<Value>,
     pub upstream_restore_session: Option<UpstreamRedactionSession>,
+    /// Issue #564 Task 2: this record proves the persisted session must be
+    /// dropped (explicit disable, budget overflow, or policy-generation
+    /// change). A missing session without this flag is
+    /// `no_session_available` and must not delete a still-valid row.
+    pub upstream_redaction_reset: bool,
     /// Issue #546: route target `thinking_effort_override` snapshot taken when
     /// the request was routed; `None` means no override.
     pub applied_thinking_effort_override: Option<String>,
@@ -107,6 +112,7 @@ impl Default for UsageRequestMetadata {
             upstream_redaction_enabled: false,
             upstream_redacted_request_json: None,
             upstream_restore_session: None,
+            upstream_redaction_reset: false,
             applied_thinking_effort_override: None,
             owner_worker_id: None,
             lease_expires_at: None,
@@ -174,6 +180,10 @@ pub struct UsageLog {
     pub upstream_redaction_enabled: bool,
     pub upstream_redacted_request_json: Option<Value>,
     pub upstream_restore_session: Option<UpstreamRedactionSession>,
+    /// Issue #564 Task 2: only this flag authorizes deleting the persisted
+    /// conversation redaction session; a missing session by itself is logged
+    /// and left alone.
+    pub upstream_redaction_reset: bool,
     pub response_prompt: Option<String>,
     pub response_raw_body: Option<String>,
     pub response_capture_truncated: bool,
@@ -405,6 +415,7 @@ impl UsageLog {
             upstream_redaction_enabled: metadata.upstream_redaction_enabled,
             upstream_redacted_request_json: metadata.upstream_redacted_request_json,
             upstream_restore_session: metadata.upstream_restore_session,
+            upstream_redaction_reset: metadata.upstream_redaction_reset,
             response_prompt: None,
             response_raw_body: None,
             response_capture_truncated: false,
@@ -531,6 +542,14 @@ impl UsageLog {
         self.upstream_redaction_enabled = upstream_redaction_enabled;
         self.upstream_redacted_request_json = upstream_redacted_request_json;
         self.upstream_restore_session = upstream_restore_session;
+        self
+    }
+
+    /// Issue #564 Task 2: mark this record as proof that the persisted
+    /// conversation redaction session must be dropped (explicit disable,
+    /// budget overflow, or a policy-generation change).
+    pub fn with_upstream_redaction_reset(mut self, reset: bool) -> Self {
+        self.upstream_redaction_reset = reset;
         self
     }
 
