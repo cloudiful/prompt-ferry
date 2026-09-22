@@ -549,6 +549,8 @@ mod tests {
                 active_windows: target_raw.map(str::to_string),
                 endpoint_active_windows: endpoint_raw.map(str::to_string),
                 dev_system_normalize: false,
+                // Issue #566: fixtures keep the thinking adaption off.
+                thinking_downgrade_enabled: false,
                 thinking_effort_override: None,
                 compact_mode: crate::db::CompactMode::Passthrough,
             }
@@ -618,6 +620,8 @@ mod tests {
             active_windows: None,
             endpoint_active_windows: None,
             dev_system_normalize: false,
+            // Issue #566: fixtures keep the thinking adaption off.
+            thinking_downgrade_enabled: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
         };

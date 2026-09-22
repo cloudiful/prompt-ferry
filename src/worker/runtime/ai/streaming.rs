@@ -365,7 +365,10 @@ pub(super) async fn forward_streaming_response(
         .map(|state| match state.stream_delta_batching.try_read() {
             Ok(v) => v.clone(),
             Err(_) => {
-                tracing::warn!(category = "stream_diag", "stream_delta_batching lock contended; falling back to disabled");
+                tracing::warn!(
+                    category = "stream_diag",
+                    "stream_delta_batching lock contended; falling back to disabled"
+                );
                 Default::default()
             }
         })

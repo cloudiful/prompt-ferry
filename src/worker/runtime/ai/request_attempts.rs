@@ -209,12 +209,15 @@ pub(super) async fn forward_route_request(
     }
     // The escape hatch keeps both the pre-flight rewrite and the fingerprint
     // retry off, so a bypassed deployment forwards byte-identical requests.
+    // Issue #566: the per-target switch gates both paths the same way, so a
+    // target that never opted in keeps the pre-#556 single attempt.
     let thinking_downgrade_bypassed = thinking_downgrade::thinking_downgrade_bypassed();
+    let thinking_downgrade_enabled =
+        !thinking_downgrade_bypassed && thinking_downgrade::thinking_downgrade_enabled_for(&route);
     // The downgraded copy is only materialized when a downgrade is actually
     // going to be sent: the pre-flight decision here, or a fingerprint
     // rejection later.
-    let mut downgraded_body = if !thinking_downgrade_bypassed && thinking_downgrade.is_downgraded()
-    {
+    let mut downgraded_body = if thinking_downgrade_enabled && thinking_downgrade.is_downgraded() {
         downgrade_prepared_body(&route, &prepared.body)
     } else {
         None
@@ -342,7 +345,7 @@ pub(super) async fn forward_route_request(
                         return Ok(ForwardOutcome::Handled);
                     }
                     AttemptOutcome::ThinkingEchoRetry(signal) => {
-                        if !thinking_retried && !thinking_off && !thinking_downgrade_bypassed {
+                        if !thinking_retried && !thinking_off && thinking_downgrade_enabled {
                             if downgraded_body.is_none() {
                                 downgraded_body = downgrade_prepared_body(&route, &prepared.body);
                             }

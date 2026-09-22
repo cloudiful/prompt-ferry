@@ -10,6 +10,13 @@
 //! counterpart: on every other upstream the same conditions leave the outbound
 //! body untouched and only the fingerprint retry remains.
 //!
+//! Issue #566 makes the whole adaptation opt-in per target
+//! (`thinking_downgrade_enabled`, default off): with the switch off the
+//! outbound bytes and the single attempt match the pre-#556 behavior, with it
+//! on the #562 behavior applies, and the
+//! `PROMPT_FERRY_DISABLE_THINKING_DOWNGRADE=1` escape hatch still forces a
+//! full bypass on an enabled target.
+//!
 //! Database-backed like the other worker integration tests; skipped when
 //! `PROMPT_FERRY_TEST_DATABASE_URL` is unset.
 
@@ -214,6 +221,18 @@ impl ThinkingHarness {
         mode: UpstreamMode,
         tool_call_first: bool,
     ) -> anyhow::Result<Self> {
+        Self::spawn_with_switch(provider, native_api, mode, tool_call_first, true).await
+    }
+
+    /// Issue #566: `thinking_downgrade_enabled` is the per-target opt-in that
+    /// gates both the pre-flight downgrade and the fingerprint retry.
+    async fn spawn_with_switch(
+        provider: db::EndpointProvider,
+        native_api: NativeApi,
+        mode: UpstreamMode,
+        tool_call_first: bool,
+        thinking_downgrade_enabled: bool,
+    ) -> anyhow::Result<Self> {
         let schema = TestSchema::new().await?;
         enable_prompt_logging(&schema).await?;
         let (upstream_addr, upstream) = spawn_upstream(mode, tool_call_first).await;
@@ -260,6 +279,7 @@ impl ThinkingHarness {
                     proxy_url_override: None,
                     active_windows: None,
                     dev_system_normalize: false,
+                    thinking_downgrade_enabled,
                     thinking_effort_override: Some("high".to_string()),
                     compact_mode: db::CompactMode::Passthrough,
                 }],
@@ -487,6 +507,75 @@ async fn fingerprint_400_after_retry_returns_the_original_error() -> anyhow::Res
 }
 
 #[tokio::test]
+async fn switch_off_target_keeps_the_passthrough_and_never_retries() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let _lock = ENV_LOCK.lock().await;
+    // Issue #566 default: the switch is off, so the fingerprint rejection is
+    // surfaced untouched after a single attempt, exactly like pre-#556.
+    let harness = ThinkingHarness::spawn_with_switch(
+        db::EndpointProvider::Generic,
+        NativeApi::Chat,
+        UpstreamMode::FingerprintFirstThenOk,
+        false,
+        false,
+    )
+    .await?;
+
+    let response = harness.post_chat("chat-switch-off").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let bodies = harness.upstream.bodies().await;
+    assert_eq!(bodies.len(), 1, "switch off must not resend the turn");
+    assert_eq!(bodies[0]["thinking"]["type"], "enabled");
+    assert_eq!(bodies[0]["reasoning_effort"], "high");
+
+    harness.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn switch_off_target_never_pre_downgrades_deepseek() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let _lock = ENV_LOCK.lock().await;
+    // DeepSeek would pre-downgrade turn 2 under #562, but the target never
+    // opted in, so the tracked effort survives on both attempts.
+    let harness = ThinkingHarness::spawn_with_switch(
+        db::EndpointProvider::DeepSeek,
+        NativeApi::Chat,
+        UpstreamMode::AlwaysOk,
+        true,
+        false,
+    )
+    .await?;
+
+    let first = harness.post_chat("thinking-thread-switch-off").await;
+    assert_eq!(first.status(), StatusCode::OK);
+    assert!(
+        !wait_for_assistant_artifact(&harness.schema).await?,
+        "the mock tool-call turn carries no reasoning content"
+    );
+    let second = harness.post_chat("thinking-thread-switch-off").await;
+    assert_eq!(second.status(), StatusCode::OK);
+    let bodies = harness.upstream.bodies().await;
+    assert_eq!(bodies.len(), 2);
+    for (index, body) in bodies.iter().enumerate() {
+        assert_eq!(
+            body["thinking"]["type"], "enabled",
+            "attempt {index} must keep the requested thinking"
+        );
+        assert_eq!(body["reasoning_effort"], "high");
+    }
+
+    harness.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn env_bypass_disables_the_fingerprint_retry() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
@@ -495,11 +584,14 @@ async fn env_bypass_disables_the_fingerprint_retry() -> anyhow::Result<()> {
     let _lock = ENV_LOCK.lock().await;
     unsafe { std::env::set_var(DISABLE_ENV, "1") };
     let _bypass = DisableThinkingDowngrade;
-    let harness = ThinkingHarness::spawn(
+    // Issue #566: the escape hatch outranks an enabled target, so even the
+    // opt-in route keeps the pre-fix single attempt.
+    let harness = ThinkingHarness::spawn_with_switch(
         db::EndpointProvider::Generic,
         NativeApi::Chat,
         UpstreamMode::AlwaysFingerprint,
         false,
+        true,
     )
     .await?;
 

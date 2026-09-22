@@ -19,10 +19,15 @@
 //!   fingerprint, so the same request is resent once with thinking off. This
 //!   path stays provider-independent and covers every upstream.
 //!
+//! Issue #566 makes the whole adaptation opt-in per target: both paths are
+//! additionally gated on [`db::RouteConfig::thinking_downgrade_enabled`], and
+//! a target that never opted in keeps the pre-#556 byte-identical passthrough.
+//!
 //! The rewrite never touches persistence, never fabricates reasoning, and
 //! leaves `teo` target configuration alone. Setting
 //! `PROMPT_FERRY_DISABLE_THINKING_DOWNGRADE=1` bypasses both paths and keeps
-//! the forwarded bytes identical to the pre-#556 behavior.
+//! the forwarded bytes identical to the pre-#556 behavior, regardless of the
+//! per-target switch.
 
 use crate::{config::NativeApi, db, worker_admin::AdminState};
 use serde_json::{Map, Value, json};
@@ -60,6 +65,13 @@ pub(super) fn thinking_downgrade_bypassed() -> bool {
     std::env::var(DISABLE_ENV).as_deref() == Ok("1")
 }
 
+/// Whether the per-target switch enables the adaptation for one route. The
+/// env escape hatch keeps the highest priority, so this only reports the
+/// configured intent; callers pair it with [`thinking_downgrade_bypassed`].
+pub(super) fn thinking_downgrade_enabled_for(route: &db::RouteConfig) -> bool {
+    route.thinking_downgrade_enabled
+}
+
 /// The single downgrade rule: no parent reasoning, no restorable echo, a
 /// thinking request, tools, and an upstream that requires the reasoning echo
 /// are all required before ferry yields for one turn. Every other turn keeps
@@ -76,8 +88,10 @@ pub(super) fn decide_thinking(
     thinking_requested: bool,
     has_tools: bool,
     upstream_requires_echo: bool,
+    downgrade_enabled: bool,
 ) -> ThinkingDisposition {
-    if thinking_requested
+    if downgrade_enabled
+        && thinking_requested
         && has_tools
         && !parent_has_reasoning
         && !echo_restorable
@@ -139,6 +153,12 @@ pub(super) fn body_thinking_signals(
 /// Issue #562: the pre-flight downgrade is gated on the route provider
 /// requiring the reasoning echo, so a non-echo upstream (e.g. opencode go)
 /// never receives a rewritten body and the parent lookup is skipped entirely.
+///
+/// Issue #566: the whole adaptation is additionally gated per target on
+/// [`db::RouteConfig::thinking_downgrade_enabled`], so a target that never
+/// opted in keeps the pre-#556 byte-identical passthrough (no rewrite and no
+/// fingerprint retry) while the `PROMPT_FERRY_DISABLE_THINKING_DOWNGRADE=1`
+/// escape hatch keeps the highest priority.
 pub(super) async fn resolve_thinking_disposition(
     admin_state: Option<&AdminState>,
     parent_event_id: Option<i64>,
@@ -148,7 +168,8 @@ pub(super) async fn resolve_thinking_disposition(
     if thinking_downgrade_bypassed() {
         return ThinkingDisposition::AsRequested;
     }
-    let upstream_requires_echo = route.provider.requires_reasoning_echo();
+    let downgrade_enabled = route.thinking_downgrade_enabled;
+    let upstream_requires_echo = downgrade_enabled && route.provider.requires_reasoning_echo();
     let signals = body_thinking_signals(route.provider, route.native_api, body);
     let parent_has_reasoning = if upstream_requires_echo
         && signals.thinking_requested
@@ -165,6 +186,7 @@ pub(super) async fn resolve_thinking_disposition(
         signals.thinking_requested,
         signals.has_tools,
         upstream_requires_echo,
+        downgrade_enabled,
     )
 }
 
@@ -357,28 +379,44 @@ mod tests {
     #[test]
     fn downgrades_only_when_nothing_can_be_passed_back() {
         assert_eq!(
-            decide_thinking(false, false, true, true, true),
+            decide_thinking(false, false, true, true, true, true),
             ThinkingDisposition::DowngradedNoReasoning
         );
         // Parent reasoning present: the replayed turn can pass it back.
         assert_eq!(
-            decide_thinking(true, false, true, true, true),
+            decide_thinking(true, false, true, true, true, true),
             ThinkingDisposition::AsRequested
         );
         // A restorable echo supplies the reasoning.
         assert_eq!(
-            decide_thinking(false, true, true, true, true),
+            decide_thinking(false, true, true, true, true, true),
             ThinkingDisposition::AsRequested
         );
         // No tools: the upstream never asks for the tool-call reasoning.
         assert_eq!(
-            decide_thinking(false, false, true, false, true),
+            decide_thinking(false, false, true, false, true, true),
             ThinkingDisposition::AsRequested
         );
         // Thinking already off: nothing to downgrade.
         assert_eq!(
-            decide_thinking(false, false, false, true, true),
+            decide_thinking(false, false, false, true, true, true),
             ThinkingDisposition::AsRequested
+        );
+    }
+
+    #[test]
+    fn per_target_switch_off_never_downgrades() {
+        // Issue #566: every other condition holds, but a target that never
+        // opted in keeps the requested thinking (pre-#556 passthrough).
+        assert_eq!(
+            decide_thinking(false, false, true, true, true, false),
+            ThinkingDisposition::AsRequested
+        );
+        // The switch is the only difference: the same inputs with it on
+        // downgrade.
+        assert_eq!(
+            decide_thinking(false, false, true, true, true, true),
+            ThinkingDisposition::DowngradedNoReasoning
         );
     }
 
@@ -389,13 +427,13 @@ mod tests {
         // requested thinking is forwarded untouched and the fingerprint retry
         // remains the only fallback.
         assert_eq!(
-            decide_thinking(false, false, true, true, false),
+            decide_thinking(false, false, true, true, false, true),
             ThinkingDisposition::AsRequested
         );
         // The gate is the only difference: same inputs with an echo upstream
         // still downgrade.
         assert_eq!(
-            decide_thinking(false, false, true, true, true),
+            decide_thinking(false, false, true, true, true, true),
             ThinkingDisposition::DowngradedNoReasoning
         );
     }
@@ -509,10 +547,16 @@ mod tests {
         let signals = read_signals(db::EndpointProvider::Minimax, NativeApi::Responses, &opaque);
         assert!(!signals.reasoning_passable);
         // Not restorable + thinking + tools + no parent reasoning = downgrade
-        // on an echo-requiring upstream.
+        // on an echo-requiring upstream with the switch on.
         assert_eq!(
-            decide_thinking(false, signals.reasoning_passable, true, true, true),
+            decide_thinking(false, signals.reasoning_passable, true, true, true, true),
             ThinkingDisposition::DowngradedNoReasoning
+        );
+        // Issue #566: the same body on a target that never opted in stays
+        // untouched.
+        assert_eq!(
+            decide_thinking(false, signals.reasoning_passable, true, true, true, false),
+            ThinkingDisposition::AsRequested
         );
 
         let summary_only = json!({

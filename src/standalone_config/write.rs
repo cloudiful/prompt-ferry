@@ -332,6 +332,7 @@ pub(crate) async fn insert_route(
             .bind(envelope_version(&proxy_envelope))
             .bind(active_windows)
             .bind(bool_i64(target.dev_system_normalize))
+            .bind(bool_i64(target.thinking_downgrade_enabled))
             .bind(
                 target
                     .thinking_effort_override
@@ -389,6 +390,7 @@ pub(crate) async fn insert_encrypted_route(
             .bind(envelope_version(&target.proxy_url_override))
             .bind(target.target.active_windows.clone())
             .bind(bool_i64(target.target.dev_system_normalize))
+            .bind(bool_i64(target.target.thinking_downgrade_enabled))
             .bind(target.target.thinking_effort_override.as_deref())
             .bind({
                 // Issue #502 Task 5: empty normalizes to `passthrough`.

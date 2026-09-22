@@ -41,7 +41,8 @@ export const useAvailableModelsStore = defineStore('available-models', () => {
         total.value > 0 &&
         first.value >= total.value
       ) {
-        const previousFirst = Math.floor((total.value - 1) / rows.value) * rows.value
+        const previousFirst =
+          Math.floor((total.value - 1) / rows.value) * rows.value
         await refresh(previousFirst, rows.value)
       }
     } finally {

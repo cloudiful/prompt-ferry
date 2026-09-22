@@ -41,6 +41,10 @@ pub struct UnifiedModelRouteTarget {
     // Issue #392 Phase K: developer->system normalization switch.
     // Always sent (no omit); `false` skips passthrough normalization.
     pub dev_system_normalize: bool,
+    // Issue #566: per-target thinking adaptation switch (pre-flight
+    // downgrade + reasoning-echo fingerprint retry). Always sent (no omit);
+    // `false` keeps the pre-#556 passthrough.
+    pub thinking_downgrade_enabled: bool,
     // Issue #464: per-target thinking effort override. `None` means
     // inherit (follow the caller); `Some(effort)` force-replaces.
     pub thinking_effort_override: Option<String>,
@@ -106,6 +110,8 @@ fn target_to_pg(target: UnifiedModelRouteTarget) -> PgModelRouteTarget {
         active_windows: target.active_windows,
         // Issue #392 Phase K: carry normalize switch through unified shape.
         dev_system_normalize: target.dev_system_normalize,
+        // Issue #566: carry thinking adaptation switch through unified shape.
+        thinking_downgrade_enabled: target.thinking_downgrade_enabled,
         // Issue #464: carry thinking effort override through unified shape.
         thinking_effort_override: target.thinking_effort_override,
         // Issue #502 Task 5: carry compact mode through unified shape.

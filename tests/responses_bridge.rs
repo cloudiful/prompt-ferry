@@ -835,10 +835,7 @@ async fn forwards_image_function_call_output_to_chat_native_upstream() {
     let content = tool_msg["content"].as_array().unwrap();
     assert!(content.iter().any(|p| p["type"] == "text"));
     assert_eq!(
-        content
-            .iter()
-            .find(|p| p["type"] == "image_url")
-            .unwrap()["image_url"]["url"],
+        content.iter().find(|p| p["type"] == "image_url").unwrap()["image_url"]["url"],
         "https://example.com/image.png"
     );
 

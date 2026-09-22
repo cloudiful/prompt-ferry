@@ -160,7 +160,10 @@ watch(
         :truncated-label="t('truncatedPreview')"
       />
     </div>
-    <div v-else-if="event.error_message || isAborted" class="text-xs text-muted">
+    <div
+      v-else-if="event.error_message || isAborted"
+      class="text-xs text-muted"
+    >
       {{ t('noUpstreamErrorBody') }}
     </div>
   </div>

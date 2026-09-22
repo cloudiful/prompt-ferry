@@ -477,6 +477,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
         };
         let response = send_upstream_request(
             &Client::new(),
@@ -513,6 +514,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -592,6 +594,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
@@ -650,6 +653,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
@@ -706,6 +710,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
@@ -765,6 +770,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -811,6 +817,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
@@ -868,6 +875,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
@@ -907,6 +915,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -955,6 +964,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
         }
     }
 
@@ -966,6 +976,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
 
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         }
@@ -1141,6 +1152,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         };
         let echo = br#"{"include":["reasoning.encrypted_content"],"input":[{"id":"resp_1_rs","type":"reasoning","encrypted_content":"minimax-resp_1_rs","summary":[{"type":"summary_text","text":"think"}]}]}"#;
@@ -1190,6 +1202,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
 
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         }
@@ -1251,6 +1264,7 @@ mod tests {
                 dev_system_normalize: false,
                 thinking_effort_override: None,
                 compact_mode: crate::db::CompactMode::Passthrough,
+                thinking_downgrade_enabled: false,
                 ..deepseek_route(NativeApi::Chat)
             };
             assert_eq!(apply_deepseek_thinking(&route, body).as_ref(), body);
@@ -1361,6 +1375,7 @@ mod tests {
                 dev_system_normalize: false,
                 thinking_effort_override: None,
                 compact_mode: crate::db::CompactMode::Passthrough,
+                thinking_downgrade_enabled: false,
                 ..minimax_route(crate::db::MinimaxServiceTier::Standard)
             };
             assert_eq!(
@@ -1500,6 +1515,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
 
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         }
@@ -1512,6 +1528,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
 
             ..route.clone()
         }
@@ -1566,6 +1583,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         };
         assert_eq!(
@@ -1578,6 +1596,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         };
         assert_eq!(
@@ -1655,6 +1674,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
 
             ..minimax_route(crate::db::MinimaxServiceTier::Standard)
         }

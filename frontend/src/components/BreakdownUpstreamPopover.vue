@@ -80,7 +80,10 @@ function endpointLabel(
         >
           <template #endpoint_name-cell="{ row }">
             <span class="font-medium text-highlighted">{{
-              endpointLabel(row.original.endpoint_name, row.original.endpoint_id)
+              endpointLabel(
+                row.original.endpoint_name,
+                row.original.endpoint_id,
+              )
             }}</span>
           </template>
           <template #error_rate-cell="{ row }">{{

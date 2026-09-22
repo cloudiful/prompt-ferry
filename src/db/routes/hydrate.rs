@@ -74,6 +74,9 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
                 // Issue #392 Phase K: normalize switch, default-off for
                 // pre-migration rows (COALESCE in SQL already defaults).
                 dev_system_normalize: row.dev_system_normalize,
+                // Issue #566: thinking adaptation switch, default-off for
+                // pre-migration rows (COALESCE in SQL already defaults).
+                thinking_downgrade_enabled: row.thinking_downgrade_enabled,
                 // Issue #464: per-target thinking effort override; None
                 // means inherit (follow the caller).
                 thinking_effort_override: row.thinking_effort_override,
@@ -92,6 +95,11 @@ pub(super) async fn model_route_candidates_by_rule(
     rule_id: Option<uuid::Uuid>,
     user_id: Option<i64>,
 ) -> Result<Vec<ModelRouteCandidate>> {
+    let user_id = if rule_id.is_some() {
+        None
+    } else {
+        Some(user_id.ok_or_else(|| anyhow!("user_id is required"))?)
+    };
     let rows = if let Some(rule_id) = rule_id {
         sqlx::query_file_as!(
             ModelRouteCandidateRow,
@@ -162,6 +170,7 @@ pub(super) async fn model_route_candidates_by_rule(
                 active_windows: row.active_windows.clone(),
                 endpoint_active_windows: row.endpoint_active_windows.clone(),
                 dev_system_normalize: row.dev_system_normalize,
+                thinking_downgrade_enabled: row.thinking_downgrade_enabled,
                 thinking_effort_override: row.thinking_effort_override.clone(),
                 compact_mode: crate::db::resolve_target_compact_mode(row.compact_mode.as_deref()),
             });
@@ -194,6 +203,7 @@ pub(super) async fn model_route_candidates_by_rule(
                 active_windows: row.active_windows,
                 endpoint_active_windows: row.endpoint_active_windows,
                 dev_system_normalize: row.dev_system_normalize,
+                thinking_downgrade_enabled: row.thinking_downgrade_enabled,
                 thinking_effort_override: row.thinking_effort_override,
                 compact_mode: crate::db::resolve_target_compact_mode(row.compact_mode.as_deref()),
             }],

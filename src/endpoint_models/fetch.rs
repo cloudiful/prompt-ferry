@@ -167,6 +167,7 @@ mod tests {
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
         }
     }
 

@@ -84,9 +84,7 @@ fn should_process_chat_string_field(json_path: &str, key: &str) -> bool {
             | "summary"
     );
     (key == "content" && json_path.contains("/messages/"))
-        || (key == "text"
-            && json_path.contains("/messages/")
-            && json_path.contains("/content/"))
+        || (key == "text" && json_path.contains("/messages/") && json_path.contains("/content/"))
         || (key == "arguments"
             && (json_path.ends_with("/function")
                 || json_path.ends_with("/function_call")
@@ -174,11 +172,13 @@ fn main() {
             .redact_fragment_with_input_kind(&redactor_snapshot, field, redactor::InputKind::Text)
             .expect("advance redact");
         let session = session_redactor.finish_session(field, &redacted, redactor_snapshot.policy());
-        state = Some(match &state {
-            Some(prior) => prior.advance(session),
-            None => redactor::RestoreState::new(session),
-        }
-        .expect("advance state"));
+        state = Some(
+            match &state {
+                Some(prior) => prior.advance(session),
+                None => redactor::RestoreState::new(session),
+            }
+            .expect("advance state"),
+        );
     }
     let state = state.expect("advance state");
     assert_eq!(state.session().entries.len(), turns);
@@ -234,11 +234,13 @@ fn main() {
             .redact_fragment_with_input_kind(&redactor_snapshot, field, redactor::InputKind::Text)
             .expect("permit redact");
         let session = session_redactor.finish_session(field, &redacted, redactor_snapshot.policy());
-        state = Some(match &state {
-            Some(prior) => prior.advance(session),
-            None => redactor::RestoreState::new(session),
-        }
-        .expect("permit state"));
+        state = Some(
+            match &state {
+                Some(prior) => prior.advance(session),
+                None => redactor::RestoreState::new(session),
+            }
+            .expect("permit state"),
+        );
     }
     let state = state.expect("permit bench state");
     assert_eq!(state.permits().len(), permit_turns);
@@ -280,16 +282,19 @@ fn main() {
         let mut body = reasoning_body.clone();
         let mut processor = UpstreamRedactionProcessor::new(None, Some("bench-reasoning"), None)
             .expect("reasoning processor");
-        walk_json_strings(&mut body, &mut |json_path, field_name, _object_type, text| {
-            let field_name = field_name.unwrap_or_default();
-            if !should_process_chat_string_field(json_path, field_name) {
-                return Ok(None);
-            }
-            processor
-                .redact_fragment(text, redactor::InputKind::Text)
-                .map(Some)
-                .map_err(anyhow::Error::new)
-        })
+        walk_json_strings(
+            &mut body,
+            &mut |json_path, field_name, _object_type, text| {
+                let field_name = field_name.unwrap_or_default();
+                if !should_process_chat_string_field(json_path, field_name) {
+                    return Ok(None);
+                }
+                processor
+                    .redact_fragment(text, redactor::InputKind::Text)
+                    .map(Some)
+                    .map_err(anyhow::Error::new)
+            },
+        )
         .expect("reasoning walk");
         black_box(body);
     });
@@ -314,16 +319,19 @@ fn main() {
         let mut value: Value = serde_json::from_str(&large_body).expect("large payload json");
         let mut processor = UpstreamRedactionProcessor::new(None, Some("bench-large"), None)
             .expect("large payload processor");
-        walk_json_strings(&mut value, &mut |json_path, field_name, _object_type, text| {
-            let field_name = field_name.unwrap_or_default();
-            if !should_process_chat_string_field(json_path, field_name) {
-                return Ok(None);
-            }
-            processor
-                .redact_fragment(text, redactor::InputKind::Text)
-                .map(Some)
-                .map_err(anyhow::Error::new)
-        })
+        walk_json_strings(
+            &mut value,
+            &mut |json_path, field_name, _object_type, text| {
+                let field_name = field_name.unwrap_or_default();
+                if !should_process_chat_string_field(json_path, field_name) {
+                    return Ok(None);
+                }
+                processor
+                    .redact_fragment(text, redactor::InputKind::Text)
+                    .map(Some)
+                    .map_err(anyhow::Error::new)
+            },
+        )
         .expect("large payload walk");
         let redacted_body = serde_json::to_vec(&value).expect("large payload serialize");
         let redacted_text = std::str::from_utf8(&redacted_body).expect("UTF-8 JSON");

@@ -71,6 +71,10 @@ export type ModelRouteTargetForm = {
   // Issue #392 Phase L: developer->system normalize switch, default off.
   // Always sent as true/false (no omit semantics).
   dev_system_normalize: boolean
+  // Issue #566: per-target thinking adaptation switch (pre-flight downgrade
+  // + reasoning-echo fingerprint retry), default off. Always sent as
+  // true/false (no omit semantics).
+  thinking_downgrade_enabled: boolean
   // Issue #464: per-target thinking effort override. null/empty means
   // inherit (follow caller); explicit value is one of
   // none/minimal/low/medium/high/xhigh/max and force-replaces the caller

@@ -160,6 +160,9 @@ export const endpointMessages = {
     normalizeLabel: '归一 developer→system',
     normalizeHint:
       '默认关闭；开启后 Chat 透传将 developer 重写为 system，关闭则原样透传。严格校验 developer 的上游需手动开启。',
+    thinkingDowngradeLabel: '思考适配',
+    thinkingDowngradeHint:
+      '默认关闭；开启后仅对需要思考回传的上游预降级，并在指纹拒绝时以关闭思考重试一次。关闭时请求字节与响应处理保持不变；环境变量 PROMPT_FERRY_DISABLE_THINKING_DOWNGRADE=1 始终强制全局关闭。',
     thinkingEffortOverride: '思考强度覆盖',
     thinkingEffortOverrideHint:
       '按目标覆盖调用端思考强度；继承表示沿用调用端传值，显式值强制替换 Chat 的 reasoning_effort 与 Responses 的 reasoning.effort。',
@@ -336,6 +339,9 @@ export const endpointMessages = {
     normalizeLabel: 'Normalize developer→system',
     normalizeHint:
       'Off by default; when on, Chat passthrough rewrites developer to system, otherwise passes through unchanged. Strict upstreams that reject developer need this on.',
+    thinkingDowngradeLabel: 'Thinking adaptation',
+    thinkingDowngradeHint:
+      'Off by default; when on, ferry pre-downgrades only echo-requiring upstreams and retries a fingerprint rejection once with thinking off. Off keeps the request bytes and response handling unchanged; PROMPT_FERRY_DISABLE_THINKING_DOWNGRADE=1 always forces a full bypass.',
     thinkingEffortOverride: 'Thinking effort override',
     thinkingEffortOverrideHint:
       'Override the caller thinking effort for this target; inherit follows the caller, an explicit value force-replaces Chat reasoning_effort and Responses reasoning.effort.',

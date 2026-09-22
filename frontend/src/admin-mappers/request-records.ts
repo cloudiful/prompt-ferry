@@ -46,19 +46,25 @@ export function deriveReasoningEffortDisplay(
 }
 
 export function upstreamLabel(row: {
-  mcp_server_name?: string | null;
-  endpoint_name?: string | null;
-  endpoint_id?: string | null;
-  upstream_model?: string | null;
-  path?: string | null;
+  mcp_server_name?: string | null
+  endpoint_name?: string | null
+  endpoint_id?: string | null
+  upstream_model?: string | null
+  path?: string | null
 }): string {
-  return row.mcp_server_name || row.endpoint_name || row.endpoint_id || row.path || "-";
+  return (
+    row.mcp_server_name ||
+    row.endpoint_name ||
+    row.endpoint_id ||
+    row.path ||
+    '-'
+  )
 }
 
 export function createRequestRecordRowView(
   record: RequestRecordListRow,
 ): RequestRecordRowView {
-  const label = upstreamLabel(record);
+  const label = upstreamLabel(record)
   const sessionRecognized = Boolean(record.conversation_id)
   const firstTurn = sessionRecognized && (record.conversation_seq ?? 1) <= 1
   return {
@@ -83,7 +89,7 @@ export function createRequestRecordDetailView(
   const recordWithUserAgent = record as RequestRecordDetail & {
     request_user_agent?: string | null
   }
-  const label = upstreamLabel(record);
+  const label = upstreamLabel(record)
   const sessionRecognized = Boolean(record.conversation_id)
   const firstTurn = sessionRecognized && (record.conversation_seq ?? 1) <= 1
   const installationShort = record.client_installation_id

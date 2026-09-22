@@ -1102,6 +1102,38 @@ async fn migrate_creates_cache_alert_state_table() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Issue #566: the per-target thinking-downgrade switch defaults off, so a
+// pre-migration deployment keeps the byte-identical passthrough.
+#[tokio::test]
+async fn migrate_adds_target_thinking_downgrade_switch_defaulting_off() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    db::migrate(&schema.pool).await?;
+
+    let column = sqlx::query_as::<_, (String, String, String, Option<String>)>(
+        r#"
+            SELECT column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'model_route_targets'
+              AND column_name = 'thinking_downgrade_enabled'
+            "#,
+    )
+    .fetch_optional(&schema.pool)
+    .await?;
+    let (name, data_type, is_nullable, column_default) = column.expect("column should exist");
+    assert_eq!(name, "thinking_downgrade_enabled");
+    assert_eq!(data_type, "boolean");
+    assert_eq!(is_nullable, "NO");
+    assert_eq!(column_default.as_deref(), Some("false"));
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
 fn legacy_input_clone(server: &db::McpServer) -> db::McpServerInput {
     db::McpServerInput {
         scope: server.scope.clone(),

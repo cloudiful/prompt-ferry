@@ -22,7 +22,15 @@ function normalizeTargetNativeApi(value: unknown): NativeApi {
 
 // Issue #464: per-target thinking effort override. Only the 7-level
 // allowlist survives; anything else normalizes to null (inherit).
-const THINKING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+const THINKING_EFFORTS = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const
 
 // Issue #502 Task 5: per-target compact mode. Only the 3-level allowlist
 // survives; anything else normalizes to passthrough (default).
@@ -39,7 +47,9 @@ function normalizeCompactMode(value: unknown): string {
 function normalizeThinkingEffort(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
-  return (THINKING_EFFORTS as readonly string[]).includes(trimmed) ? trimmed : null
+  return (THINKING_EFFORTS as readonly string[]).includes(trimmed)
+    ? trimmed
+    : null
 }
 
 export function createEmptyModelRouteForm(): ModelRouteForm {
@@ -63,6 +73,8 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         active_windows_touched: false,
         // Issue #392 Phase L: default-off normalize.
         dev_system_normalize: false,
+        // Issue #566: default-off thinking adaptation.
+        thinking_downgrade_enabled: false,
         // Issue #464: inherit (follow caller) by default.
         thinking_effort_override: null,
         // Issue #502 Task 5: passthrough (native) by default.
@@ -124,15 +136,20 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
       active_windows: (target?.active_windows ?? []).map((window) => ({
         start: window?.start ?? '',
         end: window?.end ?? '',
-        ...(Array.isArray((window as { days?: unknown })?.days) ? { days: [...((window as { days?: number[] }).days ?? [])] } : {}),
+        ...(Array.isArray((window as { days?: unknown })?.days)
+          ? { days: [...((window as { days?: number[] }).days ?? [])] }
+          : {}),
       })),
       active_windows_touched: false,
       // Issue #392 Phase L: default-off normalize; legacy payloads miss it.
       dev_system_normalize: target?.dev_system_normalize ?? false,
+      // Issue #566: default-off thinking adaptation; legacy payloads miss it.
+      thinking_downgrade_enabled: target?.thinking_downgrade_enabled ?? false,
       // Issue #464: thinking effort override; legacy payloads miss it
       // (means inherit). Null/empty means inherit.
       thinking_effort_override: normalizeThinkingEffort(
-        (target as { thinking_effort_override?: unknown } | undefined)?.thinking_effort_override,
+        (target as { thinking_effort_override?: unknown } | undefined)
+          ?.thinking_effort_override,
       ),
       // Issue #502 Task 5: compact mode; legacy payloads miss it
       // (means passthrough).
@@ -196,8 +213,13 @@ export function modelRouteFormToRequest(
           active_windows,
           // Issue #392 Phase L: booleans always sent (no omit semantics).
           dev_system_normalize: target?.dev_system_normalize ?? false,
+          // Issue #566: booleans always sent (no omit semantics).
+          thinking_downgrade_enabled:
+            target?.thinking_downgrade_enabled ?? false,
           // Issue #464: always sent (null means inherit).
-          thinking_effort_override: normalizeThinkingEffort(target?.thinking_effort_override),
+          thinking_effort_override: normalizeThinkingEffort(
+            target?.thinking_effort_override,
+          ),
           // Issue #502 Task 5: always sent (passthrough default).
           compact_mode: normalizeCompactMode(target?.compact_mode),
           // Issue #409 Phase 2: always sent (Auto default follows caller;

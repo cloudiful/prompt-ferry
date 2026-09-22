@@ -26,7 +26,12 @@ const columns = computed<TableColumn<BillingBreakdownResponse>[]>(() => [
   <section class="grid gap-3 rounded-lg bg-default p-3">
     <h2 class="text-sm font-semibold text-highlighted">{{ title }}</h2>
     <div class="min-w-0 overflow-x-auto">
-      <UTable :data="rows" :columns="columns" class="min-w-[52rem]" :ui="{ th: 'whitespace-nowrap' }">
+      <UTable
+        :data="rows"
+        :columns="columns"
+        class="min-w-[52rem]"
+        :ui="{ th: 'whitespace-nowrap' }"
+      >
         <template #empty>-</template>
         <template #request_count-cell="{ row }">{{
           formatTokenCount(row.original.request_count)

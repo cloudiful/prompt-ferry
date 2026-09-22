@@ -139,30 +139,30 @@ function onBreakdownSelect(
   emitBreakdownDrilldown(row.original)
 }
 
-const aiColumns = computed<
-  TableColumn<RequestRecordOverviewBreakdownRow>[]
->(() => [
-  { accessorKey: 'label', header: t('overviewObject') },
-  { accessorKey: 'request_count', header: t('requests') },
-  { accessorKey: 'request_share', header: t('overviewRequestShare') },
-  { id: 'tokens', header: t('overviewTotalTokens') },
-  { accessorKey: 'token_share', header: t('overviewTokenShare') },
-  { id: 'cache_rate', header: t('overviewCacheRate') },
-  { accessorKey: 'error_rate', header: t('overviewErrorRate') },
-  {
-    accessorKey: 'avg_output_tokens_per_second',
-    header: t('overviewAvgOutputRate'),
-  },
-])
+const aiColumns = computed<TableColumn<RequestRecordOverviewBreakdownRow>[]>(
+  () => [
+    { accessorKey: 'label', header: t('overviewObject') },
+    { accessorKey: 'request_count', header: t('requests') },
+    { accessorKey: 'request_share', header: t('overviewRequestShare') },
+    { id: 'tokens', header: t('overviewTotalTokens') },
+    { accessorKey: 'token_share', header: t('overviewTokenShare') },
+    { id: 'cache_rate', header: t('overviewCacheRate') },
+    { accessorKey: 'error_rate', header: t('overviewErrorRate') },
+    {
+      accessorKey: 'avg_output_tokens_per_second',
+      header: t('overviewAvgOutputRate'),
+    },
+  ],
+)
 
-const mcpColumns = computed<
-  TableColumn<RequestRecordOverviewBreakdownRow>[]
->(() => [
-  { accessorKey: 'label', header: t('overviewObject') },
-  { accessorKey: 'request_count', header: t('requests') },
-  { accessorKey: 'request_share', header: t('overviewRequestShare') },
-  { accessorKey: 'success_rate', header: t('overviewSuccessRate') },
-])
+const mcpColumns = computed<TableColumn<RequestRecordOverviewBreakdownRow>[]>(
+  () => [
+    { accessorKey: 'label', header: t('overviewObject') },
+    { accessorKey: 'request_count', header: t('requests') },
+    { accessorKey: 'request_share', header: t('overviewRequestShare') },
+    { accessorKey: 'success_rate', header: t('overviewSuccessRate') },
+  ],
+)
 
 function providerBadge(row: RequestRecordOverviewBreakdownRow): string {
   const provider = row.server_provider_kind ?? 'generic'

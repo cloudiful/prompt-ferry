@@ -91,6 +91,7 @@ fn sample_config() -> StandaloneConfig {
                 dev_system_normalize: false,
                 thinking_effort_override: None,
                 compact_mode: "passthrough".to_string(),
+                thinking_downgrade_enabled: false,
             }],
         }],
         client_keys: vec![ClientKeyConfig {
@@ -592,7 +593,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 29);
+    assert_eq!(version, 30);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -682,7 +683,7 @@ fn sample_usage_record(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_nine() {
+async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -690,7 +691,7 @@ async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_nine() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 29);
+    assert_eq!(version, 30);
     assert!(
         store
             .list_usage_summaries(64)
@@ -1575,7 +1576,7 @@ fn sample_snapshot(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_nine() {
+async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -1583,7 +1584,7 @@ async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_nine() 
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 29);
+    assert_eq!(version, 30);
     let pool = store.pool().clone();
     for (column, declared_type) in [
         ("conversation_id", "TEXT"),
@@ -1706,7 +1707,7 @@ async fn upgrade_from_schema_eight_creates_request_lease_table() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 29);
+    assert_eq!(version, 30);
 
     // Confirm migration 0008 took effect before the new lease table
     // arrived so the test really exercises the schema-8 -> schema-9

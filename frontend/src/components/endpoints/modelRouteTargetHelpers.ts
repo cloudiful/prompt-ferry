@@ -36,7 +36,9 @@ export function sortedTargetWindows(
     .map((window) => ({
       start: (window?.start ?? '').trim(),
       end: (window?.end ?? '').trim(),
-      days: Array.isArray(window?.days) ? [...(window.days as number[])] : undefined,
+      days: Array.isArray(window?.days)
+        ? [...(window.days as number[])]
+        : undefined,
     }))
     .filter((window) => window.start !== '' && window.end !== '')
     .sort((a, b) =>
@@ -52,7 +54,10 @@ export function hasTargetSchedule(
   return sortedTargetWindows(target).length > 0
 }
 
-export function formatTargetWindow(window: ScheduleWindow, t?: TranslateFn): string {
+export function formatTargetWindow(
+  window: ScheduleWindow,
+  t?: TranslateFn,
+): string {
   const time = `${window.start}–${window.end}`
   const days = window.days
   if (!days || days.length === 0 || days.length >= 7) return time
@@ -89,6 +94,7 @@ export function hasTargetSettings(
     hasTargetProxy(target) ||
     hasTargetSchedule(target) ||
     (target.dev_system_normalize ?? false) ||
+    (target.thinking_downgrade_enabled ?? false) ||
     hasTargetThinkingEffort(target) ||
     hasTargetCompactMode(target)
   )

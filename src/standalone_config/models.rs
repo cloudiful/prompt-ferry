@@ -400,6 +400,12 @@ pub struct ModelRouteTargetConfig {
     // persists the 0022 `dev_system_normalize` INTEGER column.
     #[serde(default)]
     pub dev_system_normalize: bool,
+    // Issue #566: per-target thinking adaptation switch (pre-flight
+    // downgrade + reasoning-echo fingerprint retry). `false` (default)
+    // keeps the pre-#556 byte-identical passthrough. SQLite persists the
+    // 0030 `thinking_downgrade_enabled` INTEGER column.
+    #[serde(default)]
+    pub thinking_downgrade_enabled: bool,
     // Issue #464: per-target thinking effort override. `None` (null/empty)
     // means inherit (follow the caller); `Some(effort)` is one of
     // none/minimal/low/medium/high/xhigh/max and force-replaces the
@@ -431,6 +437,10 @@ impl fmt::Debug for ModelRouteTargetConfig {
             )
             .field("active_windows", &self.active_windows)
             .field("dev_system_normalize", &self.dev_system_normalize)
+            .field(
+                "thinking_downgrade_enabled",
+                &self.thinking_downgrade_enabled,
+            )
             .field("thinking_effort_override", &self.thinking_effort_override)
             .field("compact_mode", &self.compact_mode)
             .finish()

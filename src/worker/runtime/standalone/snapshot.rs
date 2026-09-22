@@ -200,6 +200,7 @@ mod tests {
                     dev_system_normalize: false,
                     thinking_effort_override: None,
                     compact_mode: "passthrough".to_string(),
+                    thinking_downgrade_enabled: false,
                 }],
             }],
             client_keys: vec![ClientKeyConfig {
