@@ -214,6 +214,25 @@ impl ChatSessionHarness {
             .await
             .expect("responses request should send")
     }
+
+    async fn post_responses_with_session_and_cache_key(
+        &self,
+        session_id: &str,
+        prompt_cache_key: &str,
+    ) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(format!("http://{}/v1/responses", self.relay_addr))
+            .bearer_auth("client-token")
+            .header("X-Session-Id", session_id)
+            .json(&serde_json::json!({
+                "model": "gpt-test",
+                "input": "hello",
+                "prompt_cache_key": prompt_cache_key
+            }))
+            .send()
+            .await
+            .expect("responses request should send")
+    }
 }
 
 impl Drop for ChatSessionHarness {
@@ -386,6 +405,103 @@ async fn chat_prompt_cache_key_isolated_from_responses_codex_thread() -> anyhow:
     assert_eq!(chat_row.conversation_source, "chat_prompt_cache_key");
     assert_eq!(responses_row.conversation_source, "codex_thread_key");
     assert_ne!(chat_row.conversation_id, responses_row.conversation_id);
+
+    harness.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn responses_session_header_precedes_prompt_cache_key() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let harness = ChatSessionHarness::spawn().await?;
+
+    let with_header = harness
+        .post_responses_with_session_and_cache_key("header-thread", "shared-cache-key")
+        .await;
+    assert_eq!(with_header.status(), StatusCode::OK);
+    let without_header = harness
+        .post_responses_with_prompt_cache_key("shared-cache-key")
+        .await;
+    assert_eq!(without_header.status(), StatusCode::OK);
+
+    wait_for_persisted_requests(&harness.schema, 2).await?;
+    let rows = latest_rows(&harness.schema, 2).await?;
+    assert_eq!(rows.len(), 2);
+    let header_row = rows
+        .iter()
+        .find(|row| row.conversation_source == "session_header")
+        .expect("request with a session header keeps the session conversation");
+    let fallback_row = rows
+        .iter()
+        .find(|row| row.conversation_source == "codex_thread_key")
+        .expect("request without a session header falls back to the codex thread key");
+    assert_eq!(header_row.conversation_seq, Some(1));
+    assert_eq!(fallback_row.conversation_seq, Some(1));
+    assert_ne!(header_row.conversation_id, fallback_row.conversation_id);
+
+    harness.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn responses_session_headers_isolate_shared_prompt_cache_key() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let harness = ChatSessionHarness::spawn().await?;
+
+    let parent = harness
+        .post_responses_with_session_and_cache_key("parent-session", "shared-cache-key")
+        .await;
+    assert_eq!(parent.status(), StatusCode::OK);
+    let child = harness
+        .post_responses_with_session_and_cache_key("child-session", "shared-cache-key")
+        .await;
+    assert_eq!(child.status(), StatusCode::OK);
+
+    wait_for_persisted_requests(&harness.schema, 2).await?;
+    let rows = latest_rows(&harness.schema, 2).await?;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].conversation_source, "session_header");
+    assert_eq!(rows[1].conversation_source, "session_header");
+    assert_ne!(rows[0].conversation_id, rows[1].conversation_id);
+    assert_eq!(rows[0].conversation_seq, Some(1));
+    assert_eq!(rows[1].conversation_seq, Some(1));
+
+    harness.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn responses_prompt_cache_key_stays_codex_fallback_without_session_header()
+-> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let harness = ChatSessionHarness::spawn().await?;
+
+    let first = harness
+        .post_responses_with_prompt_cache_key("codex-thread")
+        .await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let second = harness
+        .post_responses_with_prompt_cache_key("codex-thread")
+        .await;
+    assert_eq!(second.status(), StatusCode::OK);
+
+    wait_for_persisted_requests(&harness.schema, 2).await?;
+    let rows = latest_rows(&harness.schema, 2).await?;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].conversation_source, "codex_thread_key");
+    assert_eq!(rows[1].conversation_source, "codex_thread_key");
+    assert_eq!(rows[0].conversation_id, rows[1].conversation_id);
+    assert_eq!(rows[0].conversation_seq, Some(2));
+    assert_eq!(rows[1].conversation_seq, Some(1));
 
     harness.shutdown().await?;
     Ok(())

@@ -7,7 +7,7 @@ use super::super::request_assembly::BufferedBridgeRequest;
 const CHAT_SESSION_NAMESPACE: &str = "chat:";
 const CHAT_PROMPT_CACHE_KEY_SOURCE: &str = "chat_prompt_cache_key";
 
-async fn resolve_session_header_conversation(
+async fn resolve_derived_conversation(
     state: &AdminState,
     user_id: Option<i64>,
     conversation_hint: &str,
@@ -85,7 +85,7 @@ pub(super) async fn resolve_prompt_conversation(
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            let resolution = resolve_session_header_conversation(
+            let resolution = resolve_derived_conversation(
                 state,
                 user_id,
                 // Chat session ids are prefixed so the same X-Session-Id never
@@ -104,7 +104,7 @@ pub(super) async fn resolve_prompt_conversation(
             // namespace, so the same value intentionally joins one conversation.
             // Prefixing also keeps them from colliding with the raw session-header
             // conversation of /v1/responses.
-            let resolution = resolve_session_header_conversation(
+            let resolution = resolve_derived_conversation(
                 state,
                 user_id,
                 &format!("{CHAT_SESSION_NAMESPACE}{codex_thread_key}"),
@@ -118,39 +118,15 @@ pub(super) async fn resolve_prompt_conversation(
     }
 
     if request.path == "/v1/responses" {
-        if let Some(codex_thread_key) = codex_thread_key
+        // Explicit session identity wins over every derived fallback below.
+        if let Some(session_header_id) = session_header_id
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            let conversation_id =
-                derive_conversation_id(user_id.unwrap_or_default(), codex_thread_key);
-            let latest = db::latest_usage_event_locator_by_conversation(
-                &state.pool,
-                user_id,
-                conversation_id,
-            )
-            .await?;
-            let replay_parent = db::latest_replayable_usage_event_locator_by_conversation(
-                &state.pool,
-                user_id,
-                conversation_id,
-            )
-            .await?;
-            let next_seq_seed = latest
-                .as_ref()
-                .and_then(|entry| entry.conversation_seq)
-                .unwrap_or(0)
-                + 1;
-            let conversation_seq =
-                db::allocate_conversation_seq(&state.pool, conversation_id, next_seq_seed).await?;
-            return Ok(Some(PromptConversationResolution {
-                conversation_id,
-                parent_event_id: replay_parent.as_ref().map(|entry| entry.event_id),
-                replay_unavailable: latest.is_some() && replay_parent.is_none(),
-                endpoint_id: replay_parent.as_ref().and_then(|entry| entry.endpoint_id),
-                conversation_seq,
-                source: "codex_thread_key",
-            }));
+            let resolution =
+                resolve_derived_conversation(state, user_id, session_header_id, "session_header")
+                    .await?;
+            return Ok(Some(resolution));
         }
 
         if let Some(previous_response_id) = previous_response_id
@@ -238,17 +214,16 @@ pub(super) async fn resolve_prompt_conversation(
             }));
         }
 
-        if let Some(session_header_id) = session_header_id
+        // Codex CLI compatibility fallback: a prompt_cache_key is shared across
+        // a whole session tree, so it only applies when the request carried no
+        // session header and no explicit identity of its own.
+        if let Some(codex_thread_key) = codex_thread_key
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            let resolution = resolve_session_header_conversation(
-                state,
-                user_id,
-                session_header_id,
-                "session_header",
-            )
-            .await?;
+            let resolution =
+                resolve_derived_conversation(state, user_id, codex_thread_key, "codex_thread_key")
+                    .await?;
             return Ok(Some(resolution));
         }
 

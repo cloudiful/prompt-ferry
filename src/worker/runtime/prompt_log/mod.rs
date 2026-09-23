@@ -457,6 +457,10 @@ fn codex_request_metadata(body: &[u8]) -> CodexRequestMetadata {
     }
 }
 
+/// Codex CLI compatibility fallback for clients that send no session header:
+/// prefer the per-window thread id, then the cache-affinity `prompt_cache_key`.
+/// `/v1/responses` only consults this after the explicit session-header,
+/// previous-response and provider-conversation sources are absent.
 fn codex_thread_key(metadata: &CodexRequestMetadata) -> Option<&str> {
     metadata
         .window_thread_id
