@@ -2,6 +2,7 @@ import type {
   ClientKeyFacet,
   RequestRecordFacets,
   RequestRecordFullResponse,
+  RequestRecordOverviewRange,
   RequestRecordState,
 } from '../generated/admin-api'
 import type {
@@ -77,6 +78,42 @@ export function createUsageStateOptions(
     label: (labels as Record<string, string>)[state] ?? state,
     value: state as RequestRecordState,
   }))
+}
+
+export type UsageRangeWindow = {
+  start?: string
+  end?: string
+}
+
+const USAGE_RANGE_WINDOW_MS: Record<
+  Exclude<RequestRecordOverviewRange, 'custom' | 'month'>,
+  number
+> = {
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+}
+
+/**
+ * Resolve the shared time-range picker into the explicit `[start, end)` bounds
+ * the facets endpoint expects, mirroring the backend preset windows so the
+ * facet dropdowns follow the same window as the records list. `custom` keeps
+ * the picker-supplied bounds.
+ */
+export function resolveUsageRangeWindow(
+  range: RequestRecordOverviewRange,
+  start: string,
+  end: string,
+  now: Date = new Date(),
+): UsageRangeWindow {
+  if (range === 'custom') {
+    return { start: start || undefined, end: end || undefined }
+  }
+  const windowStart =
+    range === 'month'
+      ? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+      : new Date(now.getTime() - USAGE_RANGE_WINDOW_MS[range])
+  return { start: windowStart.toISOString(), end: now.toISOString() }
 }
 
 export function createUsageFacetOptionsView(

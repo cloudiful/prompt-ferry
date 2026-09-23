@@ -10,9 +10,9 @@ use sort::request_records_order_by_clause;
 
 const REQUEST_RECORDS_PAGE_SQL: &str = include_str!("../../../sql/usage_events_page.sql");
 
-/// Facet dropdowns only need recent values; an unbounded GROUP BY over the
-/// whole `request_records` table was 2.27s (issue #277). Bound the lookback
-/// window (default 30d, see `usage_event_facets.sql`) and cap each facet branch.
+/// Facet dropdowns cover the caller's time window; the SQL bounds the scan
+/// (last 24 hours by default when no window is supplied, see
+/// `usage_event_facets.sql`) and caps each facet at this many values.
 const FACET_LIMIT: i64 = 200;
 
 #[derive(sqlx::FromRow)]
