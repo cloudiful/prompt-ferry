@@ -1,3 +1,8 @@
+//! Issue #277 Phase P8: metadata retention is partition-DROP based. The old
+//! row-wise prune semantics (billing protection, lease protection) are gone
+//! by operator decision: expired days leave wholesale. Admin clear semantics
+//! are covered by `partition_clear.rs`.
+
 #[path = "support/db_harness.rs"]
 mod db_harness;
 
@@ -22,19 +27,21 @@ async fn create_record(
     .await
 }
 
-async fn mark_record_old(pool: &sqlx::PgPool, event_id: i64) -> anyhow::Result<()> {
-    sqlx::query_file!(
-        "tests/sql/usage_maintenance/set_request_record_created_at.sql",
-        event_id,
-        Utc::now() - Duration::days(30),
-    )
-    .execute(pool)
-    .await?;
+/// "Expired" in the partition model means the row's whole UTC day is older
+/// than the metadata retention horizon. The content row is deleted first:
+/// content-family days exist only for the P7 handover window
+/// (today-8..today+8), so a metadata-expired row's content expired long
+/// before ("content row absent" is the expired signal).
+async fn mark_record_expired(pool: &sqlx::PgPool, event_id: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM request_record_content WHERE event_id = $1")
+        .bind(event_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 #[tokio::test]
-async fn metadata_prune_protects_billing_active_and_leased_records() -> anyhow::Result<()> {
+async fn expired_metadata_partition_drops_and_recent_partition_survives() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
         return Ok(());
@@ -43,102 +50,98 @@ async fn metadata_prune_protects_billing_active_and_leased_records() -> anyhow::
     let schema = TestSchema::new().await?;
     db::migrate(&schema.pool).await?;
 
-    let unbilled_request_id = Uuid::new_v4();
-    let unbilled_event = create_record(
-        &schema.pool,
-        unbilled_request_id,
-        None,
-        db::RequestRecordState::Completed,
-    )
-    .await?;
-    sqlx::query_file!(
-        "tests/sql/usage_maintenance/delete_usage_charge.sql",
-        unbilled_event,
-    )
-    .execute(&schema.pool)
-    .await?;
-    sqlx::query_file!(
-        "tests/sql/usage_maintenance/insert_request_record_lease.sql",
-        unbilled_request_id,
-        Utc::now() - Duration::hours(1),
-        Utc::now() - Duration::hours(2),
-    )
-    .execute(&schema.pool)
-    .await?;
-    mark_record_old(&schema.pool, unbilled_event).await?;
-
-    let billed_event = create_record(
+    let expired_event = create_record(
         &schema.pool,
         Uuid::new_v4(),
         None,
         db::RequestRecordState::Completed,
     )
     .await?;
-    mark_record_old(&schema.pool, billed_event).await?;
-
-    let active_request_id = Uuid::new_v4();
-    let active_event = create_record(
+    let charged_event = create_record(
         &schema.pool,
-        active_request_id,
+        Uuid::new_v4(),
         None,
-        db::RequestRecordState::Received,
+        db::RequestRecordState::Completed,
     )
     .await?;
-    sqlx::query_file!(
-        "tests/sql/usage_maintenance/delete_usage_charge.sql",
-        active_event,
-    )
-    .execute(&schema.pool)
-    .await?;
-    sqlx::query_file!(
-        "tests/sql/usage_maintenance/insert_request_record_lease.sql",
-        active_request_id,
-        Utc::now() + Duration::hours(1),
-        Utc::now(),
-    )
-    .execute(&schema.pool)
-    .await?;
-    mark_record_old(&schema.pool, active_event).await?;
+    mark_record_expired(&schema.pool, expired_event).await?;
+    mark_record_expired(&schema.pool, charged_event).await?;
 
-    let report = db::prune_usage_events(&schema.pool, 1).await?;
-    assert_eq!(report.deleted, 1);
-    assert_eq!(report.protected_by_billing, 1);
+    // The metadata day that these rows were moved to must exist: move both
+    // rows onto a historical day inside the P7 handover window (day -92 is
+    // beyond the 90-day retention but inside today-95..today+8).
+    let historical_day = Utc::now() - Duration::days(92);
+    for event_id in [expired_event, charged_event] {
+        sqlx::query_file!(
+            "tests/sql/usage_maintenance/set_request_record_created_at.sql",
+            event_id,
+            historical_day,
+        )
+        .execute(&schema.pool)
+        .await?;
+    }
 
-    let deleted = sqlx::query_file!(
+    let horizons = db::PartitionHorizons {
+        metadata_retention_days: 90,
+        content_retention_days: 3,
+    };
+    let report = db::run_partition_maintenance(&schema.pool, horizons)
+        .await?
+        .expect("partition maintenance should acquire its advisory lock");
+    assert!(report.partitions_dropped >= 1);
+
+    let expired = sqlx::query_file!(
         "tests/sql/usage_maintenance/count_request_record.sql",
-        unbilled_event,
+        expired_event,
     )
     .fetch_one(&schema.pool)
     .await?;
-    assert_eq!(deleted.count, 0);
-    let billed = sqlx::query_file!(
+    assert_eq!(
+        expired.count, 0,
+        "an expired day's rows leave with the partition"
+    );
+
+    // The billed row sat in the same expired day, so it is gone too: billing
+    // protection no longer holds in the partition-drop model.
+    let charged = sqlx::query_file!(
         "tests/sql/usage_maintenance/count_request_record.sql",
-        billed_event,
+        charged_event,
     )
     .fetch_one(&schema.pool)
     .await?;
-    assert_eq!(billed.count, 1);
-    let active = sqlx::query_file!(
+    assert_eq!(
+        charged.count, 0,
+        "a row in an expired day leaves with the partition even if later billed"
+    );
+
+    let recent = create_record(
+        &schema.pool,
+        Uuid::new_v4(),
+        None,
+        db::RequestRecordState::Completed,
+    )
+    .await?;
+    let report = db::run_partition_maintenance(&schema.pool, horizons)
+        .await?
+        .expect("second partition maintenance round should acquire its lock");
+    assert_eq!(
+        report.partitions_dropped, 0,
+        "a second round with nothing new expired must not drop today's partition"
+    );
+    let kept = sqlx::query_file!(
         "tests/sql/usage_maintenance/count_request_record.sql",
-        active_event,
+        recent,
     )
     .fetch_one(&schema.pool)
     .await?;
-    assert_eq!(active.count, 1);
-    let orphan_lease = sqlx::query_file!(
-        "tests/sql/usage_maintenance/count_request_record_leases.sql",
-        unbilled_request_id,
-    )
-    .fetch_one(&schema.pool)
-    .await?;
-    assert_eq!(orphan_lease.count, 0);
+    assert_eq!(kept.count, 1, "today's rows are never dropped");
 
     schema.cleanup().await?;
     Ok(())
 }
 
 #[tokio::test]
-async fn metadata_maintenance_skips_when_lock_is_held() -> anyhow::Result<()> {
+async fn partition_maintenance_skips_when_lock_is_held() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
         return Ok(());
@@ -146,21 +149,25 @@ async fn metadata_maintenance_skips_when_lock_is_held() -> anyhow::Result<()> {
 
     let schema = TestSchema::new().await?;
     db::migrate(&schema.pool).await?;
-    let lock_key = 0x7072_756e_654d_6574_i64;
+    let lock_key = db::PARTITION_MAINTENANCE_LOCK_KEY;
     let mut lock_connection = schema.pool.acquire().await?;
     let acquired = sqlx::query_file_scalar!(
-        "tests/sql/usage_maintenance/try_acquire_metadata_prune_lock.sql",
+        "tests/sql/usage_maintenance/try_acquire_partition_lock.sql",
         lock_key,
     )
     .fetch_one(&mut *lock_connection)
     .await?;
     assert!(acquired);
 
-    let skipped = db::run_usage_metadata_maintenance(&schema.pool, 1).await?;
+    let horizons = db::PartitionHorizons {
+        metadata_retention_days: 90,
+        content_retention_days: 3,
+    };
+    let skipped = db::run_partition_maintenance(&schema.pool, horizons).await?;
     assert!(skipped.is_none());
 
     let released = sqlx::query_file_scalar!(
-        "tests/sql/usage_maintenance/release_metadata_prune_lock.sql",
+        "tests/sql/usage_maintenance/release_partition_lock.sql",
         lock_key,
     )
     .fetch_one(&mut *lock_connection)
@@ -169,7 +176,7 @@ async fn metadata_maintenance_skips_when_lock_is_held() -> anyhow::Result<()> {
     drop(lock_connection);
 
     assert!(
-        db::run_usage_metadata_maintenance(&schema.pool, 1)
+        db::run_partition_maintenance(&schema.pool, horizons)
             .await?
             .is_some()
     );
@@ -237,146 +244,6 @@ async fn approval_retention_keeps_pending_and_recent_resolved_rows() -> anyhow::
         .await?;
         assert_eq!(count.count, expected);
     }
-
-    schema.cleanup().await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn clear_scopes_keep_billed_records_and_report_protection() -> anyhow::Result<()> {
-    if !test_database_configured() {
-        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
-        return Ok(());
-    }
-
-    let schema = TestSchema::new().await?;
-    db::migrate(&schema.pool).await?;
-    let user_a = db::create_user(
-        &schema.pool,
-        db::UserCreate {
-            login_name: "retention-user-a".to_string(),
-            password_hash: "unused".to_string(),
-            display_name: "Retention A".to_string(),
-            is_admin: false,
-        },
-    )
-    .await?
-    .user_id;
-    let user_b = db::create_user(
-        &schema.pool,
-        db::UserCreate {
-            login_name: "retention-user-b".to_string(),
-            password_hash: "unused".to_string(),
-            display_name: "Retention B".to_string(),
-            is_admin: false,
-        },
-    )
-    .await?
-    .user_id;
-
-    let current_unbilled = create_record(
-        &schema.pool,
-        Uuid::new_v4(),
-        Some(user_a),
-        db::RequestRecordState::Completed,
-    )
-    .await?;
-    sqlx::query_file!(
-        "tests/sql/usage_maintenance/delete_usage_charge.sql",
-        current_unbilled,
-    )
-    .execute(&schema.pool)
-    .await?;
-    let current_billed = create_record(
-        &schema.pool,
-        Uuid::new_v4(),
-        Some(user_a),
-        db::RequestRecordState::Completed,
-    )
-    .await?;
-    let current = db::clear_usage_events(
-        &schema.pool,
-        db::UsageClearQuery {
-            scope: db::UsageClearScope::CurrentUser,
-            visible_user_id: Some(user_a),
-            target_user_id: None,
-            start_at: None,
-            end_at: None,
-        },
-    )
-    .await?;
-    assert_eq!(current.deleted, 1);
-    assert_eq!(current.protected_by_billing, 1);
-
-    let target = create_record(
-        &schema.pool,
-        Uuid::new_v4(),
-        Some(user_b),
-        db::RequestRecordState::Completed,
-    )
-    .await?;
-    sqlx::query_file!(
-        "tests/sql/usage_maintenance/delete_usage_charge.sql",
-        target,
-    )
-    .execute(&schema.pool)
-    .await?;
-    let target_report = db::clear_usage_events(
-        &schema.pool,
-        db::UsageClearQuery {
-            scope: db::UsageClearScope::TargetUser,
-            visible_user_id: None,
-            target_user_id: Some(user_b),
-            start_at: None,
-            end_at: None,
-        },
-    )
-    .await?;
-    assert_eq!(target_report.deleted, 1);
-
-    let all_a = create_record(
-        &schema.pool,
-        Uuid::new_v4(),
-        Some(user_a),
-        db::RequestRecordState::Completed,
-    )
-    .await?;
-    let all_b = create_record(
-        &schema.pool,
-        Uuid::new_v4(),
-        Some(user_b),
-        db::RequestRecordState::Completed,
-    )
-    .await?;
-    for event_id in [all_a, all_b] {
-        sqlx::query_file!(
-            "tests/sql/usage_maintenance/delete_usage_charge.sql",
-            event_id,
-        )
-        .execute(&schema.pool)
-        .await?;
-    }
-    let all = db::clear_usage_events(
-        &schema.pool,
-        db::UsageClearQuery {
-            scope: db::UsageClearScope::AllUsers,
-            visible_user_id: None,
-            target_user_id: None,
-            start_at: None,
-            end_at: None,
-        },
-    )
-    .await?;
-    assert_eq!(all.deleted, 2);
-    assert_eq!(all.protected_by_billing, 1);
-
-    let billed_count = sqlx::query_file!(
-        "tests/sql/usage_maintenance/count_request_record.sql",
-        current_billed,
-    )
-    .fetch_one(&schema.pool)
-    .await?;
-    assert_eq!(billed_count.count, 1);
 
     schema.cleanup().await?;
     Ok(())

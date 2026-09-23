@@ -5,6 +5,8 @@ mod connection;
 mod endpoints;
 mod mcp;
 mod mcp_credentials;
+mod partition_ddl;
+mod partition_maintenance;
 mod relays;
 mod routes;
 mod routing_state;
@@ -30,6 +32,15 @@ pub use connection::{
     connect, connect_sqlite, connect_sqlite_with_max_connections, connect_with_max_connections,
     migrate, migrate_standalone,
 };
+pub use partition_maintenance::{
+    PARTITION_MAINTENANCE_LOCK_KEY, PartitionHorizons, PartitionMaintenanceReport,
+    drop_partitions_before_today, run_partition_maintenance,
+};
+
+/// Issue #277 Phase P8: content-family retention days, kept as a named
+/// constant because content expiry is now partition-drop driven and no longer
+/// user-configurable.
+pub const PARTITION_CONTENT_RETENTION_DAYS: i32 = 3;
 pub use endpoints::{
     create_endpoint, create_endpoint_with_mcp, delete_endpoint, get_endpoint, list_endpoints,
     list_endpoints_page, list_visible_endpoints, set_endpoint_mcp_enabled,
@@ -81,13 +92,13 @@ pub use settings::{
 pub use types::*;
 pub(crate) use usage::get_visible_usage_event_detail_with_raw_store;
 pub(crate) use usage::run_raw_payload_maintenance_with_store;
-pub use usage::run_usage_metadata_maintenance;
 pub use usage::{
     CACHE_ALERT_SETTINGS_KEY, LowCacheConversation, OverviewBucket, OverviewWindow,
     RawPayloadMaintenanceReport, RequestRecordClearReport, RequestRecordPruneReport,
-    RequestRecordRouteLocator, RequestRecordStateInput, UsageContentMaintenanceReport,
-    abort_request_record, abort_request_records_by_ids, abort_stale_request_records,
-    allocate_conversation_seq, clear_usage_events, decode_prompt_message_refs,
+    RequestRecordRouteLocator, RequestRecordStateInput, abort_request_record,
+    abort_request_records_by_ids, abort_stale_request_records, allocate_conversation_seq,
+    cleanup_orphan_request_record_leases, cleanup_orphan_usage_prompt_blocks,
+    cleanup_stale_conversation_redaction_sessions, clear_usage_events, decode_prompt_message_refs,
     delete_conversation_redaction_session, delete_request_record_lease, endpoint_today_tokens,
     find_low_cache_conversations, find_request_record_tool_calls_by_call_ids,
     get_cache_alert_settings, get_conversation_redaction_session,
@@ -107,7 +118,7 @@ pub use usage::{
     prune_usage_events, record_cache_alert, record_request_record,
     record_request_record_with_raw_store, record_request_state, replay_snapshot_before_or_at_seq,
     request_record_summary, request_records_overview, run_raw_payload_maintenance,
-    run_usage_content_maintenance, set_cache_alert_settings, upsert_conversation_redaction_session,
+    set_cache_alert_settings, upsert_conversation_redaction_session,
     upsert_request_record_tool_call, upsert_usage_assistant_artifact, upsert_usage_prompt_block,
     usage_buckets,
 };

@@ -15,7 +15,6 @@ mod artifacts;
 mod buckets;
 mod cache_alert;
 mod cleanup;
-mod content_maintenance;
 mod detail;
 mod endpoint_usage;
 mod insert;
@@ -37,7 +36,6 @@ pub use cache_alert::{
 };
 pub(crate) use cleanup::run_raw_payload_maintenance_with_store;
 pub use cleanup::{RawPayloadMaintenanceReport, run_raw_payload_maintenance};
-pub use content_maintenance::{UsageContentMaintenanceReport, run_usage_content_maintenance};
 pub(crate) use detail::get_visible_usage_event_detail_with_raw_store;
 pub use detail::{
     get_replayable_usage_event_by_provider_conversation_key,
@@ -57,8 +55,9 @@ pub use insert::{
     record_request_state,
 };
 pub use metadata_maintenance::{
-    RequestRecordClearReport, RequestRecordPruneReport, clear_usage_events, prune_usage_events,
-    run_usage_metadata_maintenance,
+    RequestRecordClearReport, RequestRecordPruneReport, cleanup_orphan_request_record_leases,
+    cleanup_orphan_usage_prompt_blocks, cleanup_stale_conversation_redaction_sessions,
+    clear_usage_events, prune_usage_events,
 };
 pub use overview::{OverviewBucket, OverviewWindow, request_records_overview};
 pub use prompt_blocks::{

@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P8: scoped row deletion across the whole request family.\n--\n-- Only the manual admin clear endpoint reaches this statement: the 15-minute\n-- tick never deletes request-family rows (it drops whole partitions instead).\n-- `clear_usage_events` calls it either with an explicit scope/range (per-user\n-- or windowed clear) or, for a full-history clear, with scope=all and the\n-- current UTC day as `start_at` so only today's rows remain to delete after\n-- every earlier partition was dropped.\n--\n-- Billing protection is gone by decision: the usage_charges ledger is\n-- permanent and decoupled from the request family.\n--\n-- Scope semantics mirror the legacy clear SQL:\n--   $1  target_user_id (TargetUser scope; NULL otherwise)\n--   $2  visible_user_id (CurrentUser scope; NULL otherwise)\n--   $3  start_at (NULL = unbounded)\n--   $4  end_at (NULL = unbounded)\n--   $5  scope code: 0 = all users, 1 = current user, 2 = target user\nWITH candidates AS MATERIALIZED (\n    SELECT rr.event_id, rr.created_at\n    FROM request_records rr\n    WHERE ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)\n      AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at <= $4)\n      AND (\n          $5::INT = 0\n          OR ($5::INT = 1 AND rr.user_id = $2::BIGINT)\n          OR ($5::INT = 2 AND rr.user_id = $1::BIGINT)\n      )\n), deleted_metadata AS (\n    DELETE FROM request_records rr\n    USING candidates\n    WHERE rr.event_id = candidates.event_id\n      AND rr.created_at = candidates.created_at\n    RETURNING rr.event_id\n), deleted_content AS (\n    DELETE FROM request_record_content content\n    USING candidates\n    WHERE content.event_id = candidates.event_id\n      AND content.created_at = candidates.created_at\n    RETURNING content.event_id\n), deleted_block_refs AS (\n    DELETE FROM request_record_block_refs refs\n    USING candidates\n    WHERE refs.event_id = candidates.event_id\n      AND refs.created_at = candidates.created_at\n    RETURNING refs.event_id\n), deleted_artifacts AS (\n    DELETE FROM request_record_assistant_artifacts artifacts\n    USING candidates\n    WHERE artifacts.event_id = candidates.event_id\n      AND artifacts.created_at = candidates.created_at\n    RETURNING artifacts.event_id\n), deleted_tool_calls AS (\n    DELETE FROM request_record_tool_calls calls\n    USING candidates\n    WHERE calls.parent_event_id = candidates.event_id\n      AND calls.created_at = candidates.created_at\n    RETURNING calls.tool_call_event_id\n), deleted_snapshots AS (\n    DELETE FROM request_record_replay_snapshots snapshots\n    USING candidates\n    WHERE snapshots.created_at = candidates.created_at\n      AND (\n          snapshots.event_id = candidates.event_id\n          OR snapshots.base_event_id = candidates.event_id\n      )\n    RETURNING snapshots.event_id\n), deleted_raw_payloads AS (\n    DELETE FROM request_record_raw_payloads raw\n    USING candidates\n    WHERE raw.event_id = candidates.event_id\n      AND raw.created_at = candidates.created_at\n    RETURNING raw.event_id\n)\nSELECT (SELECT COUNT(*) FROM deleted_metadata)::BIGINT AS \"deleted_count!\";\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "deleted_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3068011bebf4b23dc5f32b5adf27062348b2b8f933d8722fbb72fb62d7ef7616"
+}

@@ -49,9 +49,9 @@ async fn current_day_prompt_block_survives_orphan_cleanup() -> anyhow::Result<()
     .execute(&schema.pool)
     .await?;
 
-    let report = db::run_usage_content_maintenance(&schema.pool, 1)
-        .await?
-        .expect("content maintenance should acquire its advisory lock");
+    let report = db::run_raw_payload_maintenance(&schema.pool, 1).await?;
+    let _ = report;
+    let orphan_deleted = db::cleanup_orphan_usage_prompt_blocks(&schema.pool).await?;
 
     let in_flight = sqlx::query_file!(
         "tests/sql/usage_maintenance/count_usage_prompt_blocks.sql",
@@ -73,7 +73,7 @@ async fn current_day_prompt_block_survives_orphan_cleanup() -> anyhow::Result<()
         stale.count, 0,
         "an orphan older than the current UTC day is collected"
     );
-    assert_eq!(report.orphan_prompt_blocks_deleted, 1);
+    assert_eq!(orphan_deleted, 1);
 
     schema.cleanup().await?;
     Ok(())

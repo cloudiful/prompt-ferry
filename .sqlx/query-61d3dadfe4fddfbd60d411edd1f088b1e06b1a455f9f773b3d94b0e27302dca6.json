@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P8: request_record_leases is a plain table outside the\n-- partition lifecycle, so dropping metadata partitions can leave leases that\n-- point at a request id no longer present. Bounded, index-backed cleanup for\n-- the 15-minute tick.\nDELETE FROM request_record_leases lease\nWHERE NOT EXISTS (\n    SELECT 1\n    FROM request_records rr\n    WHERE rr.request_id = lease.request_id\n);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "61d3dadfe4fddfbd60d411edd1f088b1e06b1a455f9f773b3d94b0e27302dca6"
+}

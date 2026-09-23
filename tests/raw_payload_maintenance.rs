@@ -7,8 +7,9 @@ use uuid::Uuid;
 use crate::db_harness::{TEST_DATABASE_URL_ENV, TestSchema, test_database_configured};
 
 /// Raw payload rows are metadata-only after migration 0066: expired per-event
-/// objects are removed by dropping complete expired partitions while the main
-/// request-record conversation metadata is cleared first.
+/// objects are removed by dropping complete expired partitions. Since Phase
+/// P8 the DROP itself belongs to the shared partition manager, so this test
+/// drives both halves the way the runtime tick does.
 #[tokio::test]
 async fn drops_complete_expired_partition_after_clearing_record_metadata() -> anyhow::Result<()> {
     if !test_database_configured() {
@@ -37,7 +38,15 @@ async fn drops_complete_expired_partition_after_clearing_record_metadata() -> an
         .await?
         .expect("raw maintenance should acquire the isolated test lock");
     assert_eq!(report.raw_rows_deleted, 0);
-    assert!(report.partitions_dropped >= 1);
+
+    let horizons = db::PartitionHorizons {
+        metadata_retention_days: 1,
+        content_retention_days: 1,
+    };
+    let partitions = db::run_partition_maintenance(&schema.pool, horizons)
+        .await?
+        .expect("partition maintenance should acquire its advisory lock");
+    assert!(partitions.partitions_dropped >= 1);
 
     let remaining = sqlx::query_file!("tests/sql/raw_payloads_count_by_event.sql", event_id)
         .fetch_one(&schema.pool)

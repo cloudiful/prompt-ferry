@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P8: prompt blocks are day-partitioned, so the orphan\n-- guard is the current UTC day — a block written today is never reaped\n-- mid-day, and blocks from earlier days vanish with their partitions unless\n-- this guard reaps them as orphans first.\nDELETE FROM usage_prompt_blocks upb\nWHERE upb.created_at < (date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')\n  AND NOT EXISTS (\n      SELECT 1\n      FROM request_record_block_refs ref\n      WHERE ref.block_hash = upb.block_hash\n  );\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "68aa3bc4bde710fc4a9cd4c22a60d869d76192614fa64211c3b6e62810a44059"
+}

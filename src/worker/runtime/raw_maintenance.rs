@@ -13,13 +13,13 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::{info, warn};
 
-const RAW_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60 * 60);
-const RAW_MAINTENANCE_INITIAL_DELAY_MIN: Duration = Duration::from_secs(5 * 60);
-const RAW_MAINTENANCE_INITIAL_DELAY_MAX: Duration = Duration::from_secs(15 * 60);
-const RAW_SCHEDULER_JOB_ID: &str = "prompt-ferry:raw-payload-maintenance";
+const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const MAINTENANCE_INITIAL_DELAY_MIN: Duration = Duration::from_secs(5 * 60);
+const MAINTENANCE_INITIAL_DELAY_MAX: Duration = Duration::from_secs(15 * 60);
+const MAINTENANCE_SCHEDULER_JOB_ID: &str = "prompt-ferry:partition-maintenance";
 
 #[derive(Clone)]
-struct RawMaintenanceDependencies {
+struct MaintenanceDependencies {
     pool: PgPool,
     retention: Arc<RwLock<UsageRetentionSettings>>,
     raw_store: Arc<RwLock<Option<Arc<RawPayloadStore>>>>,
@@ -37,7 +37,7 @@ pub(super) fn spawn(
 ) -> JoinHandle<()> {
     let valkey_url = config.valkey_url.trim().to_string();
     tokio::spawn(async move {
-        let dependencies = Arc::new(RawMaintenanceDependencies {
+        let dependencies = Arc::new(MaintenanceDependencies {
             pool,
             retention,
             raw_store,
@@ -50,7 +50,7 @@ pub(super) fn spawn(
 
         if valkey_url.is_empty() {
             if let Err(error) = run_once(&dependencies).await {
-                warn!(error = %error, "initial raw payload maintenance failed");
+                warn!(error = %error, "initial partition maintenance failed");
             }
             run_local_scheduler(dependencies, control).await;
             return;
@@ -61,13 +61,13 @@ pub(super) fn spawn(
         };
 
         if let Err(error) = run_once(&dependencies).await {
-            warn!(error = %error, "initial raw payload maintenance failed");
+            warn!(error = %error, "initial partition maintenance failed");
         }
 
         let scheduler = coordinated_scheduler(store);
         if let Err(error) = run_coordinated_scheduler(
             scheduler,
-            raw_maintenance_job(dependencies.clone()),
+            maintenance_job(dependencies.clone()),
             valkey_url.clone(),
             control.clone(),
         )
@@ -76,15 +76,14 @@ pub(super) fn spawn(
             warn!(
                 error = %error,
                 capability = "maintenance_coordination",
-                "coordinated raw maintenance scheduler stopped; local scheduling is not safe"
+                "coordinated maintenance scheduler stopped; local scheduling is not safe"
             );
         }
     })
 }
 
-/// Delay the first maintenance run by a random 5-15 minute window. Maintenance
-/// is heavy enough that a worker restart must not stack it on top of cold
-/// caches and slow IO; the steady-state interval also starts after this delay.
+/// Delay the first maintenance run by a random 5-15 minute window. The
+/// steady-state 15-minute tick starts after this jittered delay.
 async fn wait_for_initial_delay(control: &RuntimeControl) -> bool {
     let jitter = initial_delay_jitter();
     tokio::select! {
@@ -94,39 +93,32 @@ async fn wait_for_initial_delay(control: &RuntimeControl) -> bool {
 }
 
 fn initial_delay_jitter() -> Duration {
-    let min_secs = RAW_MAINTENANCE_INITIAL_DELAY_MIN.as_secs();
-    let max_secs = RAW_MAINTENANCE_INITIAL_DELAY_MAX.as_secs();
+    let min_secs = MAINTENANCE_INITIAL_DELAY_MIN.as_secs();
+    let max_secs = MAINTENANCE_INITIAL_DELAY_MAX.as_secs();
     Duration::from_secs(rand::rng().random_range(min_secs..=max_secs))
 }
 
-async fn run_local_scheduler(
-    dependencies: Arc<RawMaintenanceDependencies>,
-    control: RuntimeControl,
-) {
+async fn run_local_scheduler(dependencies: Arc<MaintenanceDependencies>, control: RuntimeControl) {
     let scheduler = Scheduler::new(SchedulerConfig::default(), InMemoryStateStore::new());
-    if let Err(error) = run_scheduler(scheduler, raw_maintenance_job(dependencies), control).await {
-        warn!(error = %error, "local raw maintenance scheduler stopped");
+    if let Err(error) = run_scheduler(scheduler, maintenance_job(dependencies), control).await {
+        warn!(error = %error, "local maintenance scheduler stopped");
     }
 }
 
-fn raw_maintenance_job(
-    dependencies: Arc<RawMaintenanceDependencies>,
-) -> Job<RawMaintenanceDependencies> {
+fn maintenance_job(dependencies: Arc<MaintenanceDependencies>) -> Job<MaintenanceDependencies> {
     Job::new(
-        RAW_SCHEDULER_JOB_ID,
-        Schedule::Interval(RAW_MAINTENANCE_INTERVAL),
+        MAINTENANCE_SCHEDULER_JOB_ID,
+        Schedule::Interval(MAINTENANCE_INTERVAL),
         dependencies,
-        Task::from_async(
-            |context: TaskContext<RawMaintenanceDependencies>| async move {
-                run_once(&context.deps)
-                    .await
-                    .map_err(|error| error.to_string())
-            },
-        ),
+        Task::from_async(|context: TaskContext<MaintenanceDependencies>| async move {
+            run_once(&context.deps)
+                .await
+                .map_err(|error| error.to_string())
+        }),
     )
 }
 
-async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<()> {
+async fn run_once(dependencies: &MaintenanceDependencies) -> anyhow::Result<()> {
     let mut postgres_lease = if dependencies.postgres_coordination {
         match try_postgres_advisory_lease(&dependencies.pool, POSTGRES_MAINTENANCE_LOCK_KEY).await?
         {
@@ -137,43 +129,24 @@ async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<(
         None
     };
     let retention = dependencies.retention.read().await.clone().normalized();
-    match db::run_usage_content_maintenance(
-        &dependencies.pool,
-        i64::from(retention.content_retention_days),
-    )
-    .await
-    {
+    let horizons = db::PartitionHorizons {
+        metadata_retention_days: i64::from(retention.metadata_retention_days),
+        content_retention_days: i64::from(retention.content_retention_days),
+    };
+    match db::run_partition_maintenance(&dependencies.pool, horizons).await {
         Ok(Some(report)) => info!(
-            expired_events = report.expired_events,
-            deleted_block_refs = report.deleted_block_refs,
-            deleted_artifacts = report.deleted_artifacts,
-            deleted_snapshots = report.deleted_snapshots,
-            cleared_tool_arguments = report.cleared_tool_arguments,
-            deleted_redaction_sessions = report.deleted_redaction_sessions,
-            orphan_prompt_blocks_deleted = report.orphan_prompt_blocks_deleted,
-            content_retention_days = retention.content_retention_days,
-            "usage content maintenance completed"
-        ),
-        Ok(None) => {}
-        Err(error) => warn!(error = %error, "usage content maintenance failed"),
-    }
-    match db::run_usage_metadata_maintenance(
-        &dependencies.pool,
-        i64::from(retention.metadata_retention_days),
-    )
-    .await
-    {
-        Ok(Some(report)) => info!(
-            metadata_rows_deleted = report.deleted,
-            protected_by_billing = report.protected_by_billing,
+            partitions_created = report.partitions_created,
+            partitions_dropped = report.partitions_dropped,
             metadata_retention_days = retention.metadata_retention_days,
-            "usage metadata maintenance completed"
+            content_retention_days = retention.content_retention_days,
+            "partition maintenance completed"
         ),
         Ok(None) => {}
-        Err(error) => warn!(error = %error, "usage metadata maintenance failed"),
+        Err(error) => warn!(error = %error, "partition maintenance failed"),
     }
-    // Raw payloads always live in the managed object store; maintenance only
-    // prunes expired per-event object metadata and partitions.
+    // Raw payloads live in the managed object store; expired per-event
+    // objects must be removed from the store before their metadata
+    // partitions disappear.
     let raw_store = dependencies.raw_store.read().await.clone();
     match db::run_raw_payload_maintenance_with_store(
         &dependencies.pool,
@@ -183,9 +156,7 @@ async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<(
     .await
     {
         Ok(Some(report)) => info!(
-            partitions_created = report.partitions_created,
             raw_rows_deleted = report.raw_rows_deleted,
-            partitions_dropped = report.partitions_dropped,
             retention_days = retention.raw_retention_days,
             "raw payload maintenance completed"
         ),
@@ -193,6 +164,22 @@ async fn run_once(dependencies: &RawMaintenanceDependencies) -> anyhow::Result<(
         Err(error) => {
             warn!(error = %error, "raw payload maintenance failed");
         }
+    }
+    // Plain tables outside the partition lifecycle still need bounded
+    // cleanups: partition drops can orphan leases and redaction sessions.
+    match db::cleanup_orphan_request_record_leases(&dependencies.pool).await {
+        Ok(deleted) => info!(
+            orphan_leases_deleted = deleted,
+            "request lease cleanup completed"
+        ),
+        Err(error) => warn!(error = %error, "request lease cleanup failed"),
+    }
+    match db::cleanup_stale_conversation_redaction_sessions(&dependencies.pool).await {
+        Ok(deleted) => info!(
+            redaction_sessions_deleted = deleted,
+            "redaction session cleanup completed"
+        ),
+        Err(error) => warn!(error = %error, "redaction session cleanup failed"),
     }
     match db::run_approval_retention_maintenance(
         &dependencies.pool,
@@ -227,18 +214,12 @@ mod tests {
     fn initial_maintenance_delay_is_jittered_within_five_to_fifteen_minutes() {
         for _ in 0..64 {
             let delay = initial_delay_jitter();
-            assert!(delay >= RAW_MAINTENANCE_INITIAL_DELAY_MIN);
-            assert!(delay <= RAW_MAINTENANCE_INITIAL_DELAY_MAX);
+            assert!(delay >= MAINTENANCE_INITIAL_DELAY_MIN);
+            assert!(delay <= MAINTENANCE_INITIAL_DELAY_MAX);
         }
-        assert_eq!(
-            RAW_MAINTENANCE_INITIAL_DELAY_MIN,
-            Duration::from_secs(5 * 60)
-        );
-        assert_eq!(
-            RAW_MAINTENANCE_INITIAL_DELAY_MAX,
-            Duration::from_secs(15 * 60)
-        );
-        assert!(RAW_MAINTENANCE_INITIAL_DELAY_MAX < RAW_MAINTENANCE_INTERVAL);
+        assert_eq!(MAINTENANCE_INITIAL_DELAY_MIN, Duration::from_secs(5 * 60));
+        assert_eq!(MAINTENANCE_INITIAL_DELAY_MAX, Duration::from_secs(15 * 60));
+        assert_eq!(MAINTENANCE_INTERVAL, Duration::from_secs(15 * 60));
     }
 
     #[tokio::test]
@@ -257,7 +238,7 @@ mod tests {
         let task_executions = executions.clone();
         let task_execution_started = execution_started.clone();
         let job = Job::new(
-            "raw-maintenance-test",
+            "partition-maintenance-test",
             Schedule::Interval(Duration::from_millis(1)),
             Arc::<()>::new(()),
             Task::from_async(move |_: TaskContext<()>| {

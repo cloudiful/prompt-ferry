@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_record_raw_payloads (\n    event_id,\n    created_at,\n    raw_object_key,\n    raw_object_size_bytes,\n    raw_object_sha256,\n    raw_object_expires_at\n)\nVALUES (\n    $1,\n    $2,\n    'p8-raw-' || ($1::BIGINT)::text,\n    1,\n    'deadbeef',\n    ($2::TIMESTAMPTZ) + INTERVAL '3 days'\n)\nON CONFLICT (created_at, event_id) DO NOTHING;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8f524cec78487bf98f13676ef18e2d39f92a93ba3207dbed165d6466442ae2e3"
+}

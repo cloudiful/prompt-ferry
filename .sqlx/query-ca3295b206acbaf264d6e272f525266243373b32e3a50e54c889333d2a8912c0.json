@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P8: full-history clear reaps every orphan prompt block.\n-- After the history partitions are dropped and today's block refs are\n-- deleted, a prompt block with no remaining ref is dead for every scope.\nDELETE FROM usage_prompt_blocks upb\nWHERE NOT EXISTS (\n    SELECT 1\n    FROM request_record_block_refs ref\n    WHERE ref.block_hash = upb.block_hash\n);\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "ca3295b206acbaf264d6e272f525266243373b32e3a50e54c889333d2a8912c0"
+}
