@@ -371,15 +371,15 @@ async fn insert_standalone_endpoint(
 // Standalone 0014 fresh path: a new store migrates to schema 16 with the
 // provider CHECK widened to command_code, opencode_go, openrouter, glm and
 // deepseek. 0015 (issue #230) adds `glm` and 0016 (issue #287) adds
-// `deepseek`; a fresh open() applies all three, so the final schema version
-// is 16.
+// `deepseek`; a fresh open() applies every pending migration, so the final
+// schema version tracks the newest standalone migration.
 #[tokio::test]
 async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_openrouter()
 -> anyhow::Result<()> {
     let path = standalone_temp_path("fresh");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 29);
+    assert_eq!(standalone_schema_version(&pool).await?, 31);
 
     let ddl: String = sqlx::query(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'standalone_provider_endpoints'",
@@ -541,7 +541,7 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     // 0015 (issue #230) adds `glm` and 0016 (issue #287) adds `deepseek`;
     // the final schema version tracks the newest standalone migration after
     // the pending migrations apply.
-    assert_eq!(standalone_schema_version(&pool).await?, 29);
+    assert_eq!(standalone_schema_version(&pool).await?, 31);
     let preserved: i64 = sqlx::query(
         "SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'",
     )
@@ -586,7 +586,7 @@ async fn standalone_0025_quota_cleanup_preserves_route_targets() -> anyhow::Resu
     let path = standalone_temp_path("quota25");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 29);
+    assert_eq!(standalone_schema_version(&pool).await?, 31);
     // No quota columns remain.
     for table in ["standalone_model_routes", "standalone_mcp_servers"] {
         let cols: Vec<String> = if table == "standalone_model_routes" {

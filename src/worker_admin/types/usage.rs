@@ -134,6 +134,8 @@ pub struct RequestRecordFullResponse {
     pub record_id: i64,
     pub conversation_source: String,
     pub client_installation_id: Option<String>,
+    pub session_header_id: Option<String>,
+    pub session_parent_id: Option<String>,
     pub normalized_item_count: Option<i32>,
     pub request_storage_mode: String,
     pub request_raw_json: Option<serde_json::Value>,

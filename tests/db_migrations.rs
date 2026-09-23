@@ -1134,6 +1134,89 @@ async fn migrate_adds_target_thinking_downgrade_switch_defaulting_off() -> anyho
     Ok(())
 }
 
+// Issue #579 Task 2: every request record carries the session identity the
+// request sent (`x-session-id` family) plus the child-session parent link.
+// Both columns are nullable; only their presence and type are pinned here.
+#[tokio::test]
+async fn migrate_adds_request_session_identity_columns() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    db::migrate(&schema.pool).await?;
+
+    let matching_columns = sqlx::query_scalar::<_, i64>(
+        r#"
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'request_records'
+              AND (
+                    (column_name = 'session_header_id'
+                        AND data_type = 'text'
+                        AND is_nullable = 'YES')
+                 OR (column_name = 'session_parent_id'
+                        AND data_type = 'text'
+                        AND is_nullable = 'YES')
+              )
+            "#,
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    assert_eq!(matching_columns, 2);
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+// Issue #579 Task 2: the mapped session identity is persisted with the request
+// record and surfaced by the visible detail query. Later lifecycle events keep
+// the request-time values, and a header-less request (Codex CLI) stays NULL.
+#[tokio::test]
+async fn request_record_detail_keeps_session_identity() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    db::migrate(&schema.pool).await?;
+
+    let request_id = Uuid::new_v4();
+    let input = db::RequestRecordCreate::ai_request(request_id, "/v1/responses")
+        .with_session_identity(
+            Some("ses_child".to_string()),
+            Some("ses_parent".to_string()),
+        );
+    let event_id = db::record_request_record(&schema.pool, input).await?;
+
+    // A later lifecycle event without session identity keeps the request-time
+    // values instead of clearing them.
+    let mut completed = db::RequestRecordCreate::ai_request(request_id, "/v1/responses");
+    completed.request_state = db::RequestRecordState::Completed;
+    db::record_request_record(&schema.pool, completed).await?;
+
+    let detail = db::get_visible_usage_event_detail(&schema.pool, event_id, None)
+        .await?
+        .expect("detail");
+    assert_eq!(detail.session_header_id.as_deref(), Some("ses_child"));
+    assert_eq!(detail.session_parent_id.as_deref(), Some("ses_parent"));
+
+    let plain_event = db::record_request_record(
+        &schema.pool,
+        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses"),
+    )
+    .await?;
+    let plain = db::get_visible_usage_event_detail(&schema.pool, plain_event, None)
+        .await?
+        .expect("detail");
+    assert!(plain.session_header_id.is_none());
+    assert!(plain.session_parent_id.is_none());
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
 fn legacy_input_clone(server: &db::McpServer) -> db::McpServerInput {
     db::McpServerInput {
         scope: server.scope.clone(),

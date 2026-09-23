@@ -59,6 +59,8 @@ pub struct RequestRecordCreate {
     pub redaction_types_json: Option<Value>,
     pub redaction_fields_json: Option<Value>,
     pub client_installation_id: Option<String>,
+    pub session_header_id: Option<String>,
+    pub session_parent_id: Option<String>,
     pub normalized_item_count: Option<i32>,
     pub normalized_chain_hash: Option<String>,
     pub normalized_first_ref_hash: Option<String>,
@@ -211,6 +213,8 @@ impl RequestRecordCreate {
             redaction_types_json: None,
             redaction_fields_json: None,
             client_installation_id: None,
+            session_header_id: None,
+            session_parent_id: None,
             normalized_item_count: None,
             normalized_chain_hash: None,
             normalized_first_ref_hash: None,
@@ -365,6 +369,18 @@ impl RequestRecordCreate {
         self.cached_tokens = cached_tokens;
         self.cache_read_tokens = cache_read_tokens;
         self.cache_write_tokens = cache_write_tokens;
+        self
+    }
+
+    /// Issue #579 Task 2: session identity carried by the request
+    /// (`x-session-id` family) plus the child-session parent link.
+    pub fn with_session_identity(
+        mut self,
+        session_header_id: Option<String>,
+        session_parent_id: Option<String>,
+    ) -> Self {
+        self.session_header_id = session_header_id;
+        self.session_parent_id = session_parent_id;
         self
     }
 

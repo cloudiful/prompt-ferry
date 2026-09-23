@@ -36,6 +36,7 @@ pub(super) struct RequestPromptLog {
     pub(super) conversation_override_endpoint_key_id: Option<uuid::Uuid>,
     pub(super) client_installation_id: Option<String>,
     pub(super) session_header_id: Option<String>,
+    pub(super) session_parent_id: Option<String>,
     pub(super) normalized_item_count: Option<i32>,
     pub(super) normalized_chain_hash: Option<String>,
     pub(super) normalized_first_ref_hash: Option<String>,
@@ -97,6 +98,7 @@ impl Default for RequestPromptLog {
             conversation_override_endpoint_key_id: None,
             client_installation_id: None,
             session_header_id: None,
+            session_parent_id: None,
             normalized_item_count: None,
             normalized_chain_hash: None,
             normalized_first_ref_hash: None,
@@ -212,6 +214,7 @@ pub(super) async fn prepare_request_prompt_log(
         return Ok(RequestPromptLog {
             client_installation_id: codex_metadata.client_installation_id,
             session_header_id: session_header_id(request.headers.as_slice()),
+            session_parent_id: parent_session_header_id(request.headers.as_slice()),
             request_raw_json: raw_observability.request_raw_json,
             request_has_previous_response_id: raw_observability.request_has_previous_response_id,
             request_previous_response_id: raw_observability.request_previous_response_id,
@@ -252,6 +255,7 @@ pub(super) async fn prepare_request_prompt_log(
         redaction: prompt_redaction,
         client_installation_id: codex_metadata.client_installation_id.clone(),
         session_header_id: session_header_id(request.headers.as_slice()),
+        session_parent_id: parent_session_header_id(request.headers.as_slice()),
         normalized_item_count: Some(fingerprint.normalized_item_count),
         normalized_chain_hash: Some(fingerprint.normalized_chain_hash.clone()),
         normalized_first_ref_hash: fingerprint.normalized_first_ref_hash.clone(),
@@ -468,7 +472,7 @@ fn codex_thread_key(metadata: &CodexRequestMetadata) -> Option<&str> {
         .or(metadata.prompt_cache_key.as_deref())
 }
 
-fn session_header_id(headers: &[(String, String)]) -> Option<String> {
+pub(super) fn session_header_id(headers: &[(String, String)]) -> Option<String> {
     [
         "x-session-id",
         "x-session-affinity",
@@ -486,6 +490,18 @@ fn session_header_id(headers: &[(String, String)]) -> Option<String> {
     })
 }
 
+/// Issue #579 Task 2: the parent-session header an OpenCode child session sends
+/// next to its own session header. It is association and display metadata only;
+/// the conversation id still derives from the session's own `X-Session-Id`.
+pub(super) fn parent_session_header_id(headers: &[(String, String)]) -> Option<String> {
+    headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("x-parent-session-id"))
+        .map(|(_, value)| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 pub(super) fn resolve_mcp_conversation_log() -> RequestPromptLog {
     RequestPromptLog::default()
 }
@@ -494,7 +510,8 @@ pub(super) fn resolve_mcp_conversation_log() -> RequestPromptLog {
 mod tests {
     use super::{
         PromptConversationResolution, RequestPromptLog, apply_conversation_resolution,
-        codex_request_metadata, codex_thread_key, reconcile_replay_parent, session_header_id,
+        codex_request_metadata, codex_thread_key, parent_session_header_id,
+        reconcile_replay_parent, session_header_id,
     };
 
     #[test]
@@ -557,6 +574,30 @@ mod tests {
         ];
 
         assert_eq!(session_header_id(&headers).as_deref(), Some("session"));
+    }
+
+    #[test]
+    fn accepts_parent_session_identity_header() {
+        let headers = vec![
+            ("X-Session-Id".to_string(), "child-session".to_string()),
+            (
+                "X-Parent-Session-Id".to_string(),
+                "parent-session".to_string(),
+            ),
+        ];
+
+        assert_eq!(
+            parent_session_header_id(&headers).as_deref(),
+            Some("parent-session")
+        );
+    }
+
+    #[test]
+    fn ignores_blank_parent_session_identity_headers() {
+        let headers = vec![("x-parent-session-id".to_string(), "   ".to_string())];
+
+        assert_eq!(parent_session_header_id(&headers), None);
+        assert_eq!(parent_session_header_id(&[]), None);
     }
 
     #[test]

@@ -170,6 +170,8 @@ pub(in crate::worker_admin::handlers) async fn build_usage_request_full_response
             .conversation_source
             .unwrap_or_else(|| "none".to_string()),
         client_installation_id: entry.client_installation_id,
+        session_header_id: entry.session_header_id,
+        session_parent_id: entry.session_parent_id,
         normalized_item_count: entry.normalized_item_count,
         request_storage_mode: entry
             .request_storage_mode

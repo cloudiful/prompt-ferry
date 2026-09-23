@@ -115,6 +115,8 @@ pub struct RequestRecordDetail {
     pub storage_sanitized_nul_count: i32,
     pub redaction: RequestRecordRedactionSummary,
     pub client_installation_id: Option<String>,
+    pub session_header_id: Option<String>,
+    pub session_parent_id: Option<String>,
     pub normalized_item_count: Option<i32>,
     pub request_storage_mode: String,
     pub request_raw_json: Option<Value>,

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT rr.event_id AS \"event_id!\", rr.request_id AS \"request_id!\", rr.user_id, rr.endpoint_id, rr.path AS \"path!\", rr.model, rr.conversation_id, rr.parent_event_id,\n       rr.conversation_seq, rr.conversation_source AS \"conversation_source!\", rr.client_installation_id, rr.normalized_item_count,\n       rr.normalized_chain_hash, rr.normalized_first_ref_hash, rr.normalized_last_ref_hash,\n       rr.request_storage_mode AS \"request_storage_mode!\", rr.request_full_json, rr.request_delta_json,\n       CAST(NULL AS JSONB) AS request_raw_json, rr.request_has_previous_response_id AS \"request_has_previous_response_id!\",\n       rr.request_previous_response_id, rr.request_previous_response_parent_found,\n       rr.request_conversation_key, rr.request_conversation_parent_found,\n       rr.provider_response_id, rr.base_checkpoint_event_id, rr.response_prompt, CAST(NULL AS TEXT) AS response_raw_body\nFROM request_records rr\nWHERE rr.event_id = $1\n  AND rr.content_expired_at IS NULL\n",
+  "query": "SELECT rr.event_id AS \"event_id!\", rr.request_id AS \"request_id!\", rr.user_id, rr.endpoint_id, rr.path AS \"path!\", rr.model, rr.conversation_id, rr.parent_event_id,\n       rr.conversation_seq, rr.conversation_source AS \"conversation_source!\", rr.client_installation_id, rr.session_header_id, rr.session_parent_id, rr.normalized_item_count,\n       rr.normalized_chain_hash, rr.normalized_first_ref_hash, rr.normalized_last_ref_hash,\n       rr.request_storage_mode AS \"request_storage_mode!\", rr.request_full_json, rr.request_delta_json,\n       CAST(NULL AS JSONB) AS request_raw_json, rr.request_has_previous_response_id AS \"request_has_previous_response_id!\",\n       rr.request_previous_response_id, rr.request_previous_response_parent_found,\n       rr.request_conversation_key, rr.request_conversation_parent_found,\n       rr.provider_response_id, rr.base_checkpoint_event_id, rr.response_prompt, CAST(NULL AS TEXT) AS response_raw_body\nFROM request_records rr\nWHERE rr.event_id = $1\n  AND rr.content_expired_at IS NULL\n",
   "describe": {
     "columns": [
       {
@@ -126,6 +126,28 @@
       },
       {
         "ordinal": 11,
+        "name": "session_header_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "session_header_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "session_parent_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "session_parent_id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
         "name": "normalized_item_count",
         "type_info": "Int4",
         "origin": {
@@ -136,7 +158,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "normalized_chain_hash",
         "type_info": "Text",
         "origin": {
@@ -147,7 +169,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "normalized_first_ref_hash",
         "type_info": "Text",
         "origin": {
@@ -158,7 +180,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 16,
         "name": "normalized_last_ref_hash",
         "type_info": "Text",
         "origin": {
@@ -169,7 +191,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 17,
         "name": "request_storage_mode!",
         "type_info": "Text",
         "origin": {
@@ -180,7 +202,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 18,
         "name": "request_full_json",
         "type_info": "Jsonb",
         "origin": {
@@ -191,7 +213,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 19,
         "name": "request_delta_json",
         "type_info": "Jsonb",
         "origin": {
@@ -202,13 +224,13 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
         "name": "request_raw_json",
         "type_info": "Jsonb",
         "origin": "Expression"
       },
       {
-        "ordinal": 19,
+        "ordinal": 21,
         "name": "request_has_previous_response_id!",
         "type_info": "Bool",
         "origin": {
@@ -219,7 +241,7 @@
         }
       },
       {
-        "ordinal": 20,
+        "ordinal": 22,
         "name": "request_previous_response_id",
         "type_info": "Text",
         "origin": {
@@ -230,7 +252,7 @@
         }
       },
       {
-        "ordinal": 21,
+        "ordinal": 23,
         "name": "request_previous_response_parent_found",
         "type_info": "Bool",
         "origin": {
@@ -241,7 +263,7 @@
         }
       },
       {
-        "ordinal": 22,
+        "ordinal": 24,
         "name": "request_conversation_key",
         "type_info": "Text",
         "origin": {
@@ -252,7 +274,7 @@
         }
       },
       {
-        "ordinal": 23,
+        "ordinal": 25,
         "name": "request_conversation_parent_found",
         "type_info": "Bool",
         "origin": {
@@ -263,7 +285,7 @@
         }
       },
       {
-        "ordinal": 24,
+        "ordinal": 26,
         "name": "provider_response_id",
         "type_info": "Text",
         "origin": {
@@ -274,7 +296,7 @@
         }
       },
       {
-        "ordinal": 25,
+        "ordinal": 27,
         "name": "base_checkpoint_event_id",
         "type_info": "Int8",
         "origin": {
@@ -285,7 +307,7 @@
         }
       },
       {
-        "ordinal": 26,
+        "ordinal": 28,
         "name": "response_prompt",
         "type_info": "Text",
         "origin": {
@@ -296,7 +318,7 @@
         }
       },
       {
-        "ordinal": 27,
+        "ordinal": 29,
         "name": "response_raw_body",
         "type_info": "Text",
         "origin": "Expression"
@@ -323,6 +345,8 @@
       true,
       true,
       true,
+      true,
+      true,
       false,
       true,
       true,
@@ -338,5 +362,5 @@
       null
     ]
   },
-  "hash": "dccd008cac965b52c57e9ff4488009201a5f9e9b5840ac99640ae327ac7d235a"
+  "hash": "dcba70bf6ec982ac7970646de17ba26c0635337ac254820e0d578c1a4647ae2e"
 }
