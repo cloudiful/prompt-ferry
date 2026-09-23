@@ -6,6 +6,7 @@ use super::lifecycle::RuntimeControl;
 use crate::raw_payload_store::RawPayloadStore;
 use crate::worker_admin_types::UsageRetentionSettings;
 use crate::{config::WorkerConfig, db};
+use rand::RngExt;
 use scheduler::{InMemoryStateStore, Job, Schedule, Scheduler, SchedulerConfig, Task, TaskContext};
 use sqlx::PgPool;
 use std::{sync::Arc, time::Duration};
@@ -13,6 +14,8 @@ use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::{info, warn};
 
 const RAW_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60 * 60);
+const RAW_MAINTENANCE_INITIAL_DELAY_MIN: Duration = Duration::from_secs(5 * 60);
+const RAW_MAINTENANCE_INITIAL_DELAY_MAX: Duration = Duration::from_secs(15 * 60);
 const RAW_SCHEDULER_JOB_ID: &str = "prompt-ferry:raw-payload-maintenance";
 
 #[derive(Clone)]
@@ -40,6 +43,10 @@ pub(super) fn spawn(
             raw_store,
             postgres_coordination: valkey_url.is_empty(),
         });
+
+        if !wait_for_initial_delay(&control).await {
+            return;
+        }
 
         if valkey_url.is_empty() {
             if let Err(error) = run_once(&dependencies).await {
@@ -73,6 +80,23 @@ pub(super) fn spawn(
             );
         }
     })
+}
+
+/// Delay the first maintenance run by a random 5-15 minute window. Maintenance
+/// is heavy enough that a worker restart must not stack it on top of cold
+/// caches and slow IO; the steady-state interval also starts after this delay.
+async fn wait_for_initial_delay(control: &RuntimeControl) -> bool {
+    let jitter = initial_delay_jitter();
+    tokio::select! {
+        _ = tokio::time::sleep(jitter) => true,
+        _ = control.wait_for_shutdown() => false,
+    }
+}
+
+fn initial_delay_jitter() -> Duration {
+    let min_secs = RAW_MAINTENANCE_INITIAL_DELAY_MIN.as_secs();
+    let max_secs = RAW_MAINTENANCE_INITIAL_DELAY_MAX.as_secs();
+    Duration::from_secs(rand::rng().random_range(min_secs..=max_secs))
 }
 
 async fn run_local_scheduler(
@@ -198,6 +222,31 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
     use tokio::sync::Notify;
+
+    #[test]
+    fn initial_maintenance_delay_is_jittered_within_five_to_fifteen_minutes() {
+        for _ in 0..64 {
+            let delay = initial_delay_jitter();
+            assert!(delay >= RAW_MAINTENANCE_INITIAL_DELAY_MIN);
+            assert!(delay <= RAW_MAINTENANCE_INITIAL_DELAY_MAX);
+        }
+        assert_eq!(
+            RAW_MAINTENANCE_INITIAL_DELAY_MIN,
+            Duration::from_secs(5 * 60)
+        );
+        assert_eq!(
+            RAW_MAINTENANCE_INITIAL_DELAY_MAX,
+            Duration::from_secs(15 * 60)
+        );
+        assert!(RAW_MAINTENANCE_INITIAL_DELAY_MAX < RAW_MAINTENANCE_INTERVAL);
+    }
+
+    #[tokio::test]
+    async fn initial_maintenance_delay_returns_early_during_shutdown() {
+        let control = RuntimeControl::new();
+        control.begin_shutdown();
+        assert!(!wait_for_initial_delay(&control).await);
+    }
 
     #[tokio::test]
     async fn local_scheduler_stops_when_runtime_control_shuts_down() {

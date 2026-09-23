@@ -260,12 +260,33 @@ impl Drop for ManagedLeaseGuard {
     }
 }
 
+/// Progress of one request-lease reconcile pass. Recorded between stages so a
+/// failure can be logged with the request count and the backend the failing
+/// stage used, instead of blaming valkey for what is usually a saturated
+/// Postgres lease pool.
+struct LeaseReconcileDiagnostics {
+    /// Active request records read from the lease pool before the failure.
+    active_requests: usize,
+    /// Backend the failing stage talked to: the Postgres lease pool or valkey.
+    pool_source: &'static str,
+}
+
+impl Default for LeaseReconcileDiagnostics {
+    fn default() -> Self {
+        Self {
+            active_requests: 0,
+            pool_source: "lease_pool",
+        }
+    }
+}
+
 pub(super) async fn abort_stale_requests_once(admin_state: Option<&AdminState>) {
     let Some(state) = admin_state else {
         return;
     };
     if state.replay_cache.enabled() {
-        match abort_requests_missing_valkey_leases(state).await {
+        let mut diagnostics = LeaseReconcileDiagnostics::default();
+        match abort_requests_missing_valkey_leases(state, &mut diagnostics).await {
             Ok(count) if count > 0 => {
                 warn!(
                     count,
@@ -315,7 +336,8 @@ pub(super) fn spawn_stale_request_reconciler(
                 _ = control.wait_for_shutdown() => break,
                 _ = interval.tick() => {
                     if state.replay_cache.enabled() {
-                        match abort_requests_missing_valkey_leases(&state).await {
+                        let mut diagnostics = LeaseReconcileDiagnostics::default();
+                        match abort_requests_missing_valkey_leases(&state, &mut diagnostics).await {
                             Ok(count) if count > 0 => {
                                 warn!(
                                     count,
@@ -325,7 +347,12 @@ pub(super) fn spawn_stale_request_reconciler(
                             }
                             Ok(_) => {}
                             Err(err) => {
-                                warn!(error = %err, "failed to reconcile request leases from valkey");
+                                warn!(
+                                    error = %err,
+                                    pool_source = diagnostics.pool_source,
+                                    active_requests = diagnostics.active_requests,
+                                    "failed to reconcile request leases"
+                                );
                             }
                         }
                         continue;
@@ -349,10 +376,16 @@ pub(super) fn spawn_stale_request_reconciler(
     }))
 }
 
-async fn abort_requests_missing_valkey_leases(state: &AdminState) -> anyhow::Result<u64> {
+async fn abort_requests_missing_valkey_leases(
+    state: &AdminState,
+    diagnostics: &mut LeaseReconcileDiagnostics,
+) -> anyhow::Result<u64> {
+    diagnostics.pool_source = "lease_pool";
     let request_ids = db::list_active_request_record_ids(&state.lease_pool).await?;
+    diagnostics.active_requests = request_ids.len();
     const VALKEY_LEASE_CHECK_CONCURRENCY: usize = 32;
     let replay_cache = state.replay_cache.clone();
+    diagnostics.pool_source = "valkey";
     let checked = futures::stream::iter(request_ids.into_iter().map(|request_id| {
         let replay_cache = replay_cache.clone();
         async move {
@@ -370,5 +403,6 @@ async fn abort_requests_missing_valkey_leases(state: &AdminState) -> anyhow::Res
         .into_iter()
         .filter_map(|(request_id, exists)| (!exists).then_some(request_id))
         .collect::<Vec<_>>();
+    diagnostics.pool_source = "lease_pool";
     db::abort_request_records_by_ids(&state.lease_pool, &missing).await
 }

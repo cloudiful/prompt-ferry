@@ -254,7 +254,9 @@ pub(super) async fn build_admin_state(
     let is_postgres = config.storage_backend().is_postgres();
     let (pool, lease_pool, user_store, config_repository, sqlite_pool) = if is_postgres {
         let pool = db::connect(&config.database_url).await?;
-        let lease_pool = db::connect_with_max_connections(&config.database_url, 2).await?;
+        // The lease pool serves request admission, heartbeat, cancel and
+        // delete; a 2-connection cap queued them behind each other.
+        let lease_pool = db::connect_with_max_connections(&config.database_url, 8).await?;
         db::migrate(&pool).await?;
         let user_store = db::UserStore::postgres(&pool);
         let config_repository = db::ConfigRepository::postgres(&pool);
