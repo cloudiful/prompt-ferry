@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Round-trip probe for the partition family down migration: every table that\n-- carries a surviving FK into `request_records` is filled before `down`, and\n-- `down` must stay executable by truncating all of them before it restores\n-- the legacy foreign keys.\nSELECT\n    (SELECT count(*) FROM usage_charges) AS \"charges!\",\n    (SELECT count(*) FROM usage_charge_lines) AS \"charge_lines!\",\n    (SELECT count(*) FROM conversation_redaction_sessions) AS \"redaction_sessions!\",\n    (SELECT count(*) FROM request_record_raw_payloads) AS \"raw_payloads!\",\n    (SELECT count(*) FROM request_record_raw_payloads_overflow) AS \"raw_payload_overflow!\"\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "charges!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "charge_lines!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "redaction_sessions!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "raw_payloads!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "raw_payload_overflow!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "c150ee0713f8fd56bc5cf93a13f49eabd24aaa6931a97c25bf592dde6b3f35a3"
+}

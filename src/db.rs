@@ -31,7 +31,7 @@ pub use config_repository::{
 };
 pub use connection::{
     connect, connect_sqlite, connect_sqlite_with_max_connections, connect_with_max_connections,
-    migrate, migrate_standalone,
+    migrate, migrate_standalone, revert_latest_migration,
 };
 pub use partition_maintenance::{
     PARTITION_MAINTENANCE_LOCK_KEY, PartitionHorizons, PartitionMaintenanceReport,

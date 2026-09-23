@@ -1,8 +1,9 @@
--- Issue #277 Phase P7 down — rebuild the pre-partition request family.
---
--- Data loss in both directions is operator-approved (2026-09-23): the down
--- migration restores the pre-P7 *shape* as empty tables, so the previous code
--- keeps working without a compatibility layer.
+-- Issue #277 Phase P10 down fix — the down path must stay executable under
+-- normal operation. The request family is dropped without being refilled, so
+-- every surviving table that carries a foreign key into `request_records`
+-- has to lose its carrying rows first: the billing ledger, the redaction
+-- sessions and both raw payload carriers (data loss in both directions is
+-- operator-approved). The original FK shape is then restored with no drift.
 
 -- 1. The sequences are owned by the partitioned tables; detach them first.
 ALTER SEQUENCE usage_events_event_id_seq OWNED BY NONE;
@@ -334,7 +335,21 @@ ALTER TABLE request_record_replay_snapshots
     ADD CONSTRAINT request_record_replay_snapshots_base_event_id_fkey
     FOREIGN KEY (base_event_id) REFERENCES request_records(event_id) ON DELETE CASCADE;
 
--- 4. Restore the loose references that pointed at the family.
+-- 4. Restore the loose references that pointed at the family. The request
+--    family was dropped without being refilled, so every surviving
+--    FK-carrying table is emptied first: with rows still present, adding the
+--    constraint back would fail its validation against the now-empty parent
+--    and the down path would be unusable. The raw payload parent TRUNCATE
+--    cascades to every child partition (the default staging partition and
+--    all daily partitions); `_overflow` is an independent staging table and
+--    is truncated on its own. These statements run after the parent drop in
+--    step 2, so the referencing FKs are already gone and nothing restricts
+--    the truncation.
+TRUNCATE usage_charges, usage_charge_lines;
+TRUNCATE conversation_redaction_sessions;
+TRUNCATE request_record_raw_payloads;
+TRUNCATE request_record_raw_payloads_overflow;
+
 ALTER TABLE usage_charges
     ADD CONSTRAINT usage_charges_event_id_fkey
     FOREIGN KEY (event_id) REFERENCES request_records(event_id) ON DELETE SET NULL;

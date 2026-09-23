@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Row parked in the overflow staging table, the mid-staging state the raw\n-- partition manager produces while a daily partition is being created.\nINSERT INTO request_record_raw_payloads_overflow (\n    event_id,\n    created_at,\n    raw_object_key,\n    raw_object_size_bytes,\n    raw_object_sha256,\n    raw_object_expires_at\n)\nVALUES ($1, $2, $3, $4, $5, $6)\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        "Text",
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e220530b1494359a165c72495324c6b23ad869e2d3eabc798f48db0ea8996383"
+}
