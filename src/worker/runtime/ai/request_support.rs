@@ -32,9 +32,8 @@ pub(super) struct RouteRedactionState {
     /// Redacted request JSON, only present when replacements were applied.
     pub(super) redacted_request_json: Option<Value>,
     /// The existing session must be dropped: redaction was explicitly disabled
-    /// for this request, or a prior session was refused (budget overflow or a
-    /// policy-generation change). This is the only path that deletes the
-    /// persisted row.
+    /// for this request, or a prior session was dropped by a policy-generation
+    /// mismatch. This is the only path that deletes the persisted row.
     pub(super) reset: bool,
 }
 
@@ -196,9 +195,6 @@ pub(super) async fn prepare_upstream_request_for_route(
     let redaction = route_redaction_state(
         redaction_enabled,
         had_prior_session,
-        redacted_request
-            .as_ref()
-            .is_some_and(|value| value.redacted_request_json.is_some()),
         prepared.upstream_restore_session.clone(),
         prepared.upstream_redacted_request_json.clone(),
     );
@@ -210,13 +206,12 @@ pub(super) async fn prepare_upstream_request_for_route(
 
 /// Issue #564 Task 2: classify why a prepared request carries no redaction
 /// session. A missing session is only a reset signal when the caller proved
-/// there was state to drop (explicit disable, a refused prior session, or
-/// replacements that could not be finalized). Everything else is
-/// `no_session_available` and must never delete a still-valid row.
+/// there was state to drop (explicit disable, or a prior session dropped by a
+/// policy-generation mismatch). Everything else is `no_session_available` and
+/// must never delete a still-valid row.
 fn route_redaction_state(
     redaction_enabled: bool,
     had_prior_session: bool,
-    applied_replacements: bool,
     session: Option<UpstreamRedactionSession>,
     redacted_request_json: Option<Value>,
 ) -> RouteRedactionState {
@@ -230,7 +225,7 @@ fn route_redaction_state(
     }
     RouteRedactionState {
         enabled: true,
-        reset: session.is_none() && (had_prior_session || applied_replacements),
+        reset: session.is_none() && had_prior_session,
         session,
         redacted_request_json,
     }
@@ -334,7 +329,7 @@ mod tests {
 
     #[test]
     fn explicit_disable_requests_a_reset() {
-        let state = route_redaction_state(false, false, false, None, None);
+        let state = route_redaction_state(false, false, None, None);
         assert!(!state.enabled);
         assert!(state.reset);
         assert!(state.session.is_none());
@@ -344,22 +339,16 @@ mod tests {
     fn missing_session_without_prior_state_is_not_a_reset() {
         // First redaction of a conversation that matched nothing: there is no
         // row to drop, so the persistence layer must keep whatever exists.
-        let state = route_redaction_state(true, false, false, None, None);
+        let state = route_redaction_state(true, false, None, None);
         assert!(state.enabled);
         assert!(!state.reset);
     }
 
     #[test]
     fn refused_prior_session_is_a_reset() {
-        // Budget overflow (or a policy-generation change) drops the session
-        // while prior state existed, so the persisted row must be cleared.
-        let state = route_redaction_state(true, true, false, None, None);
-        assert!(state.reset);
-    }
-
-    #[test]
-    fn unfinalized_replacements_are_a_reset() {
-        let state = route_redaction_state(true, false, true, None, None);
+        // A policy-generation mismatch drops the loaded prior session, so the
+        // persisted row must be cleared even though this turn carried state.
+        let state = route_redaction_state(true, true, None, None);
         assert!(state.reset);
     }
 
@@ -367,7 +356,6 @@ mod tests {
     fn carried_session_is_never_a_reset() {
         let session = session("a.example.com");
         let state = route_redaction_state(
-            true,
             true,
             true,
             Some(session),

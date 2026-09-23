@@ -55,8 +55,9 @@ pub(super) struct RequestPromptLog {
     pub(super) upstream_redacted_request_json: Option<Value>,
     pub(super) upstream_restore_session: Option<UpstreamRedactionSession>,
     /// Issue #564 Task 2: the turn proved the persisted session must be dropped
-    /// (explicit disable, budget overflow, or a policy-generation change). Only
-    /// this flag authorizes the persistence layer to delete the row.
+    /// (upstream redaction explicitly disabled, or a policy-generation
+    /// mismatch). Only this flag authorizes the persistence layer to delete the
+    /// row.
     pub(super) upstream_redaction_reset: bool,
 }
 

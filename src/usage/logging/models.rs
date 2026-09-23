@@ -61,9 +61,10 @@ pub struct UsageRequestMetadata {
     pub upstream_redacted_request_json: Option<Value>,
     pub upstream_restore_session: Option<UpstreamRedactionSession>,
     /// Issue #564 Task 2: this record proves the persisted session must be
-    /// dropped (explicit disable, budget overflow, or policy-generation
-    /// change). A missing session without this flag is
-    /// `no_session_available` and must not delete a still-valid row.
+    /// dropped (upstream redaction explicitly disabled, or a prior session
+    /// dropped by a policy-generation mismatch). A missing session without
+    /// this flag is `no_session_available` and must not delete a still-valid
+    /// row.
     pub upstream_redaction_reset: bool,
     /// Issue #546: route target `thinking_effort_override` snapshot taken when
     /// the request was routed; `None` means no override.
@@ -546,8 +547,8 @@ impl UsageLog {
     }
 
     /// Issue #564 Task 2: mark this record as proof that the persisted
-    /// conversation redaction session must be dropped (explicit disable,
-    /// budget overflow, or a policy-generation change).
+    /// conversation redaction session must be dropped (upstream redaction
+    /// explicitly disabled, or a policy-generation mismatch).
     pub fn with_upstream_redaction_reset(mut self, reset: bool) -> Self {
         self.upstream_redaction_reset = reset;
         self

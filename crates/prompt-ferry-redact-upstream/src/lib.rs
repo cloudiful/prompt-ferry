@@ -12,16 +12,6 @@ use redactor::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Session budget ceilings. The byte ceiling must hold a whole large
-/// conversation: the serialized restore state carries the full redacted text
-/// (~400KB per 100K tokens), so a tight ceiling dropped the state on every turn
-/// and minted fresh tokens for the next one. A state that still exceeds a
-/// ceiling is not persisted: the prior state is kept when one exists, and the
-/// caller degrades to irreversible one-shot redaction only without one.
-const MAX_ENTRIES: usize = 2000;
-const MAX_PERMITS: usize = 500;
-const MAX_BYTES: usize = 8 * 1024 * 1024;
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UpstreamRedactionSession {
     pub restore_state: RestoreState,
@@ -58,56 +48,7 @@ impl UpstreamRedactionSession {
     pub fn policy_version(&self) -> i64 {
         i64::try_from(self.policy_generation).unwrap_or(i64::MAX)
     }
-
-    fn exceeds_budget(&self) -> bool {
-        let started = std::time::Instant::now();
-        let (exceeds, entries) = self.exceeds_budget_with_entries();
-        if let Some(elapsed_us) =
-            timing_sample(started.elapsed().as_micros() as u64, &BUDGET_CHECKS)
-        {
-            tracing::debug!(
-                path = "budget",
-                elapsed_us,
-                entries,
-                has_session = true,
-                "redaction path timing"
-            );
-        }
-        exceeds
-    }
-
-    fn exceeds_budget_with_entries(&self) -> (bool, usize) {
-        let entries = self.restore_state.session().entries.len();
-        if entries > MAX_ENTRIES {
-            return (true, entries);
-        }
-        if self.restore_state.permits().len() > MAX_PERMITS {
-            return (true, entries);
-        }
-        let serialized_len = serde_json::to_vec(self)
-            .map(|serialized| serialized.len())
-            .unwrap_or(0);
-        (serialized_len > MAX_BYTES, entries)
-    }
 }
-
-static BUDGET_CHECKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// Issue #528 Task 2: same sampled critical-path timing as the root crate's
-/// `redaction_timing` module, inlined because the workspace root crate cannot
-/// be a dependency here.
-mod timing {
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    const SLOW_US: u64 = 10_000;
-    const SAMPLE_EVERY: u64 = 100;
-
-    pub(super) fn timing_sample(elapsed_us: u64, counter: &AtomicU64) -> Option<u64> {
-        let call = counter.fetch_add(1, Ordering::Relaxed);
-        (elapsed_us > SLOW_US || call % SAMPLE_EVERY == 0).then_some(elapsed_us)
-    }
-}
-use timing::timing_sample;
 
 #[derive(Debug, Clone, Default)]
 pub struct UpstreamRedactionResult {
@@ -169,11 +110,9 @@ impl UpstreamRedactionProcessor {
             .unwrap_or(0)
     }
 
-    /// Finalize the request's redaction state. A state over budget is refused,
-    /// but a refused state never drops the conversation's token map: the prior
-    /// state is returned unchanged when there is one, so every entity already
-    /// mapped keeps its token and only this turn's new mappings are re-minted
-    /// next turn. `None` is reserved for a turn with no prior state at all.
+    /// Finalize the request's redaction state. `None` is reserved for a turn
+    /// that carried no prior state and minted no token, so an established
+    /// conversation always keeps its mapping (unbounded sessions).
     pub fn finish_state(
         &self,
         original_text: &str,
@@ -190,36 +129,10 @@ impl UpstreamRedactionProcessor {
             None => RestoreState::new(request_session),
         }
         .map_err(|err| RedactorError::Validation(err.to_string()))?;
-        let session = UpstreamRedactionSession {
+        Ok(Some(UpstreamRedactionSession {
             restore_state,
             policy_generation: self.policy_generation,
-        };
-        if session.exceeds_budget() {
-            return Ok(self.prior_session_after_budget_overflow(&session));
-        }
-        Ok(Some(session))
-    }
-
-    /// Budget overflow must not drop the prefix: the prior state still maps
-    /// every entity already in the conversation, so it is returned as-is, and
-    /// `None` only when there is no prior state to keep.
-    fn prior_session_after_budget_overflow(
-        &self,
-        session: &UpstreamRedactionSession,
-    ) -> Option<UpstreamRedactionSession> {
-        tracing::debug!(
-            path = "budget",
-            entries = session.restore_state.session().entries.len(),
-            permits = session.restore_state.permits().len(),
-            has_prior = self.prior_state.is_some(),
-            "redaction session exceeded its budget"
-        );
-        self.prior_state
-            .as_ref()
-            .map(|prior| UpstreamRedactionSession {
-                restore_state: prior.clone(),
-                policy_generation: self.policy_generation,
-            })
+        }))
     }
 }
 
