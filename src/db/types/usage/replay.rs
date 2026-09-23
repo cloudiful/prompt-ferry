@@ -28,6 +28,8 @@ pub struct RequestRecordChainEntry {
     pub conversation_seq: Option<i32>,
     pub conversation_source: Option<String>,
     pub client_installation_id: Option<String>,
+    pub session_header_id: Option<String>,
+    pub session_parent_id: Option<String>,
     pub normalized_item_count: Option<i32>,
     pub normalized_chain_hash: Option<String>,
     pub normalized_first_ref_hash: Option<String>,

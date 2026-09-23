@@ -24,6 +24,7 @@ SELECT
     http_request_compressed_bytes, http_request_decompressed_bytes,
     http_request_compression_ratio,
     conversation_source, client_installation_id,
+    session_header_id, session_parent_id,
     provider_response_id, provider_conversation_key,
     request_storage_mode, error_message,
     request_has_previous_response_id, request_previous_response_id,

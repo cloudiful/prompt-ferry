@@ -216,6 +216,7 @@ export type RequestRecordDetailView = RequestRecordDetail & {
   upstream_label: string
   is_session_recognized: boolean
   is_first_turn: boolean
+  is_sub_session: boolean
   target: string
   model_key: string
   model_display: string

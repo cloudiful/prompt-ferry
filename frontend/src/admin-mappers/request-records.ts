@@ -92,6 +92,7 @@ export function createRequestRecordDetailView(
   const label = upstreamLabel(record)
   const sessionRecognized = Boolean(record.conversation_id)
   const firstTurn = sessionRecognized && (record.conversation_seq ?? 1) <= 1
+  const sessionParentId = (record.session_parent_id ?? '').trim()
   const installationShort = record.client_installation_id
     ? `${record.client_installation_id.slice(0, 8)}...${record.client_installation_id.slice(-6)}`
     : null
@@ -102,6 +103,7 @@ export function createRequestRecordDetailView(
     conversation_source_label: record.conversation_source || 'none',
     is_first_turn: firstTurn,
     is_session_recognized: sessionRecognized,
+    is_sub_session: sessionParentId.length > 0,
     model_key: record.model || '-',
     model_display: deriveModelDisplay(record),
     request_date: record.created_at.slice(0, 10),

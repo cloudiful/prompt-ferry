@@ -1172,6 +1172,8 @@ export type RequestRecordDetail = {
     response_prompt?: string | null;
     response_raw_body?: string | null;
     route_selection_reason: RouteSelectionReason;
+    session_header_id?: string | null;
+    session_parent_id?: string | null;
     status?: number | null;
     storage_sanitized: boolean;
     storage_sanitized_nul_count: number;
@@ -1234,6 +1236,8 @@ export type RequestRecordFullResponse = {
     request_previous_response_parent_found?: boolean | null;
     request_raw_json?: unknown;
     request_storage_mode: string;
+    session_header_id?: string | null;
+    session_parent_id?: string | null;
     /**
      * Total number of stored messages before pagination.
      */

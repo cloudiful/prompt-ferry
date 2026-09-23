@@ -5535,6 +5535,14 @@ components:
           - 'null'
         route_selection_reason:
           $ref: '#/components/schemas/RouteSelectionReason'
+        session_header_id:
+          type:
+          - string
+          - 'null'
+        session_parent_id:
+          type:
+          - string
+          - 'null'
         status:
           type:
           - integer
@@ -5699,6 +5707,14 @@ components:
         request_raw_json: {}
         request_storage_mode:
           type: string
+        session_header_id:
+          type:
+          - string
+          - 'null'
+        session_parent_id:
+          type:
+          - string
+          - 'null'
         total_messages:
           type: integer
           format: int64

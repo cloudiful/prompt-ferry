@@ -28,12 +28,15 @@ struct ChatSessionRow {
     conversation_seq: Option<i32>,
     conversation_source: String,
     path: String,
+    session_header_id: Option<String>,
+    session_parent_id: Option<String>,
 }
 
 async fn latest_rows(schema: &TestSchema, limit: i64) -> anyhow::Result<Vec<ChatSessionRow>> {
     Ok(sqlx::query_as::<_, ChatSessionRow>(
         r#"
-        SELECT conversation_id, conversation_seq, conversation_source, path
+        SELECT conversation_id, conversation_seq, conversation_source, path,
+               session_header_id, session_parent_id
         FROM request_records
         WHERE event_kind = 'request'
         ORDER BY event_id DESC
@@ -205,6 +208,44 @@ impl ChatSessionHarness {
         reqwest::Client::new()
             .post(format!("http://{}/v1/responses", self.relay_addr))
             .bearer_auth("client-token")
+            .json(&serde_json::json!({
+                "model": "gpt-test",
+                "input": "hello",
+                "prompt_cache_key": prompt_cache_key
+            }))
+            .send()
+            .await
+            .expect("responses request should send")
+    }
+
+    async fn post_responses_with_parent_session(
+        &self,
+        session_id: &str,
+        parent_session_id: &str,
+    ) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(format!("http://{}/v1/responses", self.relay_addr))
+            .bearer_auth("client-token")
+            .header("X-Session-Id", session_id)
+            .header("X-Parent-Session-Id", parent_session_id)
+            .json(&serde_json::json!({
+                "model": "gpt-test",
+                "input": "hello"
+            }))
+            .send()
+            .await
+            .expect("responses request should send")
+    }
+
+    async fn post_responses_with_session_and_cache_key(
+        &self,
+        session_id: &str,
+        prompt_cache_key: &str,
+    ) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(format!("http://{}/v1/responses", self.relay_addr))
+            .bearer_auth("client-token")
+            .header("X-Session-Id", session_id)
             .json(&serde_json::json!({
                 "model": "gpt-test",
                 "input": "hello",
@@ -386,6 +427,142 @@ async fn chat_prompt_cache_key_isolated_from_responses_codex_thread() -> anyhow:
     assert_eq!(chat_row.conversation_source, "chat_prompt_cache_key");
     assert_eq!(responses_row.conversation_source, "codex_thread_key");
     assert_ne!(chat_row.conversation_id, responses_row.conversation_id);
+
+    harness.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn responses_session_header_precedes_prompt_cache_key() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let harness = ChatSessionHarness::spawn().await?;
+
+    let with_header = harness
+        .post_responses_with_session_and_cache_key("header-thread", "shared-cache-key")
+        .await;
+    assert_eq!(with_header.status(), StatusCode::OK);
+    let without_header = harness
+        .post_responses_with_prompt_cache_key("shared-cache-key")
+        .await;
+    assert_eq!(without_header.status(), StatusCode::OK);
+
+    wait_for_persisted_requests(&harness.schema, 2).await?;
+    let rows = latest_rows(&harness.schema, 2).await?;
+    assert_eq!(rows.len(), 2);
+    let header_row = rows
+        .iter()
+        .find(|row| row.conversation_source == "session_header")
+        .expect("request with a session header keeps the session conversation");
+    let fallback_row = rows
+        .iter()
+        .find(|row| row.conversation_source == "codex_thread_key")
+        .expect("request without a session header falls back to the codex thread key");
+    assert_eq!(header_row.conversation_seq, Some(1));
+    assert_eq!(fallback_row.conversation_seq, Some(1));
+    assert_ne!(header_row.conversation_id, fallback_row.conversation_id);
+
+    harness.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn responses_session_headers_isolate_shared_prompt_cache_key() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let harness = ChatSessionHarness::spawn().await?;
+
+    let parent = harness
+        .post_responses_with_session_and_cache_key("parent-session", "shared-cache-key")
+        .await;
+    assert_eq!(parent.status(), StatusCode::OK);
+    let child = harness
+        .post_responses_with_session_and_cache_key("child-session", "shared-cache-key")
+        .await;
+    assert_eq!(child.status(), StatusCode::OK);
+
+    wait_for_persisted_requests(&harness.schema, 2).await?;
+    let rows = latest_rows(&harness.schema, 2).await?;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].conversation_source, "session_header");
+    assert_eq!(rows[1].conversation_source, "session_header");
+    assert_ne!(rows[0].conversation_id, rows[1].conversation_id);
+    assert_eq!(rows[0].conversation_seq, Some(1));
+    assert_eq!(rows[1].conversation_seq, Some(1));
+
+    harness.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn responses_prompt_cache_key_stays_codex_fallback_without_session_header()
+-> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let harness = ChatSessionHarness::spawn().await?;
+
+    let first = harness
+        .post_responses_with_prompt_cache_key("codex-thread")
+        .await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let second = harness
+        .post_responses_with_prompt_cache_key("codex-thread")
+        .await;
+    assert_eq!(second.status(), StatusCode::OK);
+
+    wait_for_persisted_requests(&harness.schema, 2).await?;
+    let rows = latest_rows(&harness.schema, 2).await?;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].conversation_source, "codex_thread_key");
+    assert_eq!(rows[1].conversation_source, "codex_thread_key");
+    assert_eq!(rows[0].conversation_id, rows[1].conversation_id);
+    assert_eq!(rows[0].conversation_seq, Some(2));
+    assert_eq!(rows[1].conversation_seq, Some(1));
+
+    harness.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn responses_parent_session_header_is_persisted_with_its_session() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let harness = ChatSessionHarness::spawn().await?;
+
+    let parent = harness.post_responses("parent-session").await;
+    assert_eq!(parent.status(), StatusCode::OK);
+    let child = harness
+        .post_responses_with_parent_session("child-session", "parent-session")
+        .await;
+    assert_eq!(child.status(), StatusCode::OK);
+
+    wait_for_persisted_requests(&harness.schema, 2).await?;
+    let rows = latest_rows(&harness.schema, 2).await?;
+    assert_eq!(rows.len(), 2);
+    let parent_row = rows
+        .iter()
+        .find(|row| row.session_header_id.as_deref() == Some("parent-session"))
+        .expect("parent row keeps its own session header");
+    let child_row = rows
+        .iter()
+        .find(|row| row.session_header_id.as_deref() == Some("child-session"))
+        .expect("child row keeps its own session header");
+    assert_eq!(parent_row.session_parent_id, None);
+    assert_eq!(
+        child_row.session_parent_id.as_deref(),
+        Some("parent-session")
+    );
+    // Decision 2: the parent link is association only, so the child still
+    // derives its own conversation.
+    assert_ne!(parent_row.conversation_id, child_row.conversation_id);
 
     harness.shutdown().await?;
     Ok(())

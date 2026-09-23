@@ -55,7 +55,7 @@ mock.module('../src/composables/useLocale', () => ({
 
 const { createRequestRecordDetailState } =
   await import('../src/stores/request-record-detail')
-const { deriveReasoningEffortDisplay } =
+const { createRequestRecordDetailView, deriveReasoningEffortDisplay } =
   await import('../src/admin-mappers/request-records')
 
 test('reasoning effort keeps the caller value without a route override', () => {
@@ -92,6 +92,41 @@ test('reasoning effort never shows the arrow for anthropic messages', () => {
 test('reasoning effort stays hidden without a caller value', () => {
   expect(deriveReasoningEffortDisplay(null, 'high', '/v1/responses')).toBeNull()
   expect(deriveReasoningEffortDisplay('  ', 'high', '/v1/responses')).toBeNull()
+})
+
+test('detail view marks a session with a parent id as a sub-session', () => {
+  const view = createRequestRecordDetailView({
+    created_at: '2026-09-23T12:00:00Z',
+    conversation_source: 'session_header',
+    session_header_id: 'ses_child',
+    session_parent_id: 'ses_parent',
+  } as never)
+
+  expect(view.is_sub_session).toBe(true)
+  expect(view.session_parent_id).toBe('ses_parent')
+  expect(view.conversation_source_label).toBe('session_header')
+})
+
+test('detail view keeps a root session unmarked', () => {
+  const view = createRequestRecordDetailView({
+    created_at: '2026-09-23T12:00:00Z',
+    conversation_source: 'session_header',
+    session_header_id: 'ses_root',
+    session_parent_id: null,
+  } as never)
+
+  expect(view.is_sub_session).toBe(false)
+  expect(view.session_header_id).toBe('ses_root')
+})
+
+test('detail view ignores a blank parent id', () => {
+  const view = createRequestRecordDetailView({
+    created_at: '2026-09-23T12:00:00Z',
+    conversation_source: 'none',
+    session_parent_id: '  ',
+  } as never)
+
+  expect(view.is_sub_session).toBe(false)
 })
 
 function detailStateWithRecord(recordId: number) {

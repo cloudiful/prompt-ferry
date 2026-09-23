@@ -46,6 +46,7 @@ use crate::{
     },
 };
 
+use super::prompt_log::{parent_session_header_id, session_header_id};
 use super::{BufferedBridgeRequest, BufferedMcpRequest, RequestPromptLog, WorkerRuntimeState};
 use crate::mcp::targeting::McpRequestMetadata;
 
@@ -213,6 +214,15 @@ impl RequestExecutionContext {
             request.request_user_agent.clone(),
             fallback_user_id,
         );
+        // Issue #579 Task 2: the managed path already carries the extracted
+        // session identity on the prompt log; standalone mode builds no prompt
+        // log, so fall back to the request headers there.
+        if metadata.session_header_id.is_none() {
+            metadata.session_header_id = session_header_id(request.headers.as_slice());
+        }
+        if metadata.session_parent_id.is_none() {
+            metadata.session_parent_id = parent_session_header_id(request.headers.as_slice());
+        }
         metadata.http_request_content_encoding = request.http_request_content_encoding.clone();
         metadata.http_request_compressed = request.http_request_compressed;
         metadata.http_request_compressed_bytes = request.http_request_compressed_bytes;
@@ -282,6 +292,8 @@ impl RequestExecutionContext {
             storage_sanitized_nul_count: self.request_prompt_log.storage_sanitized_nul_count,
             redaction: self.request_prompt_log.redaction.clone(),
             client_installation_id: self.request_prompt_log.client_installation_id.clone(),
+            session_header_id: self.request_prompt_log.session_header_id.clone(),
+            session_parent_id: self.request_prompt_log.session_parent_id.clone(),
             normalized_item_count: self.request_prompt_log.normalized_item_count,
             normalized_chain_hash: self.request_prompt_log.normalized_chain_hash.clone(),
             normalized_first_ref_hash: self.request_prompt_log.normalized_first_ref_hash.clone(),

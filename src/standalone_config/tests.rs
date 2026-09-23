@@ -593,7 +593,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -668,6 +668,8 @@ fn sample_usage_record(
         http_request_compression_ratio: None,
         conversation_source: "none".to_string(),
         client_installation_id: None,
+        session_header_id: None,
+        session_parent_id: None,
         provider_response_id: None,
         provider_conversation_key: None,
         request_storage_mode: "full".to_string(),
@@ -683,7 +685,7 @@ fn sample_usage_record(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty() {
+async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty_one() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -691,7 +693,7 @@ async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
     assert!(
         store
             .list_usage_summaries(64)
@@ -1015,6 +1017,8 @@ fn ai_metadata_record(request_id: Uuid) -> StandaloneUsageSummaryRecord {
     record.http_request_compression_ratio = Some(0.25);
     record.conversation_source = "responses".to_string();
     record.client_installation_id = Some("install-abc".to_string());
+    record.session_header_id = Some("ses_child".to_string());
+    record.session_parent_id = Some("ses_parent".to_string());
     record.provider_response_id = Some("resp_001".to_string());
     record.provider_conversation_key = Some("conv-001".to_string());
     record.request_storage_mode = "summary".to_string();
@@ -1065,6 +1069,8 @@ async fn fresh_migration_creates_metadata_columns_at_schema_version_seven() {
         ("http_request_compression_ratio", "REAL"),
         ("conversation_source", "TEXT"),
         ("client_installation_id", "TEXT"),
+        ("session_header_id", "TEXT"),
+        ("session_parent_id", "TEXT"),
         ("provider_response_id", "TEXT"),
         ("provider_conversation_key", "TEXT"),
         ("request_storage_mode", "TEXT"),
@@ -1167,6 +1173,8 @@ async fn upgrade_from_schema_six_adds_metadata_columns_and_keeps_existing_rows()
     assert!(legacy.http_request_compression_ratio.is_none());
     assert_eq!(legacy.conversation_source, "none");
     assert!(legacy.client_installation_id.is_none());
+    assert!(legacy.session_header_id.is_none());
+    assert!(legacy.session_parent_id.is_none());
     assert!(legacy.provider_response_id.is_none());
     assert!(legacy.provider_conversation_key.is_none());
     assert_eq!(legacy.request_storage_mode, "full");
@@ -1213,6 +1221,8 @@ async fn upgrade_from_schema_six_adds_metadata_columns_and_keeps_existing_rows()
         ai_row.client_installation_id.as_deref(),
         Some("install-abc")
     );
+    assert_eq!(ai_row.session_header_id.as_deref(), Some("ses_child"));
+    assert_eq!(ai_row.session_parent_id.as_deref(), Some("ses_parent"));
     assert_eq!(ai_row.provider_response_id.as_deref(), Some("resp_001"));
     assert_eq!(
         ai_row.provider_conversation_key.as_deref(),
@@ -1264,6 +1274,8 @@ async fn metadata_round_trip_preserves_ai_and_mcp_values() {
     assert_eq!(ai_row.http_request_decompressed_bytes, Some(8192));
     assert_eq!(ai_row.http_request_compression_ratio, Some(0.25));
     assert_eq!(ai_row.conversation_source, "responses");
+    assert_eq!(ai_row.session_header_id.as_deref(), Some("ses_child"));
+    assert_eq!(ai_row.session_parent_id.as_deref(), Some("ses_parent"));
     assert!(ai_row.request_has_previous_response_id);
     assert!(ai_row.upstream_redaction_enabled);
     assert!(ai_row.response_capture_truncated);
@@ -1576,7 +1588,7 @@ fn sample_snapshot(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty() {
+async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty_one() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -1584,7 +1596,7 @@ async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty(
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
     let pool = store.pool().clone();
     for (column, declared_type) in [
         ("conversation_id", "TEXT"),
@@ -1707,7 +1719,7 @@ async fn upgrade_from_schema_eight_creates_request_lease_table() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
 
     // Confirm migration 0008 took effect before the new lease table
     // arrived so the test really exercises the schema-8 -> schema-9

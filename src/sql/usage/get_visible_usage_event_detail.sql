@@ -91,6 +91,8 @@ SELECT
         SELECT jsonb_array_elements_text(COALESCE(ue.redaction_fields_json, '[]'::jsonb))
     ), ARRAY[]::TEXT[]) AS "fields!",
     ue.client_installation_id,
+    ue.session_header_id,
+    ue.session_parent_id,
     ue.normalized_item_count,
     COALESCE(ue.request_storage_mode, 'full') AS "request_storage_mode!",
     raw.raw_object_key,

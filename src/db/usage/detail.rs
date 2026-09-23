@@ -57,6 +57,8 @@ struct RequestRecordDetailRow {
     types: Option<Vec<String>>,
     fields: Option<Vec<String>>,
     client_installation_id: Option<String>,
+    session_header_id: Option<String>,
+    session_parent_id: Option<String>,
     normalized_item_count: Option<i32>,
     request_storage_mode: Option<String>,
     raw_object_key: Option<String>,
@@ -143,6 +145,8 @@ impl From<RequestRecordDetailRow> for RequestRecordDetail {
                 fields: row.fields.unwrap_or_default(),
             },
             client_installation_id: row.client_installation_id,
+            session_header_id: row.session_header_id,
+            session_parent_id: row.session_parent_id,
             normalized_item_count: row.normalized_item_count,
             request_storage_mode: row
                 .request_storage_mode

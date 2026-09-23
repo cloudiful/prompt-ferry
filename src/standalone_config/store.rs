@@ -12,7 +12,7 @@ use super::{
 };
 use crate::relay_secrets::RelaySecretManager;
 
-const CURRENT_SCHEMA_VERSION: i64 = 30;
+const CURRENT_SCHEMA_VERSION: i64 = 31;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {
@@ -1104,6 +1104,8 @@ impl StandaloneConfigStore {
             .bind(summary.http_request_compression_ratio)
             .bind(&summary.conversation_source)
             .bind(&summary.client_installation_id)
+            .bind(&summary.session_header_id)
+            .bind(&summary.session_parent_id)
             .bind(&summary.provider_response_id)
             .bind(&summary.provider_conversation_key)
             .bind(&summary.request_storage_mode)
@@ -1583,6 +1585,8 @@ fn try_parse_usage_summary_row(
         http_request_compression_ratio: row.try_get("http_request_compression_ratio")?,
         conversation_source: required_string(row, "conversation_source")?,
         client_installation_id: optional_string(row, "client_installation_id")?,
+        session_header_id: optional_string(row, "session_header_id")?,
+        session_parent_id: optional_string(row, "session_parent_id")?,
         provider_response_id: optional_string(row, "provider_response_id")?,
         provider_conversation_key: optional_string(row, "provider_conversation_key")?,
         request_storage_mode: required_string(row, "request_storage_mode")?,

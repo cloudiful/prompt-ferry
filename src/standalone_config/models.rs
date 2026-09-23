@@ -639,6 +639,8 @@ pub struct StandaloneUsageSummaryRecord {
     pub http_request_compression_ratio: Option<f64>,
     pub conversation_source: String,
     pub client_installation_id: Option<String>,
+    pub session_header_id: Option<String>,
+    pub session_parent_id: Option<String>,
     pub provider_response_id: Option<String>,
     pub provider_conversation_key: Option<String>,
     pub request_storage_mode: String,
@@ -776,6 +778,8 @@ impl fmt::Debug for StandaloneUsageSummaryRecord {
             )
             .field("conversation_source", &self.conversation_source)
             .field("client_installation_id", &self.client_installation_id)
+            .field("session_header_id", &self.session_header_id)
+            .field("session_parent_id", &self.session_parent_id)
             .field("provider_response_id", &self.provider_response_id)
             .field("provider_conversation_key", &self.provider_conversation_key)
             .field("request_storage_mode", &self.request_storage_mode)

@@ -146,6 +146,7 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         normalized_last_ref_hash: log.normalized_last_ref_hash,
         base_checkpoint_event_id: log.base_checkpoint_event_id,
     })
+    .with_session_identity(log.session_header_id, log.session_parent_id)
     .with_request_storage(db::RequestRecordStorageInput {
         storage_sanitized,
         storage_sanitized_nul_count,
