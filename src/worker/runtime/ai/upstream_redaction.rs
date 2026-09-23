@@ -9,13 +9,12 @@ use crate::{
 };
 
 use super::upstream_text_fields::should_process_ai_string_field;
-use crate::redaction_timing::{PATH_BUDGET, PATH_REDACT, timing_sample};
+use crate::redaction_timing::{PATH_REDACT, timing_sample};
 use crate::worker::runtime::json_walker::walk_json_strings;
 
 pub(super) type PreparedRedactedRequest = UpstreamRedactedRequest;
 
 static REDACT_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static BUDGET_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 pub(super) fn redact_ai_request_json(
     path: &str,
@@ -88,7 +87,6 @@ pub(super) fn redact_ai_request_json(
     })?;
     let redacted_text = std::str::from_utf8(&redacted_body).expect("serialized JSON is UTF-8");
     let applied_replacements = processor.has_applied_replacements();
-    let budget_started = std::time::Instant::now();
     let request_session = processor
         .finish_state(original_text, redacted_text)
         .map_err(|err| {
@@ -98,17 +96,6 @@ pub(super) fn redact_ai_request_json(
                 format!("failed to finalize upstream redaction: {err}"),
             )
         })?;
-    if let Some((elapsed_us, _)) =
-        timing_sample(budget_started.elapsed().as_micros() as u64, &BUDGET_CALLS)
-    {
-        tracing::debug!(
-            path = PATH_BUDGET,
-            elapsed_us,
-            entries = processor.prior_entry_count(),
-            has_session = request_session.is_some(),
-            "redaction path timing"
-        );
-    }
     let redacted_request_json = applied_replacements.then_some(value);
     Ok(PreparedRedactedRequest {
         body: redacted_body,

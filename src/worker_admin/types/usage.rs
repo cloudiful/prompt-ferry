@@ -61,6 +61,7 @@ pub struct RequestRecordsQuery {
 #[into_params(parameter_in = Query)]
 pub struct RequestRecordFacetsQuery {
     pub request_category: Option<db::RequestRecordCategory>,
+    pub range: Option<RequestRecordOverviewRange>,
     pub start: Option<chrono::DateTime<chrono::Utc>>,
     pub end: Option<chrono::DateTime<chrono::Utc>>,
 }

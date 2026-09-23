@@ -4,6 +4,27 @@ use sqlx::Acquire;
 const USAGE_CONTENT_MAINTENANCE_BATCH_SIZE: i64 = 500;
 const USAGE_CONTENT_MAINTENANCE_LOCK_KEY: i64 = 0x7072_756e_6543_6f6e;
 
+/// Prompt blocks younger than this grace window are never treated as orphans:
+/// a block is inserted before the request record that references it, so the
+/// in-flight reference is only visible once the request finishes.
+const ORPHAN_PROMPT_BLOCK_GRACE_MINUTES: i32 = 30;
+
+const MAINTENANCE_TIMEOUTS_SQL: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/sql/usage/set_maintenance_timeouts.sql"
+));
+
+/// Bound every maintenance batch so a slow plan cannot hold locks or a worker
+/// connection indefinitely. Applied inside the batch transaction only.
+pub(super) async fn apply_maintenance_timeouts(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<()> {
+    sqlx::raw_sql(MAINTENANCE_TIMEOUTS_SQL)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 #[derive(Debug)]
 struct UsageContentPruneBatch {
     expired_events: i64,
@@ -65,14 +86,26 @@ async fn run_usage_content_maintenance_locked(
     let mut report = UsageContentMaintenanceReport::default();
     loop {
         let mut tx = conn.begin().await?;
-        let batch = sqlx::query_file_as!(
+        apply_maintenance_timeouts(&mut tx).await?;
+        let batch = match sqlx::query_file_as!(
             UsageContentPruneBatch,
             "src/sql/usage/prune_usage_content_batch.sql",
             retention_days.max(1),
             USAGE_CONTENT_MAINTENANCE_BATCH_SIZE,
         )
         .fetch_one(&mut *tx)
-        .await?;
+        .await
+        {
+            Ok(batch) => batch,
+            Err(error) => {
+                let _ = tx.rollback().await;
+                tracing::warn!(
+                    error = %error,
+                    "usage content maintenance batch failed; ending this round"
+                );
+                break;
+            }
+        };
         tx.commit().await?;
 
         report.expired_events += batch.expired_events.max(0) as u64;
@@ -87,11 +120,21 @@ async fn run_usage_content_maintenance_locked(
         }
     }
 
-    let orphan_prompt_blocks =
-        sqlx::query_file!("src/sql/usage/cleanup_orphan_usage_prompt_blocks.sql")
-            .execute(&mut **conn)
-            .await?;
-    report.orphan_prompt_blocks_deleted = orphan_prompt_blocks.rows_affected();
+    let mut orphan_tx = conn.begin().await?;
+    apply_maintenance_timeouts(&mut orphan_tx).await?;
+    match cleanup_orphan_usage_prompt_blocks(&mut orphan_tx).await {
+        Ok(deleted) => {
+            orphan_tx.commit().await?;
+            report.orphan_prompt_blocks_deleted = deleted;
+        }
+        Err(error) => {
+            let _ = orphan_tx.rollback().await;
+            tracing::warn!(
+                error = %error,
+                "orphan prompt block cleanup failed; continuing maintenance round"
+            );
+        }
+    }
     let orphan_tool_calls =
         sqlx::query_file!("src/sql/usage/cleanup_orphan_request_record_tool_calls.sql")
             .execute(&mut **conn)
@@ -109,9 +152,12 @@ async fn run_usage_content_maintenance_locked(
 pub(super) async fn cleanup_orphan_usage_prompt_blocks(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64> {
-    let deleted = sqlx::query_file!("src/sql/usage/cleanup_orphan_usage_prompt_blocks.sql")
-        .execute(&mut **tx)
-        .await?;
+    let deleted = sqlx::query_file!(
+        "src/sql/usage/cleanup_orphan_usage_prompt_blocks.sql",
+        ORPHAN_PROMPT_BLOCK_GRACE_MINUTES,
+    )
+    .execute(&mut **tx)
+    .await?;
     Ok(deleted.rows_affected())
 }
 

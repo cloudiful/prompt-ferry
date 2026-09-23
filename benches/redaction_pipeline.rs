@@ -154,9 +154,8 @@ fn main() {
     // 2000 turn-advances (each turn redacts one fresh domain and advances the
     // prior restore state), then time one incremental redact_fragment on top.
     // Setup advances the raw session exactly like UpstreamRedactionProcessor
-    // (finish_session -> RestoreState::advance) but skips the exceeds_budget
-    // gate: a full 2000-entry state cannot fit the 256KiB envelope, so the
-    // gate would abort long before 2000 turns.
+    // (finish_session -> RestoreState::advance) and hands the result to a
+    // processor for the timed turn.
     let turns = 2000;
     let turn_fields = (0..turns)
         .map(|turn| format!("turn-{turn}.example.com"))
@@ -196,31 +195,9 @@ fn main() {
     });
     drop(processor);
 
-    // 2100 entries over the MAX_ENTRIES=2000 ceiling: finish_state must hit
-    // the exceeds_budget -> Ok(None) degrade path.
-    let overflow_fields = (0..2100)
-        .map(|index| format!("budget{index}.example.com"))
-        .collect::<Vec<_>>();
-    timed("prompt_ferry_budget_overflow_path", 10, || {
-        let mut processor = UpstreamRedactionProcessor::new(None, Some("bench-budget"), None)
-            .expect("budget processor");
-        let redacted = overflow_fields
-            .iter()
-            .map(|field| {
-                processor
-                    .redact_fragment(field, redactor::InputKind::Text)
-                    .expect("budget redact")
-            })
-            .collect::<Vec<_>>();
-        let finalized = processor
-            .finish_state(&overflow_fields.join(" "), &redacted.join(" "))
-            .expect("budget finish");
-        assert!(finalized.is_none(), "2100 entries must exceed budget");
-    });
-
-    // 500 permits (MAX_PERMITS ceiling): 500 turn-advances each issuing one
-    // permit, then time a single-token restore against that state. Setup uses
-    // the raw SessionRedactor advance chain, as in the long-session scenario.
+    // 500 permits at restore: 500 turn-advances each issuing one permit, then
+    // time a single-token restore against that state. Setup uses the raw
+    // SessionRedactor advance chain, as in the long-session scenario.
     let permit_turns = 500;
     let permit_fields = (0..permit_turns)
         .map(|turn| format!("permit-{turn}.example.com"))

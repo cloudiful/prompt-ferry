@@ -2608,6 +2608,7 @@ export type RequestRecordFacetsData = {
     path?: never;
     query?: {
         request_category?: RequestRecordCategory;
+        range?: RequestRecordOverviewRange;
         start?: string;
         end?: string;
     };

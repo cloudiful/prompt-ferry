@@ -1,6 +1,6 @@
 //! Issue #528 Task 2: sampled `debug!` timing for the upstream redaction
-//! critical path (`redact`/`budget`/`persist`/`restore`). Pure observation:
-//! sampled logging only, no behavior change.
+//! critical path (`redact`/`persist`/`restore`). Pure observation: sampled
+//! logging only, no behavior change.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -9,7 +9,6 @@ const SLOW_US: u64 = 10_000;
 const SAMPLE_EVERY: u64 = 100;
 
 pub(crate) const PATH_REDACT: &str = "redact";
-pub(crate) const PATH_BUDGET: &str = "budget";
 pub(crate) const PATH_PERSIST: &str = "persist";
 pub(crate) const PATH_RESTORE: &str = "restore";
 

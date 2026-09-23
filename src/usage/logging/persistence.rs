@@ -250,17 +250,17 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
                         // Issue #564 Task 2: a missing session is only a reset
                         // signal when the record proved there was state to
                         // drop — upstream redaction was explicitly disabled for
-                        // this request, or a prior session was refused (budget
-                        // overflow / policy-generation change). Otherwise the
-                        // turn simply carried no session (admission events,
-                        // first redaction before any replacement) and deleting
-                        // the row would mint fresh tokens on the next turn and
-                        // invalidate the upstream prefix cache.
+                        // this request, or a prior session was dropped by a
+                        // policy-generation mismatch. Otherwise the turn simply
+                        // carried no session (admission events, first redaction
+                        // before any replacement) and deleting the row would
+                        // mint fresh tokens on the next turn and invalidate the
+                        // upstream prefix cache.
                         if log.upstream_redaction_reset {
-                            // Issue #524 Task 5: explicit disable and budget
-                            // overflow drop the persisted row so re-enabling
-                            // starts from a fresh token counter instead of
-                            // reviving the old mapping.
+                            // Issue #524 Task 5: explicit disable and a
+                            // policy-generation mismatch drop the persisted row
+                            // so re-enabling starts from a fresh token counter
+                            // instead of reviving the old mapping.
                             if let Err(err) = db::delete_conversation_redaction_session(
                                 &state.pool,
                                 conversation_id,

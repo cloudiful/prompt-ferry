@@ -1138,6 +1138,46 @@ mod tests {
     }
 
     #[test]
+    fn replayed_chat_reasoning_keeps_a_stable_responses_item_id() {
+        let first_turn = chat_request_to_responses(
+            br#"{
+                "model":"deepseek-v4-pro",
+                "messages":[
+                    {"role":"user","content":"question"},
+                    {"role":"assistant","reasoning_content":"plan then answer","content":"answer"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let first_value = serde_json::from_slice::<Value>(&first_turn).unwrap();
+        let first_id = first_value["input"][1]["id"].clone();
+
+        // The next turn replays the same history plus one appended turn.
+        let second_turn = chat_request_to_responses(
+            br#"{
+                "model":"deepseek-v4-pro",
+                "messages":[
+                    {"role":"user","content":"question"},
+                    {"role":"assistant","reasoning_content":"plan then answer","content":"answer"},
+                    {"role":"user","content":"follow up"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let second_value = serde_json::from_slice::<Value>(&second_turn).unwrap();
+
+        assert_eq!(second_value["input"][1]["type"].as_str(), Some("reasoning"));
+        assert_eq!(
+            second_value["input"][1]["id"], first_id,
+            "a replayed reasoning item must keep its id so the upstream prefix stays cacheable"
+        );
+        assert_eq!(
+            second_value["input"][1]["content"][0]["text"].as_str(),
+            Some("plan then answer")
+        );
+    }
+
+    #[test]
     fn translates_chat_reasoning_content_before_plain_assistant_answer() {
         let value = serde_json::from_slice::<Value>(
             &chat_request_to_responses(
