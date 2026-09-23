@@ -379,7 +379,7 @@ async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_o
     let path = standalone_temp_path("fresh");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 31);
+    assert_eq!(standalone_schema_version(&pool).await?, 32);
 
     let ddl: String = sqlx::query(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'standalone_provider_endpoints'",
@@ -541,7 +541,7 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     // 0015 (issue #230) adds `glm` and 0016 (issue #287) adds `deepseek`;
     // the final schema version tracks the newest standalone migration after
     // the pending migrations apply.
-    assert_eq!(standalone_schema_version(&pool).await?, 31);
+    assert_eq!(standalone_schema_version(&pool).await?, 32);
     let preserved: i64 = sqlx::query(
         "SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'",
     )
@@ -586,7 +586,7 @@ async fn standalone_0025_quota_cleanup_preserves_route_targets() -> anyhow::Resu
     let path = standalone_temp_path("quota25");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 31);
+    assert_eq!(standalone_schema_version(&pool).await?, 32);
     // No quota columns remain.
     for table in ["standalone_model_routes", "standalone_mcp_servers"] {
         let cols: Vec<String> = if table == "standalone_model_routes" {
@@ -639,6 +639,98 @@ async fn standalone_0025_quota_cleanup_preserves_route_targets() -> anyhow::Resu
             .await?
             .try_get(0)?;
     assert_eq!(count, 1, "route target must survive 0025");
+    pool.close().await;
+    store.close().await;
+    remove_standalone_files(&path);
+    Ok(())
+}
+
+async fn insert_standalone_endpoint_protocol(
+    pool: &sqlx::SqlitePool,
+    name: &str,
+    provider: &str,
+    region: Option<&str>,
+    native_api: &str,
+    native_api_source: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO standalone_provider_endpoints
+           (endpoint_id, name, provider, provider_region, base_url, native_api,
+            native_api_source, key_lb_enabled, enabled, mcp_enabled,
+            api_key_ciphertext, api_key_nonce, api_key_key_version)
+           VALUES (?, ?, ?, ?, 'https://example.test', ?, ?, 0, 1, 0, X'00', X'01', 1)"#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(name)
+    .bind(provider)
+    .bind(region)
+    .bind(native_api)
+    .bind(native_api_source)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+// Issue #584: the standalone schema pins the same native_api kind set and the
+// explicit NULL-safe region domain as the fixed managed constraints, so the
+// kinds the admin handler persists (including `anthropic_messages`, `realtime`
+// and the `auto` source) are never rejected by the store. Provider/region
+// combination rules stay in the shared admin handler, matching the standalone
+// convention from 0016.
+#[tokio::test]
+async fn standalone_pins_provider_endpoint_constraints() -> anyhow::Result<()> {
+    let path = standalone_temp_path("constraints");
+    let store = StandaloneConfigStore::open(&path).await?;
+    let pool = db::connect_sqlite(&path).await?;
+    assert_eq!(standalone_schema_version(&pool).await?, 32);
+
+    let ddl: String = sqlx::query(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'standalone_provider_endpoints'",
+    )
+    .fetch_one(&pool)
+    .await?
+    .try_get(0)?;
+    assert!(
+        ddl.contains("provider_region IS NULL OR provider_region IN ('cn', 'global')"),
+        "region domain must spell the NULL case out: {ddl}"
+    );
+    assert!(
+        ddl.contains("'anthropic_messages'") && ddl.contains("'realtime'"),
+        "native_api must list every persistable kind: {ddl}"
+    );
+
+    insert_standalone_endpoint_protocol(
+        &pool,
+        "am",
+        "generic",
+        None,
+        "anthropic_messages",
+        "manual",
+    )
+    .await?;
+    insert_standalone_endpoint_protocol(&pool, "rt", "generic", None, "realtime", "manual").await?;
+    insert_standalone_endpoint_protocol(&pool, "auto", "generic", None, "auto", "auto").await?;
+    insert_standalone_endpoint_protocol(&pool, "gen-null", "generic", None, "chat", "manual")
+        .await?;
+    insert_standalone_endpoint_protocol(&pool, "gen-cn", "generic", Some("cn"), "chat", "manual")
+        .await?;
+    insert_standalone_endpoint_protocol(
+        &pool,
+        "gen-bogus",
+        "generic",
+        Some("bogus"),
+        "chat",
+        "manual",
+    )
+    .await
+    .expect_err("unknown regions stay rejected");
+    insert_standalone_endpoint_protocol(&pool, "bogus-api", "generic", None, "legacy", "manual")
+        .await
+        .expect_err("unknown native_api kinds stay rejected");
+    insert_standalone_endpoint_protocol(&pool, "bogus-source", "generic", None, "chat", "legacy")
+        .await
+        .expect_err("unknown native_api_source values stay rejected");
+
     pool.close().await;
     store.close().await;
     remove_standalone_files(&path);

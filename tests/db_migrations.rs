@@ -1217,6 +1217,138 @@ async fn request_record_detail_keeps_session_identity() -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn insert_provider_endpoint_row(
+    pool: &PgPool,
+    name: &str,
+    provider: &str,
+    provider_region: Option<&str>,
+    native_api: &str,
+    native_api_source: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO provider_endpoints
+               (scope, name, base_url, api_key, provider, provider_region, native_api, native_api_source)
+           VALUES ('admin', $1, 'https://example.test', 'secret', $2, $3, $4, $5)"#,
+    )
+    .bind(name)
+    .bind(provider)
+    .bind(provider_region)
+    .bind(native_api)
+    .bind(native_api_source)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+// Issue #584: a database built by 0001 carries the auto-named inline CHECKs
+// (`provider_endpoints_native_api_check` / `..._source_check`) that later
+// migrations never replace, so the constraint fix must drop them and pin the
+// named pair to the full kind set. The region shape must spell out the NULL
+// case so a NULL region cannot slip past the MiniMax branch by evaluating to
+// NULL.
+#[tokio::test]
+async fn migrate_pins_provider_endpoint_constraints() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    db::migrate(&schema.pool).await?;
+
+    let leftover_inline_checks = sqlx::query_scalar::<_, i64>(
+        r#"
+            SELECT COUNT(*)
+            FROM pg_constraint
+            WHERE conrelid = 'provider_endpoints'::regclass
+              AND conname IN (
+                    'provider_endpoints_native_api_check',
+                    'provider_endpoints_native_api_source_check'
+              )
+            "#,
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    assert_eq!(
+        leftover_inline_checks, 0,
+        "0001 inline CHECKs must be dropped"
+    );
+
+    for (name, native_api, native_api_source) in [
+        ("am", "anthropic_messages", "manual"),
+        ("rt", "realtime", "manual"),
+        ("auto", "auto", "auto"),
+    ] {
+        insert_provider_endpoint_row(
+            &schema.pool,
+            name,
+            "generic",
+            None,
+            native_api,
+            native_api_source,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{name} must be accepted: {error}"));
+    }
+    insert_provider_endpoint_row(
+        &schema.pool,
+        "bogus-api",
+        "generic",
+        None,
+        "legacy",
+        "manual",
+    )
+    .await
+    .expect_err("unknown native_api kinds stay rejected");
+    insert_provider_endpoint_row(
+        &schema.pool,
+        "bogus-source",
+        "generic",
+        None,
+        "chat",
+        "legacy",
+    )
+    .await
+    .expect_err("unknown native_api_source values stay rejected");
+
+    insert_provider_endpoint_row(&schema.pool, "mm-null", "minimax", None, "chat", "manual")
+        .await
+        .expect_err("minimax requires a provider region");
+    insert_provider_endpoint_row(
+        &schema.pool,
+        "gen-region",
+        "generic",
+        Some("cn"),
+        "chat",
+        "manual",
+    )
+    .await
+    .expect_err("generic must not carry a provider region");
+    insert_provider_endpoint_row(
+        &schema.pool,
+        "gen-bogus",
+        "generic",
+        Some("bogus"),
+        "chat",
+        "manual",
+    )
+    .await
+    .expect_err("unknown regions stay rejected");
+    insert_provider_endpoint_row(
+        &schema.pool,
+        "mm-cn",
+        "minimax",
+        Some("cn"),
+        "chat",
+        "manual",
+    )
+    .await?;
+    insert_provider_endpoint_row(&schema.pool, "gen-null", "generic", None, "chat", "manual")
+        .await?;
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
 fn legacy_input_clone(server: &db::McpServer) -> db::McpServerInput {
     db::McpServerInput {
         scope: server.scope.clone(),
