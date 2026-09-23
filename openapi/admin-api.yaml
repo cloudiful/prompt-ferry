@@ -1223,6 +1223,11 @@ paths:
         required: false
         schema:
           $ref: '#/components/schemas/RequestRecordCategory'
+      - name: range
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/RequestRecordOverviewRange'
       - name: start
         in: query
         required: false

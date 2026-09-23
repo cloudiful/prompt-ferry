@@ -3023,6 +3023,11 @@ async fn request_record_facets_converge_on_selected_time_window() -> anyhow::Res
     assert_eq!(value["models"], serde_json::json!(["gpt-facet-in"]));
     assert_eq!(value["states"], serde_json::json!(["completed"]));
     assert_eq!(value["redactions"], serde_json::json!([false]));
+    assert_eq!(
+        value["dates"].as_array().map(Vec::len),
+        Some(1),
+        "date facet must follow the explicit window"
+    );
 
     // Empty window: zero rows converge every dropdown to empty.
     let empty_start = (base + chrono::Duration::days(30)).to_rfc3339();
@@ -3055,42 +3060,86 @@ async fn request_record_facets_converge_on_selected_time_window() -> anyhow::Res
         Some(0),
         "empty window must converge redactions to empty"
     );
+    assert_eq!(
+        value["dates"].as_array().map(Vec::len),
+        Some(0),
+        "empty window must converge dates to empty"
+    );
 
-    // Param-less call keeps the legacy 30-day lookback: all three records
-    // (each within 30 days) remain visible.
+    // Param-less and `range=24h` calls share the last-24-hours default: the
+    // 7-day-old and the future records stay out of every facet.
+    for path in [
+        "/api/v1/admin/request-records/facets".to_string(),
+        "/api/v1/admin/request-records/facets?range=24h".to_string(),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(auth_request("GET", path.clone()))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let value: Value = serde_json::from_slice(&body)?;
+        assert_eq!(
+            value["models"],
+            serde_json::json!(["gpt-facet-in"]),
+            "24h facets must contain only the in-window model ({path})"
+        );
+        assert_eq!(
+            value["states"],
+            serde_json::json!(["completed"]),
+            "24h facets must contain only the in-window state ({path})"
+        );
+        assert_eq!(
+            value["redactions"],
+            serde_json::json!([false]),
+            "24h facets must contain only the in-window redaction ({path})"
+        );
+        assert_eq!(
+            value["dates"].as_array().map(Vec::len),
+            Some(1),
+            "date facet must follow the 24h default ({path})"
+        );
+    }
+
+    // The `30d` preset keeps the older record while the future record stays
+    // outside the `[start, end)` window.
     let response = app
+        .clone()
         .oneshot(auth_request(
             "GET",
-            "/api/v1/admin/request-records/facets".to_string(),
+            "/api/v1/admin/request-records/facets?range=30d".to_string(),
         ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await?;
     let value: Value = serde_json::from_slice(&body)?;
-    let models = value["models"]
-        .as_array()
-        .expect("models facet must be present");
-    for expected in ["gpt-facet-in", "gpt-facet-old", "gpt-facet-new"] {
-        assert!(
-            models.iter().any(|item| item.as_str() == Some(expected)),
-            "legacy 30-day facets must still contain {expected}"
-        );
-    }
-    let states = value["states"]
-        .as_array()
-        .expect("states facet must be present");
-    for expected in ["completed", "failed", "aborted"] {
-        assert!(
-            states.iter().any(|item| item.as_str() == Some(expected)),
-            "legacy 30-day facets must still contain state {expected}"
-        );
-    }
-    let redactions = value["redactions"]
-        .as_array()
-        .expect("redactions facet must be present");
-    assert!(redactions.iter().any(|item| item.as_bool() == Some(true)));
-    assert!(redactions.iter().any(|item| item.as_bool() == Some(false)));
+    assert_eq!(
+        value["models"],
+        serde_json::json!(["gpt-facet-old", "gpt-facet-in"])
+    );
+    assert_eq!(value["states"], serde_json::json!(["failed", "completed"]));
+    assert_eq!(value["redactions"], serde_json::json!([true, false]));
+    assert_eq!(
+        value["dates"].as_array().map(Vec::len),
+        Some(2),
+        "30d preset must widen the date facet with the window"
+    );
+
+    // `custom` without bounds is rejected exactly like the list endpoint.
+    let response = app
+        .clone()
+        .oneshot(auth_request(
+            "GET",
+            "/api/v1/admin/request-records/facets?range=custom".to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["error"]["code"], "bad_request");
 
     schema.cleanup().await?;
     Ok(())

@@ -165,6 +165,15 @@ pub(super) async fn usage_facets(
         Ok(user) => user,
         Err(response) => return response.into_response(),
     };
+    let (start, end) = match resolve_record_range_bounds(
+        query.range,
+        query.start,
+        query.end,
+        chrono::Utc::now(),
+    ) {
+        Ok(bounds) => bounds,
+        Err(response) => return response.into_response(),
+    };
     match db::list_request_record_facets(
         &state.pool,
         (!user.is_admin).then_some(user.user_id),
@@ -172,8 +181,8 @@ pub(super) async fn usage_facets(
             .request_category
             .unwrap_or(db::RequestRecordCategory::Ai),
         user.is_admin,
-        query.start,
-        query.end,
+        start,
+        end,
     )
     .await
     {

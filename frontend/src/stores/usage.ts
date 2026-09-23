@@ -20,6 +20,7 @@ import {
   createUsageFacetOptionsView,
   createUsageStateOptions,
   createUsageWorkspaceView,
+  resolveUsageRangeWindow,
 } from '../models/usage'
 import type { RequestOverviewDrilldown } from '../request-overview'
 import type { RequestRecordOverviewResponse } from '../generated/admin-api'
@@ -182,10 +183,15 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
   }
 
   async function refreshFacets(): Promise<void> {
-    recordState.facets.value = await fetchUsageFacets(
-      queryState.requestCategory.value,
+    const window = resolveUsageRangeWindow(
+      queryState.range.value,
       queryState.start.value,
       queryState.end.value,
+    )
+    recordState.facets.value = await fetchUsageFacets(
+      queryState.requestCategory.value,
+      window.start,
+      window.end,
     )
   }
 
