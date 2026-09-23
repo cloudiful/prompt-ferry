@@ -78,29 +78,6 @@ async fn wait_for_persisted_requests(schema: &TestSchema, expected: i64) -> anyh
     anyhow::bail!("request records were not persisted before schema cleanup")
 }
 
-async fn wait_for_schema_quiescent(schema: &TestSchema) -> anyhow::Result<()> {
-    for _ in 0..400 {
-        let locks = sqlx::query_scalar::<_, i64>(
-            r#"
-            SELECT COUNT(*)
-            FROM pg_locks locks
-            JOIN pg_class cls ON cls.oid = locks.relation
-            JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace
-            WHERE nsp.nspname = $1
-              AND locks.pid <> pg_backend_pid()
-            "#,
-        )
-        .bind(&schema.schema_name)
-        .fetch_one(&schema.pool)
-        .await?;
-        if locks == 0 {
-            return Ok(());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
-    anyhow::bail!("schema did not quiesce before cleanup")
-}
-
 struct ChatSessionHarness {
     schema: TestSchema,
     relay_addr: std::net::SocketAddr,
@@ -126,8 +103,8 @@ impl ChatSessionHarness {
 
     async fn shutdown(self) -> anyhow::Result<()> {
         self.worker_handle.abort();
-        wait_for_schema_quiescent(&self.schema).await?;
-        self.schema.cleanup().await
+        self.schema.cleanup().await?;
+        Ok(())
     }
 
     async fn post_chat(&self, session_id: &str) -> reqwest::Response {

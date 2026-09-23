@@ -92,6 +92,7 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
     let response = client
         .post(format!("http://{relay_addr}/v1/responses"))
         .bearer_auth("client-token")
+        .header("X-Session-Id", "nul-byte-sanitize")
         .json(&serde_json::json!({
             "model": "gpt-test",
             "input": [{
@@ -111,11 +112,14 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
     );
     drop(requests);
 
+    // Migration 0066 moved raw bodies out of PostgreSQL to the object store,
+    // so the row is metadata-only now; the sanitized content itself is pinned
+    // by the `usage_prompt_blocks` assertions below.
     let row = sqlx::query_as::<_, (bool, i32, Option<String>)>(
         r#"
         SELECT rr.storage_sanitized,
                rr.storage_sanitized_nul_count,
-               raw.request_raw_json #>> '{input,0,content}'
+               raw.raw_object_key
         FROM request_records rr
         JOIN request_record_raw_payloads raw
           ON raw.event_id = rr.event_id
@@ -129,7 +133,11 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
     .await?;
     assert!(row.0);
     assert!(row.1 > 0);
-    assert_eq!(row.2.as_deref(), Some("beforeafter"));
+    assert!(
+        row.2.as_deref().is_some_and(|key| !key.is_empty()),
+        "the sanitized raw payload must be stored as an object, got {:?}",
+        row.2
+    );
 
     let prompt_block = sqlx::query_as::<_, (String, String)>(
         r#"
@@ -145,6 +153,7 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
     assert_eq!(prompt_block.1, "beforeafter");
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -216,6 +225,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
     let turn1 = client
         .post(format!("http://{relay_addr}/v1/chat/completions"))
         .bearer_auth("client-token")
+        .header("X-Session-Id", "opencode-go-history")
         .json(&serde_json::json!({
             "model": "deepseek-v4-flash",
             "messages": [{"role":"user","content":"need weather"}],
@@ -229,6 +239,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
     let turn2 = client
         .post(format!("http://{relay_addr}/v1/chat/completions"))
         .bearer_auth("client-token")
+        .header("X-Session-Id", "opencode-go-history")
         .json(&serde_json::json!({
             "model": "deepseek-v4-flash",
             "messages": [
@@ -256,6 +267,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
     assert_eq!(requests[1]["messages"][2]["content"].as_str(), Some("72F"));
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -414,6 +426,7 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
     assert_eq!(rows[0].3, rows[1].3);
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -507,6 +520,7 @@ async fn raw_passthrough_keeps_previous_response_id_without_replay_state() -> an
     assert_eq!(requests[0]["input"][1]["role"].as_str(), Some("developer"));
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -596,6 +610,7 @@ async fn raw_passthrough_keeps_conversation_without_replay_state() -> anyhow::Re
     );
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -688,6 +703,7 @@ async fn rejects_stateful_responses_routed_to_chat_native_target() -> anyhow::Re
     );
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -775,6 +791,7 @@ async fn rejects_responses_routed_to_anthropic_native_target() -> anyhow::Result
     );
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }

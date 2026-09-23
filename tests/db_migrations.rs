@@ -1,3 +1,6 @@
+#[path = "support/db_gate.rs"]
+mod db_gate;
+
 use std::{env, str::FromStr};
 
 use prompt_ferry::{db, keys::hash_password};
@@ -13,10 +16,15 @@ struct TestSchema {
     pool: PgPool,
     admin_pool: PgPool,
     schema: String,
+    cleanup: db_gate::SchemaCleanup,
+    /// Held for the whole test so migrations (including the concurrent index
+    /// build) never overlap another test's migration or schema teardown.
+    _gate: db_gate::MigrationGate,
 }
 
 impl TestSchema {
     async fn new() -> anyhow::Result<Self> {
+        let gate = db_gate::MigrationGate::acquire().await?;
         let database_url = env::var(TEST_DATABASE_URL_ENV)?;
         let schema = format!("pfy_test_{}", Uuid::new_v4().simple());
 
@@ -39,6 +47,8 @@ impl TestSchema {
             .await?;
 
         Ok(Self {
+            cleanup: db_gate::SchemaCleanup::new(schema.clone()),
+            _gate: gate,
             pool,
             admin_pool,
             schema,
@@ -46,12 +56,8 @@ impl TestSchema {
     }
 
     async fn cleanup(&self) -> anyhow::Result<()> {
-        self.admin_pool
-            .execute(sqlx::AssertSqlSafe(format!(
-                r#"DROP SCHEMA IF EXISTS "{}" CASCADE"#,
-                self.schema
-            )))
-            .await?;
+        db_gate::drop_schema_robust_pool(&self.admin_pool, &self.schema).await?;
+        self.cleanup.disarm();
         self.pool.close().await;
         self.admin_pool.close().await;
         Ok(())
