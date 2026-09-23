@@ -35,19 +35,18 @@ async fn finds_same_conversation_tool_call_when_parent_chain_is_stale() -> anyho
     let schema = TestSchema::new().await?;
     db::migrate(&schema.pool).await?;
     let conversation_id = Uuid::new_v4();
-    let first_event =
-        db::record_request_record(&schema.pool, completed_record(conversation_id, None, 1)).await?;
-    let tool_parent_event = db::record_request_record(
-        &schema.pool,
-        completed_record(conversation_id, Some(first_event), 2),
-    )
-    .await?;
+    let first_record = completed_record(conversation_id, None, 1);
+    let first_event = db::record_request_record(&schema.pool, first_record).await?;
+    let tool_parent_record = completed_record(conversation_id, Some(first_event), 2);
+    let tool_parent_created_at = tool_parent_record.created_at;
+    let tool_parent_event = db::record_request_record(&schema.pool, tool_parent_record).await?;
     let call_id = "call_stale_parent".to_string();
 
     db::upsert_usage_assistant_artifact(
         &schema.pool,
         db::UsageAssistantArtifactCreate {
             event_id: tool_parent_event,
+            created_at: tool_parent_created_at,
             message_json: serde_json::json!({
                 "version": 1,
                 "assistant_message": {
@@ -77,6 +76,7 @@ async fn finds_same_conversation_tool_call_when_parent_chain_is_stale() -> anyho
     db::upsert_request_record_tool_call(
         &schema.pool,
         db::RequestRecordToolCallCreate {
+            created_at: tool_parent_created_at,
             parent_event_id: tool_parent_event,
             conversation_id: Some(conversation_id),
             call_id: call_id.clone(),

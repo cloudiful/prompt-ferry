@@ -85,7 +85,12 @@ SELECT
     COALESCE(ARRAY(
         SELECT jsonb_array_elements_text(COALESCE(rr.redaction_fields_json, '[]'::jsonb))
     ), ARRAY[]::TEXT[]) AS fields,
-    (rr.request_full_json IS NOT NULL OR rr.request_delta_json IS NOT NULL) AS has_full_request,
+    EXISTS (
+        SELECT 1
+        FROM request_record_content content
+        WHERE content.event_id = rr.event_id
+          AND (content.request_full_json IS NOT NULL OR content.request_delta_json IS NOT NULL)
+    ) AS has_full_request,
     (rr.parent_event_id IS NOT NULL) AS has_parent,
     rr.error_code,
     rr.error_message,

@@ -48,6 +48,7 @@ pub(in crate::worker::runtime) async fn process_request(
         mark_function_call_outputs_received(
             services.admin_state(),
             request_ctx.request_prompt_log.parent_event_id,
+            request_ctx.created_at,
             &request.body,
         )
         .await;
@@ -66,6 +67,7 @@ pub(in crate::worker::runtime) async fn process_request(
             request: &request,
             request_id: request_ctx.request_id,
             started: request_ctx.started,
+            created_at: request_ctx.created_at,
             user_id: request.user_id.unwrap_or_default(),
             owner_worker_id: services.runtime_state.worker_instance_id(),
             anthropic,

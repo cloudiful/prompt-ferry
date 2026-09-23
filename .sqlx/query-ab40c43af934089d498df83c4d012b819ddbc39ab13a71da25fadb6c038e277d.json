@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_record_replay_snapshots(\n    created_at,\n    event_id,\n    conversation_id,\n    conversation_seq,\n    base_event_id,\n    prompt_refs_json,\n    ref_count,\n    byte_size\n)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8)\nON CONFLICT (event_id, created_at) DO NOTHING\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8",
+        "Uuid",
+        "Int4",
+        "Int8",
+        "Jsonb",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ab40c43af934089d498df83c4d012b819ddbc39ab13a71da25fadb6c038e277d"
+}

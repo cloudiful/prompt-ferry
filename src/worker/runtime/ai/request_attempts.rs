@@ -150,6 +150,7 @@ pub(super) async fn forward_route_request(
             db::RequestRecordStateInput {
                 request_id: request_ctx.request_id,
                 request_state: db::RequestRecordState::UpstreamProcessing,
+                created_at: Some(request_ctx.created_at),
                 endpoint_id: Some(route.route_id).filter(|id| !id.is_nil()),
                 model_route_rule_id: route.model_route_rule_id,
                 model: request_ctx.request_model.as_deref(),

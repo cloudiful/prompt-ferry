@@ -9,6 +9,7 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
     let mut tx = pool.begin().await?;
     let event_id = sqlx::query_file_scalar!(
         "src/sql/usage/upsert_request_record.sql",
+        input.created_at,
         input.event_kind.as_str(),
         input.request_category.as_str(),
         input.request_state.as_str(),
@@ -58,8 +59,6 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
         input.normalized_first_ref_hash,
         input.normalized_last_ref_hash,
         input.request_storage_mode,
-        input.request_full_json,
-        input.request_delta_json,
         input.request_has_previous_response_id,
         input.request_previous_response_id,
         input.request_previous_response_parent_found,
@@ -69,8 +68,6 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
         input.provider_response_id,
         input.provider_conversation_key,
         input.base_checkpoint_event_id,
-        input.response_prompt,
-        input.upstream_error_body,
         input.error_code,
         input.error_message,
         input.failure_family.map(|value| value.as_str()),
@@ -86,6 +83,21 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
         input.applied_thinking_effort_override.as_deref(),
     )
     .fetch_one(&mut *tx)
+    .await?;
+
+    // Issue #277 Phase P7: the content half lives in its own daily partition.
+    // A row is written even when every payload column is NULL, because a
+    // missing row is what "expired" means after the split.
+    sqlx::query_file!(
+        "src/sql/usage/upsert_request_record_content.sql",
+        input.created_at,
+        event_id,
+        ref_full.as_deref(),
+        ref_delta.as_ref(),
+        input.response_prompt,
+        input.upstream_error_body,
+    )
+    .execute(&mut *tx)
     .await?;
 
     tx.commit().await?;
@@ -117,7 +129,14 @@ pub async fn record_request_record(pool: &PgPool, input: RequestRecordCreate) ->
         .await?;
     }
 
-    insert_request_record_block_refs(pool, event_id, &ref_full, &ref_delta).await?;
+    insert_request_record_block_refs(
+        pool,
+        event_id,
+        input.created_at,
+        ref_full.as_deref(),
+        ref_delta.as_ref(),
+    )
+    .await?;
 
     Ok(event_id)
 }
@@ -187,16 +206,20 @@ pub async fn record_request_record_with_raw_store(
 async fn insert_request_record_block_refs(
     pool: &PgPool,
     event_id: i64,
-    request_full_json: &Option<Value>,
-    request_delta_json: &Option<Value>,
+    created_at: DateTime<Utc>,
+    request_full_json: Option<&Value>,
+    request_delta_json: Option<&Value>,
 ) -> Result<()> {
-    for json_ref in [request_full_json, request_delta_json] {
-        let Some(json) = json_ref else { continue };
+    for json in [request_full_json, request_delta_json]
+        .into_iter()
+        .flatten()
+    {
         if json.is_null() || json.as_array().map(|a| a.is_empty()).unwrap_or(true) {
             continue;
         }
         sqlx::query_file!(
             "src/sql/usage/insert_request_record_block_refs.sql",
+            created_at,
             event_id,
             json,
         )
@@ -209,6 +232,8 @@ async fn insert_request_record_block_refs(
 pub struct RequestRecordStateInput<'a> {
     pub request_id: uuid::Uuid,
     pub request_state: RequestRecordState,
+    /// Issue #277 Phase P7: pins the update to the row's partition when known.
+    pub created_at: Option<DateTime<Utc>>,
     pub endpoint_id: Option<uuid::Uuid>,
     pub model_route_rule_id: Option<uuid::Uuid>,
     pub model: Option<&'a str>,
@@ -226,6 +251,7 @@ pub async fn record_request_state(pool: &PgPool, input: RequestRecordStateInput<
         input.endpoint_key_id,
         input.endpoint_key_label,
         input.request_id,
+        input.created_at,
     )
     .execute(pool)
     .await?;
@@ -262,7 +288,14 @@ mod tests {
     }
 
     fn insert_column_count(sql: &str) -> usize {
-        let (_, rest) = sql.split_once('(').expect("sql has insert columns");
+        // Comment lines may contain parentheses and commas; strip them so the
+        // column list is parsed from the statement only.
+        let statement = sql
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("--"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (_, rest) = statement.split_once('(').expect("sql has insert columns");
         let (cols, _) = rest.split_once(")\nVALUES").expect("sql has values clause");
         cols.split(',')
             .map(str::trim)
@@ -274,7 +307,7 @@ mod tests {
     fn request_record_sql_placeholders_match_bind_count() {
         let upsert_sql = include_str!("../../sql/usage/upsert_request_record.sql");
 
-        assert_eq!(insert_column_count(upsert_sql), 75);
-        assert_eq!(max_placeholder(upsert_sql), 75);
+        assert_eq!(insert_column_count(upsert_sql), 72);
+        assert_eq!(max_placeholder(upsert_sql), 72);
     }
 }

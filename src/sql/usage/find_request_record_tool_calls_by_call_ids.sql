@@ -29,7 +29,11 @@ JOIN request_records AS parent
     ON parent.event_id = tool_call.parent_event_id
 LEFT JOIN request_record_assistant_artifacts AS artifact
     ON artifact.event_id = tool_call.parent_event_id
-   AND parent.content_expired_at IS NULL
+   AND EXISTS (
+       SELECT 1
+       FROM request_record_content content
+       WHERE content.event_id = parent.event_id
+   )
 WHERE tool_call.call_id = ANY($1)
   AND parent.event_kind = 'request'
   AND parent.request_category = 'ai'

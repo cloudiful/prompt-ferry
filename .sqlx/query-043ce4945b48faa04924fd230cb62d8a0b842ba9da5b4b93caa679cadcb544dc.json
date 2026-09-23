@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT rr.event_id AS \"event_id!\", rr.request_id AS \"request_id!\", rr.user_id, rr.endpoint_id, rr.path AS \"path!\", rr.model, rr.conversation_id, rr.parent_event_id,\n       rr.conversation_seq, rr.conversation_source AS \"conversation_source!\", rr.client_installation_id, rr.normalized_item_count,\n       rr.normalized_chain_hash, rr.normalized_first_ref_hash, rr.normalized_last_ref_hash,\n       rr.request_storage_mode AS \"request_storage_mode!\", rr.request_full_json, rr.request_delta_json,\n       CAST(NULL AS JSONB) AS request_raw_json, rr.request_has_previous_response_id AS \"request_has_previous_response_id!\",\n       rr.request_previous_response_id, rr.request_previous_response_parent_found,\n       rr.request_conversation_key, rr.request_conversation_parent_found,\n       rr.provider_response_id, rr.base_checkpoint_event_id, rr.response_prompt, CAST(NULL AS TEXT) AS response_raw_body\nFROM request_records rr\nWHERE rr.event_id = $1\n  AND ($2::BIGINT IS NULL OR rr.user_id = $2)\n",
+  "query": "SELECT rr.event_id AS \"event_id!\", rr.request_id AS \"request_id!\", rr.user_id, rr.endpoint_id, rr.path AS \"path!\", rr.model, rr.conversation_id, rr.parent_event_id,\n       rr.conversation_seq, rr.conversation_source AS \"conversation_source!\", rr.client_installation_id, rr.normalized_item_count,\n       rr.normalized_chain_hash, rr.normalized_first_ref_hash, rr.normalized_last_ref_hash,\n       rr.request_storage_mode AS \"request_storage_mode!\", content.request_full_json, content.request_delta_json,\n       CAST(NULL AS JSONB) AS request_raw_json, rr.request_has_previous_response_id AS \"request_has_previous_response_id!\",\n       rr.request_previous_response_id, rr.request_previous_response_parent_found,\n       rr.request_conversation_key, rr.request_conversation_parent_found,\n       rr.provider_response_id, rr.base_checkpoint_event_id, content.response_prompt, CAST(NULL AS TEXT) AS response_raw_body\nFROM request_records rr\nLEFT JOIN request_record_content content\n  ON content.event_id = rr.event_id\nWHERE rr.event_id = $1\n  AND content.event_id IS NOT NULL\n",
   "describe": {
     "columns": [
       {
@@ -185,7 +185,7 @@
         "type_info": "Jsonb",
         "origin": {
           "Table": {
-            "table": "request_records",
+            "table": "request_record_content",
             "name": "request_full_json"
           }
         }
@@ -196,7 +196,7 @@
         "type_info": "Jsonb",
         "origin": {
           "Table": {
-            "table": "request_records",
+            "table": "request_record_content",
             "name": "request_delta_json"
           }
         }
@@ -290,7 +290,7 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "request_records",
+            "table": "request_record_content",
             "name": "response_prompt"
           }
         }
@@ -304,7 +304,6 @@
     ],
     "parameters": {
       "Left": [
-        "Int8",
         "Int8"
       ]
     },
@@ -339,5 +338,5 @@
       null
     ]
   },
-  "hash": "86f336c5175d6beeb6754a81b325d09aba40bd00eb22de97d39b78137a529335"
+  "hash": "043ce4945b48faa04924fd230cb62d8a0b842ba9da5b4b93caa679cadcb544dc"
 }

@@ -58,6 +58,12 @@ pub async fn spawn_worker(
 
     let config = worker_config(worker_addr, upstream_addr, database_url);
     tokio::spawn(async move {
-        worker::connect_for_test_with_admin(config, reqwest::Client::new()).await
+        // Issue #277 Phase P7: the connect future sits at the denied
+        // `large_futures` limit; box it so the harness stays clippy-clean.
+        Box::pin(worker::connect_for_test_with_admin(
+            config,
+            reqwest::Client::new(),
+        ))
+        .await
     })
 }

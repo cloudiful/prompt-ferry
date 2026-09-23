@@ -159,7 +159,11 @@ async fn auto_discovers_endpoint_for_model_when_whitelist_is_disabled() -> anyho
 
     let config = worker_config(worker_addr, alpha_addr, &worker_database_url(&schema)?);
     let mut worker_handle = tokio::spawn(async move {
-        prompt_ferry::worker::connect_for_test_with_admin(config, reqwest::Client::new()).await
+        Box::pin(prompt_ferry::worker::connect_for_test_with_admin(
+            config,
+            reqwest::Client::new(),
+        ))
+        .await
     });
     wait_for_worker(&relay_handle, &mut worker_handle).await;
 

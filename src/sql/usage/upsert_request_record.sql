@@ -1,5 +1,9 @@
+-- Issue #277 Phase P7: request metadata only. The four content columns moved
+-- to `request_record_content`, keyed by the same `(event_id, created_at)`.
+-- `created_at` arrives as a bind parameter (the in-memory request record owns
+-- it) because it is both the partition key and part of every arbiter.
 INSERT INTO request_records(
-    event_kind, request_category, request_state, request_id, user_id, client_key_label, request_user_agent, endpoint_id, endpoint_key_id, endpoint_key_label, model_route_rule_id, mcp_server_id, mcp_server_name, mcp_protocol_method, mcp_operation_name, path,
+    created_at, event_kind, request_category, request_state, request_id, user_id, client_key_label, request_user_agent, endpoint_id, endpoint_key_id, endpoint_key_label, model_route_rule_id, mcp_server_id, mcp_server_name, mcp_protocol_method, mcp_operation_name, path,
     http_request_content_encoding, http_request_compressed, http_request_compressed_bytes, http_request_decompressed_bytes, http_request_compression_ratio,
     model, status, ok, duration_ms, ttft_ms,
     input_tokens, output_tokens, total_tokens, cached_tokens, cache_read_tokens,
@@ -7,13 +11,13 @@ INSERT INTO request_records(
     storage_sanitized, storage_sanitized_nul_count,
     redaction_applied, redaction_findings_count, redaction_replacements_count, redaction_types_json, redaction_fields_json,
     client_installation_id, normalized_item_count, normalized_chain_hash,
-    normalized_first_ref_hash, normalized_last_ref_hash, request_storage_mode, request_full_json,
-    request_delta_json, request_has_previous_response_id,
+    normalized_first_ref_hash, normalized_last_ref_hash, request_storage_mode,
+    request_has_previous_response_id,
     request_previous_response_id, request_previous_response_parent_found,
     request_conversation_key, request_conversation_parent_found,
     upstream_redaction_enabled,
     provider_response_id, provider_conversation_key, base_checkpoint_event_id,
-    response_prompt, upstream_error_body, error_code, error_message,
+    error_code, error_message,
     failure_family, mcp_bearer_token_slot, route_selection_reason, owner_worker_id,
     lease_expires_at, last_heartbeat_at, response_capture_truncated,
     client_key_id, requested_model, upstream_model,
@@ -24,10 +28,9 @@ VALUES (
     $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
     $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44,
     $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58,
-    $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72,
-    $73, $74, $75
+    $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72
 )
-ON CONFLICT (request_id) WHERE event_kind = 'request'
+ON CONFLICT (request_id, created_at) WHERE event_kind = 'request'
 DO UPDATE SET
     request_state = CASE
         WHEN request_records.request_state = 'aborted' THEN request_records.request_state
@@ -92,8 +95,6 @@ DO UPDATE SET
     normalized_first_ref_hash = COALESCE(EXCLUDED.normalized_first_ref_hash, request_records.normalized_first_ref_hash),
     normalized_last_ref_hash = COALESCE(EXCLUDED.normalized_last_ref_hash, request_records.normalized_last_ref_hash),
     request_storage_mode = COALESCE(NULLIF(EXCLUDED.request_storage_mode, ''), request_records.request_storage_mode),
-    request_full_json = COALESCE(EXCLUDED.request_full_json, request_records.request_full_json),
-    request_delta_json = COALESCE(EXCLUDED.request_delta_json, request_records.request_delta_json),
     request_has_previous_response_id = EXCLUDED.request_has_previous_response_id,
     request_previous_response_id = COALESCE(EXCLUDED.request_previous_response_id, request_records.request_previous_response_id),
     request_previous_response_parent_found = COALESCE(EXCLUDED.request_previous_response_parent_found, request_records.request_previous_response_parent_found),
@@ -103,8 +104,6 @@ DO UPDATE SET
     provider_response_id = COALESCE(EXCLUDED.provider_response_id, request_records.provider_response_id),
     provider_conversation_key = COALESCE(EXCLUDED.provider_conversation_key, request_records.provider_conversation_key),
     base_checkpoint_event_id = COALESCE(EXCLUDED.base_checkpoint_event_id, request_records.base_checkpoint_event_id),
-    response_prompt = COALESCE(EXCLUDED.response_prompt, request_records.response_prompt),
-    upstream_error_body = COALESCE(EXCLUDED.upstream_error_body, request_records.upstream_error_body),
     error_code = COALESCE(EXCLUDED.error_code, request_records.error_code),
     error_message = COALESCE(EXCLUDED.error_message, request_records.error_message),
     failure_family = COALESCE(EXCLUDED.failure_family, request_records.failure_family),

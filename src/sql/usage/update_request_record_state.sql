@@ -8,3 +8,4 @@ SET request_state = $1,
     updated_at = NOW()
 WHERE request_id = $7
   AND event_kind = 'request'
+  AND ($8::TIMESTAMPTZ IS NULL OR created_at = $8)

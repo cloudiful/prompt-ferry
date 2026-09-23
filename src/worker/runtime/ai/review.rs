@@ -82,6 +82,7 @@ pub(super) async fn handle_llm_review_gate(
                 db::RequestRecordStateInput {
                     request_id: request_ctx.request_id,
                     request_state: db::RequestRecordState::AwaitingApproval,
+                    created_at: Some(request_ctx.created_at),
                     endpoint_id: None,
                     model_route_rule_id: None,
                     model: request_ctx.request_model.as_deref(),

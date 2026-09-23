@@ -67,6 +67,7 @@ fn collect_tool_calls_from_artifact(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             calls.push(db::RequestRecordToolCallCreate {
+                created_at: chrono::Utc::now(),
                 parent_event_id: 0,
                 conversation_id: None,
                 call_id: call_id.to_string(),
@@ -86,6 +87,7 @@ fn collect_tool_calls_from_artifact(
 async fn persist_tool_call_events(
     admin_state: Option<&AdminState>,
     parent_event_id: i64,
+    created_at: chrono::DateTime<chrono::Utc>,
     conversation_id: Option<uuid::Uuid>,
     tool_calls: Vec<db::RequestRecordToolCallCreate>,
 ) {
@@ -97,6 +99,7 @@ async fn persist_tool_call_events(
             &state.pool,
             db::RequestRecordToolCallCreate {
                 parent_event_id,
+                created_at,
                 conversation_id,
                 ..tool_call
             },
@@ -114,6 +117,7 @@ pub(super) struct PersistAssistantArtifactParams<'a> {
     pub(super) artifact: Option<AssistantArtifact>,
     pub(super) artifact_capture_expected: bool,
     pub(super) conversation_id: Option<uuid::Uuid>,
+    pub(super) created_at: chrono::DateTime<chrono::Utc>,
     pub(super) request: &'a BufferedBridgeRequest,
     pub(super) route: &'a db::RouteConfig,
     pub(super) provider_response_id: Option<&'a str>,
@@ -126,6 +130,7 @@ pub(super) async fn persist_assistant_artifact(params: PersistAssistantArtifactP
         artifact,
         artifact_capture_expected,
         conversation_id,
+        created_at,
         request,
         route,
         provider_response_id,
@@ -152,6 +157,7 @@ pub(super) async fn persist_assistant_artifact(params: PersistAssistantArtifactP
         &state.pool,
         db::UsageAssistantArtifactCreate {
             event_id,
+            created_at,
             message_json: artifact.message_json,
             has_reasoning_content: artifact.has_reasoning_content,
             has_tool_calls: artifact.has_tool_calls,
@@ -172,7 +178,14 @@ pub(super) async fn persist_assistant_artifact(params: PersistAssistantArtifactP
         }
         Ok(_) => {}
     }
-    persist_tool_call_events(Some(state), event_id, conversation_id, tool_calls).await;
+    persist_tool_call_events(
+        Some(state),
+        event_id,
+        created_at,
+        conversation_id,
+        tool_calls,
+    )
+    .await;
 }
 
 #[cfg(test)]

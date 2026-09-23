@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P7: prompt blocks carry a day-granular `created_at`, so the\n-- orphan guard is the current UTC day instead of a minute-level grace window:\n-- a block written today is never reaped mid-day, older orphans are.\nDELETE FROM usage_prompt_blocks upb\nWHERE upb.created_at < (date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')\n  AND NOT EXISTS (\n      SELECT 1\n      FROM request_record_block_refs ref\n      WHERE ref.block_hash = upb.block_hash\n  );\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "44926800c78a9b2464bad7b39f69da1d757e27cc5ffde4798eff1aa79583e012"
+}

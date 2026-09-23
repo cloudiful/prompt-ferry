@@ -91,16 +91,25 @@ async fn insert_mcp_request_record(
     server_id: Uuid,
     server_name: &str,
 ) -> anyhow::Result<()> {
+    // Phase P7: metadata and content are separate tables; a metadata row with
+    // no content row reads as expired, so the fixture writes both.
     sqlx::query(
-        r#"INSERT INTO request_records(
-            request_id, path, request_storage_mode, created_at, request_has_previous_response_id,
-            conversation_source, event_kind, request_state, updated_at, storage_sanitized,
-            storage_sanitized_nul_count, request_category, route_selection_reason,
-            http_request_compressed, redaction_applied, redaction_findings_count,
-            redaction_replacements_count, upstream_redaction_enabled, response_capture_truncated,
-            mcp_server_id, mcp_server_name, ok
-        ) VALUES ($1, '/mcp', 'full', NOW(), FALSE, 'direct', 'request', 'completed', NOW(), TRUE,
-            0, 'mcp', 'default', FALSE, FALSE, 0, 0, FALSE, FALSE, $2, $3, TRUE)"#,
+        r#"WITH inserted AS (
+            INSERT INTO request_records(
+                request_id, path, request_storage_mode, created_at, request_has_previous_response_id,
+                conversation_source, event_kind, request_state, updated_at, storage_sanitized,
+                storage_sanitized_nul_count, request_category, route_selection_reason,
+                http_request_compressed, redaction_applied, redaction_findings_count,
+                redaction_replacements_count, upstream_redaction_enabled, response_capture_truncated,
+                mcp_server_id, mcp_server_name, ok
+            ) VALUES ($1, '/mcp', 'full', NOW(), FALSE, 'direct', 'request', 'completed', NOW(), TRUE,
+                0, 'mcp', 'default', FALSE, FALSE, 0, 0, FALSE, FALSE, $2, $3, TRUE)
+            RETURNING event_id, created_at
+        )
+        INSERT INTO request_record_content(
+            created_at, event_id, request_full_json, request_delta_json, response_prompt, upstream_error_body
+        )
+        SELECT created_at, event_id, NULL, NULL, NULL, NULL FROM inserted"#,
     )
     .bind(Uuid::new_v4())
     .bind(server_id)

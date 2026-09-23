@@ -110,6 +110,7 @@ pub async fn upsert_request_record_tool_call(
 ) -> Result<RequestRecordToolCall> {
     let row = sqlx::query_file!(
         "src/sql/usage/upsert_request_record_tool_call.sql",
+        input.created_at,
         input.parent_event_id,
         input.conversation_id,
         input.call_id,

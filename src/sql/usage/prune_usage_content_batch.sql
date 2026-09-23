@@ -1,3 +1,6 @@
+-- Issue #277 Phase P7: content expiry is now "the content row is gone". The
+-- batch deletes the content rows of eligible events and then the content-family
+-- children that belong to them; metadata rows stay until the retention prune.
 WITH expired_conversations AS (
     SELECT rr.conversation_id
     FROM request_records rr
@@ -16,7 +19,11 @@ WITH expired_conversations AS (
 ), eligible AS (
     SELECT rr.event_id, rr.conversation_id
     FROM request_records rr
-    WHERE rr.content_expired_at IS NULL
+    WHERE EXISTS (
+          SELECT 1
+          FROM request_record_content content
+          WHERE content.event_id = rr.event_id
+      )
       AND (
           (
               rr.conversation_id IS NOT NULL
@@ -31,24 +38,16 @@ WITH expired_conversations AS (
               AND rr.created_at < NOW() - ($1::BIGINT * INTERVAL '1 day')
           )
       )
-      AND NOT (
-          rr.request_state IN ('received', 'awaiting_approval', 'upstream_processing')
-          OR rr.lease_expires_at > NOW()
-      )
+      AND rr.request_state NOT IN ('received', 'awaiting_approval', 'upstream_processing')
+      AND COALESCE(rr.lease_expires_at, '-infinity'::TIMESTAMPTZ) <= NOW()
     ORDER BY rr.created_at ASC, rr.event_id ASC
     LIMIT $2
     FOR UPDATE SKIP LOCKED
 ), marked AS (
-    UPDATE request_records rr
-    SET
-        content_expired_at = NOW(),
-        request_full_json = NULL,
-        request_delta_json = NULL,
-        response_prompt = NULL,
-        upstream_error_body = NULL
-    FROM eligible
-    WHERE rr.event_id = eligible.event_id
-    RETURNING rr.event_id, rr.conversation_id
+    DELETE FROM request_record_content content
+    USING eligible
+    WHERE content.event_id = eligible.event_id
+    RETURNING content.event_id, eligible.conversation_id
 ), deleted_block_refs AS (
     DELETE FROM request_record_block_refs refs
     USING marked

@@ -4,11 +4,6 @@ use sqlx::Acquire;
 const USAGE_CONTENT_MAINTENANCE_BATCH_SIZE: i64 = 500;
 const USAGE_CONTENT_MAINTENANCE_LOCK_KEY: i64 = 0x7072_756e_6543_6f6e;
 
-/// Prompt blocks younger than this grace window are never treated as orphans:
-/// a block is inserted before the request record that references it, so the
-/// in-flight reference is only visible once the request finishes.
-const ORPHAN_PROMPT_BLOCK_GRACE_MINUTES: i32 = 30;
-
 const MAINTENANCE_TIMEOUTS_SQL: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/sql/usage/set_maintenance_timeouts.sql"
@@ -152,12 +147,9 @@ async fn run_usage_content_maintenance_locked(
 pub(super) async fn cleanup_orphan_usage_prompt_blocks(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64> {
-    let deleted = sqlx::query_file!(
-        "src/sql/usage/cleanup_orphan_usage_prompt_blocks.sql",
-        ORPHAN_PROMPT_BLOCK_GRACE_MINUTES,
-    )
-    .execute(&mut **tx)
-    .await?;
+    let deleted = sqlx::query_file!("src/sql/usage/cleanup_orphan_usage_prompt_blocks.sql")
+        .execute(&mut **tx)
+        .await?;
     Ok(deleted.rows_affected())
 }
 

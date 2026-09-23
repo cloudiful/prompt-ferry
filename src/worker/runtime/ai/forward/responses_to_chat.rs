@@ -173,6 +173,7 @@ pub(super) async fn forward_non_stream_responses_to_chat_response(
         ),
         artifact_capture_expected: true,
         conversation_id: request_ctx.request_prompt_log.conversation_id,
+        created_at: request_ctx.created_at,
         request,
         route: &route_ctx.route,
         provider_response_id: usage_capture.response_id.as_deref(),

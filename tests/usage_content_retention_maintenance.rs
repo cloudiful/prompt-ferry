@@ -7,17 +7,18 @@ use uuid::Uuid;
 
 use crate::db_harness::{TEST_DATABASE_URL_ENV, TestSchema, test_database_configured};
 
-async fn create_completed_record(pool: &sqlx::PgPool) -> anyhow::Result<i64> {
-    Ok(db::record_request_record(
-        pool,
-        db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
-            .with_state(
-                db::UsageEventKind::Request,
-                db::RequestRecordState::Completed,
-            )
-            .with_request_actor(Some(1), None, None, None),
-    )
-    .await?)
+async fn create_completed_record(
+    pool: &sqlx::PgPool,
+) -> anyhow::Result<(i64, chrono::DateTime<Utc>)> {
+    let record = db::RequestRecordCreate::ai_request(Uuid::new_v4(), "/v1/responses")
+        .with_state(
+            db::UsageEventKind::Request,
+            db::RequestRecordState::Completed,
+        )
+        .with_request_actor(Some(1), None, None, None);
+    let created_at = record.created_at;
+    let event_id = db::record_request_record(pool, record).await?;
+    Ok((event_id, created_at))
 }
 
 #[tokio::test]
@@ -30,11 +31,12 @@ async fn content_retention_deletes_assistant_tool_call_children_with_artifacts()
 
     let schema = TestSchema::new().await?;
     db::migrate(&schema.pool).await?;
-    let event_id = create_completed_record(&schema.pool).await?;
+    let (event_id, created_at) = create_completed_record(&schema.pool).await?;
     db::upsert_usage_assistant_artifact(
         &schema.pool,
         db::UsageAssistantArtifactCreate {
             event_id,
+            created_at,
             message_json: serde_json::json!({
                 "role": "assistant",
                 "reasoning_content": "internal steps",
@@ -51,6 +53,7 @@ async fn content_retention_deletes_assistant_tool_call_children_with_artifacts()
     db::upsert_request_record_tool_call(
         &schema.pool,
         db::RequestRecordToolCallCreate {
+            created_at,
             parent_event_id: event_id,
             conversation_id: None,
             call_id: "call_1".to_string(),

@@ -25,6 +25,10 @@ pub struct UsageRedactionSummary {
 #[derive(Debug, Clone)]
 pub struct UsageRequestMetadata {
     pub user_id: Option<i64>,
+    /// Issue #277 Phase P7: the request's creation instant, shared by every
+    /// record written for the same request id (partition key and arbiter).
+    /// `None` falls back to the process clock at `UsageLog` construction.
+    pub created_at: Option<DateTime<Utc>>,
     pub client_key_id: Option<i64>,
     pub client_key_label: Option<String>,
     pub request_user_agent: Option<String>,
@@ -77,6 +81,7 @@ impl Default for UsageRequestMetadata {
     fn default() -> Self {
         Self {
             user_id: None,
+            created_at: None,
             client_key_id: None,
             client_key_label: None,
             request_user_agent: None,
@@ -126,6 +131,9 @@ pub struct UsageLog {
     pub request_category: db::RequestRecordCategory,
     pub request_state: db::RequestRecordState,
     pub request_id: uuid::Uuid,
+    /// Issue #277 Phase P7: wall-clock creation instant of the request, owned by
+    /// the worker request context and reused by every record of the turn.
+    pub created_at: DateTime<Utc>,
     pub user_id: Option<i64>,
     pub client_key_id: Option<i64>,
     pub client_key_label: Option<String>,
@@ -165,7 +173,11 @@ pub struct UsageLog {
     pub normalized_first_ref_hash: Option<String>,
     pub normalized_last_ref_hash: Option<String>,
     pub request_storage_mode: String,
-    pub request_full_json: Option<Value>,
+    /// Boxed: issue #277 Phase P7. `UsageLog` travels by value through the
+    /// request futures and `clippy::large_futures` is denied at 16 KiB; boxing
+    /// the largest optional payload keeps the P7 `created_at` addition from
+    /// pushing those futures over the limit.
+    pub request_full_json: Option<Box<Value>>,
     pub request_delta_json: Option<Value>,
     pub snapshot_prompt_refs_json: Option<Value>,
     pub request_raw_json: Option<Value>,
@@ -361,6 +373,7 @@ impl UsageLog {
             request_category,
             request_state: db::RequestRecordState::Received,
             request_id,
+            created_at: metadata.created_at.unwrap_or_else(Utc::now),
             user_id: metadata.user_id,
             client_key_id: metadata.client_key_id,
             client_key_label: metadata.client_key_label,
@@ -400,7 +413,7 @@ impl UsageLog {
             normalized_first_ref_hash: metadata.normalized_first_ref_hash,
             normalized_last_ref_hash: metadata.normalized_last_ref_hash,
             request_storage_mode: metadata.request_storage_mode,
-            request_full_json: metadata.request_full_json,
+            request_full_json: metadata.request_full_json.map(Box::new),
             request_delta_json: metadata.request_delta_json,
             snapshot_prompt_refs_json: metadata.snapshot_prompt_refs_json,
             request_raw_json: metadata.request_raw_json,

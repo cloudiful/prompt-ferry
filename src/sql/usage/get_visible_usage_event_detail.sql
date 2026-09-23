@@ -102,13 +102,13 @@ SELECT
     ue.request_conversation_key,
     ue.request_conversation_parent_found,
     ue.provider_response_id,
-    (ue.request_full_json IS NOT NULL OR ue.request_delta_json IS NOT NULL) AS "has_full_request!",
+    (content.request_full_json IS NOT NULL OR content.request_delta_json IS NOT NULL) AS "has_full_request!",
     (ue.parent_event_id IS NOT NULL) AS "has_parent!",
-    ue.response_prompt,
+    content.response_prompt,
     ua.message_json -> 'assistant_message' AS assistant_message_json,
     ua.message_json -> 'output_items' AS assistant_output_items_json,
     ua.has_reasoning_content,
-    ue.upstream_error_body,
+    content.upstream_error_body,
     ue.error_code,
     ue.error_message,
     ue.abort_reason AS "abort_reason: _",
@@ -125,6 +125,8 @@ LEFT JOIN users u ON u.user_id = ue.user_id
 LEFT JOIN provider_endpoints pe ON pe.endpoint_id = ue.endpoint_id
 LEFT JOIN mcp_servers ms ON ms.server_id = ue.mcp_server_id
 LEFT JOIN request_record_assistant_artifacts ua ON ua.event_id = ue.event_id
+LEFT JOIN request_record_content content
+  ON content.event_id = ue.event_id
 LEFT JOIN request_record_raw_payloads raw
   ON raw.event_id = ue.event_id
  AND raw.created_at = ue.created_at

@@ -44,16 +44,37 @@ impl TestSchema {
     }
 
     pub async fn cleanup(&self) -> anyhow::Result<()> {
-        self.admin_pool
-            .execute(sqlx::AssertSqlSafe(format!(
-                r#"DROP SCHEMA IF EXISTS "{}" CASCADE"#,
-                self.schema_name
-            )))
-            .await?;
+        // A worker pool that is still draining a query holds locks on schema
+        // objects while `DROP SCHEMA ... CASCADE` takes ACCESS EXCLUSIVE locks on
+        // every one of them, so the two deadlock once a schema carries enough
+        // partitions. Retry until the lingering backend drains.
+        let drop_sql = format!(r#"DROP SCHEMA IF EXISTS "{}" CASCADE"#, self.schema_name);
+        let mut attempts = 0;
+        loop {
+            match self
+                .admin_pool
+                .execute(sqlx::AssertSqlSafe(drop_sql.clone()))
+                .await
+            {
+                Ok(_) => break,
+                Err(err) if is_deadlock(&err) && attempts < 20 => {
+                    attempts += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
         self.pool.close().await;
         self.admin_pool.close().await;
         Ok(())
     }
+}
+
+fn is_deadlock(err: &sqlx::Error) -> bool {
+    err.as_database_error()
+        .and_then(|error| error.code())
+        .as_deref()
+        == Some("40P01")
 }
 
 pub fn test_database_configured() -> bool {

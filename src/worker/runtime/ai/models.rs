@@ -22,6 +22,9 @@ pub(super) struct ModelsRequestContext<'a> {
     pub(super) request: &'a BufferedBridgeRequest,
     pub(super) request_id: uuid::Uuid,
     pub(super) started: Instant,
+    /// Issue #277 Phase P7: the admission record already carries this instant;
+    /// the models outcome must reuse it so both writes land on one row.
+    pub(super) created_at: chrono::DateTime<chrono::Utc>,
     pub(super) user_id: i64,
     pub(super) owner_worker_id: uuid::Uuid,
     pub(super) anthropic: bool,
@@ -42,6 +45,7 @@ pub(super) async fn process_models_request(
         owner_worker_id,
         anthropic,
         request_headers,
+        created_at,
     } = context;
     let routes = db::list_visible_endpoints(&state.pool, user_id)
         .await?
@@ -171,6 +175,7 @@ pub(super) async fn process_models_request(
                 request_id,
                 UsageRequestMetadata {
                     user_id: Some(user_id).filter(|id| *id > 0),
+                    created_at: Some(created_at),
                     request_user_agent: request.request_user_agent.clone(),
                     path: request.path.clone(),
                     ..Default::default()
@@ -253,6 +258,7 @@ pub(super) async fn process_models_request(
             request_id,
             UsageRequestMetadata {
                 user_id: Some(user_id).filter(|id| *id > 0),
+                created_at: Some(created_at),
                 request_user_agent: request.request_user_agent.clone(),
                 path: request.path.clone(),
                 ..Default::default()
