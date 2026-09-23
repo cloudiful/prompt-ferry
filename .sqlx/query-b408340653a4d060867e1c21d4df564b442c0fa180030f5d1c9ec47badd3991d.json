@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM usage_prompt_blocks upb\nWHERE upb.created_at < NOW() - make_interval(mins => $1::INT)\n  AND NOT EXISTS (\n      SELECT 1\n      FROM request_record_block_refs ref\n      WHERE ref.block_hash = upb.block_hash\n  );\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b408340653a4d060867e1c21d4df564b442c0fa180030f5d1c9ec47badd3991d"
+}

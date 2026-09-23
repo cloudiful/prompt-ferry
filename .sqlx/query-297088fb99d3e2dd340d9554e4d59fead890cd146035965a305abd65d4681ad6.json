@@ -1,285 +1,291 @@
 {
   "db_name": "PostgreSQL",
+  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, COALESCE(t.native_api, 'auto') AS target_native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override,\n        t.active_windows, e.active_windows AS endpoint_active_windows,\n        COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\",\n        COALESCE(t.thinking_downgrade_enabled, FALSE) AS \"thinking_downgrade_enabled!\",\n        t.thinking_effort_override,\n        t.compact_mode\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.rule_id = $1\n  AND r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
   "describe": {
     "columns": [
       {
-        "name": "rule_id",
         "ordinal": 0,
+        "name": "rule_id",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
-            "name": "rule_id",
-            "table": "model_endpoint_rules"
+            "table": "model_endpoint_rules",
+            "name": "rule_id"
           }
-        },
-        "type_info": "Uuid"
+        }
       },
       {
-        "name": "scope",
         "ordinal": 1,
+        "name": "scope",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "scope",
-            "table": "model_endpoint_rules"
+            "table": "model_endpoint_rules",
+            "name": "scope"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "owner_user_id",
         "ordinal": 2,
+        "name": "owner_user_id",
+        "type_info": "Int8",
         "origin": {
           "Table": {
-            "name": "owner_user_id",
-            "table": "model_endpoint_rules"
+            "table": "model_endpoint_rules",
+            "name": "owner_user_id"
           }
-        },
-        "type_info": "Int8"
+        }
       },
       {
-        "name": "model_pattern",
         "ordinal": 3,
+        "name": "model_pattern",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "model_pattern",
-            "table": "model_endpoint_rules"
+            "table": "model_endpoint_rules",
+            "name": "model_pattern"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "routing_strategy",
         "ordinal": 4,
+        "name": "routing_strategy",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "routing_strategy",
-            "table": "model_endpoint_rules"
+            "table": "model_endpoint_rules",
+            "name": "routing_strategy"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "updated_at",
         "ordinal": 5,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
         "origin": {
           "Table": {
-            "name": "updated_at",
-            "table": "model_endpoint_rules"
+            "table": "model_endpoint_rules",
+            "name": "updated_at"
           }
-        },
-        "type_info": "Timestamptz"
+        }
       },
       {
-        "name": "target_id",
         "ordinal": 6,
+        "name": "target_id",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
-            "name": "target_id",
-            "table": "model_route_targets"
+            "table": "model_route_targets",
+            "name": "target_id"
           }
-        },
-        "type_info": "Uuid"
+        }
       },
       {
-        "name": "endpoint_id",
         "ordinal": 7,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
-            "name": "endpoint_id",
-            "table": "provider_endpoints"
+            "table": "provider_endpoints",
+            "name": "endpoint_id"
           }
-        },
-        "type_info": "Uuid"
+        }
       },
       {
-        "name": "endpoint_name",
         "ordinal": 8,
+        "name": "endpoint_name",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "name",
-            "table": "provider_endpoints"
+            "table": "provider_endpoints",
+            "name": "name"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "base_url",
         "ordinal": 9,
+        "name": "base_url",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "base_url",
-            "table": "provider_endpoints"
+            "table": "provider_endpoints",
+            "name": "base_url"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "api_key",
         "ordinal": 10,
+        "name": "api_key",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "api_key",
-            "table": "provider_endpoints"
+            "table": "provider_endpoints",
+            "name": "api_key"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "proxy_url",
         "ordinal": 11,
+        "name": "proxy_url",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "proxy_url",
-            "table": "provider_endpoints"
+            "table": "provider_endpoints",
+            "name": "proxy_url"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "key_lb_enabled",
         "ordinal": 12,
+        "name": "key_lb_enabled",
+        "type_info": "Bool",
         "origin": {
           "Table": {
-            "name": "key_lb_enabled",
-            "table": "provider_endpoints"
+            "table": "provider_endpoints",
+            "name": "key_lb_enabled"
           }
-        },
-        "type_info": "Bool"
+        }
       },
       {
-        "name": "native_api",
         "ordinal": 13,
+        "name": "native_api",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "native_api",
-            "table": "provider_endpoints"
+            "table": "provider_endpoints",
+            "name": "native_api"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "target_native_api",
         "ordinal": 14,
-        "origin": "Expression",
-        "type_info": "Text"
+        "name": "target_native_api",
+        "type_info": "Text",
+        "origin": "Expression"
       },
       {
-        "name": "provider",
         "ordinal": 15,
+        "name": "provider",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "provider",
-            "table": "provider_endpoints"
+            "table": "provider_endpoints",
+            "name": "provider"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "service_tier",
         "ordinal": 16,
-        "origin": "Expression",
-        "type_info": "Text"
+        "name": "service_tier",
+        "type_info": "Text",
+        "origin": "Expression"
       },
       {
-        "name": "position",
         "ordinal": 17,
+        "name": "position",
+        "type_info": "Int4",
         "origin": {
           "Table": {
-            "name": "position",
-            "table": "model_route_targets"
+            "table": "model_route_targets",
+            "name": "position"
           }
-        },
-        "type_info": "Int4"
+        }
       },
       {
-        "name": "target_enabled",
         "ordinal": 18,
+        "name": "target_enabled",
+        "type_info": "Bool",
         "origin": {
           "Table": {
-            "name": "enabled",
-            "table": "model_route_targets"
+            "table": "model_route_targets",
+            "name": "enabled"
           }
-        },
-        "type_info": "Bool"
+        }
       },
       {
-        "name": "upstream_model",
         "ordinal": 19,
+        "name": "upstream_model",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "upstream_model",
-            "table": "model_route_targets"
+            "table": "model_route_targets",
+            "name": "upstream_model"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "proxy_url_override",
         "ordinal": 20,
+        "name": "proxy_url_override",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "proxy_url_override",
-            "table": "model_route_targets"
+            "table": "model_route_targets",
+            "name": "proxy_url_override"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "active_windows",
         "ordinal": 21,
+        "name": "active_windows",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "active_windows",
-            "table": "model_route_targets"
+            "table": "model_route_targets",
+            "name": "active_windows"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "endpoint_active_windows",
         "ordinal": 22,
+        "name": "endpoint_active_windows",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "active_windows",
-            "table": "provider_endpoints"
+            "table": "provider_endpoints",
+            "name": "active_windows"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "dev_system_normalize!",
         "ordinal": 23,
-        "origin": "Expression",
-        "type_info": "Bool"
+        "name": "dev_system_normalize!",
+        "type_info": "Bool",
+        "origin": "Expression"
       },
       {
-        "name": "thinking_downgrade_enabled!",
         "ordinal": 24,
-        "origin": "Expression",
-        "type_info": "Bool"
+        "name": "thinking_downgrade_enabled!",
+        "type_info": "Bool",
+        "origin": "Expression"
       },
       {
-        "name": "thinking_effort_override",
         "ordinal": 25,
+        "name": "thinking_effort_override",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "thinking_effort_override",
-            "table": "model_route_targets"
+            "table": "model_route_targets",
+            "name": "thinking_effort_override"
           }
-        },
-        "type_info": "Text"
+        }
       },
       {
-        "name": "compact_mode",
         "ordinal": 26,
+        "name": "compact_mode",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "name": "compact_mode",
-            "table": "model_route_targets"
+            "table": "model_route_targets",
+            "name": "compact_mode"
           }
-        },
-        "type_info": "Text"
+        }
       }
     ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
     "nullable": [
       false,
       false,
@@ -308,13 +314,7 @@
       null,
       true,
       false
-    ],
-    "parameters": {
-      "Left": [
-        "Uuid"
-      ]
-    }
+    ]
   },
-  "hash": "297088fb99d3e2dd340d9554e4d59fead890cd146035965a305abd65d4681ad6",
-  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, COALESCE(t.native_api, 'auto') AS target_native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override,\n        t.active_windows, e.active_windows AS endpoint_active_windows,\n        COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\",\n        COALESCE(t.thinking_downgrade_enabled, FALSE) AS \"thinking_downgrade_enabled!\",\n        t.thinking_effort_override,\n        t.compact_mode\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.rule_id = $1\n  AND r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n"
+  "hash": "297088fb99d3e2dd340d9554e4d59fead890cd146035965a305abd65d4681ad6"
 }

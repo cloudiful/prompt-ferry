@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P5: cheap idle gate for the metadata prune round.\n-- The batch query's anti-joins are only worth paying for when something is\n-- actually older than the retention cutoff; this probe rides the\n-- `request_records.created_at` index instead.\nSELECT EXISTS (\n    SELECT 1\n    FROM request_records rr\n    WHERE rr.created_at < $1::TIMESTAMPTZ\n) AS \"has_expired!\";\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "has_expired!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "54b4226d5bd4b037d83078a4b9dc050767950148104b233488baa3b35f242b12"
+}

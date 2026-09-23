@@ -1,7 +1,7 @@
-use super::content_maintenance::cleanup_orphan_usage_prompt_blocks;
+use super::content_maintenance::{apply_maintenance_timeouts, cleanup_orphan_usage_prompt_blocks};
 use super::{RequestRecordClearQuery, UsageClearScope};
 use anyhow::Result;
-use chrono::{Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use sqlx::{Acquire, PgPool};
 
 const METADATA_PRUNE_BATCH_SIZE: i64 = 500;
@@ -35,6 +35,7 @@ pub async fn prune_usage_events(
     let result = match result {
         Ok(report) => {
             let mut tx = conn.begin().await?;
+            apply_maintenance_timeouts(&mut tx).await?;
             cleanup_orphan_usage_prompt_blocks(&mut tx).await?;
             tx.commit().await?;
             Ok(report)
@@ -62,6 +63,9 @@ async fn run_metadata_prune_locked(
     retention_days: i64,
 ) -> Result<RequestRecordPruneReport> {
     let cutoff = Utc::now() - ChronoDuration::days(retention_days.max(1));
+    if !has_expired_request_records(conn, cutoff).await? {
+        return Ok(RequestRecordPruneReport::default());
+    }
     let protected_by_billing = sqlx::query_file_scalar!(
         "src/sql/usage/count_billing_protected_request_records.sql",
         cutoff,
@@ -75,14 +79,26 @@ async fn run_metadata_prune_locked(
 
     loop {
         let mut tx = conn.begin().await?;
-        let batch = sqlx::query_file_as!(
+        apply_maintenance_timeouts(&mut tx).await?;
+        let batch = match sqlx::query_file_as!(
             RequestRecordPruneBatch,
             "src/sql/usage/prune_usage_events.sql",
             cutoff,
             METADATA_PRUNE_BATCH_SIZE,
         )
         .fetch_one(&mut *tx)
-        .await?;
+        .await
+        {
+            Ok(batch) => batch,
+            Err(error) => {
+                let _ = tx.rollback().await;
+                tracing::warn!(
+                    error = %error,
+                    "usage metadata prune batch failed; ending this round"
+                );
+                break;
+            }
+        };
         tx.commit().await?;
 
         report.deleted += batch.deleted_count.max(0) as u64;
@@ -98,6 +114,18 @@ async fn run_metadata_prune_locked(
     }
 
     Ok(report)
+}
+
+/// Cheap idle gate: skip the prune batch when nothing is older than the
+/// retention window, so an idle worker does not pay for the batch anti-joins.
+async fn has_expired_request_records(
+    conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
+    cutoff: DateTime<Utc>,
+) -> Result<bool> {
+    let exists = sqlx::query_file_scalar!("src/sql/usage/has_expired_request_records.sql", cutoff)
+        .fetch_one(&mut **conn)
+        .await?;
+    Ok(exists)
 }
 
 async fn acquire_metadata_prune_lock(
