@@ -90,6 +90,23 @@ function extractReasoningEffort(value: unknown): string | null {
         </span>
         <span v-else>-</span>
       </DetailKeyValue>
+      <DetailKeyValue :label="t('conversationSource')">
+        {{ event.conversation_source_label }}
+      </DetailKeyValue>
+      <DetailKeyValue :label="t('sessionHeaderId')">
+        <span class="flex flex-wrap items-center gap-1">
+          <span class="break-all">{{ event.session_header_id || '-' }}</span>
+          <UBadge v-if="event.is_sub_session" :label="t('subSession')" />
+        </span>
+      </DetailKeyValue>
+      <!-- Issue #579: a parent id marks an opencode task sub-session; root
+        sessions keep the single header id. -->
+      <DetailKeyValue
+        v-if="event.session_parent_id"
+        :label="t('sessionParentId')"
+      >
+        <span class="break-all">{{ event.session_parent_id }}</span>
+      </DetailKeyValue>
       <DetailKeyValue
         v-if="reasoningEffortDisplay"
         :label="t('reasoningEffort')"
