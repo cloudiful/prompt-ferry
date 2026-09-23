@@ -1,8 +1,8 @@
 {
   "db_name": "PostgreSQL",
+  "query": "INSERT INTO model_route_targets(\n    rule_id,\n    endpoint_id,\n    position,\n    enabled,\n    upstream_model,\n    native_api,\n    proxy_url_override,\n    active_windows,\n    dev_system_normalize,\n    thinking_downgrade_enabled,\n    thinking_effort_override,\n    compact_mode\n)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\n",
   "describe": {
     "columns": [],
-    "nullable": [],
     "parameters": {
       "Left": [
         "Uuid",
@@ -18,8 +18,8 @@
         "Text",
         "Text"
       ]
-    }
+    },
+    "nullable": []
   },
-  "hash": "f262adb1a380d1c5ae90e182db53f4481d4b252425f7998783b17ac5231e788d",
-  "query": "INSERT INTO model_route_targets(\n    rule_id,\n    endpoint_id,\n    position,\n    enabled,\n    upstream_model,\n    native_api,\n    proxy_url_override,\n    active_windows,\n    dev_system_normalize,\n    thinking_downgrade_enabled,\n    thinking_effort_override,\n    compact_mode\n)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\n"
+  "hash": "f262adb1a380d1c5ae90e182db53f4481d4b252425f7998783b17ac5231e788d"
 }
