@@ -146,8 +146,7 @@ async fn migrate_upgrades_legacy_mcp_servers_table() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn migrate_adds_content_retention_columns_and_drops_legacy_payload_columns()
--> anyhow::Result<()> {
+async fn migrate_splits_content_and_partitions_request_records() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
         return Ok(());
@@ -158,7 +157,7 @@ async fn migrate_adds_content_retention_columns_and_drops_legacy_payload_columns
     let columns = sqlx::query_file!("tests/sql/db_migrations/usage_retention_columns.sql")
         .fetch_one(&schema.pool)
         .await?;
-    assert!(columns.content_expired_at_removed);
+    assert!(columns.legacy_expiry_columns_removed);
     assert!(!columns.content_columns_in_metadata);
     assert!(columns.content_table_exists);
     assert!(columns.request_records_partitioned);

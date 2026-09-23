@@ -269,6 +269,9 @@ struct LeaseReconcileDiagnostics {
     active_requests: usize,
     /// Backend the failing stage talked to: the Postgres lease pool or valkey.
     pool_source: &'static str,
+    /// Pool-wait counters sampled when the pass started, so the failure log
+    /// can report how much contention this pass saw.
+    pool_wait_start: db::PoolWaitSnapshot,
 }
 
 impl Default for LeaseReconcileDiagnostics {
@@ -276,6 +279,7 @@ impl Default for LeaseReconcileDiagnostics {
         Self {
             active_requests: 0,
             pool_source: "lease_pool",
+            pool_wait_start: db::PoolWaitSnapshot::default(),
         }
     }
 }
@@ -296,7 +300,15 @@ pub(super) async fn abort_stale_requests_once(admin_state: Option<&AdminState>) 
             }
             Ok(_) => {}
             Err(err) => {
-                warn!(error = %err, "failed to reconcile requests against valkey leases");
+                let pool_wait = db::pool_wait_snapshot().since(diagnostics.pool_wait_start);
+                warn!(
+                    error = %err,
+                    pool_source = diagnostics.pool_source,
+                    active_requests = diagnostics.active_requests,
+                    pool_wait_ms = pool_wait.total_wait_ms,
+                    pool_slow_acquires = pool_wait.slow_acquires,
+                    "failed to reconcile requests against valkey leases"
+                );
             }
         }
         return;
@@ -347,10 +359,14 @@ pub(super) fn spawn_stale_request_reconciler(
                             }
                             Ok(_) => {}
                             Err(err) => {
+                                let pool_wait =
+                                    db::pool_wait_snapshot().since(diagnostics.pool_wait_start);
                                 warn!(
                                     error = %err,
                                     pool_source = diagnostics.pool_source,
                                     active_requests = diagnostics.active_requests,
+                                    pool_wait_ms = pool_wait.total_wait_ms,
+                                    pool_slow_acquires = pool_wait.slow_acquires,
                                     "failed to reconcile request leases"
                                 );
                             }
@@ -381,6 +397,7 @@ async fn abort_requests_missing_valkey_leases(
     diagnostics: &mut LeaseReconcileDiagnostics,
 ) -> anyhow::Result<u64> {
     diagnostics.pool_source = "lease_pool";
+    diagnostics.pool_wait_start = db::pool_wait_snapshot();
     let request_ids = db::list_active_request_record_ids(&state.lease_pool).await?;
     diagnostics.active_requests = request_ids.len();
     const VALKEY_LEASE_CHECK_CONCURRENCY: usize = 32;

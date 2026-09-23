@@ -4,8 +4,8 @@ SELECT
         FROM information_schema.columns
         WHERE table_schema = current_schema()
           AND table_name = 'request_records'
-          AND column_name = 'content_expired_at'
-    ) AS "content_expired_at_removed!",
+          AND column_name LIKE '%expired%'
+    ) AS "legacy_expiry_columns_removed!",
     EXISTS (
         SELECT 1
         FROM information_schema.columns

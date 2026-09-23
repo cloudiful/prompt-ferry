@@ -39,6 +39,9 @@ pub async fn heartbeat_request_record_lease(
     lease_expires_at: DateTime<Utc>,
     last_heartbeat_at: DateTime<Utc>,
 ) -> Result<u64> {
+    // Issue #277 Phase P9: request admission touches the lease pool on every
+    // heartbeat; observe the acquire so contention is attributed here.
+    let mut connection = crate::db::pool_wait::acquire(pool, "lease_heartbeat").await?;
     let result = sqlx::query_file!(
         "src/sql/usage/heartbeat_request_record_lease.sql",
         request_id,
@@ -46,7 +49,7 @@ pub async fn heartbeat_request_record_lease(
         lease_expires_at,
         last_heartbeat_at,
     )
-    .execute(pool)
+    .execute(&mut *connection)
     .await?;
     Ok(result.rows_affected())
 }
@@ -78,15 +81,19 @@ pub async fn abort_request_record(
 }
 
 pub async fn abort_stale_request_records(pool: &PgPool) -> Result<u64> {
+    // Issue #277 Phase P9: the reconcile sweep reads the lease pool; observe
+    // the acquire so a saturated pool is visible in the sweep's own log.
+    let mut connection = crate::db::pool_wait::acquire(pool, "lease_reconcile").await?;
     let result = sqlx::query_file!("src/sql/usage/abort_stale_request_records.sql")
-        .execute(pool)
+        .execute(&mut *connection)
         .await?;
     Ok(result.rows_affected())
 }
 
 pub async fn list_active_request_record_ids(pool: &PgPool) -> Result<Vec<Uuid>> {
+    let mut connection = crate::db::pool_wait::acquire(pool, "lease_reconcile").await?;
     let rows = sqlx::query_file_scalar!("src/sql/usage/list_active_request_record_ids.sql")
-        .fetch_all(pool)
+        .fetch_all(&mut *connection)
         .await?;
     Ok(rows)
 }
@@ -95,11 +102,12 @@ pub async fn abort_request_records_by_ids(pool: &PgPool, request_ids: &[Uuid]) -
     if request_ids.is_empty() {
         return Ok(0);
     }
+    let mut connection = crate::db::pool_wait::acquire(pool, "lease_reconcile").await?;
     let result = sqlx::query_file!(
         "src/sql/usage/abort_request_records_by_ids.sql",
         request_ids
     )
-    .execute(pool)
+    .execute(&mut *connection)
     .await?;
     Ok(result.rows_affected())
 }

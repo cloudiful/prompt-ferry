@@ -7,6 +7,7 @@ mod mcp;
 mod mcp_credentials;
 mod partition_ddl;
 mod partition_maintenance;
+mod pool_wait;
 mod relays;
 mod routes;
 mod routing_state;
@@ -36,6 +37,7 @@ pub use partition_maintenance::{
     PARTITION_MAINTENANCE_LOCK_KEY, PartitionHorizons, PartitionMaintenanceReport,
     drop_partitions_before_today, run_partition_maintenance,
 };
+pub use pool_wait::{PoolWaitSnapshot, snapshot as pool_wait_snapshot};
 
 /// Issue #277 Phase P8: content-family retention days, kept as a named
 /// constant because content expiry is now partition-drop driven and no longer

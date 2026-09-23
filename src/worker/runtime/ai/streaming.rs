@@ -23,6 +23,7 @@ use crate::{
 };
 use anyhow::anyhow;
 use futures::StreamExt;
+use std::time::Instant;
 use tokio::time::{self, MissedTickBehavior};
 use tracing::{debug, error, info, warn};
 
@@ -49,6 +50,13 @@ struct UpstreamStreamDiag {
     emitted_bytes: usize,
     terminal_reason: Option<&'static str>,
     terminal_error: Option<String>,
+    /// When the diag was created, the fallback duration source.
+    started: Instant,
+    /// Total request duration in milliseconds; falls back to the diag's own
+    /// elapsed time when a caller never records the request-relative value.
+    duration_ms: Option<i64>,
+    /// Time to first output token, absent for buffered non-streaming paths.
+    ttft_ms: Option<i64>,
     finished: bool,
 }
 
@@ -74,6 +82,9 @@ impl UpstreamStreamDiag {
             emitted_bytes: 0,
             terminal_reason: None,
             terminal_error: None,
+            started: Instant::now(),
+            duration_ms: None,
+            ttft_ms: None,
             finished: false,
         }
     }
@@ -88,6 +99,12 @@ impl UpstreamStreamDiag {
         self.emitted_bytes += len;
     }
 
+    /// Record the request-relative duration and the time to first token.
+    fn record_timings(&mut self, duration_ms: i64, ttft_ms: Option<i64>) {
+        self.duration_ms = Some(duration_ms);
+        self.ttft_ms = ttft_ms;
+    }
+
     fn mark_terminal(&mut self, reason: &'static str, error: Option<String>) {
         self.terminal_reason = Some(reason);
         self.terminal_error = error;
@@ -98,6 +115,9 @@ impl UpstreamStreamDiag {
             return;
         }
         let reason = self.terminal_reason.unwrap_or("completed");
+        let duration_ms = self.duration_ms.unwrap_or_else(|| {
+            i64::try_from(self.started.elapsed().as_millis()).unwrap_or(i64::MAX)
+        });
         if reason == "completed" {
             info!(
                 category = "stream_diag",
@@ -112,6 +132,8 @@ impl UpstreamStreamDiag {
                 upstream_bytes = self.upstream_bytes,
                 emitted_chunks = self.emitted_chunks,
                 emitted_bytes = self.emitted_bytes,
+                duration_ms,
+                ttft_ms = ?self.ttft_ms,
                 terminal_reason = reason,
                 terminal_error = self.terminal_error.as_deref().unwrap_or(""),
                 "worker upstream stream finished"
@@ -130,6 +152,8 @@ impl UpstreamStreamDiag {
                 upstream_bytes = self.upstream_bytes,
                 emitted_chunks = self.emitted_chunks,
                 emitted_bytes = self.emitted_bytes,
+                duration_ms,
+                ttft_ms = ?self.ttft_ms,
                 terminal_reason = reason,
                 terminal_error = self.terminal_error.as_deref().unwrap_or(""),
                 "worker upstream stream finished"
@@ -144,6 +168,9 @@ impl Drop for UpstreamStreamDiag {
         if self.finished {
             return;
         }
+        let duration_ms = self.duration_ms.unwrap_or_else(|| {
+            i64::try_from(self.started.elapsed().as_millis()).unwrap_or(i64::MAX)
+        });
         warn!(
             category = "stream_diag",
             request_id = %self.request_id,
@@ -157,6 +184,8 @@ impl Drop for UpstreamStreamDiag {
             upstream_bytes = self.upstream_bytes,
             emitted_chunks = self.emitted_chunks,
             emitted_bytes = self.emitted_bytes,
+            duration_ms,
+            ttft_ms = ?self.ttft_ms,
             terminal_reason = self.terminal_reason.unwrap_or("dropped"),
             terminal_error = self.terminal_error.as_deref().unwrap_or(""),
             "worker upstream stream dropped before finish logging"
@@ -462,6 +491,7 @@ pub(super) async fn forward_streaming_response(
                                 message: safe_err.clone(),
                             }))
                             .await;
+                        stream_diag.record_timings(request_ctx.elapsed_ms(), ttft_ms);
                         stream_diag.mark_terminal("upstream_read_error", Some(safe_err));
                         stream_diag.finish();
                         return Err(UpstreamAttemptFailure {
@@ -508,6 +538,7 @@ pub(super) async fn forward_streaming_response(
                                 adapter.model_name(),
                                 &err,
                             );
+                            stream_diag.record_timings(request_ctx.elapsed_ms(), ttft_ms);
                             stream_diag
                                 .mark_terminal("stream_adapter_error", Some(err.message.clone()));
                             stream_diag.finish();
@@ -530,6 +561,7 @@ pub(super) async fn forward_streaming_response(
                                 adapter.model_name(),
                                 &err,
                             );
+                            stream_diag.record_timings(request_ctx.elapsed_ms(), ttft_ms);
                             stream_diag
                                 .mark_terminal("stream_adapter_error", Some(err.message.clone()));
                             stream_diag.finish();
@@ -552,6 +584,7 @@ pub(super) async fn forward_streaming_response(
                                 adapter.model_name(),
                                 &err,
                             );
+                            stream_diag.record_timings(request_ctx.elapsed_ms(), ttft_ms);
                             stream_diag
                                 .mark_terminal("stream_adapter_error", Some(err.message.clone()));
                             stream_diag.finish();
@@ -760,6 +793,7 @@ pub(super) async fn forward_streaming_response(
             ttft_ms,
         )
         .await?;
+        stream_diag.record_timings(request_ctx.elapsed_ms(), ttft_ms);
         stream_diag.mark_terminal(code, Some(message.to_string()));
         stream_diag.finish();
         return Ok(());
@@ -789,6 +823,7 @@ pub(super) async fn forward_streaming_response(
         &mut stream_diag,
     )
     .await?;
+    stream_diag.record_timings(request_ctx.elapsed_ms(), ttft_ms);
     stream_diag.mark_terminal("completed", None);
     stream_diag.finish();
     let captured_artifact = assistant_capture
@@ -908,6 +943,7 @@ async fn forward_buffered_non_sse_response(
                     error: anyhow!(err).context("failed reading upstream response"),
                     retryable,
                 };
+                stream_diag.record_timings(request_ctx.elapsed_ms(), None);
                 stream_diag.mark_terminal("upstream_read_error", Some(failure.error.to_string()));
                 stream_diag.finish();
                 return Err(failure.into());
@@ -955,6 +991,7 @@ async fn forward_buffered_non_sse_response(
     {
         Ok(restored_output) => restored_output,
         Err(err) => {
+            stream_diag.record_timings(request_ctx.elapsed_ms(), None);
             stream_diag.mark_terminal("restore_validation_error", Some(err.to_string()));
             stream_diag.finish();
             return Err(err);
@@ -1010,6 +1047,7 @@ async fn forward_buffered_non_sse_response(
         &mut stream_diag,
     )
     .await?;
+    stream_diag.record_timings(request_ctx.elapsed_ms(), None);
     stream_diag.mark_terminal("completed", None);
     stream_diag.finish();
 
