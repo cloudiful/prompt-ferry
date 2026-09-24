@@ -95,14 +95,9 @@ async fn run_raw_payload_maintenance_locked(
     // Partition dropping for raw payloads is owned by the shared partition
     // manager (same 3-day horizon, same before-today safety boundary); the
     // raw tick keeps only its object-store and default/overflow staging
-    // duties plus the VACUUMs.
+    // duties. `ensure_raw_payload_partitions` ANALYZEs each partition it
+    // creates, so no whole-family VACUUM runs here.
     let partitions_dropped = 0;
-    sqlx::query_file!("src/sql/usage/vacuum_request_records.sql")
-        .execute(&mut **conn)
-        .await?;
-    sqlx::query_file!("src/sql/usage/vacuum_raw_payloads.sql")
-        .execute(&mut **conn)
-        .await?;
 
     Ok(RawPayloadMaintenanceReport {
         partitions_created,

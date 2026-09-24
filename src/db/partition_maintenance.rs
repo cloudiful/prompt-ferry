@@ -8,6 +8,11 @@
 //! deleted, no bloat is produced, and the statement-timeout problems of the
 //! row-wise prunes this module replaces cannot occur.
 //!
+//! Statistics (Phase P11): each partition created by a tick is ANALYZEd
+//! individually so the planner immediately has real `reltuples` for it;
+//! existing partitions are never mass-analyzed and stay on autovacuum
+//! autoanalyze.
+//!
 //! Safety boundary: only partitions whose whole day is strictly before the
 //! current UTC day are dropped, so today's data survives even when retention
 //! settings are misconfigured to zero.
@@ -17,8 +22,8 @@
 //! keeps. The DDL primitives live in [`super::partition_ddl`].
 
 use super::partition_ddl::{
-    PRE_CREATE_DAYS_AHEAD, create_partition, drop_partition, list_partitions, partition_day,
-    partition_is_droppable, partition_name,
+    PRE_CREATE_DAYS_AHEAD, analyze_partition, create_partition, drop_partition, list_partitions,
+    partition_day, partition_is_droppable, partition_name,
 };
 use anyhow::Result;
 use chrono::{Duration as ChronoDuration, NaiveDate, Utc};
@@ -179,9 +184,11 @@ async fn release_partition_lock(
     }
 }
 
-/// Create today plus the forward window. `CREATE TABLE IF NOT EXISTS` makes
-/// this idempotent, so a day whose partition is missing (a worker gap longer
-/// than a day) is healed by the next tick instead of failing writes forever.
+/// Create today plus the forward window, ANALYZEing each partition this tick
+/// created (Phase P11: only fresh partitions are analyzed; existing ones stay
+/// on autovacuum autoanalyze). `CREATE TABLE IF NOT EXISTS` makes this
+/// idempotent, so a day whose partition is missing (a worker gap longer than
+/// a day) is healed by the next tick instead of failing writes forever.
 async fn pre_create_partitions(
     conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
     parent: &str,
@@ -197,6 +204,10 @@ async fn pre_create_partitions(
             continue;
         }
         create_partition(&mut tx, parent, &partition, day).await?;
+        // Only the partition this tick created is analyzed: a single,
+        // well-scoped stats refresh instead of the whole-family VACUUM
+        // (ANALYZE) the tick used to issue.
+        analyze_partition(&mut tx, &partition).await?;
         created += 1;
     }
     tx.commit().await?;
@@ -272,5 +283,23 @@ mod tests {
             .collect();
         assert_eq!(days.first(), Some(&today));
         assert_eq!(days.len(), 4);
+    }
+
+    // Phase P11: the tick's create loop must skip partitions that already
+    // exist — the per-partition ANALYZE belongs to fresh partitions only, so
+    // an already-present day must never trigger an extra analyze pass.
+    #[test]
+    fn pre_create_skips_existing_partitions_by_name() {
+        let today = NaiveDate::from_ymd_opt(2026, 9, 24).expect("valid date");
+        let existing: std::collections::HashSet<String> = (0..=PRE_CREATE_DAYS_AHEAD)
+            .map(|offset| partition_name("request_records", today + ChronoDuration::days(offset)))
+            .collect();
+        for offset in 0..=PRE_CREATE_DAYS_AHEAD {
+            let partition = partition_name("request_records", today + ChronoDuration::days(offset));
+            assert!(
+                existing.contains(&partition),
+                "a steady-state tick has nothing to create or analyze for {partition}"
+            );
+        }
     }
 }
