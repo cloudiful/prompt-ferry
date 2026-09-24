@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P11: planner stats for one child partition.\n-- `reltuples` is -1 on a never-analyzed partition and >= 0 (0 for empty)\n-- once ANALYZE has collected statistics for it.\nSELECT c.reltuples::BIGINT AS \"reltuples!\"\nFROM pg_class c\nJOIN pg_namespace ns ON ns.oid = c.relnamespace\nWHERE c.relname = $1\n  AND ns.nspname = current_schema();\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reltuples!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cb12550c7233c2874e7a9ed87e8728a38070241df043ce865c11b8d577eac528"
+}

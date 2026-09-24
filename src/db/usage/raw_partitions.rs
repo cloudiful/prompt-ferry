@@ -1,4 +1,5 @@
 use super::*;
+use crate::db::partition_ddl::analyze_partition;
 use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::{Acquire, postgres::PgConnection};
 use std::collections::HashSet;
@@ -70,6 +71,11 @@ pub async fn ensure_raw_payload_partitions(
             .execute(&mut *transaction)
             .await?;
         if !existing_partitions.contains(&partition_name) {
+            // Phase P11: a partition this helper created is ANALYZEd right
+            // away — one well-scoped stats refresh, the same semantics the
+            // shared partition manager applies to its own fresh partitions.
+            // Partitions that already existed stay on autovacuum autoanalyze.
+            analyze_partition(&mut transaction, &partition_name).await?;
             created += 1;
         }
 

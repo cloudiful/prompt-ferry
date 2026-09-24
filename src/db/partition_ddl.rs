@@ -56,6 +56,18 @@ pub(crate) async fn drop_partition(conn: &mut PgConnection, partition: &str) -> 
     Ok(())
 }
 
+/// Planner-statistics refresh for one freshly created partition. A new
+/// partition starts with `reltuples = -1` and no statistics; analyzing just
+/// that partition gives the planner real stats for its first queries, while
+/// existing partitions stay on autovacuum autoanalyze (issue #277 Phase P11).
+/// Same safety rationale as [`create_partition`]: the name comes from the
+/// controlled `partition_name` builder and PostgreSQL cannot bind identifiers.
+pub(crate) async fn analyze_partition(exec: &mut PgConnection, partition: &str) -> Result<()> {
+    let ddl = format!("ANALYZE {partition}");
+    sqlx::query(sqlx::AssertSqlSafe(ddl)).execute(exec).await?;
+    Ok(())
+}
+
 /// `<parent>_<YYYYMMDD>` for a managed parent.
 pub(crate) fn partition_name(parent: &str, day: NaiveDate) -> String {
     format!("{parent}_{}", day.format("%Y%m%d"))

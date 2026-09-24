@@ -365,3 +365,124 @@ async fn tick_reaps_orphan_leases_and_stale_redaction_sessions() -> anyhow::Resu
     schema.cleanup().await?;
     Ok(())
 }
+
+/// Issue #277 Phase P11: a partition the tick created is immediately ANALYZEd
+/// (real planner statistics, `reltuples >= 0`), while a pre-existing
+/// partition that already carries statistics is left untouched by the tick —
+/// existing partitions stay on autovacuum autoanalyze and the tick must not
+/// sweep the whole family.
+#[tokio::test]
+async fn tick_analyzes_only_the_partitions_it_creates() -> anyhow::Result<()> {
+    if !test_database_configured() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+
+    let schema = TestSchema::new().await?;
+    db::migrate(&schema.pool).await?;
+    let today = Utc::now().date_naive();
+    let tomorrow_name = format!(
+        "request_records_{}",
+        (today + Duration::days(1)).format("%Y%m%d")
+    );
+
+    // Steady-state fixture: tomorrow's partition already exists (as after the
+    // previous tick; the P7 migration pre-creates today+0..+8) with the
+    // "never analyzed" sentinel statistics. Re-create it defensively so the
+    // fixture does not depend on the handover window.
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DROP TABLE IF EXISTS {tomorrow_name}"
+    )))
+    .execute(&schema.pool)
+    .await?;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE TABLE {tomorrow_name} PARTITION OF request_records FOR VALUES FROM ('{}') TO ('{}')",
+        (today + Duration::days(1)).format("%Y-%m-%d 00:00:00+00"),
+        (today + Duration::days(2)).format("%Y-%m-%d 00:00:00+00"),
+    )))
+    .execute(&schema.pool)
+    .await?;
+    let before = sqlx::query_file!(
+        "tests/sql/usage_maintenance/partition_reltuples.sql",
+        tomorrow_name.as_str(),
+    )
+    .fetch_one(&schema.pool)
+    .await?
+    .reltuples;
+    assert_eq!(before, -1, "a fresh partition starts with reltuples = -1");
+
+    let horizons = db::PartitionHorizons {
+        metadata_retention_days: 90,
+        content_retention_days: 3,
+    };
+    let report = db::run_partition_maintenance(&schema.pool, horizons)
+        .await?
+        .expect("partition maintenance should acquire its advisory lock");
+
+    // The tick may legitimately create partitions the schema lacks (e.g. the
+    // raw-payload family is partitioned only by the tick, not the migration).
+    // Whatever it created must be analyzed; whatever it did not create must
+    // keep its "never analyzed" sentinel.
+    let after = sqlx::query_file!(
+        "tests/sql/usage_maintenance/partition_reltuples.sql",
+        tomorrow_name.as_str(),
+    )
+    .fetch_one(&schema.pool)
+    .await?
+    .reltuples;
+    assert_eq!(
+        after, -1,
+        "the tick must not analyze partitions it did not create"
+    );
+    if report.partitions_created > 0 {
+        let fresh_raw_name = format!("request_record_raw_payloads_{}", today.format("%Y%m%d"));
+        let fresh = sqlx::query_file!(
+            "tests/sql/usage_maintenance/partition_reltuples.sql",
+            fresh_raw_name.as_str(),
+        )
+        .fetch_one(&schema.pool)
+        .await?
+        .reltuples;
+        assert!(
+            fresh >= 0,
+            "a partition created by the tick must be ANALYZEd, reltuples = {fresh}"
+        );
+    }
+
+    // Drop tomorrow's partition: the tick must re-create it AND analyze it,
+    // so the planner sees real statistics (reltuples >= 0) right away.
+    sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE {tomorrow_name}")))
+        .execute(&schema.pool)
+        .await?;
+    let report = db::run_partition_maintenance(&schema.pool, horizons)
+        .await?
+        .expect("partition maintenance should acquire its advisory lock");
+    assert!(
+        report.partitions_created >= 1,
+        "the tick must re-create the missing forward-window partition"
+    );
+    let analyzed = sqlx::query_file!(
+        "tests/sql/usage_maintenance/partition_reltuples.sql",
+        tomorrow_name.as_str(),
+    )
+    .fetch_one(&schema.pool)
+    .await?
+    .reltuples;
+    assert!(
+        analyzed >= 0,
+        "a partition created by the tick must be ANALYZEd, reltuples = {analyzed}"
+    );
+
+    // The recreated day accepts writes immediately.
+    let event = create_record(&schema.pool, Some(1)).await?;
+    let stored = sqlx::query_file!(
+        "tests/sql/usage_maintenance/count_request_record.sql",
+        event,
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    assert_eq!(stored.count, 1, "the analyzed day is writable");
+
+    schema.cleanup().await?;
+    Ok(())
+}
