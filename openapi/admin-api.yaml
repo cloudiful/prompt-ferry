@@ -3384,6 +3384,7 @@ components:
       - openrouter
       - glm
       - deepseek
+      - openai
     EndpointRegion:
       type: string
       enum:

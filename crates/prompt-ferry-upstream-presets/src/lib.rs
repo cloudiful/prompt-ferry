@@ -1,7 +1,7 @@
 //! Official upstream base URLs for preset providers (issue #248).
 //!
 //! Preset providers (MiniMax, GLM, CommandCode, OpencodeGo, OpenRouter,
-//! DeepSeek) no
+//! DeepSeek, OpenAI) no
 //! longer expose a base URL in the admin form. The admin API derives the
 //! base from `(provider, provider_region, native_api)` on create/update, and
 //! the runtime, model discovery, quota and connectivity paths derive it
@@ -42,6 +42,7 @@ pub enum EndpointProvider {
     OpenRouter,
     Glm,
     DeepSeek,
+    OpenAi,
 }
 
 /// MiniMax region; only MiniMax preset rows carry one.
@@ -65,6 +66,9 @@ pub const GLM_ANTHROPIC_BASE_URL: &str = "https://open.bigmodel.cn/api/anthropic
 pub const GLM_CHAT_BASE_URL: &str = "https://open.bigmodel.cn/api/coding/paas/v4";
 /// Zhipu Coding Plan Responses root.
 pub const GLM_RESPONSES_BASE_URL: &str = "https://open.bigmodel.cn/api/v1";
+/// OpenAI Platform API inference root (the `/v1` segment is appended by the
+/// joiner).
+pub const OPENAI_BASE_URL: &str = "https://api.openai.com";
 /// MiniMax China inference root.
 pub const MINIMAX_CN_BASE_URL: &str = "https://api.minimaxi.com";
 /// MiniMax global inference root.
@@ -103,6 +107,7 @@ pub fn preset_base_url(
         EndpointProvider::OpencodeGo => Some(OPENCODE_GO_BASE_URL),
         EndpointProvider::OpenRouter => Some(OPENROUTER_BASE_URL),
         EndpointProvider::DeepSeek => Some(DEEPSEEK_BASE_URL),
+        EndpointProvider::OpenAi => Some(OPENAI_BASE_URL),
     }
 }
 
@@ -148,6 +153,7 @@ fn host_is_preset(provider: EndpointProvider, host: &str) -> bool {
         EndpointProvider::OpencodeGo => host == "opencode.ai" || host.ends_with(".opencode.ai"),
         EndpointProvider::OpenRouter => host == "openrouter.ai" || host.ends_with(".openrouter.ai"),
         EndpointProvider::DeepSeek => host == "api.deepseek.com" || host.ends_with(".deepseek.com"),
+        EndpointProvider::OpenAi => host == "api.openai.com",
     }
 }
 
@@ -237,6 +243,10 @@ mod tests {
                 preset_base_url(EndpointProvider::DeepSeek, None, native_api),
                 Some(DEEPSEEK_BASE_URL)
             );
+            assert_eq!(
+                preset_base_url(EndpointProvider::OpenAi, None, native_api),
+                Some(OPENAI_BASE_URL)
+            );
         }
     }
 
@@ -288,6 +298,15 @@ mod tests {
             .as_deref(),
             Some(DEEPSEEK_BASE_URL)
         );
+        assert_eq!(
+            derive_route_base(
+                EndpointProvider::OpenAi,
+                "https://api.openai.com/v1",
+                NativeApi::Chat
+            )
+            .as_deref(),
+            Some(OPENAI_BASE_URL)
+        );
     }
 
     #[test]
@@ -320,6 +339,7 @@ mod tests {
             (EndpointProvider::Glm, "https://proxy.example.test"),
             (EndpointProvider::OpenRouter, "https://proxy.example.test"),
             (EndpointProvider::DeepSeek, "https://proxy.example.test"),
+            (EndpointProvider::OpenAi, "https://proxy.example.test"),
         ] {
             assert_eq!(
                 derive_route_base(provider, base, NativeApi::Chat),

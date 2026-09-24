@@ -25,7 +25,9 @@ pub(super) async fn token_plan_usage(
         db::EndpointProvider::Glm => "GLM",
         // DeepSeek (issue #287 P0): account balance fetcher (`/user/balance`).
         db::EndpointProvider::DeepSeek => "DeepSeek",
-        db::EndpointProvider::Generic => {
+        // OpenAI (issue #589 P1) has no token-plan surface yet; the
+        // organization-level usage view lands in P2.
+        db::EndpointProvider::Generic | db::EndpointProvider::OpenAi => {
             return error(
                 StatusCode::BAD_REQUEST,
                 "unsupported_provider",

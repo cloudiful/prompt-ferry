@@ -1,18 +1,20 @@
 import type { MessageKey } from '@/i18n'
 
-export type ProviderBrand = 'deepseek' | 'minimax' | 'opencode' | 'openrouter'
+export type ProviderBrand =
+  'deepseek' | 'minimax' | 'openai' | 'opencode' | 'openrouter'
 
 export type ProviderVisual =
   | { kind: 'brand'; brand: ProviderBrand }
   | { kind: 'letter'; letter: string }
   | { kind: 'fallback' }
 
-// Brand marks for minimax/deepseek/openrouter/opencode are vendored from
-// simple-icons (CC0). Providers without a vendored mark get a letter avatar;
-// anything unknown falls back to a generic lucide glyph.
+// Brand marks for minimax/deepseek/openai/openrouter/opencode are vendored
+// from simple-icons (CC0). Providers without a vendored mark get a letter
+// avatar; anything unknown falls back to a generic lucide glyph.
 const BRAND_BY_PROVIDER: Record<string, ProviderBrand> = {
   deepseek: 'deepseek',
   minimax: 'minimax',
+  openai: 'openai',
   opencode_go: 'opencode',
   openrouter: 'openrouter',
 }
@@ -29,6 +31,7 @@ const LABEL_KEY_BY_PROVIDER: Record<string, MessageKey> = {
   generic: 'providerGeneric',
   glm: 'providerGlm',
   minimax: 'providerMinimax',
+  openai: 'providerOpenAi',
   opencode_go: 'providerOpencodeGo',
   openrouter: 'providerOpenRouter',
 }

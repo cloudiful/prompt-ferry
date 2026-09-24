@@ -100,7 +100,8 @@ pub(super) async fn resolve_endpoint_input(
         | (db::EndpointProvider::OpencodeGo, Some(_))
         | (db::EndpointProvider::OpenRouter, Some(_))
         | (db::EndpointProvider::Glm, Some(_))
-        | (db::EndpointProvider::DeepSeek, Some(_)) => {
+        | (db::EndpointProvider::DeepSeek, Some(_))
+        | (db::EndpointProvider::OpenAi, Some(_)) => {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_provider_region",
@@ -461,5 +462,14 @@ mod tests {
         assert!(validate_mcp_provider(None, EndpointProvider::Glm).is_ok());
         assert!(validate_mcp_provider(Some(false), EndpointProvider::Glm).is_ok());
         assert!(validate_mcp_provider(Some(true), EndpointProvider::Glm).is_err());
+    }
+
+    #[test]
+    fn validate_mcp_provider_treats_openai_like_generic() {
+        // OpenAI (issue #589 P1) follows the generic path: it never gains the
+        // MiniMax builtin MCP privilege and must carry no provider region.
+        assert!(validate_mcp_provider(None, EndpointProvider::OpenAi).is_ok());
+        assert!(validate_mcp_provider(Some(false), EndpointProvider::OpenAi).is_ok());
+        assert!(validate_mcp_provider(Some(true), EndpointProvider::OpenAi).is_err());
     }
 }

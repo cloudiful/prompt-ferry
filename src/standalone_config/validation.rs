@@ -283,5 +283,13 @@ mod tests {
             derived,
             Some(crate::upstream_presets::GLM_RESPONSES_BASE_URL)
         );
+        // Issue #589: OpenAI derives its official root the same way.
+        let provider = crate::db::EndpointProvider::from_str(EndpointProvider::OpenAi.as_str());
+        let derived = crate::upstream_presets::preset_base_url(
+            provider.into(),
+            None,
+            crate::config::NativeApi::Responses.into(),
+        );
+        assert_eq!(derived, Some(crate::upstream_presets::OPENAI_BASE_URL));
     }
 }

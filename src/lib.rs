@@ -67,6 +67,7 @@ impl From<db::EndpointProvider> for upstream_presets::EndpointProvider {
             db::EndpointProvider::OpenRouter => Self::OpenRouter,
             db::EndpointProvider::Glm => Self::Glm,
             db::EndpointProvider::DeepSeek => Self::DeepSeek,
+            db::EndpointProvider::OpenAi => Self::OpenAi,
         }
     }
 }

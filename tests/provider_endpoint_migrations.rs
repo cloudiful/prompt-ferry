@@ -315,6 +315,103 @@ async fn migrate_0079_down_folds_deepseek_back_to_generic() -> anyhow::Result<()
     Ok(())
 }
 
+// 20260924061635 up: openai behaves like generic (NULL region) while minimax
+// keeps its cn/global requirement (issue #589).
+#[tokio::test]
+async fn migrate_openai_provider_up_enforces_region_shape() -> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    schema
+        .pool
+        .execute(
+            r#"
+            CREATE TABLE provider_endpoints (
+                endpoint_id UUID PRIMARY KEY DEFAULT (md5(random()::text || clock_timestamp()::text)::uuid),
+                scope TEXT NOT NULL CHECK (scope IN ('admin', 'user')),
+                owner_user_id BIGINT,
+                name TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                api_key TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .await?;
+
+    db::migrate(&schema.pool).await?;
+
+    insert_provider_endpoint(&schema.pool, "oa-null", "openai", None).await?;
+    insert_provider_endpoint(&schema.pool, "oa-region", "openai", Some("cn"))
+        .await
+        .expect_err("openai must not carry a provider region");
+    insert_provider_endpoint(&schema.pool, "mm-cn", "minimax", Some("cn")).await?;
+    insert_provider_endpoint(&schema.pool, "gen-null", "generic", None).await?;
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+// 20260924061635 down: openai rows fold back to generic and the narrower
+// CHECKs apply again (issue #589).
+#[tokio::test]
+async fn migrate_openai_provider_down_folds_openai_back_to_generic() -> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    schema
+        .pool
+        .execute(
+            r#"
+            CREATE TABLE provider_endpoints (
+                endpoint_id UUID PRIMARY KEY DEFAULT (md5(random()::text || clock_timestamp()::text)::uuid),
+                scope TEXT NOT NULL CHECK (scope IN ('admin', 'user')),
+                owner_user_id BIGINT,
+                name TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                api_key TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .await?;
+
+    db::migrate(&schema.pool).await?;
+    insert_provider_endpoint(&schema.pool, "oa-row", "openai", None).await?;
+
+    sqlx::raw_sql(include_str!(
+        "../migrations/20260924061635_openai_provider.down.sql"
+    ))
+    .execute(&schema.pool)
+    .await?;
+
+    let row = sqlx::query(
+        "SELECT provider, provider_region FROM provider_endpoints WHERE name = 'oa-row'",
+    )
+    .fetch_one(&schema.pool)
+    .await?;
+    assert_eq!(row.try_get::<String, _>("provider")?, "generic");
+    assert!(
+        row.try_get::<Option<String>, _>("provider_region")?
+            .is_none()
+    );
+    insert_provider_endpoint(&schema.pool, "oa-after-down", "openai", None)
+        .await
+        .expect_err("openai is rejected after the down migration");
+    insert_provider_endpoint(&schema.pool, "gen-after-down", "generic", None).await?;
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
 fn standalone_temp_path(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
         "pfy-cmdcode-{}-{}-{}.sqlite",
@@ -343,6 +440,56 @@ async fn standalone_schema_version(pool: &sqlx::SqlitePool) -> anyhow::Result<i6
     .fetch_one(pool)
     .await?;
     Ok(row.try_get::<i64, _>("schema_version")?)
+}
+
+/// Insert an endpoint key row referencing `endpoint_name`. Used to prove the
+/// 0032 rebuild keeps dependent rows (and their foreign keys) intact when the
+/// parent table is dropped and recreated.
+async fn insert_standalone_endpoint_key(
+    pool: &sqlx::SqlitePool,
+    endpoint_name: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO standalone_endpoint_keys
+           (key_id, endpoint_id, key_label, enabled, position,
+            api_key_ciphertext, api_key_nonce, api_key_key_version)
+           SELECT ?, endpoint_id, 'legacy-key', 1, 0, X'00', X'01', 1
+           FROM standalone_provider_endpoints WHERE name = ?"#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(endpoint_name)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// Insert a route plus a target referencing `endpoint_name`, so the rebuild
+/// keeps the second referencing table intact too.
+async fn insert_standalone_route_target(
+    pool: &sqlx::SqlitePool,
+    endpoint_name: &str,
+) -> Result<(), sqlx::Error> {
+    let rule_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        r#"INSERT INTO standalone_model_routes
+           (rule_id, scope, owner_user_id, model_pattern, routing_strategy, enabled)
+           VALUES (?, 'admin', NULL, 'legacy-model', 'responses_session_affinity', 1)"#,
+    )
+    .bind(&rule_id)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"INSERT INTO standalone_model_route_targets
+           (target_id, rule_id, endpoint_id, position, enabled)
+           SELECT ?, ?, endpoint_id, 0, 1
+           FROM standalone_provider_endpoints WHERE name = ?"#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(&rule_id)
+    .bind(endpoint_name)
+    .execute(pool)
+    .await
+    .map(|_| ())
 }
 
 async fn insert_standalone_endpoint(
@@ -379,7 +526,7 @@ async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_o
     let path = standalone_temp_path("fresh");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 31);
+    assert_eq!(standalone_schema_version(&pool).await?, 32);
 
     let ddl: String = sqlx::query(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'standalone_provider_endpoints'",
@@ -404,12 +551,17 @@ async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_o
         ddl.contains("deepseek"),
         "provider CHECK must list deepseek: {ddl}"
     );
+    assert!(
+        ddl.contains("openai"),
+        "provider CHECK must list openai: {ddl}"
+    );
 
     insert_standalone_endpoint(&pool, "cc-fresh", "command_code", None).await?;
     insert_standalone_endpoint(&pool, "og-fresh", "opencode_go", None).await?;
     insert_standalone_endpoint(&pool, "or-fresh", "openrouter", None).await?;
     insert_standalone_endpoint(&pool, "glm-fresh", "glm", None).await?;
     insert_standalone_endpoint(&pool, "ds-fresh", "deepseek", None).await?;
+    insert_standalone_endpoint(&pool, "oa-fresh", "openai", None).await?;
     insert_standalone_endpoint(&pool, "bogus-fresh", "legacy-unknown", None)
         .await
         .expect_err("unknown providers stay rejected");
@@ -539,9 +691,9 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
     // 0015 (issue #230) adds `glm` and 0016 (issue #287) adds `deepseek`;
-    // the final schema version tracks the newest standalone migration after
-    // the pending migrations apply.
-    assert_eq!(standalone_schema_version(&pool).await?, 31);
+    // 0032 (issue #589) adds `openai`; the final schema version tracks the
+    // newest standalone migration after the pending migrations apply.
+    assert_eq!(standalone_schema_version(&pool).await?, 32);
     let preserved: i64 = sqlx::query(
         "SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'",
     )
@@ -572,6 +724,7 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     insert_standalone_endpoint(&pool, "or-upgraded", "openrouter", None).await?;
     insert_standalone_endpoint(&pool, "glm-upgraded", "glm", None).await?;
     insert_standalone_endpoint(&pool, "ds-upgraded", "deepseek", None).await?;
+    insert_standalone_endpoint(&pool, "oa-upgraded", "openai", None).await?;
 
     pool.close().await;
     store.close().await;
@@ -586,7 +739,7 @@ async fn standalone_0025_quota_cleanup_preserves_route_targets() -> anyhow::Resu
     let path = standalone_temp_path("quota25");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 31);
+    assert_eq!(standalone_schema_version(&pool).await?, 32);
     // No quota columns remain.
     for table in ["standalone_model_routes", "standalone_mcp_servers"] {
         let cols: Vec<String> = if table == "standalone_model_routes" {
@@ -639,6 +792,70 @@ async fn standalone_0025_quota_cleanup_preserves_route_targets() -> anyhow::Resu
             .await?
             .try_get(0)?;
     assert_eq!(count, 1, "route target must survive 0025");
+    pool.close().await;
+    store.close().await;
+    remove_standalone_files(&path);
+    Ok(())
+}
+
+// Issue #589: the 0032 provider widening rebuilds `standalone_provider_endpoints`
+// on the schema-31 -> schema-32 upgrade path. Referencing rows (endpoint keys,
+// route targets) must survive that rebuild: sqlx wraps SQLite migrations in a
+// transaction, and `PRAGMA foreign_keys` is a no-op inside one, so the
+// migration opts out of the implicit transaction to keep foreign keys paused
+// for the DROP.
+#[tokio::test]
+async fn standalone_0032_openai_rebuild_preserves_referencing_rows() -> anyhow::Result<()> {
+    let path = standalone_temp_path("openai32");
+    let store = StandaloneConfigStore::open(&path).await?;
+    let pool = db::connect_sqlite(&path).await?;
+    assert_eq!(standalone_schema_version(&pool).await?, 32);
+
+    insert_standalone_endpoint(&pool, "pinned-ds", "deepseek", None).await?;
+    insert_standalone_endpoint_key(&pool, "pinned-ds").await?;
+    insert_standalone_route_target(&pool, "pinned-ds").await?;
+
+    // Drop the 0032 bookkeeping and the schema version so the next open()
+    // re-applies the migration against a table that already has referencing
+    // rows, exercising the DROP/RENAME rebuild with foreign keys enabled.
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 32")
+        .execute(&pool)
+        .await?;
+    sqlx::query(
+        "UPDATE standalone_schema_meta SET schema_version = 31 WHERE schema_key = 'standalone'",
+    )
+    .execute(&pool)
+    .await?;
+    pool.close().await;
+    store.close().await;
+
+    let store = StandaloneConfigStore::open(&path).await?;
+    let pool = db::connect_sqlite(&path).await?;
+    assert_eq!(standalone_schema_version(&pool).await?, 32);
+    let children: i64 = sqlx::query(
+        "SELECT (SELECT COUNT(*) FROM standalone_endpoint_keys) \
+              + (SELECT COUNT(*) FROM standalone_model_route_targets)",
+    )
+    .fetch_one(&pool)
+    .await?
+    .try_get(0)?;
+    assert_eq!(
+        children, 2,
+        "endpoint keys and route targets must survive the 0032 rebuild"
+    );
+    let endpoints: i64 =
+        sqlx::query("SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'pinned-ds'")
+            .fetch_one(&pool)
+            .await?
+            .try_get(0)?;
+    assert_eq!(endpoints, 1, "the pinned endpoint must survive the rebuild");
+    let violations: i64 = sqlx::query("SELECT COUNT(*) FROM pragma_foreign_key_check")
+        .fetch_one(&pool)
+        .await?
+        .try_get(0)?;
+    assert_eq!(violations, 0, "the rebuild must not dangle any foreign key");
+    insert_standalone_endpoint(&pool, "oa-upgraded", "openai", None).await?;
+
     pool.close().await;
     store.close().await;
     remove_standalone_files(&path);

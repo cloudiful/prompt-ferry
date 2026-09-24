@@ -29,6 +29,12 @@ pub enum EndpointProvider {
     // `deepseek` used by the admin API contract and the 0079 CHECK.
     #[serde(rename = "deepseek")]
     DeepSeek,
+    // OpenAI Platform (issue #589) is the eighth provider. It carries no
+    // region and no builtin MCP privilege; `OpenAi` snake_cases to `open_ai`,
+    // so rename to the single-token `openai` used by the admin API contract
+    // and the provider CHECKs.
+    #[serde(rename = "openai")]
+    OpenAi,
 }
 
 impl Default for EndpointProvider {
@@ -47,6 +53,7 @@ impl EndpointProvider {
             Self::OpenRouter => "openrouter",
             Self::Glm => "glm",
             Self::DeepSeek => "deepseek",
+            Self::OpenAi => "openai",
         }
     }
 
@@ -58,6 +65,7 @@ impl EndpointProvider {
             "openrouter" => Self::OpenRouter,
             "glm" => Self::Glm,
             "deepseek" => Self::DeepSeek,
+            "openai" => Self::OpenAi,
             _ => Self::Generic,
         }
     }
@@ -70,6 +78,7 @@ impl EndpointProvider {
             Some("openrouter") => Self::OpenRouter,
             Some("glm") => Self::Glm,
             Some("deepseek") => Self::DeepSeek,
+            Some("openai") => Self::OpenAi,
             _ => Self::Generic,
         }
     }
@@ -455,6 +464,37 @@ mod tests {
     }
 
     #[test]
+    fn openai_provider_round_trips_as_single_token() {
+        // Issue #589: OpenAI is the eighth provider; it serializes to the
+        // single-token `openai` (matching the provider CHECKs and the admin
+        // API contract), not the derived `open_ai`.
+        assert_eq!(EndpointProvider::OpenAi.as_str(), "openai");
+        assert_eq!(
+            EndpointProvider::from_str("openai"),
+            EndpointProvider::OpenAi
+        );
+        assert_eq!(
+            EndpointProvider::from_optional(Some("openai")),
+            EndpointProvider::OpenAi
+        );
+        let serialized =
+            serde_json::to_value(EndpointProvider::OpenAi).expect("serialize openai provider");
+        assert_eq!(serialized, serde_json::json!("openai"));
+        let deserialized: EndpointProvider = serde_json::from_value(serde_json::json!("openai"))
+            .expect("deserialize openai provider");
+        assert_eq!(deserialized, EndpointProvider::OpenAi);
+        // Unknown providers keep the legacy generic fallback.
+        assert_eq!(
+            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::Generic
+        );
+        assert_eq!(
+            EndpointProvider::from_optional(None),
+            EndpointProvider::Generic
+        );
+    }
+
+    #[test]
     fn provider_capabilities_are_scoped() {
         // Issue #562: the pre-flight thinking downgrade only applies to the
         // upstream confirmed to reject a tool-bearing thinking turn without a
@@ -468,6 +508,7 @@ mod tests {
             EndpointProvider::OpencodeGo,
             EndpointProvider::OpenRouter,
             EndpointProvider::Glm,
+            EndpointProvider::OpenAi,
         ] {
             assert!(
                 !provider.requires_reasoning_echo(),

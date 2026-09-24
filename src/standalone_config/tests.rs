@@ -593,7 +593,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -685,7 +685,7 @@ fn sample_usage_record(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty_one() {
+async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty_two() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -693,7 +693,7 @@ async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty_one
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
     assert!(
         store
             .list_usage_summaries(64)
@@ -1588,7 +1588,7 @@ fn sample_snapshot(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty_one() {
+async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty_two() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -1596,7 +1596,7 @@ async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty_
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
     let pool = store.pool().clone();
     for (column, declared_type) in [
         ("conversation_id", "TEXT"),
@@ -1719,7 +1719,7 @@ async fn upgrade_from_schema_eight_creates_request_lease_table() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
 
     // Confirm migration 0008 took effect before the new lease table
     // arrived so the test really exercises the schema-8 -> schema-9
