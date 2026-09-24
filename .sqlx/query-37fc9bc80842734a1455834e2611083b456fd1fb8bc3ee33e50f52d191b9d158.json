@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P8: conversation_redaction_sessions is a plain table, so\n-- the partition tick must bound it explicitly. A session is dead when it has\n-- been idle for over a week (issue #524 Task 6) or when the request event it\n-- last touched left with a dropped metadata partition.\nDELETE FROM conversation_redaction_sessions sessions\nWHERE sessions.updated_at < NOW() - INTERVAL '7 days'\n   OR (\n       sessions.last_event_id IS NOT NULL\n       AND NOT EXISTS (\n           SELECT 1\n           FROM request_records rr\n           WHERE rr.event_id = sessions.last_event_id\n       )\n   );\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "37fc9bc80842734a1455834e2611083b456fd1fb8bc3ee33e50f52d191b9d158"
+}

@@ -27,6 +27,9 @@ pub(super) async fn initialize_request(
     services: &RuntimeServices,
 ) -> anyhow::Result<InitializedRequest> {
     let started = std::time::Instant::now();
+    // Issue #277 Phase P7: the wall-clock instant is captured before prompt-log
+    // preparation and flows into every request-family write of this request.
+    let created_at = chrono::Utc::now();
     let request_id =
         uuid::Uuid::parse_str(&request.request_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
     let request_model = model_from_body(&request.body);
@@ -73,6 +76,7 @@ pub(super) async fn initialize_request(
             request_model.as_deref(),
             &request_content_logging,
             redact_content,
+            created_at,
         )
         .await?
     } else {
@@ -93,6 +97,7 @@ pub(super) async fn initialize_request(
             user_id,
             owner_worker_id: services.runtime_state.worker_instance_id(),
             request_prompt_log,
-        }),
+        })
+        .with_created_at(created_at),
     })
 }

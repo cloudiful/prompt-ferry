@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO usage_charges (\n    event_id,\n    user_id,\n    request_id,\n    usage_status,\n    pricing_status\n)\nVALUES ($1, $2, $3, 'known', 'unpriced')\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7178f397aa8a6fb58f80104fb28552c4f7e2b1a21337a9fed0576c6fb36acc48"
+}

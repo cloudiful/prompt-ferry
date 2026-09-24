@@ -73,6 +73,7 @@ pub(super) fn ai_route_usage_log(
 pub(super) async fn mark_function_call_outputs_received(
     admin_state: Option<&AdminState>,
     parent_event_id: Option<i64>,
+    created_at: chrono::DateTime<chrono::Utc>,
     request_body: &[u8],
 ) {
     let (Some(state), Some(parent_event_id)) = (admin_state, parent_event_id) else {
@@ -108,6 +109,7 @@ pub(super) async fn mark_function_call_outputs_received(
         if let Err(err) = db::upsert_request_record_tool_call(
             &state.pool,
             db::RequestRecordToolCallCreate {
+                created_at,
                 parent_event_id,
                 conversation_id: existing_call.conversation_id,
                 call_id: existing_call.call_id.clone(),

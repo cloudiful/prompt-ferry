@@ -1,4 +1,5 @@
 INSERT INTO request_record_tool_calls (
+    created_at,
     parent_event_id,
     conversation_id,
     call_id,
@@ -9,8 +10,8 @@ INSERT INTO request_record_tool_calls (
     sequence_in_turn,
     mcp_request_event_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-ON CONFLICT (parent_event_id, call_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (parent_event_id, call_id, created_at)
 DO UPDATE SET
     conversation_id = COALESCE(EXCLUDED.conversation_id, request_record_tool_calls.conversation_id),
     tool_name = EXCLUDED.tool_name,

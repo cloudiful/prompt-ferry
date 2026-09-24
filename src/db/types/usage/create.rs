@@ -19,6 +19,10 @@ pub struct RequestRecordCreate {
     pub request_category: RequestRecordCategory,
     pub request_state: RequestRecordState,
     pub request_id: Uuid,
+    /// Issue #277 Phase P7: request-family rows are partitioned by day, so the
+    /// creation instant is owned by the in-memory request record and travels
+    /// with every write for the same request (partition key and arbiter).
+    pub created_at: DateTime<Utc>,
     pub user_id: Option<i64>,
     pub client_key_label: Option<String>,
     pub request_user_agent: Option<String>,
@@ -66,7 +70,9 @@ pub struct RequestRecordCreate {
     pub normalized_first_ref_hash: Option<String>,
     pub normalized_last_ref_hash: Option<String>,
     pub request_storage_mode: String,
-    pub request_full_json: Option<Value>,
+    /// Boxed: keeps the request-path futures under the denied
+    /// `clippy::large_futures` limit after the P7 `created_at` addition.
+    pub request_full_json: Option<Box<Value>>,
     pub request_delta_json: Option<Value>,
     pub request_raw_json: Option<Value>,
     pub request_has_previous_response_id: bool,
@@ -118,7 +124,9 @@ pub struct RequestRecordStorageInput {
     pub storage_sanitized_nul_count: i32,
     pub redaction: RequestRecordRedactionSummaryInput,
     pub request_storage_mode: String,
-    pub request_full_json: Option<Value>,
+    /// Boxed: keeps the request-path futures under the denied
+    /// `clippy::large_futures` limit after the P7 `created_at` addition.
+    pub request_full_json: Option<Box<Value>>,
     pub request_delta_json: Option<Value>,
     pub request_raw_json: Option<Value>,
     pub request_has_previous_response_id: bool,
@@ -138,6 +146,8 @@ pub struct RequestRecordStorageInput {
 #[derive(Debug, Clone)]
 pub struct RequestRecordAssistantArtifactCreate {
     pub event_id: i64,
+    /// Issue #277 Phase P7: same partition day as the parent request record.
+    pub created_at: DateTime<Utc>,
     pub message_json: Value,
     pub has_reasoning_content: bool,
     pub has_tool_calls: bool,
@@ -173,6 +183,7 @@ impl RequestRecordCreate {
             request_category,
             request_state: RequestRecordState::Received,
             request_id,
+            created_at: Utc::now(),
             user_id: None,
             client_key_label: None,
             request_user_agent: None,
@@ -258,6 +269,13 @@ impl RequestRecordCreate {
     ) -> Self {
         self.event_kind = event_kind;
         self.request_state = request_state;
+        self
+    }
+
+    /// Issue #277 Phase P7: pin the row to the in-memory request's creation
+    /// instant instead of the process clock at write time.
+    pub fn with_created_at(mut self, created_at: DateTime<Utc>) -> Self {
+        self.created_at = created_at;
         self
     }
 

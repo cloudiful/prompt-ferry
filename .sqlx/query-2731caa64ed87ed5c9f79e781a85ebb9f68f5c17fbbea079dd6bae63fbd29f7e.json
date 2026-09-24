@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    NOT EXISTS (\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_schema = current_schema()\n          AND table_name = 'request_records'\n          AND column_name LIKE '%expired%'\n    ) AS \"legacy_expiry_columns_removed!\",\n    EXISTS (\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_schema = current_schema()\n          AND table_name = 'request_records'\n          AND column_name IN ('request_full_json', 'request_delta_json', 'response_prompt', 'upstream_error_body')\n    ) AS \"content_columns_in_metadata!\",\n    EXISTS (\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_schema = current_schema()\n          AND table_name = 'request_record_content'\n          AND column_name IN ('request_full_json', 'request_delta_json', 'response_prompt', 'upstream_error_body')\n    ) AS \"content_table_exists!\",\n    EXISTS (\n        SELECT 1\n        FROM pg_class\n        WHERE relnamespace = current_schema()::regnamespace\n          AND relname = 'request_records'\n          AND relkind = 'p'\n    ) AS \"request_records_partitioned!\",\n    EXISTS (\n        SELECT 1\n        FROM pg_class\n        WHERE relnamespace = current_schema()::regnamespace\n          AND relname = 'request_record_content'\n          AND relkind = 'p'\n    ) AS \"content_table_partitioned!\",\n    EXISTS (\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_schema = current_schema()\n          AND table_name = 'request_record_raw_payloads'\n          AND column_name = 'raw_object_key'\n    ) AS \"raw_object_key_exists!\",\n    NOT EXISTS (\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_schema = current_schema()\n          AND table_name = 'request_records'\n          AND column_name IN (\n              'request_prompt',\n              'request_full_text',\n              'request_delta_text',\n              'upstream_redacted_request_json',\n              'restore_session_ciphertext',\n              'restore_session_nonce',\n              'restore_session_key_version'\n          )\n    ) AS \"legacy_payload_columns_removed!\",\n    NOT EXISTS (\n        SELECT 1\n        FROM information_schema.columns\n        WHERE table_schema = current_schema()\n          AND table_name IN ('request_record_raw_payloads', 'request_record_raw_payloads_overflow')\n          AND column_name IN ('request_raw_json', 'response_raw_body')\n    ) AS \"raw_body_columns_removed!\"\n-- All probes are scoped to the current schema because the shared test database\n-- may contain leftover schemas from other test runs.\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "legacy_expiry_columns_removed!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "content_columns_in_metadata!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "content_table_exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "request_records_partitioned!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "content_table_partitioned!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "raw_object_key_exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "legacy_payload_columns_removed!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "raw_body_columns_removed!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "2731caa64ed87ed5c9f79e781a85ebb9f68f5c17fbbea079dd6bae63fbd29f7e"
+}

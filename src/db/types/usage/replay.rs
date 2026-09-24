@@ -69,6 +69,8 @@ pub struct RequestRecordAssistantArtifact {
 #[derive(Debug, Clone)]
 pub struct ReplaySnapshotCreate {
     pub event_id: i64,
+    /// Issue #277 Phase P7: same partition day as the parent request record.
+    pub created_at: DateTime<Utc>,
     pub conversation_id: Uuid,
     pub conversation_seq: i32,
     pub base_event_id: i64,
@@ -101,6 +103,8 @@ pub struct RequestRecordToolCallReplayCandidate {
 
 #[derive(Debug, Clone)]
 pub struct RequestRecordToolCallCreate {
+    /// Issue #277 Phase P7: same partition day as the parent request record.
+    pub created_at: DateTime<Utc>,
     pub parent_event_id: i64,
     pub conversation_id: Option<Uuid>,
     pub call_id: String,

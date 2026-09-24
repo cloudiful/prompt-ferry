@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P7: content half of the request family. A missing row is\n-- the new \"content expired\" signal, so `record_request_record` always writes\n-- one row per event even when every payload column is NULL.\nINSERT INTO request_record_content(\n    created_at,\n    event_id,\n    request_full_json,\n    request_delta_json,\n    response_prompt,\n    upstream_error_body\n)\nVALUES ($1, $2, $3, $4, $5, $6)\nON CONFLICT (event_id, created_at) DO UPDATE SET\n    request_full_json = COALESCE(EXCLUDED.request_full_json, request_record_content.request_full_json),\n    request_delta_json = COALESCE(EXCLUDED.request_delta_json, request_record_content.request_delta_json),\n    response_prompt = COALESCE(EXCLUDED.response_prompt, request_record_content.response_prompt),\n    upstream_error_body = COALESCE(EXCLUDED.upstream_error_body, request_record_content.upstream_error_body)\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8",
+        "Jsonb",
+        "Jsonb",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4b0606247eab35a9ec2892bb68949bfcaa808a2dc159abd9d38e42fa371aff4f"
+}

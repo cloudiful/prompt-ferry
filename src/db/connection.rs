@@ -115,6 +115,31 @@ pub async fn migrate(pool: &PgPool) -> Result<()> {
         .context("failed to run database migrations")
 }
 
+/// Revert the latest applied migration that ships a down file.
+///
+/// Used by the down-migration regression tests to exercise the same revert
+/// path as `sqlx migrate revert`: `undo` rolls back every applied
+/// down-migration above `target`, so the target is the newest version below
+/// the latest down-able one.
+pub async fn revert_latest_migration(pool: &PgPool) -> Result<()> {
+    let latest = MIGRATOR
+        .iter()
+        .filter(|migration| migration.migration_type.is_down_migration())
+        .map(|migration| migration.version)
+        .max()
+        .context("no migration ships a down file")?;
+    let target = MIGRATOR
+        .iter()
+        .map(|migration| migration.version)
+        .filter(|version| *version < latest)
+        .max()
+        .unwrap_or(0);
+    MIGRATOR
+        .undo(pool, target)
+        .await
+        .context("failed to revert the latest migration")
+}
+
 pub async fn connect_sqlite(path: impl AsRef<Path>) -> sqlx::Result<SqlitePool> {
     connect_sqlite_with_max_connections(path, SQLITE_MAX_CONNECTIONS).await
 }

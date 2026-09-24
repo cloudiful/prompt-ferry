@@ -146,8 +146,7 @@ async fn migrate_upgrades_legacy_mcp_servers_table() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn migrate_adds_content_retention_columns_and_drops_legacy_payload_columns()
--> anyhow::Result<()> {
+async fn migrate_splits_content_and_partitions_request_records() -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
         return Ok(());
@@ -158,7 +157,11 @@ async fn migrate_adds_content_retention_columns_and_drops_legacy_payload_columns
     let columns = sqlx::query_file!("tests/sql/db_migrations/usage_retention_columns.sql")
         .fetch_one(&schema.pool)
         .await?;
-    assert!(columns.content_expired_at_exists);
+    assert!(columns.legacy_expiry_columns_removed);
+    assert!(!columns.content_columns_in_metadata);
+    assert!(columns.content_table_exists);
+    assert!(columns.request_records_partitioned);
+    assert!(columns.content_table_partitioned);
     assert!(columns.raw_object_key_exists);
     assert!(columns.legacy_payload_columns_removed);
 
@@ -669,6 +672,7 @@ async fn raw_payloads_stay_metadata_only_and_prune_without_losing_normalized_onl
     raw_record.request_raw_json = Some(serde_json::json!({"input": "raw"}));
     raw_record.response_raw_body = Some("raw response".to_string());
     raw_record.request_conversation_key = Some("raw-conversation".to_string());
+    let raw_record_created_at = raw_record.created_at;
     let raw_event_id = db::record_request_record(&schema.pool, raw_record).await?;
     sqlx::query_file!(
         "src/sql/usage/upsert_request_record_raw_object.sql",
@@ -692,7 +696,10 @@ async fn raw_payloads_stay_metadata_only_and_prune_without_losing_normalized_onl
     );
 
     // A response-only update for the same request stays metadata-only too.
-    let mut raw_update = db::RequestRecordCreate::ai_request(raw_request_id, "/v1/responses");
+    // Phase P7 keeps the creation instant on the in-memory record, so the
+    // second write must carry the same `created_at` to land on the same row.
+    let mut raw_update = db::RequestRecordCreate::ai_request(raw_request_id, "/v1/responses")
+        .with_created_at(raw_record_created_at);
     raw_update.response_raw_body = Some("updated raw response".to_string());
     let updated_event_id = db::record_request_record(&schema.pool, raw_update).await?;
     assert_eq!(updated_event_id, raw_event_id);
@@ -997,12 +1004,17 @@ async fn request_record_detail_keeps_thinking_effort_override_snapshot() -> anyh
     let request_id = Uuid::new_v4();
     let mut input = db::RequestRecordCreate::ai_request(request_id, "/v1/chat/completions");
     input.applied_thinking_effort_override = Some("high".to_string());
+    let created_at = input.created_at;
     let event_id = db::record_request_record(&schema.pool, input).await?;
 
     // A later lifecycle event without a snapshot keeps the request-time value.
-    let mut completed = db::RequestRecordCreate::ai_request(request_id, "/v1/chat/completions");
+    // Phase P7: the lifecycle write carries the same creation instant, which is
+    // what keeps every write on one partitioned row.
+    let mut completed = db::RequestRecordCreate::ai_request(request_id, "/v1/chat/completions")
+        .with_created_at(created_at);
     completed.request_state = db::RequestRecordState::Completed;
-    db::record_request_record(&schema.pool, completed).await?;
+    let completed_event_id = db::record_request_record(&schema.pool, completed).await?;
+    assert_eq!(completed_event_id, event_id);
 
     let detail = db::get_visible_usage_event_detail(&schema.pool, event_id, None)
         .await?

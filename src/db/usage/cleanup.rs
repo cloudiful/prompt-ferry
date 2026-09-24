@@ -92,11 +92,11 @@ async fn run_raw_payload_maintenance_locked(
     .await?;
     let raw_rows_deleted =
         prune_raw_payload_batches(conn, prune_cutoff, partial_partition_start).await?;
-    let partitions_dropped = crate::db::usage::raw_partitions::drop_expired_raw_payload_partitions(
-        conn,
-        now - ChronoDuration::days(retention_days.max(1)),
-    )
-    .await?;
+    // Partition dropping for raw payloads is owned by the shared partition
+    // manager (same 3-day horizon, same before-today safety boundary); the
+    // raw tick keeps only its object-store and default/overflow staging
+    // duties plus the VACUUMs.
+    let partitions_dropped = 0;
     sqlx::query_file!("src/sql/usage/vacuum_request_records.sql")
         .execute(&mut **conn)
         .await?;

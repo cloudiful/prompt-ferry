@@ -68,7 +68,7 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
     let conversation_id = log.conversation_id;
     let conversation_seq = log.conversation_seq;
     let (request_full_json, request_full_json_stats) =
-        sanitize_optional_json_for_storage(log.request_full_json);
+        sanitize_optional_json_for_storage(log.request_full_json.map(|value| *value));
     let (request_delta_json, request_delta_json_stats) =
         sanitize_optional_json_for_storage(log.request_delta_json);
     let (request_raw_json, request_raw_json_stats) = sanitize_optional_json_for_storage(
@@ -102,6 +102,7 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
         }
     }
     .with_state(log.event_kind, log.request_state)
+    .with_created_at(log.created_at)
     .with_request_actor(
         log.user_id,
         log.client_key_id,
@@ -166,7 +167,7 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
             },
         },
         request_storage_mode: log.request_storage_mode,
-        request_full_json,
+        request_full_json: request_full_json.map(Box::new),
         request_delta_json,
         request_raw_json: request_raw_json.clone(),
         request_has_previous_response_id: log.request_has_previous_response_id,
@@ -309,6 +310,7 @@ pub async fn record_usage_event(admin_state: Option<&AdminState>, log: UsageLog)
                     &state.replay_cache,
                     ReplaySnapshotUpdate {
                         event_id,
+                        created_at: log.created_at,
                         conversation_id,
                         conversation_seq,
                         prompt_refs,

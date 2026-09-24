@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*)::BIGINT AS \"count!\"\nFROM pg_inherits inheritance\nJOIN pg_class parent ON parent.oid = inheritance.inhparent\nJOIN pg_namespace ns ON ns.oid = parent.relnamespace\nWHERE parent.relname = $1\n  AND ns.nspname = current_schema();\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d11440b70f03a1870b7d63ecd08eff46bdaf611374e1f8b08d614789b88412c9"
+}

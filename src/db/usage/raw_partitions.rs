@@ -85,44 +85,6 @@ pub async fn ensure_raw_payload_partitions(
     Ok(created)
 }
 
-pub async fn drop_expired_raw_payload_partitions(
-    connection: &mut PgConnection,
-    cutoff: DateTime<Utc>,
-) -> Result<u64> {
-    let partitions = sqlx::query_file_as!(
-        RawPartitionRow,
-        "src/sql/usage/list_raw_payload_partitions.sql"
-    )
-    .fetch_all(&mut *connection)
-    .await?;
-    let mut dropped = 0;
-
-    for partition in partitions {
-        let Some(day) = partition.name.strip_prefix(RAW_PARTITION_PREFIX) else {
-            continue;
-        };
-        let Ok(day) = NaiveDate::parse_from_str(day, "%Y%m%d") else {
-            continue;
-        };
-        let end_at = utc_midnight(
-            day.checked_add_days(chrono::Days::new(1))
-                .ok_or_else(|| anyhow::anyhow!("raw partition date overflow"))?,
-        )?;
-        if end_at > cutoff {
-            continue;
-        }
-
-        // Names come from the controlled catalog query and are validated above.
-        let ddl = format!("DROP TABLE IF EXISTS {}", partition.name);
-        sqlx::query(sqlx::AssertSqlSafe(ddl))
-            .execute(&mut *connection)
-            .await?;
-        dropped += 1;
-    }
-
-    Ok(dropped)
-}
-
 fn raw_partition_name(day: NaiveDate) -> String {
     format!("{RAW_PARTITION_PREFIX}{}", day.format("%Y%m%d"))
 }

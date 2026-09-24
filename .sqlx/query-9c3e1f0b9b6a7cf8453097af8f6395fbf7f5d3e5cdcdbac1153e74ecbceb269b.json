@@ -1,0 +1,171 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH RECURSIVE replay_chain AS (\n    SELECT event_id, parent_event_id\n    FROM request_records\n    WHERE event_id = $5::BIGINT\n\n    UNION ALL\n\n    SELECT parent.event_id, parent.parent_event_id\n    FROM request_records AS parent\n    JOIN replay_chain AS child\n      ON child.parent_event_id = parent.event_id\n)\nSELECT\n    tool_call.tool_call_event_id,\n    tool_call.parent_event_id,\n    tool_call.conversation_id,\n    tool_call.call_id,\n    tool_call.tool_name,\n    tool_call.arguments_json,\n    tool_call.arguments_preview,\n    tool_call.status,\n    tool_call.sequence_in_turn,\n    tool_call.mcp_request_event_id,\n    tool_call.created_at,\n    tool_call.updated_at,\n    (artifact.event_id IS NOT NULL) AS \"has_assistant_artifact!\"\nFROM request_record_tool_calls AS tool_call\nJOIN request_records AS parent\n    ON parent.event_id = tool_call.parent_event_id\nLEFT JOIN request_record_assistant_artifacts AS artifact\n    ON artifact.event_id = tool_call.parent_event_id\n   AND EXISTS (\n       SELECT 1\n       FROM request_record_content content\n       WHERE content.event_id = parent.event_id\n   )\nWHERE tool_call.call_id = ANY($1)\n  AND parent.event_kind = 'request'\n  AND parent.request_category = 'ai'\n  AND parent.user_id IS NOT DISTINCT FROM $2::BIGINT\n  AND parent.endpoint_id IS NOT DISTINCT FROM $3::UUID\n  AND (\n      $4::UUID IS NULL\n      OR parent.conversation_id IS NOT DISTINCT FROM $4::UUID\n  )\n  AND (\n      $5::BIGINT IS NULL\n      OR parent.event_id IN (SELECT event_id FROM replay_chain)\n      -- A fast follow-up can arrive before prompt-log parent resolution sees\n      -- the just-completed response. The exact call_id and conversation\n      -- filters remain in force; replay resolution validates the artifact\n      -- signature before accepting this fallback candidate.\n      OR (\n          $4::UUID IS NOT NULL\n          AND parent.conversation_id IS NOT DISTINCT FROM $4::UUID\n      )\n  )\nORDER BY tool_call.call_id ASC, tool_call.parent_event_id ASC,\n         tool_call.sequence_in_turn ASC NULLS LAST,\n         tool_call.tool_call_event_id ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tool_call_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "tool_call_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "parent_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "parent_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "conversation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "call_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "call_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "tool_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "tool_name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "arguments_json",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "arguments_json"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "arguments_preview",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "arguments_preview"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "sequence_in_turn",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "sequence_in_turn"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "mcp_request_event_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "mcp_request_event_id"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "request_record_tool_calls",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "has_assistant_artifact!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Int8",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "9c3e1f0b9b6a7cf8453097af8f6395fbf7f5d3e5cdcdbac1153e74ecbceb269b"
+}

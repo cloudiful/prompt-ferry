@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P7: the block-existence JOIN was a FK-race workaround; with\n-- the loose reference gone, refs are inserted directly and the prompt block is\n-- content-addressed per day.\nINSERT INTO request_record_block_refs (created_at, event_id, block_hash)\nSELECT $1, $2, refs.ref->>'block_hash'\nFROM jsonb_array_elements($3) refs(ref)\nWHERE refs.ref ? 'block_hash'\nON CONFLICT (event_id, block_hash, created_at) DO NOTHING;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0f9c5d692b1b9d63e9ca6aa61a5b62c243e630496b7d9f719374dc1e7052dfaf"
+}

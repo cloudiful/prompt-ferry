@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P8: direct children of a partition parent, resolved\n-- through the connection search_path so tests operate inside their schema.\nSELECT child.relname AS \"name!\"\nFROM pg_inherits inheritance\nJOIN pg_class parent ON parent.oid = inheritance.inhparent\nJOIN pg_class child ON child.oid = inheritance.inhrelid\nWHERE parent.oid = ($1::text)::regclass\nORDER BY child.relname;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Name",
+        "origin": {
+          "Table": {
+            "table": "pg_class",
+            "name": "relname"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3c5ee50fba90f63267d69dc96837e67dfca2dd0ec6bb56dad5c6cebab2d96963"
+}

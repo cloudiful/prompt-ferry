@@ -2168,6 +2168,7 @@ async fn usage_event_detail_includes_assistant_artifact_fields() -> anyhow::Resu
         &schema.pool,
         db::UsageAssistantArtifactCreate {
             event_id,
+            created_at: chrono::Utc::now(),
             message_json: serde_json::json!({
                 "version": 1,
                 "assistant_message": {
@@ -2264,7 +2265,12 @@ async fn usage_event_detail_serializes_null_request_has_previous_response_id_as_
     );
 
     // Restore the current schema constraint for consistency (the test schema is
-    // dropped on cleanup regardless).
+    // dropped on cleanup regardless). Issue #277 Phase P7: the NULL row lives in
+    // a partition, so it must go before NOT NULL can be restored.
+    sqlx::query("DELETE FROM request_records WHERE event_id = $1")
+        .bind(event_id)
+        .execute(&schema.pool)
+        .await?;
     sqlx::query(
         "ALTER TABLE request_records ALTER COLUMN request_has_previous_response_id SET NOT NULL",
     )
@@ -2599,14 +2605,16 @@ async fn request_records_legacy_date_filter_still_works() -> anyhow::Result<()> 
     let admin = create_user(&schema.pool, "admin-legacy-date", true).await?;
     let state = admin_state(schema.pool.clone(), &admin).await;
     let today = chrono::Utc::now().date_naive();
-    let last_year = chrono::Datelike::year(&today);
+    // Issue #277 Phase P7: request metadata lives in daily partitions with a
+    // 90-day retention, so "historical" means inside that window instead of a
+    // previous calendar year.
+    let historical = today - chrono::Duration::days(30);
     let _today_record = insert_request_record(&schema.pool, admin.user_id, "gpt-today").await?;
     let old_record = insert_request_record(&schema.pool, admin.user_id, "gpt-old").await?;
     sqlx::query("UPDATE request_records SET created_at = $2 WHERE event_id = $1")
         .bind(old_record)
         .bind(
-            chrono::NaiveDate::from_ymd_opt(last_year - 1, 1, 1)
-                .unwrap()
+            (historical - chrono::Duration::days(10))
                 .and_hms_opt(0, 0, 0)
                 .unwrap()
                 .and_utc(),
@@ -2634,7 +2642,6 @@ async fn request_records_legacy_date_filter_still_works() -> anyhow::Result<()> 
     // Historical date well outside the Last24h preset window must still
     // return that day's records; this guards against any implicit trailing
     // 24h narrowing creeping back into date-only queries.
-    let historical = chrono::NaiveDate::from_ymd_opt(last_year - 1, 6, 15).unwrap();
     let historical_record_id =
         insert_request_record(&schema.pool, admin.user_id, "gpt-historical").await?;
     sqlx::query("UPDATE request_records SET created_at = $2 WHERE event_id = $1")

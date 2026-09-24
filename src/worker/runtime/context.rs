@@ -3,7 +3,7 @@ use std::time::Instant;
 pub(super) use super::bridge::BridgeSender;
 
 use crate::config::WorkerConfig;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use reqwest::{Client, StatusCode};
 
 #[derive(Debug, Clone, Copy)]
@@ -137,12 +137,18 @@ impl RuntimeServices {
 pub(super) struct RequestExecutionContext {
     pub(super) request_id: Uuid,
     pub(super) started: Instant,
+    /// Issue #277 Phase P7: wall-clock creation instant shared by every
+    /// request-family row written for this request (partition key + arbiter).
+    pub(super) created_at: DateTime<Utc>,
     pub(super) request_model: Option<String>,
     pub(super) client_key_id: Option<i64>,
     pub(super) client_key_label: Option<String>,
     pub(super) user_id: Option<i64>,
     pub(super) owner_worker_id: Uuid,
-    pub(super) request_prompt_log: RequestPromptLog,
+    /// Boxed: the prompt log is the heaviest field of the context and is
+    /// captured (by value) across the request futures, where an inline copy
+    /// keeps pushing them over the `large_futures` limit.
+    pub(super) request_prompt_log: Box<RequestPromptLog>,
 }
 
 #[derive(Debug, Clone)]
@@ -172,13 +178,22 @@ impl RequestExecutionContext {
         Self {
             request_id,
             started,
+            created_at: Utc::now(),
             request_model,
             client_key_id,
             client_key_label,
             user_id,
             owner_worker_id,
-            request_prompt_log,
+            request_prompt_log: Box::new(request_prompt_log),
         }
+    }
+
+    /// Issue #277 Phase P7: pin the request-family partition day to the instant
+    /// captured before prompt-log preparation so every row of the turn lands in
+    /// the same day partition.
+    pub(super) fn with_created_at(mut self, created_at: DateTime<Utc>) -> Self {
+        self.created_at = created_at;
+        self
     }
 
     pub(super) fn for_mcp(
@@ -191,12 +206,13 @@ impl RequestExecutionContext {
         Self {
             request_id,
             started,
+            created_at: Utc::now(),
             request_model: None,
             client_key_id: None,
             client_key_label: None,
             user_id,
             owner_worker_id,
-            request_prompt_log,
+            request_prompt_log: Box::new(request_prompt_log),
         }
     }
 
@@ -275,6 +291,7 @@ impl RequestExecutionContext {
             last_heartbeat_at + chrono::Duration::seconds(super::REQUEST_RECORD_LEASE_SECONDS);
         UsageRequestMetadata {
             user_id: self.user_id.or(fallback_user_id).filter(|id| *id > 0),
+            created_at: Some(self.created_at),
             client_key_id: self.client_key_id,
             client_key_label: self.client_key_label.clone(),
             request_user_agent,

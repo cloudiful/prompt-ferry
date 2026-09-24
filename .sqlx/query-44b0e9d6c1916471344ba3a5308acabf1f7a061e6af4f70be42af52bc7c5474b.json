@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    EXISTS (\n        SELECT 1\n        FROM pg_constraint\n        WHERE conname = 'usage_charges_event_id_fkey'\n          AND conrelid = 'usage_charges'::regclass\n    ) AS \"charges_fkey!\",\n    EXISTS (\n        SELECT 1\n        FROM pg_constraint\n        WHERE conname = 'conversation_redaction_sessions_last_event_id_fkey'\n          AND conrelid = 'conversation_redaction_sessions'::regclass\n    ) AS \"redaction_fkey!\",\n    EXISTS (\n        SELECT 1\n        FROM pg_constraint\n        WHERE conname = 'request_record_raw_payloads_event_id_fkey'\n          AND conrelid = 'request_record_raw_payloads'::regclass\n    ) AS \"raw_payloads_fkey!\",\n    EXISTS (\n        SELECT 1\n        FROM pg_constraint\n        WHERE conname = 'request_record_raw_payloads_overflow_event_id_fkey'\n          AND conrelid = 'request_record_raw_payloads_overflow'::regclass\n    ) AS \"raw_payloads_overflow_fkey!\",\n    EXISTS (\n        SELECT 1\n        FROM pg_class\n        WHERE relname = 'request_records'\n          AND relkind = 'r'\n    ) AS \"records_plain!\"\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "charges_fkey!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "redaction_fkey!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "raw_payloads_fkey!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "raw_payloads_overflow_fkey!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "records_plain!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "44b0e9d6c1916471344ba3a5308acabf1f7a061e6af4f70be42af52bc7c5474b"
+}

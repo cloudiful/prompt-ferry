@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_record_assistant_artifacts(\n    created_at, event_id, message_json, has_reasoning_content, has_tool_calls\n)\nVALUES ($1, $2, $3, $4, $5)\nON CONFLICT (event_id, created_at) DO UPDATE\nSET message_json = EXCLUDED.message_json,\n    has_reasoning_content = EXCLUDED.has_reasoning_content,\n    has_tool_calls = EXCLUDED.has_tool_calls\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8",
+        "Jsonb",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7e3767295e7897a8b1f9b3d54050de768c4d7623432b98ab1b82cd31f4109aac"
+}

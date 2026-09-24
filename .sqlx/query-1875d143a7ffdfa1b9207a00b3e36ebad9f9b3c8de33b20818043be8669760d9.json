@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #277 Phase P7: prompt blocks are partitioned by day, so dedupe is per\n-- `(block_hash, created_at day)`; the caller passes UTC midnight as\n-- `created_at` so a block is stored once per day instead of once per request.\nINSERT INTO usage_prompt_blocks(created_at, block_hash, role, content_json, preview_text)\nVALUES ($1, $2, $3, $4, $5)\nON CONFLICT (block_hash, created_at) DO NOTHING\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1875d143a7ffdfa1b9207a00b3e36ebad9f9b3c8de33b20818043be8669760d9"
+}

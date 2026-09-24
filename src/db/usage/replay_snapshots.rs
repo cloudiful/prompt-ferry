@@ -3,6 +3,7 @@ use super::*;
 pub async fn insert_replay_snapshot(pool: &PgPool, input: ReplaySnapshotCreate) -> Result<()> {
     sqlx::query_file!(
         "src/sql/usage/insert_replay_snapshot.sql",
+        input.created_at,
         input.event_id,
         input.conversation_id,
         input.conversation_seq,

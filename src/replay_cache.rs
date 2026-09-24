@@ -123,6 +123,8 @@ pub struct ReplaySnapshotValue {
 #[derive(Debug, Clone)]
 pub struct ReplaySnapshotUpdate {
     pub event_id: i64,
+    /// Issue #277 Phase P7: partition day of the parent request record.
+    pub created_at: DateTime<Utc>,
     pub conversation_id: Uuid,
     pub conversation_seq: i32,
     pub prompt_refs: Vec<PromptMessageRef>,
@@ -733,6 +735,7 @@ pub async fn update_replay_state(
                 pool,
                 db::ReplaySnapshotCreate {
                     event_id: update.event_id,
+                    created_at: update.created_at,
                     conversation_id: update.conversation_id,
                     conversation_seq: update.conversation_seq,
                     base_event_id: update.event_id,
@@ -782,18 +785,21 @@ mod tests {
         };
         let older_seq = ReplaySnapshotUpdate {
             event_id: 11,
+            created_at: Utc::now(),
             conversation_id,
             conversation_seq: 2,
             prompt_refs: Vec::new(),
         };
         let same_seq_lower_event = ReplaySnapshotUpdate {
             event_id: 9,
+            created_at: Utc::now(),
             conversation_id,
             conversation_seq: 3,
             prompt_refs: Vec::new(),
         };
         let newer = ReplaySnapshotUpdate {
             event_id: 12,
+            created_at: Utc::now(),
             conversation_id,
             conversation_seq: 4,
             prompt_refs: Vec::new(),
@@ -813,12 +819,14 @@ mod tests {
         let conversation_id = Uuid::new_v4();
         let older = ReplaySnapshotUpdate {
             event_id: 10,
+            created_at: Utc::now(),
             conversation_id,
             conversation_seq: 2,
             prompt_refs: Vec::new(),
         };
         let newer = ReplaySnapshotUpdate {
             event_id: 12,
+            created_at: Utc::now(),
             conversation_id,
             conversation_seq: 3,
             prompt_refs: Vec::new(),
@@ -927,12 +935,14 @@ mod tests {
         let conversation_id = Uuid::new_v4();
         let newer = ReplaySnapshotUpdate {
             event_id: 12,
+            created_at: Utc::now(),
             conversation_id,
             conversation_seq: 3,
             prompt_refs: Vec::new(),
         };
         let older = ReplaySnapshotUpdate {
             event_id: 11,
+            created_at: Utc::now(),
             conversation_id,
             conversation_seq: 2,
             prompt_refs: Vec::new(),

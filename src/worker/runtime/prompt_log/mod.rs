@@ -13,6 +13,7 @@ use crate::{
     worker_admin_types::RequestContentLoggingResponse,
 };
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use tracing::warn;
 
@@ -207,6 +208,7 @@ pub(super) async fn prepare_request_prompt_log(
     _request_model: Option<&str>,
     request_content_logging: &RequestContentLoggingResponse,
     redact_content: bool,
+    created_at: DateTime<Utc>,
 ) -> Result<RequestPromptLog> {
     let raw_observability =
         build_raw_request_observability(state, request, user_id, request_content_logging).await?;
@@ -300,6 +302,7 @@ pub(super) async fn prepare_request_prompt_log(
     for item in &normalized.items {
         let stats = db::upsert_usage_prompt_block(
             &state.pool,
+            created_at,
             &prompt_block_hash(&item.role, &item.content_json),
             &item.role,
             &item.content_json,

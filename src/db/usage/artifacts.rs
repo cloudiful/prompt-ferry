@@ -8,6 +8,7 @@ pub async fn upsert_usage_assistant_artifact(
     let (message_json, stats) = sanitize_json_for_storage(&input.message_json);
     sqlx::query_file!(
         "src/sql/usage/upsert_usage_assistant_artifact.sql",
+        input.created_at,
         input.event_id,
         message_json,
         input.has_reasoning_content,

@@ -367,7 +367,13 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
     .await?;
 
     let mut worker_handle = tokio::spawn(async move {
-        prompt_ferry::worker::connect_for_test_with_admin(config, reqwest::Client::new()).await
+        // Issue #277 Phase P7: the connect future sits at the denied
+        // `large_futures` limit; box it so the test target stays clippy-clean.
+        Box::pin(prompt_ferry::worker::connect_for_test_with_admin(
+            config,
+            reqwest::Client::new(),
+        ))
+        .await
     });
     wait_for_worker(&relay_handle, &mut worker_handle).await;
 
@@ -477,7 +483,13 @@ async fn raw_passthrough_keeps_previous_response_id_without_replay_state() -> an
     )
     .await?;
     let mut worker_handle = tokio::spawn(async move {
-        prompt_ferry::worker::connect_for_test_with_admin(config, reqwest::Client::new()).await
+        // Issue #277 Phase P7: the connect future sits at the denied
+        // `large_futures` limit; box it so the test target stays clippy-clean.
+        Box::pin(prompt_ferry::worker::connect_for_test_with_admin(
+            config,
+            reqwest::Client::new(),
+        ))
+        .await
     });
     wait_for_worker(&relay_handle, &mut worker_handle).await;
 
@@ -570,7 +582,13 @@ async fn raw_passthrough_keeps_conversation_without_replay_state() -> anyhow::Re
     )
     .await?;
     let mut worker_handle = tokio::spawn(async move {
-        prompt_ferry::worker::connect_for_test_with_admin(config, reqwest::Client::new()).await
+        // Issue #277 Phase P7: the connect future sits at the denied
+        // `large_futures` limit; box it so the test target stays clippy-clean.
+        Box::pin(prompt_ferry::worker::connect_for_test_with_admin(
+            config,
+            reqwest::Client::new(),
+        ))
+        .await
     });
     wait_for_worker(&relay_handle, &mut worker_handle).await;
 
@@ -659,7 +677,13 @@ async fn rejects_stateful_responses_routed_to_chat_native_target() -> anyhow::Re
     )
     .await?;
     let mut worker_handle = tokio::spawn(async move {
-        prompt_ferry::worker::connect_for_test_with_admin(config, reqwest::Client::new()).await
+        // Issue #277 Phase P7: the connect future sits at the denied
+        // `large_futures` limit; box it so the test target stays clippy-clean.
+        Box::pin(prompt_ferry::worker::connect_for_test_with_admin(
+            config,
+            reqwest::Client::new(),
+        ))
+        .await
     });
     wait_for_worker(&relay_handle, &mut worker_handle).await;
 
@@ -751,7 +775,13 @@ async fn rejects_responses_routed_to_anthropic_native_target() -> anyhow::Result
     )
     .await?;
     let mut worker_handle = tokio::spawn(async move {
-        prompt_ferry::worker::connect_for_test_with_admin(config, reqwest::Client::new()).await
+        // Issue #277 Phase P7: the connect future sits at the denied
+        // `large_futures` limit; box it so the test target stays clippy-clean.
+        Box::pin(prompt_ferry::worker::connect_for_test_with_admin(
+            config,
+            reqwest::Client::new(),
+        ))
+        .await
     });
     wait_for_worker(&relay_handle, &mut worker_handle).await;
 
