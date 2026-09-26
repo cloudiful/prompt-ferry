@@ -7,6 +7,7 @@ use crate::{
     openai_compat::CompatError,
     protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseStart},
     upstream_adapter::{PreparedRequestBody, PreparedUpstreamRequest},
+    worker_admin::chatgpt_backend::{self, CodexAuth},
 };
 
 use super::super::{
@@ -26,7 +27,7 @@ use super::{
         PreparedRouteRequest, ai_route_usage_log, prepare_upstream_request_for_route,
     },
     thinking_downgrade::{self, ThinkingDisposition},
-    upstream::{build_upstream_request, upstream_url_for_route},
+    upstream::{build_codex_upstream_request, build_upstream_request, upstream_url_for_route},
 };
 
 const MAX_UPSTREAM_ATTEMPTS: usize = 3;
@@ -144,6 +145,28 @@ pub(super) async fn forward_route_request(
         redaction.session,
     );
     let upstream_url = upstream_url_for_route(&route, &prepared.path);
+    // Issue #599 R2c: a stored ChatGPT OAuth token routes this endpoint to the
+    // Codex backend with the subscription credential. Resolution refreshes an
+    // expired token up front (best effort) and reports a revoked login as a
+    // clear client error instead of silently falling back to the platform key.
+    let mut chatgpt_auth = match resolve_chatgpt_auth(services, &route).await {
+        Ok(auth) => auth,
+        Err(err) => return Ok(ForwardOutcome::CompatError(err)),
+    };
+    let chatgpt_url = if chatgpt_auth.is_some() {
+        match chatgpt_backend::chatgpt_codex_url(&prepared.path) {
+            Some(url) => Some(url),
+            None => {
+                return Ok(ForwardOutcome::CompatError(CompatError::new(
+                    reqwest::StatusCode::BAD_REQUEST,
+                    "chatgpt_subscription_requires_responses",
+                    "chatgpt_subscription endpoints only support the responses protocol; set the endpoint native_api to responses",
+                )));
+            }
+        }
+    } else {
+        None
+    };
     if let Some(state) = services.admin_state() {
         let _ = db::record_request_state(
             &state.pool,
@@ -278,17 +301,22 @@ pub(super) async fn forward_route_request(
                 "sending upstream request via configured proxy"
             );
         }
-        let send_result = build_upstream_request(
-            &proxy_client,
-            method,
-            &upstream_url,
-            &route,
-            attempt_body(&prepared, downgraded_body.as_ref(), thinking_off),
-            &request.headers,
-            request_ctx.request_prompt_log.conversation_id,
-        )
-        .send()
-        .await;
+        let body = attempt_body(&prepared, downgraded_body.as_ref(), thinking_off);
+        let upstream_request = match (chatgpt_auth.as_ref(), chatgpt_url.as_deref()) {
+            (Some(auth), Some(url)) => {
+                build_codex_upstream_request(&proxy_client, method, url, &route, body, auth)
+            }
+            _ => build_upstream_request(
+                &proxy_client,
+                method,
+                &upstream_url,
+                &route,
+                body,
+                &request.headers,
+                request_ctx.request_prompt_log.conversation_id,
+            ),
+        };
+        let send_result = upstream_request.send().await;
         match send_result {
             Err(err) => {
                 let retryable = UpstreamFailurePhase::BeforeResponseHeaders.is_transient(&err);
@@ -320,6 +348,52 @@ pub(super) async fn forward_route_request(
                 });
             }
             Ok(response) => {
+                // Issue #599 R2c: one refresh-and-retry when the Codex backend
+                // rejects the subscription access token. The `refreshed` guard
+                // bounds it to a single retry, so a token that is still
+                // rejected after a successful refresh is surfaced unchanged.
+                if response.status() == reqwest::StatusCode::UNAUTHORIZED
+                    && chatgpt_auth.as_ref().is_some_and(|auth| !auth.refreshed)
+                    && let Some(repository) = chatgpt_repository(services)
+                {
+                    tracing::warn!(
+                        event = "chatgpt_token_refresh",
+                        request_id = %request_ctx.request_id,
+                        endpoint_id = %route.route_id,
+                        "ChatGPT backend rejected the stored subscription token; refreshing once"
+                    );
+                    match chatgpt_backend::refresh_stored_endpoint_token(
+                        &repository,
+                        &proxy_client,
+                        route.route_id,
+                    )
+                    .await
+                    {
+                        Ok(tokens) => {
+                            chatgpt_auth = Some(CodexAuth::new(tokens.access_token, true));
+                            attempt += 1;
+                            continue;
+                        }
+                        Err(chatgpt_backend::ChatgptBackendError::InvalidGrant(message)) => {
+                            return Ok(ForwardOutcome::CompatError(CompatError::new(
+                                reqwest::StatusCode::UNAUTHORIZED,
+                                "chatgpt_login_invalid",
+                                &format!(
+                                    "ChatGPT subscription login is no longer valid; complete the OAuth login again ({message})"
+                                ),
+                            )));
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                event = "chatgpt_token_refresh_failed",
+                                request_id = %request_ctx.request_id,
+                                endpoint_id = %route.route_id,
+                                error = %error,
+                                "returning the upstream 401 after a failed ChatGPT token refresh"
+                            );
+                        }
+                    }
+                }
                 let outcome =
                     Box::pin(handle_attempt_response(response, response_ctx.cloned())).await?;
                 match outcome {
@@ -852,6 +926,87 @@ fn error_chain_contains(
         source = cause.source();
     }
     false
+}
+
+/// Issue #599 R2c: config-repository handle for the ChatGPT OAuth token path.
+/// Managed workers carry it on the admin state; standalone SQLite workers build
+/// one over their shared store + secret manager.
+fn chatgpt_repository(services: &RuntimeServices) -> Option<db::ConfigRepository> {
+    services
+        .admin_state()
+        .map(|state| state.config_repository.clone())
+        .or_else(|| {
+            services
+                .standalone_state()
+                .map(|state| state.config_repository())
+        })
+}
+
+/// Issue #599 R2c: resolve the ChatGPT subscription credential for a route.
+///
+/// `Ok(None)` keeps the unchanged platform path (non-OpenAI endpoint, no stored
+/// token, or an unreadable credential). `Ok(Some(auth))` routes the turn to the
+/// Codex backend. `Err` is a clear client error for a stored login that is
+/// already known to be revoked.
+async fn resolve_chatgpt_auth(
+    services: &RuntimeServices,
+    route: &db::RouteConfig,
+) -> Result<Option<CodexAuth>, CompatError> {
+    if route.provider != db::EndpointProvider::OpenAi {
+        return Ok(None);
+    }
+    let Some(repository) = chatgpt_repository(services) else {
+        return Ok(None);
+    };
+    let token = match repository.get_endpoint_oauth_token(route.route_id).await {
+        Ok(Some(token)) => token,
+        Ok(None) => return Ok(None),
+        Err(err) => {
+            tracing::warn!(
+                event = "chatgpt_token_read_failed",
+                endpoint_id = %route.route_id,
+                error = %err,
+                "falling back to the platform route after a ChatGPT token read failure"
+            );
+            return Ok(None);
+        }
+    };
+    if !chatgpt_backend::access_token_expired(token.expires_at) {
+        return Ok(Some(CodexAuth::new(token.access_token, false)));
+    }
+    // Expired token: refresh up front so the turn never wastes a 401.
+    let client = match proxy::client_for_route(&services.client, route) {
+        Ok(client) => client,
+        Err(message) => {
+            tracing::warn!(
+                event = "invalid_proxy_url",
+                endpoint_id = %route.route_id,
+                error = %message,
+                "cannot refresh the ChatGPT token without a usable proxy client"
+            );
+            return Ok(Some(CodexAuth::new(token.access_token, false)));
+        }
+    };
+    match chatgpt_backend::refresh_stored_endpoint_token(&repository, &client, route.route_id).await
+    {
+        Ok(tokens) => Ok(Some(CodexAuth::new(tokens.access_token, true))),
+        Err(chatgpt_backend::ChatgptBackendError::InvalidGrant(message)) => Err(CompatError::new(
+            reqwest::StatusCode::UNAUTHORIZED,
+            "chatgpt_login_invalid",
+            &format!(
+                "ChatGPT subscription login is no longer valid; complete the OAuth login again ({message})"
+            ),
+        )),
+        Err(error) => {
+            tracing::warn!(
+                event = "chatgpt_token_refresh_failed",
+                endpoint_id = %route.route_id,
+                error = %error,
+                "sending the stale ChatGPT token; the upstream 401 retry still applies"
+            );
+            Ok(Some(CodexAuth::new(token.access_token, false)))
+        }
+    }
 }
 
 #[cfg(test)]

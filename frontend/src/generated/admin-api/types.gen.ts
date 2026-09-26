@@ -329,6 +329,18 @@ export type EndpointApiKeyRequest = {
     key_label: string;
 };
 
+/**
+ * Issue #599 R2b: stored-token state for the login UI. `expires_at`/`expired`
+ * drive the refresh-on-expiry display; no secret is ever echoed.
+ */
+export type EndpointOAuthStatusResponse = {
+    endpoint_id: string;
+    expired: boolean;
+    expires_at?: string | null;
+    has_oauth_token: boolean;
+    plan: EndpointPlan;
+};
+
 export type EndpointPage = {
     endpoints: Array<ProviderEndpoint>;
     first: number;
@@ -342,6 +354,8 @@ export type EndpointPageResponse = {
     rows: number;
     total: number;
 };
+
+export type EndpointPlan = 'platform_api_key' | 'chatgpt_subscription';
 
 export type EndpointProtocolMode = 'auto' | 'manual';
 
@@ -371,6 +385,7 @@ export type EndpointRequest = {
     name: string;
     native_api_override?: null | NativeApi;
     owner_user_id?: number | null;
+    plan?: null | EndpointPlan;
     protocol_mode: EndpointProtocolMode;
     provider?: EndpointProvider;
     provider_region?: null | EndpointRegion;
@@ -866,6 +881,63 @@ export type ModelRouteWhitelistResponse = {
 
 export type NativeApi = 'auto' | 'anthropic_messages' | 'chat' | 'responses' | 'realtime';
 
+/**
+ * Issue #599 R2b: browser login completion. `redirect_url` is the full URL
+ * (or bare query string) the browser landed on after ChatGPT redirected to
+ * `redirect_uri`.
+ */
+export type OAuthBrowserCompleteRequest = {
+    flow_id: string;
+    redirect_url: string;
+};
+
+/**
+ * Issue #599 R2b: browser login start. The operator opens `authorize_url` and
+ * pastes the URL the browser lands on (the registered `redirect_uri`) back
+ * into the complete route.
+ */
+export type OAuthBrowserStartResponse = {
+    authorize_url: string;
+    expires_in_seconds: number;
+    flow_id: string;
+    redirect_uri: string;
+};
+
+/**
+ * Issue #599 R2b: device-code login start. The admin UI shows `user_code` and
+ * `verification_uri`, then polls the device poll route at `interval_seconds`
+ * (plus a small safety margin).
+ */
+export type OAuthDeviceStartResponse = {
+    expires_in_seconds: number;
+    flow_id: string;
+    interval_seconds: number;
+    user_code: string;
+    verification_uri: string;
+};
+
+/**
+ * Issue #599 R2b: reference to one pending per-endpoint login flow.
+ */
+export type OAuthFlowRequest = {
+    flow_id: string;
+};
+
+/**
+ * Issue #599 R2b: login poll result. `pending` means ChatGPT has not accepted
+ * the device code yet; `complete` carries the freshly stamped endpoint.
+ */
+export type OAuthLoginResponse = {
+    endpoint?: null | ProviderEndpoint;
+    flow_id: string;
+    status: OAuthLoginStatus;
+};
+
+/**
+ * Issue #599 R2b: per-endpoint ChatGPT OAuth login state.
+ */
+export type OAuthLoginStatus = 'pending' | 'complete';
+
 export type OpenRouterBalance = {
     is_free_tier: boolean;
     limit?: number | null;
@@ -900,6 +972,12 @@ export type ProviderEndpoint = {
     enabled: boolean;
     endpoint_id: string;
     /**
+     * Issue #599 R2a: response-side saved-OAuth-token indicator. `true` when
+     * a ChatGPT OAuth token is stored; the secrets themselves are never
+     * echoed, mirroring `has_proxy_url`.
+     */
+    has_oauth_token?: boolean;
+    /**
      * Issue #368 Phase C (P2): response-side saved-proxy indicator.
      * `true` when a proxy URL is stored; the secret itself is never echoed.
      */
@@ -910,6 +988,13 @@ export type ProviderEndpoint = {
     native_api: string;
     native_api_source: string;
     owner_user_id?: number | null;
+    /**
+     * Issue #599 R2a: upstream plan axis (`platform_api_key` |
+     * `chatgpt_subscription`). Derived server-side from the stored OAuth
+     * token (see `EndpointPlan::resolve`); `serde(default)` keeps the
+     * contract backward-compatible, mirroring `has_proxy_url`.
+     */
+    plan?: EndpointPlan;
     provider: EndpointProvider;
     provider_region?: null | EndpointRegion;
     scope: string;
@@ -2125,6 +2210,202 @@ export type UpdateEndpointResponses = {
 };
 
 export type UpdateEndpointResponse = UpdateEndpointResponses[keyof UpdateEndpointResponses];
+
+export type OauthClearData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/endpoints/{endpoint_id}/oauth';
+};
+
+export type OauthClearErrors = {
+    404: ErrorEnvelope;
+};
+
+export type OauthClearError = OauthClearErrors[keyof OauthClearErrors];
+
+export type OauthClearResponses = {
+    /**
+     * Stored ChatGPT OAuth token cleared
+     */
+    204: void;
+};
+
+export type OauthClearResponse = OauthClearResponses[keyof OauthClearResponses];
+
+export type OauthStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/endpoints/{endpoint_id}/oauth';
+};
+
+export type OauthStatusErrors = {
+    404: ErrorEnvelope;
+};
+
+export type OauthStatusError = OauthStatusErrors[keyof OauthStatusErrors];
+
+export type OauthStatusResponses = {
+    /**
+     * Stored ChatGPT OAuth login state
+     */
+    200: EndpointOAuthStatusResponse;
+};
+
+export type OauthStatusResponse = OauthStatusResponses[keyof OauthStatusResponses];
+
+export type OauthBrowserStartData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/endpoints/{endpoint_id}/oauth/browser';
+};
+
+export type OauthBrowserStartErrors = {
+    400: ErrorEnvelope;
+    404: ErrorEnvelope;
+};
+
+export type OauthBrowserStartError = OauthBrowserStartErrors[keyof OauthBrowserStartErrors];
+
+export type OauthBrowserStartResponses = {
+    /**
+     * Browser login started
+     */
+    200: OAuthBrowserStartResponse;
+};
+
+export type OauthBrowserStartResponse = OauthBrowserStartResponses[keyof OauthBrowserStartResponses];
+
+export type OauthBrowserCompleteData = {
+    body: OAuthBrowserCompleteRequest;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/endpoints/{endpoint_id}/oauth/browser/complete';
+};
+
+export type OauthBrowserCompleteErrors = {
+    400: ErrorEnvelope;
+    404: ErrorEnvelope;
+    410: ErrorEnvelope;
+};
+
+export type OauthBrowserCompleteError = OauthBrowserCompleteErrors[keyof OauthBrowserCompleteErrors];
+
+export type OauthBrowserCompleteResponses = {
+    /**
+     * Browser login completed from the pasted redirect
+     */
+    200: OAuthLoginResponse;
+};
+
+export type OauthBrowserCompleteResponse = OauthBrowserCompleteResponses[keyof OauthBrowserCompleteResponses];
+
+export type OauthDeviceStartData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/endpoints/{endpoint_id}/oauth/device';
+};
+
+export type OauthDeviceStartErrors = {
+    400: ErrorEnvelope;
+    404: ErrorEnvelope;
+};
+
+export type OauthDeviceStartError = OauthDeviceStartErrors[keyof OauthDeviceStartErrors];
+
+export type OauthDeviceStartResponses = {
+    /**
+     * Device-code login started
+     */
+    200: OAuthDeviceStartResponse;
+};
+
+export type OauthDeviceStartResponse = OauthDeviceStartResponses[keyof OauthDeviceStartResponses];
+
+export type OauthDevicePollData = {
+    body: OAuthFlowRequest;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/endpoints/{endpoint_id}/oauth/device/poll';
+};
+
+export type OauthDevicePollErrors = {
+    400: ErrorEnvelope;
+    404: ErrorEnvelope;
+    410: ErrorEnvelope;
+};
+
+export type OauthDevicePollError = OauthDevicePollErrors[keyof OauthDevicePollErrors];
+
+export type OauthDevicePollResponses = {
+    /**
+     * Device-code login poll result
+     */
+    200: OAuthLoginResponse;
+};
+
+export type OauthDevicePollResponse = OauthDevicePollResponses[keyof OauthDevicePollResponses];
+
+export type OauthRefreshData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/endpoints/{endpoint_id}/oauth/refresh';
+};
+
+export type OauthRefreshErrors = {
+    400: ErrorEnvelope;
+    404: ErrorEnvelope;
+};
+
+export type OauthRefreshError = OauthRefreshErrors[keyof OauthRefreshErrors];
+
+export type OauthRefreshResponses = {
+    /**
+     * ChatGPT OAuth login state after refresh
+     */
+    200: EndpointOAuthStatusResponse;
+};
+
+export type OauthRefreshResponse = OauthRefreshResponses[keyof OauthRefreshResponses];
 
 export type TestEndpointData = {
     body?: never;

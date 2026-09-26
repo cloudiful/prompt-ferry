@@ -1,6 +1,7 @@
 import type {
   ApprovalStatusFilter,
   ConversationEndpointOverride,
+  EndpointPlan,
   NativeApi,
   RequestRecordDetail,
   RequestRecordListRow,
@@ -33,6 +34,12 @@ export type EndpointForm = {
   protocol_mode: 'auto' | 'manual'
   native_api_override:
     'anthropic_messages' | 'responses' | 'chat' | 'realtime' | null
+  // Issue #599 R2c: upstream plan axis (`platform_api_key` |
+  // `chatgpt_subscription`). Sent on save; `chatgpt_subscription` requires a
+  // completed OAuth login (the server rejects it otherwise) and
+  // `has_oauth_token` mirrors the stored credential so the selector can gate.
+  plan: EndpointPlan
+  has_oauth_token: boolean
   enabled: boolean
   mcp_enabled: boolean
   // Issue #368 Phase C: masked outbound proxy default. `proxy_url` holds

@@ -5,6 +5,8 @@ use http::header;
 use reqwest::{Client, Method};
 use std::borrow::Cow;
 
+use crate::worker_admin::chatgpt_backend::{self, CodexAuth};
+
 #[cfg(test)]
 pub(super) async fn send_upstream_request(
     client: &Client,
@@ -46,15 +48,52 @@ pub(super) fn build_upstream_request(
         PreparedRequestBody::PassthroughStream(bytes)
         | PreparedRequestBody::BufferedBytes(bytes) => bytes.as_slice(),
     };
-    // Each transform borrows the bytes when nothing needs rewriting, so an
-    // unchanged body is forwarded byte-for-byte (prefix-cache stable) and the
-    // only owned allocation is the final one reqwest takes ownership of.
+    request_builder.body(transformed_body(route, raw, false))
+}
+
+/// Issue #599 R2c: ChatGPT (Codex) backend request builder. The URL already
+/// points at the Codex backend; auth comes from the stored OAuth token (bearer
+/// + `chatgpt-account-id`) and the body is normalized onto a Codex model with
+/// `store: false`. The platform builder above is untouched.
+pub(super) fn build_codex_upstream_request(
+    client: &Client,
+    method: &Method,
+    url: &str,
+    route: &db::RouteConfig,
+    body: &PreparedRequestBody,
+    auth: &CodexAuth,
+) -> reqwest::RequestBuilder {
+    let raw = match body {
+        PreparedRequestBody::PassthroughStream(bytes)
+        | PreparedRequestBody::BufferedBytes(bytes) => bytes.as_slice(),
+    };
+    chatgpt_backend::with_codex_headers(
+        client
+            .request(method.clone(), url)
+            .header(header::CONTENT_TYPE, "application/json"),
+        &auth.access_token,
+        auth.account_id.as_deref(),
+    )
+    .body(transformed_body(route, raw, true))
+}
+
+/// Shared provider body pipeline. Each transform borrows the bytes when
+/// nothing needs rewriting, so an unchanged body is forwarded byte-for-byte
+/// (prefix-cache stable) and the only owned allocation is the final buffer
+/// reqwest takes ownership of. `codex_backend` appends the ChatGPT (Codex)
+/// normalization (model mapping + `store: false`), which also hands back an
+/// owned buffer.
+fn transformed_body(route: &db::RouteConfig, raw: &[u8], codex_backend: bool) -> Vec<u8> {
     let body = apply_minimax_service_tier(route, raw);
     let body = apply_minimax_reasoning_split(route, body.as_ref());
     let body = apply_minimax_reasoning_echo_restore(route, body.as_ref());
     let body = apply_deepseek_thinking(route, body.as_ref());
     let body = apply_anthropic_cache_control(route, body);
-    request_builder.body(body.into_owned())
+    if codex_backend {
+        chatgpt_backend::normalize_codex_request_body(body.as_ref()).into_owned()
+    } else {
+        body.into_owned()
+    }
 }
 
 /// Inject the endpoint-configured MiniMax `service_tier` into an upstream
@@ -1771,6 +1810,140 @@ mod tests {
         assert!(
             url.starts_with("https://open.bigmodel.cn/api/coding/paas/v4"),
             "{url} must use the derived Chat family base"
+        );
+    }
+
+    // ---- Issue #599 R2c: ChatGPT (Codex) backend request builder ----
+
+    fn openai_responses_route() -> RouteConfig {
+        RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 7,
+            model_route_rule_id: None,
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: "platform-key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: NativeApi::Responses,
+            upstream_model: None,
+            route_selection_reason: RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::OpenAi,
+            service_tier: crate::db::MinimaxServiceTier::Standard,
+            proxy_url: None,
+            dev_system_normalize: false,
+            thinking_downgrade_enabled: false,
+            thinking_effort_override: None,
+            compact_mode: crate::db::CompactMode::Passthrough,
+        }
+    }
+
+    fn jwt_with_account_id(account_id: &str) -> String {
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        let payload = serde_json::json!({
+            "https://api.openai.com/auth": { "chatgpt_account_id": account_id }
+        });
+        format!("header.{}.sig", URL_SAFE_NO_PAD.encode(payload.to_string()))
+    }
+
+    #[test]
+    fn codex_request_uses_oauth_bearer_and_normalizes_the_model() {
+        let route = openai_responses_route();
+        let auth = CodexAuth::new("oauth-access-token".to_string(), false);
+        let request = build_codex_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://chatgpt.com/backend-api/codex/responses",
+            &route,
+            &PreparedRequestBody::BufferedBytes(
+                br#"{"model":"gpt-4o","input":[{"role":"user","content":"hi"}]}"#.to_vec(),
+            ),
+            &auth,
+        )
+        .build()
+        .unwrap();
+        assert_eq!(
+            request.headers().get(header::AUTHORIZATION).unwrap(),
+            "Bearer oauth-access-token"
+        );
+        assert_eq!(request.headers().get("originator").unwrap(), "opencode");
+        // An opaque token carries no account claim, so no binding header.
+        assert!(request.headers().get("chatgpt-account-id").is_none());
+        let value: serde_json::Value =
+            serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+        assert_eq!(value["model"], "gpt-5.1-codex");
+        assert_eq!(value["store"], false);
+        assert_eq!(value["input"][0]["content"], "hi");
+    }
+
+    #[test]
+    fn codex_request_carries_the_account_id_claim() {
+        let route = openai_responses_route();
+        let auth = CodexAuth::new(jwt_with_account_id("acct_123"), true);
+        assert_eq!(auth.account_id.as_deref(), Some("acct_123"));
+        assert!(auth.refreshed);
+        let request = build_codex_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://chatgpt.com/backend-api/codex/responses",
+            &route,
+            &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-5.1-codex"}"#.to_vec()),
+            &auth,
+        )
+        .build()
+        .unwrap();
+        assert_eq!(
+            request.headers().get("chatgpt-account-id").unwrap(),
+            "acct_123"
+        );
+    }
+
+    #[test]
+    fn platform_builder_keeps_the_platform_model_and_store_field() {
+        // The Codex model mapping is only reachable through the Codex builder;
+        // a platform OpenAI Responses route must forward its body unchanged.
+        let route = openai_responses_route();
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://api.openai.com/v1/responses",
+            &route,
+            &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-4o","store":true}"#.to_vec()),
+            &[],
+            None,
+        )
+        .build()
+        .unwrap();
+        assert_eq!(
+            request.headers().get(header::AUTHORIZATION).unwrap(),
+            "Bearer platform-key"
+        );
+        let value: serde_json::Value =
+            serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+        assert_eq!(value["model"], "gpt-4o");
+        assert_eq!(value["store"], true);
+    }
+
+    #[test]
+    fn codex_body_normalization_borrows_an_already_normalized_body() {
+        let route = openai_responses_route();
+        let auth = CodexAuth::new("oauth-access-token".to_string(), false);
+        let body = br#"{ "model" : "gpt-5.1-codex" , "store" : false }"#;
+        let request = build_codex_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "https://chatgpt.com/backend-api/codex/responses",
+            &route,
+            &PreparedRequestBody::BufferedBytes(body.to_vec()),
+            &auth,
+        )
+        .build()
+        .unwrap();
+        assert_eq!(
+            request.body().unwrap().as_bytes().unwrap(),
+            body,
+            "an already-normalized body must stay byte-for-byte"
         );
     }
 }

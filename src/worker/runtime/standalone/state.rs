@@ -80,6 +80,15 @@ impl StandaloneRuntimeState {
         self.store.pool().clone()
     }
 
+    /// Issue #599 R2c: config-repository handle for runtime paths that must
+    /// read decrypted endpoint credentials (the ChatGPT OAuth token) while the
+    /// data plane runs without an admin state of its own. Construction is
+    /// cheap (Arc store + key material) and configuration writes keep going
+    /// through the store's typed methods.
+    pub(crate) fn config_repository(&self) -> crate::db::ConfigRepository {
+        crate::db::ConfigRepository::sqlite(self.store.clone(), self.manager.clone())
+    }
+
     /// Load the latest durable replay snapshot for a conversation, if any
     /// has been persisted. Used by runtime replay consumers (for example,
     /// prompt reconstruction) to restore the most recent prompt-ref

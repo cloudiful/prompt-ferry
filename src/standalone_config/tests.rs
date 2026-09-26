@@ -153,6 +153,8 @@ async fn schema_creation_has_typed_tables_without_plaintext_secret_columns() {
     assert!(table_names.contains("standalone_schema_meta"));
     assert!(table_names.contains("standalone_provider_endpoints"));
     assert!(table_names.contains("standalone_endpoint_keys"));
+    // Issue #599 R2a: per-endpoint OAuth token envelope table.
+    assert!(table_names.contains("standalone_endpoint_oauth_tokens"));
     assert!(table_names.contains("standalone_model_routes"));
     assert!(table_names.contains("standalone_client_keys"));
     assert!(table_names.contains("standalone_users"));
@@ -177,6 +179,344 @@ async fn schema_creation_has_typed_tables_without_plaintext_secret_columns() {
     );
     pool.close().await;
     cleanup(store, path).await;
+}
+
+async fn insert_oauth_token_endpoint(pool: &sqlx::SqlitePool, endpoint_id: Uuid) {
+    // Issue #599 R2a: FK-enforced parent row for the token tests (dummy API
+    // key envelope bytes; the secret under test is the OAuth token).
+    sqlx::query(
+        r#"INSERT INTO standalone_provider_endpoints
+           (endpoint_id, name, provider, provider_region, base_url, native_api,
+            native_api_source, key_lb_enabled, enabled, mcp_enabled,
+            api_key_ciphertext, api_key_nonce, api_key_key_version)
+           VALUES (?, 'oauth-endpoint', 'openai', NULL, 'https://example.test',
+                   'responses', 'manual', 0, 1, 0, X'00', X'01', 1)"#,
+    )
+    .bind(endpoint_id.to_string())
+    .execute(pool)
+    .await
+    .expect("seed endpoint");
+}
+
+fn oauth_token_endpoint_input(provider: crate::db::EndpointProvider) -> crate::db::EndpointCreate {
+    // Issue #599 R2a P1: minimal endpoint input for the provider-switch
+    // regression test; the OAuth token under test is stored separately.
+    crate::db::EndpointCreate {
+        scope: "admin".to_string(),
+        owner_user_id: None,
+        name: "oauth-endpoint".to_string(),
+        provider,
+        provider_region: None,
+        service_tier: Default::default(),
+        base_url: "https://example.test".to_string(),
+        native_api: NativeApi::Responses,
+        native_api_source: NativeApiSource::Manual,
+        api_key: "endpoint-secret".to_string(),
+        api_keys: Vec::new(),
+        key_lb_enabled: false,
+        enabled: true,
+        proxy_url: None,
+        active_windows: None,
+    }
+}
+
+#[tokio::test]
+async fn endpoint_oauth_token_round_trips_through_envelope() {
+    // Issue #599 R2a: set/get/presence/clear over the 0033 envelope triplets.
+    let (store, path) = open_store().await;
+    let manager = manager(9);
+    let endpoint_id = Uuid::new_v4();
+    insert_oauth_token_endpoint(store.pool(), endpoint_id).await;
+
+    assert!(
+        store
+            .get_endpoint_oauth_token(&manager, endpoint_id)
+            .await
+            .expect("get absent")
+            .is_none()
+    );
+    assert!(
+        store
+            .list_endpoint_oauth_token_ids()
+            .await
+            .expect("ids absent")
+            .is_empty()
+    );
+
+    let expires = chrono::DateTime::parse_from_rfc3339("2030-01-01T00:00:00Z")
+        .expect("fixed expiry")
+        .with_timezone(&chrono::Utc);
+    store
+        .set_endpoint_oauth_token(
+            &manager,
+            endpoint_id,
+            Some(crate::db::EndpointOAuthTokenSet {
+                access_token: "access-1".to_string(),
+                refresh_token: "refresh-1".to_string(),
+                expires_at: Some(expires),
+            }),
+        )
+        .await
+        .expect("set token");
+    let loaded = store
+        .get_endpoint_oauth_token(&manager, endpoint_id)
+        .await
+        .expect("get token")
+        .expect("token present");
+    assert_eq!(loaded.endpoint_id, endpoint_id);
+    assert_eq!(loaded.access_token, "access-1");
+    assert_eq!(loaded.refresh_token, "refresh-1");
+    assert_eq!(loaded.expires_at, Some(expires));
+    assert_eq!(
+        store
+            .list_endpoint_oauth_token_ids()
+            .await
+            .expect("ids present"),
+        vec![endpoint_id]
+    );
+
+    // Ciphertext at rest must not contain the plaintext secret.
+    let row = sqlx::query(
+        "SELECT access_token_ciphertext, refresh_token_ciphertext \
+         FROM standalone_endpoint_oauth_tokens WHERE endpoint_id = ?",
+    )
+    .bind(endpoint_id.to_string())
+    .fetch_one(store.pool())
+    .await
+    .expect("token row");
+    for column in ["access_token_ciphertext", "refresh_token_ciphertext"] {
+        let blob = row.try_get::<Vec<u8>, _>(column).expect("ciphertext blob");
+        assert!(
+            !String::from_utf8_lossy(&blob).contains("access-1")
+                && !String::from_utf8_lossy(&blob).contains("refresh-1"),
+            "{column} must be encrypted at rest"
+        );
+    }
+
+    // Refresh replaces the stored pair.
+    store
+        .set_endpoint_oauth_token(
+            &manager,
+            endpoint_id,
+            Some(crate::db::EndpointOAuthTokenSet {
+                access_token: "access-2".to_string(),
+                refresh_token: "refresh-2".to_string(),
+                expires_at: None,
+            }),
+        )
+        .await
+        .expect("refresh token");
+    let reloaded = store
+        .get_endpoint_oauth_token(&manager, endpoint_id)
+        .await
+        .expect("get refreshed")
+        .expect("token present");
+    assert_eq!(reloaded.access_token, "access-2");
+    assert_eq!(reloaded.refresh_token, "refresh-2");
+    assert_eq!(reloaded.expires_at, None);
+
+    // Clearing NULLs the row: reads fall back to absent.
+    store
+        .set_endpoint_oauth_token(&manager, endpoint_id, None)
+        .await
+        .expect("clear token");
+    assert!(
+        store
+            .get_endpoint_oauth_token(&manager, endpoint_id)
+            .await
+            .expect("get cleared")
+            .is_none()
+    );
+    assert!(
+        store
+            .list_endpoint_oauth_token_ids()
+            .await
+            .expect("ids cleared")
+            .is_empty()
+    );
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn endpoint_oauth_token_clear_survives_a_provider_switch() {
+    // Issue #599 R2a P1: the OpenAI-only gate guards *storing* a credential.
+    // When an OpenAI endpoint with a stored token moves to another provider,
+    // the admin PATCH clears the orphaned token after the endpoint update —
+    // and that clear used to fail the provider gate (turning the switch into
+    // a 500 and leaving the secret behind).
+    let (store, path) = open_store().await;
+    let store = Arc::new(store);
+    let manager = manager(9);
+    let repo = crate::db::ConfigRepository::sqlite(store.clone(), manager.clone());
+    let endpoint_id = Uuid::new_v4();
+    repo.create_endpoint(
+        endpoint_id,
+        oauth_token_endpoint_input(crate::db::EndpointProvider::OpenAi),
+        false,
+    )
+    .await
+    .expect("create the openai endpoint");
+    repo.set_endpoint_oauth_token(
+        endpoint_id,
+        Some(crate::db::EndpointOAuthTokenSet {
+            access_token: "access-1".to_string(),
+            refresh_token: "refresh-1".to_string(),
+            expires_at: None,
+        }),
+    )
+    .await
+    .expect("store token on the openai endpoint");
+    let stored = repo
+        .get_endpoint(endpoint_id)
+        .await
+        .expect("get openai endpoint")
+        .expect("endpoint present");
+    assert!(stored.has_oauth_token);
+    assert_eq!(stored.plan, crate::db::EndpointPlan::ChatgptSubscription);
+
+    // Move the endpoint to a non-OpenAI provider. The endpoint upsert keeps
+    // the token row, so the switch leaves an orphaned credential behind.
+    repo.update_endpoint(
+        endpoint_id,
+        oauth_token_endpoint_input(crate::db::EndpointProvider::Generic),
+    )
+    .await
+    .expect("switch provider")
+    .expect("endpoint present");
+    let orphaned = repo
+        .get_endpoint(endpoint_id)
+        .await
+        .expect("get switched endpoint")
+        .expect("endpoint present");
+    assert_eq!(orphaned.provider, crate::db::EndpointProvider::Generic);
+    assert!(
+        orphaned.has_oauth_token,
+        "the token row must survive the provider switch"
+    );
+    assert_eq!(orphaned.plan, crate::db::EndpointPlan::PlatformApiKey);
+
+    // Storing stays OpenAI-only ...
+    assert!(
+        repo.set_endpoint_oauth_token(
+            endpoint_id,
+            Some(crate::db::EndpointOAuthTokenSet {
+                access_token: "access-2".to_string(),
+                refresh_token: "refresh-2".to_string(),
+                expires_at: None,
+            }),
+        )
+        .await
+        .is_err(),
+        "a non-openai endpoint must reject new oauth tokens"
+    );
+    // ... but clearing the orphaned token must succeed (P1 regression).
+    repo.clear_endpoint_oauth_token(endpoint_id)
+        .await
+        .expect("clear the orphaned token after the provider switch");
+    assert!(
+        repo.list_endpoint_oauth_token_ids()
+            .await
+            .expect("token ids after clear")
+            .is_empty()
+    );
+    let cleared = repo
+        .get_endpoint(endpoint_id)
+        .await
+        .expect("get cleared endpoint")
+        .expect("endpoint present");
+    assert!(!cleared.has_oauth_token);
+    assert_eq!(cleared.plan, crate::db::EndpointPlan::PlatformApiKey);
+
+    drop(repo);
+    let store = Arc::try_unwrap(store).expect("sole store owner after the repository is dropped");
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn endpoint_oauth_token_wrong_key_is_rejected() {
+    // Issue #599 R2a: the envelope only opens with the manager that sealed
+    // it; a rotated/lost key fails closed instead of returning garbage.
+    let (store, path) = open_store().await;
+    let endpoint_id = Uuid::new_v4();
+    insert_oauth_token_endpoint(store.pool(), endpoint_id).await;
+    store
+        .set_endpoint_oauth_token(
+            &manager(9),
+            endpoint_id,
+            Some(crate::db::EndpointOAuthTokenSet {
+                access_token: "access-1".to_string(),
+                refresh_token: "refresh-1".to_string(),
+                expires_at: None,
+            }),
+        )
+        .await
+        .expect("set token");
+    assert!(
+        store
+            .get_endpoint_oauth_token(&manager(10), endpoint_id)
+            .await
+            .is_err(),
+        "decryption with the wrong manager must fail"
+    );
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn endpoint_oauth_token_is_dropped_with_its_endpoint() {
+    // Issue #599 R2a: `ON DELETE CASCADE` keeps no orphaned secret behind
+    // when the endpoint goes away.
+    let (store, path) = open_store().await;
+    let manager = manager(9);
+    let endpoint_id = Uuid::new_v4();
+    insert_oauth_token_endpoint(store.pool(), endpoint_id).await;
+    store
+        .set_endpoint_oauth_token(
+            &manager,
+            endpoint_id,
+            Some(crate::db::EndpointOAuthTokenSet {
+                access_token: "access-1".to_string(),
+                refresh_token: "refresh-1".to_string(),
+                expires_at: None,
+            }),
+        )
+        .await
+        .expect("set token");
+    assert!(store.delete_endpoint(endpoint_id).await.expect("delete"));
+    assert!(
+        store
+            .get_endpoint_oauth_token(&manager, endpoint_id)
+            .await
+            .expect("get after delete")
+            .is_none()
+    );
+    assert!(
+        store
+            .list_endpoint_oauth_token_ids()
+            .await
+            .expect("ids after delete")
+            .is_empty()
+    );
+    cleanup(store, path).await;
+}
+
+#[test]
+fn endpoint_oauth_token_debug_redacts_both_secrets() {
+    // Issue #599 R2a: refresh tokens must never reach logs.
+    let record = super::models::EndpointOAuthTokenConfig {
+        endpoint_id: Uuid::new_v4(),
+        access_token: "access-secret-value".to_string(),
+        refresh_token: "refresh-secret-value".to_string(),
+        expires_at: None,
+    };
+    let rendered = format!("{record:?}");
+    assert!(
+        !rendered.contains("access-secret-value"),
+        "access token must not leak into Debug: {rendered}"
+    );
+    assert!(
+        !rendered.contains("refresh-secret-value"),
+        "refresh token must not leak into Debug: {rendered}"
+    );
 }
 
 #[tokio::test]
@@ -593,7 +933,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -685,7 +1025,7 @@ fn sample_usage_record(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty_two() {
+async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty_three() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -693,7 +1033,7 @@ async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty_two
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
     assert!(
         store
             .list_usage_summaries(64)
@@ -1588,7 +1928,7 @@ fn sample_snapshot(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty_two() {
+async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty_three() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -1596,7 +1936,7 @@ async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty_
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
     let pool = store.pool().clone();
     for (column, declared_type) in [
         ("conversation_id", "TEXT"),
@@ -1719,7 +2059,7 @@ async fn upgrade_from_schema_eight_creates_request_lease_table() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
 
     // Confirm migration 0008 took effect before the new lease table
     // arrived so the test really exercises the schema-8 -> schema-9
