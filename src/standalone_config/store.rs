@@ -110,7 +110,13 @@ impl StandaloneConfigStore {
         &self.path
     }
 
-    pub(crate) fn pool(&self) -> &SqlitePool {
+    /// Share the underlying SQLite pool (integration-test support).
+    ///
+    /// Production code goes through the typed store methods; route-level
+    /// integration tests under `tests/` build as an external crate and
+    /// cannot see `pub(crate)` items, so they use this documented accessor
+    /// to construct `UserStore::sqlite` and to close the pool on cleanup.
+    pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 

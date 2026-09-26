@@ -640,6 +640,237 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/oauth:
+    get:
+      tags:
+      - endpoints
+      operationId: oauth_status
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Stored ChatGPT OAuth login state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EndpointOAuthStatusResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+    delete:
+      tags:
+      - endpoints
+      operationId: oauth_clear
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Stored ChatGPT OAuth token cleared
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/oauth/browser:
+    post:
+      tags:
+      - endpoints
+      operationId: oauth_browser_start
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Browser login started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthBrowserStartResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/oauth/browser/complete:
+    post:
+      tags:
+      - endpoints
+      operationId: oauth_browser_complete
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuthBrowserCompleteRequest'
+        required: true
+      responses:
+        '200':
+          description: Browser login completed from the pasted redirect
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthLoginResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '410':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/oauth/device:
+    post:
+      tags:
+      - endpoints
+      operationId: oauth_device_start
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Device-code login started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthDeviceStartResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/oauth/device/poll:
+    post:
+      tags:
+      - endpoints
+      operationId: oauth_device_poll
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuthFlowRequest'
+        required: true
+      responses:
+        '200':
+          description: Device-code login poll result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthLoginResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '410':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/oauth/refresh:
+    post:
+      tags:
+      - endpoints
+      operationId: oauth_refresh
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: ChatGPT OAuth login state after refresh
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EndpointOAuthStatusResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/admin/endpoints/{endpoint_id}/test:
     post:
       tags:
@@ -3327,6 +3558,31 @@ components:
           description: Stable key identity; when omitted or null the key is matched by key_label on update
         key_label:
           type: string
+    EndpointOAuthStatusResponse:
+      type: object
+      description: |-
+        Issue #599 R2b: stored-token state for the login UI. `expires_at`/`expired`
+        drive the refresh-on-expiry display; no secret is ever echoed.
+      required:
+      - endpoint_id
+      - plan
+      - has_oauth_token
+      - expired
+      properties:
+        endpoint_id:
+          type: string
+          format: uuid
+        expired:
+          type: boolean
+        expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        has_oauth_token:
+          type: boolean
+        plan:
+          $ref: '#/components/schemas/EndpointPlan'
     EndpointPage:
       type: object
       required:
@@ -4650,6 +4906,105 @@ components:
       - chat
       - responses
       - realtime
+    OAuthBrowserCompleteRequest:
+      type: object
+      description: |-
+        Issue #599 R2b: browser login completion. `redirect_url` is the full URL
+        (or bare query string) the browser landed on after ChatGPT redirected to
+        `redirect_uri`.
+      required:
+      - flow_id
+      - redirect_url
+      properties:
+        flow_id:
+          type: string
+          format: uuid
+        redirect_url:
+          type: string
+    OAuthBrowserStartResponse:
+      type: object
+      description: |-
+        Issue #599 R2b: browser login start. The operator opens `authorize_url` and
+        pastes the URL the browser lands on (the registered `redirect_uri`) back
+        into the complete route.
+      required:
+      - flow_id
+      - authorize_url
+      - redirect_uri
+      - expires_in_seconds
+      properties:
+        authorize_url:
+          type: string
+        expires_in_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+        flow_id:
+          type: string
+          format: uuid
+        redirect_uri:
+          type: string
+    OAuthDeviceStartResponse:
+      type: object
+      description: |-
+        Issue #599 R2b: device-code login start. The admin UI shows `user_code` and
+        `verification_uri`, then polls the device poll route at `interval_seconds`
+        (plus a small safety margin).
+      required:
+      - flow_id
+      - user_code
+      - verification_uri
+      - interval_seconds
+      - expires_in_seconds
+      properties:
+        expires_in_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+        flow_id:
+          type: string
+          format: uuid
+        interval_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+        user_code:
+          type: string
+        verification_uri:
+          type: string
+    OAuthFlowRequest:
+      type: object
+      description: 'Issue #599 R2b: reference to one pending per-endpoint login flow.'
+      required:
+      - flow_id
+      properties:
+        flow_id:
+          type: string
+          format: uuid
+    OAuthLoginResponse:
+      type: object
+      description: |-
+        Issue #599 R2b: login poll result. `pending` means ChatGPT has not accepted
+        the device code yet; `complete` carries the freshly stamped endpoint.
+      required:
+      - flow_id
+      - status
+      properties:
+        endpoint:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ProviderEndpoint'
+        flow_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/OAuthLoginStatus'
+    OAuthLoginStatus:
+      type: string
+      description: 'Issue #599 R2b: per-endpoint ChatGPT OAuth login state.'
+      enum:
+      - pending
+      - complete
     OpenRouterBalance:
       type: object
       required:

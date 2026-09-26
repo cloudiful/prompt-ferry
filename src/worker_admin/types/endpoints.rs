@@ -158,6 +158,73 @@ pub struct EndpointTestResponse {
     pub message: String,
 }
 
+/// Issue #599 R2b: per-endpoint ChatGPT OAuth login state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OAuthLoginStatus {
+    Pending,
+    Complete,
+}
+
+/// Issue #599 R2b: device-code login start. The admin UI shows `user_code` and
+/// `verification_uri`, then polls the device poll route at `interval_seconds`
+/// (plus a small safety margin).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OAuthDeviceStartResponse {
+    pub flow_id: Uuid,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub interval_seconds: u64,
+    pub expires_in_seconds: u64,
+}
+
+/// Issue #599 R2b: reference to one pending per-endpoint login flow.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct OAuthFlowRequest {
+    pub flow_id: Uuid,
+}
+
+/// Issue #599 R2b: login poll result. `pending` means ChatGPT has not accepted
+/// the device code yet; `complete` carries the freshly stamped endpoint.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct OAuthLoginResponse {
+    pub flow_id: Uuid,
+    pub status: OAuthLoginStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<db::ProviderEndpoint>,
+}
+
+/// Issue #599 R2b: browser login start. The operator opens `authorize_url` and
+/// pastes the URL the browser lands on (the registered `redirect_uri`) back
+/// into the complete route.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct OAuthBrowserStartResponse {
+    pub flow_id: Uuid,
+    pub authorize_url: String,
+    pub redirect_uri: String,
+    pub expires_in_seconds: u64,
+}
+
+/// Issue #599 R2b: browser login completion. `redirect_url` is the full URL
+/// (or bare query string) the browser landed on after ChatGPT redirected to
+/// `redirect_uri`.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct OAuthBrowserCompleteRequest {
+    pub flow_id: Uuid,
+    pub redirect_url: String,
+}
+
+/// Issue #599 R2b: stored-token state for the login UI. `expires_at`/`expired`
+/// drive the refresh-on-expiry display; no secret is ever echoed.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct EndpointOAuthStatusResponse {
+    pub endpoint_id: Uuid,
+    pub plan: EndpointPlan,
+    pub has_oauth_token: bool,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub expired: bool,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TokenPlanUsageResponse {
     pub provider: EndpointProvider,

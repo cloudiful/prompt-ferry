@@ -318,13 +318,10 @@ impl super::ConfigRepository {
         self.set_endpoint_oauth_token(endpoint_id, None).await
     }
 
-    /// Issue #599 R2a: load the decrypted OAuth token for internal use (token
-    /// refresh in R2b). Crate-private on purpose: the return type carries
-    /// secrets, so no admin response type may contain it. `None` means absent
-    /// or cleared.
-    // Issue #599 R2b will consume this dispatcher for token refresh;
-    // single-fetch presence reuses the backend secret reads above.
-    #[allow(dead_code)]
+    /// Issue #599 R2a/R2b: load the decrypted OAuth token for internal use
+    /// (token refresh and login completion in R2b). Crate-private on purpose:
+    /// the return type carries secrets, so no admin response type may contain
+    /// it. `None` means absent or cleared.
     pub(crate) async fn get_endpoint_oauth_token(
         &self,
         endpoint_id: Uuid,

@@ -29,7 +29,7 @@ pub(super) async fn create_endpoint(
     let mcp_enabled = body
         .mcp_enabled
         .unwrap_or(body.provider == db::EndpointProvider::Minimax);
-    let input = match resolve_endpoint_input(&state, body, None, None, None).await {
+    let input = match resolve_endpoint_input(&state, body, None, None, None, false).await {
         Ok(input) => input,
         Err(response) => return response.into_response(),
     };
@@ -107,12 +107,16 @@ pub(super) async fn update_endpoint(
     // `body` moves into `resolve_endpoint_input` (both are `Copy`).
     let requested_plan = body.plan;
     let new_provider = body.provider;
+    // Issue #599 R2b: an existing stored token makes the subscription plan
+    // claimable on PATCH (`validate_endpoint_plan`).
+    let has_oauth_token = existing.has_oauth_token;
     let input = match resolve_endpoint_input(
         &state,
         body,
         Some(existing_api_keys),
         existing_proxy_url,
         existing_active_windows,
+        has_oauth_token,
     )
     .await
     {

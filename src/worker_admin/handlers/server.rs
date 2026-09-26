@@ -307,6 +307,8 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             post(reject_approval),
         )
         .route("/bridge/status", get(bridge_status))
+        // Issue #599 R2b: per-endpoint ChatGPT OAuth login, refresh, and clear.
+        .merge(oauth::routes())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             reject_unsupported_sqlite_capabilities,
