@@ -52,11 +52,11 @@ pub(super) async fn create_endpoint(
             if let Err(err) = publish_snapshot(&state).await {
                 tracing::warn!(error = %err, "snapshot publication failed after endpoint create");
             }
-            match state.config_repository.get_endpoint(endpoint_id).await {
-                Ok(Some(endpoint)) => Json(endpoint).into_response(),
-                Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
-                Err(err) => internal(&state, err),
-            }
+            // Issue #599 R2e.2: answer from the committed write result. A
+            // freshly created endpoint never carries an OAuth token, so the
+            // effective plan is the platform default. The removed post-save
+            // re-fetch could turn a committed write into a false 404.
+            saved_endpoint_response(endpoint, false, mcp_enabled)
         }
         Err(err) => internal(&state, err),
     }
@@ -164,15 +164,31 @@ pub(super) async fn update_endpoint(
             if let Err(err) = publish_snapshot(&state).await {
                 tracing::warn!(error = %err, "snapshot publication failed after endpoint update");
             }
-            match state.config_repository.get_endpoint(endpoint_id).await {
-                Ok(Some(endpoint)) => Json(endpoint).into_response(),
-                Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
-                Err(err) => internal(&state, err),
-            }
+            // Issue #599 R2e.2: answer from the committed write result plus
+            // the in-handler transitions (`set_endpoint_mcp_enabled`, token
+            // clear) instead of re-reading the row; the removed post-save
+            // re-fetch could turn a committed write into a false 404.
+            let has_oauth_token = existing.has_oauth_token && !switch_clears_token;
+            saved_endpoint_response(endpoint, has_oauth_token, mcp_enabled)
         }
         Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
         Err(err) => internal(&state, err),
     }
+}
+
+/// Issue #599 R2e.2: render the create/update success response from the
+/// committed repository write result. The effective plan and token presence
+/// are derived in memory, so a committed write never turns into a false 404
+/// through a redundant post-save `get_endpoint` miss.
+fn saved_endpoint_response(
+    mut endpoint: db::UnifiedProviderEndpoint,
+    has_oauth_token: bool,
+    mcp_enabled: bool,
+) -> Response {
+    endpoint.has_oauth_token = has_oauth_token;
+    endpoint.plan = db::EndpointPlan::resolve(endpoint.provider, has_oauth_token);
+    endpoint.mcp_enabled = mcp_enabled;
+    Json(endpoint).into_response()
 }
 
 async fn refresh_managed_minimax_mcp(state: &AdminState, endpoint_id: Uuid) {
