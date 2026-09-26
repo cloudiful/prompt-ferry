@@ -325,8 +325,9 @@ OpenAI 端点支持两种「上游计划」（Admin → 上游端点 → OpenAI�
    刷新；上游返回 401 时自动刷新并重试一次；refresh token 失效会清除凭据并提示
    重新登录。
 4. 端点端口类型需为 `responses`。客户端模型名会归一为 Codex 后端模型：Codex 系列
-   （`gpt-5.2-codex`、`gpt-5.1-codex`、`gpt-5.1-codex-mini` 等）原样保留并去掉思考
-   强度后缀，其它模型（如 `gpt-4o`、`o3`）回退到 `gpt-5.1-codex`。
+   （`gpt-6-sol`、`gpt-6-astra`、`gpt-6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、
+   `gpt-5.6-luna`、`gpt-5.2-codex`、`gpt-5.1-codex` 等）原样保留并去掉思考
+   强度后缀；未知模型原样透传，由上游返回真实的模型错误；模型为空时回退到 `gpt-6-sol`。
 
 订阅额度仅在端点对话框展示（5 小时/周窗口），不参与路由权重，也不计入 Platform
 API 用量；两套凭据相互独立：切换到官方 API Key 计划会清除已存的 OAuth 凭据，切离

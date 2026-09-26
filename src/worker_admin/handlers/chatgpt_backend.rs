@@ -44,11 +44,18 @@ const MIN_TOKEN_TTL_SECONDS: i64 = 60;
 const MAX_TOKEN_TTL_SECONDS: i64 = 60 * 60 * 24 * 30;
 const MESSAGE_LIMIT: usize = 240;
 
-/// Default Codex backend model for any caller model the backend does not
-/// accept (the subscription backend rejects non-Codex OpenAI models).
-pub const DEFAULT_CODEX_MODEL: &str = "gpt-5.1-codex";
+/// Default Codex backend model, used only when the request carries no model
+/// name at all. Unknown names pass through untouched so the subscription
+/// backend returns the true model error instead of a misleading rewrite.
+pub const DEFAULT_CODEX_MODEL: &str = "gpt-6-sol";
 /// Codex backend model ids accepted by the ChatGPT subscription backend.
-static CODEX_MODELS: [&str; 9] = [
+static CODEX_MODELS: [&str; 15] = [
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
     "gpt-5.2",
     "gpt-5.2-codex",
     "gpt-5.1",
@@ -93,24 +100,27 @@ pub fn chatgpt_codex_url(native_path: &str) -> Option<String> {
 /// Normalize a caller model onto a Codex backend model id.
 ///
 /// Known Codex ids (and their `-low`/`-high`-style reasoning-effort variants)
-/// pass through with the suffix folded into the base id; anything else — other
-/// OpenAI families and unknown names — maps to [`DEFAULT_CODEX_MODEL`] because
-/// the subscription backend rejects them. A leading `provider/` segment is
-/// dropped first.
-pub fn normalize_codex_model(requested: &str) -> &'static str {
+/// pass through with the suffix folded into the base id; anything else passes
+/// through unchanged so the subscription backend returns the true model error
+/// instead of a misleading rewrite. A leading `provider/` segment is dropped
+/// first, and an empty model falls back to [`DEFAULT_CODEX_MODEL`].
+pub fn normalize_codex_model(requested: &str) -> Cow<'_, str> {
     let name = requested.trim();
     let name = name.rsplit('/').next().unwrap_or(name).trim();
+    if name.is_empty() {
+        return Cow::Borrowed(DEFAULT_CODEX_MODEL);
+    }
     if let Some(known) = known_codex_model(name) {
-        return known;
+        return Cow::Borrowed(known);
     }
     for suffix in REASONING_EFFORT_SUFFIXES {
         if let Some(base) = name.strip_suffix(suffix)
             && let Some(known) = known_codex_model(base)
         {
-            return known;
+            return Cow::Borrowed(known);
         }
     }
-    DEFAULT_CODEX_MODEL
+    Cow::Borrowed(name)
 }
 
 fn known_codex_model(name: &str) -> Option<&'static str> {
@@ -133,9 +143,9 @@ pub fn normalize_codex_request_body<'a>(body: &'a [u8]) -> Cow<'a, [u8]> {
     };
     let mut changed = false;
     if let Some(model) = object.get("model").and_then(Value::as_str) {
-        let normalized = normalize_codex_model(model);
+        let normalized = normalize_codex_model(model).into_owned();
         if normalized != model {
-            object.insert("model".to_string(), Value::String(normalized.to_string()));
+            object.insert("model".to_string(), Value::String(normalized));
             changed = true;
         }
     }

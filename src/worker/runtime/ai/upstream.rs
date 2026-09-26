@@ -1872,7 +1872,8 @@ mod tests {
         assert!(request.headers().get("chatgpt-account-id").is_none());
         let value: serde_json::Value =
             serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
-        assert_eq!(value["model"], "gpt-5.1-codex");
+        // Unknown models pass through so the backend returns the true error.
+        assert_eq!(value["model"], "gpt-4o");
         assert_eq!(value["store"], false);
         assert_eq!(value["input"][0]["content"], "hi");
     }
