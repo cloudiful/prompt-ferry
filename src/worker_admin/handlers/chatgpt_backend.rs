@@ -8,16 +8,18 @@
 //! The runtime request path (`worker::runtime::ai`) reaches these helpers
 //! through `worker_admin::chatgpt_backend`, the same way it already uses
 //! `worker_admin::token_plan_cache`; no secret is ever logged or echoed.
+//! Access-token claim decoding lives in the adjacent `codex_claims` module,
+//! and the R2f.1 request-context headers in `codex_request_headers`.
 
 use std::borrow::Cow;
 use std::time::Duration;
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE};
 use chrono::{DateTime, Utc};
 use reqwest::{Client, RequestBuilder};
 use serde_json::Value;
 use uuid::Uuid;
 
+use super::codex_claims;
 use super::oauth_client::{
     CHATGPT_ISSUER, ChatgptOAuthError, OAuthTokenResponse, refresh_chatgpt_tokens,
 };
@@ -164,27 +166,7 @@ pub fn normalize_codex_request_body<'a>(body: &'a [u8]) -> Cow<'a, [u8]> {
 /// top level or under the `https://api.openai.com/auth` claim). `None` when
 /// the token is opaque or malformed; the request is still attempted.
 pub fn codex_account_id_from_access_token(access_token: &str) -> Option<String> {
-    let payload = access_token.split('.').nth(1)?;
-    let mut padded = payload.to_string();
-    while padded.len() % 4 != 0 {
-        padded.push('=');
-    }
-    let bytes = URL_SAFE.decode(padded.as_bytes()).ok()?;
-    let value = serde_json::from_slice::<Value>(&bytes).ok()?;
-    account_id_from_claims(&value)
-}
-
-fn account_id_from_claims(payload: &Value) -> Option<String> {
-    let direct = payload.get("chatgpt_account_id");
-    let nested = payload
-        .get("https://api.openai.com/auth")
-        .and_then(|auth| auth.get("chatgpt_account_id"));
-    direct
-        .or(nested)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    codex_claims::account_id_from_access_token(access_token)
 }
 
 /// ChatGPT subscription credential resolved for one request. `refreshed`
@@ -237,6 +219,12 @@ pub fn with_codex_headers(
         None => builder,
     }
 }
+
+/// Request-path Codex headers beyond auth (issue #599 R2f.1). The presence
+/// rules and the residency claim live in the adjacent `codex_request_headers`
+/// module so this mapping layer stays bounded; the public path is kept here for
+/// the runtime request builder.
+pub use super::codex_request_headers::with_codex_request_headers;
 
 /// One display-only ChatGPT rate-limit window (percent based).
 #[derive(Debug, Clone, PartialEq)]

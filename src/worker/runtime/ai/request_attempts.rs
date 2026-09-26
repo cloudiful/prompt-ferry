@@ -303,9 +303,15 @@ pub(super) async fn forward_route_request(
         }
         let body = attempt_body(&prepared, downgraded_body.as_ref(), thinking_off);
         let upstream_request = match (chatgpt_auth.as_ref(), chatgpt_url.as_deref()) {
-            (Some(auth), Some(url)) => {
-                build_codex_upstream_request(&proxy_client, method, url, &route, body, auth)
-            }
+            (Some(auth), Some(url)) => build_codex_upstream_request(
+                &proxy_client,
+                method,
+                url,
+                &route,
+                body,
+                auth,
+                &request.headers,
+            ),
             _ => build_upstream_request(
                 &proxy_client,
                 method,

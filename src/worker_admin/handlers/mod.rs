@@ -5,6 +5,11 @@ mod billing;
 // public so the runtime request path can reach the same helpers the admin
 // handlers use (the pattern already used by `pub mod oauth`).
 pub mod chatgpt_backend;
+// Issue #599 R2f.1: access-token claim extraction and the request-context
+// header helper shared by the ChatGPT mapping layer, split out to keep
+// `chatgpt_backend` bounded.
+mod codex_claims;
+mod codex_request_headers;
 mod endpoint_usage;
 mod endpoints;
 mod mcp;
