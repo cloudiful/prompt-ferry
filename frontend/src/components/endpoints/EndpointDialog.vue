@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { normalizeProviderPlan } from '@/admin-mappers'
 import type { User } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
 import EndpointApiKeysEditor from '@/components/endpoints/EndpointApiKeysEditor.vue'
@@ -113,6 +114,17 @@ function hasEndpointSettings(): boolean {
   return hasProxy.value || hasEndpointSchedule()
 }
 
+// Issue #599 R2e.1: the subscription plan authenticates through the ChatGPT
+// OAuth login, so its API-key editor stays hidden. The provider gate keeps a
+// stale plan from hiding the editor off OpenAI.
+const isChatgptSubscription = computed(
+  () =>
+    normalizeProviderPlan(
+      form.value?.provider ?? 'generic',
+      form.value?.plan,
+    ) === 'chatgpt_subscription',
+)
+
 // Issue #599 R2c: mirror the live OAuth state into the form. A token that
 // appears (login completed) enables the subscription plan; a token that
 // disappears (cleared/revoked) forces the platform plan back.
@@ -151,7 +163,11 @@ function applyOAuthStatus(next: {
             :placeholder="t('ownerUser')"
             @update:model-value="form.owner_user_id = $event ?? null"
           />
-          <EndpointApiKeysEditor v-model:form="form" :t="t" />
+          <EndpointApiKeysEditor
+            v-if="!isChatgptSubscription"
+            v-model:form="form"
+            :t="t"
+          />
           <div
             v-if="form.provider === 'openai'"
             class="border-t border-default pt-3"
