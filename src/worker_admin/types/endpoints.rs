@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     config::NativeApi,
-    db::{self, EndpointProvider, EndpointRegion, MinimaxServiceTier},
+    db::{self, EndpointPlan, EndpointProvider, EndpointRegion, MinimaxServiceTier},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
@@ -27,6 +27,12 @@ pub struct EndpointRequest {
     pub provider: EndpointProvider,
     #[serde(default)]
     pub provider_region: Option<EndpointRegion>,
+    /// Issue #599 R2a: requested upstream plan. Omitted keeps the stored
+    /// credential state; `platform_api_key` is always accepted (and clears
+    /// any stored OAuth token on update); `chatgpt_subscription` requires
+    /// the R2b OAuth login flow and is rejected until it lands.
+    #[serde(default)]
+    pub plan: Option<EndpointPlan>,
     #[serde(default)]
     pub service_tier: MinimaxServiceTier,
     pub base_url: String,

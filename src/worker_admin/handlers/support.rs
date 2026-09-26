@@ -117,6 +117,11 @@ pub(super) async fn resolve_endpoint_input(
         }
         _ => {}
     }
+    // Issue #599 R2a: upstream plan gate (OpenAI-only subscription axis; the
+    // login flow that stores tokens arrives in R2b).
+    if let Err((code, message)) = validate_endpoint_plan(body.provider, body.plan) {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, code, message));
+    }
     if let Some(owner_user_id) = body.owner_user_id {
         let owner = db::get_active_user(&state.pool, owner_user_id)
             .await
@@ -334,6 +339,32 @@ pub(super) fn normalize_endpoint_base_url(base_url: &str) -> String {
     v
 }
 
+/// Issue #599 R2a: upstream plan gate for endpoint create/update. Keeping the
+/// plan (`None`) and the platform plan are always accepted; the subscription
+/// plan is an OpenAI-only axis value and additionally needs the R2b OAuth
+/// login flow (no token can be stored yet), so requesting it now fails closed.
+/// Returns the `(error_code, message)` pair for a 400 response.
+pub(super) fn validate_endpoint_plan(
+    provider: db::EndpointProvider,
+    plan: Option<db::EndpointPlan>,
+) -> std::result::Result<(), (&'static str, &'static str)> {
+    match plan {
+        None | Some(db::EndpointPlan::PlatformApiKey) => Ok(()),
+        Some(db::EndpointPlan::ChatgptSubscription)
+            if !provider.supports_chatgpt_subscription_plan() =>
+        {
+            Err((
+                "invalid_plan",
+                "chatgpt_subscription plan requires an openai endpoint",
+            ))
+        }
+        Some(db::EndpointPlan::ChatgptSubscription) => Err((
+            "oauth_login_required",
+            "chatgpt_subscription login arrives with the OAuth login flow (issue #599 R2b)",
+        )),
+    }
+}
+
 pub(super) fn validate_mcp_provider(
     mcp_enabled: Option<bool>,
     provider: db::EndpointProvider,
@@ -376,8 +407,8 @@ pub(super) fn truncate_message(message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_endpoint_base_url, validate_mcp_provider};
-    use crate::db::EndpointProvider;
+    use super::{normalize_endpoint_base_url, validate_endpoint_plan, validate_mcp_provider};
+    use crate::db::{self, EndpointProvider};
 
     #[test]
     fn normalize_endpoint_base_url_strips_trailing_v1_chain() {
@@ -407,6 +438,73 @@ mod tests {
                 "input {input:?}"
             );
         }
+    }
+
+    #[test]
+    fn validate_endpoint_plan_accepts_keep_and_platform_for_every_provider() {
+        // Issue #599 R2a: omitting the plan or requesting the platform plan
+        // never fails, regardless of provider.
+        for provider in [
+            EndpointProvider::Generic,
+            EndpointProvider::Minimax,
+            EndpointProvider::CommandCode,
+            EndpointProvider::OpencodeGo,
+            EndpointProvider::OpenRouter,
+            EndpointProvider::Glm,
+            EndpointProvider::DeepSeek,
+            EndpointProvider::OpenAi,
+        ] {
+            assert!(
+                validate_endpoint_plan(provider, None).is_ok(),
+                "{provider:?} must accept an omitted plan"
+            );
+            assert!(
+                validate_endpoint_plan(provider, Some(db::EndpointPlan::PlatformApiKey)).is_ok(),
+                "{provider:?} must accept the platform plan"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_endpoint_plan_rejects_subscription_off_openai() {
+        // Issue #599 R2a: the subscription plan is an OpenAI-only axis value;
+        // requesting it elsewhere fails with `invalid_plan`.
+        for provider in [
+            EndpointProvider::Generic,
+            EndpointProvider::Minimax,
+            EndpointProvider::CommandCode,
+            EndpointProvider::OpencodeGo,
+            EndpointProvider::OpenRouter,
+            EndpointProvider::Glm,
+            EndpointProvider::DeepSeek,
+        ] {
+            assert_eq!(
+                validate_endpoint_plan(provider, Some(db::EndpointPlan::ChatgptSubscription)),
+                Err((
+                    "invalid_plan",
+                    "chatgpt_subscription plan requires an openai endpoint"
+                )),
+                "{provider:?} must reject the subscription plan"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_endpoint_plan_defers_subscription_login_to_r2b() {
+        // Issue #599 R2a: even on OpenAI the subscription plan cannot be
+        // claimed yet — no token can be stored before the R2b login flow, so
+        // the request fails closed with `oauth_login_required` instead of
+        // silently persisting a platform endpoint.
+        assert_eq!(
+            validate_endpoint_plan(
+                EndpointProvider::OpenAi,
+                Some(db::EndpointPlan::ChatgptSubscription)
+            ),
+            Err((
+                "oauth_login_required",
+                "chatgpt_subscription login arrives with the OAuth login flow (issue #599 R2b)"
+            ))
+        );
     }
 
     #[test]

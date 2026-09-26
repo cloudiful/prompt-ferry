@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO endpoint_oauth_tokens (endpoint_id, access_token, refresh_token, expires_at, created_at, updated_at)\nVALUES ($1, $2, $3, $4, NOW(), NOW())\nON CONFLICT (endpoint_id) DO UPDATE SET\n    access_token = EXCLUDED.access_token,\n    refresh_token = EXCLUDED.refresh_token,\n    expires_at = EXCLUDED.expires_at,\n    updated_at = NOW();\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "310829c685d5fb813b7429d9338b1645ec71b69cb4d594f9d505ec9c885cee33"
+}

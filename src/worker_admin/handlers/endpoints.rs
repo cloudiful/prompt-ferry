@@ -103,6 +103,10 @@ pub(super) async fn update_endpoint(
     };
     // Issue #392 Phase K: same carry for `active_windows` (omitted keeps).
     let existing_active_windows = Some(existing.active_windows.clone());
+    // Issue #599 R2a: plan-switch hygiene needs the requested values after
+    // `body` moves into `resolve_endpoint_input` (both are `Copy`).
+    let requested_plan = body.plan;
+    let new_provider = body.provider;
     let input = match resolve_endpoint_input(
         &state,
         body,
@@ -121,6 +125,21 @@ pub(super) async fn update_endpoint(
         .await
     {
         Ok(Some(endpoint)) => {
+            // Issue #599 R2a: plan switch clears the counterpart credential.
+            // An explicit platform plan, or a provider move away from OpenAI,
+            // drops any stored ChatGPT OAuth token (the derived plan falls
+            // back to `platform_api_key`). No-op when nothing is stored.
+            let switch_clears_token = existing.has_oauth_token
+                && (requested_plan == Some(db::EndpointPlan::PlatformApiKey)
+                    || new_provider != db::EndpointProvider::OpenAi);
+            if switch_clears_token
+                && let Err(err) = state
+                    .config_repository
+                    .clear_endpoint_oauth_token(endpoint_id)
+                    .await
+            {
+                return internal(&state, err);
+            }
             let endpoint_id = endpoint.endpoint_id;
             if let Err(err) = state
                 .config_repository

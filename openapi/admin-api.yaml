@@ -3369,6 +3369,11 @@ components:
         total:
           type: integer
           format: int64
+    EndpointPlan:
+      type: string
+      enum:
+      - platform_api_key
+      - chatgpt_subscription
     EndpointProtocolMode:
       type: string
       enum:
@@ -3446,6 +3451,15 @@ components:
           - integer
           - 'null'
           format: int64
+        plan:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/EndpointPlan'
+            description: |-
+              Issue #599 R2a: requested upstream plan. Omitted keeps the stored
+              credential state; `platform_api_key` is always accepted (and clears
+              any stored OAuth token on update); `chatgpt_subscription` requires
+              the R2b OAuth login flow and is rejected until it lands.
         protocol_mode:
           $ref: '#/components/schemas/EndpointProtocolMode'
         provider:
@@ -4742,6 +4756,12 @@ components:
         endpoint_id:
           type: string
           format: uuid
+        has_oauth_token:
+          type: boolean
+          description: |-
+            Issue #599 R2a: response-side saved-OAuth-token indicator. `true` when
+            a ChatGPT OAuth token is stored; the secrets themselves are never
+            echoed, mirroring `has_proxy_url`.
         has_proxy_url:
           type: boolean
           description: |-
@@ -4762,6 +4782,13 @@ components:
           - integer
           - 'null'
           format: int64
+        plan:
+          $ref: '#/components/schemas/EndpointPlan'
+          description: |-
+            Issue #599 R2a: upstream plan axis (`platform_api_key` |
+            `chatgpt_subscription`). Derived server-side from the stored OAuth
+            token (see `EndpointPlan::resolve`); `serde(default)` keeps the
+            contract backward-compatible, mirroring `has_proxy_url`.
         provider:
           $ref: '#/components/schemas/EndpointProvider'
         provider_region:

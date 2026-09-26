@@ -470,12 +470,12 @@ fn timestamp(value: chrono::DateTime<chrono::Utc>) -> String {
 }
 
 #[derive(Clone, Copy)]
-enum EnvelopePart {
+pub(crate) enum EnvelopePart {
     Ciphertext,
     Nonce,
 }
 
-fn envelope_part(
+pub(crate) fn envelope_part(
     envelope: &Option<EncryptedSecretEnvelope>,
     part: EnvelopePart,
 ) -> Option<Vec<u8>> {
@@ -485,6 +485,6 @@ fn envelope_part(
     })
 }
 
-fn envelope_version(envelope: &Option<EncryptedSecretEnvelope>) -> Option<i64> {
+pub(crate) fn envelope_version(envelope: &Option<EncryptedSecretEnvelope>) -> Option<i64> {
     envelope.as_ref().map(|value| i64::from(value.key_version))
 }

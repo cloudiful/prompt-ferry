@@ -3,16 +3,18 @@ use std::path::{Path, PathBuf};
 use sqlx::{Row, SqlitePool, sqlite::Sqlite};
 use uuid::Uuid;
 
-use super::write::{self, EncryptedConfig};
+use super::models::EndpointOAuthTokenConfig;
+use super::write::{self, EncryptedConfig, EnvelopePart, envelope_part, envelope_version};
 use super::{
     BootstrapSeed, ClientKeyConfig, EndpointApiKeyConfig, ManagedRelayConfig, ModelRouteConfig,
     ModelRouteTargetConfig, ProviderEndpointConfig, ReplaySnapshotUpsertOutcome, Result,
     SettingConfig, StandaloneConfig, StandaloneConfigError, StandaloneReplaySnapshotRecord,
     StandaloneUsageSummaryRecord, rows,
 };
+use crate::db::{EndpointOAuthToken, EndpointOAuthTokenSet};
 use crate::relay_secrets::RelaySecretManager;
 
-const CURRENT_SCHEMA_VERSION: i64 = 32;
+const CURRENT_SCHEMA_VERSION: i64 = 33;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {
@@ -197,6 +199,109 @@ impl StandaloneConfigStore {
                 key.api_key = manager.decrypt(&envelope)?;
                 Ok(key)
             })
+            .collect()
+    }
+
+    // ---- Issue #599 R2a: per-endpoint ChatGPT OAuth token (envelope storage). ----
+
+    /// Store (or refresh) the ChatGPT OAuth token for an endpoint, or clear
+    /// it with `None` (NULL convention: all token columns go NULL so presence
+    /// reads fall back to absent). Both secrets are encrypted through the
+    /// manager into the 0033 envelope triplets; presence afterwards reads as
+    /// `refresh_token IS NOT NULL`.
+    pub async fn set_endpoint_oauth_token(
+        &self,
+        manager: &RelaySecretManager,
+        endpoint_id: Uuid,
+        token: Option<EndpointOAuthTokenSet>,
+    ) -> Result<()> {
+        let record = token.map(|token| EndpointOAuthTokenConfig {
+            endpoint_id,
+            access_token: token.access_token,
+            refresh_token: token.refresh_token,
+            expires_at: token.expires_at,
+        });
+        let access = record
+            .as_ref()
+            .map(|record| manager.encrypt(&record.access_token))
+            .transpose()?;
+        let refresh = record
+            .as_ref()
+            .map(|record| manager.encrypt(&record.refresh_token))
+            .transpose()?;
+        let now = rfc3339_now();
+        standalone_query!("src/sql/standalone/set_endpoint_oauth_token.sql")
+            .bind(endpoint_id.to_string())
+            .bind(envelope_part(&access, EnvelopePart::Ciphertext))
+            .bind(envelope_part(&access, EnvelopePart::Nonce))
+            .bind(envelope_version(&access))
+            .bind(envelope_part(&refresh, EnvelopePart::Ciphertext))
+            .bind(envelope_part(&refresh, EnvelopePart::Nonce))
+            .bind(envelope_version(&refresh))
+            .bind(record.as_ref().and_then(|record| {
+                record
+                    .expires_at
+                    .map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true))
+            }))
+            .bind(now.clone())
+            .bind(now)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Load the decrypted OAuth token. Returns `None` when no row exists or
+    /// the row was cleared (NULL refresh envelope); a half-written row
+    /// (refresh present, access missing) is corrupt and fails closed.
+    pub async fn get_endpoint_oauth_token(
+        &self,
+        manager: &RelaySecretManager,
+        endpoint_id: Uuid,
+    ) -> Result<Option<EndpointOAuthToken>> {
+        let row = standalone_query!("src/sql/standalone/get_endpoint_oauth_token.sql")
+            .bind(endpoint_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        let access = rows::envelope(&row, "access_token")?;
+        let refresh = rows::envelope(&row, "refresh_token")?;
+        let Some(refresh) = refresh else {
+            return Ok(None);
+        };
+        let Some(access) = access else {
+            return Err(StandaloneConfigError::CorruptDatabase(
+                "endpoint oauth token is missing its access token".to_string(),
+            ));
+        };
+        let expires_at = row
+            .try_get::<Option<String>, _>("expires_at")?
+            .map(|raw| {
+                chrono::DateTime::parse_from_rfc3339(&raw)
+                    .map(|value| value.with_timezone(&chrono::Utc))
+                    .map_err(|_| {
+                        StandaloneConfigError::CorruptDatabase(
+                            "endpoint oauth token has an invalid expires_at".to_string(),
+                        )
+                    })
+            })
+            .transpose()?;
+        Ok(Some(EndpointOAuthToken {
+            endpoint_id,
+            access_token: manager.decrypt(&access)?,
+            refresh_token: manager.decrypt(&refresh)?,
+            expires_at,
+        }))
+    }
+
+    /// IDs of endpoints with a stored (non-cleared) OAuth token. Drives the
+    /// derived plan and the admin `has_oauth_token` indicator without ever
+    /// touching the secrets themselves.
+    pub async fn list_endpoint_oauth_token_ids(&self) -> Result<Vec<Uuid>> {
+        let rows = standalone_query!("src/sql/standalone/list_endpoint_oauth_token_ids.sql")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter()
+            .map(|row| rows::uuid(row, "endpoint_id"))
             .collect()
     }
 
@@ -1258,6 +1363,12 @@ fn decrypt_json(
     serde_json::from_str(&value).map_err(|error| {
         StandaloneConfigError::CorruptDatabase(format!("{label} JSON is invalid: {error}"))
     })
+}
+
+/// Issue #599 R2a: `to_rfc3339()` timestamps for the OAuth token bookkeeping
+/// columns (created/updated mirror the `set_endpoint_mcp_enabled` style).
+fn rfc3339_now() -> String {
+    chrono::Utc::now().to_rfc3339()
 }
 
 /// Validate that a `prompt_refs_json` payload is a non-empty JSON array

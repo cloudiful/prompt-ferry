@@ -33,6 +33,9 @@ pub(super) fn from_postgres(endpoint: PgProviderEndpoint) -> UnifiedProviderEndp
         name: endpoint.name,
         provider: endpoint.provider,
         provider_region: endpoint.provider_region,
+        // Issue #599 R2a: carried through (row SELECTs default both);
+        // the repository enriches them from token presence afterwards.
+        plan: endpoint.plan,
         service_tier: endpoint.service_tier,
         base_url: endpoint.base_url,
         native_api: parse_native_api(&endpoint.native_api),
@@ -41,6 +44,9 @@ pub(super) fn from_postgres(endpoint: PgProviderEndpoint) -> UnifiedProviderEndp
         enabled: endpoint.enabled,
         mcp_enabled: endpoint.mcp_enabled,
         has_proxy_url,
+        // Issue #599 R2a: carried through (the repository stamps the derived
+        // values from token presence after mapping).
+        has_oauth_token: endpoint.has_oauth_token,
         // Issue #392 Phase K: carry schedule through unified shape.
         active_windows: endpoint.active_windows,
         created_at: endpoint.created_at,
@@ -76,6 +82,9 @@ pub(super) fn from_sqlite(endpoint: ScProviderEndpoint) -> Result<UnifiedProvide
         name: endpoint.name,
         provider: provider_from_sqlite(endpoint.provider),
         provider_region: endpoint.provider_region.map(region_from_sqlite),
+        // Issue #599 R2a: SQLite stores no plan column in R2a; both fields
+        // start absent and the repository enriches them from token presence.
+        plan: crate::db::EndpointPlan::default(),
         service_tier: service_tier_from_sqlite(endpoint.service_tier),
         base_url: endpoint.base_url,
         native_api: endpoint.native_api,
@@ -84,6 +93,7 @@ pub(super) fn from_sqlite(endpoint: ScProviderEndpoint) -> Result<UnifiedProvide
         enabled: endpoint.enabled,
         mcp_enabled: endpoint.mcp_enabled,
         has_proxy_url,
+        has_oauth_token: false,
         active_windows,
         created_at: endpoint.created_at,
         updated_at: endpoint.updated_at,
@@ -195,6 +205,9 @@ pub(super) fn unified_to_pg(endpoint: UnifiedProviderEndpoint) -> crate::db::Pro
         name: endpoint.name,
         provider: endpoint.provider,
         provider_region: endpoint.provider_region,
+        // Issue #599 R2a: carry the derived plan so list/get responses share
+        // one shape with the single-endpoint shape.
+        plan: endpoint.plan,
         service_tier: endpoint.service_tier,
         base_url: endpoint.base_url,
         native_api: endpoint.native_api.as_str().to_string(),
@@ -207,6 +220,9 @@ pub(super) fn unified_to_pg(endpoint: UnifiedProviderEndpoint) -> crate::db::Pro
         // Issue #368 Phase C (P2): carry the saved-proxy indicator so the
         // page response matches the single-endpoint shape.
         has_proxy_url: endpoint.has_proxy_url,
+        // Issue #599 R2a: carry the saved-token indicator the same way; the
+        // secrets themselves never travel this path.
+        has_oauth_token: endpoint.has_oauth_token,
         // Issue #392 Phase K: carry schedule through unified shape.
         active_windows: endpoint.active_windows,
         key_lb_enabled: endpoint.key_lb_enabled,

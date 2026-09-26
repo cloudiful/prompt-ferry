@@ -1,0 +1,3 @@
+SELECT endpoint_id
+FROM standalone_endpoint_oauth_tokens
+WHERE refresh_token_ciphertext IS NOT NULL;

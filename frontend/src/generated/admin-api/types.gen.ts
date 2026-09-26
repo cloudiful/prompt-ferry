@@ -343,6 +343,8 @@ export type EndpointPageResponse = {
     total: number;
 };
 
+export type EndpointPlan = 'platform_api_key' | 'chatgpt_subscription';
+
 export type EndpointProtocolMode = 'auto' | 'manual';
 
 export type EndpointProvider = 'generic' | 'minimax' | 'command_code' | 'opencode_go' | 'openrouter' | 'glm' | 'deepseek' | 'openai';
@@ -371,6 +373,7 @@ export type EndpointRequest = {
     name: string;
     native_api_override?: null | NativeApi;
     owner_user_id?: number | null;
+    plan?: null | EndpointPlan;
     protocol_mode: EndpointProtocolMode;
     provider?: EndpointProvider;
     provider_region?: null | EndpointRegion;
@@ -900,6 +903,12 @@ export type ProviderEndpoint = {
     enabled: boolean;
     endpoint_id: string;
     /**
+     * Issue #599 R2a: response-side saved-OAuth-token indicator. `true` when
+     * a ChatGPT OAuth token is stored; the secrets themselves are never
+     * echoed, mirroring `has_proxy_url`.
+     */
+    has_oauth_token?: boolean;
+    /**
      * Issue #368 Phase C (P2): response-side saved-proxy indicator.
      * `true` when a proxy URL is stored; the secret itself is never echoed.
      */
@@ -910,6 +919,13 @@ export type ProviderEndpoint = {
     native_api: string;
     native_api_source: string;
     owner_user_id?: number | null;
+    /**
+     * Issue #599 R2a: upstream plan axis (`platform_api_key` |
+     * `chatgpt_subscription`). Derived server-side from the stored OAuth
+     * token (see `EndpointPlan::resolve`); `serde(default)` keeps the
+     * contract backward-compatible, mirroring `has_proxy_url`.
+     */
+    plan?: EndpointPlan;
     provider: EndpointProvider;
     provider_region?: null | EndpointRegion;
     scope: string;

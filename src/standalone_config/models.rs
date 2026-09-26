@@ -321,6 +321,31 @@ impl fmt::Debug for EndpointApiKeyConfig {
     }
 }
 
+/// Issue #599 R2a: per-endpoint ChatGPT subscription OAuth token. Plaintext
+/// only in memory; SQLite persists the 0033 envelope triplets
+/// (`*_ciphertext BLOB / *_nonce BLOB / *_key_version INTEGER`, NULL means
+/// cleared). The refresh token lives only in these server-side columns, never
+/// in logs or responses.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndpointOAuthTokenConfig {
+    pub endpoint_id: Uuid,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl fmt::Debug for EndpointOAuthTokenConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EndpointOAuthTokenConfig")
+            .field("endpoint_id", &self.endpoint_id)
+            .field("access_token", &redacted_secret(&self.access_token))
+            .field("refresh_token", &redacted_secret(&self.refresh_token))
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderEndpointConfig {
     pub endpoint_id: Uuid,

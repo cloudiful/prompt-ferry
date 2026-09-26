@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT endpoint_id\nFROM endpoint_oauth_tokens\nWHERE refresh_token IS NOT NULL\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "endpoint_oauth_tokens",
+            "name": "endpoint_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6d412dcd4318bb58d824b823774b2446ffa1ec2a7fc3d64763f7947ab2cc555f"
+}

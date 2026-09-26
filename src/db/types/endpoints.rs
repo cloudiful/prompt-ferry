@@ -93,6 +93,13 @@ impl EndpointProvider {
     pub fn requires_reasoning_echo(self) -> bool {
         matches!(self, Self::DeepSeek)
     }
+
+    /// Issue #599 R2a: whether this provider may carry a ChatGPT subscription
+    /// (OAuth) credential. Only OpenAI endpoints have the plan axis; every
+    /// other provider is API-key-only and rejects OAuth token storage.
+    pub fn supports_chatgpt_subscription_plan(self) -> bool {
+        matches!(self, Self::OpenAi)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -117,6 +124,102 @@ impl EndpointRegion {
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointPlan {
+    #[default]
+    PlatformApiKey,
+    ChatgptSubscription,
+}
+
+impl EndpointPlan {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PlatformApiKey => "platform_api_key",
+            Self::ChatgptSubscription => "chatgpt_subscription",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "chatgpt_subscription" => Self::ChatgptSubscription,
+            _ => Self::PlatformApiKey,
+        }
+    }
+
+    pub fn from_optional(value: Option<&str>) -> Self {
+        match value {
+            Some("chatgpt_subscription") => Self::ChatgptSubscription,
+            _ => Self::PlatformApiKey,
+        }
+    }
+
+    /// Issue #599 R2a: effective plan for an endpoint. The plan axis lives on
+    /// the OpenAI provider only and is derived server-side from the stored
+    /// OAuth token: `chatgpt_subscription` iff a token is stored on an OpenAI
+    /// endpoint, `platform_api_key` otherwise. Client-supplied plan values are
+    /// validated by `validate_endpoint_plan`, never trusted blindly.
+    pub fn resolve(provider: EndpointProvider, has_oauth_token: bool) -> Self {
+        if has_oauth_token && provider.supports_chatgpt_subscription_plan() {
+            Self::ChatgptSubscription
+        } else {
+            Self::PlatformApiKey
+        }
+    }
+}
+
+/// Issue #599 R2a: per-endpoint ChatGPT subscription OAuth token. Server-side
+/// only: the secrets never serialize (no `Serialize` impl on purpose) and the
+/// custom `Debug` redacts them, mirroring the `api_key` redaction. The refresh
+/// token lives only in the encrypted store columns, never in logs or
+/// responses.
+#[derive(Clone)]
+pub struct EndpointOAuthToken {
+    pub endpoint_id: uuid::Uuid,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+impl std::fmt::Debug for EndpointOAuthToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Both secrets render as byte counts so a token can never leak
+        // through logs while remaining identifiable by endpoint and expiry.
+        formatter
+            .debug_struct("EndpointOAuthToken")
+            .field("endpoint_id", &self.endpoint_id)
+            .field("access_token", &redacted_secret_len(&self.access_token))
+            .field("refresh_token", &redacted_secret_len(&self.refresh_token))
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+/// Issue #599 R2a: secrets for storing (or refreshing) an endpoint OAuth
+/// token. `None` at the repository boundary clears the stored token instead
+/// (NULL convention); this struct only carries fresh secrets inward.
+#[derive(Clone)]
+pub struct EndpointOAuthTokenSet {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+impl std::fmt::Debug for EndpointOAuthTokenSet {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EndpointOAuthTokenSet")
+            .field("access_token", &redacted_secret_len(&self.access_token))
+            .field("refresh_token", &redacted_secret_len(&self.refresh_token))
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+fn redacted_secret_len(value: &str) -> String {
+    format!("[REDACTED; {} bytes]", value.len())
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -208,6 +311,12 @@ pub struct ProviderEndpoint {
     pub name: String,
     pub provider: EndpointProvider,
     pub provider_region: Option<EndpointRegion>,
+    /// Issue #599 R2a: upstream plan axis (`platform_api_key` |
+    /// `chatgpt_subscription`). Derived server-side from the stored OAuth
+    /// token (see `EndpointPlan::resolve`); `serde(default)` keeps the
+    /// contract backward-compatible, mirroring `has_proxy_url`.
+    #[serde(default)]
+    pub plan: EndpointPlan,
     #[serde(default)]
     pub service_tier: MinimaxServiceTier,
     pub base_url: String,
@@ -218,6 +327,11 @@ pub struct ProviderEndpoint {
     // Issue #368 Phase A: never echoed (mirrors `api_key` redaction).
     #[serde(skip_serializing)]
     pub proxy_url: Option<String>,
+    /// Issue #599 R2a: response-side saved-OAuth-token indicator. `true` when
+    /// a ChatGPT OAuth token is stored; the secrets themselves are never
+    /// echoed, mirroring `has_proxy_url`.
+    #[serde(default)]
+    pub has_oauth_token: bool,
     /// Issue #368 Phase C (P2): response-side saved-proxy indicator.
     /// `true` when a proxy URL is stored; the secret itself is never echoed.
     #[serde(default)]
@@ -259,6 +373,11 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             name: value.name,
             provider: EndpointProvider::from_str(&value.provider),
             provider_region: EndpointRegion::from_str(value.provider_region.as_deref()),
+            // Issue #599 R2a: the endpoint row SELECTs predate the OAuth
+            // token table, so rows start on the platform plan without a
+            // token; the unified repository enriches both fields from token
+            // presence before serving admin responses.
+            plan: EndpointPlan::default(),
             service_tier: MinimaxServiceTier::from_optional(value.service_tier.as_deref()),
             base_url: value.base_url,
             native_api: value.native_api,
@@ -266,6 +385,7 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             api_key: value.api_key,
             proxy_url: value.proxy_url,
             has_proxy_url,
+            has_oauth_token: false,
             active_windows,
             key_lb_enabled: value.key_lb_enabled,
             enabled: value.enabled,
@@ -492,6 +612,141 @@ mod tests {
             EndpointProvider::from_optional(None),
             EndpointProvider::Generic
         );
+    }
+
+    #[test]
+    fn endpoint_plan_round_trips_as_snake_case() {
+        // Issue #599 R2a: the plan axis lives on the OpenAI provider
+        // (`platform_api_key | chatgpt_subscription`); it serializes as
+        // snake_case and unknown/legacy values fall back to the platform plan.
+        assert_eq!(EndpointPlan::PlatformApiKey.as_str(), "platform_api_key");
+        assert_eq!(
+            EndpointPlan::ChatgptSubscription.as_str(),
+            "chatgpt_subscription"
+        );
+        assert_eq!(EndpointPlan::default(), EndpointPlan::PlatformApiKey);
+        assert_eq!(
+            EndpointPlan::from_str("chatgpt_subscription"),
+            EndpointPlan::ChatgptSubscription
+        );
+        assert_eq!(
+            EndpointPlan::from_str("platform_api_key"),
+            EndpointPlan::PlatformApiKey
+        );
+        assert_eq!(
+            EndpointPlan::from_str("legacy-unknown"),
+            EndpointPlan::PlatformApiKey
+        );
+        assert_eq!(
+            EndpointPlan::from_optional(Some("chatgpt_subscription")),
+            EndpointPlan::ChatgptSubscription
+        );
+        assert_eq!(
+            EndpointPlan::from_optional(None),
+            EndpointPlan::PlatformApiKey
+        );
+        let serialized = serde_json::to_value(EndpointPlan::ChatgptSubscription)
+            .expect("serialize chatgpt_subscription plan");
+        assert_eq!(serialized, serde_json::json!("chatgpt_subscription"));
+        let deserialized: EndpointPlan =
+            serde_json::from_value(serde_json::json!("platform_api_key"))
+                .expect("deserialize platform_api_key plan");
+        assert_eq!(deserialized, EndpointPlan::PlatformApiKey);
+    }
+
+    #[test]
+    fn endpoint_plan_resolves_from_oauth_presence_on_openai_only() {
+        // Issue #599 R2a: the effective plan is derived server-side. A stored
+        // token flips an OpenAI endpoint to the subscription plan; every other
+        // provider stays on the platform plan even if a token row lingered.
+        assert_eq!(
+            EndpointPlan::resolve(EndpointProvider::OpenAi, true),
+            EndpointPlan::ChatgptSubscription
+        );
+        for provider in [
+            EndpointProvider::Generic,
+            EndpointProvider::Minimax,
+            EndpointProvider::CommandCode,
+            EndpointProvider::OpencodeGo,
+            EndpointProvider::OpenRouter,
+            EndpointProvider::Glm,
+            EndpointProvider::DeepSeek,
+            EndpointProvider::OpenAi,
+        ] {
+            assert_eq!(
+                EndpointPlan::resolve(provider, false),
+                EndpointPlan::PlatformApiKey,
+                "{provider:?} without a token must stay on the platform plan"
+            );
+        }
+        for provider in [
+            EndpointProvider::Generic,
+            EndpointProvider::Minimax,
+            EndpointProvider::CommandCode,
+            EndpointProvider::OpencodeGo,
+            EndpointProvider::OpenRouter,
+            EndpointProvider::Glm,
+            EndpointProvider::DeepSeek,
+        ] {
+            assert_eq!(
+                EndpointPlan::resolve(provider, true),
+                EndpointPlan::PlatformApiKey,
+                "{provider:?} must never resolve to the subscription plan"
+            );
+        }
+    }
+
+    #[test]
+    fn only_openai_supports_chatgpt_subscription_plan() {
+        // Issue #599 R2a: the plan axis is OpenAI-only; the storage gate and
+        // the admin validation share this bit so a future provider needs an
+        // explicit opt-in here.
+        assert!(EndpointProvider::OpenAi.supports_chatgpt_subscription_plan());
+        for provider in [
+            EndpointProvider::Generic,
+            EndpointProvider::Minimax,
+            EndpointProvider::CommandCode,
+            EndpointProvider::OpencodeGo,
+            EndpointProvider::OpenRouter,
+            EndpointProvider::Glm,
+            EndpointProvider::DeepSeek,
+        ] {
+            assert!(
+                !provider.supports_chatgpt_subscription_plan(),
+                "{provider:?} must stay API-key-only"
+            );
+        }
+    }
+
+    #[test]
+    fn oauth_token_debug_redacts_both_secrets() {
+        // Issue #599 R2a: refresh tokens must never reach logs. The Debug
+        // impl renders byte counts; a regression that echoes a secret fails
+        // this test instead of leaking at runtime.
+        let token = EndpointOAuthToken {
+            endpoint_id: uuid::Uuid::new_v4(),
+            access_token: "access-secret-value".to_string(),
+            refresh_token: "refresh-secret-value".to_string(),
+            expires_at: None,
+        };
+        let rendered = format!("{token:?}");
+        assert!(
+            !rendered.contains("access-secret-value"),
+            "access token must not leak into Debug: {rendered}"
+        );
+        assert!(
+            !rendered.contains("refresh-secret-value"),
+            "refresh token must not leak into Debug: {rendered}"
+        );
+        assert!(rendered.contains("[REDACTED;"));
+        let staged = EndpointOAuthTokenSet {
+            access_token: "access-secret-value".to_string(),
+            refresh_token: "refresh-secret-value".to_string(),
+            expires_at: None,
+        };
+        let staged_rendered = format!("{staged:?}");
+        assert!(!staged_rendered.contains("access-secret-value"));
+        assert!(!staged_rendered.contains("refresh-secret-value"));
     }
 
     #[test]

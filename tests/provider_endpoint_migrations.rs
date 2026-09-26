@@ -515,7 +515,7 @@ async fn insert_standalone_endpoint(
     .map(|_| ())
 }
 
-// Standalone 0014 fresh path: a new store migrates to schema 16 with the
+// Standalone 0014 fresh path: a new store migrates to schema 33 with the
 // provider CHECK widened to command_code, opencode_go, openrouter, glm and
 // deepseek. 0015 (issue #230) adds `glm` and 0016 (issue #287) adds
 // `deepseek`; a fresh open() applies every pending migration, so the final
@@ -526,7 +526,7 @@ async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_o
     let path = standalone_temp_path("fresh");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 32);
+    assert_eq!(standalone_schema_version(&pool).await?, 33);
 
     let ddl: String = sqlx::query(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'standalone_provider_endpoints'",
@@ -693,7 +693,7 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     // 0015 (issue #230) adds `glm` and 0016 (issue #287) adds `deepseek`;
     // 0032 (issue #589) adds `openai`; the final schema version tracks the
     // newest standalone migration after the pending migrations apply.
-    assert_eq!(standalone_schema_version(&pool).await?, 32);
+    assert_eq!(standalone_schema_version(&pool).await?, 33);
     let preserved: i64 = sqlx::query(
         "SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'",
     )
@@ -739,7 +739,7 @@ async fn standalone_0025_quota_cleanup_preserves_route_targets() -> anyhow::Resu
     let path = standalone_temp_path("quota25");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 32);
+    assert_eq!(standalone_schema_version(&pool).await?, 33);
     // No quota columns remain.
     for table in ["standalone_model_routes", "standalone_mcp_servers"] {
         let cols: Vec<String> = if table == "standalone_model_routes" {
@@ -809,16 +809,18 @@ async fn standalone_0032_openai_rebuild_preserves_referencing_rows() -> anyhow::
     let path = standalone_temp_path("openai32");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 32);
+    assert_eq!(standalone_schema_version(&pool).await?, 33);
 
     insert_standalone_endpoint(&pool, "pinned-ds", "deepseek", None).await?;
     insert_standalone_endpoint_key(&pool, "pinned-ds").await?;
     insert_standalone_route_target(&pool, "pinned-ds").await?;
 
-    // Drop the 0032 bookkeeping and the schema version so the next open()
-    // re-applies the migration against a table that already has referencing
-    // rows, exercising the DROP/RENAME rebuild with foreign keys enabled.
-    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 32")
+    // Drop the 0032/0033 bookkeeping and the schema version so the next
+    // open() re-applies the migrations against a table that already has
+    // referencing rows, exercising the DROP/RENAME rebuild with foreign keys
+    // enabled. 0033 (issue #599) only creates its own table, so replaying it
+    // alongside 0032 keeps the scenario focused on the 0032 rebuild.
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (32, 33)")
         .execute(&pool)
         .await?;
     sqlx::query(
@@ -831,7 +833,7 @@ async fn standalone_0032_openai_rebuild_preserves_referencing_rows() -> anyhow::
 
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 32);
+    assert_eq!(standalone_schema_version(&pool).await?, 33);
     let children: i64 = sqlx::query(
         "SELECT (SELECT COUNT(*) FROM standalone_endpoint_keys) \
               + (SELECT COUNT(*) FROM standalone_model_route_targets)",
@@ -855,6 +857,288 @@ async fn standalone_0032_openai_rebuild_preserves_referencing_rows() -> anyhow::
         .try_get(0)?;
     assert_eq!(violations, 0, "the rebuild must not dangle any foreign key");
     insert_standalone_endpoint(&pool, "oa-upgraded", "openai", None).await?;
+
+    pool.close().await;
+    store.close().await;
+    remove_standalone_files(&path);
+    Ok(())
+}
+
+// 0094 up (issue #599 R2a): per-endpoint OAuth token table with the NULL-clear
+// convention (`refresh_token IS NOT NULL` means present) and delete cascade.
+#[tokio::test]
+async fn migrate_0094_endpoint_oauth_token_table() -> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    schema
+        .pool
+        .execute(
+            r#"
+            CREATE TABLE provider_endpoints (
+                endpoint_id UUID PRIMARY KEY DEFAULT (md5(random()::text || clock_timestamp()::text)::uuid),
+                scope TEXT NOT NULL CHECK (scope IN ('admin', 'user')),
+                owner_user_id BIGINT,
+                name TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                api_key TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .await?;
+
+    db::migrate(&schema.pool).await?;
+
+    let endpoint_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO provider_endpoints (endpoint_id, scope, name, base_url, api_key)
+           VALUES ($1, 'admin', 'oauth-ep', 'https://example.test', 'secret')"#,
+    )
+    .bind(endpoint_id)
+    .execute(&schema.pool)
+    .await?;
+
+    async fn present_count(pool: &PgPool) -> anyhow::Result<i64> {
+        Ok(sqlx::query(
+            "SELECT COUNT(*) FROM endpoint_oauth_tokens WHERE refresh_token IS NOT NULL",
+        )
+        .fetch_one(pool)
+        .await?
+        .try_get(0)?)
+    }
+
+    // Tokens for unknown endpoints are rejected by the foreign key.
+    sqlx::query(
+        "INSERT INTO endpoint_oauth_tokens (endpoint_id, access_token, refresh_token)
+         VALUES ($1, 'a', 'r')",
+    )
+    .bind(Uuid::new_v4())
+    .execute(&schema.pool)
+    .await
+    .expect_err("token rows require their endpoint");
+
+    sqlx::query(
+        "INSERT INTO endpoint_oauth_tokens (endpoint_id, access_token, refresh_token)
+         VALUES ($1, 'a', 'r')",
+    )
+    .bind(endpoint_id)
+    .execute(&schema.pool)
+    .await?;
+    assert_eq!(present_count(&schema.pool).await?, 1);
+
+    // Re-storing replaces the pair (upsert); NULLing clears to absent.
+    sqlx::query(
+        "INSERT INTO endpoint_oauth_tokens (endpoint_id, access_token, refresh_token)
+         VALUES ($1, 'a2', 'r2')
+         ON CONFLICT (endpoint_id) DO UPDATE SET
+             access_token = EXCLUDED.access_token,
+             refresh_token = EXCLUDED.refresh_token,
+             updated_at = NOW()",
+    )
+    .bind(endpoint_id)
+    .execute(&schema.pool)
+    .await?;
+    let access: String =
+        sqlx::query("SELECT access_token FROM endpoint_oauth_tokens WHERE endpoint_id = $1")
+            .bind(endpoint_id)
+            .fetch_one(&schema.pool)
+            .await?
+            .try_get(0)?;
+    assert_eq!(access, "a2");
+    sqlx::query(
+        "UPDATE endpoint_oauth_tokens
+         SET access_token = NULL, refresh_token = NULL, expires_at = NULL
+         WHERE endpoint_id = $1",
+    )
+    .bind(endpoint_id)
+    .execute(&schema.pool)
+    .await?;
+    assert_eq!(present_count(&schema.pool).await?, 0);
+
+    // Deleting the endpoint cascades the token row away.
+    sqlx::query(
+        "UPDATE endpoint_oauth_tokens
+         SET access_token = 'a', refresh_token = 'r'
+         WHERE endpoint_id = $1",
+    )
+    .bind(endpoint_id)
+    .execute(&schema.pool)
+    .await?;
+    sqlx::query("DELETE FROM provider_endpoints WHERE endpoint_id = $1")
+        .bind(endpoint_id)
+        .execute(&schema.pool)
+        .await?;
+    let remaining: i64 = sqlx::query("SELECT COUNT(*) FROM endpoint_oauth_tokens")
+        .fetch_one(&schema.pool)
+        .await?
+        .try_get(0)?;
+    assert_eq!(remaining, 0, "token rows must cascade with their endpoint");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+// 0094 down (issue #599 R2a): dropping the token table leaves endpoints
+// untouched.
+#[tokio::test]
+async fn migrate_0094_down_drops_oauth_token_table_only() -> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    schema
+        .pool
+        .execute(
+            r#"
+            CREATE TABLE provider_endpoints (
+                endpoint_id UUID PRIMARY KEY DEFAULT (md5(random()::text || clock_timestamp()::text)::uuid),
+                scope TEXT NOT NULL CHECK (scope IN ('admin', 'user')),
+                owner_user_id BIGINT,
+                name TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                api_key TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .await?;
+
+    db::migrate(&schema.pool).await?;
+    insert_provider_endpoint(&schema.pool, "oa-row", "openai", None).await?;
+
+    sqlx::raw_sql(include_str!(
+        "../migrations/0094_endpoint_oauth_token.down.sql"
+    ))
+    .execute(&schema.pool)
+    .await?;
+
+    let endpoints: i64 =
+        sqlx::query("SELECT COUNT(*) FROM provider_endpoints WHERE name = 'oa-row'")
+            .fetch_one(&schema.pool)
+            .await?
+            .try_get(0)?;
+    assert_eq!(
+        endpoints, 1,
+        "endpoints must survive the 0094 down migration"
+    );
+    sqlx::query("SELECT COUNT(*) FROM endpoint_oauth_tokens")
+        .fetch_one(&schema.pool)
+        .await
+        .expect_err("the token table is gone after the down migration");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+// Standalone 0033 (issue #599 R2a): fresh stores gain the OAuth token envelope
+// table; the NULL-clear convention and delete cascade hold.
+#[tokio::test]
+async fn standalone_0033_oauth_token_envelope_table() -> anyhow::Result<()> {
+    let path = standalone_temp_path("oauth33");
+    let store = StandaloneConfigStore::open(&path).await?;
+    let pool = db::connect_sqlite(&path).await?;
+    assert_eq!(standalone_schema_version(&pool).await?, 33);
+
+    let columns: Vec<String> =
+        sqlx::query("SELECT name FROM pragma_table_info('standalone_endpoint_oauth_tokens')")
+            .fetch_all(&pool)
+            .await?
+            .into_iter()
+            .map(|row| row.try_get::<String, _>("name").expect("column"))
+            .collect();
+    for column in [
+        "endpoint_id",
+        "access_token_ciphertext",
+        "access_token_nonce",
+        "access_token_key_version",
+        "refresh_token_ciphertext",
+        "refresh_token_nonce",
+        "refresh_token_key_version",
+        "expires_at",
+        "created_at",
+        "updated_at",
+    ] {
+        assert!(
+            columns.iter().any(|name| name == column),
+            "token table must carry {column}: {columns:?}"
+        );
+    }
+    assert!(
+        !columns.iter().any(|name| name == "access_token"),
+        "no plaintext secret column: {columns:?}"
+    );
+
+    insert_standalone_endpoint(&pool, "oauth-ep", "openai", None).await?;
+    let endpoint_id: String = sqlx::query(
+        "SELECT endpoint_id FROM standalone_provider_endpoints WHERE name = 'oauth-ep'",
+    )
+    .fetch_one(&pool)
+    .await?
+    .try_get(0)?;
+    sqlx::query(
+        "INSERT INTO standalone_endpoint_oauth_tokens
+         (endpoint_id, access_token_ciphertext, access_token_nonce, access_token_key_version,
+          refresh_token_ciphertext, refresh_token_nonce, refresh_token_key_version,
+          expires_at, created_at, updated_at)
+         VALUES (?, X'00', X'01', 1, X'02', X'03', 1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+    )
+    .bind(&endpoint_id)
+    .execute(&pool)
+    .await?;
+    let present: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM standalone_endpoint_oauth_tokens WHERE refresh_token_ciphertext IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await?
+    .try_get(0)?;
+    assert_eq!(present, 1);
+
+    sqlx::query(
+        "UPDATE standalone_endpoint_oauth_tokens
+         SET access_token_ciphertext = NULL, access_token_nonce = NULL,
+             access_token_key_version = NULL, refresh_token_ciphertext = NULL,
+             refresh_token_nonce = NULL, refresh_token_key_version = NULL,
+             expires_at = NULL
+         WHERE endpoint_id = ?",
+    )
+    .bind(&endpoint_id)
+    .execute(&pool)
+    .await?;
+    let present: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM standalone_endpoint_oauth_tokens WHERE refresh_token_ciphertext IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await?
+    .try_get(0)?;
+    assert_eq!(present, 0, "NULLed rows must read as absent");
+
+    sqlx::query(
+        "UPDATE standalone_endpoint_oauth_tokens
+         SET access_token_ciphertext = X'00', access_token_nonce = X'01',
+             access_token_key_version = 1, refresh_token_ciphertext = X'02',
+             refresh_token_nonce = X'03', refresh_token_key_version = 1
+         WHERE endpoint_id = ?",
+    )
+    .bind(&endpoint_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query("DELETE FROM standalone_provider_endpoints WHERE endpoint_id = ?")
+        .bind(&endpoint_id)
+        .execute(&pool)
+        .await?;
+    let remaining: i64 = sqlx::query("SELECT COUNT(*) FROM standalone_endpoint_oauth_tokens")
+        .fetch_one(&pool)
+        .await?
+        .try_get(0)?;
+    assert_eq!(remaining, 0, "token rows must cascade with their endpoint");
 
     pool.close().await;
     store.close().await;

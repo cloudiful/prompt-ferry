@@ -8,12 +8,16 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use super::{PostgresConfigRepository, SqliteConfigRepository, endpoints_map, endpoints_sqlite};
 use crate::{
     config::NativeApi,
-    db::{EndpointCreate, EndpointPage, ProviderEndpoint as PgProviderEndpoint},
+    db::{
+        EndpointCreate, EndpointOAuthToken, EndpointOAuthTokenSet, EndpointPage, EndpointPlan,
+        ProviderEndpoint as PgProviderEndpoint,
+    },
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -24,6 +28,10 @@ pub struct UnifiedProviderEndpoint {
     pub name: String,
     pub provider: crate::db::EndpointProvider,
     pub provider_region: Option<crate::db::EndpointRegion>,
+    /// Issue #599 R2a: upstream plan axis, derived server-side from the
+    /// stored OAuth token (`EndpointPlan::resolve`). Never trusted blindly
+    /// from the client.
+    pub plan: EndpointPlan,
     pub service_tier: crate::db::MinimaxServiceTier,
     pub base_url: String,
     pub native_api: NativeApi,
@@ -34,6 +42,10 @@ pub struct UnifiedProviderEndpoint {
     // Issue #368 Phase C (P2): response-side saved-proxy indicator.
     // `true` when a proxy URL is stored; the secret itself is never echoed.
     pub has_proxy_url: bool,
+    // Issue #599 R2a: response-side saved-OAuth-token indicator. `true` when
+    // a ChatGPT OAuth token is stored; the secrets themselves are never
+    // echoed, mirroring `has_proxy_url`.
+    pub has_oauth_token: bool,
     // Issue #392 Phase K: endpoint default windows (empty means all-day).
     pub active_windows: Vec<crate::db::ActiveWindow>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -87,6 +99,14 @@ impl UnifiedProviderEndpoint {
     pub fn into_pg(self) -> PgProviderEndpoint {
         endpoints_map::unified_to_pg(self)
     }
+}
+
+/// Issue #599 R2a: stamp the derived plan + token presence onto a unified
+/// endpoint after mapping. `token_ids` holds every endpoint with a stored
+/// (non-cleared) OAuth token.
+fn stamp_oauth_presence(endpoint: &mut UnifiedProviderEndpoint, token_ids: &HashSet<Uuid>) {
+    endpoint.has_oauth_token = token_ids.contains(&endpoint.endpoint_id);
+    endpoint.plan = EndpointPlan::resolve(endpoint.provider, endpoint.has_oauth_token);
 }
 
 impl super::ConfigRepository {
@@ -173,6 +193,10 @@ impl super::ConfigRepository {
                         .proxy_url
                         .as_deref()
                         .is_some_and(|raw| !raw.trim().is_empty()),
+                    // Issue #599 R2a: the internal MCP shape stays on the
+                    // platform plan; subscription routing arrives in R2c.
+                    plan: crate::db::EndpointPlan::default(),
+                    has_oauth_token: false,
                     // Issue #392 Phase K: 0021 plaintext schedule for display.
                     active_windows: crate::db::parse_stored_windows(
                         endpoint.active_windows.as_deref(),
@@ -258,6 +282,69 @@ impl super::ConfigRepository {
         }
     }
 
+    /// Issue #599 R2a: store (`Some`) or clear (`None`, NULL convention) the
+    /// ChatGPT OAuth token for an endpoint. The endpoint must exist either
+    /// way. The OpenAI-only gate guards storing a credential, so a non-OpenAI
+    /// endpoint can never acquire one; clearing deliberately bypasses that
+    /// gate, because a provider or plan switch moves the endpoint first and
+    /// only then drops the orphaned token (issue #599 R2a P1). Secrets stay
+    /// server-side; admin responses only ever see `has_oauth_token`.
+    pub async fn set_endpoint_oauth_token(
+        &self,
+        endpoint_id: Uuid,
+        token: Option<EndpointOAuthTokenSet>,
+    ) -> Result<()> {
+        let endpoint = self
+            .get_endpoint(endpoint_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("endpoint {endpoint_id} not found"))?;
+        if token.is_some() && !endpoint.provider.supports_chatgpt_subscription_plan() {
+            anyhow::bail!(
+                "chatgpt oauth token requires an openai endpoint (found {:?})",
+                endpoint.provider
+            );
+        }
+        match self {
+            Self::Postgres(repo) => repo.set_endpoint_oauth_token(endpoint_id, token).await,
+            Self::Sqlite(repo) => repo.set_endpoint_oauth_token(endpoint_id, token).await,
+        }
+    }
+
+    /// Issue #599 R2a: drop the stored OAuth token (plan-switch hygiene).
+    /// Works on any provider so a switch away from OpenAI still removes the
+    /// orphaned credential; never fails for a missing token and leaves the
+    /// endpoint itself untouched.
+    pub async fn clear_endpoint_oauth_token(&self, endpoint_id: Uuid) -> Result<()> {
+        self.set_endpoint_oauth_token(endpoint_id, None).await
+    }
+
+    /// Issue #599 R2a: load the decrypted OAuth token for internal use (token
+    /// refresh in R2b). Crate-private on purpose: the return type carries
+    /// secrets, so no admin response type may contain it. `None` means absent
+    /// or cleared.
+    // Issue #599 R2b will consume this dispatcher for token refresh;
+    // single-fetch presence reuses the backend secret reads above.
+    #[allow(dead_code)]
+    pub(crate) async fn get_endpoint_oauth_token(
+        &self,
+        endpoint_id: Uuid,
+    ) -> Result<Option<EndpointOAuthToken>> {
+        match self {
+            Self::Postgres(repo) => repo.get_endpoint_oauth_token(endpoint_id).await,
+            Self::Sqlite(repo) => repo.get_endpoint_oauth_token(endpoint_id).await,
+        }
+    }
+
+    /// Issue #599 R2a: IDs of endpoints with a stored (non-cleared) OAuth
+    /// token. Drives the derived plan and the admin `has_oauth_token`
+    /// indicator without ever touching the secrets themselves.
+    pub async fn list_endpoint_oauth_token_ids(&self) -> Result<Vec<Uuid>> {
+        match self {
+            Self::Postgres(repo) => repo.list_endpoint_oauth_token_ids().await,
+            Self::Sqlite(repo) => repo.list_endpoint_oauth_token_ids().await,
+        }
+    }
+
     pub async fn get_user_endpoint_setting(&self, user_id: i64) -> Result<Option<Uuid>> {
         match self {
             Self::Postgres(repo) => {
@@ -297,12 +384,23 @@ impl super::ConfigRepository {
 impl PostgresConfigRepository {
     async fn list_endpoints_page(&self, first: i64, rows: i64) -> Result<UnifiedEndpointPage> {
         let page: EndpointPage = crate::db::list_endpoints_page(&self.pool, first, rows).await?;
+        // Issue #599 R2a: one presence query stamps the whole page (no N+1);
+        // the secrets themselves never leave the token table.
+        let token_ids = self
+            .list_endpoint_oauth_token_ids()
+            .await?
+            .into_iter()
+            .collect::<HashSet<_>>();
         Ok(UnifiedEndpointPage {
             total: page.total,
             endpoints: page
                 .endpoints
                 .into_iter()
-                .map(endpoints_map::from_postgres)
+                .map(|endpoint| {
+                    let mut unified = endpoints_map::from_postgres(endpoint);
+                    stamp_oauth_presence(&mut unified, &token_ids);
+                    unified
+                })
                 .collect(),
             first: page.first,
             rows: page.rows,
@@ -310,9 +408,19 @@ impl PostgresConfigRepository {
     }
 
     async fn get_endpoint(&self, endpoint_id: Uuid) -> Result<Option<UnifiedProviderEndpoint>> {
-        Ok(crate::db::get_endpoint(&self.pool, endpoint_id)
+        let endpoint = crate::db::get_endpoint(&self.pool, endpoint_id)
             .await?
-            .map(endpoints_map::from_postgres))
+            .map(endpoints_map::from_postgres);
+        let Some(mut unified) = endpoint else {
+            return Ok(None);
+        };
+        // Issue #599 R2a: presence reuses the secret read; the row is dropped
+        // without logging, keeping single-endpoint fetches at one extra
+        // indexed query.
+        let present = self.get_endpoint_oauth_token(endpoint_id).await?.is_some();
+        unified.has_oauth_token = present;
+        unified.plan = EndpointPlan::resolve(unified.provider, present);
+        Ok(Some(unified))
     }
 
     async fn create_endpoint(
@@ -341,6 +449,76 @@ impl PostgresConfigRepository {
         Ok(endpoint.map(|e| e.api_key))
     }
 
+    /// Issue #599 R2a: upsert (`Some`) or clear (`None`, NULL convention) the
+    /// OAuth token row. The caller (`ConfigRepository::set_...`) enforces the
+    /// OpenAI-only gate, so this stays a plain secret write.
+    async fn set_endpoint_oauth_token(
+        &self,
+        endpoint_id: Uuid,
+        token: Option<EndpointOAuthTokenSet>,
+    ) -> Result<()> {
+        let (access_token, refresh_token, expires_at) = match token {
+            Some(token) => (
+                Some(token.access_token),
+                Some(token.refresh_token),
+                token.expires_at,
+            ),
+            None => (None, None, None),
+        };
+        sqlx::query_file!(
+            "src/sql/endpoints/set_endpoint_oauth_token.sql",
+            endpoint_id,
+            access_token,
+            refresh_token,
+            expires_at,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_endpoint_oauth_token(
+        &self,
+        endpoint_id: Uuid,
+    ) -> Result<Option<EndpointOAuthToken>> {
+        let row = sqlx::query_file!(
+            "src/sql/endpoints/get_endpoint_oauth_token.sql",
+            endpoint_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else { return Ok(None) };
+        // `query_file!` yields a generated record struct, so columns are read
+        // as fields; nullable columns stay `Option`, matching the clear
+        // convention below.
+        let access_token = row.access_token;
+        let refresh_token = row.refresh_token;
+        let expires_at = row.expires_at;
+        match (access_token, refresh_token) {
+            (Some(access_token), Some(refresh_token)) => Ok(Some(EndpointOAuthToken {
+                endpoint_id,
+                access_token,
+                refresh_token,
+                expires_at,
+            })),
+            // Cleared (NULL convention) or never stored.
+            (None, None) => Ok(None),
+            // Refresh without access cannot be used; fail closed like SQLite.
+            (None, Some(_)) => {
+                anyhow::bail!("endpoint oauth token is missing its access token")
+            }
+            // Stale access without refresh reads as absent (clear marker).
+            (Some(_), None) => Ok(None),
+        }
+    }
+
+    async fn list_endpoint_oauth_token_ids(&self) -> Result<Vec<Uuid>> {
+        let rows = sqlx::query_file!("src/sql/endpoints/list_endpoint_oauth_token_ids.sql")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().map(|row| row.endpoint_id).collect())
+    }
+
     async fn endpoint_proxy_url(&self, endpoint_id: Uuid) -> Result<Option<String>> {
         let endpoint = crate::db::get_endpoint(&self.pool, endpoint_id).await?;
         Ok(endpoint.and_then(|e| e.proxy_url))
@@ -364,10 +542,19 @@ impl SqliteConfigRepository {
             .list_endpoints_page(&self.manager, first, rows)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let unified = endpoints
+        let mut unified = endpoints
             .into_iter()
             .map(endpoints_map::from_sqlite)
             .collect::<Result<Vec<_>>>()?;
+        // Issue #599 R2a: one presence query stamps the whole page (no N+1).
+        let token_ids = self
+            .list_endpoint_oauth_token_ids()
+            .await?
+            .into_iter()
+            .collect::<HashSet<_>>();
+        for endpoint in &mut unified {
+            stamp_oauth_presence(endpoint, &token_ids);
+        }
         Ok(UnifiedEndpointPage {
             total,
             endpoints: unified,
@@ -382,7 +569,14 @@ impl SqliteConfigRepository {
             .get_endpoint(&self.manager, endpoint_id)
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
-        endpoint.map(endpoints_map::from_sqlite).transpose()
+        let Some(endpoint) = endpoint else {
+            return Ok(None);
+        };
+        let mut unified = endpoints_map::from_sqlite(endpoint)?;
+        let present = self.get_endpoint_oauth_token(endpoint_id).await?.is_some();
+        unified.has_oauth_token = present;
+        unified.plan = EndpointPlan::resolve(unified.provider, present);
+        Ok(Some(unified))
     }
 
     async fn create_endpoint(
@@ -478,6 +672,34 @@ impl SqliteConfigRepository {
         Ok(endpoint.map(|e| e.api_key))
     }
 
+    async fn set_endpoint_oauth_token(
+        &self,
+        endpoint_id: Uuid,
+        token: Option<EndpointOAuthTokenSet>,
+    ) -> Result<()> {
+        self.store
+            .set_endpoint_oauth_token(&self.manager, endpoint_id, token)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err}"))
+    }
+
+    async fn get_endpoint_oauth_token(
+        &self,
+        endpoint_id: Uuid,
+    ) -> Result<Option<EndpointOAuthToken>> {
+        self.store
+            .get_endpoint_oauth_token(&self.manager, endpoint_id)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err}"))
+    }
+
+    async fn list_endpoint_oauth_token_ids(&self) -> Result<Vec<Uuid>> {
+        self.store
+            .list_endpoint_oauth_token_ids()
+            .await
+            .map_err(|err| anyhow::anyhow!("{err}"))
+    }
+
     async fn endpoint_proxy_url(&self, endpoint_id: Uuid) -> Result<Option<String>> {
         let endpoint = self
             .store
@@ -531,6 +753,7 @@ mod tests {
             name: "primary".to_string(),
             provider: crate::db::EndpointProvider::Generic,
             provider_region: None,
+            plan: crate::db::EndpointPlan::PlatformApiKey,
             service_tier: crate::db::MinimaxServiceTier::Standard,
             base_url: "https://example.test".to_string(),
             native_api: NativeApi::Chat,
@@ -539,6 +762,7 @@ mod tests {
             enabled: true,
             mcp_enabled: false,
             has_proxy_url: false,
+            has_oauth_token: false,
             active_windows: vec![],
             created_at: now,
             updated_at: now,
