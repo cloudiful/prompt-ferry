@@ -112,6 +112,11 @@ pub enum EndpointProvider {
     // rebuild migration widens the provider CHECK to match.
     #[serde(rename = "deepseek")]
     DeepSeek,
+    // Issue #589: OpenAI mirrors the admin API single-token `openai` (the
+    // snake_case default would be `open_ai`); the 0032 standalone rebuild
+    // migration widens the provider CHECK to match.
+    #[serde(rename = "openai")]
+    OpenAi,
 }
 
 impl EndpointProvider {
@@ -124,6 +129,7 @@ impl EndpointProvider {
             Self::OpenRouter => "openrouter",
             Self::Glm => "glm",
             Self::DeepSeek => "deepseek",
+            Self::OpenAi => "openai",
         }
     }
 
@@ -136,6 +142,7 @@ impl EndpointProvider {
             "openrouter" => Ok(Self::OpenRouter),
             "glm" => Ok(Self::Glm),
             "deepseek" => Ok(Self::DeepSeek),
+            "openai" => Ok(Self::OpenAi),
             _ => Err(StandaloneConfigError::CorruptDatabase(format!(
                 "unknown endpoint provider {value:?}"
             ))),

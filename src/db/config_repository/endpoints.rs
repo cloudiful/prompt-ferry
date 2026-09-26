@@ -146,6 +146,9 @@ impl super::ConfigRepository {
                         crate::standalone_config::EndpointProvider::DeepSeek => {
                             crate::db::EndpointProvider::DeepSeek
                         }
+                        crate::standalone_config::EndpointProvider::OpenAi => {
+                            crate::db::EndpointProvider::OpenAi
+                        }
                         crate::standalone_config::EndpointProvider::Generic => {
                             crate::db::EndpointProvider::Generic
                         }

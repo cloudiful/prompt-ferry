@@ -91,6 +91,7 @@ pub(super) fn sqlite_endpoint_from_create(
         crate::db::EndpointProvider::OpenRouter => ScEndpointProvider::OpenRouter,
         crate::db::EndpointProvider::Glm => ScEndpointProvider::Glm,
         crate::db::EndpointProvider::DeepSeek => ScEndpointProvider::DeepSeek,
+        crate::db::EndpointProvider::OpenAi => ScEndpointProvider::OpenAi,
         crate::db::EndpointProvider::Generic => ScEndpointProvider::Generic,
     };
     let provider_region = match input.provider_region {
@@ -201,6 +202,10 @@ mod tests {
         assert_eq!(
             provider_round_trip(DbEndpointProvider::DeepSeek),
             ScEndpointProvider::DeepSeek
+        );
+        assert_eq!(
+            provider_round_trip(DbEndpointProvider::OpenAi),
+            ScEndpointProvider::OpenAi
         );
         assert_eq!(
             provider_round_trip(DbEndpointProvider::Generic),

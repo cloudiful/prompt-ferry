@@ -100,7 +100,11 @@ pub async fn fetch_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
         // DeepSeek (issue #287 P0) has its own account-balance fetcher
         // (`/user/balance`); the flag alone drives routing weight.
         EndpointProvider::DeepSeek => fetch_deepseek_endpoint_usage(endpoint).await,
-        EndpointProvider::Generic => Err(anyhow!("endpoint provider has no token plan API")),
+        // OpenAI (issue #589 P1) has no token-plan fetcher yet; the
+        // organization-level usage endpoint is a P2 concern.
+        EndpointProvider::Generic | EndpointProvider::OpenAi => {
+            Err(anyhow!("endpoint provider has no token plan API"))
+        }
     }
 }
 

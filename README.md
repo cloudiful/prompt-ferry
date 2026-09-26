@@ -24,6 +24,10 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 - Per-request reasoning controls: Chat `reasoning_effort` and Responses `reasoning.effort`, including DeepSeek `max`; Chat compatibility maps unsupported `developer` roles to `system`.
 - Configurable redaction for forwarded content, logs, and usage details.
 - Users, client API keys, upstream endpoints, model routes, and multiple relays.
+- First-class upstream presets for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM, DeepSeek, and OpenAI
+  Platform; preset base URLs (`https://api.openai.com` for OpenAI) are derived server-side, so only the
+  inference API key is configured. Other OpenAI-compatible hosts keep using the Generic provider with an
+  explicit base URL.
 - MCP aggregation for HTTP and stdio servers, with SQLite support for configuration, catalog, and runtime execution; MCP quota and usage ledgers require PostgreSQL.
 - MCP credential quota: per-credential and shared quota-group budgets (requests or credits) with
   atomic reservation, usage-ratio balancing across API keys, cooldown on auth/throttle failures,

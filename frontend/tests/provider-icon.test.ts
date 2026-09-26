@@ -10,6 +10,7 @@ test('brand providers resolve to their vendored simple-icons mark', () => {
     kind: 'brand',
     brand: 'deepseek',
   })
+  expect(providerVisual('openai')).toEqual({ kind: 'brand', brand: 'openai' })
   expect(providerVisual('openrouter')).toEqual({
     kind: 'brand',
     brand: 'openrouter',
@@ -44,6 +45,7 @@ test('every endpoint provider maps to a localized label key', () => {
     'openrouter',
     'glm',
     'deepseek',
+    'openai',
   ]) {
     expect(providerLabelKey(provider)).not.toBeNull()
   }

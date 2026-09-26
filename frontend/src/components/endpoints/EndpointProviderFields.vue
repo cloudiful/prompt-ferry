@@ -19,7 +19,8 @@ const providerSelection = computed({
       | 'opencode_go'
       | 'openrouter'
       | 'glm'
-      | 'deepseek',
+      | 'deepseek'
+      | 'openai',
   ) {
     form.value.provider = value
     if (value !== 'minimax') {
@@ -95,6 +96,7 @@ const hasVersionPath = computed(() =>
         { label: t('providerOpenRouter'), value: 'openrouter' },
         { label: t('providerGlm'), value: 'glm' },
         { label: t('providerDeepSeek'), value: 'deepseek' },
+        { label: t('providerOpenAi'), value: 'openai' },
       ]"
       label-key="label"
       value-key="value"

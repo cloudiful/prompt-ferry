@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import deepseekRaw from '@/assets/providers/deepseek.svg?raw'
 import minimaxRaw from '@/assets/providers/minimax.svg?raw'
+import openaiRaw from '@/assets/providers/openai.svg?raw'
 import opencodeRaw from '@/assets/providers/opencode.svg?raw'
 import openrouterRaw from '@/assets/providers/openrouter.svg?raw'
 import { useLocale } from '@/composables/useLocale'
@@ -24,6 +25,7 @@ const { t } = useLocale()
 const BRAND_RAW: Record<ProviderBrand, string> = {
   deepseek: deepseekRaw,
   minimax: minimaxRaw,
+  openai: openaiRaw,
   opencode: opencodeRaw,
   openrouter: openrouterRaw,
 }
