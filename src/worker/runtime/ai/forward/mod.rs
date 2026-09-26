@@ -1,5 +1,6 @@
 mod invalid_continuation;
 mod non_stream;
+mod response_kind;
 mod responses_to_chat;
 
 use super::super::{
@@ -143,20 +144,12 @@ pub(super) async fn forward_upstream_response(
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
     let upstream_response_headers = forwarded_response_headers(response.headers());
-    let is_sse = upstream_content_type
+    // Issue #599 R2f.3: the header is authoritative when it names an event
+    // stream; every other response is classified from its actual body prefix
+    // after the success check below.
+    let header_is_sse = upstream_content_type
         .as_deref()
         .is_some_and(|value| value.contains("text/event-stream"));
-    let mut assistant_capture = (route.native_api == crate::config::NativeApi::Chat)
-        .then(|| AssistantArtifactCapture::new(is_sse, request_ctx.user_id));
-    let mut responses_capture =
-        should_capture_responses_artifact(&request.path, response_adapter, route.native_api).then(
-            || {
-                ResponsesArtifactCapture::new(
-                    is_sse || response_adapter == ResponseAdapter::AnthropicMessagesToResponses,
-                    request_ctx.user_id,
-                )
-            },
-        );
 
     if !status.is_success() {
         let body = read_response_sample(response, ERROR_BODY_SAMPLE_BYTES).await;
@@ -193,6 +186,38 @@ pub(super) async fn forward_upstream_response(
         return respond_upstream_error(&context, status, body, upstream_response_headers).await;
     }
 
+    // Issue #599 R2f.3: a Responses upstream can stream `data:`/`event:`
+    // framing under a missing or generic content type. Inspect a bounded body
+    // prefix before choosing the forwarder and replay every peeked byte ahead
+    // of the untouched remainder, so no byte is lost and nothing is buffered
+    // beyond the bound.
+    let resolved_kind = if header_is_sse {
+        response_kind::ResponseKind::EventStream
+    } else {
+        let sniffed = response_kind::sniff_response(response).await?;
+        response = sniffed.response;
+        sniffed.kind
+    };
+    let is_sse = resolved_kind.is_event_stream();
+    // Relay the framing the body actually uses: an event stream that arrived
+    // under a missing/generic header must reach the client as SSE.
+    let forwarded_content_type = if is_sse && !header_is_sse {
+        Some("text/event-stream".to_string())
+    } else {
+        upstream_content_type.clone()
+    };
+    let mut assistant_capture = (route.native_api == crate::config::NativeApi::Chat)
+        .then(|| AssistantArtifactCapture::new(is_sse, request_ctx.user_id));
+    let mut responses_capture =
+        should_capture_responses_artifact(&request.path, response_adapter, route.native_api).then(
+            || {
+                ResponsesArtifactCapture::new(
+                    is_sse || response_adapter == ResponseAdapter::AnthropicMessagesToResponses,
+                    request_ctx.user_id,
+                )
+            },
+        );
+
     if response_adapter == ResponseAdapter::ChatToResponses && !is_sse {
         return Box::pin(forward_non_stream_chat_response(
             response,
@@ -215,7 +240,10 @@ pub(super) async fn forward_upstream_response(
         route_ctx.route.provider,
         route_ctx.route.native_api,
         upstream_content_type.as_deref(),
-        is_sse,
+        // The GLM envelope is a JSON body; gate the buffering check on the
+        // header framing so a request whose body is a JSON envelope (classified
+        // as JSON by the prefix sniff) still gets its envelope checked.
+        header_is_sse,
         response_adapter,
     ) {
         match consume_envelope_preflight(
@@ -280,7 +308,7 @@ pub(super) async fn forward_upstream_response(
         context.cloned(),
         assistant_capture.as_mut(),
         responses_capture.as_mut(),
-        upstream_content_type,
+        forwarded_content_type,
         is_sse,
     ))
     .await

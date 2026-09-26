@@ -25,6 +25,9 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+mod responses_framing;
+mod responses_usage;
+
 const RESPONSES_JSON_BODY: &str = r#"{"id":"resp_1","object":"response","status":"completed","output":[],"usage":{"total_tokens":5}}"#;
 
 fn test_services(out_tx: BridgeSender) -> RuntimeServices {
