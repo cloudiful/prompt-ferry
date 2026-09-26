@@ -32,6 +32,10 @@ export function createEndpointListItemView(
     name: endpoint.name,
     provider: endpoint.provider,
     provider_region: endpoint.provider_region ?? null,
+    // R2e.3: carry the plan axis and token presence into the list view so
+    // the table/card decide quota visibility from the row alone.
+    plan: endpoint.plan ?? 'platform_api_key',
+    has_oauth_token: endpoint.has_oauth_token === true,
     base_url: endpoint.base_url,
     scope: endpoint.scope,
     scope_label:

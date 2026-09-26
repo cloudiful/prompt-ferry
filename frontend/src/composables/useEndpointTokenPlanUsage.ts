@@ -3,6 +3,7 @@ import type {
   ProviderEndpoint,
   TokenPlanUsageResponse,
 } from '@/generated/admin-api'
+import { isQuotaEligible } from '@/models/endpoints/quota'
 import { fetchTokenPlanUsage } from '@/stores/endpoints-api'
 
 export function useEndpointTokenPlanUsage(
@@ -16,16 +17,9 @@ export function useEndpointTokenPlanUsage(
 
   async function open(nextEndpointId: string): Promise<void> {
     const endpoint = findEndpointById(nextEndpointId)
-    if (
-      !endpoint ||
-      (endpoint.provider !== 'minimax' &&
-        endpoint.provider !== 'command_code' &&
-        endpoint.provider !== 'opencode_go' &&
-        endpoint.provider !== 'openrouter' &&
-        endpoint.provider !== 'glm' &&
-        endpoint.provider !== 'deepseek')
-    )
-      return
+    // R2e.3: the same eligibility gate the list uses — an OpenAI endpoint
+    // only opens the subscription quota once a token is stored.
+    if (!endpoint || !isQuotaEligible(endpoint)) return
     endpointId.value = nextEndpointId
     usage.value = null
     visible.value = true

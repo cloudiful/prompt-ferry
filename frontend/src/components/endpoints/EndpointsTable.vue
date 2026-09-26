@@ -1,13 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import {
-  computed,
-  defineComponent,
-  h,
-  onMounted,
-  watch,
-  type PropType,
-} from 'vue'
+import { computed, defineComponent, h, watch, type PropType } from 'vue'
 import EndpointNameCell from '@/components/endpoints/EndpointNameCell.vue'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
@@ -17,6 +10,7 @@ import {
 } from '@/composables/useTokenPlanBadges'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
 import type { EndpointListItemView } from '@/models/endpoints'
+import { isQuotaEligible } from '@/models/endpoints/quota'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
 const props = defineProps<{
@@ -28,25 +22,11 @@ const props = defineProps<{
   total: number
 }>()
 
-// Quota-bearing providers — mirrors the guard around the existing
-// `tokenPlanUsage` action button and the backend admin guard. Non-quota
-// providers carry no plan windows, so the badge column collapses to a
-// dash instead of a misleading row of empty pills.
-const QUOTA_PROVIDERS = new Set<EndpointListItemView['provider']>([
-  'minimax',
-  'command_code',
-  'opencode_go',
-  'openrouter',
-  'glm',
-  'deepseek',
-])
-
-function isQuotaProvider(provider: EndpointListItemView['provider']): boolean {
-  return QUOTA_PROVIDERS.has(provider)
-}
-
+// R2e.3: quota visibility comes from the shared eligibility helper (OpenAI
+// joins only with a stored subscription token). Non-quota rows collapse the
+// column to a dash instead of a misleading row of empty pills.
 const showUsageColumn = computed(() =>
-  props.items.some((item) => isQuotaProvider(item.provider)),
+  props.items.some((item) => isQuotaEligible(item)),
 )
 
 const columns = computed<TableColumn<EndpointListItemView>[]>(() => {
@@ -74,29 +54,28 @@ defineEmits<{
   toggleEndpointEnabled: [endpointId: string, enabled: boolean]
 }>()
 
-// Lazy prefetch: kick off token-plan fetches for the visible page once
-// the table mounts and every time the items list swaps (page change,
-// refresh, delete). The cache layer caps in-flight at 4 concurrent
-// requests and coalesces duplicate ids.
+// Lazy prefetch: kick off token-plan fetches for the eligible visible rows
+// whenever the page swaps or an endpoint's eligibility flips (OAuth login).
+// The cache layer caps in-flight at 4 concurrent requests and coalesces
+// duplicate ids; the immediate run covers the mount case.
 async function prefetchVisible(): Promise<void> {
   const ids = props.items
-    .filter((item) => isQuotaProvider(item.provider))
+    .filter((item) => isQuotaEligible(item))
     .map((item) => item.endpoint_id)
   await prefetchTokenPlanBatch(ids, 4)
 }
 
-onMounted(() => {
-  void prefetchVisible()
-})
-
-// Re-prefetch whenever the visible endpoint set changes. We compare on
-// the joined id list so order or unrelated field updates don't trigger
-// redundant fetches.
+// We compare on the joined id+eligibility list so order or unrelated field
+// updates don't trigger redundant fetches.
 watch(
-  () => props.items.map((item) => item.endpoint_id).join('|'),
+  () =>
+    props.items
+      .map((item) => `${item.endpoint_id}:${isQuotaEligible(item) ? 1 : 0}`)
+      .join('|'),
   () => {
     void prefetchVisible()
   },
+  { immediate: true },
 )
 
 // Inline usage-badge subcomponent. Lives in the same SFC so we don't
@@ -178,7 +157,7 @@ const EndpointUsageBadges = defineComponent({
       </template>
       <template v-if="showUsageColumn" #usage-cell="{ row }">
         <EndpointUsageBadges
-          v-if="isQuotaProvider(row.original.provider)"
+          v-if="isQuotaEligible(row.original)"
           :endpoint-id="row.original.endpoint_id"
           :t="t"
         />
@@ -195,7 +174,7 @@ const EndpointUsageBadges = defineComponent({
       <template #actions-cell="{ row }">
         <div class="flex justify-end gap-2">
           <UTooltip
-            v-if="isQuotaProvider(row.original.provider)"
+            v-if="isQuotaEligible(row.original)"
             :text="t('tokenPlanUsage')"
           >
             <UButton

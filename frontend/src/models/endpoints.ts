@@ -1,4 +1,5 @@
 import type {
+  EndpointPlan,
   EndpointTestResponse,
   ProviderEndpoint,
   ModelEndpointRule,
@@ -19,6 +20,8 @@ export type EndpointListItemView = {
   name: string
   provider: ProviderEndpoint['provider']
   provider_region: ProviderEndpoint['provider_region']
+  plan: EndpointPlan
+  has_oauth_token: boolean
   base_url: string
   scope: string
   scope_label: string

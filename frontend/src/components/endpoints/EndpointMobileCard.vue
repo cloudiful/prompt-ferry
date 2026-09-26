@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineComponent, h, type PropType } from 'vue'
+import { computed, defineComponent, h, watch, type PropType } from 'vue'
 import ProviderIcon from '@/components/providers/ProviderIcon.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import {
@@ -8,6 +8,7 @@ import {
 } from '@/composables/useTokenPlanBadges'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
 import type { EndpointListItemView } from '@/models/endpoints'
+import { isQuotaEligible } from '@/models/endpoints/quota'
 
 const props = defineProps<{
   busy: boolean
@@ -23,23 +24,22 @@ defineEmits<{
   toggleEndpointEnabled: [endpointId: string, enabled: boolean]
 }>()
 
-// Same provider gate as the desktop table — non-quota providers fall
-// back to a "—" pill in the usage row.
-const QUOTA_PROVIDERS = new Set<EndpointListItemView['provider']>([
-  'minimax',
-  'command_code',
-  'opencode_go',
-  'openrouter',
-  'glm',
-  'deepseek',
-])
+// Same shared eligibility gate as the desktop table: non-quota rows keep
+// the "—" fallback, and an OpenAI endpoint without a stored subscription
+// token never renders or fetches subscription quota.
+const quotaEligible = computed(() => isQuotaEligible(props.item))
 
-const isQuotaProvider = computed(() => QUOTA_PROVIDERS.has(props.item.provider))
-
-// Kick off the prefetch when the card mounts so mobile renders the
-// badges within one round-trip of the table mount. The cache layer
-// already dedupes against the table's prefetch, so this is free.
-prefetchTokenPlanBatch([props.item.endpoint_id], 4)
+// Kick off the prefetch when the card mounts or the row becomes eligible
+// (OAuth login) so mobile renders the badges within one round-trip of the
+// table mount. The cache layer already dedupes against the table's
+// prefetch, so this is free.
+watch(
+  quotaEligible,
+  (eligible) => {
+    if (eligible) void prefetchTokenPlanBatch([props.item.endpoint_id], 4)
+  },
+  { immediate: true },
+)
 
 // Inline usage-badge subcomponent for the mobile card. Compact pill
 // pair wrapping across the row so the wider card surface can afford the
@@ -131,7 +131,7 @@ const EndpointMobileUsageBadges = defineComponent({
           />
         </div>
       </div>
-      <div v-if="isQuotaProvider" class="grid gap-px min-w-0">
+      <div v-if="quotaEligible" class="grid gap-px min-w-0">
         <div
           class="text-[0.7rem] font-bold tracking-wide text-dimmed uppercase"
         >
@@ -160,7 +160,7 @@ const EndpointMobileUsageBadges = defineComponent({
       class="grid gap-2 md:grid-cols-2 [&>button]:w-full [&>button]:justify-center"
     >
       <UButton
-        v-if="isQuotaProvider"
+        v-if="quotaEligible"
         size="sm"
         color="neutral"
         variant="outline"
