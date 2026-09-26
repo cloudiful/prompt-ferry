@@ -140,6 +140,8 @@ impl UsageCapture {
         }
         if let Some(usage) = extract_usage(payload).or_else(|| extract_usage(value)) {
             self.usage = merge_usage(&self.usage, &usage);
+        } else if let Some(diagnosis) = response_usage_diagnostics::diagnose(payload, value) {
+            diagnosis.record();
         }
         if value.get("response").is_some() {
             text::append_text(&mut self.response_text, &text::extract_output_text(payload));

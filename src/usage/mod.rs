@@ -7,6 +7,9 @@ pub mod logging;
 mod output_events;
 pub mod prompt;
 mod request;
+mod response_usage_diagnostics;
+#[cfg(test)]
+mod response_usage_diagnostics_tests;
 mod text;
 
 pub use capture::{TokenUsage, UsageCapture};
