@@ -131,6 +131,12 @@ async fn codex_url_defaults_to_the_backend_root_and_honours_the_override() {
 #[test]
 fn codex_model_normalization_covers_known_and_fallback_models() {
     for (requested, expected) in [
+        ("gpt-6-astra", "gpt-6-astra"),
+        ("gpt-6-sol", "gpt-6-sol"),
+        ("gpt-6-luna", "gpt-6-luna"),
+        ("gpt-5.6-sol", "gpt-5.6-sol"),
+        ("gpt-5.6-terra", "gpt-5.6-terra"),
+        ("gpt-5.6-luna", "gpt-5.6-luna"),
         ("gpt-5.2", "gpt-5.2"),
         ("gpt-5.2-codex", "gpt-5.2-codex"),
         ("gpt-5.1", "gpt-5.1"),
@@ -141,20 +147,23 @@ fn codex_model_normalization_covers_known_and_fallback_models() {
         ("gpt-5", "gpt-5"),
         ("codex-mini-latest", "codex-mini-latest"),
         // Reasoning-effort suffixes fold into the base Codex id.
+        ("gpt-6-sol-xhigh", "gpt-6-sol"),
         ("gpt-5.1-codex-high", "gpt-5.1-codex"),
         ("gpt-5.2-codex-xhigh", "gpt-5.2-codex"),
         ("gpt-5.1-codex-max-low", "gpt-5.1-codex-max"),
         // Provider prefix is dropped before matching.
+        ("openai/gpt-6-sol", "gpt-6-sol"),
         ("openai/gpt-5.2-codex", "gpt-5.2-codex"),
-        // Non-Codex OpenAI families and unknown names fall back.
-        ("gpt-4o", DEFAULT_CODEX_MODEL),
-        ("o3", DEFAULT_CODEX_MODEL),
-        ("gpt-4.1-mini", DEFAULT_CODEX_MODEL),
-        ("legacy-model", DEFAULT_CODEX_MODEL),
+        // Unknown names pass through so upstream returns the true error.
+        ("gpt-4o", "gpt-4o"),
+        ("o3", "o3"),
+        ("gpt-4.1-mini", "gpt-4.1-mini"),
+        ("legacy-model", "legacy-model"),
+        // An empty model falls back to the default.
         ("", DEFAULT_CODEX_MODEL),
     ] {
         assert_eq!(
-            normalize_codex_model(requested),
+            normalize_codex_model(requested).into_owned(),
             expected,
             "model {requested}"
         );
@@ -163,13 +172,20 @@ fn codex_model_normalization_covers_known_and_fallback_models() {
 
 #[test]
 fn codex_body_normalization_maps_the_model_and_forces_store_false() {
-    let body = br#"{"model":"gpt-4o","store":true,"stream":true,"input":[]}"#;
+    let body = br#"{"model":"gpt-6-sol-xhigh","store":true,"stream":true,"input":[]}"#;
     let normalized = normalize_codex_request_body(body);
     let value: Value = serde_json::from_slice(normalized.as_ref()).unwrap();
-    assert_eq!(value["model"], DEFAULT_CODEX_MODEL);
+    assert_eq!(value["model"], "gpt-6-sol");
     assert_eq!(value["store"], false);
     assert_eq!(value["stream"], true);
     assert_eq!(value["input"], json!([]));
+
+    // Unknown models pass through untouched; only the stateless flag is forced.
+    let unknown = br#"{"model":"gpt-4o","store":true}"#;
+    let passthrough = normalize_codex_request_body(unknown);
+    let value: Value = serde_json::from_slice(passthrough.as_ref()).unwrap();
+    assert_eq!(value["model"], "gpt-4o");
+    assert_eq!(value["store"], false);
 
     // A model-only rewrite keeps the stateless flag when it is already false.
     let model_only = br#"{"model":"gpt-5.1-codex-high","store":false}"#;

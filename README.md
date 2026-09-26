@@ -388,9 +388,11 @@ Setup:
    refresh on expiry, the first 401 triggers one refresh-and-retry, and a revoked refresh
    token clears the credential and asks for a new login.
 4. The endpoint native API must be `responses`. Caller model names are normalized onto Codex
-   backend models: Codex ids (`gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-mini`, …) are
-   kept (reasoning-effort suffixes folded in), and other models (`gpt-4o`, `o3`) fall back to
-   `gpt-5.1-codex`.
+   backend models: Codex ids (`gpt-6-sol`, `gpt-6-astra`, `gpt-6-luna`, `gpt-5.6-sol`,
+   `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.2-codex`, `gpt-5.1-codex`, …) are
+   kept (reasoning-effort suffixes folded in); unknown models pass through unchanged so the
+   upstream backend returns the true model error, and an empty model falls back to
+   `gpt-6-sol`.
 
 The subscription quota is display-only in the endpoint dialog (5-hour/weekly windows): it never
 affects routing weight and stays separate from Platform API usage. The two credential sets are
