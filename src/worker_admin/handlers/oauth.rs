@@ -5,6 +5,7 @@
 //! pending-login registry plus R2a persistence in `oauth_session`; this module
 //! owns the admin routes and is the public test surface (`worker_admin::oauth`).
 
+use super::chatgpt_backend::chatgpt_oauth_issuer;
 use super::oauth_client::BROWSER_REDIRECT_URI;
 use super::oauth_session::{
     PendingBrowserFlow, PendingDeviceFlow, browser_flow, complete_login, device_flow,
@@ -56,16 +57,6 @@ pub fn routes() -> Router<AdminState> {
         )
 }
 
-/// ChatGPT OAuth issuer. The deployment override lets integration tests point
-/// the client at a mock issuer and lets air-gapped installs front it.
-fn oauth_issuer() -> String {
-    std::env::var("PROMPT_FERRY_CHATGPT_OAUTH_ISSUER")
-        .ok()
-        .map(|value| value.trim().trim_end_matches('/').to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| super::oauth_client::CHATGPT_ISSUER.to_string())
-}
-
 pub(super) async fn oauth_status(
     State(state): State<AdminState>,
     headers: HeaderMap,
@@ -92,7 +83,7 @@ pub(super) async fn oauth_device_start(
         Ok(client) => client,
         Err(response) => return response,
     };
-    let issuer = oauth_issuer();
+    let issuer = chatgpt_oauth_issuer();
     let device = match request_device_authorization(&client, &issuer).await {
         Ok(device) => device,
         Err(error) => return oauth_error_response(&state, error),
@@ -135,11 +126,18 @@ pub(super) async fn oauth_device_poll(
         remove_device_flow(body.flow_id);
         return error(StatusCode::GONE, "oauth_flow_expired", DEVICE_FLOW_EXPIRED);
     }
+    // Issue #599 R2b P3: re-check the provider gate at completion time. The
+    // endpoint may have moved off OpenAI inside the flow TTL, and the stored
+    // token must never land on a provider that cannot carry it.
+    if let Err(response) = ensure_login_endpoint(&state, endpoint_id).await {
+        remove_device_flow(body.flow_id);
+        return response;
+    }
     let client = match oauth_client(&state, endpoint_id).await {
         Ok(client) => client,
         Err(response) => return response,
     };
-    let issuer = oauth_issuer();
+    let issuer = chatgpt_oauth_issuer();
     let device = DeviceAuthorization {
         device_auth_id: flow.device_auth_id.clone(),
         user_code: flow.user_code.clone(),
@@ -210,7 +208,7 @@ pub(super) async fn oauth_browser_start(
             expires_at: Instant::now() + BROWSER_FLOW_TTL,
         },
     );
-    let issuer = oauth_issuer();
+    let issuer = chatgpt_oauth_issuer();
     Json(OAuthBrowserStartResponse {
         flow_id,
         authorize_url: authorize_url(&issuer, BROWSER_REDIRECT_URI, &pkce, &oauth_state),
@@ -236,6 +234,12 @@ pub(super) async fn oauth_browser_complete(
         remove_browser_flow(body.flow_id);
         return error(StatusCode::GONE, "oauth_flow_expired", BROWSER_FLOW_EXPIRED);
     }
+    // Issue #599 R2b P3: re-check the provider gate at completion time (see
+    // `oauth_device_poll`); a provider move inside the TTL drops the flow.
+    if let Err(response) = ensure_login_endpoint(&state, endpoint_id).await {
+        remove_browser_flow(body.flow_id);
+        return response;
+    }
     let code = match parse_redirect_url(&body.redirect_url, &flow.oauth_state) {
         Ok(code) => code,
         Err(error) => {
@@ -251,7 +255,7 @@ pub(super) async fn oauth_browser_complete(
     };
     let exchange = exchange_authorization_code(
         &client,
-        &oauth_issuer(),
+        &chatgpt_oauth_issuer(),
         &code,
         &flow.redirect_uri,
         &flow.code_verifier,
@@ -305,7 +309,7 @@ pub(super) async fn oauth_refresh(
         Ok(client) => client,
         Err(response) => return response,
     };
-    match refresh_chatgpt_tokens(&client, &oauth_issuer(), &token.refresh_token).await {
+    match refresh_chatgpt_tokens(&client, &chatgpt_oauth_issuer(), &token.refresh_token).await {
         Ok(tokens) => {
             // The refresh response may omit a rotated refresh token; keep the
             // stored one in that case.

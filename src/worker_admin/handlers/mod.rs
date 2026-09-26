@@ -1,6 +1,10 @@
 mod approvals;
 mod auth;
 mod billing;
+// Issue #599 R2c: the ChatGPT (Codex) private-interface mapping layer is
+// public so the runtime request path can reach the same helpers the admin
+// handlers use (the pattern already used by `pub mod oauth`).
+pub mod chatgpt_backend;
 mod endpoint_usage;
 mod endpoints;
 mod mcp;

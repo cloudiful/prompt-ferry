@@ -1,4 +1,5 @@
 import type {
+  EndpointPlan,
   EndpointRequest,
   MinimaxServiceTier,
   ProviderEndpoint,
@@ -11,6 +12,28 @@ export function normalizeServiceTier(
   value: MinimaxServiceTier | string | null | undefined,
 ): MinimaxServiceTier {
   return value === 'priority' ? 'priority' : 'standard'
+}
+
+// Issue #599 R2c: the plan axis is derived server-side (token presence on an
+// OpenAI endpoint). Unknown/legacy values fall back to the platform plan so a
+// save never accidentally requests the subscription plan.
+export function normalizeEndpointPlan(
+  value: EndpointPlan | string | null | undefined,
+): EndpointPlan {
+  return value === 'chatgpt_subscription'
+    ? 'chatgpt_subscription'
+    : 'platform_api_key'
+}
+
+// Issue #599 R2c: only OpenAI endpoints carry the plan axis; every provider
+// switch away from OpenAI forces the platform plan back so a stale
+// subscription selection is never submitted.
+export function normalizeProviderPlan(
+  provider: EndpointForm['provider'],
+  plan: EndpointPlan | string | null | undefined,
+): EndpointPlan {
+  if (provider !== 'openai') return 'platform_api_key'
+  return normalizeEndpointPlan(plan)
 }
 
 export function createEmptyEndpointForm(): EndpointForm {
@@ -35,6 +58,10 @@ export function createEmptyEndpointForm(): EndpointForm {
     key_lb_enabled: false,
     protocol_mode: 'auto',
     native_api_override: null,
+    // Issue #599 R2c: platform plan until the operator logs in and selects the
+    // ChatGPT subscription plan.
+    plan: 'platform_api_key',
+    has_oauth_token: false,
     enabled: true,
     mcp_enabled: false,
     // Issue #368 Phase C: masked proxy default; empty + no saved means direct.
@@ -81,6 +108,9 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
         ? 'auto'
         : 'manual',
     native_api_override: nativeApiOverride,
+    // Issue #599 R2c: the derived plan and token presence gate the selector.
+    plan: normalizeProviderPlan(source.provider ?? 'generic', source.plan),
+    has_oauth_token: source.has_oauth_token ?? false,
     enabled: source.enabled ?? true,
     mcp_enabled: source.mcp_enabled ?? false,
     // Issue #368 Phase C: masked proxy input; never echo the secret.
@@ -158,5 +188,8 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
     mcp_enabled: safe.mcp_enabled ?? false,
     proxy_url,
     active_windows,
+    // Issue #599 R2c: always send the effective plan; the provider guard keeps
+    // a stale subscription selection from surviving a provider switch.
+    plan: normalizeProviderPlan(safe.provider ?? 'generic', safe.plan),
   }
 }

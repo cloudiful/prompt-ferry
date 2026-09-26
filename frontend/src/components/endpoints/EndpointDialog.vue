@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { User } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
 import EndpointApiKeysEditor from '@/components/endpoints/EndpointApiKeysEditor.vue'
+import EndpointOAuthSection from '@/components/endpoints/EndpointOAuthSection.vue'
 import EndpointProviderFields from '@/components/endpoints/EndpointProviderFields.vue'
 import ProxySettingsFields from '@/components/shared/ProxySettingsFields.vue'
 import ScheduleWindowsFields from '@/components/shared/ScheduleWindowsFields.vue'
@@ -111,6 +112,23 @@ function hasEndpointSchedule(): boolean {
 function hasEndpointSettings(): boolean {
   return hasProxy.value || hasEndpointSchedule()
 }
+
+// Issue #599 R2c: mirror the live OAuth state into the form. A token that
+// appears (login completed) enables the subscription plan; a token that
+// disappears (cleared/revoked) forces the platform plan back.
+function applyOAuthStatus(next: {
+  plan: EndpointForm['plan']
+  has_oauth_token: boolean
+}): void {
+  const hadToken = form.value?.has_oauth_token ?? false
+  if (!form.value) return
+  form.value.has_oauth_token = next.has_oauth_token
+  if (!next.has_oauth_token) {
+    form.value.plan = 'platform_api_key'
+    return
+  }
+  if (!hadToken) form.value.plan = next.plan
+}
 </script>
 
 <template>
@@ -134,6 +152,20 @@ function hasEndpointSettings(): boolean {
             @update:model-value="form.owner_user_id = $event ?? null"
           />
           <EndpointApiKeysEditor v-model:form="form" :t="t" />
+          <div
+            v-if="form.provider === 'openai'"
+            class="border-t border-default pt-3"
+          >
+            <EndpointOAuthSection
+              v-if="form.endpoint_id"
+              :endpoint-id="form.endpoint_id"
+              :t="t"
+              @status="applyOAuthStatus"
+            />
+            <p v-else class="text-xs text-dimmed">
+              {{ t('endpointOAuthSaveFirst') }}
+            </p>
+          </div>
           <div class="grid gap-2 border-t border-default pt-3">
             <div class="flex items-center justify-between gap-3">
               <div class="flex items-center gap-1">

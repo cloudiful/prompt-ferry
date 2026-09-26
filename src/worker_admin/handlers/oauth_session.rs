@@ -8,11 +8,9 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use reqwest::Client;
 
+use super::chatgpt_backend::token_expiry;
 use super::oauth_client::{CHATGPT_ISSUER, ChatgptOAuthError, OAuthTokenResponse};
 use super::*;
-
-const DEFAULT_TOKEN_TTL_SECONDS: i64 = 3600;
-const MAX_TOKEN_TTL_SECONDS: i64 = 60 * 60 * 24 * 30;
 
 #[derive(Clone)]
 pub(super) struct PendingDeviceFlow {
@@ -166,14 +164,10 @@ pub(super) async fn persist_token(
     refresh_token: String,
     expires_in_seconds: Option<u64>,
 ) -> Result<(), Response> {
-    let ttl_seconds = expires_in_seconds
-        .and_then(|seconds| i64::try_from(seconds).ok())
-        .unwrap_or(DEFAULT_TOKEN_TTL_SECONDS)
-        .clamp(60, MAX_TOKEN_TTL_SECONDS);
     let token = db::EndpointOAuthTokenSet {
         access_token,
         refresh_token,
-        expires_at: Some(Utc::now() + chrono::Duration::seconds(ttl_seconds)),
+        expires_at: Some(token_expiry(expires_in_seconds)),
     };
     state
         .config_repository

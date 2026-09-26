@@ -307,6 +307,32 @@ tools 的一轮请求。ferry 让这类轮次继续可用：
 `native_api`、`disposition`、`attempt`。设置
 `PROMPT_FERRY_DISABLE_THINKING_DOWNGRADE=1` 可同时旁路两条路径。
 
+### ChatGPT Plus/Pro 订阅（OAuth）
+
+OpenAI 端点支持两种「上游计划」（Admin → 上游端点 → OpenAI）：
+
+- 官方 API Key（Platform）：沿用 `https://api.openai.com`，用量按 Platform API 口径。
+- ChatGPT Plus/Pro 订阅：使用 ChatGPT 账号 OAuth 登录，推理走 Codex 后端
+  `https://chatgpt.com/backend-api/codex/responses`，额度按订阅的 5 小时/周窗口。
+
+配置步骤：
+
+1. 新建或编辑 OpenAI 端点并先保存（订阅计划需要端点已存在）。
+2. 在「ChatGPT 登录」区完成登录：Headless 用设备码（界面会显示设备码与验证地址，
+   在浏览器打开并输入设备码），或浏览器登录（打开授权链接完成登录后，把跳转到
+   `http://localhost:1455/auth/callback` 的完整地址粘贴回输入框）。
+3. 登录成功后把「上游计划」切换为 ChatGPT Plus/Pro 订阅并保存。凭据到期会自动
+   刷新；上游返回 401 时自动刷新并重试一次；refresh token 失效会清除凭据并提示
+   重新登录。
+4. 端点端口类型需为 `responses`。客户端模型名会归一为 Codex 后端模型：Codex 系列
+   （`gpt-5.2-codex`、`gpt-5.1-codex`、`gpt-5.1-codex-mini` 等）原样保留并去掉思考
+   强度后缀，其它模型（如 `gpt-4o`、`o3`）回退到 `gpt-5.1-codex`。
+
+订阅额度仅在端点对话框展示（5 小时/周窗口），不参与路由权重，也不计入 Platform
+API 用量；两套凭据相互独立：切换到官方 API Key 计划会清除已存的 OAuth 凭据，切离
+OpenAI 提供方同样清理。内网前置或测试可用 `PROMPT_FERRY_CHATGPT_OAUTH_ISSUER` 与
+`PROMPT_FERRY_CHATGPT_BACKEND_URL` 覆盖 ChatGPT 认证与后端域名。
+
 ### 单机二进制
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的

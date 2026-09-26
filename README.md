@@ -367,6 +367,38 @@ Observability events: `event=thinking_downgrade`, `event=thinking_echo_retry`,
 carrying `conversation_id`, `provider`, `native_api`, `disposition`, and
 `attempt`. Set `PROMPT_FERRY_DISABLE_THINKING_DOWNGRADE=1` to bypass both paths.
 
+### ChatGPT Plus/Pro subscription (OAuth)
+
+OpenAI endpoints support two "upstream plans" (Admin → Endpoints → OpenAI):
+
+- Platform API key: keeps using `https://api.openai.com` and Platform API usage accounting.
+- ChatGPT Plus/Pro subscription: log in with a ChatGPT account over OAuth, and inference goes
+  to the Codex backend at `https://chatgpt.com/backend-api/codex/responses` with the
+  subscription's 5-hour/weekly windows.
+
+Setup:
+
+1. Create or edit the OpenAI endpoint and save it first (the subscription plan needs an
+   existing endpoint).
+2. Complete the login under "ChatGPT login": headless uses a device code (the panel shows the
+   code and the verification address to open in a browser), or browser login (open the
+   authorize link, then paste the full `http://localhost:1455/auth/callback` redirect address
+   back into the panel).
+3. Once logged in, switch "Upstream plan" to ChatGPT Plus/Pro subscription and save. Tokens
+   refresh on expiry, the first 401 triggers one refresh-and-retry, and a revoked refresh
+   token clears the credential and asks for a new login.
+4. The endpoint native API must be `responses`. Caller model names are normalized onto Codex
+   backend models: Codex ids (`gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-mini`, …) are
+   kept (reasoning-effort suffixes folded in), and other models (`gpt-4o`, `o3`) fall back to
+   `gpt-5.1-codex`.
+
+The subscription quota is display-only in the endpoint dialog (5-hour/weekly windows): it never
+affects routing weight and stays separate from Platform API usage. The two credential sets are
+independent — switching to the Platform API key plan clears the stored OAuth credential, and a
+provider move away from OpenAI does the same. For fronting or tests,
+`PROMPT_FERRY_CHATGPT_OAUTH_ISSUER` and `PROMPT_FERRY_CHATGPT_BACKEND_URL` override the ChatGPT
+auth and backend hosts.
+
 ### Single-host binary
 
 Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases)

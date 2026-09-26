@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ProviderIcon from '@/components/providers/ProviderIcon.vue'
+import { normalizeProviderPlan } from '@/admin-mappers'
+import type { EndpointPlan } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
 
 const props = defineProps<{
@@ -23,6 +25,9 @@ const providerSelection = computed({
       | 'openai',
   ) {
     form.value.provider = value
+    // Issue #599 R2c: the plan axis is OpenAI-only; a provider switch away
+    // resets it so a stale subscription selection is never submitted.
+    form.value.plan = normalizeProviderPlan(value, form.value.plan)
     if (value !== 'minimax') {
       // Preset providers other than MiniMax carry no region, no service
       // tier, and no MiniMax builtin MCP privilege. Their base URL is
@@ -50,6 +55,28 @@ const providerRegionSelection = computed({
 })
 const isGeneric = computed(() => form.value.provider === 'generic')
 const isMinimax = computed(() => form.value.provider === 'minimax')
+const isOpenAi = computed(() => form.value.provider === 'openai')
+// Issue #599 R2c: the ChatGPT subscription plan is claimable only after the
+// OAuth login stored a token; the server rejects it otherwise.
+const planSelection = computed<EndpointPlan>({
+  get: () => normalizeProviderPlan(form.value.provider, form.value.plan),
+  set(value) {
+    form.value.plan = normalizeProviderPlan(form.value.provider, value)
+  },
+})
+const planOptions = computed(() => [
+  { label: props.t('endpointPlanPlatformApiKey'), value: 'platform_api_key' },
+  {
+    label: props.t('endpointPlanChatgptSubscription'),
+    value: 'chatgpt_subscription',
+    disabled: !form.value.has_oauth_token,
+  },
+])
+const planHint = computed(() =>
+  form.value.has_oauth_token
+    ? props.t('endpointPlanHint')
+    : props.t('endpointPlanLoginRequired'),
+)
 const serviceTierSelection = computed({
   get: () => (form.value.service_tier === 'priority' ? 'priority' : 'standard'),
   set(value: 'standard' | 'priority') {
@@ -122,6 +149,40 @@ const hasVersionPath = computed(() =>
       label-key="label"
       value-key="value"
     />
+  </div>
+  <div
+    v-if="isOpenAi"
+    class="grid gap-1 md:grid-cols-[9rem_minmax(0,1fr)] md:items-center"
+  >
+    <div class="flex items-center gap-1">
+      <label class="text-xs text-muted" for="endpoint-plan">
+        {{ t('endpointPlan') }}
+      </label>
+      <UTooltip :text="t('endpointPlanHint')">
+        <UButton
+          type="button"
+          size="xs"
+          color="neutral"
+          variant="ghost"
+          icon="i-lucide-info"
+          :aria-label="t('endpointPlanHint')"
+        />
+      </UTooltip>
+    </div>
+    <USelect
+      id="endpoint-plan"
+      v-model="planSelection"
+      class="w-full"
+      :items="planOptions"
+      label-key="label"
+      value-key="value"
+    />
+    <p
+      v-if="!form.has_oauth_token"
+      class="text-xs leading-snug text-warning md:col-start-2"
+    >
+      {{ planHint }}
+    </p>
   </div>
   <div v-if="isMinimax" class="grid gap-3 md:grid-cols-2">
     <div class="grid gap-1 md:grid-cols-[8rem_minmax(0,1fr)] md:items-center">

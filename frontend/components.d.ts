@@ -30,6 +30,7 @@ declare module 'vue' {
     EndpointDialog: typeof import('./src/components/endpoints/EndpointDialog.vue')['default']
     EndpointMobileCard: typeof import('./src/components/endpoints/EndpointMobileCard.vue')['default']
     EndpointNameCell: typeof import('./src/components/endpoints/EndpointNameCell.vue')['default']
+    EndpointOAuthSection: typeof import('./src/components/endpoints/EndpointOAuthSection.vue')['default']
     EndpointProviderFields: typeof import('./src/components/endpoints/EndpointProviderFields.vue')['default']
     EndpointsEndpointsTab: typeof import('./src/components/endpoints/EndpointsEndpointsTab.vue')['default']
     EndpointsRoutesTab: typeof import('./src/components/endpoints/EndpointsRoutesTab.vue')['default']
