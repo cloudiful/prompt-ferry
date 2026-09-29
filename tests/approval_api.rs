@@ -256,7 +256,7 @@ async fn approve_endpoint_wakes_waiter_and_clears_payload() -> anyhow::Result<()
 }
 
 #[tokio::test]
-async fn login_succeeds_with_local_session_fallback_when_session_backend_is_disabled()
+async fn login_rejects_with_service_unavailable_when_session_backend_is_disabled()
 -> anyhow::Result<()> {
     if !test_database_configured() {
         eprintln!("skipping approval api test: {TEST_DATABASE_URL_ENV} is not set");
@@ -303,12 +303,12 @@ async fn login_succeeds_with_local_session_fallback_when_session_backend_is_disa
         ))
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    let set_cookie = response
-        .headers()
-        .get(header::SET_COOKIE)
-        .expect("set-cookie header");
-    assert!(set_cookie.to_str()?.contains("prompt_ferry_session="));
+    // The process-local authentication fallback is deliberately disabled: a
+    // session that only one worker can read would silently break login behind a
+    // load balancer, so a disabled session backend is a hard 503.
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+    assert_eq!(body["error"]["code"], "service_unavailable");
     schema.cleanup().await?;
     Ok(())
 }
@@ -822,6 +822,7 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -953,6 +954,7 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -976,6 +978,7 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -1206,6 +1209,7 @@ async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -1322,6 +1326,7 @@ async fn session_affinity_options_fixture(
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -1512,6 +1517,7 @@ async fn reset_session_affinity_clears_anonymous_record_binding_under_user_zero(
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -1625,6 +1631,7 @@ async fn session_route_options_surfaces_binding_when_rule_no_longer_resolves() -
                     thinking_effort_override: None,
                     compact_mode: db::CompactMode::Passthrough,
                     thinking_downgrade_enabled: false,
+                    service_tier: None,
                 }],
             },
         )
@@ -1726,6 +1733,7 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -1764,7 +1772,10 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
             "models": [{
                 "id": "gpt-routed",
                 "name": "gpt-routed"
-            }]
+            }],
+            "total": 1,
+            "first": 0,
+            "rows": 20
         })
     );
 
@@ -1822,6 +1833,7 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -1857,7 +1869,10 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
             "models": [{
                 "id": "glm-5",
                 "name": "glm-5"
-            }]
+            }],
+            "total": 1,
+            "first": 0,
+            "rows": 20
         })
     );
 

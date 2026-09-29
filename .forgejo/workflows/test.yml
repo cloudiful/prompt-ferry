@@ -1,0 +1,202 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
+  RUSTC_WRAPPER: sccache
+
+jobs:
+  fmt:
+    runs-on: aio
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    runs-on: aio
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Lint with clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    runs-on: aio
+    timeout-minutes: 90
+    # Throwaway, job-scoped credentials for the ephemeral service containers
+    # below. They are never the shared test database and never leave this job.
+    env:
+      PROMPT_FERRY_TEST_DATABASE_URL: postgres://prompt_ferry:prompt_ferry_ci@postgres:5432/prompt_ferry_test
+      PROMPT_FERRY_TEST_VALKEY_URL: redis://valkey:6379
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: prompt_ferry
+          POSTGRES_PASSWORD: prompt_ferry_ci
+          POSTGRES_DB: prompt_ferry_test
+        options: >-
+          --health-cmd "pg_isready -U prompt_ferry -d prompt_ferry_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      valkey:
+        image: valkey/valkey:8
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run workspace tests with PostgreSQL and Valkey
+        run: scripts/ci/run-tests.sh
+
+  bench:
+    runs-on: aio
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      # Bounded redaction benchmark subset only: mutation testing and the full
+      # 10k/100k/500k matrix stay local/manual and are never hard gates.
+      - name: Run gated redaction benchmarks
+        run: cargo bench --bench redaction_pipeline --bench redaction_restore -- quick
+
+      - name: Compare against the committed baseline
+        run: python3 scripts/ci/bench_compare.py --check
+
+  coverage:
+    runs-on: aio
+    timeout-minutes: 120
+    env:
+      PROMPT_FERRY_TEST_DATABASE_URL: postgres://prompt_ferry:prompt_ferry_ci@postgres:5432/prompt_ferry_test
+      PROMPT_FERRY_TEST_VALKEY_URL: redis://valkey:6379
+      DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+      REQUIRE_DIFF_BASE: ${{ github.event_name == 'pull_request' }}
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: prompt_ferry
+          POSTGRES_PASSWORD: prompt_ferry_ci
+          POSTGRES_DB: prompt_ferry_test
+        options: >-
+          --health-cmd "pg_isready -U prompt_ferry -d prompt_ferry_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      valkey:
+        image: valkey/valkey:8
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Ensure llvm coverage tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v rustup >/dev/null 2>&1; then
+            rustup component add llvm-tools-preview
+          elif ! command -v llvm-profdata >/dev/null 2>&1; then
+            echo "llvm-tools-preview or LLVM_PROFDATA is required" >&2
+            exit 1
+          fi
+
+      - name: Coverage report and redaction diff gate
+        run: scripts/ci/coverage.sh
+
+      - name: Upload coverage report
+        if: always()
+        uses: https://data.forgejo.org/forgejo/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: target/coverage/
+          if-no-files-found: warn
+          retention-days: 14
+
+  frontend:
+    runs-on: aio
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Match the Bun version pinned by frontend/package.json. The install
+      # keeps the 7-day release-age policy from frontend/bunfig.toml and never
+      # writes the gitignored lockfile.
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Restore Bun install cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('frontend/package.json', 'frontend/bunfig.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: bun install --no-save
+
+      - name: Check formatting
+        working-directory: frontend
+        run: bun run format:check
+
+      - name: Typecheck
+        working-directory: frontend
+        run: bun run typecheck
+
+      - name: Unit tests
+        working-directory: frontend
+        run: bun run test
+
+      - name: Build
+        working-directory: frontend
+        run: bun run build

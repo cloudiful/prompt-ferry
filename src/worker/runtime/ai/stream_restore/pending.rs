@@ -1,6 +1,10 @@
 use anyhow::{Result, anyhow};
 use serde_json::Value;
 
+#[cfg(test)]
+#[path = "pending_survivor_tests.rs"]
+mod survivor_tests;
+
 pub(super) fn synthetic_delta(mut template: Value, pointer: &str, text: String) -> Result<Vec<u8>> {
     blank_stream_text(&mut template);
     let target = template

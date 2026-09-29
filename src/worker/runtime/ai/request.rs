@@ -41,9 +41,7 @@ pub(in crate::worker::runtime) async fn process_request(
         services.standalone_state(),
         request_ctx.request_id,
     );
-    services
-        .record_usage_event(request_ctx.ai_usage_log(&request, None))
-        .await;
+    Box::pin(services.record_usage_event(request_ctx.ai_usage_log(&request, None))).await;
     if request.path == "/v1/responses" {
         mark_function_call_outputs_received(
             services.admin_state(),
@@ -60,7 +58,7 @@ pub(in crate::worker::runtime) async fn process_request(
             .headers
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("anthropic-version"));
-        return process_models_request(ModelsRequestContext {
+        return Box::pin(process_models_request(ModelsRequestContext {
             state,
             client: &services.client,
             out_tx: &services.out_tx,
@@ -72,7 +70,7 @@ pub(in crate::worker::runtime) async fn process_request(
             owner_worker_id: services.runtime_state.worker_instance_id(),
             anthropic,
             request_headers: &request.headers,
-        })
+        }))
         .await;
     }
 
@@ -87,12 +85,12 @@ pub(in crate::worker::runtime) async fn process_request(
         Ok(RouteResolution::Responded) => return Ok(()),
         Err(err) => {
             if let Some(affinity_error) = err.downcast_ref::<RouteAffinityError>() {
-                return respond_with_affinity_error(
+                return Box::pin(respond_with_affinity_error(
                     services,
                     &request,
                     &request_ctx,
                     affinity_error.clone(),
-                )
+                ))
                 .await;
             }
             return Err(err);
@@ -101,7 +99,14 @@ pub(in crate::worker::runtime) async fn process_request(
 
     if let Err(err) = resolve_auto_protocol(&mut route, &request.path) {
         let route_ctx = RouteExecutionContext::new(&route);
-        return respond_with_client_error(services, &request, &request_ctx, &route_ctx, err).await;
+        return Box::pin(respond_with_client_error(
+            services,
+            &request,
+            &request_ctx,
+            &route_ctx,
+            err,
+        ))
+        .await;
     }
 
     let outcome = Box::pin(forward_route_request(RouteForwardRequest {
@@ -119,8 +124,14 @@ pub(in crate::worker::runtime) async fn process_request(
     let err = match outcome {
         ForwardOutcome::Handled => return Ok(()),
         ForwardOutcome::CompatError(err) => {
-            return respond_with_client_error(services, &request, &request_ctx, &route_ctx, err)
-                .await;
+            return Box::pin(respond_with_client_error(
+                services,
+                &request,
+                &request_ctx,
+                &route_ctx,
+                err,
+            ))
+            .await;
         }
         ForwardOutcome::TransportError {
             error,
@@ -130,7 +141,7 @@ pub(in crate::worker::runtime) async fn process_request(
                 return Ok(());
             }
             if error.to_string().contains("upstream_response_too_large") {
-                return respond_with_local_error(
+                return Box::pin(respond_with_local_error(
                     services,
                     &request,
                     &request_ctx,
@@ -142,7 +153,7 @@ pub(in crate::worker::runtime) async fn process_request(
                         upstream_error_body: None,
                         response_body: None,
                     },
-                )
+                ))
                 .await;
             }
             error
@@ -153,8 +164,8 @@ pub(in crate::worker::runtime) async fn process_request(
     } else {
         "upstream_error"
     };
-    services
-        .record_usage_event(
+    Box::pin(
+        services.record_usage_event(
             request_ctx
                 .ai_usage_log(&request, Some(route.user_id))
                 .with_upstream_redaction(
@@ -180,8 +191,9 @@ pub(in crate::worker::runtime) async fn process_request(
                     Some(safe_error(&err, redact_content, request_ctx.user_id)),
                     None,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
     Err(err)
 }
 
@@ -227,7 +239,7 @@ mod auto_protocol_tests {
             upstream_model: None,
             route_selection_reason: db::RouteSelectionReason::Default,
             provider: db::EndpointProvider::Generic,
-            service_tier: db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,

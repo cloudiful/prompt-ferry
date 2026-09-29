@@ -23,6 +23,7 @@ mock.module('../src/stores/endpoints-api', () => ({
   deleteModelRouteById: mock(),
   fetchEndpointsPage: mock(),
   fetchModelRoutesPage: mock(),
+  fetchOrganizationUsage: mock(),
   persistEndpoint: mock(),
   persistModelRoute: mock(),
   runEndpointTest: endpointTest,

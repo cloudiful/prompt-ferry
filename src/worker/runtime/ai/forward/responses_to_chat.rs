@@ -52,26 +52,26 @@ pub(super) async fn forward_non_stream_responses_to_chat_response(
     if let Some(err) =
         check_glm_envelope_error(&body, route_ctx.route.provider, route_ctx.route.native_api)
     {
-        return super::super::errors::respond_with_client_error(
+        return Box::pin(super::super::errors::respond_with_client_error(
             services,
             request,
             request_ctx,
             route_ctx,
             err,
-        )
+        ))
         .await;
     }
 
     let translated = match responses_response_to_chat(&body) {
         Ok(translated) => translated,
         Err(err) => {
-            return super::super::errors::respond_with_client_error(
+            return Box::pin(super::super::errors::respond_with_client_error(
                 services,
                 request,
                 request_ctx,
                 route_ctx,
                 CompatError::new(reqwest::StatusCode::BAD_GATEWAY, err.code, err.message),
-            )
+            ))
             .await;
         }
     };
@@ -127,8 +127,8 @@ pub(super) async fn forward_non_stream_responses_to_chat_response(
     )
     .await?;
 
-    let usage_event_id = services
-        .record_usage_event(
+    let usage_event_id = Box::pin(
+        services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
                 .with_upstream_redaction(
                     upstream_restore_session.is_some(),
@@ -161,8 +161,9 @@ pub(super) async fn forward_non_stream_responses_to_chat_response(
                 .with_response_capture_truncated(
                     usage_capture.response_text_truncated || raw_body_truncated,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
     persist_assistant_artifact(PersistAssistantArtifactParams {
         admin_state: services.admin_state(),
         usage_event_id,

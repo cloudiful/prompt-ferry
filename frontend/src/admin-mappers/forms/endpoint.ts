@@ -1,17 +1,19 @@
 import type {
   EndpointPlan,
   EndpointRequest,
-  MinimaxServiceTier,
   ProviderEndpoint,
 } from '../../generated/admin-api'
 import type { EndpointForm } from '../../models'
 
-// Backend treats omitted/unknown tiers as standard; keep the form in sync so
-// legacy endpoints round-trip without changing behavior.
+// Issue #637: service tiers are free-form strings, not a fixed enum. Trim the
+// value and treat blank/whitespace-only input as inherit (`null`) so the
+// request leaves the caller/provider default untouched; non-empty values are
+// preserved verbatim.
 export function normalizeServiceTier(
-  value: MinimaxServiceTier | string | null | undefined,
-): MinimaxServiceTier {
-  return value === 'priority' ? 'priority' : 'standard'
+  value: string | null | undefined,
+): string | null {
+  const trimmed = value?.trim() ?? ''
+  return trimmed === '' ? null : trimmed
 }
 
 // Issue #599 R2c: the plan axis is derived server-side (token presence on an
@@ -36,6 +38,36 @@ export function normalizeProviderPlan(
   return normalizeEndpointPlan(plan)
 }
 
+// Issue #589 P2c: only OpenAI endpoints carry the Admin API Key; switching
+// away drops the typed secret and any pending clear so the form never carries
+// a stale value across providers (the server clears the stored key itself).
+export function clearAdminApiKeyOutsideOpenAi(
+  form: Pick<
+    EndpointForm,
+    'provider' | 'admin_api_key' | 'admin_api_key_clear'
+  >,
+): void {
+  if (form.provider === 'openai') return
+  form.admin_api_key = ''
+  form.admin_api_key_clear = false
+}
+
+// Issue #589 P2c: Admin API Key save/keep/clear per the generated contract.
+// `""` clears the stored value, a non-empty value replaces it, and omitting
+// the field keeps it on PATCH (`None` on create). Non-OpenAI endpoints never
+// send the field; the server rejects non-empty values and clears any stored
+// key when the provider moves away.
+export function resolveAdminApiKeyRequest(form: {
+  provider?: EndpointForm['provider'] | null
+  admin_api_key?: string | null
+  admin_api_key_clear?: boolean | null
+}): string | undefined {
+  if ((form.provider ?? 'generic') !== 'openai') return undefined
+  if (form.admin_api_key_clear) return ''
+  const trimmed = (form.admin_api_key ?? '').trim()
+  return trimmed !== '' ? trimmed : undefined
+}
+
 export function createEmptyEndpointForm(): EndpointForm {
   return {
     endpoint_id: '',
@@ -44,7 +76,8 @@ export function createEmptyEndpointForm(): EndpointForm {
     name: '',
     provider: 'generic',
     provider_region: null,
-    service_tier: 'standard',
+    // Issue #637: inherit until the operator configures an override.
+    service_tier: null,
     base_url: '',
     api_keys: [
       {
@@ -70,6 +103,10 @@ export function createEmptyEndpointForm(): EndpointForm {
     // Issue #392 Phase L: untouched all-day endpoint schedule.
     active_windows: [],
     active_windows_touched: false,
+    // Issue #589 P2c: Admin API Key starts unset and is never prefilled.
+    admin_api_key: '',
+    has_admin_api_key: false,
+    admin_api_key_clear: false,
   }
 }
 
@@ -127,6 +164,11 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
         : {}),
     })),
     active_windows_touched: false,
+    // Issue #589 P2c: the response only reports whether an Admin API Key is
+    // saved; the input value stays empty and the secret is never echoed.
+    admin_api_key: '',
+    has_admin_api_key: source.has_admin_api_key ?? false,
+    admin_api_key_clear: false,
   }
 }
 
@@ -151,10 +193,27 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
   const endpointTouched = safe.active_windows_touched ?? false
   const active_windows = endpointTouched
     ? [...(safe.active_windows ?? [])]
-        .map((window) => ({
-          start: (window?.start ?? '').trim(),
-          end: (window?.end ?? '').trim(),
-        }))
+        .map((window) => {
+          // Issue #514: keep `days` so a restricted window reopens on the
+          // same weekdays; empty/all-7 are omitted to mean every day.
+          const rawDays = Array.isArray((window as { days?: unknown })?.days)
+            ? ([...((window as { days?: number[] }).days ?? [])] as number[])
+            : undefined
+          const days = rawDays
+            ? [
+                ...new Set(
+                  rawDays.filter(
+                    (d) => Number.isInteger(d) && d >= 1 && d <= 7,
+                  ),
+                ),
+              ].sort((a, b) => a - b)
+            : undefined
+          return {
+            start: (window?.start ?? '').trim(),
+            end: (window?.end ?? '').trim(),
+            ...(days && days.length > 0 && days.length < 7 ? { days } : {}),
+          }
+        })
         .sort((a, b) =>
           a.start === b.start
             ? a.end.localeCompare(b.end)
@@ -163,6 +222,8 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
     : undefined
   return {
     api_key: apiKeys[0]?.api_key ?? '',
+    // Issue #589 P2c: Admin API Key save/keep/clear, OpenAI-only.
+    admin_api_key: resolveAdminApiKeyRequest(safe),
     api_keys: apiKeys
       .map((key) => ({
         key_label: (key.key_label ?? '').trim(),

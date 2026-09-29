@@ -871,6 +871,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/organization-usage:
+    get:
+      tags:
+      - endpoints
+      operationId: organization_usage
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OpenAI Platform organization usage (UTC month to date)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAiOrganizationUsageResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/admin/endpoints/{endpoint_id}/test:
     post:
       tags:
@@ -2254,11 +2280,11 @@ paths:
       operationId: get_cache_alert_setting
       responses:
         '200':
-          description: Continuous-session cache alert settings; the stored DingTalk secret is never echoed back
+          description: Continuous-session cache alert settings; the stored DingTalk secret is never echoed back and `has_dingtalk_secret` reports whether one is stored
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CacheAlertSettings'
+                $ref: '#/components/schemas/CacheAlertSettingsResponse'
     put:
       tags:
       - settings
@@ -2275,7 +2301,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CacheAlertSettings'
+                $ref: '#/components/schemas/CacheAlertSettingsResponse'
   /api/v1/settings/endpoint:
     get:
       tags:
@@ -3222,6 +3248,43 @@ components:
           type: integer
           format: int32
           default: 30
+    CacheAlertSettingsResponse:
+      type: object
+      description: |-
+        Admin API view of [`CacheAlertSettings`]: the write-only DingTalk secret is
+        always blanked, and `has_dingtalk_secret` reports whether a non-blank secret
+        is actually stored. The request schema and the persisted JSON never carry
+        this derived flag.
+      required:
+      - enabled
+      - window_minutes
+      - min_turns
+      - threshold
+      - cooldown_minutes
+      - dingtalk_webhook_url
+      - dingtalk_secret
+      - has_dingtalk_secret
+      properties:
+        cooldown_minutes:
+          type: integer
+          format: int32
+        dingtalk_secret:
+          type: string
+        dingtalk_webhook_url:
+          type: string
+        enabled:
+          type: boolean
+        has_dingtalk_secret:
+          type: boolean
+        min_turns:
+          type: integer
+          format: int32
+        threshold:
+          type: number
+          format: double
+        window_minutes:
+          type: integer
+          format: int32
     ClientKey:
       type: object
       required:
@@ -3670,6 +3733,17 @@ components:
             Issue #392 Phase K: endpoint default windows (`[{start,end}]` `HH:MM`).
             `None` (omitted) keeps the stored value on PATCH; `Some([])`
             means all-day; `Some([...])` replaces after validation.
+        admin_api_key:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #589: optional OpenAI Admin API key, accepted only for the
+            OpenAI provider. `None` (omitted) keeps the stored value on PATCH
+            (`None` on create means unset); `Some("")`/whitespace clears it;
+            `Some(key)` replaces it. A non-OpenAI provider rejects a non-empty
+            value and always clears any stored key. Server-side only: responses
+            expose just `has_admin_api_key`.
         api_key:
           type: string
         api_keys:
@@ -3736,7 +3810,12 @@ components:
         scope:
           type: string
         service_tier:
-          $ref: '#/components/schemas/MinimaxServiceTier'
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #637: free-form service-tier override. `None`/blank inherits
+            (no override); a model-route target override wins over this value.
     EndpointSettingRequest:
       type: object
       properties:
@@ -4522,11 +4601,6 @@ components:
         user_id:
           type: integer
           format: int64
-    MinimaxServiceTier:
-      type: string
-      enum:
-      - standard
-      - priority
     ModelEndpointRule:
       type: object
       required:
@@ -4712,6 +4786,14 @@ components:
         rule_id:
           type: string
           format: uuid
+        service_tier:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #637: per-target free-form service-tier override. `None`/blank
+            inherits the endpoint value (or leaves the caller/provider default
+            intact when the endpoint is blank too).
         target_id:
           type: string
           format: uuid
@@ -4801,6 +4883,14 @@ components:
             Issue #368 Phase B: per-target proxy override. `None` (omitted/null)
             means keep on PATCH / inherit on create; `Some("")` means clear to
             inherit; `Some(url)` must use `http/https/socks5/socks5h`.
+        service_tier:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #637: per-target free-form service-tier override. `None`
+            (omitted/null/empty) means inherit the endpoint value; `Some(value)`
+            is trimmed and wins over the endpoint override.
         thinking_downgrade_enabled:
           type: boolean
           description: |-
@@ -5005,6 +5095,61 @@ components:
       enum:
       - pending
       - complete
+    OpenAiOrganizationUsageResponse:
+      type: object
+      description: |-
+        Issue #589 P2b: OpenAI Platform organization usage for the endpoint's Admin
+        API key. UTC month-to-date input/output tokens and USD cost from the
+        official `usage/completions` and `costs` endpoints. Display-only: it never
+        feeds routing weights, token-plan quota, or remaining-credit calculations.
+      required:
+      - provider
+      - period_start
+      - period_end
+      - currency
+      - input_tokens
+      - output_tokens
+      - total_tokens
+      - cost_usd
+      - truncated
+      - cached
+      - fetched_at
+      properties:
+        cached:
+          type: boolean
+          description: Served from the 60s display cache instead of a live upstream read.
+        cost_usd:
+          type: number
+          format: double
+        currency:
+          type: string
+        fetched_at:
+          type: string
+          format: date-time
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        period_end:
+          type: string
+          format: date-time
+          description: UTC instant the window was read (`now`).
+        period_start:
+          type: string
+          format: date-time
+          description: UTC first instant of the current month.
+        provider:
+          $ref: '#/components/schemas/EndpointProvider'
+        total_tokens:
+          type: integer
+          format: int64
+        truncated:
+          type: boolean
+          description: |-
+            The upstream reported more pages than the fetch cap read; totals are a
+            lower bound.
     OpenRouterBalance:
       type: object
       required:
@@ -5111,6 +5256,12 @@ components:
         endpoint_id:
           type: string
           format: uuid
+        has_admin_api_key:
+          type: boolean
+          description: |-
+            Issue #589: response-side saved-Admin-API-Key indicator. The secret is
+            read through a dedicated query and never reaches this shape or any
+            serialized endpoint response.
         has_oauth_token:
           type: boolean
           description: |-
@@ -5153,7 +5304,12 @@ components:
         scope:
           type: string
         service_tier:
-          $ref: '#/components/schemas/MinimaxServiceTier'
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #637: free-form endpoint service-tier override. `None` means
+            inherit (no override); a model-route target override wins over it.
         updated_at:
           type: string
           format: date-time
@@ -6403,24 +6559,6 @@ components:
             Usage unit for the provider (`requests`/`credits`), derived from the
             server-side registry so the client never re-derives it. `None` when the
             provider is unknown or the row is not an MCP server row.
-    RequestRecordOverviewErrorRow:
-      type: object
-      required:
-      - key
-      - label
-      - count
-      - rate
-      properties:
-        count:
-          type: integer
-          format: int64
-        key:
-          type: string
-        label:
-          type: string
-        rate:
-          type: number
-          format: double
     RequestRecordOverviewRange:
       type: string
       enum:
@@ -6435,16 +6573,11 @@ components:
       - summary
       - trend
       - breakdown
-      - error_breakdown
       properties:
         breakdown:
           type: array
           items:
             $ref: '#/components/schemas/RequestRecordOverviewBreakdownRow'
-        error_breakdown:
-          type: array
-          items:
-            $ref: '#/components/schemas/RequestRecordOverviewErrorRow'
         summary:
           $ref: '#/components/schemas/RequestRecordOverviewSummary'
         trend:
@@ -6577,11 +6710,17 @@ components:
       type: object
       required:
       - request_count
+      - request_share
       - error_count
       - error_rate
       - total_tokens
       properties:
         avg_output_tokens_per_second:
+          type:
+          - number
+          - 'null'
+          format: double
+        cache_rate:
           type:
           - number
           - 'null'
@@ -6604,9 +6743,28 @@ components:
         request_count:
           type: integer
           format: int64
+        request_share:
+          type: number
+          format: double
+          description: Share of the window's requests, matching the main model table.
+        token_share:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: |-
+            Share of the window's total tokens, matching the main model table.
+            `None` when the window has zero total tokens.
         total_tokens:
           type: integer
           format: int64
+        upstream_model:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Model actually sent upstream when a route target override applies.
+            `None` when the request used the requested model unchanged.
     RequestRecordPage:
       type: object
       required:

@@ -30,3 +30,19 @@ export function isQuotaEligible(source: QuotaEligibilitySource): boolean {
   }
   return PLATFORM_QUOTA_PROVIDERS.has(source.provider)
 }
+
+// Issue #589 P2c: the OpenAI Platform organization usage surface is a
+// different axis from the ChatGPT subscription quota above. It reads the
+// endpoint's separate Admin API Key, is organization-level (UTC month to
+// date), and stays off unless an OpenAI endpoint has one stored. It never
+// feeds routing weights or remaining-credit math.
+export type OrganizationUsageEligibilitySource = {
+  provider: EndpointProvider
+  has_admin_api_key?: boolean | null
+}
+
+export function isOrganizationUsageEligible(
+  source: OrganizationUsageEligibilitySource,
+): boolean {
+  return source.provider === 'openai' && source.has_admin_api_key === true
+}

@@ -8,10 +8,7 @@ import type {
 import { useLocale } from '@/composables/useLocale'
 import type { RequestRecordFormatting } from '../models/request-record-formatting'
 import type { RequestOverviewDrilldown } from '../request-overview'
-import {
-  createErrorOption,
-  createTrendOption,
-} from '../request-overview-charts'
+import { createTrendOption } from '../request-overview-charts'
 
 const UsageChart = defineAsyncComponent(() => import('./usage/UsageChart.vue'))
 const BreakdownUpstreamPopover = defineAsyncComponent(
@@ -35,7 +32,6 @@ const hasTraffic = computed(
   () => (props.overview?.summary.request_count ?? 0) > 0,
 )
 const breakdownRows = computed(() => props.overview?.breakdown ?? [])
-const errorRows = computed(() => props.overview?.error_breakdown ?? [])
 
 const chartLabels = computed(() => ({
   cacheRead: t('overviewCacheRead'),
@@ -85,14 +81,6 @@ const trendOption = computed(() =>
     trend: props.overview?.trend ?? [],
     formatTime: formatBucket,
     formatCompact: props.formatting.formatTokenQuantity,
-  }),
-)
-
-const errorOption = computed(() =>
-  createErrorOption({
-    rows: errorRows.value,
-    formatCompact: props.formatting.formatTokenQuantity,
-    formatPercent: props.formatting.formatPercent,
   }),
 )
 
@@ -195,13 +183,6 @@ function providerBadge(row: RequestRecordOverviewBreakdownRow): string {
           {{ t('overviewTrend') }}
         </div>
         <UsageChart :option="trendOption" />
-      </section>
-
-      <section class="rounded-lg border border-default bg-default p-4">
-        <div class="mb-2 text-sm font-semibold text-highlighted">
-          {{ t('overviewErrorBreakdown') }}
-        </div>
-        <UsageChart :option="errorOption" />
       </section>
 
       <section

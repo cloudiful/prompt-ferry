@@ -81,6 +81,9 @@ pub(super) fn remove_browser_flow(flow_id: Uuid) {
     lock_flows(&BROWSER_FLOWS).remove(&flow_id);
 }
 
+// Axum's `Response` is inherently larger than clippy's 128-byte threshold, and
+// boxing it would only change these internal helper signatures.
+#[allow(clippy::result_large_err)]
 pub(super) async fn ensure_login_endpoint(
     state: &AdminState,
     endpoint_id: Uuid,
@@ -98,6 +101,7 @@ pub(super) async fn ensure_login_endpoint(
 }
 
 /// Endpoint-aware protocol client: honors the endpoint proxy and fails closed.
+#[allow(clippy::result_large_err)]
 pub(super) async fn oauth_client(
     state: &AdminState,
     endpoint_id: Uuid,
@@ -157,6 +161,7 @@ pub(super) async fn oauth_status_response(state: &AdminState, endpoint_id: Uuid)
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub(super) async fn persist_token(
     state: &AdminState,
     endpoint_id: Uuid,

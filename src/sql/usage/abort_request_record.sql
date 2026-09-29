@@ -1,10 +1,14 @@
 WITH active AS (
-    SELECT event_id, request_state
+    SELECT event_id, request_id, request_state
     FROM request_records
     WHERE request_id = $1
       AND event_kind = 'request'
       AND request_state IN ('received', 'awaiting_approval', 'upstream_processing')
     FOR UPDATE
+), cleaned AS (
+    DELETE FROM request_record_leases lease
+    USING active
+    WHERE lease.request_id = active.request_id
 )
 UPDATE request_records rr
 SET

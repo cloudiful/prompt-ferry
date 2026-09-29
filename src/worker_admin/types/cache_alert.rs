@@ -45,6 +45,22 @@ pub struct CacheAlertSettings {
     pub dingtalk_secret: String,
 }
 
+/// Admin API view of [`CacheAlertSettings`]: the write-only DingTalk secret is
+/// always blanked, and `has_dingtalk_secret` reports whether a non-blank secret
+/// is actually stored. The request schema and the persisted JSON never carry
+/// this derived flag.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema, PartialEq)]
+pub struct CacheAlertSettingsResponse {
+    pub enabled: bool,
+    pub window_minutes: i32,
+    pub min_turns: i32,
+    pub threshold: f64,
+    pub cooldown_minutes: i32,
+    pub dingtalk_webhook_url: String,
+    pub dingtalk_secret: String,
+    pub has_dingtalk_secret: bool,
+}
+
 impl Default for CacheAlertSettings {
     fn default() -> Self {
         Self {
@@ -114,6 +130,27 @@ impl CacheAlertSettings {
         Self {
             dingtalk_secret: String::new(),
             ..self.clone()
+        }
+    }
+
+    /// Whether a non-blank DingTalk secret is currently stored; the secret
+    /// value itself stays write-only.
+    pub fn has_dingtalk_secret(&self) -> bool {
+        !self.dingtalk_secret.trim().is_empty()
+    }
+
+    /// Redacted admin API response with the derived secret-presence flag.
+    pub fn redacted_response(&self) -> CacheAlertSettingsResponse {
+        let redacted = self.redacted();
+        CacheAlertSettingsResponse {
+            enabled: redacted.enabled,
+            window_minutes: redacted.window_minutes,
+            min_turns: redacted.min_turns,
+            threshold: redacted.threshold,
+            cooldown_minutes: redacted.cooldown_minutes,
+            dingtalk_webhook_url: redacted.dingtalk_webhook_url,
+            dingtalk_secret: redacted.dingtalk_secret,
+            has_dingtalk_secret: self.has_dingtalk_secret(),
         }
     }
 }
@@ -193,5 +230,45 @@ mod tests {
         };
 
         assert_eq!(settings.redacted().dingtalk_secret, "");
+    }
+
+    #[test]
+    fn cache_alert_response_reports_presence_and_never_echoes_the_secret() {
+        let absent = CacheAlertSettings::default().redacted_response();
+        assert!(!absent.has_dingtalk_secret);
+        assert_eq!(absent.dingtalk_secret, "");
+
+        let present = CacheAlertSettings {
+            dingtalk_secret: "SEC-test-secret".to_string(),
+            ..CacheAlertSettings::default()
+        }
+        .redacted_response();
+        assert!(present.has_dingtalk_secret);
+        assert_eq!(present.dingtalk_secret, "");
+
+        let blank = CacheAlertSettings {
+            dingtalk_secret: "   ".to_string(),
+            ..CacheAlertSettings::default()
+        }
+        .redacted_response();
+        assert!(!blank.has_dingtalk_secret);
+    }
+
+    #[test]
+    fn cache_alert_request_never_carries_the_derived_presence_flag() {
+        let request = serde_json::to_value(CacheAlertSettings {
+            dingtalk_secret: "SEC-test-secret".to_string(),
+            ..CacheAlertSettings::default()
+        })
+        .expect("serialize request");
+
+        assert!(request.get("has_dingtalk_secret").is_none());
+        assert_eq!(request["dingtalk_secret"], "SEC-test-secret");
+
+        // An unexpected presence flag in a payload is not persisted either.
+        let parsed: CacheAlertSettings =
+            serde_json::from_value(json!({ "has_dingtalk_secret": true }))
+                .expect("partial payload");
+        assert!(parsed.dingtalk_secret.is_empty());
     }
 }

@@ -103,7 +103,7 @@ async function logout(): Promise<void> {
 
     <UDashboardPanel>
       <template #header>
-        <UDashboardNavbar :ui="{ right: 'min-w-0 flex-1 justify-end' }">
+        <UDashboardNavbar>
           <template #leading>
             <UButton
               v-if="collapsed"
@@ -113,12 +113,6 @@ async function logout(): Promise<void> {
               :aria-label="t('expandNav')"
               class="hidden lg:inline-flex"
               @click="collapsed = false"
-            />
-          </template>
-          <template #right>
-            <div
-              id="dashboard-navbar-actions"
-              class="flex min-w-0 max-w-full items-center justify-end gap-1.5 overflow-x-auto overscroll-x-contain"
             />
           </template>
         </UDashboardNavbar>

@@ -16,7 +16,7 @@ mod queries;
 pub(crate) use self::presentation::overview_cache_rate;
 pub use self::queries::OverviewBucket;
 
-/// Admin overview responses are cached briefly because the four aggregate
+/// Admin overview responses are cached briefly because the three aggregate
 /// queries are the heaviest reads against `request_records` and the dashboard
 /// polls them.
 const OVERVIEW_CACHE_TTL: Duration = Duration::from_secs(30);
@@ -88,18 +88,16 @@ pub async fn request_records_overview(
         return Ok(cached);
     }
 
-    let (summary, trend, breakdown, error_breakdown) = tokio::try_join!(
+    let (summary, trend, breakdown) = tokio::try_join!(
         queries::query_summary(pool, visible_user_id, request_category, window, user),
         queries::query_trend(pool, visible_user_id, request_category, window, user),
         queries::query_breakdown(pool, visible_user_id, request_category, window, user),
-        queries::query_error_breakdown(pool, visible_user_id, request_category, window, user),
     )?;
 
     let response = RequestRecordOverviewResponse {
         summary,
         trend,
         breakdown,
-        error_breakdown,
     };
     store_response(key, now, &response);
     Ok(response)
@@ -133,7 +131,6 @@ mod tests {
             },
             trend: Vec::new(),
             breakdown: Vec::new(),
-            error_breakdown: Vec::new(),
         }
     }
 

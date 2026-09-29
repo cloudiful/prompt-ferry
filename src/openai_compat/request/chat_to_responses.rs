@@ -119,11 +119,19 @@ pub fn chat_request_to_responses(body: &[u8]) -> Result<Vec<u8>, CompatError> {
         "store",
         "metadata",
         "prompt_cache_key",
-        "service_tier",
     ] {
         if let Some(value) = object.get(field) {
             responses.insert(field.to_string(), value.clone());
         }
+    }
+    // Issue #637: a null/empty/whitespace caller tier means inherit — omit
+    // it instead of forwarding an absent-intent value upstream. Meaningful
+    // values are preserved verbatim for the provider transform.
+    if let Some(value) = object
+        .get("service_tier")
+        .filter(|value| has_meaningful_value(value))
+    {
+        responses.insert("service_tier".to_string(), value.clone());
     }
     if let Some(value) = object
         .get("max_completion_tokens")

@@ -19,6 +19,8 @@ pub mod openai_compat;
 pub mod openapi_export;
 pub mod raw_payload_store;
 pub mod realtime;
+#[cfg(test)]
+mod redaction_budget_tests;
 pub(crate) mod redaction_timing;
 pub use prompt_ferry_redact as redact;
 #[cfg(test)]
@@ -32,6 +34,7 @@ pub mod response_affinity;
 pub mod routing;
 pub use prompt_ferry_runtime_env::runtime_env;
 pub mod serve;
+pub mod session_affinity;
 pub mod standalone_config;
 pub mod storage;
 pub mod storage_sanitization;

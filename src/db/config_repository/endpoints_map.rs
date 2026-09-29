@@ -7,12 +7,11 @@ use crate::{
     config::NativeApi,
     db::{
         EndpointApiKey as PgEndpointApiKey, EndpointProvider, EndpointRegion,
-        MinimaxServiceTier as PgServiceTier, ProviderEndpoint as PgProviderEndpoint,
+        ProviderEndpoint as PgProviderEndpoint,
     },
     standalone_config::{
         EndpointApiKeyConfig as ScEndpointApiKey, EndpointProvider as ScEndpointProvider,
-        EndpointRegion as ScEndpointRegion, MinimaxServiceTier as ScServiceTier,
-        ProviderEndpointConfig as ScProviderEndpoint,
+        EndpointRegion as ScEndpointRegion, ProviderEndpointConfig as ScProviderEndpoint,
     },
 };
 
@@ -47,6 +46,9 @@ pub(super) fn from_postgres(endpoint: PgProviderEndpoint) -> UnifiedProviderEndp
         // Issue #599 R2a: carried through (the repository stamps the derived
         // values from token presence after mapping).
         has_oauth_token: endpoint.has_oauth_token,
+        // Issue #589: carried through; the repository stamps it from the
+        // dedicated Admin API key query.
+        has_admin_api_key: endpoint.has_admin_api_key,
         // Issue #392 Phase K: carry schedule through unified shape.
         active_windows: endpoint.active_windows,
         created_at: endpoint.created_at,
@@ -85,7 +87,8 @@ pub(super) fn from_sqlite(endpoint: ScProviderEndpoint) -> Result<UnifiedProvide
         // Issue #599 R2a: SQLite stores no plan column in R2a; both fields
         // start absent and the repository enriches them from token presence.
         plan: crate::db::EndpointPlan::default(),
-        service_tier: service_tier_from_sqlite(endpoint.service_tier),
+        // Issue #637: free-form override carried through unchanged.
+        service_tier: endpoint.service_tier,
         base_url: endpoint.base_url,
         native_api: endpoint.native_api,
         native_api_source: endpoint.native_api_source.as_str().to_string(),
@@ -94,6 +97,9 @@ pub(super) fn from_sqlite(endpoint: ScProviderEndpoint) -> Result<UnifiedProvide
         mcp_enabled: endpoint.mcp_enabled,
         has_proxy_url,
         has_oauth_token: false,
+        // Issue #589: the SQLite store resolves the saved-Admin-API-Key
+        // indicator separately from the 0035 envelope table.
+        has_admin_api_key: false,
         active_windows,
         created_at: endpoint.created_at,
         updated_at: endpoint.updated_at,
@@ -149,6 +155,61 @@ pub(super) fn region_from_sqlite(region: ScEndpointRegion) -> EndpointRegion {
     }
 }
 
+pub(super) fn unified_to_pg(endpoint: UnifiedProviderEndpoint) -> crate::db::ProviderEndpoint {
+    let created_at = endpoint.created_at;
+    let updated_at = endpoint.updated_at;
+    crate::db::ProviderEndpoint {
+        endpoint_id: endpoint.endpoint_id,
+        scope: endpoint.scope,
+        owner_user_id: endpoint.owner_user_id,
+        name: endpoint.name,
+        provider: endpoint.provider,
+        provider_region: endpoint.provider_region,
+        // Issue #599 R2a: carry the derived plan so list/get responses share
+        // one shape with the single-endpoint shape.
+        plan: endpoint.plan,
+        service_tier: endpoint.service_tier,
+        base_url: endpoint.base_url,
+        native_api: endpoint.native_api.as_str().to_string(),
+        native_api_source: endpoint.native_api_source,
+        api_key: String::new(),
+        // Issue #368 Phase A: Unified is the redacted admin shape; the
+        // proxy secret never leaves the store via this path (mirrors
+        // `api_key` redaction). Decrypted reads use dedicated helpers.
+        proxy_url: None,
+        // Issue #368 Phase C (P2): carry the saved-proxy indicator so the
+        // page response matches the single-endpoint shape.
+        has_proxy_url: endpoint.has_proxy_url,
+        // Issue #599 R2a: carry the saved-token indicator the same way; the
+        // secrets themselves never travel this path.
+        has_oauth_token: endpoint.has_oauth_token,
+        // Issue #589: carry the saved-Admin-API-Key indicator; the secret
+        // itself never travels this path.
+        has_admin_api_key: endpoint.has_admin_api_key,
+        // Issue #392 Phase K: carry schedule through unified shape.
+        active_windows: endpoint.active_windows,
+        key_lb_enabled: endpoint.key_lb_enabled,
+        enabled: endpoint.enabled,
+        mcp_enabled: endpoint.mcp_enabled,
+        created_at,
+        updated_at,
+        api_keys: endpoint
+            .api_keys
+            .into_iter()
+            .map(|key| crate::db::EndpointApiKey {
+                key_id: key.key_id,
+                endpoint_id: key.endpoint_id,
+                key_label: key.key_label,
+                api_key: String::new(),
+                position: key.position,
+                enabled: key.enabled,
+                created_at: key.created_at,
+                updated_at: key.updated_at,
+            })
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,71 +239,5 @@ mod tests {
         ] {
             assert_eq!(provider_from_sqlite(sc), expected);
         }
-    }
-}
-
-pub(super) fn service_tier_from_sqlite(tier: ScServiceTier) -> PgServiceTier {
-    match tier {
-        ScServiceTier::Priority => PgServiceTier::Priority,
-        ScServiceTier::Standard => PgServiceTier::Standard,
-    }
-}
-
-pub(crate) fn service_tier_to_sqlite(tier: PgServiceTier) -> ScServiceTier {
-    match tier {
-        PgServiceTier::Priority => ScServiceTier::Priority,
-        PgServiceTier::Standard => ScServiceTier::Standard,
-    }
-}
-
-pub(super) fn unified_to_pg(endpoint: UnifiedProviderEndpoint) -> crate::db::ProviderEndpoint {
-    let created_at = endpoint.created_at;
-    let updated_at = endpoint.updated_at;
-    crate::db::ProviderEndpoint {
-        endpoint_id: endpoint.endpoint_id,
-        scope: endpoint.scope,
-        owner_user_id: endpoint.owner_user_id,
-        name: endpoint.name,
-        provider: endpoint.provider,
-        provider_region: endpoint.provider_region,
-        // Issue #599 R2a: carry the derived plan so list/get responses share
-        // one shape with the single-endpoint shape.
-        plan: endpoint.plan,
-        service_tier: endpoint.service_tier,
-        base_url: endpoint.base_url,
-        native_api: endpoint.native_api.as_str().to_string(),
-        native_api_source: endpoint.native_api_source,
-        api_key: String::new(),
-        // Issue #368 Phase A: Unified is the redacted admin shape; the
-        // proxy secret never leaves the store via this path (mirrors
-        // `api_key` redaction). Decrypted reads use dedicated helpers.
-        proxy_url: None,
-        // Issue #368 Phase C (P2): carry the saved-proxy indicator so the
-        // page response matches the single-endpoint shape.
-        has_proxy_url: endpoint.has_proxy_url,
-        // Issue #599 R2a: carry the saved-token indicator the same way; the
-        // secrets themselves never travel this path.
-        has_oauth_token: endpoint.has_oauth_token,
-        // Issue #392 Phase K: carry schedule through unified shape.
-        active_windows: endpoint.active_windows,
-        key_lb_enabled: endpoint.key_lb_enabled,
-        enabled: endpoint.enabled,
-        mcp_enabled: endpoint.mcp_enabled,
-        created_at,
-        updated_at,
-        api_keys: endpoint
-            .api_keys
-            .into_iter()
-            .map(|key| crate::db::EndpointApiKey {
-                key_id: key.key_id,
-                endpoint_id: key.endpoint_id,
-                key_label: key.key_label,
-                api_key: String::new(),
-                position: key.position,
-                enabled: key.enabled,
-                created_at: key.created_at,
-                updated_at: key.updated_at,
-            })
-            .collect(),
     }
 }

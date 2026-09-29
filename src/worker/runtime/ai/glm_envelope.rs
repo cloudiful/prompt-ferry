@@ -29,8 +29,8 @@
 //! - The Passthrough + non-SSE + JSON path is handled centrally in
 //!   `forward_upstream_response` via [`envelope_preflight_eligible`]
 //!   + [`consume_envelope_preflight`] (issue #241). Without it the
-//!   streaming/buffered entry would receive the envelope bytes and
-//!   emit them as a 200 success.
+//!     streaming/buffered entry would receive the envelope bytes and
+//!     emit them as a 200 success.
 //! - The translation branches (ChatToResponses / ResponsesToChat /
 //!   Responses passthrough non-stream) run the check on the body they
 //!   already read, because those paths must not double-buffer the

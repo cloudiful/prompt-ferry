@@ -334,6 +334,21 @@ API 用量；两套凭据相互独立：切换到官方 API Key 计划会清除�
 OpenAI 提供方同样清理。内网前置或测试可用 `PROMPT_FERRY_CHATGPT_OAUTH_ISSUER` 与
 `PROMPT_FERRY_CHATGPT_BACKEND_URL` 覆盖 ChatGPT 认证与后端域名。
 
+### OpenAI Platform 组织用量（Admin API Key）
+
+OpenAI 端点可以单独保存一个可选的 Admin API Key，用于读取该 OpenAI Platform 组织
+自身的 API 用量与费用；它与推理 API Key 分开、仅在服务端使用：界面输入后不再回显，
+接口响应只返回 `has_admin_api_key`，密钥不会进入日志或响应。
+
+- 仅 OpenAI 端点可保存 Admin API Key；端点切换到其他 provider 会清除已保存的值。
+- 保存时留空保留原值，填入非空值覆盖，只有「清除」再保存才会删除。
+- 端点对话框中的「Platform 组织用量」通过该 Key 读取
+  `GET /v1/organization/usage/completions` 与 `GET /v1/organization/costs`，统计
+  UTC 月初至今的输入/输出/合计 tokens 与 USD 费用，并标明统计范围与缓存状态。
+- 该数据是组织级、仅用于展示：不是 ChatGPT 订阅配额，也不是单个端点或单个 Key
+  的口径，且不参与路由权重或剩余额度计算。未配置 Admin API Key 或上游拒绝时，
+  界面显示可操作的提示，而不是占位数字。
+
 ### 单机二进制
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的

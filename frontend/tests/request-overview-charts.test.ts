@@ -19,8 +19,7 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
 })
 
-const { createErrorOption, createTrendOption } =
-  await import('../src/request-overview-charts')
+const { createTrendOption } = await import('../src/request-overview-charts')
 
 const labels = {
   cacheRead: 'Cache read',
@@ -31,11 +30,6 @@ const labels = {
   output: 'Output',
   requests: 'Requests',
   success: 'Success',
-}
-
-function formatPercent(value?: number | null): string {
-  if (value == null) return '-'
-  return `${Math.round(value * 100)}%`
 }
 
 function trendBucket(
@@ -191,17 +185,4 @@ test('trend MCP axis and tooltip compact request counts', () => {
   const series = (option as unknown as { series: Array<{ data: unknown[] }> })
     .series
   expect(series[0]?.data).toEqual([2_500_000])
-})
-
-test('error breakdown axis and tooltip compact counts while rate stays percent', () => {
-  const option = createErrorOption({
-    rows: [{ count: 2_500_000, key: 'boom', label: 'boom', rate: 0.125 }],
-    formatCompact: formatTokenQuantity,
-    formatPercent,
-  })
-  expect(axisFormatterOf(option, 'x')(2_500_000)).toBe('2.5M')
-  const text = tooltipOf(option)([{ dataIndex: 0 }])
-  expect(text).toContain('2.5M')
-  expect(text).not.toContain('2,500,000')
-  expect(text).toContain('13%')
 })

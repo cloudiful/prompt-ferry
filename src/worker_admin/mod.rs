@@ -8,6 +8,8 @@ mod glm_parsing_tests;
 pub(crate) mod glm_usage;
 mod handlers;
 pub(crate) mod json_scalars;
+pub(crate) mod openai_org_usage;
+pub(crate) mod openai_org_usage_cache;
 pub(crate) mod opencode_go_parsing;
 pub(crate) mod opencode_go_usage;
 pub(crate) mod openrouter_parsing;

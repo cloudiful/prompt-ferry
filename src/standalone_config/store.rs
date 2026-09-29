@@ -14,7 +14,7 @@ use super::{
 use crate::db::{EndpointOAuthToken, EndpointOAuthTokenSet};
 use crate::relay_secrets::RelaySecretManager;
 
-const CURRENT_SCHEMA_VERSION: i64 = 33;
+const CURRENT_SCHEMA_VERSION: i64 = 35;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {
@@ -50,16 +50,17 @@ impl StandaloneConfigStore {
                 message: "must not be empty".to_string(),
             });
         }
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() && !parent.exists() {
-                return Err(StandaloneConfigError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!(
-                        "SQLite parent directory does not exist: {}",
-                        parent.display()
-                    ),
-                )));
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+            && !parent.exists()
+        {
+            return Err(StandaloneConfigError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "SQLite parent directory does not exist: {}",
+                    parent.display()
+                ),
+            )));
         }
         let pool = crate::db::connect_sqlite(path).await?;
         let store = Self {
@@ -188,6 +189,63 @@ impl StandaloneConfigStore {
             endpoint.api_keys.push(key);
         }
         Ok(Some(endpoint))
+    }
+
+    // ---- Issue #589: optional per-endpoint OpenAI Admin API key (envelope storage). ----
+
+    /// Store (or clear, with `None`/empty) the optional OpenAI Admin API key
+    /// for an endpoint. The secret is encrypted into the 0035 envelope
+    /// columns; admin responses only ever expose the saved indicator.
+    pub async fn set_endpoint_admin_api_key(
+        &self,
+        manager: &RelaySecretManager,
+        endpoint_id: uuid::Uuid,
+        value: Option<&str>,
+    ) -> Result<()> {
+        let normalized = value.map(str::trim).filter(|value| !value.is_empty());
+        let envelope = normalized
+            .map(|value| manager.encrypt(value))
+            .transpose()
+            .map_err(StandaloneConfigError::Encryption)?;
+        let now = rfc3339_now();
+        standalone_query!("src/sql/standalone/set_endpoint_admin_key.sql")
+            .bind(endpoint_id.to_string())
+            .bind(envelope_part(&envelope, EnvelopePart::Ciphertext))
+            .bind(envelope_part(&envelope, EnvelopePart::Nonce))
+            .bind(envelope_version(&envelope))
+            .bind(now.clone())
+            .bind(now)
+            .execute(self.pool())
+            .await?;
+        Ok(())
+    }
+
+    /// Decrypted Admin API key for an endpoint, used by the server-side PATCH
+    /// carry and by the organization usage read. `None` means not configured;
+    /// the value is never echoed by an admin response.
+    pub async fn endpoint_admin_api_key(
+        &self,
+        manager: &RelaySecretManager,
+        endpoint_id: uuid::Uuid,
+    ) -> Result<Option<String>> {
+        let row = standalone_query!("src/sql/standalone/get_endpoint_admin_key.sql")
+            .bind(endpoint_id.to_string())
+            .fetch_optional(self.pool())
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        let envelope = rows::envelope(&row, "admin_api_key")?;
+        write::decrypt_optional(manager, envelope.as_ref())
+    }
+
+    /// Endpoint ids that currently store an Admin API key, so a page listing
+    /// resolves the saved indicator without a query per row.
+    pub async fn list_endpoint_admin_key_ids(&self) -> Result<Vec<Uuid>> {
+        let rows = standalone_query!("src/sql/standalone/list_endpoint_admin_key_ids.sql")
+            .fetch_all(self.pool())
+            .await?;
+        rows.iter()
+            .map(|row| rows::uuid(row, "endpoint_id"))
+            .collect()
     }
 
     pub async fn list_endpoint_keys_for(
@@ -506,14 +564,12 @@ impl StandaloneConfigStore {
             .bind(existing.and_then(|server| server.lifecycle_learned_protocol_version.as_deref()))
             .bind(
                 existing
-                    .map(|server| server.lifecycle_learned_for_updated_at)
-                    .flatten()
+                    .and_then(|server| server.lifecycle_learned_for_updated_at)
                     .map(|value| value.to_rfc3339()),
             )
             .bind(
                 existing
-                    .map(|server| server.lifecycle_learned_at)
-                    .flatten()
+                    .and_then(|server| server.lifecycle_learned_at)
                     .map(|value| value.to_rfc3339()),
             )
             .bind(env.ciphertext)

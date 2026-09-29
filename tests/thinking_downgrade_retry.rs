@@ -282,6 +282,7 @@ impl ThinkingHarness {
                     thinking_downgrade_enabled,
                     thinking_effort_override: Some("high".to_string()),
                     compact_mode: db::CompactMode::Passthrough,
+                    service_tier: None,
                 }],
             },
         )

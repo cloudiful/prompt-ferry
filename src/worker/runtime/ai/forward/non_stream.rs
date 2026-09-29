@@ -121,7 +121,14 @@ pub(super) async fn forward_non_stream_chat_response(
     if let Some(err) =
         check_glm_envelope_error(&body, route_ctx.route.provider, route_ctx.route.native_api)
     {
-        return respond_with_client_error(services, request, request_ctx, route_ctx, err).await;
+        return Box::pin(respond_with_client_error(
+            services,
+            request,
+            request_ctx,
+            route_ctx,
+            err,
+        ))
+        .await;
     }
     let transformed = match chat_response_to_responses(&body) {
         Ok(transformed) => transformed,
@@ -142,13 +149,13 @@ pub(super) async fn forward_non_stream_chat_response(
                 streaming = false,
                 "failed adapting invalid upstream tool call arguments"
             );
-            return respond_with_client_error(
+            return Box::pin(respond_with_client_error(
                 services,
                 request,
                 request_ctx,
                 route_ctx,
                 CompatError::new(reqwest::StatusCode::BAD_GATEWAY, err.code, err.message),
-            )
+            ))
             .await;
         }
     };
@@ -198,8 +205,8 @@ pub(super) async fn forward_non_stream_chat_response(
         response_headers,
     )
     .await?;
-    let usage_event_id = services
-        .record_usage_event(
+    let usage_event_id = Box::pin(
+        services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
                 .with_upstream_redaction(
                     upstream_restore_session.is_some(),
@@ -232,8 +239,9 @@ pub(super) async fn forward_non_stream_chat_response(
                 .with_response_capture_truncated(
                     capture.response_text_truncated || raw_body_truncated,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
     let artifact_capture_expected = assistant_capture.is_some();
     persist_assistant_artifact(PersistAssistantArtifactParams {
         admin_state: services.admin_state(),
@@ -286,7 +294,14 @@ pub(super) async fn forward_non_stream_responses_response(
     if let Some(err) =
         check_glm_envelope_error(&body, route_ctx.route.provider, route_ctx.route.native_api)
     {
-        return respond_with_client_error(services, request, request_ctx, route_ctx, err).await;
+        return Box::pin(respond_with_client_error(
+            services,
+            request,
+            request_ctx,
+            route_ctx,
+            err,
+        ))
+        .await;
     }
     let restored_body = if let Some(session) = upstream_restore_session.clone() {
         restore_ai_response_json_blocking(request.path.clone(), body.to_vec(), session).await?
@@ -341,8 +356,8 @@ pub(super) async fn forward_non_stream_responses_response(
         response_headers,
     )
     .await?;
-    let usage_event_id = services
-        .record_usage_event(
+    let usage_event_id = Box::pin(
+        services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
                 .with_upstream_redaction(
                     upstream_restore_session.is_some(),
@@ -375,8 +390,9 @@ pub(super) async fn forward_non_stream_responses_response(
                 .with_response_capture_truncated(
                     usage_capture.response_text_truncated || raw_body_truncated,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
     persist_assistant_artifact(PersistAssistantArtifactParams {
         admin_state: services.admin_state(),
         usage_event_id,
@@ -468,8 +484,8 @@ pub(super) async fn forward_non_stream_anthropic_response(
         response_headers,
     )
     .await?;
-    let usage_event_id = services
-        .record_usage_event(
+    let usage_event_id = Box::pin(
+        services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
                 .with_upstream_redaction(
                     upstream_restore_session.is_some(),
@@ -502,8 +518,9 @@ pub(super) async fn forward_non_stream_anthropic_response(
                 .with_response_capture_truncated(
                     usage_capture.response_text_truncated || raw_body_truncated,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
     persist_assistant_artifact(PersistAssistantArtifactParams {
         admin_state: services.admin_state(),
         usage_event_id,

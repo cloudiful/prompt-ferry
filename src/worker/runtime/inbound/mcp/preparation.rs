@@ -91,7 +91,7 @@ async fn send_failure(
         body.clone().into_bytes(),
     )
     .await;
-    record_mcp_request_event(
+    Box::pin(record_mcp_request_event(
         context,
         FailurePayload {
             status,
@@ -100,7 +100,7 @@ async fn send_failure(
             upstream_error_body: Some(body),
             response_body: None,
         },
-    )
+    ))
     .await;
 }
 
@@ -127,14 +127,13 @@ async fn record_mcp_admission_event(
     request_content_logging: &RequestContentLoggingResponse,
     redact_content: bool,
 ) {
-    services
-        .record_usage_event(request_ctx.mcp_usage_log(
-            request,
-            metadata,
-            request_content_logging,
-            redact_content,
-        ))
-        .await;
+    Box::pin(services.record_usage_event(request_ctx.mcp_usage_log(
+        request,
+        metadata,
+        request_content_logging,
+        redact_content,
+    )))
+    .await;
 }
 
 /// Stage 1: build the request context and record the initial usage event
@@ -274,7 +273,7 @@ pub(super) async fn prepare_upstream(
                     &context,
                     &execution.request.request_id,
                     err.status,
-                    &err.code,
+                    err.code,
                     err.message.clone(),
                     err.message,
                 ))

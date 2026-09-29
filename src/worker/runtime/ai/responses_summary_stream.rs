@@ -72,38 +72,28 @@ impl ResponsesReasoningSummarySseFilter {
                         && !has_summary
                         && !self.summary_seen.contains(&key)
                         && !self.summary_completed.contains(&key)
-                    {
-                        if let Some(text) = item
+                        && let Some(text) = item
                             .get("content")
                             .map(crate::openai_compat::extract_text)
                             .filter(|text| !text.trim().is_empty())
                             .or_else(|| fallback.clone())
-                        {
-                            if self.summary_started.insert(key.clone()) {
-                                output.push(summary_part_added(output_index.clone(), &key));
-                            }
-                            let known_text = self
-                                .reasoning_text
-                                .get(&key)
-                                .filter(|known| !known.is_empty())
-                                .cloned();
-                            if known_text.is_none() {
-                                output.push(summary_delta(output_index.clone(), &key, &text));
-                                self.reasoning_text.insert(key.clone(), text.clone());
-                            }
-                            let complete_text = known_text.as_deref().unwrap_or(&text);
-                            output.push(summary_text_done(
-                                output_index.clone(),
-                                &key,
-                                complete_text,
-                            ));
-                            output.push(summary_part_done(
-                                output_index.clone(),
-                                &key,
-                                complete_text,
-                            ));
-                            self.summary_completed.insert(key.clone());
+                    {
+                        if self.summary_started.insert(key.clone()) {
+                            output.push(summary_part_added(output_index.clone(), &key));
                         }
+                        let known_text = self
+                            .reasoning_text
+                            .get(&key)
+                            .filter(|known| !known.is_empty())
+                            .cloned();
+                        if known_text.is_none() {
+                            output.push(summary_delta(output_index.clone(), &key, &text));
+                            self.reasoning_text.insert(key.clone(), text.clone());
+                        }
+                        let complete_text = known_text.as_deref().unwrap_or(&text);
+                        output.push(summary_text_done(output_index.clone(), &key, complete_text));
+                        output.push(summary_part_done(output_index.clone(), &key, complete_text));
+                        self.summary_completed.insert(key.clone());
                     }
                     let summary_filled = ensure_reasoning_summary(item, fallback.as_deref());
                     changed = summary_filled || minted;

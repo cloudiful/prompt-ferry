@@ -5,9 +5,10 @@ use utoipa::ToSchema;
 
 use crate::config::{NativeApi, NativeApiSource};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EndpointProvider {
+    #[default]
     Generic,
     Minimax,
     CommandCode,
@@ -37,12 +38,6 @@ pub enum EndpointProvider {
     OpenAi,
 }
 
-impl Default for EndpointProvider {
-    fn default() -> Self {
-        Self::Generic
-    }
-}
-
 impl EndpointProvider {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -57,7 +52,9 @@ impl EndpointProvider {
         }
     }
 
-    pub fn from_str(value: &str) -> Self {
+    /// Maps a stored provider value to its variant; unknown values are the
+    /// generic provider rather than an error.
+    pub fn from_str_or_default(value: &str) -> Self {
         match value {
             "minimax" => Self::Minimax,
             "command_code" => Self::CommandCode,
@@ -100,6 +97,38 @@ impl EndpointProvider {
     pub fn supports_chatgpt_subscription_plan(self) -> bool {
         matches!(self, Self::OpenAi)
     }
+
+    /// Issue #637: whether the caller-supplied `service_tier` compatibility
+    /// translation accepts and forwards the field for this provider. Only
+    /// MiniMax and OpenAI are confirmed (their accepted value vocabularies
+    /// differ, so values stay free-form); every other provider keeps the
+    /// previous behavior — the translation rejects or drops the caller
+    /// field. This is the caller-compatibility layer only and stays
+    /// provider-scoped; the configured endpoint/target override is a
+    /// separate, provider-agnostic layer (see
+    /// [`supports_service_tier_for`] and [`SERVICE_TIER_WIRE_KEY`]).
+    pub fn supports_service_tier(self) -> bool {
+        matches!(self, Self::Minimax | Self::OpenAi)
+    }
+}
+
+/// Issue #644: the top-level wire key for the configured free-form
+/// service-tier override. Every provider is a best-effort passthrough, so the
+/// field name is fixed by the HTTP JSON protocol contract instead of a
+/// provider allowlist. Shared by the live transform and the admin probe.
+pub const SERVICE_TIER_WIRE_KEY: &str = "service_tier";
+
+/// Issue #644: whether the configured free-form `service_tier` override is
+/// injected for a protocol. The override is provider-agnostic: any endpoint
+/// may carry a configured value and it is written as a best-effort top-level
+/// `service_tier` passthrough on the HTTP JSON protocols (Chat Completions,
+/// Responses, Anthropic Messages). `Auto` is resolved to one of those before
+/// forwarding. Realtime is excluded because it carries WebSocket frames
+/// instead of the common JSON request body and never runs the JSON body
+/// transform. The caller-compatibility translation stays separately gated by
+/// [`EndpointProvider::supports_service_tier`].
+pub fn supports_service_tier_for(native_api: NativeApi) -> bool {
+    !matches!(native_api, NativeApi::Realtime)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -142,7 +171,9 @@ impl EndpointPlan {
         }
     }
 
-    pub fn from_str(value: &str) -> Self {
+    /// Maps a stored plan value to its variant; unknown values are the
+    /// platform API key plan rather than an error.
+    pub fn from_str_or_default(value: &str) -> Self {
         match value {
             "chatgpt_subscription" => Self::ChatgptSubscription,
             _ => Self::PlatformApiKey,
@@ -222,35 +253,13 @@ fn redacted_secret_len(value: &str) -> String {
     format!("[REDACTED; {} bytes]", value.len())
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MinimaxServiceTier {
-    #[default]
-    Standard,
-    Priority,
-}
-
-impl MinimaxServiceTier {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Standard => "standard",
-            Self::Priority => "priority",
-        }
-    }
-
-    pub fn from_str(value: &str) -> Self {
-        match value {
-            "priority" => Self::Priority,
-            _ => Self::Standard,
-        }
-    }
-
-    pub fn from_optional(value: Option<&str>) -> Self {
-        match value {
-            Some("priority") => Self::Priority,
-            _ => Self::Standard,
-        }
-    }
+/// Issue #637: normalize a free-form service-tier override. Values are
+/// trimmed and blank/whitespace-only input becomes `None` (no override), so
+/// the caller's provider field/default stays intact.
+pub fn normalize_service_tier(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
@@ -281,6 +290,8 @@ pub struct ProviderEndpointRow {
     pub name: String,
     pub provider: String,
     pub provider_region: Option<String>,
+    /// Issue #637: free-form service-tier override (TEXT NULL). `None`/blank
+    /// means inherit (no override).
     pub service_tier: Option<String>,
     pub base_url: String,
     pub native_api: String,
@@ -317,8 +328,10 @@ pub struct ProviderEndpoint {
     /// contract backward-compatible, mirroring `has_proxy_url`.
     #[serde(default)]
     pub plan: EndpointPlan,
+    /// Issue #637: free-form endpoint service-tier override. `None` means
+    /// inherit (no override); a model-route target override wins over it.
     #[serde(default)]
-    pub service_tier: MinimaxServiceTier,
+    pub service_tier: Option<String>,
     pub base_url: String,
     pub native_api: String,
     pub native_api_source: String,
@@ -336,6 +349,11 @@ pub struct ProviderEndpoint {
     /// `true` when a proxy URL is stored; the secret itself is never echoed.
     #[serde(default)]
     pub has_proxy_url: bool,
+    /// Issue #589: response-side saved-Admin-API-Key indicator. The secret is
+    /// read through a dedicated query and never reaches this shape or any
+    /// serialized endpoint response.
+    #[serde(default)]
+    pub has_admin_api_key: bool,
     /// Issue #392 Phase K: endpoint default windows (`HH:MM` pairs).
     /// Empty means all-day; empty target inherits this value.
     #[serde(default)]
@@ -371,14 +389,14 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             scope: value.scope,
             owner_user_id: value.owner_user_id,
             name: value.name,
-            provider: EndpointProvider::from_str(&value.provider),
+            provider: EndpointProvider::from_str_or_default(&value.provider),
             provider_region: EndpointRegion::from_str(value.provider_region.as_deref()),
             // Issue #599 R2a: the endpoint row SELECTs predate the OAuth
             // token table, so rows start on the platform plan without a
             // token; the unified repository enriches both fields from token
             // presence before serving admin responses.
             plan: EndpointPlan::default(),
-            service_tier: MinimaxServiceTier::from_optional(value.service_tier.as_deref()),
+            service_tier: normalize_service_tier(value.service_tier.as_deref()),
             base_url: value.base_url,
             native_api: value.native_api,
             native_api_source: value.native_api_source,
@@ -386,6 +404,10 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             proxy_url: value.proxy_url,
             has_proxy_url,
             has_oauth_token: false,
+            // Issue #589: the endpoint row SELECTs predate the Admin API key
+            // column; the unified repository enriches it from the dedicated
+            // query before serving admin responses.
+            has_admin_api_key: false,
             active_windows,
             key_lb_enabled: value.key_lb_enabled,
             enabled: value.enabled,
@@ -404,8 +426,10 @@ pub struct EndpointCreate {
     pub name: String,
     pub provider: EndpointProvider,
     pub provider_region: Option<EndpointRegion>,
+    /// Issue #637: free-form service-tier override; trimmed by the write
+    /// path and stored as NULL when omitted/blank (inherit).
     #[serde(default)]
-    pub service_tier: MinimaxServiceTier,
+    pub service_tier: Option<String>,
     pub base_url: String,
     pub native_api: NativeApi,
     pub native_api_source: NativeApiSource,
@@ -449,7 +473,7 @@ mod tests {
     fn command_code_provider_round_trips_as_snake_case() {
         assert_eq!(EndpointProvider::CommandCode.as_str(), "command_code");
         assert_eq!(
-            EndpointProvider::from_str("command_code"),
+            EndpointProvider::from_str_or_default("command_code"),
             EndpointProvider::CommandCode
         );
         assert_eq!(
@@ -466,7 +490,7 @@ mod tests {
         assert_eq!(deserialized, EndpointProvider::CommandCode);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
-            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::from_str_or_default("legacy-unknown"),
             EndpointProvider::Generic
         );
     }
@@ -475,7 +499,7 @@ mod tests {
     fn opencode_go_provider_round_trips_as_snake_case() {
         assert_eq!(EndpointProvider::OpencodeGo.as_str(), "opencode_go");
         assert_eq!(
-            EndpointProvider::from_str("opencode_go"),
+            EndpointProvider::from_str_or_default("opencode_go"),
             EndpointProvider::OpencodeGo
         );
         assert_eq!(
@@ -492,7 +516,7 @@ mod tests {
         assert_eq!(deserialized, EndpointProvider::OpencodeGo);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
-            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::from_str_or_default("legacy-unknown"),
             EndpointProvider::Generic
         );
     }
@@ -501,7 +525,7 @@ mod tests {
     fn openrouter_provider_round_trips_as_snake_case() {
         assert_eq!(EndpointProvider::OpenRouter.as_str(), "openrouter");
         assert_eq!(
-            EndpointProvider::from_str("openrouter"),
+            EndpointProvider::from_str_or_default("openrouter"),
             EndpointProvider::OpenRouter
         );
         assert_eq!(
@@ -518,7 +542,7 @@ mod tests {
         assert_eq!(deserialized, EndpointProvider::OpenRouter);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
-            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::from_str_or_default("legacy-unknown"),
             EndpointProvider::Generic
         );
     }
@@ -530,7 +554,10 @@ mod tests {
         // CHECKs and the admin API contract), and `from_optional(None)`
         // must keep the legacy generic fallback for legacy rows.
         assert_eq!(EndpointProvider::Glm.as_str(), "glm");
-        assert_eq!(EndpointProvider::from_str("glm"), EndpointProvider::Glm);
+        assert_eq!(
+            EndpointProvider::from_str_or_default("glm"),
+            EndpointProvider::Glm
+        );
         assert_eq!(
             EndpointProvider::from_optional(Some("glm")),
             EndpointProvider::Glm
@@ -543,7 +570,7 @@ mod tests {
         assert_eq!(deserialized, EndpointProvider::Glm);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
-            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::from_str_or_default("legacy-unknown"),
             EndpointProvider::Generic
         );
         assert_eq!(
@@ -559,7 +586,7 @@ mod tests {
         // contract), not the derived `deep_seek`.
         assert_eq!(EndpointProvider::DeepSeek.as_str(), "deepseek");
         assert_eq!(
-            EndpointProvider::from_str("deepseek"),
+            EndpointProvider::from_str_or_default("deepseek"),
             EndpointProvider::DeepSeek
         );
         assert_eq!(
@@ -574,7 +601,7 @@ mod tests {
         assert_eq!(deserialized, EndpointProvider::DeepSeek);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
-            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::from_str_or_default("legacy-unknown"),
             EndpointProvider::Generic
         );
         assert_eq!(
@@ -590,7 +617,7 @@ mod tests {
         // API contract), not the derived `open_ai`.
         assert_eq!(EndpointProvider::OpenAi.as_str(), "openai");
         assert_eq!(
-            EndpointProvider::from_str("openai"),
+            EndpointProvider::from_str_or_default("openai"),
             EndpointProvider::OpenAi
         );
         assert_eq!(
@@ -605,7 +632,7 @@ mod tests {
         assert_eq!(deserialized, EndpointProvider::OpenAi);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
-            EndpointProvider::from_str("legacy-unknown"),
+            EndpointProvider::from_str_or_default("legacy-unknown"),
             EndpointProvider::Generic
         );
         assert_eq!(
@@ -626,15 +653,15 @@ mod tests {
         );
         assert_eq!(EndpointPlan::default(), EndpointPlan::PlatformApiKey);
         assert_eq!(
-            EndpointPlan::from_str("chatgpt_subscription"),
+            EndpointPlan::from_str_or_default("chatgpt_subscription"),
             EndpointPlan::ChatgptSubscription
         );
         assert_eq!(
-            EndpointPlan::from_str("platform_api_key"),
+            EndpointPlan::from_str_or_default("platform_api_key"),
             EndpointPlan::PlatformApiKey
         );
         assert_eq!(
-            EndpointPlan::from_str("legacy-unknown"),
+            EndpointPlan::from_str_or_default("legacy-unknown"),
             EndpointPlan::PlatformApiKey
         );
         assert_eq!(
@@ -719,6 +746,43 @@ mod tests {
     }
 
     #[test]
+    fn only_minimax_and_openai_accept_caller_service_tier() {
+        // Issue #637: the caller-compatibility bit behind the Responses→Chat
+        // translation stays provider-scoped and unchanged by issue #644.
+        for provider in [EndpointProvider::Minimax, EndpointProvider::OpenAi] {
+            assert!(provider.supports_service_tier(), "{provider:?}");
+        }
+        for provider in [
+            EndpointProvider::Generic,
+            EndpointProvider::CommandCode,
+            EndpointProvider::OpencodeGo,
+            EndpointProvider::OpenRouter,
+            EndpointProvider::Glm,
+            EndpointProvider::DeepSeek,
+        ] {
+            assert!(!provider.supports_service_tier(), "{provider:?}");
+        }
+    }
+
+    #[test]
+    fn configured_service_tier_override_covers_every_json_protocol() {
+        // Issue #644: the configured override is provider-agnostic (the
+        // helper takes no provider) and covers every HTTP JSON protocol;
+        // Realtime is excluded because it carries WebSocket frames.
+        use crate::config::NativeApi;
+        assert_eq!(SERVICE_TIER_WIRE_KEY, "service_tier");
+        for native_api in [
+            NativeApi::Chat,
+            NativeApi::Responses,
+            NativeApi::AnthropicMessages,
+            NativeApi::Auto,
+        ] {
+            assert!(supports_service_tier_for(native_api), "{native_api:?}");
+        }
+        assert!(!supports_service_tier_for(NativeApi::Realtime));
+    }
+
+    #[test]
     fn oauth_token_debug_redacts_both_secrets() {
         // Issue #599 R2a: refresh tokens must never reach logs. The Debug
         // impl renders byte counts; a regression that echoes a secret fails
@@ -773,26 +837,21 @@ mod tests {
     }
 
     #[test]
-    fn service_tier_defaults_to_standard_and_parses_priority() {
-        assert_eq!(MinimaxServiceTier::default(), MinimaxServiceTier::Standard);
+    fn service_tier_is_free_form_and_blank_means_inherit() {
+        // Issue #637: the free-form override trims values and treats
+        // blank/whitespace as unset (inherit).
+        assert_eq!(normalize_service_tier(None), None);
+        assert_eq!(normalize_service_tier(Some("")), None);
+        assert_eq!(normalize_service_tier(Some("   ")), None);
         assert_eq!(
-            MinimaxServiceTier::from_optional(None),
-            MinimaxServiceTier::Standard
+            normalize_service_tier(Some(" priority ")),
+            Some("priority".to_string())
         );
         assert_eq!(
-            MinimaxServiceTier::from_optional(Some("priority")),
-            MinimaxServiceTier::Priority
+            normalize_service_tier(Some("fast")),
+            Some("fast".to_string())
         );
-        assert_eq!(
-            MinimaxServiceTier::from_optional(Some("standard")),
-            MinimaxServiceTier::Standard
-        );
-        assert_eq!(
-            MinimaxServiceTier::from_optional(Some("legacy-unknown")),
-            MinimaxServiceTier::Standard
-        );
-        assert_eq!(MinimaxServiceTier::Priority.as_str(), "priority");
-        // Legacy/omitted JSON values deserialize as standard.
+        // Legacy/omitted JSON values deserialize as inherit (null).
         let create: EndpointCreate = serde_json::from_value(serde_json::json!({
             "scope": "admin",
             "name": "legacy",
@@ -807,6 +866,44 @@ mod tests {
             "enabled": true
         }))
         .expect("legacy endpoint create without service_tier");
-        assert_eq!(create.service_tier, MinimaxServiceTier::Standard);
+        assert_eq!(create.service_tier, None);
+    }
+
+    #[test]
+    fn provider_endpoint_serialization_exposes_only_the_admin_key_indicator() {
+        // Issue #589: the Admin API key secret must never reach a serialized
+        // endpoint response; only the saved indicator is echoed.
+        let now = Utc::now();
+        let endpoint = ProviderEndpoint {
+            endpoint_id: uuid::Uuid::new_v4(),
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "openai".to_string(),
+            provider: EndpointProvider::OpenAi,
+            provider_region: None,
+            plan: EndpointPlan::default(),
+            service_tier: None,
+            base_url: "https://api.openai.com".to_string(),
+            native_api: "responses".to_string(),
+            native_api_source: "manual".to_string(),
+            api_key: "sk-inference-secret".to_string(),
+            proxy_url: Some("http://user:pass@proxy.test".to_string()),
+            has_proxy_url: true,
+            has_oauth_token: false,
+            has_admin_api_key: true,
+            active_windows: vec![],
+            key_lb_enabled: false,
+            enabled: true,
+            mcp_enabled: false,
+            created_at: now,
+            updated_at: now,
+            api_keys: vec![],
+        };
+        let value = serde_json::to_value(&endpoint).expect("serialize endpoint");
+        assert_eq!(value["has_admin_api_key"], serde_json::json!(true));
+        let serialized = serde_json::to_string(&endpoint).expect("serialize endpoint");
+        assert!(!serialized.contains("sk-inference-secret"));
+        assert!(!serialized.contains("\"admin_api_key\":"));
+        assert!(!serialized.contains("pass@proxy.test"));
     }
 }

@@ -57,10 +57,10 @@ pub(in crate::worker_admin::handlers) fn combine_record_date_range(
         (Some(legacy), Some(bound)) => Some(legacy.min(bound)),
         (legacy, bound) => legacy.or(bound),
     };
-    if let (Some(s), Some(e)) = (effective_start, effective_end) {
-        if s >= e {
-            return Err(ApiError::bad_request("range produces an empty window"));
-        }
+    if let (Some(s), Some(e)) = (effective_start, effective_end)
+        && s >= e
+    {
+        return Err(ApiError::bad_request("range produces an empty window"));
     }
     Ok((effective_start, effective_end))
 }

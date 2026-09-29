@@ -70,7 +70,8 @@ pub(super) async fn resolve_endpoint_input(
     existing_proxy_url: Option<String>,
     existing_active_windows: Option<Vec<db::ActiveWindow>>,
     has_oauth_token: bool,
-) -> Result<EndpointCreate, ApiError> {
+    existing_admin_api_key: Option<String>,
+) -> Result<(EndpointCreate, Option<String>), ApiError> {
     validate_mcp_provider(body.mcp_enabled, body.provider).map_err(|message| {
         ApiError::new(StatusCode::BAD_REQUEST, "invalid_mcp_provider", message)
     })?;
@@ -290,23 +291,38 @@ pub(super) async fn resolve_endpoint_input(
         Some(derived) => derived.to_string(),
         None => normalize_endpoint_base_url(&body.base_url),
     };
-    Ok(EndpointCreate {
-        scope: body.scope,
-        owner_user_id: body.owner_user_id,
-        name: body.name,
-        provider: body.provider,
-        provider_region: body.provider_region,
-        service_tier: body.service_tier,
-        base_url,
-        native_api,
-        native_api_source,
-        api_key,
-        api_keys,
-        key_lb_enabled: body.key_lb_enabled,
-        enabled: body.enabled.unwrap_or(true),
-        proxy_url,
-        active_windows,
-    })
+    // Issue #589: optional Admin API key, OpenAI-only. `None` (omitted) keeps
+    // the stored value on PATCH (`None` on create means unset);
+    // empty/whitespace clears to unset; a non-empty value replaces it. A
+    // non-OpenAI provider rejects a submitted key and forces a clear, so
+    // switching an endpoint away from OpenAI drops any stored key. Never
+    // echoed back.
+    let admin_api_key = resolve_admin_api_key(
+        body.provider,
+        body.admin_api_key.as_deref(),
+        existing_admin_api_key.as_deref(),
+    )
+    .map_err(|message| ApiError::new(StatusCode::BAD_REQUEST, "invalid_admin_api_key", message))?;
+    Ok((
+        EndpointCreate {
+            scope: body.scope,
+            owner_user_id: body.owner_user_id,
+            name: body.name,
+            provider: body.provider,
+            provider_region: body.provider_region,
+            service_tier: body.service_tier,
+            base_url,
+            native_api,
+            native_api_source,
+            api_key,
+            api_keys,
+            key_lb_enabled: body.key_lb_enabled,
+            enabled: body.enabled.unwrap_or(true),
+            proxy_url,
+            active_windows,
+        },
+        admin_api_key,
+    ))
 }
 
 /// Issue #368 Phase B: normalize and validate an outbound proxy URL.
@@ -340,6 +356,34 @@ pub(super) fn normalize_endpoint_base_url(base_url: &str) -> String {
         }
     }
     v
+}
+
+/// Issue #589: server-side PATCH semantics for the optional Admin API key.
+/// The key is OpenAI-only:
+/// - OpenAI: `None` (omitted) keeps the stored value; empty/whitespace clears
+///   it; any other value replaces it after trimming.
+/// - Any other provider: a non-empty submitted value is rejected, and the
+///   resolved value is always `None` so a provider switch clears any key that
+///   was stored while the endpoint was OpenAI.
+pub(super) fn resolve_admin_api_key(
+    provider: db::EndpointProvider,
+    submitted: Option<&str>,
+    existing: Option<&str>,
+) -> std::result::Result<Option<String>, &'static str> {
+    if provider != db::EndpointProvider::OpenAi {
+        if submitted.is_some_and(|raw| !raw.trim().is_empty()) {
+            return Err("Admin API Key is only valid for OpenAI endpoints");
+        }
+        return Ok(None);
+    }
+    Ok(match submitted {
+        None => existing
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        Some(raw) if raw.trim().is_empty() => None,
+        Some(raw) => Some(raw.trim().to_string()),
+    })
 }
 
 /// Issue #599 R2a/R2b: upstream plan gate for endpoint create/update. Keeping
@@ -414,8 +458,75 @@ pub(super) fn truncate_message(message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_endpoint_base_url, validate_endpoint_plan, validate_mcp_provider};
+    use super::{
+        normalize_endpoint_base_url, resolve_admin_api_key, validate_endpoint_plan,
+        validate_mcp_provider,
+    };
     use crate::db::{self, EndpointProvider};
+
+    #[test]
+    fn resolve_admin_api_key_keeps_clears_and_replaces_on_openai() {
+        let openai = EndpointProvider::OpenAi;
+        // Omitted keeps the stored value (trimmed); on create (no stored
+        // value) it stays unset.
+        assert_eq!(resolve_admin_api_key(openai, None, None), Ok(None));
+        assert_eq!(
+            resolve_admin_api_key(openai, None, Some("  sk-existing  ")),
+            Ok(Some("sk-existing".to_string()))
+        );
+        assert_eq!(resolve_admin_api_key(openai, None, Some("   ")), Ok(None));
+        // Empty/whitespace clears an existing value.
+        assert_eq!(
+            resolve_admin_api_key(openai, Some(""), Some("sk-existing")),
+            Ok(None)
+        );
+        assert_eq!(
+            resolve_admin_api_key(openai, Some("   "), Some("sk-existing")),
+            Ok(None)
+        );
+        // A value replaces the stored one after trimming.
+        assert_eq!(
+            resolve_admin_api_key(openai, Some("  sk-new  "), None),
+            Ok(Some("sk-new".to_string()))
+        );
+        assert_eq!(
+            resolve_admin_api_key(openai, Some("sk-new"), Some("sk-existing")),
+            Ok(Some("sk-new".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_admin_api_key_rejects_and_clears_for_non_openai() {
+        let generic = EndpointProvider::Generic;
+        // A non-empty submission on a non-OpenAI endpoint is rejected.
+        assert_eq!(
+            resolve_admin_api_key(generic, Some("sk-new"), None),
+            Err("Admin API Key is only valid for OpenAI endpoints")
+        );
+        assert_eq!(
+            resolve_admin_api_key(EndpointProvider::Minimax, Some(" sk "), None),
+            Err("Admin API Key is only valid for OpenAI endpoints")
+        );
+        // Omitted/empty on a non-OpenAI endpoint always resolves to clear, so
+        // switching an endpoint away from OpenAI drops any stored key.
+        assert_eq!(resolve_admin_api_key(generic, None, None), Ok(None));
+        assert_eq!(
+            resolve_admin_api_key(generic, None, Some("sk-from-openai")),
+            Ok(None)
+        );
+        assert_eq!(
+            resolve_admin_api_key(generic, Some(""), Some("sk-from-openai")),
+            Ok(None)
+        );
+        assert_eq!(
+            resolve_admin_api_key(
+                EndpointProvider::OpenRouter,
+                Some("   "),
+                Some("sk-from-openai")
+            ),
+            Ok(None)
+        );
+    }
 
     #[test]
     fn normalize_endpoint_base_url_strips_trailing_v1_chain() {

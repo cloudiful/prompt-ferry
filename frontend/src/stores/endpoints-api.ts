@@ -5,6 +5,7 @@ import {
   deleteModelRoute,
   listEndpoints,
   listModelRoutes,
+  organizationUsage,
   testEndpoint,
   tokenPlanUsage,
   testModelRoute,
@@ -19,6 +20,7 @@ import type {
   ModelRoutePageResponse,
   ModelRouteRequest,
   ModelRouteTestResponse,
+  OpenAiOrganizationUsageResponse,
   ProviderEndpoint,
   TokenPlanUsageResponse,
 } from '../generated/admin-api'
@@ -90,6 +92,18 @@ export async function fetchTokenPlanUsage(
 ): Promise<TokenPlanUsageResponse> {
   return expectData(
     await tokenPlanUsage<true>(withData({ path: { endpoint_id: endpointId } })),
+  )
+}
+
+// Issue #589 P2c: OpenAI Platform organization usage for the endpoint's
+// separate Admin API Key. Display-only; never part of routing or quota math.
+export async function fetchOrganizationUsage(
+  endpointId: string,
+): Promise<OpenAiOrganizationUsageResponse> {
+  return expectData(
+    await organizationUsage<true>(
+      withData({ path: { endpoint_id: endpointId } }),
+    ),
   )
 }
 

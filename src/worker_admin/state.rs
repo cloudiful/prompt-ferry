@@ -18,6 +18,7 @@ use sqlx::PgPool;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 use uuid::Uuid;
 
+use super::openai_org_usage_cache::OpenAiOrgUsageCache;
 use super::token_plan_cache::TokenPlanQuotaCache;
 use crate::{
     db::{ConfigRepository, ManagedRelayRuntimeStatus, StreamDeltaBatchingSettings, UserStore},
@@ -112,6 +113,8 @@ pub struct AdminState {
     pub mcp_allowed_origins: Vec<String>,
     pub endpoint_model_cache: EndpointModelCache,
     pub(crate) token_plan_quota: TokenPlanQuotaCache,
+    /// Issue #589 P2b: display-only OpenAI organization usage cache.
+    pub(crate) openai_org_usage: OpenAiOrgUsageCache,
 }
 
 pub struct AdminStateInit {
@@ -169,6 +172,7 @@ impl AdminState {
             mcp_allowed_origins: init.mcp_allowed_origins,
             endpoint_model_cache: init.endpoint_model_cache,
             token_plan_quota: TokenPlanQuotaCache::default(),
+            openai_org_usage: OpenAiOrgUsageCache::default(),
         }
     }
 

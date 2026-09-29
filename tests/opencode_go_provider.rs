@@ -19,7 +19,7 @@ use uuid::Uuid;
 fn provider_wire_values_match_minimax_convention() {
     assert_eq!(EndpointProvider::OpencodeGo.as_str(), "opencode_go");
     assert_eq!(
-        EndpointProvider::from_str("opencode_go"),
+        EndpointProvider::from_str_or_default("opencode_go"),
         EndpointProvider::OpencodeGo
     );
     assert_eq!(
@@ -39,7 +39,7 @@ fn provider_wire_values_match_minimax_convention() {
     assert_eq!(deserialized, EndpointProvider::OpencodeGo);
     // Unknown providers keep the legacy generic fallback.
     assert_eq!(
-        EndpointProvider::from_str("legacy-unknown"),
+        EndpointProvider::from_str_or_default("legacy-unknown"),
         EndpointProvider::Generic
     );
     assert_eq!(
@@ -98,13 +98,13 @@ fn key_usage_serde_omits_absent_opencode_go_sections() {
         }
     }
     // A key carrying no opencode_go windows must not serialize them.
-    let absent = serde_json::to_value(&key(None, None, None)).expect("serialize key");
+    let absent = serde_json::to_value(key(None, None, None)).expect("serialize key");
     assert!(absent.get("opencodego_rolling").is_none());
     assert!(absent.get("opencodego_weekly").is_none());
     assert!(absent.get("opencodego_monthly").is_none());
     // A key with all three percent windows serializes each under its field.
     let present =
-        serde_json::to_value(&key(Some(12.0), Some(34.0), Some(56.0))).expect("serialize key");
+        serde_json::to_value(key(Some(12.0), Some(34.0), Some(56.0))).expect("serialize key");
     assert_eq!(present["opencodego_rolling"]["percent"], json!(12.0));
     assert_eq!(present["opencodego_weekly"]["percent"], json!(34.0));
     assert_eq!(present["opencodego_monthly"]["percent"], json!(56.0));

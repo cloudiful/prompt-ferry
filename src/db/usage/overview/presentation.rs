@@ -97,21 +97,6 @@ pub(crate) fn overview_cache_rate(full_input_tokens: i64, cache_read_tokens: i64
     }
 }
 
-pub(super) fn failure_family_label(key: &str) -> &'static str {
-    match key {
-        "auth" => "鉴权失败",
-        "rate_limit" => "限流",
-        "quota" => "配额",
-        "timeout" => "超时",
-        "upstream_4xx" => "上游 4xx",
-        "upstream_5xx" => "上游 5xx",
-        "network" => "网络/传输",
-        "empty_success" => "空成功",
-        "policy" => "策略拦截",
-        _ => "未知",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{

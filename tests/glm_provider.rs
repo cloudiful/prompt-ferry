@@ -52,13 +52,13 @@ fn key_usage_serde_omits_absent_glm_sections() {
     // A key carrying no GLM sections must not serialize them (the
     // existing `#[serde(skip_serializing_if = "Option::is_none")]`
     // annotations on the GLM fields mean absent == omitted).
-    let absent = serde_json::to_value(&key(None, None)).expect("serialize key");
+    let absent = serde_json::to_value(key(None, None)).expect("serialize key");
     assert!(absent.get("glm_five_hour").is_none());
     assert!(absent.get("glm_weekly").is_none());
     // A key with both windows serializes each under its field and the
     // 5h `limit` / `current_value` shape round-trips so the admin UI
     // can render the "used / total" subline.
-    let present = serde_json::to_value(&key(
+    let present = serde_json::to_value(key(
         Some(glm_window(50000.0, 1000.0, Some(2.0))),
         Some(glm_window(100.0, 5.0, Some(5.0))),
     ))

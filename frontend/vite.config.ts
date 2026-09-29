@@ -95,8 +95,8 @@ export default defineConfig({
       experimental: { componentDetection: true },
       ui: {
         colors: {
-          primary: 'blue',
-          neutral: 'slate',
+          primary: 'sky',
+          neutral: 'mist',
         },
         table: {
           slots: {

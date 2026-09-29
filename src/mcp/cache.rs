@@ -230,24 +230,22 @@ impl McpCatalogCache {
         );
 
         let CacheBackend::Valkey(manager) = &self.backend else {
-            if let CacheBackend::Sqlite(store) = &self.backend {
-                if let Ok(payload) = serde_json::to_string(&StoredCatalog {
+            if let CacheBackend::Sqlite(store) = &self.backend
+                && let Ok(payload) = serde_json::to_string(&StoredCatalog {
                     updated_at: server.updated_at,
                     snapshot,
-                }) {
-                    if let Err(err) = store
-                        .coordinator
-                        .put(
-                            "mcp-catalog",
-                            &server.server_id.to_string(),
-                            &payload,
-                            store.ttl_seconds,
-                        )
-                        .await
-                    {
-                        warn!(error = %err, server_id = %server.server_id, "failed to write MCP catalog to SQLite");
-                    }
-                }
+                })
+                && let Err(err) = store
+                    .coordinator
+                    .put(
+                        "mcp-catalog",
+                        &server.server_id.to_string(),
+                        &payload,
+                        store.ttl_seconds,
+                    )
+                    .await
+            {
+                warn!(error = %err, server_id = %server.server_id, "failed to write MCP catalog to SQLite");
             }
             return;
         };

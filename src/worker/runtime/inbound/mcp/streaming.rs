@@ -41,7 +41,7 @@ pub(super) async fn handle_streaming_transport_response<S>(
                         redaction_enabled(services.admin_state()),
                         request_ctx.user_id,
                     );
-                    record_mcp_request_event(
+                    Box::pin(record_mcp_request_event(
                         context,
                         FailurePayload {
                             status: StatusCode::BAD_GATEWAY,
@@ -50,7 +50,7 @@ pub(super) async fn handle_streaming_transport_response<S>(
                             upstream_error_body: None,
                             response_body: None,
                         },
-                    )
+                    ))
                     .await;
                     return;
                 }
@@ -60,7 +60,7 @@ pub(super) async fn handle_streaming_transport_response<S>(
             match restore_mcp_body_json_blocking(body.clone(), session.clone()).await {
                 Ok(restored_body) => restored_body,
                 Err(err) => {
-                    return handle_restore_failure(context, err, body).await;
+                    return Box::pin(handle_restore_failure(context, err, body)).await;
                 }
             };
         send_mcp_response(
@@ -84,7 +84,7 @@ pub(super) async fn handle_streaming_transport_response<S>(
         } else {
             extract_mcp_error(status, &restored_body)
         };
-        record_mcp_request_event(
+        Box::pin(record_mcp_request_event(
             context,
             FailurePayload {
                 status: StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
@@ -93,7 +93,7 @@ pub(super) async fn handle_streaming_transport_response<S>(
                 upstream_error_body,
                 response_body,
             },
-        )
+        ))
         .await;
         return;
     }
@@ -228,32 +228,31 @@ pub(super) async fn handle_streaming_transport_response<S>(
             }
         }
     }
-    if failure.is_none() {
-        if let Err(err) = services
+    if failure.is_none()
+        && let Err(err) = services
             .out_tx
             .send(BridgeMessage::McpResponseEnd(McpResponseEnd {
                 request_id: request.request_id.clone(),
             }))
             .await
-        {
-            warn!(
-                category = "mcp_bridge_diag",
-                phase = "response_end",
-                request_id = %request.request_id,
-                status,
-                streamed_chunks,
-                streamed_bytes,
-                error = %err,
-                "failed to send MCP response end from worker to relay"
-            );
-            failure = Some(FailurePayload {
-                status: StatusCode::BAD_GATEWAY,
-                error_code: "mcp_stream_disconnected".to_string(),
-                error_message: format!("failed to send MCP response end to relay: {err}"),
-                upstream_error_body: None,
-                response_body: None,
-            });
-        }
+    {
+        warn!(
+            category = "mcp_bridge_diag",
+            phase = "response_end",
+            request_id = %request.request_id,
+            status,
+            streamed_chunks,
+            streamed_bytes,
+            error = %err,
+            "failed to send MCP response end from worker to relay"
+        );
+        failure = Some(FailurePayload {
+            status: StatusCode::BAD_GATEWAY,
+            error_code: "mcp_stream_disconnected".to_string(),
+            error_message: format!("failed to send MCP response end to relay: {err}"),
+            upstream_error_body: None,
+            response_body: None,
+        });
     }
     let failure = failure.unwrap_or_else(|| {
         if ok {
@@ -279,7 +278,7 @@ pub(super) async fn handle_streaming_transport_response<S>(
             }
         }
     });
-    record_mcp_request_event(context, failure).await;
+    Box::pin(record_mcp_request_event(context, failure)).await;
 }
 
 pub(super) async fn handle_buffered_transport_response(
@@ -297,7 +296,7 @@ pub(super) async fn handle_buffered_transport_response(
         match restore_mcp_body_json_blocking(body.clone(), session.clone()).await {
             Ok(restored_body) => restored_body,
             Err(err) => {
-                handle_restore_failure(context, err, body).await;
+                Box::pin(handle_restore_failure(context, err, body)).await;
                 return;
             }
         }
@@ -325,7 +324,7 @@ pub(super) async fn handle_buffered_transport_response(
         body,
     )
     .await;
-    record_mcp_request_event(
+    Box::pin(record_mcp_request_event(
         context,
         FailurePayload {
             status: StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
@@ -334,7 +333,7 @@ pub(super) async fn handle_buffered_transport_response(
             upstream_error_body,
             response_body,
         },
-    )
+    ))
     .await;
 }
 

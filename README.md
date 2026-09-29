@@ -401,6 +401,26 @@ provider move away from OpenAI does the same. For fronting or tests,
 `PROMPT_FERRY_CHATGPT_OAUTH_ISSUER` and `PROMPT_FERRY_CHATGPT_BACKEND_URL` override the ChatGPT
 auth and backend hosts.
 
+### OpenAI Platform organization usage (Admin API Key)
+
+An OpenAI endpoint can store an optional Admin API Key, separate from its inference API keys, to
+read the OpenAI Platform organization's own API usage and spend. It is server-side only: the
+operator types it in the endpoint dialog, responses report just `has_admin_api_key`, and the
+secret is never echoed, logged, or returned.
+
+- Only OpenAI endpoints accept the Admin API Key; moving an endpoint to another provider clears
+  any stored value.
+- Saving keeps the stored key when the field is left blank, replaces it with a non-empty value,
+  and clears it only through Clear + Save.
+- "Platform organization usage" in the endpoint dialog reads
+  `GET /v1/organization/usage/completions` and `GET /v1/organization/costs` through that key for
+  the current UTC month to date, showing input/output/total tokens and USD spend with the period
+  and cache state.
+- It is organization-level and display-only. It is not the ChatGPT subscription quota, not a
+  per-endpoint or per-key figure, and it never feeds routing weights or remaining-credit math. A
+  missing Admin API Key or an upstream rejection shows an actionable message instead of
+  placeholder numbers.
+
 ### Single-host binary
 
 Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases)

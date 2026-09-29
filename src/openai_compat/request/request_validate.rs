@@ -122,6 +122,7 @@ fn reject_unknown_root_fields(object: &Map<String, Value>) -> Result<(), CompatE
         "reasoning",
         "conversation",
         "previous_response_id",
+        "service_tier",
         "stream",
         "temperature",
         "text",

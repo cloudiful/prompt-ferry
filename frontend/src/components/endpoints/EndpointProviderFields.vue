@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ProviderIcon from '@/components/providers/ProviderIcon.vue'
-import { normalizeProviderPlan } from '@/admin-mappers'
+import SettingsFieldRow from '@/components/shared/SettingsFieldRow.vue'
+import {
+  clearAdminApiKeyOutsideOpenAi,
+  normalizeProviderPlan,
+} from '@/admin-mappers'
 import type { EndpointPlan } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
+import { endpointFormProtocol } from '@/models/endpoints/service-tier'
 
 const props = defineProps<{
   t: TranslateFn
@@ -28,20 +33,21 @@ const providerSelection = computed({
     // Issue #599 R2c: the plan axis is OpenAI-only; a provider switch away
     // resets it so a stale subscription selection is never submitted.
     form.value.plan = normalizeProviderPlan(value, form.value.plan)
+    // Issue #589 P2c: the Admin API Key is OpenAI-only; drop any typed value
+    // on a provider switch (the server clears the stored key too).
+    clearAdminApiKeyOutsideOpenAi(form.value)
     if (value !== 'minimax') {
-      // Preset providers other than MiniMax carry no region, no service
-      // tier, and no MiniMax builtin MCP privilege. Their base URL is
-      // derived server-side, so the form no longer tracks one.
+      // Preset providers other than MiniMax carry no region and no MiniMax
+      // builtin MCP privilege. Their base URL is derived server-side, so the
+      // form no longer tracks one. Issue #644: a configured free-form
+      // service tier is provider-agnostic, so a provider switch keeps it
+      // instead of clearing a value the operator set in the settings
+      // subpage.
       form.value.provider_region = null
-      form.value.service_tier = 'standard'
       form.value.mcp_enabled = false
       return
     }
     form.value.provider_region = form.value.provider_region ?? 'cn'
-    // Preserve an explicit priority selection; normalize legacy/unknown
-    // values to the standard default.
-    form.value.service_tier =
-      form.value.service_tier === 'priority' ? 'priority' : 'standard'
     if (!form.value.endpoint_id) {
       form.value.mcp_enabled = true
     }
@@ -77,21 +83,8 @@ const planHint = computed(() =>
     ? props.t('endpointPlanHint')
     : props.t('endpointPlanLoginRequired'),
 )
-const serviceTierSelection = computed({
-  get: () => (form.value.service_tier === 'priority' ? 'priority' : 'standard'),
-  set(value: 'standard' | 'priority') {
-    form.value.service_tier = value
-  },
-})
-const serviceTierOptions = computed(() => [
-  { label: props.t('serviceTierStandard'), value: 'standard' },
-  { label: props.t('serviceTierPriority'), value: 'priority' },
-])
 const protocolSelection = computed({
-  get(): 'auto' | 'anthropic_messages' | 'responses' | 'chat' | 'realtime' {
-    if (form.value.protocol_mode === 'auto') return 'auto'
-    return form.value.native_api_override ?? 'responses'
-  },
+  get: () => endpointFormProtocol(form.value),
   set(
     value: 'auto' | 'anthropic_messages' | 'responses' | 'chat' | 'realtime',
   ) {
@@ -106,6 +99,11 @@ const protocolSelection = computed({
 })
 const hasVersionPath = computed(() =>
   /\/v1\/?$/.test(form.value.base_url.trim()),
+)
+const baseUrlHint = computed(() =>
+  hasVersionPath.value
+    ? `${props.t('baseUrlHint')} ${props.t('baseUrlVersionWarning')}`
+    : props.t('baseUrlHint'),
 )
 </script>
 
@@ -150,25 +148,12 @@ const hasVersionPath = computed(() =>
       value-key="value"
     />
   </div>
-  <div
+  <SettingsFieldRow
     v-if="isOpenAi"
-    class="grid gap-1 md:grid-cols-[9rem_minmax(0,1fr)] md:items-center"
+    :label="t('endpointPlan')"
+    :hint="planHint"
+    for-id="endpoint-plan"
   >
-    <div class="flex items-center gap-1">
-      <label class="text-xs text-muted" for="endpoint-plan">
-        {{ t('endpointPlan') }}
-      </label>
-      <UTooltip :text="t('endpointPlanHint')">
-        <UButton
-          type="button"
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          icon="i-lucide-info"
-          :aria-label="t('endpointPlanHint')"
-        />
-      </UTooltip>
-    </div>
     <USelect
       id="endpoint-plan"
       v-model="planSelection"
@@ -177,85 +162,35 @@ const hasVersionPath = computed(() =>
       label-key="label"
       value-key="value"
     />
-    <p
-      v-if="!form.has_oauth_token"
-      class="text-xs leading-snug text-warning md:col-start-2"
-    >
-      {{ planHint }}
-    </p>
-  </div>
-  <div v-if="isMinimax" class="grid gap-3 md:grid-cols-2">
-    <div class="grid gap-1 md:grid-cols-[8rem_minmax(0,1fr)] md:items-center">
-      <label class="flex items-center text-xs text-muted">
-        {{ t('providerRegion') }}
-      </label>
-      <USelect
-        v-model="providerRegionSelection"
-        class="w-full"
-        :items="[
-          { label: t('providerRegionCn'), value: 'cn' },
-          { label: t('providerRegionGlobal'), value: 'global' },
-        ]"
-        label-key="label"
-        value-key="value"
-      />
-    </div>
-    <div class="grid gap-1 md:grid-cols-[8rem_minmax(0,1fr)] md:items-center">
-      <div class="flex items-center gap-1">
-        <label class="text-xs text-muted" for="endpoint-service-tier">
-          {{ t('serviceTier') }}
-        </label>
-        <UTooltip :text="t('serviceTierHint')">
-          <UButton
-            type="button"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-info"
-            :aria-label="t('serviceTierHint')"
-          />
-        </UTooltip>
-      </div>
-      <USelect
-        id="endpoint-service-tier"
-        v-model="serviceTierSelection"
-        class="w-full"
-        :items="serviceTierOptions"
-        label-key="label"
-        value-key="value"
-      />
-    </div>
-  </div>
-  <div
-    v-if="isGeneric"
-    class="grid gap-1 md:grid-cols-[9rem_minmax(0,1fr)] md:items-center"
+  </SettingsFieldRow>
+  <SettingsFieldRow
+    v-if="isMinimax"
+    :label="t('providerRegion')"
+    for-id="endpoint-provider-region"
   >
-    <div class="flex items-center gap-1">
-      <label class="text-xs text-muted" for="endpoint-base-url">
-        {{ t('baseUrl') }}
-      </label>
-      <UTooltip :text="t('baseUrlHint')">
-        <UButton
-          type="button"
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          icon="i-lucide-info"
-          :aria-label="t('baseUrlHint')"
-        />
-      </UTooltip>
-    </div>
+    <USelect
+      id="endpoint-provider-region"
+      v-model="providerRegionSelection"
+      class="w-full"
+      :items="[
+        { label: t('providerRegionCn'), value: 'cn' },
+        { label: t('providerRegionGlobal'), value: 'global' },
+      ]"
+      label-key="label"
+      value-key="value"
+    />
+  </SettingsFieldRow>
+  <SettingsFieldRow
+    v-if="isGeneric"
+    :label="t('baseUrl')"
+    :hint="baseUrlHint"
+    for-id="endpoint-base-url"
+  >
     <UInput
       id="endpoint-base-url"
       v-model="form.base_url"
       class="w-full"
       :placeholder="t('baseUrl')"
     />
-    <p
-      v-if="hasVersionPath"
-      class="text-xs leading-snug text-warning md:col-start-2"
-    >
-      {{ t('baseUrlVersionWarning') }}
-    </p>
-  </div>
+  </SettingsFieldRow>
 </template>

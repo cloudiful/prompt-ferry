@@ -1,0 +1,37 @@
+# cargo-mutants scope for #569 Phase 2 (assertion strength of the redaction
+# chain). The run is manual-only: .forgejo/workflows/mutants.yml.
+#
+# Exactly six production files: the smallest surface that still covers the
+# #568 restore leak site (`stream_restore.rs`) and its helpers, the upstream
+# restore crate, and the redaction timing module. The two largest redaction
+# production files (`src/worker/runtime/ai/thinking_downgrade.rs` and
+# `crates/prompt-ferry-redact/src/lib.rs`) stay out of scope so one manual
+# batch stays bounded.
+#
+# These globs are only effective together with `--workspace`: this is a
+# root-package workspace, so without it cargo-mutants mutates just the root
+# `prompt-ferry` package and silently drops the
+# `crates/prompt-ferry-redact-upstream/src/lib.rs` entry below.
+examine_globs = [
+    "src/worker/runtime/ai/stream_restore.rs",
+    "src/worker/runtime/ai/stream_restore/sse.rs",
+    "src/worker/runtime/ai/stream_restore/pending.rs",
+    "src/worker/runtime/ai/upstream_restore.rs",
+    "crates/prompt-ferry-redact-upstream/src/lib.rs",
+    "src/redaction_timing.rs",
+]
+
+# Test targets are never mutation sites.
+exclude_globs = [
+    "**/tests/**",
+    "**/tests.rs",
+    "**/*_tests.rs",
+    "**/*-tests.rs",
+]
+
+# The suite shares one PostgreSQL database and a process-global redaction
+# config lock, so the run stays sequential (cargo-mutants default -j1) with
+# libtest single-threaded (RUST_TEST_THREADS=1 in the workflow). These bounds
+# keep a single mutated build/test from hanging the batch.
+timeout_multiplier = 3.0
+minimum_test_timeout = 120

@@ -1,0 +1,187 @@
+{
+  "benchmarks": {
+    "redaction_restore/full_ctx_100k/rules_all9_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 1551484.5
+    },
+    "redaction_restore/full_ctx_100k/rules_all9_secrets_50": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 1560387.8
+    },
+    "redaction_restore/full_ctx_100k/rules_domain_secrets_0": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 1766151.0
+    },
+    "redaction_restore/full_ctx_100k/rules_domain_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 1563357.0
+    },
+    "redaction_restore/full_ctx_100k/rules_domain_secrets_50": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 1551835.5
+    },
+    "redaction_restore/full_ctx_10k/rules_all9_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 154175.6
+    },
+    "redaction_restore/full_ctx_10k/rules_domain_secrets_0": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 170859.6
+    },
+    "redaction_restore/full_ctx_10k/rules_domain_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 153133.7
+    },
+    "redaction_restore/full_ctx_10k/rules_domain_secrets_50": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 154664.4
+    },
+    "redaction_restore/full_ctx_500k/rules_all9_secrets_0": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 8744642.0
+    },
+    "redaction_restore/full_ctx_500k/rules_all9_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 7842961.2
+    },
+    "redaction_restore/full_ctx_500k/rules_all9_secrets_50": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 7813435.9
+    },
+    "redaction_restore/full_ctx_500k/rules_domain_secrets_0": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 10254599.7
+    },
+    "redaction_restore/full_ctx_500k/rules_domain_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 7780645.4
+    },
+    "redaction_restore/full_ctx_500k/rules_domain_secrets_50": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 7729146.2
+    },
+    "redaction_restore/quick_ctx_100k/rules_all9_secrets_0": {
+      "gate": true,
+      "max_regression_factor": 2.5,
+      "median_ns": 1760511.3
+    },
+    "redaction_restore/quick_ctx_10k/rules_all9_secrets_0": {
+      "gate": true,
+      "max_regression_factor": 2.5,
+      "median_ns": 173002.5
+    },
+    "redaction_restore/quick_ctx_10k/rules_all9_secrets_50": {
+      "gate": true,
+      "max_regression_factor": 2.5,
+      "median_ns": 154723.3
+    },
+    "redaction_round/full_ctx_100k/rules_all9_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 32884740.4
+    },
+    "redaction_round/full_ctx_100k/rules_all9_secrets_50": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 15831376.2
+    },
+    "redaction_round/full_ctx_100k/rules_domain_secrets_0": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 13269829.6
+    },
+    "redaction_round/full_ctx_100k/rules_domain_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 32652735.7
+    },
+    "redaction_round/full_ctx_100k/rules_domain_secrets_50": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 15224332.9
+    },
+    "redaction_round/full_ctx_10k/rules_all9_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 2681306.8
+    },
+    "redaction_round/full_ctx_10k/rules_domain_secrets_0": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 1273612.1
+    },
+    "redaction_round/full_ctx_10k/rules_domain_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 2645976.4
+    },
+    "redaction_round/full_ctx_10k/rules_domain_secrets_50": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 1692359.5
+    },
+    "redaction_round/full_ctx_500k/rules_all9_secrets_0": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 70954775.8
+    },
+    "redaction_round/full_ctx_500k/rules_all9_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 162383893.0
+    },
+    "redaction_round/full_ctx_500k/rules_all9_secrets_50": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 77692795.9
+    },
+    "redaction_round/full_ctx_500k/rules_domain_secrets_0": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 67455446.3
+    },
+    "redaction_round/full_ctx_500k/rules_domain_secrets_200": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 160001533.2
+    },
+    "redaction_round/full_ctx_500k/rules_domain_secrets_50": {
+      "gate": false,
+      "max_regression_factor": 2.5,
+      "median_ns": 77021966.8
+    },
+    "redaction_round/quick_ctx_100k/rules_all9_secrets_0": {
+      "gate": true,
+      "max_regression_factor": 2.5,
+      "median_ns": 13500251.7
+    },
+    "redaction_round/quick_ctx_10k/rules_all9_secrets_0": {
+      "gate": true,
+      "max_regression_factor": 2.5,
+      "median_ns": 1305061.8
+    },
+    "redaction_round/quick_ctx_10k/rules_all9_secrets_50": {
+      "gate": true,
+      "max_regression_factor": 2.5,
+      "median_ns": 1716668.9
+    }
+  },
+  "generated_by": "scripts/ci/bench_compare.py --save",
+  "notes": "CI runs only the 'quick' subset with `cargo bench ... -- quick`; the full matrix is recorded for the growth curve but is never a hard gate.",
+  "version": 1
+}

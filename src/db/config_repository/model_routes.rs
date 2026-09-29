@@ -52,6 +52,9 @@ pub struct UnifiedModelRouteTarget {
     // `passthrough`; `self_summarize` enables ferry-side handoff
     // summarization for non-Responses targets.
     pub compact_mode: crate::db::CompactMode,
+    /// Issue #637: per-target free-form service-tier override surfaced in the
+    /// unified admin shape; `None`/blank means inherit the endpoint value.
+    pub service_tier: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,6 +119,8 @@ fn target_to_pg(target: UnifiedModelRouteTarget) -> PgModelRouteTarget {
         thinking_effort_override: target.thinking_effort_override,
         // Issue #502 Task 5: carry compact mode through unified shape.
         compact_mode: target.compact_mode,
+        // Issue #637: carry the free-form target override through.
+        service_tier: target.service_tier,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }

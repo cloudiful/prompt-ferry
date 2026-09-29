@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { normalizeProviderPlan } from '@/admin-mappers'
+import { useEndpointDialogValidation } from '@/composables/useEndpointDialogValidation'
 import type { User } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
+import EndpointAdminApiKeyFields from '@/components/endpoints/EndpointAdminApiKeyFields.vue'
 import EndpointApiKeysEditor from '@/components/endpoints/EndpointApiKeysEditor.vue'
 import EndpointOAuthSection from '@/components/endpoints/EndpointOAuthSection.vue'
+import EndpointOrganizationUsage from '@/components/endpoints/EndpointOrganizationUsage.vue'
 import EndpointProviderFields from '@/components/endpoints/EndpointProviderFields.vue'
+import ServiceTierOverrideField from '@/components/shared/ServiceTierOverrideField.vue'
 import ProxySettingsFields from '@/components/shared/ProxySettingsFields.vue'
 import ScheduleWindowsFields from '@/components/shared/ScheduleWindowsFields.vue'
+import SettingsFieldRow from '@/components/shared/SettingsFieldRow.vue'
+import {
+  endpointFormProtocol,
+  supportsServiceTierFor,
+} from '@/models/endpoints/service-tier'
 
 const props = defineProps<{
   busy: boolean
@@ -41,77 +50,27 @@ watch(visible, (open) => {
   if (!open) view.value = 'main'
 })
 
-// INLINE-proxy-ui-a1 BUG fix: guard legacy forms missing Phase C fields so
-// the dialog always renders instead of throwing on undefined access.
-const hasProxy = computed(() => {
-  const typed = (form.value?.proxy_url ?? '').trim() !== ''
-  const saved = form.value?.has_saved_proxy_url ?? false
-  return typed || saved
-})
+// Issue #589 P2c: proxy/schedule validation moved to a composable so this
+// dialog stays a thin shell; the outer save gates on the same rules.
+const { canSaveOuter, hasEndpointSettings: hasBaseEndpointSettings } =
+  useEndpointDialogValidation(form, props.t)
 
-// Issue #368 Phase C: proxy validity for the outer save. Empty means
-// direct/keep (valid); `scheme://` with an empty address is an unfinished
-// inline edit and must block the outer save.
-const isProxyValid = computed(() => {
-  const trimmed = (form.value?.proxy_url ?? '').trim()
-  if (!trimmed) return true
-  const match = trimmed.match(/^(http|https|socks5h|socks5):\/\/(.*)$/i)
-  if (match) return (match[2] ?? '').trim() !== ''
-  return true
-})
-
-// Issue #457: `end` may additionally be `24:00` (exclusive midnight);
-// `start` stays within `00:00-23:59`.
-const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
-const HHMM_END_RE = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/
-
-function endpointRowError(window: { start: string; end: string }): string {
-  const start = (window?.start ?? '').trim()
-  const end = (window?.end ?? '').trim()
-  if (!start || !end) return props.t('scheduleRequired')
-  if (!HHMM_RE.test(start) || !HHMM_END_RE.test(end))
-    return props.t('scheduleInvalid')
-  if (start === end) return props.t('scheduleEqual')
-  return ''
-}
-
-const isScheduleValid = computed(() =>
-  (form.value?.active_windows ?? []).every(
-    (window) => endpointRowError(window) === '',
-  ),
+// Issue #644: the free-form service-tier override is provider-agnostic and
+// lives in the settings subpage; Realtime uses WebSocket frames instead of the
+// common JSON request body, so it is the only protocol that stays hidden.
+const serviceTierEligible = computed(() =>
+  form.value ? supportsServiceTierFor(endpointFormProtocol(form.value)) : true,
 )
 
-const canSaveOuter = computed(() => isProxyValid.value && isScheduleValid.value)
-
-// Issue #392 Phase L: endpoint default schedule mirrors the target dialog.
-// Non-empty means restricted; empty means all-day.
-function endpointWindows(): Array<{ start: string; end: string }> {
-  return Array.isArray(form.value?.active_windows)
-    ? (form.value?.active_windows ?? [])
-    : []
-}
-
-function sortedEndpointWindows(): Array<{ start: string; end: string }> {
-  return [...endpointWindows()]
-    .map((window) => ({
-      start: (window?.start ?? '').trim(),
-      end: (window?.end ?? '').trim(),
-    }))
-    .filter((window) => window.start !== '' && window.end !== '')
-    .sort((a, b) =>
-      a.start === b.start
-        ? a.end.localeCompare(b.end)
-        : a.start.localeCompare(b.start),
-    )
-}
-
-function hasEndpointSchedule(): boolean {
-  return sortedEndpointWindows().length > 0
+// Issue #644: a configured tier lights the settings gear even when proxy and
+// schedule are untouched; the composable only covers proxy/schedule.
+function hasEndpointServiceTier(): boolean {
+  return (form.value?.service_tier ?? '').trim() !== ''
 }
 
 // Gear highlight when anything is non-default.
 function hasEndpointSettings(): boolean {
-  return hasProxy.value || hasEndpointSchedule()
+  return hasBaseEndpointSettings() || hasEndpointServiceTier()
 }
 
 // Issue #599 R2e.1: the subscription plan authenticates through the ChatGPT
@@ -168,6 +127,18 @@ function applyOAuthStatus(next: {
             v-model:form="form"
             :t="t"
           />
+          <div
+            v-if="form.provider === 'openai'"
+            class="grid gap-3 border-t border-default pt-3"
+          >
+            <EndpointAdminApiKeyFields v-model:form="form" :t="t" />
+            <EndpointOrganizationUsage
+              :endpoint-id="form.endpoint_id"
+              :provider="form.provider"
+              :has-admin-api-key="form.has_admin_api_key"
+              :t="t"
+            />
+          </div>
           <div
             v-if="form.provider === 'openai'"
             class="border-t border-default pt-3"
@@ -252,48 +223,29 @@ function applyOAuthStatus(next: {
               t('endpointSettings')
             }}</span>
           </div>
-          <div class="grid gap-2 rounded border border-default bg-muted p-3">
-            <div class="flex items-center gap-1">
-              <span class="text-xs font-medium text-default">{{
-                t('proxyUrl')
-              }}</span>
-              <UTooltip :text="t('proxyUrlHint')">
-                <UButton
-                  type="button"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-info"
-                  :aria-label="t('proxyUrlHint')"
-                />
-              </UTooltip>
-            </div>
-            <ProxySettingsFields
-              v-model:proxy-url="form.proxy_url"
-              v-model:has-saved="form.has_saved_proxy_url"
+          <div class="grid gap-3 rounded border border-default bg-muted p-3">
+            <SettingsFieldRow :label="t('proxyUrl')" :hint="t('proxyUrlHint')">
+              <ProxySettingsFields
+                v-model:proxy-url="form.proxy_url"
+                v-model:has-saved="form.has_saved_proxy_url"
+                :t="t"
+              />
+            </SettingsFieldRow>
+            <SettingsFieldRow
+              :label="t('scheduleWindows')"
+              :hint="t('scheduleWindowsHint')"
+            >
+              <ScheduleWindowsFields
+                v-model:windows="form.active_windows"
+                v-model:touched="form.active_windows_touched"
+                :t="t"
+              />
+            </SettingsFieldRow>
+            <ServiceTierOverrideField
+              v-if="serviceTierEligible"
+              v-model="form.service_tier"
               :t="t"
-            />
-          </div>
-          <div class="grid gap-2 rounded border border-default bg-muted p-3">
-            <div class="flex items-center gap-1">
-              <span class="text-xs font-medium text-default">{{
-                t('scheduleWindows')
-              }}</span>
-              <UTooltip :text="t('scheduleWindowsHint')">
-                <UButton
-                  type="button"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-info"
-                  :aria-label="t('scheduleWindowsHint')"
-                />
-              </UTooltip>
-            </div>
-            <ScheduleWindowsFields
-              v-model:windows="form.active_windows"
-              v-model:touched="form.active_windows_touched"
-              :t="t"
+              input-id="endpoint-service-tier"
             />
           </div>
         </template>

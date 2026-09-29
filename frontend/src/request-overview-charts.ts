@@ -1,7 +1,4 @@
-import type {
-  RequestRecordOverviewErrorRow,
-  RequestRecordOverviewTrendBucket,
-} from './generated/admin-api'
+import type { RequestRecordOverviewTrendBucket } from './generated/admin-api'
 import { getChartTheme } from './theme/chartTheme'
 
 type ChartLabels = {
@@ -166,59 +163,5 @@ export function createTrendOption(input: {
         : []),
     ],
     series,
-  }
-}
-
-export function createErrorOption(input: {
-  rows: RequestRecordOverviewErrorRow[]
-  formatCompact: (value?: number | null) => string
-  formatPercent: (value?: number | null) => string
-}) {
-  const theme = getChartTheme()
-  const rows = input.rows.slice(0, 10)
-  const formatAxisValue = (value: string | number): string => {
-    const numeric = typeof value === 'string' ? Number(value) : value
-    if (Number.isNaN(numeric)) return '-'
-    return input.formatCompact(numeric)
-  }
-  return {
-    backgroundColor: 'transparent',
-    grid: { left: 112, right: 24, top: 12, bottom: 20 },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      backgroundColor: theme.bg,
-      borderColor: theme.border,
-      textStyle: { color: theme.text },
-      formatter: (params: Array<{ dataIndex: number }>) => {
-        const row = rows[params[0]?.dataIndex ?? 0]
-        return row
-          ? `${row.label}<br/>${input.formatCompact(row.count)} / ${input.formatPercent(row.rate)}`
-          : ''
-      },
-    },
-    xAxis: {
-      type: 'value',
-      axisLabel: {
-        color: theme.muted,
-        fontSize: 10,
-        formatter: formatAxisValue,
-      },
-      splitLine: { lineStyle: { color: theme.grid, type: 'dashed' } },
-    },
-    yAxis: {
-      type: 'category',
-      data: rows.map((row) => row.label),
-      axisLabel: { color: theme.text, fontSize: 11 },
-      axisLine: { lineStyle: { color: theme.axis } },
-    },
-    series: [
-      {
-        type: 'bar',
-        data: rows.map((row) => row.count),
-        itemStyle: { color: theme.error, borderRadius: 3 },
-        barMaxWidth: 20,
-      },
-    ],
   }
 }

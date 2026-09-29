@@ -2,13 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import PageIntro from '../components/PageIntro.vue'
-import { useLocale } from '../composables/useLocale'
+import { setLocale, useLocale } from '../composables/useLocale'
 import SettingsGeneralTab from '../components/settings/SettingsGeneralTab.vue'
+import SettingsCacheAlertSection from '../components/settings/SettingsCacheAlertSection.vue'
 import SettingsNetworkTab from '../components/settings/SettingsNetworkTab.vue'
 import SettingsRequestsTab from '../components/settings/SettingsRequestsTab.vue'
 import SettingsReviewTab from '../components/settings/SettingsReviewTab.vue'
 import SettingsStorageTab from '../components/settings/SettingsStorageTab.vue'
-import { setLocale } from '../composables/useLocale'
 import { useNotifier } from '../composables/useNotifier'
 import { resolveSettingsTab } from '../models/settings'
 import { useSessionStore } from '../stores/session'
@@ -31,9 +31,7 @@ let usageRetentionSnapshot = ''
 let streamDeltaBatchingSnapshot = ''
 let modelRouteWhitelistSnapshot = ''
 
-function serialize(value: unknown): string {
-  return JSON.stringify(value)
-}
+const serialize = (value: unknown): string => JSON.stringify(value)
 
 function syncRequestSnapshots(): void {
   requestContentLoggingSnapshot = serialize(settingsStore.requestContentLogging)
@@ -290,6 +288,11 @@ onBeforeUnmount(() => {
 
     <SettingsStorageTab
       v-else-if="session.isAdmin && activeSection === 'storage'"
+      :t="t"
+    />
+
+    <SettingsCacheAlertSection
+      v-else-if="session.isAdmin && activeSection === 'cache-alert'"
       :t="t"
     />
   </div>

@@ -32,7 +32,9 @@ pub struct UnifiedProviderEndpoint {
     /// stored OAuth token (`EndpointPlan::resolve`). Never trusted blindly
     /// from the client.
     pub plan: EndpointPlan,
-    pub service_tier: crate::db::MinimaxServiceTier,
+    /// Issue #637: free-form service-tier override carried through the
+    /// unified admin shape; `None` means inherit (no override).
+    pub service_tier: Option<String>,
     pub base_url: String,
     pub native_api: NativeApi,
     pub native_api_source: String,
@@ -46,6 +48,10 @@ pub struct UnifiedProviderEndpoint {
     // a ChatGPT OAuth token is stored; the secrets themselves are never
     // echoed, mirroring `has_proxy_url`.
     pub has_oauth_token: bool,
+    // Issue #589: response-side saved-Admin-API-Key indicator. The secret is
+    // read through the dedicated repository query and never reaches this
+    // shape.
+    pub has_admin_api_key: bool,
     // Issue #392 Phase K: endpoint default windows (empty means all-day).
     pub active_windows: Vec<crate::db::ActiveWindow>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -181,7 +187,7 @@ impl super::ConfigRepository {
                             crate::db::EndpointRegion::Global
                         }
                     }),
-                    service_tier: endpoints_map::service_tier_from_sqlite(endpoint.service_tier),
+                    service_tier: endpoint.service_tier,
                     base_url: endpoint.base_url,
                     native_api: endpoint.native_api.as_str().to_string(),
                     native_api_source: endpoint.native_api_source.as_str().to_string(),
@@ -197,6 +203,9 @@ impl super::ConfigRepository {
                     // platform plan; subscription routing arrives in R2c.
                     plan: crate::db::EndpointPlan::default(),
                     has_oauth_token: false,
+                    // Issue #589: the internal MCP shape does not read the
+                    // Admin API key (usage-only secret, dedicated query).
+                    has_admin_api_key: false,
                     // Issue #392 Phase K: 0021 plaintext schedule for display.
                     active_windows: crate::db::parse_stored_windows(
                         endpoint.active_windows.as_deref(),
@@ -342,6 +351,38 @@ impl super::ConfigRepository {
         }
     }
 
+    /// Issue #589: store (`Some`) or clear (`None`, empty) the optional OpenAI
+    /// Admin API key for an endpoint. The provider gate lives in the admin
+    /// handler, so this stays a plain secret write; admin responses expose
+    /// only `has_admin_api_key`.
+    pub async fn set_endpoint_admin_api_key(
+        &self,
+        endpoint_id: Uuid,
+        admin_api_key: Option<&str>,
+    ) -> Result<()> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.set_endpoint_admin_api_key(endpoint_id, admin_api_key)
+                    .await
+            }
+            Self::Sqlite(repo) => {
+                repo.set_endpoint_admin_api_key(endpoint_id, admin_api_key)
+                    .await
+            }
+        }
+    }
+
+    /// Issue #589: decrypted Admin API key for the server-side PATCH carry and
+    /// the organization usage read. Crate-private on purpose: the return value
+    /// is a secret, so no admin response type may contain it. `None` means not
+    /// configured or cleared.
+    pub(crate) async fn endpoint_admin_api_key(&self, endpoint_id: Uuid) -> Result<Option<String>> {
+        match self {
+            Self::Postgres(repo) => repo.endpoint_admin_api_key(endpoint_id).await,
+            Self::Sqlite(repo) => repo.endpoint_admin_api_key(endpoint_id).await,
+        }
+    }
+
     pub async fn get_user_endpoint_setting(&self, user_id: i64) -> Result<Option<Uuid>> {
         match self {
             Self::Postgres(repo) => {
@@ -388,6 +429,9 @@ impl PostgresConfigRepository {
             .await?
             .into_iter()
             .collect::<HashSet<_>>();
+        // Issue #589: same one-query presence stamp for the saved Admin API
+        // key; the secret never leaves its column.
+        let admin_key_ids = self.endpoint_admin_key_ids().await?;
         Ok(UnifiedEndpointPage {
             total: page.total,
             endpoints: page
@@ -396,6 +440,7 @@ impl PostgresConfigRepository {
                 .map(|endpoint| {
                     let mut unified = endpoints_map::from_postgres(endpoint);
                     stamp_oauth_presence(&mut unified, &token_ids);
+                    unified.has_admin_api_key = admin_key_ids.contains(&unified.endpoint_id);
                     unified
                 })
                 .collect(),
@@ -417,6 +462,9 @@ impl PostgresConfigRepository {
         let present = self.get_endpoint_oauth_token(endpoint_id).await?.is_some();
         unified.has_oauth_token = present;
         unified.plan = EndpointPlan::resolve(unified.provider, present);
+        // Issue #589: reuse the secret read for presence; the value is
+        // dropped without logging.
+        unified.has_admin_api_key = self.endpoint_admin_api_key(endpoint_id).await?.is_some();
         Ok(Some(unified))
     }
 
@@ -516,6 +564,44 @@ impl PostgresConfigRepository {
         Ok(rows.into_iter().map(|row| row.endpoint_id).collect())
     }
 
+    /// Issue #589: write (or clear) the optional Admin API key column. Blank
+    /// values collapse to `NULL`, so a cleared key reads as absent.
+    async fn set_endpoint_admin_api_key(
+        &self,
+        endpoint_id: Uuid,
+        admin_api_key: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query_file!(
+            "src/sql/endpoints/set_endpoint_admin_api_key.sql",
+            endpoint_id,
+            normalize_admin_api_key(admin_api_key),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Issue #589: decrypted Admin API key for the server-side PATCH carry and
+    /// the organization usage read.
+    async fn endpoint_admin_api_key(&self, endpoint_id: Uuid) -> Result<Option<String>> {
+        let row = sqlx::query_file!(
+            "src/sql/endpoints/get_endpoint_admin_api_key.sql",
+            endpoint_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|row| normalize_admin_api_key(row.admin_api_key.as_deref())))
+    }
+
+    /// Issue #589: endpoints with a stored (non-blank) Admin API key. Drives
+    /// the admin `has_admin_api_key` indicator for a page in one query.
+    async fn endpoint_admin_key_ids(&self) -> Result<HashSet<Uuid>> {
+        let rows = sqlx::query_file!("src/sql/endpoints/list_endpoint_admin_key_ids.sql")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().map(|row| row.endpoint_id).collect())
+    }
+
     async fn endpoint_proxy_url(&self, endpoint_id: Uuid) -> Result<Option<String>> {
         let endpoint = crate::db::get_endpoint(&self.pool, endpoint_id).await?;
         Ok(endpoint.and_then(|e| e.proxy_url))
@@ -549,8 +635,18 @@ impl SqliteConfigRepository {
             .await?
             .into_iter()
             .collect::<HashSet<_>>();
+        // Issue #589: same one-query presence stamp for the saved Admin API
+        // key.
+        let admin_key_ids = self
+            .store
+            .list_endpoint_admin_key_ids()
+            .await
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+            .into_iter()
+            .collect::<HashSet<_>>();
         for endpoint in &mut unified {
             stamp_oauth_presence(endpoint, &token_ids);
+            endpoint.has_admin_api_key = admin_key_ids.contains(&endpoint.endpoint_id);
         }
         Ok(UnifiedEndpointPage {
             total,
@@ -573,6 +669,14 @@ impl SqliteConfigRepository {
         let present = self.get_endpoint_oauth_token(endpoint_id).await?.is_some();
         unified.has_oauth_token = present;
         unified.plan = EndpointPlan::resolve(unified.provider, present);
+        // Issue #589: reuse the 0035 envelope read for presence; the secret is
+        // never echoed.
+        unified.has_admin_api_key = self
+            .store
+            .endpoint_admin_api_key(&self.manager, endpoint_id)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+            .is_some();
         Ok(Some(unified))
     }
 
@@ -697,6 +801,24 @@ impl SqliteConfigRepository {
             .map_err(|err| anyhow::anyhow!("{err}"))
     }
 
+    async fn set_endpoint_admin_api_key(
+        &self,
+        endpoint_id: Uuid,
+        admin_api_key: Option<&str>,
+    ) -> Result<()> {
+        self.store
+            .set_endpoint_admin_api_key(&self.manager, endpoint_id, admin_api_key)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err}"))
+    }
+
+    async fn endpoint_admin_api_key(&self, endpoint_id: Uuid) -> Result<Option<String>> {
+        self.store
+            .endpoint_admin_api_key(&self.manager, endpoint_id)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err}"))
+    }
+
     async fn endpoint_proxy_url(&self, endpoint_id: Uuid) -> Result<Option<String>> {
         let endpoint = self
             .store
@@ -735,9 +857,29 @@ impl SqliteConfigRepository {
     }
 }
 
+/// Issue #589: trim an incoming Admin API key and collapse an empty/whitespace
+/// value to `None` (clear). Shared by the PostgreSQL read/write paths; the
+/// SQLite store applies the same normalization to the encrypted envelope.
+fn normalize_admin_api_key(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_admin_api_key_trims_and_treats_blank_as_absent() {
+        assert_eq!(normalize_admin_api_key(None), None);
+        assert_eq!(normalize_admin_api_key(Some("   ")), None);
+        assert_eq!(
+            normalize_admin_api_key(Some("  sk-admin  ")),
+            Some("sk-admin".to_string())
+        );
+    }
 
     #[test]
     fn pg_endpoint_round_trips_via_mapper() {
@@ -751,7 +893,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             provider_region: None,
             plan: crate::db::EndpointPlan::PlatformApiKey,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             base_url: "https://example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: "manual".to_string(),
@@ -760,6 +902,7 @@ mod tests {
             mcp_enabled: false,
             has_proxy_url: false,
             has_oauth_token: false,
+            has_admin_api_key: true,
             active_windows: vec![],
             created_at: now,
             updated_at: now,
@@ -768,5 +911,8 @@ mod tests {
         let pg: PgProviderEndpoint = unified.into();
         assert_eq!(pg.endpoint_id, endpoint_id);
         assert_eq!(pg.base_url, "https://example.test");
+        // Issue #589: the saved-Admin-API-Key indicator survives into the
+        // response shape; the secret itself never travels this path.
+        assert!(pg.has_admin_api_key);
     }
 }

@@ -3,6 +3,7 @@ import { authMessages } from './modules/auth'
 import { billingMessages } from './modules/billing'
 import { coreMessages } from './modules/core'
 import { endpointMessages } from './modules/endpoints'
+import { endpointOpenAiMessages } from './modules/endpoints.openai'
 import { mcpMessages } from './modules/mcp'
 import { relayMessages } from './modules/relays'
 import { redactionMessages } from './modules/redaction'
@@ -22,6 +23,7 @@ const modules = [
   authMessages,
   userMessages,
   endpointMessages,
+  endpointOpenAiMessages,
   mcpMessages,
   relayMessages,
   redactionMessages,

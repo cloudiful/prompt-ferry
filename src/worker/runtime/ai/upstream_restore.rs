@@ -114,67 +114,8 @@ fn restore_mcp_string(text: &str, context: &redactor::RestoreContext<'_>) -> Res
 }
 
 #[cfg(test)]
-mod tests {
-    use redactor::{FindingKind, InputKind, RedactionPolicy, RedactorBuilder, RestoreState};
-
-    use super::{restore_ai_response_json, restore_mcp_body_json};
-    use crate::redact_upstream::UpstreamRedactionSession;
-
-    fn session(original: &str) -> (UpstreamRedactionSession, String) {
-        let redactor = RedactorBuilder::new()
-            .with_redaction_policy(RedactionPolicy::default().with_kind(FindingKind::Domain, true))
-            .build();
-        let artifact = redactor
-            .redact_artifact_with_input_kind_source_and_prior_session(
-                original,
-                InputKind::Text,
-                None,
-                None,
-                Some("conversation"),
-            )
-            .expect("redact");
-        let token = artifact.session.issued_tokens[0].clone();
-        (
-            UpstreamRedactionSession::current(RestoreState::new(artifact.session).expect("state")),
-            token,
-        )
-    }
-
-    #[test]
-    fn restores_valid_tokens_and_preserves_invalid_ai_tokens() {
-        let (session, token) = session("a.example.com");
-        let text = format!(
-            "valid {token} malformed [[RDX:v2:...]] unknown [[RDX:v2:scope:unknown:001:deadbeef]]"
-        );
-        let body = serde_json::json!({
-            "output": [{"type": "output_text", "text": text}]
-        });
-
-        let restored = restore_ai_response_json(
-            "/v1/responses",
-            &serde_json::to_vec(&body).expect("encode"),
-            &session,
-        )
-        .expect("restore");
-        let restored: serde_json::Value = serde_json::from_slice(&restored).expect("decode");
-
-        assert_eq!(
-            restored["output"][0]["text"],
-            "valid a.example.com malformed [[RDX:v2:...]] unknown [[RDX:v2:scope:unknown:001:deadbeef]]"
-        );
-    }
-
-    #[test]
-    fn invalid_ai_json_still_fails() {
-        let (session, _) = session("a.example.com");
-        assert!(restore_ai_response_json("/v1/responses", br#"{"#, &session).is_err());
-    }
-
-    #[test]
-    fn mcp_restore_remains_strict_for_invalid_tokens() {
-        let (session, _) = session("a.example.com");
-        let body = br#"{"text":"[[RDX:v2:...]]"}"#;
-
-        assert!(restore_mcp_body_json(body, &session).is_err());
-    }
-}
+#[path = "upstream_restore_blocking_tests.rs"]
+mod blocking_tests;
+#[cfg(test)]
+#[path = "upstream_restore_diagnostics_tests.rs"]
+mod diagnostics_tests;

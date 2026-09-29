@@ -27,6 +27,18 @@ use crate::replay_responses_upstream_harness::{
 use crate::worker_database_url_harness::worker_database_url;
 use crate::worker_spawn_harness::spawn_worker;
 
+/// Assert the upstream status and surface the response body when it differs,
+/// so a non-200 from the worker is diagnosable from the failure alone.
+async fn assert_status_with_body(
+    response: reqwest::Response,
+    expected: StatusCode,
+) -> anyhow::Result<()> {
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    assert_eq!(status, expected, "unexpected response body: {body}");
+    Ok(())
+}
+
 async fn wait_for_assistant_artifact(schema: &TestSchema) -> anyhow::Result<(bool, bool)> {
     for _ in 0..100 {
         if let Some(row) = sqlx::query_as::<_, (bool, bool)>(
@@ -92,6 +104,7 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
     let response = client
         .post(format!("http://{relay_addr}/v1/responses"))
         .bearer_auth("client-token")
+        .header("X-Session-Id", "nul-bytes-session")
         .json(&serde_json::json!({
             "model": "gpt-test",
             "input": [{
@@ -102,7 +115,7 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
         }))
         .send()
         .await?;
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_status_with_body(response, StatusCode::OK).await?;
 
     let requests = upstream_log.bodies.lock().await;
     assert_eq!(
@@ -111,15 +124,15 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
     );
     drop(requests);
 
-    let row = sqlx::query_as::<_, (bool, i32, Option<String>)>(
+    // Raw bodies live in the configured object store, not in PostgreSQL
+    // (`0066` dropped the body columns), so the sanitized-text invariant is
+    // asserted through `usage_prompt_blocks` below; here only the record-level
+    // sanitization flags remain.
+    let row = sqlx::query_as::<_, (bool, i32)>(
         r#"
         SELECT rr.storage_sanitized,
-               rr.storage_sanitized_nul_count,
-               raw.request_raw_json #>> '{input,0,content}'
+               rr.storage_sanitized_nul_count
         FROM request_records rr
-        JOIN request_record_raw_payloads raw
-          ON raw.event_id = rr.event_id
-          AND raw.created_at = rr.created_at
         WHERE rr.event_kind = 'request'
         ORDER BY rr.created_at DESC
         LIMIT 1
@@ -129,7 +142,6 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
     .await?;
     assert!(row.0);
     assert!(row.1 > 0);
-    assert_eq!(row.2.as_deref(), Some("beforeafter"));
 
     let prompt_block = sqlx::query_as::<_, (String, String)>(
         r#"
@@ -206,6 +218,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -216,6 +229,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
     let turn1 = client
         .post(format!("http://{relay_addr}/v1/chat/completions"))
         .bearer_auth("client-token")
+        .header("X-Session-Id", "opencode-go-history")
         .json(&serde_json::json!({
             "model": "deepseek-v4-flash",
             "messages": [{"role":"user","content":"need weather"}],
@@ -223,12 +237,13 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
         }))
         .send()
         .await?;
-    assert_eq!(turn1.status(), StatusCode::OK);
+    assert_status_with_body(turn1, StatusCode::OK).await?;
     assert_eq!(wait_for_assistant_artifact(&schema).await?, (true, true));
 
     let turn2 = client
         .post(format!("http://{relay_addr}/v1/chat/completions"))
         .bearer_auth("client-token")
+        .header("X-Session-Id", "opencode-go-history")
         .json(&serde_json::json!({
             "model": "deepseek-v4-flash",
             "messages": [
@@ -240,7 +255,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
         }))
         .send()
         .await?;
-    assert_eq!(turn2.status(), StatusCode::OK);
+    assert_status_with_body(turn2, StatusCode::OK).await?;
 
     let requests = upstream_log.bodies.lock().await;
     assert_eq!(requests.len(), 2);
@@ -348,6 +363,7 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
                     thinking_effort_override: None,
                     compact_mode: db::CompactMode::Passthrough,
                     thinking_downgrade_enabled: false,
+                    service_tier: None,
                 },
                 db::ModelRouteTargetCreate {
                     endpoint_id: right_code.endpoint_id,
@@ -360,6 +376,7 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
                     thinking_effort_override: None,
                     compact_mode: db::CompactMode::Passthrough,
                     thinking_downgrade_enabled: false,
+                    service_tier: None,
                 },
             ],
         },
@@ -478,6 +495,7 @@ async fn raw_passthrough_keeps_previous_response_id_without_replay_state() -> an
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -577,6 +595,7 @@ async fn raw_passthrough_keeps_conversation_without_replay_state() -> anyhow::Re
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -672,6 +691,7 @@ async fn rejects_stateful_responses_routed_to_chat_native_target() -> anyhow::Re
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -770,6 +790,7 @@ async fn rejects_responses_routed_to_anthropic_native_target() -> anyhow::Result
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )

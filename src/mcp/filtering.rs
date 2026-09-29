@@ -46,17 +46,16 @@ pub(super) async fn call_server_filtered(
     // lists are composed by `aggregate::aggregate`.
     if method == "resources/list" {
         filter_result_items(&mut response, server, "resources", "uri");
-    } else if method == "resources/templates/list" {
-        if let Some(items) = response
+    } else if method == "resources/templates/list"
+        && let Some(items) = response
             .pointer_mut("/result/resourceTemplates")
             .and_then(Value::as_array_mut)
-        {
-            items.retain(|item| {
-                item.get("uriTemplate")
-                    .and_then(Value::as_str)
-                    .is_none_or(|uri| !is_disabled_item(server, "resources", uri))
-            });
-        }
+    {
+        items.retain(|item| {
+            item.get("uriTemplate")
+                .and_then(Value::as_str)
+                .is_none_or(|uri| !is_disabled_item(server, "resources", uri))
+        });
     }
     Ok(response)
 }

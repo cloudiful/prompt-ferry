@@ -9,7 +9,6 @@ import type {
   SessionRouteOptionsResponse,
   EndpointProvider,
   EndpointRegion,
-  MinimaxServiceTier,
   UsageClearScope,
 } from './generated/admin-api'
 
@@ -27,7 +26,10 @@ export type EndpointForm = {
   name: string
   provider: EndpointProvider
   provider_region: EndpointRegion | null
-  service_tier: MinimaxServiceTier
+  // Issue #637: free-form service-tier override. null/blank means inherit
+  // (no override); a non-empty value is sent trimmed and wins over the
+  // provider/caller default.
+  service_tier: string | null
   base_url: string
   api_keys: EndpointApiKeyForm[]
   key_lb_enabled: boolean
@@ -51,6 +53,15 @@ export type EndpointForm = {
   // `active_windows_touched` tracks omit-when-untouched like targets.
   active_windows: Array<{ start: string; end: string; days?: number[] }>
   active_windows_touched: boolean
+  // Issue #589 P2c: optional OpenAI Admin API Key, independent from the
+  // inference API keys and only meaningful for the OpenAI provider.
+  // `admin_api_key` holds the newly typed value (empty means untouched and is
+  // never prefilled from the response); `has_admin_api_key` mirrors the
+  // response indicator; `admin_api_key_clear` requests an explicit clear on
+  // save. The secret itself is never echoed back to the client.
+  admin_api_key: string
+  has_admin_api_key: boolean
+  admin_api_key_clear: boolean
 }
 
 export type EndpointApiKeyForm = {
@@ -87,6 +98,12 @@ export type ModelRouteTargetForm = {
   // none/minimal/low/medium/high/xhigh/max and force-replaces the caller
   // value. Always sent as string|null (no omit).
   thinking_effort_override: string | null
+  // Issue #637: per-target free-form service-tier override. null/blank
+  // means inherit (endpoint value, else caller/provider default).
+  // Optional for legacy forms (same precedent as `native_api?`); the
+  // mapper normalizes missing values to inherit. Carried invisibly until
+  // the P4 control lands; always sent as string|null (no omit).
+  service_tier?: string | null
   // Issue #502 Task 5: per-target compact mode. 'passthrough' (default)
   // keeps native passthrough; 'self_summarize' enables ferry-side handoff
   // summarization for non-Responses targets; 'off' rejects compact.

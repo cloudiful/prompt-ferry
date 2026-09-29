@@ -453,7 +453,7 @@ mod tests {
             None,
         );
 
-        services.record_usage_event(log).await;
+        Box::pin(services.record_usage_event(log)).await;
         assert_eq!(standalone.recent_usage().len(), 1);
 
         let no_state = RuntimeServices::new(
@@ -463,16 +463,15 @@ mod tests {
             WorkerRuntimeState::default(),
             ResponseLimits::default(),
         );
-        no_state
-            .record_usage_event(UsageLog::ai_request(
-                uuid::Uuid::new_v4(),
-                UsageRequestMetadata {
-                    path: "/v1/models".to_string(),
-                    ..UsageRequestMetadata::default()
-                },
-                None,
-            ))
-            .await;
+        Box::pin(no_state.record_usage_event(UsageLog::ai_request(
+            uuid::Uuid::new_v4(),
+            UsageRequestMetadata {
+                path: "/v1/models".to_string(),
+                ..UsageRequestMetadata::default()
+            },
+            None,
+        )))
+        .await;
         assert_eq!(standalone.recent_usage().len(), 1);
         let _ = std::fs::remove_file(path);
     }

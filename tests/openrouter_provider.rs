@@ -20,7 +20,7 @@ use uuid::Uuid;
 fn provider_wire_values_match_minimax_convention() {
     assert_eq!(EndpointProvider::OpenRouter.as_str(), "openrouter");
     assert_eq!(
-        EndpointProvider::from_str("openrouter"),
+        EndpointProvider::from_str_or_default("openrouter"),
         EndpointProvider::OpenRouter
     );
     assert_eq!(
@@ -41,7 +41,7 @@ fn provider_wire_values_match_minimax_convention() {
     assert_eq!(deserialized, EndpointProvider::OpenRouter);
     // Unknown providers keep the legacy generic fallback.
     assert_eq!(
-        EndpointProvider::from_str("legacy-unknown"),
+        EndpointProvider::from_str_or_default("legacy-unknown"),
         EndpointProvider::Generic
     );
     assert_eq!(
@@ -115,11 +115,11 @@ fn key_usage_serde_omits_absent_openrouter_sections() {
         }
     }
     // A key carrying no OpenRouter sections must not serialize them.
-    let absent = serde_json::to_value(&key(None, None)).expect("serialize key");
+    let absent = serde_json::to_value(key(None, None)).expect("serialize key");
     assert!(absent.get("openrouter_balance").is_none());
     assert!(absent.get("openrouter_spend").is_none());
     // A key with balance + spend serializes each under its field.
-    let present = serde_json::to_value(&key(
+    let present = serde_json::to_value(key(
         Some(openrouter_balance(Some(100.0), Some(74.5))),
         Some(openrouter_spend()),
     ))

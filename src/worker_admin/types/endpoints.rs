@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     config::NativeApi,
-    db::{self, EndpointPlan, EndpointProvider, EndpointRegion, MinimaxServiceTier},
+    db::{self, EndpointPlan, EndpointProvider, EndpointRegion},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
@@ -33,10 +33,20 @@ pub struct EndpointRequest {
     /// the R2b OAuth login flow and is rejected until it lands.
     #[serde(default)]
     pub plan: Option<EndpointPlan>,
+    /// Issue #637: free-form service-tier override. `None`/blank inherits
+    /// (no override); a model-route target override wins over this value.
     #[serde(default)]
-    pub service_tier: MinimaxServiceTier,
+    pub service_tier: Option<String>,
     pub base_url: String,
     pub api_key: String,
+    /// Issue #589: optional OpenAI Admin API key, accepted only for the
+    /// OpenAI provider. `None` (omitted) keeps the stored value on PATCH
+    /// (`None` on create means unset); `Some("")`/whitespace clears it;
+    /// `Some(key)` replaces it. A non-OpenAI provider rejects a non-empty
+    /// value and always clears any stored key. Server-side only: responses
+    /// expose just `has_admin_api_key`.
+    #[serde(default)]
+    pub admin_api_key: Option<String>,
     #[serde(default)]
     pub api_keys: Vec<EndpointApiKeyRequest>,
     #[serde(default)]

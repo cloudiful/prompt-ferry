@@ -52,11 +52,6 @@ const activeSection = computed<EndpointsSection>(() => {
   return 'upstreams'
 })
 
-const pageTitle = computed(() => {
-  if (activeSection.value === 'routes') return t('modelRoute')
-  return t('endpoint')
-})
-
 const showNewEndpointButton = computed(
   () => activeSection.value === 'upstreams',
 )
@@ -65,7 +60,7 @@ const showNewModelRouteButton = computed(() => activeSection.value === 'routes')
 
 <template>
   <div class="grid min-w-0 max-w-full gap-3">
-    <PageIntro :title="pageTitle">
+    <PageIntro>
       <template #actions>
         <UButton
           v-if="showNewEndpointButton"

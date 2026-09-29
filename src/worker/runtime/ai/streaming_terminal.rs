@@ -62,8 +62,8 @@ pub(super) async fn finish_failure(
     let upstream_error_body = upstream_error_body
         .map(|body| maybe_redact_text(body, context.logging.redact_content, request_ctx.user_id))
         .filter(|body| !body.trim().is_empty());
-    services
-        .record_usage_event(
+    Box::pin(
+        services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
                 .with_upstream_redaction(
                     context.upstream_restore_session.is_some(),
@@ -95,8 +95,9 @@ pub(super) async fn finish_failure(
                     Some(message.to_string()),
                     upstream_error_body,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
 
     if terminal.is_some() {
         services

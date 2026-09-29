@@ -33,6 +33,16 @@ pub(super) fn to_chat_request_with_prefix(
             chat.insert(field.to_string(), value.clone());
         }
     }
+    // Issue #637: a null/empty/whitespace caller tier means inherit — omit
+    // it instead of forwarding an absent-intent value upstream. Meaningful
+    // values are preserved verbatim for the provider transform.
+    if let Some(value) = request
+        .object
+        .get("service_tier")
+        .filter(|value| has_meaningful_value(value))
+    {
+        chat.insert("service_tier".to_string(), value.clone());
+    }
     if let Some(value) = request.object.get("max_output_tokens") {
         chat.insert("max_tokens".to_string(), value.clone());
     }

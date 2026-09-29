@@ -55,7 +55,8 @@ struct ModelRouteCandidateRow {
     native_api: String,
     target_native_api: Option<String>,
     provider: String,
-    service_tier: Option<String>,
+    endpoint_service_tier: Option<String>,
+    target_service_tier: Option<String>,
     position: i32,
     target_enabled: bool,
     upstream_model: Option<String>,
@@ -85,6 +86,7 @@ struct ModelRouteTargetRow {
     thinking_downgrade_enabled: bool,
     thinking_effort_override: Option<String>,
     compact_mode: Option<String>,
+    service_tier: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }

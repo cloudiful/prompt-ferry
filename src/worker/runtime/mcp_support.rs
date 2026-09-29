@@ -48,9 +48,8 @@ pub(super) async fn record_mcp_request_event(
                 .filter(|text| !text.trim().is_empty())
         })
         .flatten();
-    context
-        .services
-        .record_usage_event(
+    Box::pin(
+        context.services.record_usage_event(
             context
                 .request_ctx
                 .mcp_usage_log(
@@ -98,6 +97,7 @@ pub(super) async fn record_mcp_request_event(
                     (!error_message.is_empty()).then_some(error_message),
                     upstream_error_body,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
 }

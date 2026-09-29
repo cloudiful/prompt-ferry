@@ -477,21 +477,9 @@ fn codex_thread_key(metadata: &CodexRequestMetadata) -> Option<&str> {
 }
 
 pub(super) fn session_header_id(headers: &[(String, String)]) -> Option<String> {
-    [
-        "x-session-id",
-        "x-session-affinity",
-        "x-opencode-session",
-        "session-id",
-    ]
-    .into_iter()
-    .find_map(|expected_name| {
-        headers
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(expected_name))
-            .map(|(_, value)| value.trim())
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })
+    // Issue #633: canonical alias rules live in `session_affinity` so
+    // conversation grouping and Codex OAuth egress resolve identically.
+    crate::session_affinity::resolve_session_affinity(headers)
 }
 
 /// Issue #579 Task 2: the parent-session header an OpenCode child session sends

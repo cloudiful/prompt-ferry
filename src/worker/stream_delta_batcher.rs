@@ -134,10 +134,10 @@ impl StreamDeltaBatcher {
         let Some(mut pending) = self.pending.take() else {
             return Ok(Vec::new());
         };
-        if let Some(seq) = pending.last_sequence_number {
-            if let Some(obj) = pending.payload.as_object_mut() {
-                obj.insert("sequence_number".to_string(), serde_json::json!(seq));
-            }
+        if let Some(seq) = pending.last_sequence_number
+            && let Some(obj) = pending.payload.as_object_mut()
+        {
+            obj.insert("sequence_number".to_string(), serde_json::json!(seq));
         }
         Ok(vec![
             sse_event(&pending.payload).map_err(|err| anyhow::anyhow!(err.message))?,

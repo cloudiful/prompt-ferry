@@ -49,7 +49,7 @@ fn sample_config() -> StandaloneConfig {
             name: "upstream".to_string(),
             provider: EndpointProvider::Generic,
             provider_region: Some(EndpointRegion::Global),
-            service_tier: crate::standalone_config::MinimaxServiceTier::Standard,
+            service_tier: None,
             base_url: "https://api.example.test".to_string(),
             native_api: NativeApi::Responses,
             native_api_source: NativeApiSource::Manual,
@@ -92,6 +92,7 @@ fn sample_config() -> StandaloneConfig {
                 thinking_effort_override: None,
                 compact_mode: "passthrough".to_string(),
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         }],
         client_keys: vec![ClientKeyConfig {
@@ -520,6 +521,188 @@ fn endpoint_oauth_token_debug_redacts_both_secrets() {
 }
 
 #[tokio::test]
+async fn endpoint_admin_api_key_round_trips_through_envelope() {
+    // Issue #589: set/get/presence/clear over the 0035 envelope table, plus
+    // the encrypted-at-rest guarantee for the Admin API key.
+    let (store, path) = open_store().await;
+    let manager = manager(13);
+    let endpoint = concurrent_endpoint(1);
+    store
+        .save_endpoint(&manager, &endpoint)
+        .await
+        .expect("save endpoint");
+    let endpoint_id = endpoint.endpoint_id;
+
+    assert!(
+        store
+            .endpoint_admin_api_key(&manager, endpoint_id)
+            .await
+            .expect("get absent")
+            .is_none()
+    );
+    assert!(
+        store
+            .list_endpoint_admin_key_ids()
+            .await
+            .expect("ids absent")
+            .is_empty()
+    );
+
+    // Stored encrypted; surrounding whitespace is trimmed.
+    store
+        .set_endpoint_admin_api_key(&manager, endpoint_id, Some("  sk-admin-1  "))
+        .await
+        .expect("set admin key");
+    assert_eq!(
+        store
+            .endpoint_admin_api_key(&manager, endpoint_id)
+            .await
+            .expect("get admin key"),
+        Some("sk-admin-1".to_string())
+    );
+    assert_eq!(
+        store
+            .list_endpoint_admin_key_ids()
+            .await
+            .expect("ids present"),
+        vec![endpoint_id]
+    );
+    let row = sqlx::query(
+        "SELECT admin_api_key_ciphertext FROM standalone_endpoint_admin_keys WHERE endpoint_id = ?",
+    )
+    .bind(endpoint_id.to_string())
+    .fetch_one(store.pool())
+    .await
+    .expect("admin key row");
+    let blob = row
+        .try_get::<Vec<u8>, _>("admin_api_key_ciphertext")
+        .expect("ciphertext blob");
+    assert!(
+        !String::from_utf8_lossy(&blob).contains("sk-admin-1"),
+        "the Admin API key must be encrypted at rest"
+    );
+
+    // A new value replaces the stored one.
+    store
+        .set_endpoint_admin_api_key(&manager, endpoint_id, Some("sk-admin-2"))
+        .await
+        .expect("replace admin key");
+    assert_eq!(
+        store
+            .endpoint_admin_api_key(&manager, endpoint_id)
+            .await
+            .expect("get replaced admin key"),
+        Some("sk-admin-2".to_string())
+    );
+
+    // Empty/whitespace clears to absent; the inference key still opens.
+    store
+        .set_endpoint_admin_api_key(&manager, endpoint_id, Some("   "))
+        .await
+        .expect("clear admin key");
+    assert!(
+        store
+            .endpoint_admin_api_key(&manager, endpoint_id)
+            .await
+            .expect("get cleared admin key")
+            .is_none()
+    );
+    assert!(
+        store
+            .list_endpoint_admin_key_ids()
+            .await
+            .expect("ids cleared")
+            .is_empty()
+    );
+    let persisted = store
+        .get_endpoint(&manager, endpoint_id)
+        .await
+        .expect("read endpoint")
+        .expect("endpoint present");
+    assert_eq!(persisted.api_key, endpoint.api_key);
+
+    // `ON DELETE CASCADE` keeps no orphaned secret behind.
+    store
+        .set_endpoint_admin_api_key(&manager, endpoint_id, Some("sk-admin-3"))
+        .await
+        .expect("set before delete");
+    assert!(store.delete_endpoint(endpoint_id).await.expect("delete"));
+    let remaining: i64 =
+        sqlx::query("SELECT COUNT(*) FROM standalone_endpoint_admin_keys WHERE endpoint_id = ?")
+            .bind(endpoint_id.to_string())
+            .fetch_one(store.pool())
+            .await
+            .expect("count after delete")
+            .try_get(0)
+            .expect("count value");
+    assert_eq!(remaining, 0, "the key row must cascade with its endpoint");
+
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
+async fn endpoint_repository_reports_saved_admin_api_key_presence() {
+    // Issue #589: admin responses expose only the saved indicator, on both
+    // the single-endpoint and the page shape, and clearing flips it back.
+    let (store, path) = open_store().await;
+    let store = Arc::new(store);
+    let manager = manager(14);
+    let repo = crate::db::ConfigRepository::sqlite(store.clone(), manager.clone());
+    let endpoint_id = Uuid::new_v4();
+    repo.create_endpoint(
+        endpoint_id,
+        oauth_token_endpoint_input(crate::db::EndpointProvider::OpenAi),
+        false,
+    )
+    .await
+    .expect("create endpoint");
+
+    let absent = repo
+        .get_endpoint(endpoint_id)
+        .await
+        .expect("get endpoint")
+        .expect("endpoint present");
+    assert!(!absent.has_admin_api_key);
+
+    repo.set_endpoint_admin_api_key(endpoint_id, Some("sk-admin-presence"))
+        .await
+        .expect("set admin key");
+    assert!(
+        repo.get_endpoint(endpoint_id)
+            .await
+            .expect("get endpoint")
+            .expect("endpoint present")
+            .has_admin_api_key
+    );
+    let page = repo
+        .list_endpoints_page(0, 10)
+        .await
+        .expect("list endpoints");
+    assert!(
+        page.endpoints
+            .iter()
+            .any(|endpoint| endpoint.endpoint_id == endpoint_id && endpoint.has_admin_api_key),
+        "the page shape must carry the saved indicator"
+    );
+
+    repo.set_endpoint_admin_api_key(endpoint_id, None)
+        .await
+        .expect("clear admin key");
+    assert!(
+        !repo
+            .get_endpoint(endpoint_id)
+            .await
+            .expect("get endpoint")
+            .expect("endpoint present")
+            .has_admin_api_key
+    );
+
+    drop(repo);
+    let store = Arc::try_unwrap(store).expect("sole store owner after the repository is dropped");
+    cleanup(store, path).await;
+}
+
+#[tokio::test]
 async fn restart_persists_configuration_and_wrong_key_is_rejected() {
     let (store, path) = open_store().await;
     let expected = sample_config();
@@ -933,7 +1116,7 @@ async fn legacy_schema_migrates_users_and_keeps_encrypted_client_keys() {
     .expect("schema version")
     .try_get::<i64, _>("schema_version")
     .expect("version value");
-    assert_eq!(version, 33);
+    assert_eq!(version, 35);
 
     let snapshot = store
         .load_snapshot(&manager)
@@ -1025,7 +1208,7 @@ fn sample_usage_record(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty_three() {
+async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty_five() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -1033,7 +1216,7 @@ async fn fresh_migration_creates_empty_usage_ledger_at_schema_version_thirty_thr
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 33);
+    assert_eq!(version, 35);
     assert!(
         store
             .list_usage_summaries(64)
@@ -1928,7 +2111,7 @@ fn sample_snapshot(
 }
 
 #[tokio::test]
-async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty_three() {
+async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty_five() {
     let (store, path) = open_store().await;
     let version = standalone_query!("src/sql/standalone/schema_version.sql")
         .fetch_one(store.pool())
@@ -1936,7 +2119,7 @@ async fn fresh_migration_creates_replay_snapshot_table_at_schema_version_thirty_
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 33);
+    assert_eq!(version, 35);
     let pool = store.pool().clone();
     for (column, declared_type) in [
         ("conversation_id", "TEXT"),
@@ -2059,7 +2242,7 @@ async fn upgrade_from_schema_eight_creates_request_lease_table() {
         .expect("schema version")
         .try_get::<i64, _>("schema_version")
         .expect("version value");
-    assert_eq!(version, 33);
+    assert_eq!(version, 35);
 
     // Confirm migration 0008 took effect before the new lease table
     // arrived so the test really exercises the schema-8 -> schema-9

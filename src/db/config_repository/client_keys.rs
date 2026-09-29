@@ -359,10 +359,10 @@ impl SqliteConfigRepository {
             .await
             .map_err(|err| anyhow::anyhow!("{err}"))?;
         let index = usize::try_from(legacy_key_id).ok();
-        if let Some(index) = index {
-            if index < keys.len() {
-                return Ok(Some(keys[index].key_id));
-            }
+        if let Some(index) = index
+            && index < keys.len()
+        {
+            return Ok(Some(keys[index].key_id));
         }
         if total == 1 && legacy_key_id == 0 {
             return Ok(keys.first().map(|k| k.key_id));

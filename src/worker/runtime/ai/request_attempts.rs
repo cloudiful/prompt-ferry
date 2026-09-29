@@ -384,7 +384,7 @@ pub(super) async fn forward_route_request(
                             return Ok(ForwardOutcome::CompatError(CompatError::new(
                                 reqwest::StatusCode::UNAUTHORIZED,
                                 "chatgpt_login_invalid",
-                                &format!(
+                                format!(
                                     "ChatGPT subscription login is no longer valid; complete the OAuth login again ({message})"
                                 ),
                             )));
@@ -485,12 +485,12 @@ pub(super) async fn forward_route_request(
                             attempt += 1;
                             continue;
                         }
-                        respond_upstream_error(
+                        Box::pin(respond_upstream_error(
                             &response_ctx,
                             signal.status,
                             signal.body,
                             signal.response_headers,
-                        )
+                        ))
                         .await?;
                         return Ok(ForwardOutcome::Handled);
                     }
@@ -611,8 +611,8 @@ async fn handle_self_summarize_compact(
         .raw_content_logging_enabled
         .then(|| String::from_utf8_lossy(&body).to_string())
         .filter(|text| !text.trim().is_empty());
-    services
-        .record_usage_event(
+    Box::pin(
+        services.record_usage_event(
             ai_route_usage_log(request_ctx, request, &route_ctx)
                 .with_upstream_redaction(
                     prepared.upstream_restore_session.is_some(),
@@ -634,8 +634,9 @@ async fn handle_self_summarize_compact(
                     response_prompt,
                     response_raw_body,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
     Ok(ForwardOutcome::Handled)
 }
 
@@ -999,7 +1000,7 @@ async fn resolve_chatgpt_auth(
         Err(chatgpt_backend::ChatgptBackendError::InvalidGrant(message)) => Err(CompatError::new(
             reqwest::StatusCode::UNAUTHORIZED,
             "chatgpt_login_invalid",
-            &format!(
+            format!(
                 "ChatGPT subscription login is no longer valid; complete the OAuth login again ({message})"
             ),
         )),

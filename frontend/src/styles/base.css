@@ -50,28 +50,6 @@ select {
   text-overflow: ellipsis;
 }
 
-/* Dashboard chrome: toolbar controls share one explicit height */
-#dashboard-navbar-actions {
-  --dashboard-toolbar-height: 2rem;
-}
-
-#dashboard-navbar-actions > div {
-  align-items: center;
-}
-
-#dashboard-navbar-actions
-  :where(button, [role='combobox'], [data-slot='base']) {
-  height: var(--dashboard-toolbar-height);
-  min-height: var(--dashboard-toolbar-height);
-  box-sizing: border-box;
-}
-
-/* Ensure neutral/outline/solid/ghost toolbar buttons keep same height */
-#dashboard-navbar-actions button {
-  height: var(--dashboard-toolbar-height);
-  min-height: var(--dashboard-toolbar-height);
-}
-
 /* Desktop collapse fully hides sidebar rail while preserving mobile slideover */
 @media (min-width: 1024px) {
   [data-slot='root'][data-collapsed='true'] {

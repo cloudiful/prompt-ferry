@@ -1,3 +1,4 @@
+use super::super::openai_org_usage;
 use super::*;
 
 pub(super) async fn token_plan_usage(
@@ -238,6 +239,77 @@ fn chatgpt_quota_window(window: &chatgpt_backend::ChatgptQuotaWindow) -> TokenPl
     }
 }
 
+/// Issue #589 P2b: OpenAI Platform organization usage and spend. Reads the
+/// official `usage/completions` and `costs` endpoints with the endpoint's
+/// dedicated Admin API key and returns UTC month-to-date token and USD totals.
+/// Display-only: it never feeds routing weights or quota.
+pub(super) async fn organization_usage(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Path(endpoint_id): Path<Uuid>,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response.into_response();
+    }
+    let endpoint = match state.config_repository.get_endpoint(endpoint_id).await {
+        Ok(Some(endpoint)) => endpoint,
+        Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
+        Err(err) => return internal(&state, err),
+    };
+    if endpoint.provider != db::EndpointProvider::OpenAi {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "unsupported_provider",
+            "organization usage is only available for OpenAI endpoints",
+        );
+    }
+    let admin_api_key = match state
+        .config_repository
+        .endpoint_admin_api_key(endpoint_id)
+        .await
+    {
+        Ok(Some(key)) => key,
+        Ok(None) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "missing_admin_api_key",
+                "configure an OpenAI Admin API key for this endpoint to read organization usage",
+            );
+        }
+        Err(err) => return internal(&state, err),
+    };
+    let proxy_url = match state
+        .config_repository
+        .endpoint_proxy_url(endpoint_id)
+        .await
+    {
+        Ok(proxy_url) => proxy_url,
+        Err(err) => return internal(&state, err),
+    };
+    match state
+        .openai_org_usage
+        .get_or_refresh(endpoint_id, || {
+            // The stored inference base is passed through but ignored: the
+            // organization Admin API is pinned to the official Platform
+            // origin so the privileged Admin key never follows a custom base.
+            openai_org_usage::fetch_organization_usage(
+                &endpoint.base_url,
+                &admin_api_key,
+                proxy_url.as_deref(),
+                Utc::now(),
+            )
+        })
+        .await
+    {
+        Ok(usage) => Json(usage).into_response(),
+        Err(err) => error(
+            StatusCode::BAD_GATEWAY,
+            "organization_usage_unavailable",
+            &truncate_message(&maybe_redact(&state, &err.to_string())),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,7 +325,7 @@ mod tests {
             provider: db::EndpointProvider::OpenAi,
             provider_region: None,
             plan: db::EndpointPlan::ChatgptSubscription,
-            service_tier: db::MinimaxServiceTier::Standard,
+            service_tier: None,
             base_url: "https://api.openai.com/v1".to_string(),
             native_api: "responses".to_string(),
             native_api_source: "manual".to_string(),
@@ -261,6 +333,7 @@ mod tests {
             proxy_url: None,
             has_oauth_token: true,
             has_proxy_url: false,
+            has_admin_api_key: false,
             active_windows: Vec::new(),
             key_lb_enabled: false,
             enabled: true,

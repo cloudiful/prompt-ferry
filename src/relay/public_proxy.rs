@@ -37,8 +37,7 @@ use self::{
     mcp::{proxy_mcp_root, proxy_mcp_server},
 };
 
-pub(super) fn response_compression_layer()
--> CompressionLayer<impl Predicate + Clone + Send + 'static> {
+pub(super) fn response_compression_layer() -> CompressionLayer<impl Predicate + Send + 'static> {
     let predicate = DefaultPredicate::new()
         .and(NotForContentType::SSE)
         .and(skip_websocket_upgrade);

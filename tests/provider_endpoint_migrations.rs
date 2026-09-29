@@ -515,7 +515,7 @@ async fn insert_standalone_endpoint(
     .map(|_| ())
 }
 
-// Standalone 0014 fresh path: a new store migrates to schema 33 with the
+// Standalone 0014 fresh path: a new store migrates to schema 35 with the
 // provider CHECK widened to command_code, opencode_go, openrouter, glm and
 // deepseek. 0015 (issue #230) adds `glm` and 0016 (issue #287) adds
 // `deepseek`; a fresh open() applies every pending migration, so the final
@@ -526,7 +526,7 @@ async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_o
     let path = standalone_temp_path("fresh");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 35);
 
     let ddl: String = sqlx::query(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'standalone_provider_endpoints'",
@@ -693,7 +693,7 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     // 0015 (issue #230) adds `glm` and 0016 (issue #287) adds `deepseek`;
     // 0032 (issue #589) adds `openai`; the final schema version tracks the
     // newest standalone migration after the pending migrations apply.
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 35);
     let preserved: i64 = sqlx::query(
         "SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'",
     )
@@ -739,7 +739,7 @@ async fn standalone_0025_quota_cleanup_preserves_route_targets() -> anyhow::Resu
     let path = standalone_temp_path("quota25");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 35);
     // No quota columns remain.
     for table in ["standalone_model_routes", "standalone_mcp_servers"] {
         let cols: Vec<String> = if table == "standalone_model_routes" {
@@ -809,18 +809,28 @@ async fn standalone_0032_openai_rebuild_preserves_referencing_rows() -> anyhow::
     let path = standalone_temp_path("openai32");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 35);
 
     insert_standalone_endpoint(&pool, "pinned-ds", "deepseek", None).await?;
     insert_standalone_endpoint_key(&pool, "pinned-ds").await?;
     insert_standalone_route_target(&pool, "pinned-ds").await?;
 
-    // Drop the 0032/0033 bookkeeping and the schema version so the next
-    // open() re-applies the migrations against a table that already has
-    // referencing rows, exercising the DROP/RENAME rebuild with foreign keys
-    // enabled. 0033 (issue #599) only creates its own table, so replaying it
-    // alongside 0032 keeps the scenario focused on the 0032 rebuild.
-    sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (32, 33)")
+    // Rewind to the schema-31 state so the next open() re-applies the
+    // 0032/0033/0034/0035 migrations against a table that already has referencing
+    // rows, exercising the DROP/RENAME rebuild with foreign keys enabled.
+    // Issue #637's 0034 relaxed `service_tier` to nullable and added the
+    // target column, so the pre-0034 shape is restored first: 0032's endpoint
+    // rebuild declares `service_tier NOT NULL`, and 0034 re-adds the dropped
+    // target column. 0033 (issue #599) only creates its own table, so
+    // replaying it alongside 0032 keeps the scenario focused on the 0032
+    // rebuild.
+    sqlx::query("UPDATE standalone_provider_endpoints SET service_tier = 'standard'")
+        .execute(&pool)
+        .await?;
+    sqlx::query("ALTER TABLE standalone_model_route_targets DROP COLUMN service_tier")
+        .execute(&pool)
+        .await?;
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (32, 33, 34, 35)")
         .execute(&pool)
         .await?;
     sqlx::query(
@@ -833,7 +843,7 @@ async fn standalone_0032_openai_rebuild_preserves_referencing_rows() -> anyhow::
 
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 35);
     let children: i64 = sqlx::query(
         "SELECT (SELECT COUNT(*) FROM standalone_endpoint_keys) \
               + (SELECT COUNT(*) FROM standalone_model_route_targets)",
@@ -1045,7 +1055,7 @@ async fn standalone_0033_oauth_token_envelope_table() -> anyhow::Result<()> {
     let path = standalone_temp_path("oauth33");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 35);
 
     let columns: Vec<String> =
         sqlx::query("SELECT name FROM pragma_table_info('standalone_endpoint_oauth_tokens')")
@@ -1143,5 +1153,528 @@ async fn standalone_0033_oauth_token_envelope_table() -> anyhow::Result<()> {
     pool.close().await;
     store.close().await;
     remove_standalone_files(&path);
+    Ok(())
+}
+
+// 20260927090230 up: the optional Admin API key column is added and stores the
+// secret; down drops the column (issue #589).
+#[tokio::test]
+async fn migrate_openai_admin_api_key_adds_and_drops_column() -> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    schema
+        .pool
+        .execute(
+            r#"
+            CREATE TABLE provider_endpoints (
+                endpoint_id UUID PRIMARY KEY DEFAULT (md5(random()::text || clock_timestamp()::text)::uuid),
+                scope TEXT NOT NULL CHECK (scope IN ('admin', 'user')),
+                owner_user_id BIGINT,
+                name TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                api_key TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .await?;
+
+    db::migrate(&schema.pool).await?;
+    insert_provider_endpoint(&schema.pool, "oa-admin", "openai", None).await?;
+
+    // The new column accepts a value and defaults to NULL for existing rows.
+    let unset = sqlx::query("SELECT admin_api_key FROM provider_endpoints WHERE name = 'oa-admin'")
+        .fetch_one(&schema.pool)
+        .await?;
+    assert!(
+        unset
+            .try_get::<Option<String>, _>("admin_api_key")?
+            .is_none()
+    );
+    sqlx::query("UPDATE provider_endpoints SET admin_api_key = 'sk-admin' WHERE name = 'oa-admin'")
+        .execute(&schema.pool)
+        .await?;
+    let stored =
+        sqlx::query("SELECT admin_api_key FROM provider_endpoints WHERE name = 'oa-admin'")
+            .fetch_one(&schema.pool)
+            .await?;
+    assert_eq!(
+        stored.try_get::<Option<String>, _>("admin_api_key")?,
+        Some("sk-admin".to_string())
+    );
+
+    sqlx::raw_sql(include_str!(
+        "../migrations/20260927090230_openai_admin_api_key.down.sql"
+    ))
+    .execute(&schema.pool)
+    .await?;
+    let dropped =
+        sqlx::query("SELECT admin_api_key FROM provider_endpoints WHERE name = 'oa-admin'")
+            .fetch_optional(&schema.pool)
+            .await;
+    assert!(
+        dropped.is_err(),
+        "admin_api_key column must be dropped by the down migration"
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+// Issue #589: 0035 adds the encrypted Admin API key envelope table; NULL means
+// cleared and rows cascade with their endpoint.
+#[tokio::test]
+async fn standalone_0035_adds_endpoint_admin_key_table() -> anyhow::Result<()> {
+    let path = standalone_temp_path("admin35");
+    let store = StandaloneConfigStore::open(&path).await?;
+    let pool = db::connect_sqlite(&path).await?;
+    assert_eq!(standalone_schema_version(&pool).await?, 35);
+
+    let columns: Vec<String> =
+        sqlx::query("SELECT name FROM pragma_table_info('standalone_endpoint_admin_keys')")
+            .fetch_all(&pool)
+            .await?
+            .into_iter()
+            .map(|row| row.try_get::<String, _>("name").expect("column"))
+            .collect();
+    for column in [
+        "endpoint_id",
+        "admin_api_key_ciphertext",
+        "admin_api_key_nonce",
+        "admin_api_key_key_version",
+        "created_at",
+        "updated_at",
+    ] {
+        assert!(
+            columns.iter().any(|name| name == column),
+            "admin key table must carry {column}: {columns:?}"
+        );
+    }
+    assert!(
+        !columns.iter().any(|name| name == "admin_api_key"),
+        "no plaintext secret column: {columns:?}"
+    );
+
+    insert_standalone_endpoint(&pool, "oa-admin35", "openai", None).await?;
+    let endpoint_id: String = sqlx::query(
+        "SELECT endpoint_id FROM standalone_provider_endpoints WHERE name = 'oa-admin35'",
+    )
+    .fetch_one(&pool)
+    .await?
+    .try_get(0)?;
+    sqlx::query(
+        "INSERT INTO standalone_endpoint_admin_keys
+         (endpoint_id, admin_api_key_ciphertext, admin_api_key_nonce,
+          admin_api_key_key_version, created_at, updated_at)
+         VALUES (?, X'00', X'01', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+    )
+    .bind(&endpoint_id)
+    .execute(&pool)
+    .await?;
+    let present: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM standalone_endpoint_admin_keys \
+         WHERE admin_api_key_ciphertext IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await?
+    .try_get(0)?;
+    assert_eq!(present, 1);
+
+    sqlx::query(
+        "UPDATE standalone_endpoint_admin_keys
+         SET admin_api_key_ciphertext = NULL, admin_api_key_nonce = NULL,
+             admin_api_key_key_version = NULL
+         WHERE endpoint_id = ?",
+    )
+    .bind(&endpoint_id)
+    .execute(&pool)
+    .await?;
+    let present: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM standalone_endpoint_admin_keys \
+         WHERE admin_api_key_ciphertext IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await?
+    .try_get(0)?;
+    assert_eq!(present, 0, "NULLed rows must read as absent");
+
+    sqlx::query(
+        "UPDATE standalone_endpoint_admin_keys
+         SET admin_api_key_ciphertext = X'00', admin_api_key_nonce = X'01',
+             admin_api_key_key_version = 1
+         WHERE endpoint_id = ?",
+    )
+    .bind(&endpoint_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query("DELETE FROM standalone_provider_endpoints WHERE endpoint_id = ?")
+        .bind(&endpoint_id)
+        .execute(&pool)
+        .await?;
+    let remaining: i64 = sqlx::query("SELECT COUNT(*) FROM standalone_endpoint_admin_keys")
+        .fetch_one(&pool)
+        .await?
+        .try_get(0)?;
+    assert_eq!(remaining, 0, "key rows must cascade with their endpoint");
+
+    pool.close().await;
+    store.close().await;
+    remove_standalone_files(&path);
+    Ok(())
+}
+
+async fn insert_provider_endpoint_with_native_api(
+    pool: &PgPool,
+    name: &str,
+    native_api: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO provider_endpoints (scope, name, base_url, api_key, provider, native_api)
+           VALUES ('admin', $1, 'https://example.test', 'secret', 'generic', $2)"#,
+    )
+    .bind(name)
+    .bind(native_api)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+async fn create_minimal_provider_endpoints(pool: &PgPool) -> anyhow::Result<()> {
+    pool.execute(
+        r#"
+        CREATE TABLE provider_endpoints (
+            endpoint_id UUID PRIMARY KEY DEFAULT (md5(random()::text || clock_timestamp()::text)::uuid),
+            scope TEXT NOT NULL CHECK (scope IN ('admin', 'user')),
+            owner_user_id BIGINT,
+            name TEXT NOT NULL,
+            base_url TEXT NOT NULL,
+            api_key TEXT NOT NULL,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn provider_endpoint_shape(
+    pool: &PgPool,
+    name: &str,
+) -> anyhow::Result<(String, Option<String>)> {
+    let row =
+        sqlx::query("SELECT provider, provider_region FROM provider_endpoints WHERE name = $1")
+            .bind(name)
+            .fetch_one(pool)
+            .await?;
+    Ok((
+        row.try_get::<String, _>("provider")?,
+        row.try_get::<Option<String>, _>("provider_region")?,
+    ))
+}
+
+// Minimax region tightening down: the legacy shape returns and every valid
+// row survives the rollback byte-for-byte (no data rewrite on either leg).
+#[tokio::test]
+async fn minimax_region_not_null_down_restores_legacy_shape_and_preserves_rows()
+-> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    create_minimal_provider_endpoints(&schema.pool).await?;
+    db::migrate(&schema.pool).await?;
+
+    insert_provider_endpoint(&schema.pool, "mm-cn", "minimax", Some("cn")).await?;
+    insert_provider_endpoint(&schema.pool, "mm-global", "minimax", Some("global")).await?;
+    insert_provider_endpoint(&schema.pool, "gen-null", "generic", None).await?;
+    insert_provider_endpoint(&schema.pool, "openai-null", "openai", None).await?;
+
+    sqlx::raw_sql(include_str!(
+        "../migrations/20260928030747_minimax_provider_region_not_null.down.sql"
+    ))
+    .execute(&schema.pool)
+    .await?;
+
+    assert_eq!(
+        provider_endpoint_shape(&schema.pool, "mm-cn").await?,
+        ("minimax".to_string(), Some("cn".to_string()))
+    );
+    assert_eq!(
+        provider_endpoint_shape(&schema.pool, "mm-global").await?,
+        ("minimax".to_string(), Some("global".to_string()))
+    );
+    assert_eq!(
+        provider_endpoint_shape(&schema.pool, "gen-null").await?,
+        ("generic".to_string(), None)
+    );
+    assert_eq!(
+        provider_endpoint_shape(&schema.pool, "openai-null").await?,
+        ("openai".to_string(), None)
+    );
+
+    // Legacy shape is back: NULL regions pass again, garbage still fails.
+    insert_provider_endpoint(&schema.pool, "mm-null-legacy", "minimax", None).await?;
+    insert_provider_endpoint(&schema.pool, "mm-us-legacy", "minimax", Some("us"))
+        .await
+        .expect_err("legacy shape still rejects unknown regions");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+// Minimax region tightening up: pre-existing NULL-region rows abort the
+// migration loudly with the offending names instead of touching data.
+#[tokio::test]
+async fn minimax_region_not_null_up_guard_reports_offending_rows_without_touching_them()
+-> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    create_minimal_provider_endpoints(&schema.pool).await?;
+    db::migrate(&schema.pool).await?;
+
+    schema
+        .pool
+        .execute(
+            "ALTER TABLE provider_endpoints DROP CONSTRAINT ck_provider_endpoints_provider_region",
+        )
+        .await?;
+    insert_provider_endpoint(&schema.pool, "mm-legacy-null", "minimax", None).await?;
+
+    let err = sqlx::raw_sql(include_str!(
+        "../migrations/20260928030747_minimax_provider_region_not_null.up.sql"
+    ))
+    .execute(&schema.pool)
+    .await
+    .expect_err("up migration must refuse while NULL-region minimax rows exist");
+    assert!(
+        err.to_string().contains("mm-legacy-null"),
+        "guard must name the offending row, got: {err}"
+    );
+    assert_eq!(
+        provider_endpoint_shape(&schema.pool, "mm-legacy-null").await?,
+        ("minimax".to_string(), None),
+        "offending row must survive the refused migration"
+    );
+    let tightened: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'provider_endpoints'::regclass AND conname = 'ck_provider_endpoints_provider_region'",
+    )
+    .fetch_one(&schema.pool)
+    .await?
+    .try_get(0)?;
+    assert_eq!(
+        tightened, 0,
+        "refused migration must not install the tightened check"
+    );
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+// Native API dedup up: the canonical constraint admits anthropic_messages
+// (and auto) while still rejecting unknown values.
+#[tokio::test]
+async fn native_api_canonical_check_permits_anthropic_messages_and_rejects_unknown()
+-> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    create_minimal_provider_endpoints(&schema.pool).await?;
+    db::migrate(&schema.pool).await?;
+
+    for native_api in ["auto", "responses", "chat", "anthropic_messages"] {
+        insert_provider_endpoint_with_native_api(
+            &schema.pool,
+            &format!("api-{native_api}"),
+            native_api,
+        )
+        .await?;
+    }
+    insert_provider_endpoint_with_native_api(&schema.pool, "api-smoke", "smoke_signal")
+        .await
+        .expect_err("canonical native_api check must still reject unknown values");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+// Native API dedup down: rollback with wide values in place refuses loudly
+// and preserves them; on a narrow schema it restores the legacy CHECK.
+#[tokio::test]
+async fn native_api_check_drop_down_guards_wide_values_and_restores_narrow() -> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    create_minimal_provider_endpoints(&schema.pool).await?;
+    db::migrate(&schema.pool).await?;
+
+    insert_provider_endpoint_with_native_api(&schema.pool, "wide-row", "anthropic_messages")
+        .await?;
+    let err = sqlx::raw_sql(include_str!(
+        "../migrations/20260928030749_remove_obsolete_native_api_check.down.sql"
+    ))
+    .execute(&schema.pool)
+    .await
+    .expect_err("down migration must refuse while wider native_api rows exist");
+    assert!(
+        err.to_string().contains("anthropic_messages"),
+        "guard must name the offending value, got: {err}"
+    );
+    let preserved: i64 =
+        sqlx::query("SELECT COUNT(*) FROM provider_endpoints WHERE name = 'wide-row'")
+            .fetch_one(&schema.pool)
+            .await?
+            .try_get(0)?;
+    assert_eq!(
+        preserved, 1,
+        "offending row must survive the refused rollback"
+    );
+    let restored: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'provider_endpoints'::regclass AND conname = 'provider_endpoints_native_api_check'",
+    )
+    .fetch_one(&schema.pool)
+    .await?
+    .try_get(0)?;
+    assert_eq!(
+        restored, 0,
+        "refused rollback must not restore the narrow check"
+    );
+
+    sqlx::query("DELETE FROM provider_endpoints WHERE name = 'wide-row'")
+        .execute(&schema.pool)
+        .await?;
+    sqlx::raw_sql(include_str!(
+        "../migrations/20260928030749_remove_obsolete_native_api_check.down.sql"
+    ))
+    .execute(&schema.pool)
+    .await?;
+
+    insert_provider_endpoint_with_native_api(&schema.pool, "narrow-again", "anthropic_messages")
+        .await
+        .expect_err("restored narrow check must reject anthropic_messages again");
+    insert_provider_endpoint_with_native_api(&schema.pool, "chat-again", "chat").await?;
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+async fn insert_provider_endpoint_with_native_api_source(
+    pool: &PgPool,
+    name: &str,
+    native_api_source: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO provider_endpoints (scope, name, base_url, api_key, provider, native_api_source)
+           VALUES ('admin', $1, 'https://example.test', 'secret', 'generic', $2)"#,
+    )
+    .bind(name)
+    .bind(native_api_source)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+// Native API source dedup up: the canonical constraint admits auto (reached
+// via Auto protocol mode) while still rejecting unknown values.
+#[tokio::test]
+async fn native_api_source_canonical_check_permits_auto_and_rejects_unknown() -> anyhow::Result<()>
+{
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    create_minimal_provider_endpoints(&schema.pool).await?;
+    db::migrate(&schema.pool).await?;
+
+    for source in ["auto", "detected", "manual"] {
+        insert_provider_endpoint_with_native_api_source(
+            &schema.pool,
+            &format!("src-{source}"),
+            source,
+        )
+        .await?;
+    }
+    insert_provider_endpoint_with_native_api_source(&schema.pool, "src-smoke", "smoke_signal")
+        .await
+        .expect_err("canonical native_api_source check must still reject unknown values");
+
+    schema.cleanup().await?;
+    Ok(())
+}
+
+// Native API source dedup down: rollback with wide values in place refuses
+// loudly and preserves them; on a narrow schema it restores the legacy CHECK.
+#[tokio::test]
+async fn native_api_source_check_drop_down_guards_wide_values_and_restores_narrow()
+-> anyhow::Result<()> {
+    if env::var(TEST_DATABASE_URL_ENV).is_err() {
+        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
+        return Ok(());
+    }
+    let schema = TestSchema::new().await?;
+    create_minimal_provider_endpoints(&schema.pool).await?;
+    db::migrate(&schema.pool).await?;
+
+    insert_provider_endpoint_with_native_api_source(&schema.pool, "wide-row", "auto").await?;
+    let err = sqlx::raw_sql(include_str!(
+        "../migrations/20260928033039_remove_obsolete_native_api_source_check.down.sql"
+    ))
+    .execute(&schema.pool)
+    .await
+    .expect_err("down migration must refuse while wider native_api_source rows exist");
+    assert!(
+        err.to_string().contains("auto"),
+        "guard must name the offending value, got: {err}"
+    );
+    let preserved: i64 =
+        sqlx::query("SELECT COUNT(*) FROM provider_endpoints WHERE name = 'wide-row'")
+            .fetch_one(&schema.pool)
+            .await?
+            .try_get(0)?;
+    assert_eq!(
+        preserved, 1,
+        "offending row must survive the refused rollback"
+    );
+    let restored: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'provider_endpoints'::regclass AND conname = 'provider_endpoints_native_api_source_check'",
+    )
+    .fetch_one(&schema.pool)
+    .await?
+    .try_get(0)?;
+    assert_eq!(
+        restored, 0,
+        "refused rollback must not restore the narrow check"
+    );
+
+    sqlx::query("DELETE FROM provider_endpoints WHERE name = 'wide-row'")
+        .execute(&schema.pool)
+        .await?;
+    sqlx::raw_sql(include_str!(
+        "../migrations/20260928033039_remove_obsolete_native_api_source_check.down.sql"
+    ))
+    .execute(&schema.pool)
+    .await?;
+
+    insert_provider_endpoint_with_native_api_source(&schema.pool, "narrow-again", "auto")
+        .await
+        .expect_err("restored narrow check must reject auto again");
+    insert_provider_endpoint_with_native_api_source(&schema.pool, "manual-again", "manual").await?;
+
+    schema.cleanup().await?;
     Ok(())
 }

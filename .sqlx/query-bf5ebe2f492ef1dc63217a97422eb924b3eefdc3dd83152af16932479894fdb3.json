@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE provider_endpoints\nSET admin_api_key = $2,\n    updated_at = NOW()\nWHERE endpoint_id = $1\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bf5ebe2f492ef1dc63217a97422eb924b3eefdc3dd83152af16932479894fdb3"
+}

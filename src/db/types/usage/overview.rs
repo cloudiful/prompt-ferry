@@ -48,10 +48,19 @@ pub struct RequestRecordOverviewTrendBucket {
 pub struct RequestRecordOverviewUpstreamBreakdown {
     pub endpoint_id: Option<Uuid>,
     pub endpoint_name: Option<String>,
+    /// Model actually sent upstream when a route target override applies.
+    /// `None` when the request used the requested model unchanged.
+    pub upstream_model: Option<String>,
     pub request_count: i64,
+    /// Share of the window's requests, matching the main model table.
+    pub request_share: f64,
     pub error_count: i64,
     pub error_rate: f64,
     pub total_tokens: i64,
+    /// Share of the window's total tokens, matching the main model table.
+    /// `None` when the window has zero total tokens.
+    pub token_share: Option<f64>,
+    pub cache_rate: Option<f64>,
     pub avg_output_tokens_per_second: Option<f64>,
 }
 
@@ -93,17 +102,8 @@ pub struct RequestRecordOverviewBreakdownRow {
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct RequestRecordOverviewErrorRow {
-    pub key: String,
-    pub label: String,
-    pub count: i64,
-    pub rate: f64,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RequestRecordOverviewResponse {
     pub summary: RequestRecordOverviewSummary,
     pub trend: Vec<RequestRecordOverviewTrendBucket>,
     pub breakdown: Vec<RequestRecordOverviewBreakdownRow>,
-    pub error_breakdown: Vec<RequestRecordOverviewErrorRow>,
 }

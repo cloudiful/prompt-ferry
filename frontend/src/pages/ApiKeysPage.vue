@@ -142,7 +142,7 @@ onMounted(async () => {
 
 <template>
   <div class="grid min-w-0 max-w-full gap-3">
-    <PageIntro :eyebrow="t('access')" :title="t('apiKeys')">
+    <PageIntro>
       <template #actions>
         <label v-if="session.isAdmin" class="flex min-w-52 items-center">
           <USelect

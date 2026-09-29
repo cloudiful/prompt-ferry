@@ -145,7 +145,7 @@ onMounted(refresh)
 
 <template>
   <div class="grid min-w-0 max-w-full gap-3">
-    <PageIntro :eyebrow="t('bridge')" :title="t('relays')">
+    <PageIntro>
       <template #actions>
         <UBadge :label="relaySummary" />
         <UButton size="sm" @click="openCreateDialog">{{

@@ -1,0 +1,24 @@
+# Redaction-chain paths gated by the incremental coverage check (#569 Phase 0).
+# One fnmatch-style glob per line, relative to the repository root.
+# `*` also matches `/` here, so a trailing `/**` covers a whole subtree.
+# A leading `!` excludes a path that an include glob already matched.
+src/worker/runtime/ai/stream_restore.rs
+src/worker/runtime/ai/stream_restore/**
+src/worker/runtime/ai/upstream_restore.rs
+src/worker/runtime/ai/thinking_downgrade.rs
+src/redaction_timing.rs
+crates/prompt-ferry-redact/src/**
+crates/prompt-ferry-redact-upstream/src/**
+
+# Test-only paths, out of scope for the production gate. cargo-llvm-cov's
+# default --ignore-filename-regex omits any tests/examples/benches directory and
+# any tests.rs / *_tests.rs / *-tests.rs file, so these never appear in LCOV and
+# would otherwise trip the fail-closed missing-file check. Covers
+# src/worker/runtime/ai/stream_restore/property_tests.rs and
+# crates/**/src/tests/**.
+!**/tests/**
+!**/examples/**
+!**/benches/**
+!**/tests.rs
+!**/*_tests.rs
+!**/*-tests.rs

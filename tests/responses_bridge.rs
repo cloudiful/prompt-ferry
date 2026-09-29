@@ -1052,7 +1052,8 @@ async fn forwards_reasoning_effort_stateless_to_chat_native_upstream() {
 }
 
 #[tokio::test]
-async fn normalizes_developer_role_and_forwards_max_reasoning_effort_to_chat_upstream() {
+async fn keeps_developer_role_without_normalize_and_forwards_max_reasoning_effort_to_chat_upstream()
+{
     let upstream_log = Arc::new(ChatRequestLog::default());
     let upstream_addr = spawn_chat_only_upstream(upstream_log.clone()).await;
     let (relay_addr, worker_addr, relay_handle) = spawn_relay().await;
@@ -1082,7 +1083,14 @@ async fn normalizes_developer_role_and_forwards_max_reasoning_effort_to_chat_ups
     assert_eq!(response.status(), StatusCode::OK);
     let requests = upstream_log.bodies.lock().await;
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0]["messages"][0]["role"].as_str(), Some("system"));
+    // Issue #392 Phase K: developer->system normalization is opt-in per target
+    // (`dev_system_normalize`, default false), so a legacy direct route must
+    // pass the role through untouched; the rewrite itself is covered by
+    // `openai_compat::request::chat_native` unit tests.
+    assert_eq!(
+        requests[0]["messages"][0]["role"].as_str(),
+        Some("developer")
+    );
     assert_eq!(
         requests[0]["messages"][0]["content"].as_str(),
         Some("be concise")

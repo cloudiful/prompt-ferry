@@ -183,7 +183,13 @@ pub(super) async fn forward_upstream_response(
                 response_headers: upstream_response_headers,
             }));
         }
-        return respond_upstream_error(&context, status, body, upstream_response_headers).await;
+        return Box::pin(respond_upstream_error(
+            &context,
+            status,
+            body,
+            upstream_response_headers,
+        ))
+        .await;
     }
 
     // Issue #599 R2f.3: a Responses upstream can stream `data:`/`event:`
@@ -255,8 +261,14 @@ pub(super) async fn forward_upstream_response(
         .await?
         {
             EnvelopePreflightOutcome::Fail(err) => {
-                return respond_with_client_error(services, request, request_ctx, route_ctx, err)
-                    .await;
+                return Box::pin(respond_with_client_error(
+                    services,
+                    request,
+                    request_ctx,
+                    route_ctx,
+                    err,
+                ))
+                .await;
             }
             EnvelopePreflightOutcome::Pass(rebuilt) => {
                 // `consume_envelope_preflight` has already passed the
@@ -357,8 +369,8 @@ pub(super) async fn respond_upstream_error(
         upstream_response_headers,
     )
     .await?;
-    services
-        .record_usage_event(
+    Box::pin(
+        services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
                 .with_upstream_redaction(
                     context.upstream_restore_session.is_some(),
@@ -377,8 +389,9 @@ pub(super) async fn respond_upstream_error(
                     Some(http_error_message(status.as_u16(), error_body.as_deref())),
                     error_body.clone(),
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
     warn!(
         endpoint_id = %route.route_id,
         base_url = %route.base_url,

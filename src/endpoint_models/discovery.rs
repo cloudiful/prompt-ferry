@@ -75,7 +75,7 @@ mod tests {
             model_route_rule_id: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,

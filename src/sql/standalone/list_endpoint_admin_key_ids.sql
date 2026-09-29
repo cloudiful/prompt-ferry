@@ -1,0 +1,3 @@
+SELECT endpoint_id
+FROM standalone_endpoint_admin_keys
+WHERE admin_api_key_ciphertext IS NOT NULL;

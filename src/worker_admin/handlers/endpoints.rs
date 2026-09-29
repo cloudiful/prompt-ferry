@@ -29,10 +29,11 @@ pub(super) async fn create_endpoint(
     let mcp_enabled = body
         .mcp_enabled
         .unwrap_or(body.provider == db::EndpointProvider::Minimax);
-    let input = match resolve_endpoint_input(&state, body, None, None, None, false).await {
-        Ok(input) => input,
-        Err(response) => return response.into_response(),
-    };
+    let (input, admin_api_key) =
+        match resolve_endpoint_input(&state, body, None, None, None, false, None).await {
+            Ok(input) => input,
+            Err(response) => return response.into_response(),
+        };
     let endpoint_id = uuid::Uuid::new_v4();
     match state
         .config_repository
@@ -40,6 +41,15 @@ pub(super) async fn create_endpoint(
         .await
     {
         Ok(endpoint) => {
+            // Issue #589: persist the optional Admin API key before the
+            // response is built so `has_admin_api_key` is accurate.
+            if let Err(err) = state
+                .config_repository
+                .set_endpoint_admin_api_key(endpoint_id, admin_api_key.as_deref())
+                .await
+            {
+                return internal(&state, err);
+            }
             let pg_endpoint = endpoint.clone().into_pg();
             if let Err(err) = state
                 .config_repository
@@ -56,7 +66,7 @@ pub(super) async fn create_endpoint(
             // freshly created endpoint never carries an OAuth token, so the
             // effective plan is the platform default. The removed post-save
             // re-fetch could turn a committed write into a false 404.
-            saved_endpoint_response(endpoint, false, mcp_enabled)
+            saved_endpoint_response(endpoint, false, mcp_enabled, admin_api_key.is_some())
         }
         Err(err) => internal(&state, err),
     }
@@ -110,13 +120,29 @@ pub(super) async fn update_endpoint(
     // Issue #599 R2b: an existing stored token makes the subscription plan
     // claimable on PATCH (`validate_endpoint_plan`).
     let has_oauth_token = existing.has_oauth_token;
-    let input = match resolve_endpoint_input(
+    // Issue #589: PATCH carry for the optional Admin API key. It is
+    // OpenAI-only, so only an OpenAI update needs the stored secret; any
+    // other provider resolves to clear.
+    let existing_admin_api_key = if body.provider == db::EndpointProvider::OpenAi {
+        match state
+            .config_repository
+            .endpoint_admin_api_key(endpoint_id)
+            .await
+        {
+            Ok(value) => value,
+            Err(err) => return internal(&state, err),
+        }
+    } else {
+        None
+    };
+    let (input, admin_api_key) = match resolve_endpoint_input(
         &state,
         body,
         Some(existing_api_keys),
         existing_proxy_url,
         existing_active_windows,
         has_oauth_token,
+        existing_admin_api_key,
     )
     .await
     {
@@ -145,6 +171,19 @@ pub(super) async fn update_endpoint(
                 return internal(&state, err);
             }
             let endpoint_id = endpoint.endpoint_id;
+            // Issue #589: apply the resolved Admin API key before the response
+            // is built so `has_admin_api_key` is accurate; a non-OpenAI
+            // update resolves to `None` and clears any stored key.
+            if let Err(err) = state
+                .config_repository
+                .set_endpoint_admin_api_key(endpoint_id, admin_api_key.as_deref())
+                .await
+            {
+                return internal(&state, err);
+            }
+            // Issue #589 P2b: a changed (or cleared) Admin API key must not be
+            // served from the previous organization-usage snapshot.
+            state.openai_org_usage.invalidate(endpoint_id).await;
             if let Err(err) = state
                 .config_repository
                 .set_endpoint_mcp_enabled(endpoint_id, mcp_enabled)
@@ -169,7 +208,12 @@ pub(super) async fn update_endpoint(
             // clear) instead of re-reading the row; the removed post-save
             // re-fetch could turn a committed write into a false 404.
             let has_oauth_token = existing.has_oauth_token && !switch_clears_token;
-            saved_endpoint_response(endpoint, has_oauth_token, mcp_enabled)
+            saved_endpoint_response(
+                endpoint,
+                has_oauth_token,
+                mcp_enabled,
+                admin_api_key.is_some(),
+            )
         }
         Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
         Err(err) => internal(&state, err),
@@ -179,14 +223,18 @@ pub(super) async fn update_endpoint(
 /// Issue #599 R2e.2: render the create/update success response from the
 /// committed repository write result. The effective plan and token presence
 /// are derived in memory, so a committed write never turns into a false 404
-/// through a redundant post-save `get_endpoint` miss.
+/// through a redundant post-save `get_endpoint` miss. `has_admin_api_key`
+/// mirrors the just-resolved value (issue #589); the secret itself is never
+/// part of the response.
 fn saved_endpoint_response(
     mut endpoint: db::UnifiedProviderEndpoint,
     has_oauth_token: bool,
     mcp_enabled: bool,
+    has_admin_api_key: bool,
 ) -> Response {
     endpoint.has_oauth_token = has_oauth_token;
     endpoint.plan = db::EndpointPlan::resolve(endpoint.provider, has_oauth_token);
+    endpoint.has_admin_api_key = has_admin_api_key;
     endpoint.mcp_enabled = mcp_enabled;
     Json(endpoint).into_response()
 }
@@ -227,6 +275,9 @@ pub(super) async fn delete_endpoint(
             if let Some(server) = managed_server {
                 state.mcp_catalog_service.invalidate(server.server_id).await;
             }
+            // Issue #589 P2b: drop any cached organization usage for the
+            // deleted endpoint.
+            state.openai_org_usage.invalidate(endpoint_id).await;
             if let Err(err) = publish_snapshot(&state).await {
                 tracing::warn!(error = %err, "snapshot publication failed after endpoint delete");
             }

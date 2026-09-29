@@ -1,6 +1,7 @@
 use super::schemas::ErrorEnvelope;
 use crate::{
     db,
+    worker_admin::openai_org_usage::OpenAiOrganizationUsageResponse,
     worker_admin_types::{
         EndpointOAuthStatusResponse, EndpointPageResponse, EndpointRequest, EndpointTestResponse,
         OAuthBrowserCompleteRequest, OAuthBrowserStartResponse, OAuthDeviceStartResponse,
@@ -73,6 +74,18 @@ pub(super) fn test_endpoint() {}
     tag = "endpoints"
 )]
 pub(super) fn token_plan_usage() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/organization-usage",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 200, body = OpenAiOrganizationUsageResponse, description = "OpenAI Platform organization usage (UTC month to date)"),
+        (status = 400, body = ErrorEnvelope)
+    ),
+    tag = "endpoints"
+)]
+pub(super) fn organization_usage() {}
 
 #[utoipa::path(
     get,

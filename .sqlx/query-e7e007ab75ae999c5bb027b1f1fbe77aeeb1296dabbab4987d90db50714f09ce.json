@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT endpoint_id\nFROM provider_endpoints\nWHERE admin_api_key IS NOT NULL\n  AND btrim(admin_api_key) <> ''\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "endpoint_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e7e007ab75ae999c5bb027b1f1fbe77aeeb1296dabbab4987d90db50714f09ce"
+}

@@ -8,6 +8,7 @@ SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,
         COALESCE(t.thinking_downgrade_enabled, FALSE) AS "thinking_downgrade_enabled!",
         t.thinking_effort_override,
         t.compact_mode,
+        t.service_tier,
        t.created_at, t.updated_at
 FROM model_route_targets t
 LEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id

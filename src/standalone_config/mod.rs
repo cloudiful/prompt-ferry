@@ -25,9 +25,9 @@ mod write;
 pub(crate) use coordinator::StandaloneCoordinatorStore;
 pub use models::{
     BootstrapSeed, ClientKeyConfig, EndpointApiKeyConfig, EndpointProvider, EndpointRegion,
-    ManagedRelayConfig, MinimaxServiceTier, ModelRouteConfig, ModelRouteTargetConfig,
-    ProviderEndpointConfig, ReplaySnapshotUpsertOutcome, Result, RouteScope, RoutingStrategy,
-    SettingConfig, StandaloneConfig, StandaloneConfigError, StandaloneReplaySnapshotRecord,
+    ManagedRelayConfig, ModelRouteConfig, ModelRouteTargetConfig, ProviderEndpointConfig,
+    ReplaySnapshotUpsertOutcome, Result, RouteScope, RoutingStrategy, SettingConfig,
+    StandaloneConfig, StandaloneConfigError, StandaloneReplaySnapshotRecord,
     StandaloneUsageSummaryRecord, default_target_native_api,
 };
 pub(crate) use request_leases::{RequestLeaseAcquireOutcome, StandaloneRequestLeaseStore};

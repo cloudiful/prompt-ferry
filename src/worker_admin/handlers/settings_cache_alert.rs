@@ -11,7 +11,7 @@ pub(super) async fn get_cache_alert_setting(
         return state.sqlite_capability_unavailable();
     }
     let settings = state.cache_alert.read().await.clone();
-    Json(settings.redacted()).into_response()
+    Json(settings.redacted_response()).into_response()
 }
 
 pub(super) async fn set_cache_alert_setting(
@@ -40,7 +40,7 @@ pub(super) async fn set_cache_alert_setting(
     match db::set_cache_alert_settings(pool, &next).await {
         Ok(saved) => {
             *state.cache_alert.write().await = saved.clone();
-            Json(saved.redacted()).into_response()
+            Json(saved.redacted_response()).into_response()
         }
         Err(err) => internal(&state, err),
     }

@@ -1,5 +1,6 @@
 WITH normalized AS (
     SELECT rr.model,
+           rr.upstream_model,
            rr.ok,
            rr.request_state,
            rr.endpoint_id,
@@ -80,20 +81,29 @@ WITH normalized AS (
            )::DOUBLE PRECISION AS avg_output_tokens_per_second
     FROM normalized
     GROUP BY model
+), totals AS (
+    SELECT SUM(request_count)::DOUBLE PRECISION AS request_count,
+           SUM(total_tokens)::DOUBLE PRECISION AS total_tokens
+    FROM grouped
 ), upstream AS (
     -- P1 (issue #207): per (model x endpoint_id) aggregates for the hover
     -- breakdown. Error predicate mirrors `metrics.sql`
     -- (`ok IS FALSE OR request_state IN (...)`, `failure_family` kept for
     -- observability) so the existing `ok` / `failure_family` / `endpoint_id`
     -- indexes can serve the grouping without a new migration.
+    -- Issue #593: the grouping also keys on `upstream_model` so a route
+    -- override shows the actual upstream model as its own entry.
     SELECT COALESCE(n.model, '(unknown)') AS model_key,
            n.endpoint_id,
+           n.upstream_model,
            COALESCE(pe.name, n.endpoint_id::TEXT, '(direct)') AS endpoint_name,
            COUNT(*)::BIGINT AS request_count,
            COUNT(*) FILTER (
                WHERE n.ok IS FALSE OR n.request_state IN ('failed', 'aborted')
            )::BIGINT AS error_count,
            COALESCE(SUM(GREATEST(n.total_tokens, 0)), 0)::BIGINT AS total_tokens,
+           COALESCE(SUM(n.normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
+           COALESCE(SUM(n.normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens,
            AVG(
                CASE
                    WHEN n.request_state = 'completed'
@@ -107,28 +117,37 @@ WITH normalized AS (
            )::DOUBLE PRECISION AS avg_output_tokens_per_second
     FROM normalized n
     LEFT JOIN provider_endpoints pe ON pe.endpoint_id = n.endpoint_id
-    GROUP BY COALESCE(n.model, '(unknown)'), n.endpoint_id, pe.name
+    GROUP BY COALESCE(n.model, '(unknown)'), n.endpoint_id, n.upstream_model, pe.name
 ), upstream_agg AS (
-    SELECT model_key,
+    -- Issue #593: upstream entries reuse the main table's seven metrics with
+    -- the same semantics (global request/token shares, fold-aware cache rate).
+    SELECT u.model_key,
            COUNT(*)::BIGINT AS upstream_count,
            json_agg(
                json_build_object(
-                   'endpoint_id', endpoint_id,
-                   'endpoint_name', endpoint_name,
-                   'request_count', request_count,
-                   'error_count', error_count,
-                   'error_rate', CASE WHEN request_count > 0 THEN error_count::DOUBLE PRECISION / request_count ELSE 0 END,
-                   'total_tokens', total_tokens,
-                   'avg_output_tokens_per_second', avg_output_tokens_per_second
+                   'endpoint_id', u.endpoint_id,
+                   'endpoint_name', u.endpoint_name,
+                   'upstream_model', u.upstream_model,
+                   'request_count', u.request_count,
+                   'request_share', CASE WHEN t.request_count > 0 THEN u.request_count::DOUBLE PRECISION / t.request_count ELSE 0 END,
+                   'error_count', u.error_count,
+                   'error_rate', CASE WHEN u.request_count > 0 THEN u.error_count::DOUBLE PRECISION / u.request_count ELSE 0 END,
+                   'total_tokens', u.total_tokens,
+                   -- Issue #593: match the main table's nullable token share
+                   -- (`/ NULLIF(total, 0)`), so a zero-token window stays NULL.
+                   'token_share', u.total_tokens::DOUBLE PRECISION / NULLIF(t.total_tokens, 0),
+                   'cache_rate', CASE
+                       WHEN u.full_input_tokens > 0
+                       THEN LEAST(GREATEST(u.cache_read_tokens::DOUBLE PRECISION / u.full_input_tokens, 0), 1)
+                       ELSE NULL
+                   END,
+                   'avg_output_tokens_per_second', u.avg_output_tokens_per_second
                )
-               ORDER BY total_tokens DESC, request_count DESC, endpoint_name ASC
+               ORDER BY u.total_tokens DESC, u.request_count DESC, u.endpoint_name ASC, u.upstream_model ASC NULLS LAST
            ) AS upstream_breakdown
-    FROM upstream
-    GROUP BY model_key
-), totals AS (
-    SELECT SUM(request_count)::DOUBLE PRECISION AS request_count,
-           SUM(total_tokens)::DOUBLE PRECISION AS total_tokens
-    FROM grouped
+    FROM upstream u
+    CROSS JOIN totals t
+    GROUP BY u.model_key
 )
 SELECT label AS "label!",
        model,

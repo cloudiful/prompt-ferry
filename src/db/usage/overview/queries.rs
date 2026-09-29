@@ -3,15 +3,12 @@ use chrono::{DateTime, Utc};
 use sqlx::FromRow;
 
 use crate::db::{
-    RequestRecordCategory, RequestRecordOverviewBreakdownRow, RequestRecordOverviewErrorRow,
-    RequestRecordOverviewSummary, RequestRecordOverviewTrendBucket,
-    RequestRecordOverviewUpstreamBreakdown,
+    RequestRecordCategory, RequestRecordOverviewBreakdownRow, RequestRecordOverviewSummary,
+    RequestRecordOverviewTrendBucket, RequestRecordOverviewUpstreamBreakdown,
 };
 
 use super::OverviewWindow;
-use super::presentation::{
-    error_rate, failure_family_label, opt_error_rate, ratio, summary_from_metrics, token_usage,
-};
+use super::presentation::{error_rate, opt_error_rate, ratio, summary_from_metrics, token_usage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverviewBucket {
@@ -126,12 +123,6 @@ fn mcp_provider_dimension(raw: Option<&str>) -> (Option<String>, Option<String>)
     let usage_unit =
         crate::db::mcp_provider_info(provider_kind).map(|info| info.unit.as_str().to_string());
     (provider_kind.map(str::to_string), usage_unit)
-}
-
-#[derive(Debug, FromRow)]
-struct ErrorRow {
-    key: String,
-    count: i64,
 }
 
 pub async fn query_summary(
@@ -319,37 +310,6 @@ pub async fn query_breakdown(
                 .collect())
         }
     }
-}
-
-pub async fn query_error_breakdown(
-    pool: &sqlx::PgPool,
-    visible_user_id: Option<i64>,
-    request_category: RequestRecordCategory,
-    window: OverviewWindow,
-    user: Option<&str>,
-) -> Result<Vec<RequestRecordOverviewErrorRow>> {
-    let rows = sqlx::query_file_as!(
-        ErrorRow,
-        "src/sql/usage/overview/error_breakdown.sql",
-        visible_user_id,
-        request_category.as_str(),
-        window.start,
-        window.end,
-        user,
-    )
-    .fetch_all(pool)
-    .await?;
-    let total = rows.iter().map(|row| row.count).sum::<i64>();
-
-    Ok(rows
-        .into_iter()
-        .map(|row| RequestRecordOverviewErrorRow {
-            label: failure_family_label(&row.key).to_string(),
-            key: row.key,
-            count: row.count,
-            rate: ratio(row.count, total),
-        })
-        .collect())
 }
 
 #[cfg(test)]

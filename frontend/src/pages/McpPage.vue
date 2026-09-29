@@ -157,7 +157,7 @@ onMounted(async () => {
 
 <template>
   <div class="grid min-w-0 max-w-full gap-3">
-    <PageIntro :eyebrow="t('tooling')" :title="t('mcp')">
+    <PageIntro>
       <template #actions>
         <UButton
           size="sm"

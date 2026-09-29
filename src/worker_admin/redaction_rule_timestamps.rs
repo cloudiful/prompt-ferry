@@ -18,7 +18,7 @@ pub fn stamp_custom_string_timestamps(
     for (index, rule) in next.iter_mut().enumerate() {
         let previous_rule = previous.get(index);
         let unchanged = previous_rule.is_some_and(|previous| previous.same_content(rule));
-        let legacy_created_at = previous_rule.and_then(|_| previous_blob_updated_at);
+        let legacy_created_at = previous_rule.and(previous_blob_updated_at);
 
         let created_at = rule
             .created_at

@@ -83,6 +83,9 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
                 // Issue #502 Task 5: per-target compact mode; missing
                 // reads as `passthrough` (no new default semantics).
                 compact_mode: crate::db::resolve_target_compact_mode(row.compact_mode.as_deref()),
+                // Issue #637: free-form per-target override; blank means
+                // inherit (NULL).
+                service_tier: crate::db::normalize_service_tier(row.service_tier.as_deref()),
                 created_at: row.created_at,
                 updated_at: row.updated_at,
             }
@@ -133,9 +136,13 @@ pub(super) async fn model_route_candidates_by_rule(
             .unwrap_or_else(|| {
                 fallback_api_keys(row.endpoint_id, &row.endpoint_name, &row.api_key)
             });
-        let provider = crate::db::EndpointProvider::from_str(&row.provider);
-        let service_tier =
-            crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref());
+        let provider = crate::db::EndpointProvider::from_str_or_default(&row.provider);
+        // Issue #637: target override wins, else the endpoint value, else
+        // inherit (both blank/NULL).
+        let service_tier = crate::db::resolve_service_tier(
+            row.endpoint_service_tier.as_deref(),
+            row.target_service_tier.as_deref(),
+        );
         // Issue #409 Phase 1: target explicit wins, else endpoint fallback.
         // Both `Auto` stays `Auto` for per-caller `resolve_auto_protocol`.
         let target_native_api = row

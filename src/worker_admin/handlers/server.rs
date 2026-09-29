@@ -99,7 +99,7 @@ pub fn router(state: AdminState) -> Router {
     router_with_frontend_dist(state, frontend_dist_dir())
 }
 
-fn response_compression_layer() -> CompressionLayer<impl Predicate + Clone + Send + 'static> {
+fn response_compression_layer() -> CompressionLayer<impl Predicate + Send + 'static> {
     let predicate = DefaultPredicate::new()
         .and(NotForContentType::SSE)
         .and(skip_websocket_upgrade);
@@ -174,6 +174,10 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
         .route(
             "/admin/endpoints/{endpoint_id}/token-plan-usage",
             get(token_plan_usage),
+        )
+        .route(
+            "/admin/endpoints/{endpoint_id}/organization-usage",
+            get(organization_usage),
         )
         .route(
             "/admin/model-routes",
@@ -404,6 +408,10 @@ mod admin_routing_tests {
         for (path, expected) in [
             ("/admin/endpoints", Some(Capability::Endpoints)),
             ("/admin/endpoints/test", Some(Capability::Endpoints)),
+            (
+                "/admin/endpoints/abc/organization-usage",
+                Some(Capability::Endpoints),
+            ),
             ("/admin/model-routes", Some(Capability::ModelRoutes)),
             ("/admin/relays", Some(Capability::Relays)),
             ("/admin/relays/abc/reconnect", Some(Capability::Relays)),

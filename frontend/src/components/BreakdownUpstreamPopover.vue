@@ -23,8 +23,13 @@ const upstreamColumns = computed<
   TableColumn<RequestRecordOverviewUpstreamBreakdown>[]
 >(() => [
   { accessorKey: 'endpoint_name', header: t('overviewUpstreamEndpoint') },
-  { accessorKey: 'error_rate', header: t('overviewErrorRate') },
+  { id: 'model', header: t('model') },
+  { accessorKey: 'request_count', header: t('requests') },
+  { accessorKey: 'request_share', header: t('overviewRequestShare') },
   { accessorKey: 'total_tokens', header: t('overviewTotalTokens') },
+  { accessorKey: 'token_share', header: t('overviewTokenShare') },
+  { accessorKey: 'cache_rate', header: t('overviewCacheRate') },
+  { accessorKey: 'error_rate', header: t('overviewErrorRate') },
   {
     accessorKey: 'avg_output_tokens_per_second',
     header: t('overviewAvgOutputRate'),
@@ -38,6 +43,11 @@ function endpointLabel(
   if (endpointName && endpointName.length > 0) return endpointName
   if (endpointId && endpointId.length > 0) return endpointId.slice(0, 8)
   return '-'
+}
+
+function modelLabel(upstreamModel: string | null | undefined): string {
+  if (upstreamModel && upstreamModel.length > 0) return upstreamModel
+  return props.row.label
 }
 </script>
 
@@ -63,7 +73,7 @@ function endpointLabel(
     />
     <template #content>
       <div
-        class="max-h-[50vh] w-[min(28rem,calc(100vw-2rem))] overflow-auto p-3"
+        class="max-h-[50vh] w-[min(38rem,calc(100vw-2rem))] overflow-auto p-3"
       >
         <div class="mb-2 text-xs font-semibold text-highlighted">
           {{ t('overviewUpstreamBreakdown') }}
@@ -86,11 +96,28 @@ function endpointLabel(
               )
             }}</span>
           </template>
-          <template #error_rate-cell="{ row }">{{
-            formatting.formatPercent(row.original.error_rate)
+          <template #model-cell="{ row }">
+            <span class="font-medium text-highlighted">{{
+              modelLabel(row.original.upstream_model)
+            }}</span>
+          </template>
+          <template #request_count-cell="{ row }">{{
+            formatting.formatCount(row.original.request_count)
+          }}</template>
+          <template #request_share-cell="{ row }">{{
+            formatting.formatPercent(row.original.request_share)
           }}</template>
           <template #total_tokens-cell="{ row }">{{
             formatting.formatTokenQuantity(row.original.total_tokens)
+          }}</template>
+          <template #token_share-cell="{ row }">{{
+            formatting.formatPercent(row.original.token_share)
+          }}</template>
+          <template #cache_rate-cell="{ row }">{{
+            formatting.formatPercent(row.original.cache_rate)
+          }}</template>
+          <template #error_rate-cell="{ row }">{{
+            formatting.formatPercent(row.original.error_rate)
           }}</template>
           <template #avg_output_tokens_per_second-cell="{ row }">{{
             formatting.formatTokensPerSecond(

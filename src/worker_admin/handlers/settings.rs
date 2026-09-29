@@ -663,10 +663,10 @@ pub(super) async fn set_raw_object_store(
         Ok(store) => store,
         Err(err) => return bad_request(&format!("{err:#}")),
     };
-    if let Some(ref store) = candidate_store {
-        if let Err(err) = store.validate_candidate().await {
-            return bad_request(&format!("raw object store validation failed: {err:#}"));
-        }
+    if let Some(ref store) = candidate_store
+        && let Err(err) = store.validate_candidate().await
+    {
+        return bad_request(&format!("raw object store validation failed: {err:#}"));
     }
 
     let persisted =

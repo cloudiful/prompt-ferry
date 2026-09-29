@@ -206,6 +206,23 @@ export type CacheAlertSettings = {
     window_minutes?: number;
 };
 
+/**
+ * Admin API view of [`CacheAlertSettings`]: the write-only DingTalk secret is
+ * always blanked, and `has_dingtalk_secret` reports whether a non-blank secret
+ * is actually stored. The request schema and the persisted JSON never carry
+ * this derived flag.
+ */
+export type CacheAlertSettingsResponse = {
+    cooldown_minutes: number;
+    dingtalk_secret: string;
+    dingtalk_webhook_url: string;
+    enabled: boolean;
+    has_dingtalk_secret: boolean;
+    min_turns: number;
+    threshold: number;
+    window_minutes: number;
+};
+
 export type ClientKey = {
     created_at: string;
     enabled: boolean;
@@ -370,6 +387,15 @@ export type EndpointRequest = {
      * means all-day; `Some([...])` replaces after validation.
      */
     active_windows?: Array<ActiveWindow> | null;
+    /**
+     * Issue #589: optional OpenAI Admin API key, accepted only for the
+     * OpenAI provider. `None` (omitted) keeps the stored value on PATCH
+     * (`None` on create means unset); `Some("")`/whitespace clears it;
+     * `Some(key)` replaces it. A non-OpenAI provider rejects a non-empty
+     * value and always clears any stored key. Server-side only: responses
+     * expose just `has_admin_api_key`.
+     */
+    admin_api_key?: string | null;
     api_key: string;
     api_keys?: Array<EndpointApiKeyRequest>;
     base_url: string;
@@ -397,7 +423,11 @@ export type EndpointRequest = {
      */
     proxy_url?: string | null;
     scope: string;
-    service_tier?: MinimaxServiceTier;
+    /**
+     * Issue #637: free-form service-tier override. `None`/blank inherits
+     * (no override); a model-route target override wins over this value.
+     */
+    service_tier?: string | null;
 };
 
 export type EndpointSettingRequest = {
@@ -700,8 +730,6 @@ export type MeResponse = {
     user_id: number;
 };
 
-export type MinimaxServiceTier = 'standard' | 'priority';
-
 export type ModelEndpointRule = {
     created_at: string;
     enabled: boolean;
@@ -777,6 +805,12 @@ export type ModelRouteTarget = {
     native_api?: NativeApi;
     position: number;
     rule_id: string;
+    /**
+     * Issue #637: per-target free-form service-tier override. `None`/blank
+     * inherits the endpoint value (or leaves the caller/provider default
+     * intact when the endpoint is blank too).
+     */
+    service_tier?: string | null;
     target_id: string;
     /**
      * Issue #566: per-target thinking adaptation switch (pre-flight
@@ -833,6 +867,12 @@ export type ModelRouteTargetRequest = {
      * inherit; `Some(url)` must use `http/https/socks5/socks5h`.
      */
     proxy_url_override?: string | null;
+    /**
+     * Issue #637: per-target free-form service-tier override. `None`
+     * (omitted/null/empty) means inherit the endpoint value; `Some(value)`
+     * is trimmed and wins over the endpoint override.
+     */
+    service_tier?: string | null;
     /**
      * Issue #566: per-target thinking adaptation switch (pre-flight
      * downgrade + reasoning-echo fingerprint retry). Always sent (no omit
@@ -938,6 +978,39 @@ export type OAuthLoginResponse = {
  */
 export type OAuthLoginStatus = 'pending' | 'complete';
 
+/**
+ * Issue #589 P2b: OpenAI Platform organization usage for the endpoint's Admin
+ * API key. UTC month-to-date input/output tokens and USD cost from the
+ * official `usage/completions` and `costs` endpoints. Display-only: it never
+ * feeds routing weights, token-plan quota, or remaining-credit calculations.
+ */
+export type OpenAiOrganizationUsageResponse = {
+    /**
+     * Served from the 60s display cache instead of a live upstream read.
+     */
+    cached: boolean;
+    cost_usd: number;
+    currency: string;
+    fetched_at: string;
+    input_tokens: number;
+    output_tokens: number;
+    /**
+     * UTC instant the window was read (`now`).
+     */
+    period_end: string;
+    /**
+     * UTC first instant of the current month.
+     */
+    period_start: string;
+    provider: EndpointProvider;
+    total_tokens: number;
+    /**
+     * The upstream reported more pages than the fetch cap read; totals are a
+     * lower bound.
+     */
+    truncated: boolean;
+};
+
 export type OpenRouterBalance = {
     is_free_tier: boolean;
     limit?: number | null;
@@ -972,6 +1045,12 @@ export type ProviderEndpoint = {
     enabled: boolean;
     endpoint_id: string;
     /**
+     * Issue #589: response-side saved-Admin-API-Key indicator. The secret is
+     * read through a dedicated query and never reaches this shape or any
+     * serialized endpoint response.
+     */
+    has_admin_api_key?: boolean;
+    /**
      * Issue #599 R2a: response-side saved-OAuth-token indicator. `true` when
      * a ChatGPT OAuth token is stored; the secrets themselves are never
      * echoed, mirroring `has_proxy_url`.
@@ -998,7 +1077,11 @@ export type ProviderEndpoint = {
     provider: EndpointProvider;
     provider_region?: null | EndpointRegion;
     scope: string;
-    service_tier?: MinimaxServiceTier;
+    /**
+     * Issue #637: free-form endpoint service-tier override. `None` means
+     * inherit (no override); a model-route target override wins over it.
+     */
+    service_tier?: string | null;
     updated_at: string;
 };
 
@@ -1434,18 +1517,10 @@ export type RequestRecordOverviewBreakdownRow = {
     usage_unit?: string | null;
 };
 
-export type RequestRecordOverviewErrorRow = {
-    count: number;
-    key: string;
-    label: string;
-    rate: number;
-};
-
 export type RequestRecordOverviewRange = '24h' | '7d' | '30d' | 'month' | 'custom';
 
 export type RequestRecordOverviewResponse = {
     breakdown: Array<RequestRecordOverviewBreakdownRow>;
-    error_breakdown: Array<RequestRecordOverviewErrorRow>;
     summary: RequestRecordOverviewSummary;
     trend: Array<RequestRecordOverviewTrendBucket>;
 };
@@ -1492,12 +1567,27 @@ export type RequestRecordOverviewTrendBucket = {
 
 export type RequestRecordOverviewUpstreamBreakdown = {
     avg_output_tokens_per_second?: number | null;
+    cache_rate?: number | null;
     endpoint_id?: string | null;
     endpoint_name?: string | null;
     error_count: number;
     error_rate: number;
     request_count: number;
+    /**
+     * Share of the window's requests, matching the main model table.
+     */
+    request_share: number;
+    /**
+     * Share of the window's total tokens, matching the main model table.
+     * `None` when the window has zero total tokens.
+     */
+    token_share?: number | null;
     total_tokens: number;
+    /**
+     * Model actually sent upstream when a route target override applies.
+     * `None` when the request used the requested model unchanged.
+     */
+    upstream_model?: string | null;
 };
 
 export type RequestRecordPage = {
@@ -2406,6 +2496,33 @@ export type OauthRefreshResponses = {
 };
 
 export type OauthRefreshResponse = OauthRefreshResponses[keyof OauthRefreshResponses];
+
+export type OrganizationUsageData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/endpoints/{endpoint_id}/organization-usage';
+};
+
+export type OrganizationUsageErrors = {
+    400: ErrorEnvelope;
+};
+
+export type OrganizationUsageError = OrganizationUsageErrors[keyof OrganizationUsageErrors];
+
+export type OrganizationUsageResponses = {
+    /**
+     * OpenAI Platform organization usage (UTC month to date)
+     */
+    200: OpenAiOrganizationUsageResponse;
+};
+
+export type OrganizationUsageResponse = OrganizationUsageResponses[keyof OrganizationUsageResponses];
 
 export type TestEndpointData = {
     body?: never;
@@ -3617,9 +3734,9 @@ export type GetCacheAlertSettingData = {
 
 export type GetCacheAlertSettingResponses = {
     /**
-     * Continuous-session cache alert settings; the stored DingTalk secret is never echoed back
+     * Continuous-session cache alert settings; the stored DingTalk secret is never echoed back and `has_dingtalk_secret` reports whether one is stored
      */
-    200: CacheAlertSettings;
+    200: CacheAlertSettingsResponse;
 };
 
 export type GetCacheAlertSettingResponse = GetCacheAlertSettingResponses[keyof GetCacheAlertSettingResponses];
@@ -3635,7 +3752,7 @@ export type SetCacheAlertSettingResponses = {
     /**
      * Updated cache alert settings; a blank dingtalk_secret keeps the stored value
      */
-    200: CacheAlertSettings;
+    200: CacheAlertSettingsResponse;
 };
 
 export type SetCacheAlertSettingResponse = SetCacheAlertSettingResponses[keyof SetCacheAlertSettingResponses];

@@ -24,7 +24,7 @@ use uuid::Uuid;
 fn provider_wire_values_match_minimax_convention() {
     assert_eq!(EndpointProvider::CommandCode.as_str(), "command_code");
     assert_eq!(
-        EndpointProvider::from_str("command_code"),
+        EndpointProvider::from_str_or_default("command_code"),
         EndpointProvider::CommandCode
     );
     assert_eq!(
@@ -43,7 +43,7 @@ fn provider_wire_values_match_minimax_convention() {
     assert_eq!(deserialized, EndpointProvider::CommandCode);
     // Unknown providers keep the legacy generic fallback.
     assert_eq!(
-        EndpointProvider::from_str("legacy-unknown"),
+        EndpointProvider::from_str_or_default("legacy-unknown"),
         EndpointProvider::Generic
     );
     assert_eq!(
@@ -185,12 +185,12 @@ fn key_usage_serde_omits_absent_command_code_sections() {
         }
     }
     // MiniMax-shaped key: no command_code sections serialized.
-    let minimax_shaped = serde_json::to_value(&key(None, None, None)).expect("serialize key");
+    let minimax_shaped = serde_json::to_value(key(None, None, None)).expect("serialize key");
     assert!(minimax_shaped.get("balances").is_none());
     assert!(minimax_shaped.get("five_hour").is_none());
     assert!(minimax_shaped.get("weekly").is_none());
     // CommandCode key: dual windows present; PAYG degrades to None windows.
-    let dual = serde_json::to_value(&key(
+    let dual = serde_json::to_value(key(
         Some(CommandCodeBalances {
             monthly_credits: 80.0,
             purchased_credits: 0.0,
@@ -203,7 +203,7 @@ fn key_usage_serde_omits_absent_command_code_sections() {
     .expect("serialize key");
     assert_eq!(dual["five_hour"]["remaining_percent"], json!(50.0));
     assert_eq!(dual["weekly"]["remaining_percent"], json!(75.0));
-    let payg = serde_json::to_value(&key(
+    let payg = serde_json::to_value(key(
         Some(CommandCodeBalances {
             monthly_credits: 0.0,
             purchased_credits: 10.0,

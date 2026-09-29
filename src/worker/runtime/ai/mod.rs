@@ -19,6 +19,9 @@ mod responses_summary_stream;
 mod responses_summary_stream_tests;
 pub(super) mod review;
 mod stream_restore;
+#[cfg(test)]
+#[path = "stream_restore/property_tests.rs"]
+mod stream_restore_property_tests;
 pub(super) mod streaming;
 mod streaming_terminal;
 mod streaming_usage;

@@ -124,7 +124,7 @@ async fn settle_and_respond(
                 body.clone().into_bytes(),
             )
             .await;
-            record_mcp_request_event(
+            Box::pin(record_mcp_request_event(
                 &context,
                 FailurePayload {
                     status: StatusCode::BAD_GATEWAY,
@@ -137,7 +137,7 @@ async fn settle_and_respond(
                     upstream_error_body: Some(body),
                     response_body: None,
                 },
-            )
+            ))
             .await;
         }
     }

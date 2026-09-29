@@ -1,7 +1,7 @@
 {
   "name": "prompt-ferry-frontend",
   "private": true,
-  "version": "1.41.2",
+  "version": "1.42.1",
   "type": "module",
   "packageManager": "bun@1.3.14",
   "scripts": {
@@ -11,7 +11,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "build": "bun run typecheck && vite build",
-    "typecheck": "tsgo --noEmit -p tsconfig.tsgo.json"
+    "typecheck": "tsgo --noEmit -p tsconfig.tsgo.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@iconify-json/lucide": "1.2.129",
@@ -32,6 +33,7 @@
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "prettier": "3.9.6",
     "typescript": "6.0.3",
-    "vite": "8.2.2"
+    "vite": "8.2.2",
+    "vitest": "5.0.1"
   }
 }

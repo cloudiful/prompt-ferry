@@ -27,7 +27,7 @@ pub(super) async fn handle_restore_failure(
         client_body,
     )
     .await;
-    record_mcp_request_event(
+    Box::pin(record_mcp_request_event(
         context,
         FailurePayload {
             status: StatusCode::BAD_GATEWAY,
@@ -36,6 +36,6 @@ pub(super) async fn handle_restore_failure(
             upstream_error_body: Some(String::from_utf8_lossy(&upstream_body).to_string()),
             response_body: None,
         },
-    )
+    ))
     .await;
 }

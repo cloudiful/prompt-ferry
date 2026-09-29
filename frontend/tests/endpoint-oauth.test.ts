@@ -4,6 +4,7 @@ import { createSSRApp, h } from 'vue'
 import { compileScript, parse } from 'vue/compiler-sfc'
 import { renderToString } from 'vue/server-renderer'
 import * as adminMappers from '../src/admin-mappers'
+import * as endpointDialogValidation from '../src/composables/useEndpointDialogValidation'
 import {
   createEmptyEndpointForm,
   endpointFormToRequest,
@@ -12,7 +13,8 @@ import {
   normalizeProviderPlan,
 } from '../src/admin-mappers/forms/endpoint'
 import type { ProviderEndpoint } from '../src/generated/admin-api'
-import { endpointMessages } from '../src/i18n/modules/endpoints'
+import { endpointOpenAiMessages } from '../src/i18n/modules/endpoints.openai'
+import { messages } from '../src/i18n'
 import type { EndpointForm } from '../src/models'
 
 function endpointFixture(
@@ -175,6 +177,9 @@ const dialogComponent = ((): Component => {
   const resolve = (spec: string): unknown => {
     if (spec === 'vue') return vue
     if (spec === '@/admin-mappers') return adminMappers
+    if (spec === '@/composables/useEndpointDialogValidation') {
+      return endpointDialogValidation
+    }
     if (spec.endsWith('EndpointApiKeysEditor.vue')) return apiKeysStub
     return slotStub(spec.split('/').pop() ?? spec)
   }
@@ -265,6 +270,25 @@ test('new endpoints keep the save-first login guidance', async () => {
   expect(html).toContain(API_KEYS_MARKER)
 })
 
+test('OpenAI endpoints mount the Admin API Key and organization usage sections', async () => {
+  const html = await renderDialog({
+    ...subscriptionForm(),
+    plan: 'platform_api_key',
+  })
+  expect(html).toContain('data-stub="EndpointAdminApiKeyFields.vue"')
+  expect(html).toContain('data-stub="EndpointOrganizationUsage.vue"')
+})
+
+test('non-OpenAI endpoints hide the Admin API Key and organization usage sections', async () => {
+  const html = await renderDialog({
+    ...createEmptyEndpointForm(),
+    name: 'generic',
+    provider: 'generic',
+  })
+  expect(html).not.toContain('data-stub="EndpointAdminApiKeyFields.vue"')
+  expect(html).not.toContain('data-stub="EndpointOrganizationUsage.vue"')
+})
+
 test('ChatGPT OAuth copy exists in both locales', () => {
   const keys = [
     'endpointPlan',
@@ -299,9 +323,12 @@ test('ChatGPT OAuth copy exists in both locales', () => {
     'endpointOAuthCopy',
   ] as const
   for (const locale of ['zh-CN', 'en-US'] as const) {
-    const messages = endpointMessages[locale] as Record<string, string>
+    const localized = endpointOpenAiMessages[locale] as Record<string, string>
+    const merged = messages[locale] as Record<string, string>
     for (const key of keys) {
-      expect(messages[key]?.length ?? 0).toBeGreaterThan(0)
+      expect(localized[key]?.length ?? 0).toBeGreaterThan(0)
+      // Extracted keys stay flat in the merged locale object.
+      expect(merged[key]).toBe(localized[key])
     }
   }
 })

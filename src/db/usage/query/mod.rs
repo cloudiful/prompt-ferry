@@ -130,7 +130,7 @@ impl From<RequestRecordListRowFlat> for RequestRecordListRow {
             failure_family: row.failure_family,
             mcp_bearer_token_slot: row.mcp_bearer_token_slot,
             route_selection_reason: row.route_selection_reason.unwrap_or_default(),
-            created_at: row.created_at.unwrap_or_else(|| chrono::Utc::now()),
+            created_at: row.created_at.unwrap_or_else(chrono::Utc::now),
         }
     }
 }

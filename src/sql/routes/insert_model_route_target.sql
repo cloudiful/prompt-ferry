@@ -10,6 +10,7 @@ INSERT INTO model_route_targets(
     dev_system_normalize,
     thinking_downgrade_enabled,
     thinking_effort_override,
-    compact_mode
+    compact_mode,
+    service_tier
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)

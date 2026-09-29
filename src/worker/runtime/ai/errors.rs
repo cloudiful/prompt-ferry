@@ -29,8 +29,8 @@ pub(super) async fn respond_with_local_error(
         }))
         .await
         .context("relay response channel closed")?;
-    services
-        .record_usage_event(
+    Box::pin(
+        services.record_usage_event(
             request_ctx
                 .ai_usage_log(request, None)
                 .with_upstream_redaction(
@@ -56,8 +56,9 @@ pub(super) async fn respond_with_local_error(
                     Some(failure.error_message),
                     failure.upstream_error_body,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
     Ok(())
 }
 
@@ -84,8 +85,8 @@ pub(super) async fn respond_with_affinity_error(
         } else {
             (audit.endpoint_id, audit.endpoint_key_id)
         };
-    services
-        .record_usage_event(
+    Box::pin(
+        services.record_usage_event(
             request_ctx
                 .ai_usage_log(request, None)
                 .with_upstream_redaction(
@@ -114,8 +115,9 @@ pub(super) async fn respond_with_affinity_error(
                     Some(affinity_error.message.to_string()),
                     None,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
     Ok(())
 }
 
@@ -130,7 +132,7 @@ pub(super) async fn respond_with_client_error(
         serde_json::json!({
             "type": "error",
             "error": {
-                "type": anthropic_error_type(err.status, &err.code),
+                "type": anthropic_error_type(err.status, err.code),
                 "message": err.message,
             },
         })
@@ -168,8 +170,8 @@ pub(super) async fn respond_with_client_error(
         }))
         .await
         .context("relay response channel closed")?;
-    services
-        .record_usage_event(
+    Box::pin(
+        services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
                 .with_upstream_redaction(
                     request_ctx.request_prompt_log.upstream_redaction_enabled,
@@ -190,8 +192,9 @@ pub(super) async fn respond_with_client_error(
                     None,
                 )
                 .with_error(Some(err.code.to_string()), Some(err.message), Some(body)),
-        )
-        .await;
+        ),
+    )
+    .await;
     Ok(())
 }
 

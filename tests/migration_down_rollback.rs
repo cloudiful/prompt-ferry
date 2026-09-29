@@ -16,6 +16,11 @@ use uuid::Uuid;
 
 use crate::db_harness::{TEST_DATABASE_URL_ENV, TestSchema, test_database_configured};
 
+/// `20260923135234_partition_request_family`, the down path under test. The
+/// version is pinned because newer down-able migrations sit above it, and the
+/// revert helper targets the latest down-able migration at or below the ceiling.
+const PARTITION_FAMILY_VERSION: i64 = 20260923135234;
+
 async fn create_user(pool: &sqlx::PgPool) -> anyhow::Result<i64> {
     let user = db::create_user(
         pool,
@@ -138,7 +143,7 @@ async fn down_migrates_while_billing_ledger_holds_rows() -> anyhow::Result<()> {
     assert_eq!(seeded.raw_payload_overflow, 1);
 
     // Down must succeed despite the non-empty ledger and raw payloads ...
-    db::revert_latest_migration(&schema.pool).await?;
+    db::revert_latest_migration(&schema.pool, PARTITION_FAMILY_VERSION).await?;
 
     // ... truncating every FK-carrying table ...
     let drained = sqlx::query_file!("tests/sql/db_migrations/ledger_round_trip_counts.sql")

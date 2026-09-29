@@ -442,7 +442,7 @@ pub(super) async fn forward_streaming_response(
                                 redact_content,
                                 request_ctx.user_id,
                             );
-                        services.record_usage_event(
+                        Box::pin(services.record_usage_event(
                             ai_route_usage_log(request_ctx, request, route_ctx)
                                 .with_upstream_redaction(
                                     upstream_restore_session.is_some(),
@@ -480,7 +480,7 @@ pub(super) async fn forward_streaming_response(
                                     Some(safe_err.clone()),
                                     None,
                                 ),
-                        )
+                        ))
                         .await;
                         let _ = services
                             .out_tx
@@ -542,13 +542,13 @@ pub(super) async fn forward_streaming_response(
                             stream_diag
                                 .mark_terminal("stream_adapter_error", Some(err.message.clone()));
                             stream_diag.finish();
-                            return respond_with_client_error(
+                            return Box::pin(respond_with_client_error(
                                 services,
                                 request,
                                 request_ctx,
                                 route_ctx,
                                 err,
-                            )
+                            ))
                             .await;
                         }
                     }
@@ -565,13 +565,13 @@ pub(super) async fn forward_streaming_response(
                             stream_diag
                                 .mark_terminal("stream_adapter_error", Some(err.message.clone()));
                             stream_diag.finish();
-                            return respond_with_client_error(
+                            return Box::pin(respond_with_client_error(
                                 services,
                                 request,
                                 request_ctx,
                                 route_ctx,
                                 err,
-                            )
+                            ))
                             .await;
                         }
                     }
@@ -588,13 +588,13 @@ pub(super) async fn forward_streaming_response(
                             stream_diag
                                 .mark_terminal("stream_adapter_error", Some(err.message.clone()));
                             stream_diag.finish();
-                            return respond_with_client_error(
+                            return Box::pin(respond_with_client_error(
                                 services,
                                 request,
                                 request_ctx,
                                 route_ctx,
                                 err,
-                            )
+                            ))
                             .await;
                         }
                     }
@@ -643,8 +643,14 @@ pub(super) async fn forward_streaming_response(
                     adapter.model_name(),
                     &err,
                 );
-                return respond_with_client_error(services, request, request_ctx, route_ctx, err)
-                    .await;
+                return Box::pin(respond_with_client_error(
+                    services,
+                    request,
+                    request_ctx,
+                    route_ctx,
+                    err,
+                ))
+                .await;
             }
         };
         let output_chunks = match sse_restore_filter.as_mut() {
@@ -671,8 +677,14 @@ pub(super) async fn forward_streaming_response(
                     adapter.model_name(),
                     &err,
                 );
-                return respond_with_client_error(services, request, request_ctx, route_ctx, err)
-                    .await;
+                return Box::pin(respond_with_client_error(
+                    services,
+                    request,
+                    request_ctx,
+                    route_ctx,
+                    err,
+                ))
+                .await;
             }
         };
         let output_chunks = match sse_restore_filter.as_mut() {
@@ -699,8 +711,14 @@ pub(super) async fn forward_streaming_response(
                     adapter.model_name(),
                     &err,
                 );
-                return respond_with_client_error(services, request, request_ctx, route_ctx, err)
-                    .await;
+                return Box::pin(respond_with_client_error(
+                    services,
+                    request,
+                    request_ctx,
+                    route_ctx,
+                    err,
+                ))
+                .await;
             }
         };
         let output_chunks = match sse_restore_filter.as_mut() {
@@ -783,7 +801,7 @@ pub(super) async fn forward_streaming_response(
             ttft_ms = Some(request_ctx.elapsed_ms());
         }
         let (code, message) = failure_details(responses_stream_terminal);
-        finish_failure(
+        Box::pin(finish_failure(
             responses_stream_terminal,
             &context,
             status.as_u16(),
@@ -791,7 +809,7 @@ pub(super) async fn forward_streaming_response(
             &raw_response_body,
             responses_error_body.as_deref(),
             ttft_ms,
-        )
+        ))
         .await?;
         stream_diag.record_timings(request_ctx.elapsed_ms(), ttft_ms);
         stream_diag.mark_terminal(code, Some(message.to_string()));
@@ -842,8 +860,8 @@ pub(super) async fn forward_streaming_response(
         redact_content,
         request_ctx.user_id,
     );
-    let usage_event_id = services
-        .record_usage_event(
+    let usage_event_id = Box::pin(
+        services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
                 .with_upstream_redaction(
                     upstream_restore_session.is_some(),
@@ -876,8 +894,9 @@ pub(super) async fn forward_streaming_response(
                 .with_response_capture_truncated(
                     capture.response_text_truncated || raw_response_capture_truncated,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
     let artifact_capture_expected = assistant_capture.is_some() || responses_capture.is_some();
     persist_assistant_artifact(PersistAssistantArtifactParams {
         admin_state: services.admin_state(),
@@ -1067,8 +1086,8 @@ async fn forward_buffered_non_sse_response(
         redact_content,
         request_ctx.user_id,
     );
-    let usage_event_id = services
-        .record_usage_event(
+    let usage_event_id = Box::pin(
+        services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
                 .with_upstream_redaction(
                     true,
@@ -1101,8 +1120,9 @@ async fn forward_buffered_non_sse_response(
                 .with_response_capture_truncated(
                     capture.response_text_truncated || raw_response_capture_truncated,
                 ),
-        )
-        .await;
+        ),
+    )
+    .await;
     let artifact_capture_expected = assistant_capture.is_some() || responses_capture.is_some();
     persist_assistant_artifact(PersistAssistantArtifactParams {
         admin_state: services.admin_state(),

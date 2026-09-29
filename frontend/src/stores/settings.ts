@@ -38,6 +38,7 @@ import {
 } from '../admin-mappers'
 import { expectData, withData } from '../api'
 import type { StreamDeltaBatchingForm } from '../models'
+import { createCacheAlertStore } from './settings/cache-alert'
 
 const emptyLlmReview = ensureLlmReviewDefaults({
   enabled: false,
@@ -103,6 +104,13 @@ export const useSettingsStore = defineStore('settings', () => {
   })
   const llmReview = ref<LlmReviewSettings>(emptyLlmReview)
   const llmReviewWebhookHeadersText = ref('')
+  const {
+    cacheAlert,
+    cacheAlertError,
+    loadCacheAlert,
+    refreshCacheAlert,
+    saveCacheAlert,
+  } = createCacheAlertStore()
 
   async function refresh(): Promise<void> {
     loading.value = true
@@ -122,6 +130,7 @@ export const useSettingsStore = defineStore('settings', () => {
         getModelRouteWhitelist<true>(withData()),
         getLlmReviewSetting<true>(withData()),
         getUsageRetention<true>(withData()),
+        loadCacheAlert(),
       ])
       requestContentLogging.value = expectData(contentLogging)
       streamDeltaBatching.value = streamDeltaBatchingToForm(
@@ -254,6 +263,8 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   return {
+    cacheAlert,
+    cacheAlertError,
     llmReview,
     llmReviewWebhookHeadersText,
     loading,
@@ -261,8 +272,10 @@ export const useSettingsStore = defineStore('settings', () => {
     rawObjectStore,
     rawObjectStoreError,
     refresh,
+    refreshCacheAlert,
     refreshRawObjectStore,
     relayIpWhitelist,
+    saveCacheAlert,
     saveLlmReview,
     saveModelRouteWhitelist,
     saveRawObjectStore,

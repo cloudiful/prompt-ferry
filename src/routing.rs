@@ -10,10 +10,10 @@ pub enum BoundBindingState {
     StaleKey,
 }
 
-pub fn candidate_target_by_endpoint<'a>(
-    candidate: &'a ModelRouteCandidate,
+pub fn candidate_target_by_endpoint(
+    candidate: &ModelRouteCandidate,
     endpoint_id: uuid::Uuid,
-) -> Option<&'a ModelRouteCandidateTarget> {
+) -> Option<&ModelRouteCandidateTarget> {
     candidate
         .targets
         .iter()

@@ -25,6 +25,7 @@ const fetchTokenPlanUsage = mock(
 
 mock.module('../src/stores/endpoints-api', () => ({
   ...endpointsApi,
+  fetchOrganizationUsage: mock(async () => undefined),
   fetchTokenPlanUsage,
 }))
 

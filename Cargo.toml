@@ -4,7 +4,7 @@ default-members = [".", "tools/db-init", "crates/prompt-ferry-llm-review", "crat
 
 [package]
 name = "prompt-ferry"
-version = "1.41.2"
+version = "1.42.1"
 edition = "2024"
 license = "Apache-2.0"
 readme = "README.md"
@@ -23,6 +23,10 @@ harness = false
 
 [[bench]]
 name = "redaction_pipeline"
+harness = false
+
+[[bench]]
+name = "redaction_restore"
 harness = false
 
 [[bin]]
@@ -85,5 +89,7 @@ uuid = { version = "1.26.1", features = ["serde", "v4"] }
 zstd = "0.14.0"
 
 [dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 flate2 = "1.1.10"
+proptest = "1.11.0"
 sqlx = { version = "0.9.0", features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "sqlite", "chrono", "uuid", "json", "macros", "migrate", "sqlx-toml"] }

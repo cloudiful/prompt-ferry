@@ -115,19 +115,21 @@ pub async fn migrate(pool: &PgPool) -> Result<()> {
         .context("failed to run database migrations")
 }
 
-/// Revert the latest applied migration that ships a down file.
+/// Revert the latest down-able migration at or below `ceiling`, mirroring
+/// `sqlx migrate revert`: `undo` rolls back every applied down-migration above
+/// the version just below the selected one, so passing the migration under
+/// test pins the reverted path even after newer down-able migrations land.
 ///
 /// Used by the down-migration regression tests to exercise the same revert
-/// path as `sqlx migrate revert`: `undo` rolls back every applied
-/// down-migration above `target`, so the target is the newest version below
-/// the latest down-able one.
-pub async fn revert_latest_migration(pool: &PgPool) -> Result<()> {
+/// path as `sqlx migrate revert`.
+pub async fn revert_latest_migration(pool: &PgPool, ceiling: i64) -> Result<()> {
     let latest = MIGRATOR
         .iter()
         .filter(|migration| migration.migration_type.is_down_migration())
         .map(|migration| migration.version)
+        .filter(|version| *version <= ceiling)
         .max()
-        .context("no migration ships a down file")?;
+        .context("no migration at or below the requested version ships a down file")?;
     let target = MIGRATOR
         .iter()
         .map(|migration| migration.version)

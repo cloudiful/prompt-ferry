@@ -500,4 +500,6 @@ fn warn_residual_tokens(value: &Value, surface: &'static str) {
 }
 
 #[cfg(test)]
+mod survivor_tests;
+#[cfg(test)]
 mod tests;
