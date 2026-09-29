@@ -32,6 +32,7 @@ pub mod response_affinity;
 pub mod routing;
 pub use prompt_ferry_runtime_env::runtime_env;
 pub mod serve;
+pub mod session_affinity;
 pub mod standalone_config;
 pub mod storage;
 pub mod storage_sanitization;
