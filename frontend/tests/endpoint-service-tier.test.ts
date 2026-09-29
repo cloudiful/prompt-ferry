@@ -84,16 +84,26 @@ test('endpointFormToRequest round-trips the service tier and inherits blank', ()
   expect(endpointFormToRequest(blank).service_tier).toBeNull()
 })
 
-test('a form switched to a non-minimax provider submits inherit', () => {
-  // Issue #637 P3: the provider switch must not silently create `standard`
-  // for OpenAI/generic — it leaves `null` (inherit) and the request keeps
-  // it, so the runtime preserves the caller/provider default there.
-  const switched = {
-    ...createEmptyEndpointForm(),
-    provider: 'openai' as const,
-    service_tier: null,
+test('a configured tier is submitted for every provider', () => {
+  // Issue #644: the override is provider-agnostic, so the request keeps a
+  // configured value on any provider instead of inheriting it away.
+  for (const provider of [
+    'generic',
+    'minimax',
+    'openai',
+    'deepseek',
+    'glm',
+    'openrouter',
+    'command_code',
+    'opencode_go',
+  ] as const) {
+    const configured = {
+      ...createEmptyEndpointForm(),
+      provider,
+      service_tier: 'priority',
+    }
+    expect(endpointFormToRequest(configured).service_tier).toBe('priority')
   }
-  expect(endpointFormToRequest(switched).service_tier).toBeNull()
 })
 
 test('service tier copy explains the free-form inherit contract', () => {
@@ -106,4 +116,14 @@ test('service tier copy explains the free-form inherit contract', () => {
   // Issue #637: the tier control reuses the shared `proxyInherit` copy as its
   // blank/inherited placeholder, which must read exactly `继承` in zh-CN.
   expect(endpointMessages['zh-CN'].proxyInherit).toBe('继承')
+})
+
+test('endpoint settings copy names the service-tier control', () => {
+  // Issue #644: the endpoint settings subpage now also hosts the tier control.
+  for (const locale of ['zh-CN', 'en-US'] as const) {
+    const messages = endpointMessages[locale]
+    expect(messages.endpointSettingsHint.toLowerCase()).toContain(
+      messages.serviceTier.toLowerCase(),
+    )
+  }
 })

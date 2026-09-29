@@ -21,7 +21,7 @@ export const endpointMessages = {
     providerRegionGlobal: '国际区',
     serviceTier: '服务等级',
     serviceTierHint:
-      '可选的服务等级覆盖，按上游文档填写取值（如 MiniMax 的 priority 或 OpenAI 的 fast）。留空表示继承，不覆盖调用端与上游默认值；仅对已支持的上游与协议组合生效。',
+      '可选的服务等级覆盖，按上游文档填写取值（如 MiniMax 的 priority 或 OpenAI 的 fast）。留空表示继承，不覆盖调用端与上游默认值；按 JSON 请求体尽力透传，Realtime 不适用。',
     minimaxMcp: '暴露 MiniMax MCP 工具',
     minimaxMcpHint: '在 MCP 聚合入口提供 web_search 和 understand_image。',
     editEndpoint: '编辑上游节点',
@@ -152,7 +152,7 @@ export const endpointMessages = {
     targetSettings: '目标设置',
     endpointSettings: '端点设置',
     targetSettingsHint: '端口、服务等级、代理、排期与归一设置',
-    endpointSettingsHint: '代理与排期设置',
+    endpointSettingsHint: '代理、排期与服务等级设置',
     proxySet: '已设置',
     proxyInherit: '继承',
     proxyDirectShort: '直连',
@@ -230,7 +230,7 @@ export const endpointMessages = {
     providerRegionGlobal: 'Global',
     serviceTier: 'Service tier',
     serviceTierHint:
-      'Optional service-tier override using the value documented by the upstream (for example MiniMax priority or OpenAI fast). Blank inherits the caller and upstream default; it applies only to supported provider/protocol combinations.',
+      'Optional service-tier override using the value documented by the upstream (for example MiniMax priority or OpenAI fast). Blank inherits the caller and upstream default; it is a best-effort JSON body passthrough and does not apply to Realtime.',
     minimaxMcp: 'Expose MiniMax MCP tools',
     minimaxMcpHint: 'Expose web_search and understand_image through MCP.',
     editEndpoint: 'Edit endpoint',
@@ -366,7 +366,7 @@ export const endpointMessages = {
     endpointSettings: 'Endpoint settings',
     targetSettingsHint:
       'Native API, service tier, proxy, schedule and normalize settings',
-    endpointSettingsHint: 'Proxy and schedule settings',
+    endpointSettingsHint: 'Proxy, schedule and service tier settings',
     proxySet: 'Set',
     proxyInherit: 'Inherit',
     proxyDirectShort: 'Direct',

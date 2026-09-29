@@ -6,9 +6,14 @@ import type { EndpointForm } from '@/models'
 import EndpointApiKeysEditor from '@/components/endpoints/EndpointApiKeysEditor.vue'
 import EndpointOAuthSection from '@/components/endpoints/EndpointOAuthSection.vue'
 import EndpointProviderFields from '@/components/endpoints/EndpointProviderFields.vue'
+import ServiceTierOverrideField from '@/components/shared/ServiceTierOverrideField.vue'
 import ProxySettingsFields from '@/components/shared/ProxySettingsFields.vue'
 import ScheduleWindowsFields from '@/components/shared/ScheduleWindowsFields.vue'
 import SettingsFieldRow from '@/components/shared/SettingsFieldRow.vue'
+import {
+  endpointFormProtocol,
+  supportsServiceTierFor,
+} from '@/models/endpoints/service-tier'
 
 const props = defineProps<{
   busy: boolean
@@ -110,9 +115,20 @@ function hasEndpointSchedule(): boolean {
   return sortedEndpointWindows().length > 0
 }
 
+// Issue #644: the free-form service-tier override is provider-agnostic and
+// lives in the settings subpage; Realtime uses WebSocket frames instead of the
+// common JSON request body, so it is the only protocol that stays hidden.
+const serviceTierEligible = computed(() =>
+  form.value ? supportsServiceTierFor(endpointFormProtocol(form.value)) : true,
+)
+
+function hasEndpointServiceTier(): boolean {
+  return (form.value?.service_tier ?? '').trim() !== ''
+}
+
 // Gear highlight when anything is non-default.
 function hasEndpointSettings(): boolean {
-  return hasProxy.value || hasEndpointSchedule()
+  return hasProxy.value || hasEndpointSchedule() || hasEndpointServiceTier()
 }
 
 // Issue #599 R2e.1: the subscription plan authenticates through the ChatGPT
@@ -271,6 +287,12 @@ function applyOAuthStatus(next: {
                 :t="t"
               />
             </SettingsFieldRow>
+            <ServiceTierOverrideField
+              v-if="serviceTierEligible"
+              v-model="form.service_tier"
+              :t="t"
+              input-id="endpoint-service-tier"
+            />
           </div>
         </template>
         <div class="flex justify-end gap-2 pt-1">

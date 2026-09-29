@@ -1,8 +1,8 @@
-//! Issue #637 P3: service-tier protocol and forwarding parity.
+//! Issue #637/#644: service-tier protocol and forwarding parity.
 //!
-//! The documented matrix (MiniMax Chat/Responses/Anthropic Messages,
-//! OpenAI Chat/Responses; Realtime and the rest excluded) gates the
-//! override via the shared provider/protocol policy; the platform builder
+//! Every provider receives the configured override as a best-effort top-level
+//! `service_tier` passthrough on the HTTP JSON protocols (Chat Completions,
+//! Responses, Anthropic Messages); Realtime is excluded. The platform builder
 //! and the Codex backend carry it the same way as the direct transform.
 
 use std::borrow::Cow;
@@ -11,10 +11,9 @@ use super::*;
 
 #[test]
 fn chat_and_responses_bodies_receive_configured_tier() {
-    // Official MiniMax Chat Completions docs as well as Responses docs, and
-    // OpenAI Chat/Responses alike, support the top-level `service_tier`
-    // field, so both protocols are injected for supported providers.
-    for provider in [EndpointProvider::Minimax, EndpointProvider::OpenAi] {
+    // The top-level `service_tier` field is injected verbatim for every
+    // provider on both protocols.
+    for provider in ALL_PROVIDERS {
         for native_api in [NativeApi::Chat, NativeApi::Responses] {
             let route =
                 route_with_protocol(&responses_route(provider, Some("priority")), native_api);
@@ -36,23 +35,25 @@ fn chat_and_responses_bodies_receive_configured_tier() {
 }
 
 #[test]
-fn minimax_anthropic_messages_receives_configured_tier() {
-    // Issue #637 matrix: MiniMax publishes the field on Anthropic Messages
-    // in addition to Chat/Responses.
-    let route = route_with_protocol(
-        &responses_route(EndpointProvider::Minimax, Some("priority")),
-        NativeApi::AnthropicMessages,
-    );
-    let injected = apply_service_tier_override(&route, br#"{"model":"m"}"#);
-    let value: serde_json::Value = serde_json::from_slice(injected.as_ref()).unwrap();
-    assert_eq!(value["service_tier"], "priority");
+fn anthropic_messages_receives_configured_tier_for_every_provider() {
+    // Issue #644: Anthropic Messages is an HTTP JSON protocol too, so the
+    // provider-agnostic override applies there as well.
+    for provider in ALL_PROVIDERS {
+        let route = route_with_protocol(
+            &responses_route(provider, Some("priority")),
+            NativeApi::AnthropicMessages,
+        );
+        let injected = apply_service_tier_override(&route, br#"{"model":"m"}"#);
+        let value: serde_json::Value = serde_json::from_slice(injected.as_ref()).unwrap();
+        assert_eq!(value["service_tier"], "priority", "{provider:?}");
+    }
 }
 
 #[test]
-fn realtime_bodies_leave_body_unchanged_for_supported_providers() {
-    // Issue #637 matrix: Realtime is excluded for both providers — bodies
-    // pass through byte-for-byte even when a tier is configured.
-    for provider in [EndpointProvider::Minimax, EndpointProvider::OpenAi] {
+fn realtime_bodies_leave_body_unchanged_for_every_provider() {
+    // Realtime carries WebSocket frames instead of the common JSON request
+    // body — bodies pass through byte-for-byte even when a tier is configured.
+    for provider in ALL_PROVIDERS {
         let route = route_with_protocol(
             &responses_route(provider, Some("priority")),
             NativeApi::Realtime,
@@ -69,24 +70,10 @@ fn realtime_bodies_leave_body_unchanged_for_supported_providers() {
 }
 
 #[test]
-fn openai_anthropic_messages_leaves_body_unchanged() {
-    // Issue #637 matrix: OpenAI publishes the field on Chat/Responses
-    // only, so Anthropic bodies pass through even when configured.
-    let route = route_with_protocol(
-        &responses_route(EndpointProvider::OpenAi, Some("priority")),
-        NativeApi::AnthropicMessages,
-    );
-    let body = br#"{"model":"m","service_tier":"standard"}"#;
-    let injected = apply_service_tier_override(&route, body);
-    assert!(matches!(&injected, Cow::Borrowed(_)));
-    assert_eq!(injected.as_ref(), body);
-}
-
-#[test]
 fn untiered_routes_preserve_caller_across_protocols() {
     // With no configured override the caller field survives on every
     // protocol; the transform never strips or rewrites it.
-    for provider in [EndpointProvider::Minimax, EndpointProvider::OpenAi] {
+    for provider in ALL_PROVIDERS {
         for native_api in [
             NativeApi::Chat,
             NativeApi::Responses,

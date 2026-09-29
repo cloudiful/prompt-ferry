@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ProviderIcon from '@/components/providers/ProviderIcon.vue'
-import ServiceTierOverrideField from '@/components/shared/ServiceTierOverrideField.vue'
 import SettingsFieldRow from '@/components/shared/SettingsFieldRow.vue'
-import { normalizeProviderPlan, normalizeServiceTier } from '@/admin-mappers'
+import { normalizeProviderPlan } from '@/admin-mappers'
 import type { EndpointPlan } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
-import { supportsServiceTierFor } from '@/models/endpoints/service-tier'
+import { endpointFormProtocol } from '@/models/endpoints/service-tier'
 
 const props = defineProps<{
   t: TranslateFn
@@ -32,22 +31,17 @@ const providerSelection = computed({
     // resets it so a stale subscription selection is never submitted.
     form.value.plan = normalizeProviderPlan(value, form.value.plan)
     if (value !== 'minimax') {
-      // Preset providers other than MiniMax carry no region, no MiniMax
-      // builtin MCP privilege, and no endpoint-level tier default. Their
-      // base URL is derived server-side, so the form no longer tracks one.
-      // Issue #637: leave the tier as inherit (`null`) so a provider switch
-      // never silently creates a MiniMax-vocabulary `standard` override on
-      // e.g. OpenAI endpoints (the runtime would rewrite every body with
-      // it).
+      // Preset providers other than MiniMax carry no region and no MiniMax
+      // builtin MCP privilege. Their base URL is derived server-side, so the
+      // form no longer tracks one. Issue #644: a configured free-form
+      // service tier is provider-agnostic, so a provider switch keeps it
+      // instead of clearing a value the operator set in the settings
+      // subpage.
       form.value.provider_region = null
-      form.value.service_tier = null
       form.value.mcp_enabled = false
       return
     }
     form.value.provider_region = form.value.provider_region ?? 'cn'
-    // Issue #637: keep an explicit free-form override; blank stays inherit
-    // instead of fabricating the old MiniMax `standard` default.
-    form.value.service_tier = normalizeServiceTier(form.value.service_tier)
     if (!form.value.endpoint_id) {
       form.value.mcp_enabled = true
     }
@@ -84,10 +78,7 @@ const planHint = computed(() =>
     : props.t('endpointPlanLoginRequired'),
 )
 const protocolSelection = computed({
-  get(): 'auto' | 'anthropic_messages' | 'responses' | 'chat' | 'realtime' {
-    if (form.value.protocol_mode === 'auto') return 'auto'
-    return form.value.native_api_override ?? 'responses'
-  },
+  get: () => endpointFormProtocol(form.value),
   set(
     value: 'auto' | 'anthropic_messages' | 'responses' | 'chat' | 'realtime',
   ) {
@@ -100,12 +91,6 @@ const protocolSelection = computed({
     form.value.native_api_override = value
   },
 })
-// Issue #637: the free-form service-tier override is only offered for the
-// documented provider/protocol pairs; `auto` stays selectable because the
-// runtime resolves the caller protocol before forwarding.
-const serviceTierEligible = computed(() =>
-  supportsServiceTierFor(form.value.provider, protocolSelection.value),
-)
 const hasVersionPath = computed(() =>
   /\/v1\/?$/.test(form.value.base_url.trim()),
 )
@@ -189,12 +174,6 @@ const baseUrlHint = computed(() =>
       value-key="value"
     />
   </SettingsFieldRow>
-  <ServiceTierOverrideField
-    v-if="serviceTierEligible"
-    v-model="form.service_tier"
-    :t="t"
-    input-id="endpoint-service-tier"
-  />
   <SettingsFieldRow
     v-if="isGeneric"
     :label="t('baseUrl')"

@@ -102,13 +102,13 @@ fn transformed_body(route: &db::RouteConfig, raw: &[u8], codex_backend: bool) ->
 }
 
 /// Inject the resolved free-form `service_tier` override into an upstream
-/// JSON request body. Only supported provider/protocol combinations (via
-/// the shared [`crate::db::EndpointProvider::supports_service_tier_for`]
-/// matrix: MiniMax Chat/Responses/Anthropic Messages, OpenAI
-/// Chat/Responses) are modified, and only when a non-empty override is
-/// configured; with no override the body is returned unchanged so the
-/// caller's existing field/provider default is preserved. Realtime and all
-/// other providers/protocols return the body unchanged. The configured
+/// JSON request body. Issue #644: the override is provider-agnostic and is
+/// written as a best-effort top-level `service_tier` passthrough on every
+/// HTTP JSON protocol (see [`crate::db::supports_service_tier_for`]); only
+/// Realtime — which carries WebSocket frames instead of the common JSON
+/// request body — is excluded, and only when a non-empty override is
+/// configured. With no override the body is returned unchanged so the
+/// caller's existing field/provider default is preserved. The configured
 /// value overwrites any existing wire-key field. When the field already
 /// carries the configured value the parsed body is discarded and the
 /// original bytes are borrowed, so an already-correct request is forwarded
@@ -118,12 +118,10 @@ pub(super) fn apply_service_tier_override<'a>(
     route: &db::RouteConfig,
     body: &'a [u8],
 ) -> Cow<'a, [u8]> {
-    if !route.provider.supports_service_tier_for(route.native_api) {
+    if !db::supports_service_tier_for(route.native_api) {
         return Cow::Borrowed(body);
     }
-    let Some(wire_key) = route.provider.service_tier_wire_key() else {
-        return Cow::Borrowed(body);
-    };
+    let wire_key = db::SERVICE_TIER_WIRE_KEY;
     // Issue #637: no configured override leaves the caller's field intact.
     // The persistence boundary already trims blanks to `None`; re-trim
     // defensively so a blank value can never inject an empty tier.

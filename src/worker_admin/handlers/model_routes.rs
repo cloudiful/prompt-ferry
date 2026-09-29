@@ -436,27 +436,16 @@ async fn run_model_route_test(
         NativeApi::Auto => unreachable!("auto model routes return before protocol test"),
         NativeApi::Realtime => unreachable!(),
     };
-    // Issue #637 P3: keep probe behavior consistent with live forwarding.
-    // The shared provider/protocol matrix
-    // (`supports_service_tier_for`: MiniMax Chat/Responses/Anthropic
-    // Messages, OpenAI Chat/Responses) gates the resolved free-form tier,
-    // which is injected when configured; Realtime and every other
-    // combination leave the probe body unchanged so the "test" button stays
-    // representative.
-    if target.provider.supports_service_tier_for(target.native_api)
-        && let Some(wire_key) = target.provider.service_tier_wire_key()
-        && let Some(tier) = target
-            .service_tier
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        && let Some(object) = payload.as_object_mut()
-    {
-        object.insert(
-            wire_key.to_string(),
-            serde_json::Value::String(tier.to_string()),
-        );
-    }
+    // Issue #644: keep probe behavior consistent with live forwarding. The
+    // configured free-form tier is provider-agnostic
+    // (`db::supports_service_tier_for`): every HTTP JSON protocol injects it
+    // when configured, while Realtime — which carries WebSocket frames —
+    // stays untouched so the "test" button remains representative.
+    apply_service_tier_to_probe_payload(
+        target.native_api,
+        target.service_tier.as_deref(),
+        &mut payload,
+    );
     // P4 (issue #230): route the probe through the runtime helper so the
     // GLM `/v1` strip applies (a GLM Chat base
     // `.../api/coding/paas/v4` joins `/chat/completions`, not
@@ -560,6 +549,64 @@ fn model_route_test_routing_key(candidate: &db::ModelRouteCandidate) -> Option<&
     match candidate.routing_strategy {
         db::ModelRouteRoutingStrategy::ResponsesSessionAffinity => {
             Some(MODEL_ROUTE_TEST_SESSION_KEY)
+        }
+    }
+}
+
+/// Issue #644: inject the configured free-form service tier into a probe
+/// payload the same way live forwarding does. The gate is provider-agnostic
+/// (any endpoint may carry a configured value) and covers every HTTP JSON
+/// protocol; Realtime and blank/unset values leave the payload unchanged.
+fn apply_service_tier_to_probe_payload(
+    native_api: NativeApi,
+    tier: Option<&str>,
+    payload: &mut serde_json::Value,
+) {
+    if !db::supports_service_tier_for(native_api) {
+        return;
+    }
+    let Some(tier) = tier.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let Some(object) = payload.as_object_mut() else {
+        return;
+    };
+    object.insert(
+        db::SERVICE_TIER_WIRE_KEY.to_string(),
+        serde_json::Value::String(tier.to_string()),
+    );
+}
+
+#[cfg(test)]
+mod service_tier_probe_tests {
+    use super::*;
+
+    #[test]
+    fn probe_injects_configured_tier_on_every_json_protocol() {
+        // Issue #644: provider-agnostic — the helper takes only the resolved
+        // protocol, and every JSON protocol receives the configured value.
+        for native_api in [
+            NativeApi::Chat,
+            NativeApi::Responses,
+            NativeApi::AnthropicMessages,
+        ] {
+            let mut payload = serde_json::json!({"model": "m", "service_tier": "standard"});
+            apply_service_tier_to_probe_payload(native_api, Some("priority"), &mut payload);
+            assert_eq!(payload["service_tier"], "priority", "{native_api:?}");
+            assert_eq!(payload["model"], "m");
+        }
+    }
+
+    #[test]
+    fn probe_leaves_realtime_and_unset_tiers_unchanged() {
+        let mut realtime = serde_json::json!({"model": "m", "service_tier": "standard"});
+        apply_service_tier_to_probe_payload(NativeApi::Realtime, Some("priority"), &mut realtime);
+        assert_eq!(realtime["service_tier"], "standard");
+
+        for tier in [None, Some(""), Some("   ")] {
+            let mut payload = serde_json::json!({"model": "m", "service_tier": "standard"});
+            apply_service_tier_to_probe_payload(NativeApi::Chat, tier, &mut payload);
+            assert_eq!(payload["service_tier"], "standard", "{tier:?}");
         }
     }
 }

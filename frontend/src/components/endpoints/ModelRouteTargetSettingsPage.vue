@@ -8,8 +8,11 @@ import type { EndpointProvider } from '@/generated/admin-api'
 import type { ModelRouteTargetForm } from '@/models'
 import { supportsServiceTierFor } from '@/models/endpoints/service-tier'
 
-const props = defineProps<{
+defineProps<{
   t: TranslateFn
+  // Issue #644: the endpoint provider travels from the endpoint picker but no
+  // longer gates the override; the configured target tier is exposed for every
+  // provider, so the prop is kept for caller compatibility only.
   endpointProvider?: EndpointProvider | null
 }>()
 
@@ -55,14 +58,11 @@ const nativeApiSelection = computed({
   },
 })
 
-// Issue #637: expose the free-form target override only when the selected
-// endpoint provider and this target's port type are a documented pair; the
-// provider travels from the endpoint picker into this settings view.
+// Issue #644: the free-form target override is exposed for every provider on
+// the HTTP JSON protocols; Realtime carries WebSocket frames instead, so it
+// stays hidden there.
 const serviceTierEligible = computed(() =>
-  supportsServiceTierFor(
-    props.endpointProvider ?? null,
-    nativeApiSelection.value,
-  ),
+  supportsServiceTierFor(nativeApiSelection.value),
 )
 
 const serviceTier = computed({

@@ -1,4 +1,8 @@
 import { expect, test } from 'bun:test'
+import * as vue from 'vue'
+import { createSSRApp, h } from 'vue'
+import { compileScript, parse } from 'vue/compiler-sfc'
+import { renderToString } from 'vue/server-renderer'
 import {
   createEmptyModelRouteForm,
   modelRouteFormToRequest,
@@ -8,7 +12,12 @@ import {
   hasTargetServiceTier,
   hasTargetSettings,
 } from '../src/components/endpoints/modelRouteTargetHelpers'
-import type { ModelEndpointRule } from '../src/generated/admin-api'
+import type {
+  EndpointProvider,
+  ModelEndpointRule,
+} from '../src/generated/admin-api'
+import type { ModelRouteTargetForm } from '../src/models'
+import * as serviceTierHelpers from '../src/models/endpoints/service-tier'
 
 function routeFixture(
   service_tier: string | null | undefined,
@@ -103,4 +112,131 @@ test('a configured target tier lights up the target settings gear', () => {
 
   target.service_tier = null
   expect(hasTargetSettings(target)).toBe(false)
+})
+
+// Issue #644: SSR harness for the route-target settings subpage. The control is
+// exposed for every provider on the HTTP JSON protocols; the endpoint provider
+// no longer gates it.
+type Component = Parameters<typeof h>[0]
+
+function rewriteSfcImports(code: string): string {
+  return code.replace(
+    /import\s+([^;'"]+?)\s+from\s+(['"])([^'"]+)\2;?/g,
+    (_match, clause: string, _quote: string, spec: string) => {
+      if (clause.trim().startsWith('type ')) return ''
+      const named = clause.match(/\{([^}]*)\}/)
+      const fallback = clause
+        .replace(/\{[^}]*\}/, '')
+        .replace(/^,|,$/g, '')
+        .trim()
+      const statements: string[] = []
+      if (fallback) {
+        statements.push(
+          `const ${fallback} = __resolve(${JSON.stringify(spec)});`,
+        )
+      }
+      for (const part of named?.[1].split(',') ?? []) {
+        const entry = part.trim()
+        if (!entry || entry.startsWith('type ')) continue
+        const [source, local = source] = entry.split(/\s+as\s+/)
+        statements.push(
+          `const ${local.trim()} = __resolve(${JSON.stringify(spec)})[${JSON.stringify(source.trim())}];`,
+        )
+      }
+      return statements.join(' ')
+    },
+  )
+}
+
+function slotStub(name: string) {
+  return {
+    name,
+    render(this: { $slots: Record<string, (() => unknown) | undefined> }) {
+      return h('div', { 'data-stub': name }, this.$slots.default?.())
+    },
+  }
+}
+
+const targetSettingsSource = await Bun.file(
+  new URL(
+    '../src/components/endpoints/ModelRouteTargetSettingsPage.vue',
+    import.meta.url,
+  ),
+).text()
+
+const settingsPageComponent: Component = (() => {
+  const { descriptor } = parse(targetSettingsSource, {
+    filename: 'ModelRouteTargetSettingsPage.vue',
+  })
+  const script = compileScript(descriptor, {
+    id: 'model-route-target-settings',
+    inlineTemplate: true,
+  })
+  const js = new Bun.Transpiler({ loader: 'ts' }).transformSync(
+    rewriteSfcImports(script.content).replace(/export default/, 'return'),
+  )
+  const resolve = (spec: string): unknown => {
+    if (spec === 'vue') return vue
+    if (spec === '@/models/endpoints/service-tier') return serviceTierHelpers
+    return slotStub(spec.split('/').pop() ?? spec)
+  }
+  return new Function('__resolve', `"use strict";\n${js}`)(resolve) as Component
+})()
+
+const TIER_MARKER = 'data-stub="ServiceTierOverrideField.vue"'
+
+async function renderTargetSettings(
+  target: ModelRouteTargetForm,
+  endpointProvider: EndpointProvider,
+): Promise<string> {
+  const app = createSSRApp({
+    render: () =>
+      h(settingsPageComponent, {
+        target,
+        endpointProvider,
+        t: (key: string) => key,
+      }),
+  })
+  app.component('USelect', slotStub('USelect'))
+  app.component('USwitch', slotStub('USwitch'))
+  return renderToString(app)
+}
+
+function targetForm(native_api: ModelRouteTargetForm['native_api']) {
+  const form = createEmptyModelRouteForm()
+  const target = form.targets[0]
+  if (!target) throw new Error('expected a default target')
+  target.native_api = native_api
+  return target
+}
+
+test('the target settings subpage exposes the tier for every provider on JSON protocols', async () => {
+  for (const provider of [
+    'generic',
+    'minimax',
+    'command_code',
+    'opencode_go',
+    'openrouter',
+    'glm',
+    'deepseek',
+    'openai',
+  ] as const) {
+    for (const native_api of [
+      'chat',
+      'responses',
+      'anthropic_messages',
+    ] as const) {
+      const html = await renderTargetSettings(targetForm(native_api), provider)
+      expect(html).toContain(TIER_MARKER)
+    }
+    // Auto resolves at request time, so it stays eligible.
+    expect(await renderTargetSettings(targetForm('auto'), provider)).toContain(
+      TIER_MARKER,
+    )
+  }
+})
+
+test('the target settings subpage hides the tier on Realtime', async () => {
+  const html = await renderTargetSettings(targetForm('realtime'), 'minimax')
+  expect(html).not.toContain(TIER_MARKER)
 })

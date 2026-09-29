@@ -1,8 +1,8 @@
-//! Issue #637 P3: core service-tier override semantics.
+//! Issue #637/#644: core service-tier override semantics.
 //!
-//! Configured tiers inject and overwrite; unset/blank tiers preserve the
-//! caller body byte-for-byte; unsupported providers and non-JSON bodies
-//! pass through untouched. Protocol coverage lives in [`super::protocol_tests`].
+//! Configured tiers inject and overwrite on every provider; unset/blank tiers
+//! preserve the caller body byte-for-byte; Realtime and non-JSON bodies pass
+//! through untouched. Protocol coverage lives in [`super::protocol_tests`].
 
 use std::borrow::Cow;
 
@@ -49,10 +49,10 @@ fn openai_preserves_free_form_values_verbatim() {
 }
 
 #[test]
-fn unset_tier_preserves_caller_field_for_supported_providers() {
-    // Issue #637: with no configured override the caller's field/provider
+fn unset_tier_preserves_caller_field_for_every_provider() {
+    // Issue #637/#644: with no configured override the caller's field/provider
     // default is preserved; the body is forwarded byte-for-byte.
-    for provider in [EndpointProvider::Minimax, EndpointProvider::OpenAi] {
+    for provider in ALL_PROVIDERS {
         let route = responses_route(provider, None);
         for body in [
             br#"{"model":"m"}"#.as_slice(),
@@ -60,7 +60,7 @@ fn unset_tier_preserves_caller_field_for_supported_providers() {
         ] {
             let injected = apply_service_tier_override(&route, body);
             assert!(matches!(&injected, Cow::Borrowed(_)));
-            assert_eq!(injected.as_ref(), body);
+            assert_eq!(injected.as_ref(), body, "{provider:?}");
         }
     }
 }
@@ -79,20 +79,17 @@ fn blank_tier_is_treated_as_unset() {
 }
 
 #[test]
-fn unsupported_providers_leave_body_unchanged() {
-    for provider in [
-        EndpointProvider::Generic,
-        EndpointProvider::CommandCode,
-        EndpointProvider::OpencodeGo,
-        EndpointProvider::OpenRouter,
-        EndpointProvider::Glm,
-        EndpointProvider::DeepSeek,
-    ] {
+fn every_provider_injects_on_json_protocols() {
+    // Issue #644: the configured override is provider-agnostic — it is a
+    // best-effort passthrough for any provider rather than a MiniMax/OpenAI
+    // allowlist.
+    for provider in ALL_PROVIDERS {
         let route = responses_route(provider, Some("priority"));
         let body = br#"{"model":"m","service_tier":"standard"}"#;
         let injected = apply_service_tier_override(&route, body);
-        assert!(matches!(&injected, Cow::Borrowed(_)));
-        assert_eq!(injected.as_ref(), body, "{provider:?}");
+        let value: serde_json::Value = serde_json::from_slice(injected.as_ref()).unwrap();
+        assert_eq!(value["service_tier"], "priority", "{provider:?}");
+        assert_eq!(value["model"], "m", "{provider:?}");
     }
 }
 
@@ -113,7 +110,7 @@ fn already_configured_tier_skips_reserialization() {
     // Deliberately non-canonical key order/whitespace: an already-correct
     // tier must be forwarded byte-for-byte, not re-serialized (issue #259
     // prefix-cache stability).
-    for provider in [EndpointProvider::Minimax, EndpointProvider::OpenAi] {
+    for provider in ALL_PROVIDERS {
         let route = responses_route(provider, Some("priority"));
         let body = br#"{ "service_tier" : "priority" , "model" : "m" }"#;
         let injected = apply_service_tier_override(&route, body);
