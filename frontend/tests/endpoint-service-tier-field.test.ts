@@ -130,6 +130,10 @@ test('the service tier input carries a configured value', async () => {
 
 const tierMarker = 'data-stub="ServiceTierOverrideField.vue"'
 
+// Issue #644: the endpoint tier control moved out of the provider fields into
+// the dialog settings subpage. Rendering the real `EndpointProviderFields` must
+// no longer produce the control for any provider/protocol pair, including the
+// ones that used to be eligible.
 const providerFieldsComponent = compileComponent(
   await Bun.file(
     new URL(
@@ -164,40 +168,27 @@ async function renderProviderFields(
   return renderToString(app)
 }
 
-test('the endpoint tier field follows the documented provider/protocol matrix', async () => {
-  const eligible = [
-    { provider: 'minimax' as const, native_api_override: 'chat' as const },
+test('the provider fields no longer host the endpoint tier control', async () => {
+  const cases = [
+    { provider: 'generic' as const, protocol_mode: 'auto' as const },
     {
       provider: 'minimax' as const,
+      protocol_mode: 'manual' as const,
+      native_api_override: 'chat' as const,
+    },
+    {
+      provider: 'minimax' as const,
+      protocol_mode: 'manual' as const,
       native_api_override: 'anthropic_messages' as const,
     },
-    { provider: 'openai' as const, native_api_override: 'responses' as const },
-  ]
-  for (const overrides of eligible) {
-    const html = await renderProviderFields({
-      protocol_mode: 'manual',
-      ...overrides,
-    })
-    expect(html).toContain(tierMarker)
-  }
-  // Auto resolves to the caller protocol, so a supported provider stays eligible.
-  expect(
-    await renderProviderFields({ provider: 'openai', protocol_mode: 'auto' }),
-  ).toContain(tierMarker)
-
-  const hidden = [
-    { provider: 'minimax' as const, native_api_override: 'realtime' as const },
     {
       provider: 'openai' as const,
-      native_api_override: 'anthropic_messages' as const,
+      protocol_mode: 'manual' as const,
+      native_api_override: 'responses' as const,
     },
-    { provider: 'generic' as const, native_api_override: null },
   ]
-  for (const overrides of hidden) {
-    const html = await renderProviderFields({
-      protocol_mode: 'manual',
-      ...overrides,
-    })
+  for (const overrides of cases) {
+    const html = await renderProviderFields(overrides)
     expect(html).not.toContain(tierMarker)
   }
 })

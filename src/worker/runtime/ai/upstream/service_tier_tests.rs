@@ -1,12 +1,12 @@
-//! Issue #637 P3: service-tier override behavior tests.
+//! Issue #637/#644: service-tier override behavior tests.
 //!
 //! The resolved `RouteConfig.service_tier` (target override wins over the
-//! endpoint value, `None` means inherit) is applied to supported
-//! MiniMax/OpenAI bodies; with no override the caller body/provider
-//! default is preserved, and all unrelated providers pass through
+//! endpoint value, `None` means inherit) is injected as a best-effort
+//! top-level `service_tier` passthrough on every provider's HTTP JSON
+//! protocols; with no override the caller body/provider default is preserved,
+//! and Realtime (WebSocket frames) plus non-JSON bodies pass through
 //! byte-for-byte. Free-form values are preserved verbatim via the shared
-//! [`crate::db::EndpointProvider::service_tier_wire_key`] policy. Shared
-//! fixtures live here;
+//! [`crate::db::SERVICE_TIER_WIRE_KEY`] policy. Shared fixtures live here;
 //! core override semantics live in [`override_tests`], protocol and
 //! forwarding parity in [`protocol_tests`], so each file stays focused.
 
@@ -18,6 +18,17 @@ use crate::{
     config::NativeApi,
     db::{EndpointProvider, RouteConfig, RouteSelectionReason},
 };
+
+const ALL_PROVIDERS: [EndpointProvider; 8] = [
+    EndpointProvider::Generic,
+    EndpointProvider::Minimax,
+    EndpointProvider::CommandCode,
+    EndpointProvider::OpencodeGo,
+    EndpointProvider::OpenRouter,
+    EndpointProvider::Glm,
+    EndpointProvider::DeepSeek,
+    EndpointProvider::OpenAi,
+];
 
 fn responses_route(provider: EndpointProvider, tier: Option<&str>) -> RouteConfig {
     RouteConfig {
@@ -54,18 +65,27 @@ fn route_with_protocol(route: &RouteConfig, native_api: NativeApi) -> RouteConfi
 }
 
 #[test]
-fn wire_key_is_shared_with_the_provider_capability() {
-    // The live transform, the route probe and the compatibility
-    // translation share `EndpointProvider::supports_service_tier`; the
-    // wire key follows the same bit.
-    assert_eq!(
-        EndpointProvider::Minimax.service_tier_wire_key(),
-        Some("service_tier")
-    );
-    assert_eq!(
-        EndpointProvider::OpenAi.service_tier_wire_key(),
-        Some("service_tier")
-    );
+fn configured_override_is_provider_agnostic_while_caller_bit_stays_scoped() {
+    // Issue #644: the configured endpoint/target override injects on every
+    // provider's HTTP JSON protocols (the gate takes no provider), while the
+    // issue #637 caller-compatibility bit is unchanged and provider-scoped.
+    for native_api in [
+        NativeApi::Chat,
+        NativeApi::Responses,
+        NativeApi::AnthropicMessages,
+        NativeApi::Auto,
+    ] {
+        assert!(
+            crate::db::supports_service_tier_for(native_api),
+            "{native_api:?}"
+        );
+    }
+    assert!(!crate::db::supports_service_tier_for(NativeApi::Realtime));
+    assert_eq!(crate::db::SERVICE_TIER_WIRE_KEY, "service_tier");
+
+    for provider in [EndpointProvider::Minimax, EndpointProvider::OpenAi] {
+        assert!(provider.supports_service_tier(), "{provider:?}");
+    }
     for provider in [
         EndpointProvider::Generic,
         EndpointProvider::CommandCode,
@@ -74,10 +94,6 @@ fn wire_key_is_shared_with_the_provider_capability() {
         EndpointProvider::Glm,
         EndpointProvider::DeepSeek,
     ] {
-        assert_eq!(
-            provider.service_tier_wire_key(),
-            None,
-            "{provider:?} must never gain a service-tier wire key"
-        );
+        assert!(!provider.supports_service_tier(), "{provider:?}");
     }
 }

@@ -101,45 +101,37 @@ impl EndpointProvider {
         matches!(self, Self::OpenAi)
     }
 
-    /// Issue #637: whether this provider publishes the top-level
-    /// `service_tier` field on its Chat Completions and Responses contracts.
-    /// Only MiniMax and OpenAI are confirmed (their accepted value
-    /// vocabularies differ, so values stay free-form); every other provider
-    /// keeps the previous behavior — the compatibility translation rejects
-    /// or drops the caller field and no override is injected. The table
-    /// stays conservative: a new provider needs contract evidence before it
-    /// can flip this. Shared by the live transform, the route probe and the
-    /// compatibility translation.
+    /// Issue #637: whether the caller-supplied `service_tier` compatibility
+    /// translation accepts and forwards the field for this provider. Only
+    /// MiniMax and OpenAI are confirmed (their accepted value vocabularies
+    /// differ, so values stay free-form); every other provider keeps the
+    /// previous behavior — the translation rejects or drops the caller
+    /// field. This is the caller-compatibility layer only and stays
+    /// provider-scoped; the configured endpoint/target override is a
+    /// separate, provider-agnostic layer (see
+    /// [`supports_service_tier_for`] and [`SERVICE_TIER_WIRE_KEY`]).
     pub fn supports_service_tier(self) -> bool {
         matches!(self, Self::Minimax | Self::OpenAi)
     }
+}
 
-    /// Issue #637: provider-native wire key for the free-form service-tier
-    /// override (`None` means no override concept). Shares the
-    /// [`Self::supports_service_tier`] bit so a future/different native key
-    /// stays representable without changing UI semantics.
-    pub fn service_tier_wire_key(self) -> Option<&'static str> {
-        self.supports_service_tier().then_some("service_tier")
-    }
+/// Issue #644: the top-level wire key for the configured free-form
+/// service-tier override. Every provider is a best-effort passthrough, so the
+/// field name is fixed by the HTTP JSON protocol contract instead of a
+/// provider allowlist. Shared by the live transform and the admin probe.
+pub const SERVICE_TIER_WIRE_KEY: &str = "service_tier";
 
-    /// Issue #637: documented protocol matrix for the free-form
-    /// service-tier override. MiniMax publishes the top-level
-    /// `service_tier` field on Chat, Responses and Anthropic Messages;
-    /// OpenAI on Chat and Responses. Realtime, `Auto` (always resolved
-    /// before forwarding) and every other provider/protocol combination
-    /// are excluded. Shared by the live transform and the route probe; the
-    /// compatibility translation only ever handles Chat/Responses targets,
-    /// where it defers to [`Self::supports_service_tier`].
-    pub fn supports_service_tier_for(self, native_api: NativeApi) -> bool {
-        match self {
-            Self::Minimax => matches!(
-                native_api,
-                NativeApi::Chat | NativeApi::Responses | NativeApi::AnthropicMessages
-            ),
-            Self::OpenAi => matches!(native_api, NativeApi::Chat | NativeApi::Responses),
-            _ => false,
-        }
-    }
+/// Issue #644: whether the configured free-form `service_tier` override is
+/// injected for a protocol. The override is provider-agnostic: any endpoint
+/// may carry a configured value and it is written as a best-effort top-level
+/// `service_tier` passthrough on the HTTP JSON protocols (Chat Completions,
+/// Responses, Anthropic Messages). `Auto` is resolved to one of those before
+/// forwarding. Realtime is excluded because it carries WebSocket frames
+/// instead of the common JSON request body and never runs the JSON body
+/// transform. The caller-compatibility translation stays separately gated by
+/// [`EndpointProvider::supports_service_tier`].
+pub fn supports_service_tier_for(native_api: NativeApi) -> bool {
+    !matches!(native_api, NativeApi::Realtime)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -743,12 +735,11 @@ mod tests {
     }
 
     #[test]
-    fn only_minimax_and_openai_support_service_tier() {
-        // Issue #637: the shared capability bit behind the live transform,
-        // the route probe and the compatibility translation.
+    fn only_minimax_and_openai_accept_caller_service_tier() {
+        // Issue #637: the caller-compatibility bit behind the Responses→Chat
+        // translation stays provider-scoped and unchanged by issue #644.
         for provider in [EndpointProvider::Minimax, EndpointProvider::OpenAi] {
             assert!(provider.supports_service_tier(), "{provider:?}");
-            assert_eq!(provider.service_tier_wire_key(), Some("service_tier"));
         }
         for provider in [
             EndpointProvider::Generic,
@@ -759,68 +750,25 @@ mod tests {
             EndpointProvider::DeepSeek,
         ] {
             assert!(!provider.supports_service_tier(), "{provider:?}");
-            assert_eq!(provider.service_tier_wire_key(), None);
         }
     }
 
     #[test]
-    fn service_tier_protocol_matrix_covers_documented_contracts() {
-        // Issue #637: MiniMax Chat/Responses/Anthropic Messages, OpenAI
-        // Chat/Responses; Realtime, Auto and everything else excluded.
+    fn configured_service_tier_override_covers_every_json_protocol() {
+        // Issue #644: the configured override is provider-agnostic (the
+        // helper takes no provider) and covers every HTTP JSON protocol;
+        // Realtime is excluded because it carries WebSocket frames.
         use crate::config::NativeApi;
+        assert_eq!(SERVICE_TIER_WIRE_KEY, "service_tier");
         for native_api in [
             NativeApi::Chat,
             NativeApi::Responses,
             NativeApi::AnthropicMessages,
-        ] {
-            assert!(
-                EndpointProvider::Minimax.supports_service_tier_for(native_api),
-                "{native_api:?}"
-            );
-        }
-        for native_api in [NativeApi::Chat, NativeApi::Responses] {
-            assert!(
-                EndpointProvider::OpenAi.supports_service_tier_for(native_api),
-                "{native_api:?}"
-            );
-        }
-        for native_api in [
-            NativeApi::AnthropicMessages,
-            NativeApi::Realtime,
             NativeApi::Auto,
         ] {
-            assert!(
-                !EndpointProvider::OpenAi.supports_service_tier_for(native_api),
-                "{native_api:?}"
-            );
+            assert!(supports_service_tier_for(native_api), "{native_api:?}");
         }
-        for native_api in [NativeApi::Realtime, NativeApi::Auto] {
-            assert!(
-                !EndpointProvider::Minimax.supports_service_tier_for(native_api),
-                "{native_api:?}"
-            );
-        }
-        for provider in [
-            EndpointProvider::Generic,
-            EndpointProvider::CommandCode,
-            EndpointProvider::OpencodeGo,
-            EndpointProvider::OpenRouter,
-            EndpointProvider::Glm,
-            EndpointProvider::DeepSeek,
-        ] {
-            for native_api in [
-                NativeApi::Chat,
-                NativeApi::Responses,
-                NativeApi::AnthropicMessages,
-                NativeApi::Realtime,
-                NativeApi::Auto,
-            ] {
-                assert!(
-                    !provider.supports_service_tier_for(native_api),
-                    "{provider:?} {native_api:?}"
-                );
-            }
-        }
+        assert!(!supports_service_tier_for(NativeApi::Realtime));
     }
 
     #[test]

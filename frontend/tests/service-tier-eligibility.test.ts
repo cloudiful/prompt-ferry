@@ -1,68 +1,46 @@
 import { expect, test } from 'bun:test'
-import type { EndpointProvider, NativeApi } from '../src/generated/admin-api'
+import type { NativeApi } from '../src/generated/admin-api'
 import {
+  endpointFormProtocol,
   supportsServiceTierFor,
-  supportsServiceTierProvider,
 } from '../src/models/endpoints/service-tier'
 
-// Mirrors `EndpointProvider::supports_service_tier_for` in
-// `src/db/types/endpoints.rs`. If the Rust matrix changes, this must too.
-const ALL_PROTOCOLS: readonly NativeApi[] = [
-  'auto',
-  'chat',
-  'responses',
-  'anthropic_messages',
-  'realtime',
-]
+// Issue #644: mirrors `supports_service_tier_for` in
+// `src/db/types/endpoints.rs` — the configured override is provider-agnostic
+// and covers every HTTP JSON protocol; Realtime carries WebSocket frames and
+// is the only exclusion. If the Rust gate changes, this must too.
 
-const UNSUPPORTED_PROVIDERS: readonly EndpointProvider[] = [
-  'generic',
-  'command_code',
-  'opencode_go',
-  'openrouter',
-  'glm',
-  'deepseek',
-]
-
-test('mirrors the documented provider/protocol matrix', () => {
+test('every HTTP JSON protocol is eligible', () => {
   for (const protocol of [
+    'auto',
     'chat',
     'responses',
     'anthropic_messages',
   ] as NativeApi[]) {
-    expect(supportsServiceTierFor('minimax', protocol)).toBe(true)
-  }
-  expect(supportsServiceTierFor('minimax', 'realtime')).toBe(false)
-
-  for (const protocol of ['chat', 'responses'] as NativeApi[]) {
-    expect(supportsServiceTierFor('openai', protocol)).toBe(true)
-  }
-  for (const protocol of ['anthropic_messages', 'realtime'] as NativeApi[]) {
-    expect(supportsServiceTierFor('openai', protocol)).toBe(false)
+    expect(supportsServiceTierFor(protocol)).toBe(true)
   }
 })
 
-test('auto stays eligible for supported providers and resolves at runtime', () => {
-  expect(supportsServiceTierFor('minimax', 'auto')).toBe(true)
-  expect(supportsServiceTierFor('openai', 'auto')).toBe(true)
+test('realtime is the only excluded protocol', () => {
+  expect(supportsServiceTierFor('realtime')).toBe(false)
 })
 
-test('only MiniMax and OpenAI are supported providers', () => {
-  expect(supportsServiceTierProvider('minimax')).toBe(true)
-  expect(supportsServiceTierProvider('openai')).toBe(true)
-  for (const provider of UNSUPPORTED_PROVIDERS) {
-    expect(supportsServiceTierProvider(provider)).toBe(false)
-  }
-})
-
-test('unsupported providers, realtime and a missing provider are hidden', () => {
-  for (const provider of UNSUPPORTED_PROVIDERS) {
-    for (const protocol of ALL_PROTOCOLS) {
-      expect(supportsServiceTierFor(provider, protocol)).toBe(false)
-    }
-  }
-  for (const protocol of ALL_PROTOCOLS) {
-    expect(supportsServiceTierFor(null, protocol)).toBe(false)
-    expect(supportsServiceTierFor(undefined, protocol)).toBe(false)
-  }
+test('endpointFormProtocol resolves the endpoint protocol axis', () => {
+  expect(
+    endpointFormProtocol({ protocol_mode: 'auto', native_api_override: null }),
+  ).toBe('auto')
+  expect(
+    endpointFormProtocol({
+      protocol_mode: 'manual',
+      native_api_override: 'chat',
+    }),
+  ).toBe('chat')
+  // A manual mode without an explicit override falls back to Responses,
+  // mirroring the request-side default.
+  expect(
+    endpointFormProtocol({
+      protocol_mode: 'manual',
+      native_api_override: null,
+    }),
+  ).toBe('responses')
 })
