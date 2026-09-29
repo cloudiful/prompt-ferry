@@ -7,7 +7,7 @@ use crate::{
     openai_compat::CompatError,
     redact,
     redact_upstream::{UpstreamRedactionSession, current_policy_version, decrypt_upstream_session},
-    upstream_adapter::{PreparedUpstreamRequest, prepare_upstream_request_with_compact},
+    upstream_adapter::{PreparedUpstreamRequest, prepare_upstream_request_for_provider},
     worker_admin::AdminState,
     worker_usage::UsageLog,
 };
@@ -180,10 +180,14 @@ pub(super) async fn prepare_upstream_request_for_route(
     // Issue #502 Task 5: thread the per-target compact mode; `passthrough`
     // keeps Task 3 behavior, `self_summarize` enables the ferry-side
     // handoff flow for non-Responses targets, `off` rejects compact.
-    let mut prepared = prepare_upstream_request_with_compact(
+    // Issue #637: thread the resolved route provider so the compatibility
+    // translation accepts/forwards the caller `service_tier` only for
+    // supported providers.
+    let mut prepared = prepare_upstream_request_for_provider(
         &request.path,
         prepared_body,
         route.native_api,
+        Some(route.provider),
         route.dev_system_normalize,
         route.thinking_effort_override.as_deref(),
         route.compact_mode,

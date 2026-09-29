@@ -268,7 +268,8 @@ fn route_from_target(
         upstream_model: target.upstream_model.clone(),
         route_selection_reason,
         provider: target.provider,
-        service_tier: target.service_tier,
+        // Issue #637: resolved target>endpoint override carried through.
+        service_tier: target.service_tier.clone(),
         // Issue #368 Phase D: resolved proxy (override wins, empty means
         // direct); pooled client selection uses this value.
         proxy_url: db::resolve_proxy_url(
@@ -448,7 +449,7 @@ mod tests {
             enabled: true,
             upstream_model: None,
             provider: db::EndpointProvider::Generic,
-            service_tier: db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: proxy_url.map(str::to_string),
             proxy_url_override: proxy_override.map(str::to_string),
             active_windows: None,
@@ -479,7 +480,7 @@ mod tests {
             enabled: true,
             upstream_model: None,
             provider: db::EndpointProvider::Generic,
-            service_tier: db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             proxy_url_override: None,
             active_windows: None,

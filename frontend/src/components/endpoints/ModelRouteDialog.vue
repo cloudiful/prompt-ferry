@@ -106,14 +106,24 @@ const selectedTargetModel = computed({
   },
 })
 
-const selectedEndpointLabel = computed(() => {
+const selectedEndpoint = computed(() => {
   const target = selectedTargetModel.value
-  if (!target) return ''
+  if (!target) return null
   return (
-    props.endpointOptions.find((item) => item.value === target.endpoint_id)
-      ?.label ?? ''
+    props.endpointOptions.find((item) => item.value === target.endpoint_id) ??
+    null
   )
 })
+
+const selectedEndpointLabel = computed(
+  () => selectedEndpoint.value?.label ?? '',
+)
+
+// Issue #637: the target settings view needs the selected endpoint's provider
+// to decide whether the free-form service-tier override applies.
+const selectedEndpointProvider = computed(
+  () => selectedEndpoint.value?.provider ?? null,
+)
 
 const canSaveOuter = computed(() => canSaveTargets(form.value?.targets ?? []))
 
@@ -335,6 +345,7 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
           <ModelRouteTargetSettingsPage
             v-if="selectedTargetModel"
             v-model:target="selectedTargetModel"
+            :endpoint-provider="selectedEndpointProvider"
             :t="t"
           />
         </template>

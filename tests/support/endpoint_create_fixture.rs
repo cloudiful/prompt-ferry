@@ -133,7 +133,7 @@ pub fn openai_endpoint_body(name: &str, api_key: &str) -> Value {
         "provider": "openai",
         "provider_region": null,
         "plan": null,
-        "service_tier": "standard",
+        "service_tier": null,
         "base_url": "https://api.openai.com/v1",
         "api_key": api_key,
         "api_keys": [],

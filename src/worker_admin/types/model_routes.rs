@@ -80,6 +80,8 @@ impl ModelRouteRequest {
                         // Issue #464: inherit (follow the caller).
                         thinking_effort_override: None,
                         compact_mode: None,
+                        // Issue #637: inherit the endpoint override.
+                        service_tier: None,
                     })
                     .collect()
             })
@@ -143,6 +145,8 @@ impl ModelRouteRequest {
                     thinking_downgrade_enabled: target.thinking_downgrade_enabled,
                     thinking_effort_override,
                     compact_mode,
+                    // Issue #637: always sent; blank normalizes to inherit.
+                    service_tier: db::normalize_service_tier(target.service_tier.as_deref()),
                 })
             });
         let targets = futures::future::try_join_all(targets).await?;
@@ -349,6 +353,11 @@ pub struct ModelRouteTargetRequest {
     /// normalize to `passthrough`.
     #[serde(default)]
     pub compact_mode: Option<String>,
+    /// Issue #637: per-target free-form service-tier override. `None`
+    /// (omitted/null/empty) means inherit the endpoint value; `Some(value)`
+    /// is trimmed and wins over the endpoint override.
+    #[serde(default)]
+    pub service_tier: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -535,6 +544,7 @@ mod tests {
             thinking_downgrade_enabled: false,
             thinking_effort_override: None,
             compact_mode: None,
+            service_tier: None,
         })
         .expect("serialize off");
         assert_eq!(
@@ -560,6 +570,7 @@ mod tests {
             // Issue #502 Task 5: compact mode round-trips; omitted means
             // passthrough.
             compact_mode: Some("self_summarize".to_string()),
+            service_tier: Some("fast".to_string()),
         })
         .expect("serialize on");
         assert_eq!(

@@ -141,7 +141,7 @@ pub(super) fn target(
         enabled: true,
         upstream_model: None,
         provider: db::EndpointProvider::OpencodeGo,
-        service_tier: db::MinimaxServiceTier::Standard,
+        service_tier: None,
         proxy_url: None,
 
         proxy_url_override: None,

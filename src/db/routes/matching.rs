@@ -22,7 +22,7 @@ pub async fn get_route(pool: &PgPool, route_id: uuid::Uuid) -> Result<Option<Rou
             upstream_model: None,
             route_selection_reason: crate::db::RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::from_str(&row.provider),
-            service_tier: crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
+            service_tier: crate::db::normalize_service_tier(row.service_tier.as_deref()),
             proxy_url: row.proxy_url,
             // Issue #392 Phase K: direct lookup never normalizes.
             dev_system_normalize: false,

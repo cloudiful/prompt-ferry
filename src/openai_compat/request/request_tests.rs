@@ -1262,4 +1262,101 @@ mod tests {
         assert_eq!(input[7]["type"].as_str(), Some("function_call"));
         assert_eq!(input[7]["call_id"].as_str(), Some("call_2"));
     }
+
+    #[test]
+    fn chat_request_preserves_service_tier_when_translating_to_responses() {
+        // Issue #637 P3: a Chat caller field survives translation; a
+        // configured override (if any) is applied later by the provider
+        // transform, so translation itself must not drop or rewrite it.
+        let value = serde_json::from_slice::<Value>(
+            &chat_request_to_responses(
+                br#"{
+                    "model":"m",
+                    "messages":[{"role":"user","content":"hi"}],
+                    "service_tier":"fast"
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(value["service_tier"].as_str(), Some("fast"));
+    }
+
+    #[test]
+    fn responses_request_preserves_service_tier_when_translating_to_chat() {
+        // Issue #637 P3: a Responses caller field survives translation to a
+        // chat-native upstream instead of being rejected as unsupported.
+        let value = serde_json::from_slice::<Value>(
+            &responses_request_to_chat(
+                br#"{
+                    "model":"m",
+                    "input":"hi",
+                    "service_tier":"priority"
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(value["messages"][0]["content"].as_str(), Some("hi"));
+        assert_eq!(value["service_tier"].as_str(), Some("priority"));
+    }
+
+    #[test]
+    fn stateless_responses_request_preserves_service_tier_when_translating_to_chat() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_stateless_request_to_chat(
+                br#"{
+                    "model":"m",
+                    "input":"hi",
+                    "service_tier":"fast"
+                }"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(value["messages"][0]["content"].as_str(), Some("hi"));
+        assert_eq!(value["service_tier"].as_str(), Some("fast"));
+    }
+
+    #[test]
+    fn responses_request_without_service_tier_omits_it_in_chat() {
+        let value = serde_json::from_slice::<Value>(
+            &responses_request_to_chat(br#"{"model":"m","input":"hi"}"#).unwrap(),
+        )
+        .unwrap();
+        assert!(value.get("service_tier").is_none());
+    }
+
+    #[test]
+    fn chat_request_omits_blank_service_tier_when_translating_to_responses() {
+        // Issue #637: null/empty/whitespace caller tiers mean inherit and
+        // are omitted instead of forwarded upstream.
+        for tier in [r#"null"#, r#""""#, r#""   ""#] {
+            let body = format!(
+                r#"{{"model":"m","messages":[{{"role":"user","content":"hi"}}],"service_tier":{tier}}}"#
+            );
+            let value = serde_json::from_slice::<Value>(
+                &chat_request_to_responses(body.as_bytes()).unwrap(),
+            )
+            .unwrap();
+            assert!(value.get("service_tier").is_none(), "tier {tier}");
+        }
+    }
+
+    #[test]
+    fn responses_request_omits_blank_service_tier_when_translating_to_chat() {
+        // Issue #637: same inherit-means-omit contract in the other
+        // direction; blank values also pass validation untouched.
+        for tier in [r#"null"#, r#""""#, r#""   ""#] {
+            let body = format!(r#"{{"model":"m","input":"hi","service_tier":{tier}}}"#);
+            for translated in [
+                responses_request_to_chat(body.as_bytes()),
+                responses_stateless_request_to_chat(body.as_bytes()),
+            ] {
+                let value: Value = serde_json::from_slice(&translated.unwrap()).unwrap();
+                assert_eq!(value["messages"][0]["content"].as_str(), Some("hi"));
+                assert!(value.get("service_tier").is_none(), "tier {tier}");
+            }
+        }
+    }
 }

@@ -233,6 +233,7 @@ async fn endpoint_proxy_round_trips_with_encrypted_envelope() {
             thinking_downgrade_enabled: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            service_tier: None,
         }],
     };
     repo.create_model_route(rule_id, route_input)
@@ -625,6 +626,7 @@ async fn model_route_crud_round_trips_with_target_persistence() {
             thinking_downgrade_enabled: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            service_tier: None,
         }],
     };
     let rule = repo

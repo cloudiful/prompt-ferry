@@ -99,7 +99,8 @@ pub(super) fn sqlite_endpoint_from_create(
         Some(EndpointRegion::Global) => Some(ScEndpointRegion::Global),
         None => None,
     };
-    let service_tier = super::endpoints_map::service_tier_to_sqlite(input.service_tier);
+    // Issue #637: trim the free-form override; blank persists as inherit.
+    let service_tier = crate::db::normalize_service_tier(input.service_tier.as_deref());
     // Issue #368 Phase A: normalize the proxy default; empty/whitespace
     // means direct (`None`) so clears round-trip as NULL.
     let proxy_url = input
@@ -155,7 +156,7 @@ mod tests {
                 name: "round-trip".to_string(),
                 provider,
                 provider_region: None,
-                service_tier: crate::db::MinimaxServiceTier::Standard,
+                service_tier: None,
                 base_url: "https://example.test".to_string(),
                 native_api: crate::config::NativeApi::Chat,
                 native_api_source: crate::config::NativeApiSource::Manual,

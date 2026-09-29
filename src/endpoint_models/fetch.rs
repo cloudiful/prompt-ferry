@@ -162,7 +162,7 @@ mod tests {
             upstream_model: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: proxy.map(str::to_string),
             dev_system_normalize: false,
             thinking_effort_override: None,

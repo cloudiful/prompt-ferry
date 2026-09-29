@@ -167,7 +167,7 @@ impl BootstrapSeed {
                 name: "bootstrap-upstream".to_string(),
                 provider: EndpointProvider::Generic,
                 provider_region: None,
-                service_tier: crate::standalone_config::MinimaxServiceTier::Standard,
+                service_tier: None,
                 base_url: normalize_endpoint_base_url(&self.upstream_base_url),
                 native_api: self.upstream_native_api,
                 native_api_source: NativeApiSource::Manual,

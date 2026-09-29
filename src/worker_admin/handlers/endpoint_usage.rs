@@ -253,7 +253,7 @@ mod tests {
             provider: db::EndpointProvider::OpenAi,
             provider_region: None,
             plan: db::EndpointPlan::ChatgptSubscription,
-            service_tier: db::MinimaxServiceTier::Standard,
+            service_tier: None,
             base_url: "https://api.openai.com/v1".to_string(),
             native_api: "responses".to_string(),
             native_api_source: "manual".to_string(),

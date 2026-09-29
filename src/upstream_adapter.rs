@@ -60,10 +60,50 @@ pub fn prepare_upstream_request(
 /// keeps the Task 3 behavior byte-for-byte; `off` rejects compact on any
 /// target; `self_summarize` lets non-Responses targets run the ferry-side
 /// handoff flow instead of the cross-protocol 400.
+///
+/// Issue #637: this route-less entry point delegates with no provider
+/// context, so a caller `service_tier` is rejected on Responses→Chat;
+/// Chat→Responses forwards the caller field for every provider (baseline
+/// behavior — the configuration-based override stays gated in the separate
+/// live transform). Pass a provider via
+/// `prepare_upstream_request_for_provider` for the provider-aware
+/// Responses→Chat admission.
 pub fn prepare_upstream_request_with_compact(
     request_path: &str,
     request_body: &[u8],
     native_api: NativeApi,
+    dev_system_normalize: bool,
+    thinking_effort_override: Option<&str>,
+    compact_mode: crate::db::CompactMode,
+) -> Result<PreparedUpstreamRequest, CompatError> {
+    prepare_upstream_request_for_provider(
+        request_path,
+        request_body,
+        native_api,
+        None,
+        dev_system_normalize,
+        thinking_effort_override,
+        compact_mode,
+    )
+}
+
+/// Issue #637: provider-aware dispatch threading the resolved route
+/// provider into the compatibility translation. On Responses→Chat the
+/// caller `service_tier` is accepted and forwarded only for supported
+/// providers (the shared `EndpointProvider::supports_service_tier` bit also
+/// used by the live transform and the route probe); unrelated providers
+/// and route-less callers keep the previous explicit `unsupported_feature`
+/// rejection there. On Chat→Responses the caller field is always forwarded
+/// (baseline behavior, plan decision 3: no configured value preserves the
+/// caller's field) — the configuration-based override stays gated by the
+/// provider/protocol matrix in the separate live transform, which never
+/// injects for unsupported combinations. The live request path always
+/// passes `Some`.
+pub fn prepare_upstream_request_for_provider(
+    request_path: &str,
+    request_body: &[u8],
+    native_api: NativeApi,
+    provider: Option<crate::db::EndpointProvider>,
     dev_system_normalize: bool,
     thinking_effort_override: Option<&str>,
     compact_mode: crate::db::CompactMode,
@@ -91,6 +131,7 @@ pub fn prepare_upstream_request_with_compact(
         request_path,
         request_body,
         native_api,
+        provider,
         dev_system_normalize,
     )?;
     // Issue #464: per-target thinking effort override. `None`/empty means
@@ -178,6 +219,7 @@ fn prepare_upstream_request_inner(
     request_path: &str,
     request_body: &[u8],
     native_api: NativeApi,
+    provider: Option<crate::db::EndpointProvider>,
     dev_system_normalize: bool,
 ) -> Result<PreparedUpstreamRequest, CompatError> {
     match (request_path, native_api) {
@@ -225,6 +267,7 @@ fn prepare_upstream_request_inner(
             "POST /v1/responses/compact requires a responses-native endpoint target; enable per-target self_summarize to compact without upstream support",
         )),
         ("/v1/responses", NativeApi::Chat) => {
+            reject_service_tier_for_unsupported_provider(provider, request_body)?;
             let translated = responses_stateless_request_to_chat(request_body)?;
             Ok(PreparedUpstreamRequest {
                 path: NativeApi::Chat.path().to_string(),
@@ -262,6 +305,9 @@ fn prepare_upstream_request_inner(
             })
         }
         ("/v1/chat/completions", NativeApi::Responses) => {
+            // Issue #637: the caller field is always forwarded here
+            // (baseline behavior); the configuration-based override stays
+            // gated in the separate live transform.
             let translated = chat_request_to_responses(request_body)?;
             Ok(PreparedUpstreamRequest {
                 path: NativeApi::Responses.path().to_string(),
@@ -287,6 +333,64 @@ fn prepare_upstream_request_inner(
             upstream_restore_session: None,
         }),
     }
+}
+
+// Issue #637: service-tier admission for the Responses→Chat
+// compatibility translation. Only supported providers (the shared
+// `EndpointProvider::supports_service_tier` bit also used by the live
+// transform and the route probe) accept and forward the caller field; no
+// provider context authorizes nothing, so route-less/legacy callers get the
+// same rejection as unsupported providers. Chat→Responses needs no gate:
+// the caller field is always forwarded and the configured override stays
+// gated in the live transform.
+fn tier_allowed_for_provider(provider: Option<crate::db::EndpointProvider>) -> bool {
+    provider.is_some_and(|provider| provider.supports_service_tier())
+}
+
+/// Mirrors the compatibility validation's meaningful-value semantics for the
+/// tier field so the adapter gate matches it exactly: null/blank/empty
+/// values stay meaningless and never trigger the rejection.
+fn has_meaningful_tier(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::Bool(flag) => *flag,
+        serde_json::Value::String(text) => !text.trim().is_empty(),
+        serde_json::Value::Array(items) => !items.is_empty(),
+        serde_json::Value::Object(object) => !object.is_empty(),
+        serde_json::Value::Number(_) => true,
+    }
+}
+
+/// Issue #637: reject a caller `service_tier` routed to an unsupported
+/// provider's chat-native upstream with the same `unsupported_feature` shape
+/// the validation used before the field was allowlisted, so unrelated
+/// providers keep the previous explicit 400 instead of silently forwarding
+/// the field. Non-JSON bodies fall through to the translation's own
+/// validation.
+fn reject_service_tier_for_unsupported_provider(
+    provider: Option<crate::db::EndpointProvider>,
+    request_body: &[u8],
+) -> Result<(), CompatError> {
+    if tier_allowed_for_provider(provider) {
+        return Ok(());
+    }
+    let meaningful = serde_json::from_slice::<serde_json::Value>(request_body)
+        .ok()
+        .and_then(|body| {
+            body.as_object()?
+                .get("service_tier")
+                .filter(|tier| has_meaningful_tier(tier))
+                .map(|_| ())
+        })
+        .is_some();
+    if !meaningful {
+        return Ok(());
+    }
+    Err(CompatError::new(
+        StatusCode::BAD_REQUEST,
+        "unsupported_feature",
+        "responses field `service_tier` is not supported for chat-native endpoints",
+    ))
 }
 
 #[cfg(test)]
@@ -617,5 +721,131 @@ mod tests {
         )
         .unwrap();
         assert_eq!(prepared.response_adapter, ResponseAdapter::Passthrough);
+    }
+
+    #[test]
+    fn responses_to_chat_rejects_tier_for_unsupported_provider() {
+        // Issue #637: unrelated providers keep the previous explicit 400
+        // instead of silently forwarding the caller field.
+        let error = super::prepare_upstream_request_for_provider(
+            "/v1/responses",
+            br#"{"model":"m","input":"hi","service_tier":"priority"}"#,
+            NativeApi::Chat,
+            Some(crate::db::EndpointProvider::Generic),
+            false,
+            None,
+            crate::db::CompactMode::Passthrough,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "unsupported_feature");
+        assert!(error.message.contains("service_tier"));
+    }
+
+    #[test]
+    fn responses_to_chat_forwards_tier_for_supported_providers() {
+        // Issue #637: MiniMax/OpenAI chat-native targets accept the caller
+        // field.
+        for provider in [
+            crate::db::EndpointProvider::Minimax,
+            crate::db::EndpointProvider::OpenAi,
+        ] {
+            let prepared = super::prepare_upstream_request_for_provider(
+                "/v1/responses",
+                br#"{"model":"m","input":"hi","service_tier":"priority"}"#,
+                NativeApi::Chat,
+                Some(provider),
+                false,
+                None,
+                crate::db::CompactMode::Passthrough,
+            )
+            .unwrap();
+            assert_eq!(prepared.path, "/v1/chat/completions");
+            let PreparedRequestBody::BufferedBytes(body) = prepared.body else {
+                panic!("responses to chat translation must buffer");
+            };
+            let body: Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(body["service_tier"].as_str(), Some("priority"));
+        }
+    }
+
+    #[test]
+    fn chat_to_responses_forwards_caller_tier_for_unsupported_provider() {
+        // Issue #637: caller-compatibility baseline — the caller field is
+        // always forwarded on Chat→Responses (plan decision 3: no
+        // configured value preserves the caller's field). The
+        // configuration-based override stays gated in the separate live
+        // transform, which never injects for unsupported combinations.
+        let prepared = super::prepare_upstream_request_for_provider(
+            "/v1/chat/completions",
+            br#"{"model":"m","messages":[{"role":"user","content":"hi"}],"service_tier":"priority"}"#,
+            NativeApi::Responses,
+            Some(crate::db::EndpointProvider::Generic),
+            false,
+            None,
+            crate::db::CompactMode::Passthrough,
+        )
+        .unwrap();
+        assert_eq!(prepared.path, "/v1/responses");
+        let PreparedRequestBody::BufferedBytes(body) = prepared.body else {
+            panic!("chat to Responses translation must buffer");
+        };
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["service_tier"].as_str(), Some("priority"));
+    }
+
+    #[test]
+    fn chat_to_responses_keeps_tier_for_supported_provider() {
+        let prepared = super::prepare_upstream_request_for_provider(
+            "/v1/chat/completions",
+            br#"{"model":"m","messages":[{"role":"user","content":"hi"}],"service_tier":"fast"}"#,
+            NativeApi::Responses,
+            Some(crate::db::EndpointProvider::OpenAi),
+            false,
+            None,
+            crate::db::CompactMode::Passthrough,
+        )
+        .unwrap();
+        let PreparedRequestBody::BufferedBytes(body) = prepared.body else {
+            panic!("chat to Responses translation must buffer");
+        };
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["service_tier"].as_str(), Some("fast"));
+    }
+
+    #[test]
+    fn routeless_requests_reject_tier_on_responses_to_chat_only() {
+        // Issue #637: no provider context authorizes nothing on
+        // Responses→Chat (same rejection as unsupported providers), while
+        // Chat→Responses forwards the caller field for every provider
+        // (caller-compatibility baseline; overrides stay gated in the live
+        // transform).
+        let error = super::prepare_upstream_request_for_provider(
+            "/v1/responses",
+            br#"{"model":"m","input":"hi","service_tier":"priority"}"#,
+            NativeApi::Chat,
+            None,
+            false,
+            None,
+            crate::db::CompactMode::Passthrough,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "unsupported_feature");
+        assert!(error.message.contains("service_tier"));
+
+        let prepared = super::prepare_upstream_request_for_provider(
+            "/v1/chat/completions",
+            br#"{"model":"m","messages":[{"role":"user","content":"hi"}],"service_tier":"priority"}"#,
+            NativeApi::Responses,
+            None,
+            false,
+            None,
+            crate::db::CompactMode::Passthrough,
+        )
+        .unwrap();
+        let PreparedRequestBody::BufferedBytes(body) = prepared.body else {
+            panic!("chat to Responses translation must buffer");
+        };
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["service_tier"].as_str(), Some("priority"));
     }
 }

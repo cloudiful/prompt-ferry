@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT endpoint_id AS \"route_id!\", COALESCE(owner_user_id, 0) AS \"user_id!\", base_url, api_key, proxy_url, key_lb_enabled, native_api, provider, COALESCE(service_tier, 'standard') AS service_tier\nFROM provider_endpoints\nWHERE endpoint_id = $1\n  AND enabled = TRUE\n",
+  "query": "WITH selected AS (\n    SELECT COALESCE(\n        (SELECT endpoint_id FROM user_endpoint_settings WHERE user_id = $1),\n        (SELECT endpoint_id FROM provider_endpoints WHERE scope = 'user' AND owner_user_id = $1 AND enabled = TRUE ORDER BY updated_at DESC LIMIT 1),\n        (SELECT endpoint_id FROM provider_endpoints WHERE scope = 'admin' AND enabled = TRUE ORDER BY updated_at DESC LIMIT 1)\n    ) AS endpoint_id\n)\nSELECT e.endpoint_id AS \"route_id!\", $1::BIGINT AS \"user_id!\", e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, e.provider, e.service_tier\nFROM selected s\nJOIN provider_endpoints e ON e.endpoint_id = s.endpoint_id\nWHERE e.enabled = TRUE\n",
   "describe": {
     "columns": [
       {
@@ -90,12 +90,17 @@
         "ordinal": 8,
         "name": "service_tier",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "service_tier"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Int8"
       ]
     },
     "nullable": [
@@ -107,8 +112,8 @@
       false,
       false,
       false,
-      null
+      true
     ]
   },
-  "hash": "cf1ad697caea6d46b25abce48e54c21575e3628ae12fe861e0a37bbd494eca83"
+  "hash": "b1cbdbe093cfc52a713766a77a236bd79abc1f6e8b3da6ae39dedaddaefbde83"
 }

@@ -100,7 +100,7 @@ mod tests {
             upstream_model: None,
             route_selection_reason: db::RouteSelectionReason::Default,
             provider: db::EndpointProvider::Generic,
-            service_tier: db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: proxy.map(str::to_string),
             dev_system_normalize: false,
             thinking_effort_override: None,

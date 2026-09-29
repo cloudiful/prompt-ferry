@@ -7,12 +7,11 @@ use crate::{
     config::NativeApi,
     db::{
         EndpointApiKey as PgEndpointApiKey, EndpointProvider, EndpointRegion,
-        MinimaxServiceTier as PgServiceTier, ProviderEndpoint as PgProviderEndpoint,
+        ProviderEndpoint as PgProviderEndpoint,
     },
     standalone_config::{
         EndpointApiKeyConfig as ScEndpointApiKey, EndpointProvider as ScEndpointProvider,
-        EndpointRegion as ScEndpointRegion, MinimaxServiceTier as ScServiceTier,
-        ProviderEndpointConfig as ScProviderEndpoint,
+        EndpointRegion as ScEndpointRegion, ProviderEndpointConfig as ScProviderEndpoint,
     },
 };
 
@@ -85,7 +84,8 @@ pub(super) fn from_sqlite(endpoint: ScProviderEndpoint) -> Result<UnifiedProvide
         // Issue #599 R2a: SQLite stores no plan column in R2a; both fields
         // start absent and the repository enriches them from token presence.
         plan: crate::db::EndpointPlan::default(),
-        service_tier: service_tier_from_sqlite(endpoint.service_tier),
+        // Issue #637: free-form override carried through unchanged.
+        service_tier: endpoint.service_tier,
         base_url: endpoint.base_url,
         native_api: endpoint.native_api,
         native_api_source: endpoint.native_api_source.as_str().to_string(),
@@ -178,20 +178,6 @@ mod tests {
         ] {
             assert_eq!(provider_from_sqlite(sc), expected);
         }
-    }
-}
-
-pub(super) fn service_tier_from_sqlite(tier: ScServiceTier) -> PgServiceTier {
-    match tier {
-        ScServiceTier::Priority => PgServiceTier::Priority,
-        ScServiceTier::Standard => PgServiceTier::Standard,
-    }
-}
-
-pub(crate) fn service_tier_to_sqlite(tier: PgServiceTier) -> ScServiceTier {
-    match tier {
-        PgServiceTier::Priority => ScServiceTier::Priority,
-        PgServiceTier::Standard => ScServiceTier::Standard,
     }
 }
 

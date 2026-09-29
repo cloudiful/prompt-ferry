@@ -84,6 +84,8 @@ async fn sync_model_route_targets(
             None | Some([]) => None,
             Some(windows) => active_windows::storage_value(windows),
         };
+        // Issue #637: trim the free-form override; blank means inherit.
+        let service_tier = crate::db::normalize_service_tier(target.service_tier.as_deref());
         sqlx::query_file!(
             "src/sql/routes/insert_model_route_target.sql",
             rule_id,
@@ -98,6 +100,7 @@ async fn sync_model_route_targets(
             target.thinking_downgrade_enabled,
             target.thinking_effort_override,
             target.compact_mode.as_str(),
+            service_tier.as_deref(),
         )
         .execute(&mut **tx)
         .await?;

@@ -397,7 +397,11 @@ export type EndpointRequest = {
      */
     proxy_url?: string | null;
     scope: string;
-    service_tier?: MinimaxServiceTier;
+    /**
+     * Issue #637: free-form service-tier override. `None`/blank inherits
+     * (no override); a model-route target override wins over this value.
+     */
+    service_tier?: string | null;
 };
 
 export type EndpointSettingRequest = {
@@ -700,8 +704,6 @@ export type MeResponse = {
     user_id: number;
 };
 
-export type MinimaxServiceTier = 'standard' | 'priority';
-
 export type ModelEndpointRule = {
     created_at: string;
     enabled: boolean;
@@ -777,6 +779,12 @@ export type ModelRouteTarget = {
     native_api?: NativeApi;
     position: number;
     rule_id: string;
+    /**
+     * Issue #637: per-target free-form service-tier override. `None`/blank
+     * inherits the endpoint value (or leaves the caller/provider default
+     * intact when the endpoint is blank too).
+     */
+    service_tier?: string | null;
     target_id: string;
     /**
      * Issue #566: per-target thinking adaptation switch (pre-flight
@@ -833,6 +841,12 @@ export type ModelRouteTargetRequest = {
      * inherit; `Some(url)` must use `http/https/socks5/socks5h`.
      */
     proxy_url_override?: string | null;
+    /**
+     * Issue #637: per-target free-form service-tier override. `None`
+     * (omitted/null/empty) means inherit the endpoint value; `Some(value)`
+     * is trimmed and wins over the endpoint override.
+     */
+    service_tier?: string | null;
     /**
      * Issue #566: per-target thinking adaptation switch (pre-flight
      * downgrade + reasoning-echo fingerprint retry). Always sent (no omit
@@ -998,7 +1012,11 @@ export type ProviderEndpoint = {
     provider: EndpointProvider;
     provider_region?: null | EndpointRegion;
     scope: string;
-    service_tier?: MinimaxServiceTier;
+    /**
+     * Issue #637: free-form endpoint service-tier override. `None` means
+     * inherit (no override); a model-route target override wins over it.
+     */
+    service_tier?: string | null;
     updated_at: string;
 };
 

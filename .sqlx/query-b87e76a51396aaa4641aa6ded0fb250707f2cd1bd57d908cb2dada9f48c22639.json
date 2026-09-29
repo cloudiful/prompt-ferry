@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO provider_endpoints(scope, owner_user_id, name, provider, provider_region, service_tier, base_url, native_api, native_api_source, api_key, proxy_url, active_windows, key_lb_enabled, enabled)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, api_key, proxy_url, active_windows, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
+  "query": "INSERT INTO provider_endpoints(scope, owner_user_id, name, provider, provider_region, service_tier, base_url, native_api, native_api_source, api_key, proxy_url, active_windows, key_lb_enabled, enabled)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, service_tier, base_url, native_api, native_api_source, api_key, proxy_url, active_windows, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
   "describe": {
     "columns": [
       {
@@ -73,7 +73,12 @@
         "ordinal": 6,
         "name": "service_tier",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "service_tier"
+          }
+        }
       },
       {
         "ordinal": 7,
@@ -222,7 +227,7 @@
       false,
       false,
       true,
-      null,
+      true,
       false,
       false,
       false,
@@ -236,5 +241,5 @@
       false
     ]
   },
-  "hash": "e3eea6ac950aa99c48ead03de0968449ead0325d3bc240e7393e8e07d3ebb0d3"
+  "hash": "b87e76a51396aaa4641aa6ded0fb250707f2cd1bd57d908cb2dada9f48c22639"
 }

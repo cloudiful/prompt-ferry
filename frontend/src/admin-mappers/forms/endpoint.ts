@@ -1,17 +1,19 @@
 import type {
   EndpointPlan,
   EndpointRequest,
-  MinimaxServiceTier,
   ProviderEndpoint,
 } from '../../generated/admin-api'
 import type { EndpointForm } from '../../models'
 
-// Backend treats omitted/unknown tiers as standard; keep the form in sync so
-// legacy endpoints round-trip without changing behavior.
+// Issue #637: service tiers are free-form strings, not a fixed enum. Trim the
+// value and treat blank/whitespace-only input as inherit (`null`) so the
+// request leaves the caller/provider default untouched; non-empty values are
+// preserved verbatim.
 export function normalizeServiceTier(
-  value: MinimaxServiceTier | string | null | undefined,
-): MinimaxServiceTier {
-  return value === 'priority' ? 'priority' : 'standard'
+  value: string | null | undefined,
+): string | null {
+  const trimmed = value?.trim() ?? ''
+  return trimmed === '' ? null : trimmed
 }
 
 // Issue #599 R2c: the plan axis is derived server-side (token presence on an
@@ -44,7 +46,8 @@ export function createEmptyEndpointForm(): EndpointForm {
     name: '',
     provider: 'generic',
     provider_region: null,
-    service_tier: 'standard',
+    // Issue #637: inherit until the operator configures an override.
+    service_tier: null,
     base_url: '',
     api_keys: [
       {

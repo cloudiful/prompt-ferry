@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, COALESCE(t.native_api, 'auto') AS target_native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override,\n        t.active_windows, e.active_windows AS endpoint_active_windows,\n        COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\",\n        COALESCE(t.thinking_downgrade_enabled, FALSE) AS \"thinking_downgrade_enabled!\",\n        t.thinking_effort_override,\n        t.compact_mode\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.rule_id = $1\n  AND r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
+  "query": "SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy, r.updated_at,\n       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, COALESCE(t.native_api, 'auto') AS target_native_api, e.provider, e.service_tier AS endpoint_service_tier, t.service_tier AS target_service_tier,\n       t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override,\n        t.active_windows, e.active_windows AS endpoint_active_windows,\n        COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\",\n        COALESCE(t.thinking_downgrade_enabled, FALSE) AS \"thinking_downgrade_enabled!\",\n        t.thinking_effort_override,\n        t.compact_mode\nFROM model_endpoint_rules r\nJOIN model_route_targets t ON t.rule_id = r.rule_id\nJOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE r.rule_id = $1\n  AND r.enabled = TRUE\n  AND t.enabled = TRUE\n  AND e.enabled = TRUE\nORDER BY\n  CASE WHEN r.scope = 'user' THEN 0 ELSE 1 END,\n  r.updated_at DESC,\n  t.position ASC\n",
   "describe": {
     "columns": [
       {
@@ -176,12 +176,28 @@
       },
       {
         "ordinal": 16,
-        "name": "service_tier",
+        "name": "endpoint_service_tier",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "service_tier"
+          }
+        }
       },
       {
         "ordinal": 17,
+        "name": "target_service_tier",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_route_targets",
+            "name": "service_tier"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
         "name": "position",
         "type_info": "Int4",
         "origin": {
@@ -192,7 +208,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "target_enabled",
         "type_info": "Bool",
         "origin": {
@@ -203,7 +219,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "upstream_model",
         "type_info": "Text",
         "origin": {
@@ -214,7 +230,7 @@
         }
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "proxy_url_override",
         "type_info": "Text",
         "origin": {
@@ -225,7 +241,7 @@
         }
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "active_windows",
         "type_info": "Text",
         "origin": {
@@ -236,7 +252,7 @@
         }
       },
       {
-        "ordinal": 22,
+        "ordinal": 23,
         "name": "endpoint_active_windows",
         "type_info": "Text",
         "origin": {
@@ -247,19 +263,19 @@
         }
       },
       {
-        "ordinal": 23,
+        "ordinal": 24,
         "name": "dev_system_normalize!",
         "type_info": "Bool",
         "origin": "Expression"
       },
       {
-        "ordinal": 24,
+        "ordinal": 25,
         "name": "thinking_downgrade_enabled!",
         "type_info": "Bool",
         "origin": "Expression"
       },
       {
-        "ordinal": 25,
+        "ordinal": 26,
         "name": "thinking_effort_override",
         "type_info": "Text",
         "origin": {
@@ -270,7 +286,7 @@
         }
       },
       {
-        "ordinal": 26,
+        "ordinal": 27,
         "name": "compact_mode",
         "type_info": "Text",
         "origin": {
@@ -303,7 +319,8 @@
       false,
       null,
       false,
-      null,
+      true,
+      true,
       false,
       false,
       true,
@@ -316,5 +333,5 @@
       false
     ]
   },
-  "hash": "297088fb99d3e2dd340d9554e4d59fead890cd146035965a305abd65d4681ad6"
+  "hash": "9641cf134849fff3f5625177d85910d4c9bfd7487b81a87fce4dafd394e5f3a4"
 }

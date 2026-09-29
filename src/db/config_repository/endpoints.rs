@@ -32,7 +32,9 @@ pub struct UnifiedProviderEndpoint {
     /// stored OAuth token (`EndpointPlan::resolve`). Never trusted blindly
     /// from the client.
     pub plan: EndpointPlan,
-    pub service_tier: crate::db::MinimaxServiceTier,
+    /// Issue #637: free-form service-tier override carried through the
+    /// unified admin shape; `None` means inherit (no override).
+    pub service_tier: Option<String>,
     pub base_url: String,
     pub native_api: NativeApi,
     pub native_api_source: String,
@@ -181,7 +183,7 @@ impl super::ConfigRepository {
                             crate::db::EndpointRegion::Global
                         }
                     }),
-                    service_tier: endpoints_map::service_tier_from_sqlite(endpoint.service_tier),
+                    service_tier: endpoint.service_tier,
                     base_url: endpoint.base_url,
                     native_api: endpoint.native_api.as_str().to_string(),
                     native_api_source: endpoint.native_api_source.as_str().to_string(),
@@ -751,7 +753,7 @@ mod tests {
             provider: crate::db::EndpointProvider::Generic,
             provider_region: None,
             plan: crate::db::EndpointPlan::PlatformApiKey,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             base_url: "https://example.test".to_string(),
             native_api: NativeApi::Chat,
             native_api_source: "manual".to_string(),

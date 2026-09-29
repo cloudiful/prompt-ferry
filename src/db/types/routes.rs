@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 use crate::config::NativeApi;
 use crate::db::RouteSelectionReason;
 use crate::db::types::EndpointApiKey;
-use crate::db::types::endpoints::{EndpointProvider, MinimaxServiceTier};
+use crate::db::types::endpoints::{EndpointProvider, normalize_service_tier};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -53,6 +53,14 @@ pub fn normalize_compact_mode(raw: Option<&str>) -> CompactMode {
 /// `None`/empty inherits `passthrough`; explicit values parse leniently.
 pub fn resolve_target_compact_mode(raw: Option<&str>) -> CompactMode {
     normalize_compact_mode(raw)
+}
+
+/// Issue #637: resolve the effective free-form service-tier override for a
+/// route target. A non-empty target override wins; otherwise a non-empty
+/// endpoint override is inherited; both blank means no override, so the
+/// caller's provider field/default stays intact.
+pub fn resolve_service_tier(endpoint: Option<&str>, target: Option<&str>) -> Option<String> {
+    normalize_service_tier(target).or_else(|| normalize_service_tier(endpoint))
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -108,7 +116,10 @@ pub struct RouteConfig {
     pub upstream_model: Option<String>,
     pub route_selection_reason: RouteSelectionReason,
     pub provider: EndpointProvider,
-    pub service_tier: MinimaxServiceTier,
+    /// Issue #637: resolved free-form service-tier override for this route
+    /// (model-route target override wins over the endpoint value); `None`
+    /// means inherit (leave the caller/provider field untouched).
+    pub service_tier: Option<String>,
     // Issue #368 Phase A+D: resolved outbound proxy for this route
     // (`proxy_url_override` ?? endpoint `proxy_url`). `None` means direct.
     // Pooled client selection lives in `worker::runtime::ai::proxy`.
@@ -192,6 +203,11 @@ pub struct ModelRouteTarget {
     /// summarization for non-Responses targets. Always sent (no omit).
     #[serde(default)]
     pub compact_mode: CompactMode,
+    /// Issue #637: per-target free-form service-tier override. `None`/blank
+    /// inherits the endpoint value (or leaves the caller/provider default
+    /// intact when the endpoint is blank too).
+    #[serde(default)]
+    pub service_tier: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -262,6 +278,10 @@ pub struct ModelRouteTargetCreate {
     /// summarization for non-Responses targets. Always sent (no omit).
     #[serde(default)]
     pub compact_mode: CompactMode,
+    /// Issue #637: per-target free-form service-tier override. `None`/blank
+    /// means inherit the endpoint value.
+    #[serde(default)]
+    pub service_tier: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -304,7 +324,9 @@ pub struct ModelRouteCandidateTarget {
     pub enabled: bool,
     pub upstream_model: Option<String>,
     pub provider: EndpointProvider,
-    pub service_tier: MinimaxServiceTier,
+    /// Issue #637: resolved free-form service-tier override
+    /// (target override wins over the endpoint value). `None` means inherit.
+    pub service_tier: Option<String>,
     // Issue #368 Phase A+D: endpoint default plus per-target override.
     // Resolution (`override ?? endpoint`) via `resolve_proxy_url`; both are
     // carried here so the selector can pick without extra lookups.
@@ -458,7 +480,9 @@ pub struct ModelRoutePage {
 
 #[cfg(test)]
 mod compact_mode_tests {
-    use super::{CompactMode, normalize_compact_mode, resolve_target_compact_mode};
+    use super::{
+        CompactMode, normalize_compact_mode, resolve_service_tier, resolve_target_compact_mode,
+    };
 
     #[test]
     fn defaults_to_passthrough_and_round_trips() {
@@ -487,5 +511,29 @@ mod compact_mode_tests {
         assert!(CompactMode::SelfSummarize.is_self_summarize());
         assert!(!CompactMode::Passthrough.is_self_summarize());
         assert!(!CompactMode::Off.is_self_summarize());
+    }
+
+    #[test]
+    fn resolve_service_tier_prefers_target_then_endpoint_then_none() {
+        // Issue #637: target override > endpoint override > inherit; blank
+        // and whitespace act as unset at every level.
+        assert_eq!(
+            resolve_service_tier(Some("standard"), Some("priority")),
+            Some("priority".to_string())
+        );
+        assert_eq!(
+            resolve_service_tier(Some("priority"), None),
+            Some("priority".to_string())
+        );
+        assert_eq!(
+            resolve_service_tier(Some("priority"), Some("   ")),
+            Some("priority".to_string())
+        );
+        assert_eq!(
+            resolve_service_tier(None, Some(" fast ")),
+            Some("fast".to_string())
+        );
+        assert_eq!(resolve_service_tier(None, None), None);
+        assert_eq!(resolve_service_tier(Some(""), Some("  ")), None);
     }
 }

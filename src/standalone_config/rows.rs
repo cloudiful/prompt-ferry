@@ -3,8 +3,8 @@ use uuid::Uuid;
 
 use super::models::{
     ClientKeyConfig, EndpointApiKeyConfig, EndpointProvider, EndpointRegion, ManagedRelayConfig,
-    MinimaxServiceTier, ModelRouteConfig, ModelRouteTargetConfig, ProviderEndpointConfig, Result,
-    RouteScope, RoutingStrategy, SettingConfig, StandaloneConfigError,
+    ModelRouteConfig, ModelRouteTargetConfig, ProviderEndpointConfig, Result, RouteScope,
+    RoutingStrategy, SettingConfig, StandaloneConfigError,
 };
 use crate::{
     config::{BridgeEncryptionMode, NativeApi, NativeApiSource, TlsMode},
@@ -141,15 +141,15 @@ pub(crate) fn endpoint(
 )> {
     let created_at = sqlite_timestamp(row, "created_at")?;
     let updated_at = sqlite_timestamp(row, "updated_at")?;
-    // `service_tier` was added by standalone migration 0011; older rows and
-    // legacy snapshots default to `standard` so existing endpoints keep
-    // their behavior. A missing column (pre-migration snapshot) also
-    // defaults to standard instead of failing the read.
+    // Issue #637: free-form service-tier override (standalone 0034). NULL or
+    // blank means inherit; a missing column (pre-migration snapshot) also
+    // reads as inherit.
     let service_tier = match row.try_get::<Option<String>, _>("service_tier") {
-        Err(_) => MinimaxServiceTier::Standard,
-        Ok(None) => MinimaxServiceTier::Standard,
-        Ok(Some(value)) if value.trim().is_empty() => MinimaxServiceTier::Standard,
-        Ok(Some(value)) => MinimaxServiceTier::parse_lossy(Some(value.as_str())),
+        Ok(value) => value
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        Err(sqlx::Error::ColumnNotFound(_)) => None,
+        Err(error) => return Err(error.into()),
     };
     // Issue #392 Phase K: 0021 `active_windows` is plaintext; pre-migration
     // rows lack the column and read as all-day (`None`).
@@ -409,6 +409,15 @@ pub(crate) fn route_target(
         Err(sqlx::Error::ColumnNotFound(_)) => "passthrough".to_string(),
         Err(error) => return Err(error.into()),
     };
+    // Issue #637: 0034 `service_tier` TEXT NULL; pre-migration rows lack the
+    // column and read as inherit (`None`). Blank also normalizes to None.
+    let service_tier = match row.try_get::<Option<String>, _>("service_tier") {
+        Ok(value) => value
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        Err(sqlx::Error::ColumnNotFound(_)) => None,
+        Err(error) => return Err(error.into()),
+    };
     Ok((
         uuid(row, "rule_id")?,
         ModelRouteTargetConfig {
@@ -428,6 +437,7 @@ pub(crate) fn route_target(
             thinking_downgrade_enabled,
             thinking_effort_override,
             compact_mode,
+            service_tier,
         },
         envelope_opt(row, "proxy_url_override")?,
     ))

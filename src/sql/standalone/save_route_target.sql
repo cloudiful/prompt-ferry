@@ -3,8 +3,9 @@ INSERT INTO standalone_model_route_targets (
     native_api,
     proxy_url_override_ciphertext, proxy_url_override_nonce, proxy_url_override_key_version,
     active_windows, dev_system_normalize, thinking_downgrade_enabled, thinking_effort_override, compact_mode,
+    service_tier,
     updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(target_id) DO UPDATE SET
     rule_id = excluded.rule_id,
     endpoint_id = excluded.endpoint_id,
@@ -20,4 +21,5 @@ ON CONFLICT(target_id) DO UPDATE SET
     thinking_downgrade_enabled = excluded.thinking_downgrade_enabled,
     thinking_effort_override = excluded.thinking_effort_override,
     compact_mode = excluded.compact_mode,
+    service_tier = excluded.service_tier,
     updated_at = CURRENT_TIMESTAMP;

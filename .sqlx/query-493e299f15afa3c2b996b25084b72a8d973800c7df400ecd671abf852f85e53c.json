@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE provider_endpoints\nSET\n    scope = $2,\n    owner_user_id = $3,\n    name = $4,\n    provider = $5,\n    provider_region = $6,\n    service_tier = $7,\n    base_url = $8,\n    native_api = $9,\n    native_api_source = $10,\n    api_key = $11,\n    proxy_url = $12,\n    active_windows = $13,\n    key_lb_enabled = $14,\n    enabled = $15,\n    updated_at = NOW()\nWHERE endpoint_id = $1\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, api_key, proxy_url, active_windows, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
+  "query": "INSERT INTO provider_endpoints(scope, owner_user_id, name, provider, provider_region, service_tier, base_url, native_api, native_api_source, api_key, proxy_url, active_windows, key_lb_enabled, enabled, mcp_enabled)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)\nRETURNING endpoint_id, scope, owner_user_id, name, provider, provider_region, service_tier, base_url, native_api, native_api_source, api_key, proxy_url, active_windows, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\n",
   "describe": {
     "columns": [
       {
@@ -73,7 +73,12 @@
         "ordinal": 6,
         "name": "service_tier",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "service_tier"
+          }
+        }
       },
       {
         "ordinal": 7,
@@ -199,7 +204,6 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
         "Text",
         "Int8",
         "Text",
@@ -213,6 +217,7 @@
         "Text",
         "Text",
         "Bool",
+        "Bool",
         "Bool"
       ]
     },
@@ -223,7 +228,7 @@
       false,
       false,
       true,
-      null,
+      true,
       false,
       false,
       false,
@@ -237,5 +242,5 @@
       false
     ]
   },
-  "hash": "682af3089a28a6f3e8781d81431d839ad6673170689d1e72b8e8686813fe3b80"
+  "hash": "493e299f15afa3c2b996b25084b72a8d973800c7df400ecd671abf852f85e53c"
 }
