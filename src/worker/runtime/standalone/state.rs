@@ -391,6 +391,7 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_runtime_persists_usage_and_hydrates_on_reopen() {
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         use crate::worker_usage::{UsageLog, UsageRequestMetadata};
 
         let path = database_path();
@@ -470,6 +471,7 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_runtime_persists_repeated_lifecycle_events_for_one_request() {
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         use crate::db::{RequestRecordState, UsageEventKind};
         use crate::worker_usage::{UsageLog, UsageRequestMetadata};
 
@@ -556,6 +558,7 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_runtime_persists_phase_1c_a_request_metadata_and_hydrates_it() {
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         use crate::db::{RequestRecordState, UsageEventKind};
         use crate::worker_usage::{UsageLog, UsageRequestMetadata};
 
@@ -677,6 +680,7 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_runtime_persists_phase_1c_b_replay_snapshots() {
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         use crate::worker_usage::{UsageLog, UsageRequestMetadata};
 
         let path = database_path();
@@ -791,6 +795,7 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_runtime_skips_replay_snapshot_for_malformed_prompt_refs() {
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         use crate::worker_usage::{UsageLog, UsageRequestMetadata};
 
         let path = database_path();

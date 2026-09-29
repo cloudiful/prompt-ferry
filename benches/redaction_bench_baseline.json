@@ -182,6 +182,6 @@
     }
   },
   "generated_by": "scripts/ci/bench_compare.py --save",
-  "notes": "CI runs only the 'quick' subset with `cargo bench ... -- quick`; the full matrix is recorded for the growth curve but is never a hard gate.",
+  "notes": "Only the 'quick' subset is gated with `cargo bench ... -- quick`; the full matrix is recorded for the growth curve but is never a hard gate.",
   "version": 1
 }

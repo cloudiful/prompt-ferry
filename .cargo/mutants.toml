@@ -1,5 +1,5 @@
 # cargo-mutants scope for #569 Phase 2 (assertion strength of the redaction
-# chain). The run is manual-only: .forgejo/workflows/mutants.yml.
+# chain). The run is manual-only.
 #
 # Exactly six production files: the smallest surface that still covers the
 # #568 restore leak site (`stream_restore.rs`) and its helpers, the upstream

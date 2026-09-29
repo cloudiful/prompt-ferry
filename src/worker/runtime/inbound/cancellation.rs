@@ -197,6 +197,7 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_cancel_request_awaits_durable_persistence_and_survives_reopen() {
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         let path = database_path("awaited");
         let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
         let manager =

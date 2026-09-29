@@ -15,6 +15,7 @@ use super::support::open_standalone_state;
 
 #[tokio::test]
 async fn standalone_guard_acquires_and_keeps_owner_checked_row() {
+    let _redaction_guard = crate::redact_test_support::lock_async().await;
     let (state, path) = open_standalone_state().await;
     let control = RuntimeControl::new();
     let inputs =
@@ -74,6 +75,7 @@ async fn standalone_guard_acquires_and_keeps_owner_checked_row() {
 
 #[tokio::test]
 async fn standalone_guard_does_not_heartbeat_when_blocked_by_other_owner() {
+    let _redaction_guard = crate::redact_test_support::lock_async().await;
     let (state, path) = open_standalone_state().await;
     let control = RuntimeControl::new();
     let other_owner = Uuid::new_v4();
@@ -126,6 +128,7 @@ async fn standalone_guard_does_not_heartbeat_when_blocked_by_other_owner() {
 
 #[tokio::test]
 async fn standalone_reconciler_deletes_only_expired_rows() {
+    let _redaction_guard = crate::redact_test_support::lock_async().await;
     use std::time::Duration;
 
     let (state, path) = open_standalone_state().await;

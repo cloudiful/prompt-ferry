@@ -1,8 +1,8 @@
 # CI coverage scripts
 
-`#569 Phase 0` measures coverage and gates only the redaction chain. The
-`.forgejo/workflows/test.yml` jobs call these scripts; they are reproducible
-locally with Docker or any reachable PostgreSQL 17 and Valkey.
+`#569 Phase 0` measures coverage and gates only the redaction chain. These
+scripts are reproducible locally with Docker or any reachable PostgreSQL 17 and
+Valkey.
 
 ## Scripts
 
@@ -77,15 +77,13 @@ cargo-mutants mutates only the root `prompt-ferry` package and silently drops
 `crates/prompt-ferry-redact-upstream/src/lib.rs`. Confirm the resolved scope
 with `cargo mutants --list-files --workspace`, which must list those six files.
 
-`.forgejo/workflows/mutants.yml` is manual-only (`workflow_dispatch`; no
-`pull_request` or `push` trigger) because a batch is long-running. It runs
-`require-services.sh` first, so the PostgreSQL/Valkey-backed tests cannot
-silently skip, and sets `RUST_TEST_THREADS=1` to keep the shared-database and
-global-redaction-lock suite serialized; `cargo-mutants` itself stays sequential.
-The report in `mutants.out/` uploads as the `mutants-report` artifact. Target:
-survivors below 10%, with each surviving mutant either killed by a new
-assertion or waived in writing. The `shard` dispatch input (`--shard k/n`) can
-split one batch across bounded runs.
+Mutation testing is manual-only because a batch is long-running. The run
+executes `require-services.sh` first, so the PostgreSQL/Valkey-backed tests
+cannot silently skip, and sets `RUST_TEST_THREADS=1` to keep the shared-database
+and global-redaction-lock suite serialized; `cargo-mutants` itself stays
+sequential. The report lands in `mutants.out/`. Target: survivors below 10%,
+with each surviving mutant either killed by a new assertion or waived in
+writing. `cargo mutants --shard k/n` splits one batch across bounded runs.
 
 ```bash
 cargo install cargo-mutants --locked
@@ -95,7 +93,7 @@ scripts/ci/require-services.sh
 RUST_TEST_THREADS=1 cargo mutants --in-place --no-shuffle --workspace
 ```
 
-The survivor report has not been produced yet; the first manual/CI run is
+The survivor report has not been produced yet; the first manual run is
 pending operator execution.
 
 ## Performance benchmarks (#569 Phase 3)
@@ -120,8 +118,8 @@ scripts/ci/bench_compare.py --mode check   # compare a run against the baseline
 fails when a gated median exceeds its baseline by `max_regression_factor`
 (default `2.5`, override with `--max-factor`) or when a gated benchmark
 produced no measurement; ungated full-matrix entries are reported but never
-fail. The `bench` job in `.forgejo/workflows/test.yml` runs the bounded subset
-only, so mutation testing and full-load benchmarks stay manual and ungated.
+fail. Only the bounded `quick` subset is gated; mutation testing and full-load
+benchmarks stay manual.
 
 Release medians from the committed baseline (reference host, `--test-threads`
 irrelevant here):
@@ -157,7 +155,6 @@ bun run test
 ```
 
 `bun run test` executes `vitest run`. `frontend/package.json` pins the Bun
-version CI uses (`1.3.14`), and the `frontend` job in
-`.forgejo/workflows/test.yml` runs `format:check`, `typecheck`, `test`, and
-`build` with that version. The install uses `--no-save`, so the gitignored
-`frontend/bun.lock` is never written or committed.
+version (`1.3.14`) that `format:check`, `typecheck`, `test`, and `build` run
+with. The install uses `--no-save`, so the gitignored `frontend/bun.lock` is
+never written or committed.

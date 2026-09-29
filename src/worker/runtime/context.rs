@@ -429,6 +429,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatches_standalone_usage_and_keeps_no_state_as_noop() {
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         let path = database_path();
         let store = Arc::new(StandaloneConfigStore::open(&path).await.expect("store"));
         let standalone = StandaloneRuntimeState::new(

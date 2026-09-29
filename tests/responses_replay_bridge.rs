@@ -157,6 +157,7 @@ async fn sanitizes_nul_bytes_for_request_storage_without_mutating_upstream_paylo
     assert_eq!(prompt_block.1, "beforeafter");
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -271,6 +272,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
     assert_eq!(requests[1]["messages"][2]["content"].as_str(), Some("72F"));
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -437,6 +439,7 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
     assert_eq!(rows[0].3, rows[1].3);
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -537,6 +540,7 @@ async fn raw_passthrough_keeps_previous_response_id_without_replay_state() -> an
     assert_eq!(requests[0]["input"][1]["role"].as_str(), Some("developer"));
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -633,6 +637,7 @@ async fn raw_passthrough_keeps_conversation_without_replay_state() -> anyhow::Re
     );
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -732,6 +737,7 @@ async fn rejects_stateful_responses_routed_to_chat_native_target() -> anyhow::Re
     );
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }
@@ -826,6 +832,7 @@ async fn rejects_responses_routed_to_anthropic_native_target() -> anyhow::Result
     );
 
     worker_handle.abort();
+    let _ = worker_handle.await;
     schema.cleanup().await?;
     Ok(())
 }

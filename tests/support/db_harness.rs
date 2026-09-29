@@ -6,16 +6,24 @@ use sqlx::{
 };
 use uuid::Uuid;
 
+#[path = "db_gate.rs"]
+mod db_gate;
+
 pub const TEST_DATABASE_URL_ENV: &str = "PROMPT_FERRY_TEST_DATABASE_URL";
 
 pub struct TestSchema {
     pub pool: PgPool,
     admin_pool: PgPool,
     pub schema_name: String,
+    cleanup: db_gate::SchemaCleanup,
+    /// Held for the whole test so migrations (including the concurrent index
+    /// build) never overlap another test's migration or schema teardown.
+    _gate: db_gate::MigrationGate,
 }
 
 impl TestSchema {
     pub async fn new() -> anyhow::Result<Self> {
+        let gate = db_gate::MigrationGate::acquire().await?;
         let database_url = env::var(TEST_DATABASE_URL_ENV)?;
         let schema_name = format!("pfy_test_{}", Uuid::new_v4().simple());
         let base_options = PgConnectOptions::from_str(&database_url)?;
@@ -37,6 +45,8 @@ impl TestSchema {
             .await?;
 
         Ok(Self {
+            cleanup: db_gate::SchemaCleanup::new(schema_name.clone()),
+            _gate: gate,
             pool,
             admin_pool,
             schema_name,
@@ -44,37 +54,12 @@ impl TestSchema {
     }
 
     pub async fn cleanup(&self) -> anyhow::Result<()> {
-        // A worker pool that is still draining a query holds locks on schema
-        // objects while `DROP SCHEMA ... CASCADE` takes ACCESS EXCLUSIVE locks on
-        // every one of them, so the two deadlock once a schema carries enough
-        // partitions. Retry until the lingering backend drains.
-        let drop_sql = format!(r#"DROP SCHEMA IF EXISTS "{}" CASCADE"#, self.schema_name);
-        let mut attempts = 0;
-        loop {
-            match self
-                .admin_pool
-                .execute(sqlx::AssertSqlSafe(drop_sql.clone()))
-                .await
-            {
-                Ok(_) => break,
-                Err(err) if is_deadlock(&err) && attempts < 20 => {
-                    attempts += 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                }
-                Err(err) => return Err(err.into()),
-            }
-        }
+        db_gate::drop_schema_robust_pool(&self.admin_pool, &self.schema_name).await?;
+        self.cleanup.disarm();
         self.pool.close().await;
         self.admin_pool.close().await;
         Ok(())
     }
-}
-
-fn is_deadlock(err: &sqlx::Error) -> bool {
-    err.as_database_error()
-        .and_then(|error| error.code())
-        .as_deref()
-        == Some("40P01")
 }
 
 pub fn test_database_configured() -> bool {

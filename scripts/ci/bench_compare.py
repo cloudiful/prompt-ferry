@@ -3,8 +3,8 @@
 
 `#569` Phase 3 keeps a measured Criterion baseline in the repository
 (`benches/redaction_bench_baseline.json`) and gates only the bounded `quick`
-subset in CI. The full 10k/100k/500k x rules/secrets matrix is recorded but
-never gated, so mutation testing and full-load runs stay manual.
+subset. The full 10k/100k/500k x rules/secrets matrix is recorded but never
+gated, so mutation testing and full-load runs stay manual.
 
 Usage:
     # after `cargo bench --bench redaction_pipeline --bench redaction_restore`
@@ -31,7 +31,7 @@ DEFAULT_GATE_SEGMENT = "quick"
 DEFAULT_MAX_FACTOR = 2.5
 
 QUICK_NOTE = (
-    "CI runs only the 'quick' subset with `cargo bench ... -- quick`; the full "
+    "Only the 'quick' subset is gated with `cargo bench ... -- quick`; the full "
     "matrix is recorded for the growth curve but is never a hard gate."
 )
 

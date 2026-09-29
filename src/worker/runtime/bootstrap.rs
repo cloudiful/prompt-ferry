@@ -592,6 +592,7 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_runtime_opens_and_bootstraps_legacy_static_configuration() {
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         let path = std::env::temp_dir().join(format!(
             "prompt-ferry-runtime-bootstrap-{}.sqlite",
             SystemTime::now()
@@ -622,6 +623,7 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_runtime_starts_without_endpoint_for_admin_setup() {
+        let _redaction_guard = crate::redact_test_support::lock_async().await;
         let path = std::env::temp_dir().join(format!(
             "prompt-ferry-no-endpoint-{}.sqlite",
             uuid::Uuid::new_v4()

@@ -69,6 +69,7 @@ async fn standalone_services(
 
 #[tokio::test]
 async fn sniffed_event_stream_usage_reaches_the_request_usage_sink() {
+    let _redaction_guard = crate::redact_test_support::lock_async().await;
     let (addr, count) = spawn_split_event_stream_upstream(None).await;
     let (out_tx, _bridge_log) = spawn_bridge_log();
     let path = database_path();
