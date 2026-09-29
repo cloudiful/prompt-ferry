@@ -822,6 +822,7 @@ async fn reset_session_affinity_clears_conversation_binding() -> anyhow::Result<
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -953,6 +954,7 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -976,6 +978,7 @@ async fn reset_session_affinity_clears_both_record_and_current_rule_bindings() -
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -1206,6 +1209,7 @@ async fn reset_session_affinity_returns_503_when_backend_unavailable() -> anyhow
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -1322,6 +1326,7 @@ async fn session_affinity_options_fixture(
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -1512,6 +1517,7 @@ async fn reset_session_affinity_clears_anonymous_record_binding_under_user_zero(
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -1625,6 +1631,7 @@ async fn session_route_options_surfaces_binding_when_rule_no_longer_resolves() -
                     thinking_effort_override: None,
                     compact_mode: db::CompactMode::Passthrough,
                     thinking_downgrade_enabled: false,
+                    service_tier: None,
                 }],
             },
         )
@@ -1726,6 +1733,7 @@ async fn available_models_respects_model_route_whitelist() -> anyhow::Result<()>
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -1822,6 +1830,7 @@ async fn available_models_filters_endpoint_catalog_by_model_patterns() -> anyhow
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )

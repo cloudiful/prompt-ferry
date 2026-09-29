@@ -233,7 +233,7 @@ mod tests {
                 name: "local endpoint".to_string(),
                 provider: EndpointProvider::Generic,
                 provider_region: None,
-                service_tier: crate::standalone_config::MinimaxServiceTier::Standard,
+                service_tier: None,
                 base_url: "https://local.example".to_string(),
                 native_api: NativeApi::Responses,
                 native_api_source: NativeApiSource::Manual,
@@ -267,6 +267,7 @@ mod tests {
                     thinking_effort_override: None,
                     compact_mode: "passthrough".to_string(),
                     thinking_downgrade_enabled: false,
+                    service_tier: None,
                 }],
             }],
             ..StandaloneConfig::default()
@@ -358,7 +359,7 @@ fn default_route_for_user(config: &WorkerConfig, user_id: i64) -> db::RouteConfi
         upstream_model: None,
         route_selection_reason: db::RouteSelectionReason::Default,
         provider: db::EndpointProvider::Generic,
-        service_tier: db::MinimaxServiceTier::Standard,
+        service_tier: None,
         proxy_url: None,
         // Issue #392 Phase K: legacy direct routes never normalize.
         dev_system_normalize: false,

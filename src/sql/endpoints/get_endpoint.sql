@@ -1,3 +1,3 @@
-SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, api_key, proxy_url, active_windows, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at
+SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, service_tier, base_url, native_api, native_api_source, api_key, proxy_url, active_windows, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at
 FROM provider_endpoints
 WHERE endpoint_id = $1

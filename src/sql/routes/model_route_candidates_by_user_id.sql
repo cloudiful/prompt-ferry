@@ -1,5 +1,5 @@
 SELECT r.rule_id, r.scope, r.owner_user_id, r.model_pattern, r.routing_strategy, r.updated_at,
-       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, COALESCE(t.native_api, 'auto') AS target_native_api, e.provider, COALESCE(e.service_tier, 'standard') AS service_tier,
+       t.target_id, e.endpoint_id, e.name AS endpoint_name, e.base_url, e.api_key, e.proxy_url, e.key_lb_enabled, e.native_api, COALESCE(t.native_api, 'auto') AS target_native_api, e.provider, e.service_tier AS endpoint_service_tier, t.service_tier AS target_service_tier,
        t.position, t.enabled AS target_enabled, t.upstream_model, t.proxy_url_override,
         t.active_windows, e.active_windows AS endpoint_active_windows,
         COALESCE(t.dev_system_normalize, FALSE) AS "dev_system_normalize!",

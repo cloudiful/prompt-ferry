@@ -81,9 +81,6 @@ function onTimeUpdate(
 
 <template>
   <div class="grid gap-3 text-xs">
-    <div v-if="(windows ?? []).length === 0" class="text-xs text-muted">
-      {{ t('scheduleEmptyHint') }}
-    </div>
     <div v-for="(row, index) in windows" :key="index" class="grid gap-1">
       <div class="flex items-center gap-2">
         <label class="grid flex-1 gap-1">

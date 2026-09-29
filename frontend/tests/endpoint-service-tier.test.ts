@@ -29,48 +29,81 @@ function endpointFixture(
   }
 }
 
-test('new endpoint forms default to the standard service tier', () => {
-  expect(createEmptyEndpointForm().service_tier).toBe('standard')
+test('new endpoint forms default to inherit', () => {
+  expect(createEmptyEndpointForm().service_tier).toBeNull()
 })
 
-test('normalizeServiceTier keeps priority and falls back to standard', () => {
+test('normalizeServiceTier trims values and treats blank as inherit', () => {
   expect(normalizeServiceTier('priority')).toBe('priority')
   expect(normalizeServiceTier('standard')).toBe('standard')
-  expect(normalizeServiceTier(undefined)).toBe('standard')
-  expect(normalizeServiceTier(null)).toBe('standard')
-  expect(normalizeServiceTier('legacy-unknown')).toBe('standard')
+  // Issue #637: free-form values survive so a provider-specific vocabulary
+  // (e.g. OpenAI `fast`) is never coerced back to a MiniMax default.
+  expect(normalizeServiceTier('fast')).toBe('fast')
+  expect(normalizeServiceTier(' legacy-unknown ')).toBe('legacy-unknown')
+  expect(normalizeServiceTier(undefined)).toBeNull()
+  expect(normalizeServiceTier(null)).toBeNull()
+  expect(normalizeServiceTier('')).toBeNull()
+  expect(normalizeServiceTier('   ')).toBeNull()
 })
 
-test('endpointToForm preserves priority and defaults legacy values', () => {
+test('endpointToForm preserves a configured tier and inherits legacy values', () => {
   expect(
     endpointToForm(endpointFixture({ service_tier: 'priority' })).service_tier,
   ).toBe('priority')
   expect(
     endpointToForm(endpointFixture({ service_tier: 'standard' })).service_tier,
   ).toBe('standard')
+  expect(
+    endpointToForm(endpointFixture({ service_tier: 'fast' })).service_tier,
+  ).toBe('fast')
+  expect(
+    endpointToForm(endpointFixture({ service_tier: null })).service_tier,
+  ).toBeNull()
   const { service_tier, ...legacy } = endpointFixture()
-  expect(endpointToForm(legacy as ProviderEndpoint).service_tier).toBe(
-    'standard',
-  )
+  expect(endpointToForm(legacy as ProviderEndpoint).service_tier).toBeNull()
 })
 
-test('endpointFormToRequest round-trips the service tier', () => {
+test('endpointFormToRequest round-trips the service tier and inherits blank', () => {
   const priority = {
     ...createEmptyEndpointForm(),
-    service_tier: 'priority' as const,
+    service_tier: 'priority',
   }
   expect(endpointFormToRequest(priority).service_tier).toBe('priority')
-  expect(endpointFormToRequest(createEmptyEndpointForm()).service_tier).toBe(
-    'standard',
-  )
+  const freeForm = {
+    ...createEmptyEndpointForm(),
+    service_tier: ' fast ',
+  }
+  expect(endpointFormToRequest(freeForm).service_tier).toBe('fast')
+  expect(
+    endpointFormToRequest(createEmptyEndpointForm()).service_tier,
+  ).toBeNull()
+  const blank = {
+    ...createEmptyEndpointForm(),
+    service_tier: '   ',
+  }
+  expect(endpointFormToRequest(blank).service_tier).toBeNull()
 })
 
-test('service tier copy explains priority admission and cost', () => {
+test('a form switched to a non-minimax provider submits inherit', () => {
+  // Issue #637 P3: the provider switch must not silently create `standard`
+  // for OpenAI/generic — it leaves `null` (inherit) and the request keeps
+  // it, so the runtime preserves the caller/provider default there.
+  const switched = {
+    ...createEmptyEndpointForm(),
+    provider: 'openai' as const,
+    service_tier: null,
+  }
+  expect(endpointFormToRequest(switched).service_tier).toBeNull()
+})
+
+test('service tier copy explains the free-form inherit contract', () => {
   for (const locale of ['zh-CN', 'en-US'] as const) {
     const messages = endpointMessages[locale]
     expect(messages.serviceTier.length).toBeGreaterThan(0)
-    expect(messages.serviceTierStandard.length).toBeGreaterThan(0)
-    expect(messages.serviceTierPriority.length).toBeGreaterThan(0)
-    expect(messages.serviceTierHint).toContain('1.5')
+    expect(messages.proxyInherit.length).toBeGreaterThan(0)
+    expect(messages.serviceTierHint.length).toBeGreaterThan(0)
   }
+  // Issue #637: the tier control reuses the shared `proxyInherit` copy as its
+  // blank/inherited placeholder, which must read exactly `继承` in zh-CN.
+  expect(endpointMessages['zh-CN'].proxyInherit).toBe('继承')
 })

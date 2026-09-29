@@ -167,7 +167,7 @@ mod tests {
                 name: "local endpoint".to_string(),
                 provider: EndpointProvider::Generic,
                 provider_region: None,
-                service_tier: crate::standalone_config::MinimaxServiceTier::Standard,
+                service_tier: None,
                 base_url: "https://upstream.example".to_string(),
                 native_api: NativeApi::Responses,
                 native_api_source: NativeApiSource::Manual,
@@ -201,6 +201,7 @@ mod tests {
                     thinking_effort_override: None,
                     compact_mode: "passthrough".to_string(),
                     thinking_downgrade_enabled: false,
+                    service_tier: None,
                 }],
             }],
             client_keys: vec![ClientKeyConfig {

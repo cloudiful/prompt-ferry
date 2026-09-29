@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "WITH preferred AS (\n    SELECT COALESCE(\n        (SELECT endpoint_id FROM user_endpoint_settings WHERE user_id = $1),\n        (SELECT endpoint_id\n         FROM provider_endpoints\n         WHERE scope = 'user'\n           AND owner_user_id = $1\n           AND enabled = TRUE\n         ORDER BY updated_at DESC\n         LIMIT 1),\n        (SELECT endpoint_id\n         FROM provider_endpoints\n         WHERE scope = 'admin'\n           AND owner_user_id IS NULL\n           AND enabled = TRUE\n         ORDER BY updated_at DESC\n         LIMIT 1)\n    ) AS endpoint_id\n)\nSELECT\n    e.endpoint_id AS \"route_id!\",\n    $1::BIGINT AS \"user_id!\",\n    e.base_url,\n    e.api_key,\n    e.proxy_url,\n    e.key_lb_enabled,\n    e.native_api,\n    e.provider,\n    COALESCE(e.service_tier, 'standard') AS service_tier\nFROM provider_endpoints e\nCROSS JOIN preferred p\nWHERE e.enabled = TRUE\n  AND (\n      (e.scope = 'user' AND e.owner_user_id = $1)\n      OR (e.scope = 'admin' AND e.owner_user_id IS NULL)\n  )\nORDER BY\n    CASE\n        WHEN e.endpoint_id = p.endpoint_id THEN 0\n        WHEN e.scope = 'user' THEN 1\n        ELSE 2\n    END,\n    e.updated_at DESC\n",
+  "query": "WITH preferred AS (\n    SELECT COALESCE(\n        (SELECT endpoint_id FROM user_endpoint_settings WHERE user_id = $1),\n        (SELECT endpoint_id\n         FROM provider_endpoints\n         WHERE scope = 'user'\n           AND owner_user_id = $1\n           AND enabled = TRUE\n         ORDER BY updated_at DESC\n         LIMIT 1),\n        (SELECT endpoint_id\n         FROM provider_endpoints\n         WHERE scope = 'admin'\n           AND owner_user_id IS NULL\n           AND enabled = TRUE\n         ORDER BY updated_at DESC\n         LIMIT 1)\n    ) AS endpoint_id\n)\nSELECT\n    e.endpoint_id AS \"route_id!\",\n    $1::BIGINT AS \"user_id!\",\n    e.base_url,\n    e.api_key,\n    e.proxy_url,\n    e.key_lb_enabled,\n    e.native_api,\n    e.provider,\n    e.service_tier AS service_tier\nFROM provider_endpoints e\nCROSS JOIN preferred p\nWHERE e.enabled = TRUE\n  AND (\n      (e.scope = 'user' AND e.owner_user_id = $1)\n      OR (e.scope = 'admin' AND e.owner_user_id IS NULL)\n  )\nORDER BY\n    CASE\n        WHEN e.endpoint_id = p.endpoint_id THEN 0\n        WHEN e.scope = 'user' THEN 1\n        ELSE 2\n    END,\n    e.updated_at DESC\n",
   "describe": {
     "columns": [
       {
@@ -90,7 +90,12 @@
         "ordinal": 8,
         "name": "service_tier",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "service_tier"
+          }
+        }
       }
     ],
     "parameters": {
@@ -107,8 +112,8 @@
       false,
       false,
       false,
-      null
+      true
     ]
   },
-  "hash": "997156ace108bfca93df089b17202845c0c0d930abfdb9c91f89c4e75852ec3c"
+  "hash": "6f1d9560d554023fab35c41f2cbd9b318372246b5d1c1483f85ae86d096d0ff2"
 }

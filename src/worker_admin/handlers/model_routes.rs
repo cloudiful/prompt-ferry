@@ -436,15 +436,25 @@ async fn run_model_route_test(
         NativeApi::Auto => unreachable!("auto model routes return before protocol test"),
         NativeApi::Realtime => unreachable!(),
     };
-    // Keep probe behavior consistent with real forwarding: MiniMax
-    // endpoints always carry the configured `service_tier`, generic
-    // endpoints leave the probe body unchanged.
-    if target.provider == db::EndpointProvider::Minimax
+    // Issue #637 P3: keep probe behavior consistent with live forwarding.
+    // The shared provider/protocol matrix
+    // (`supports_service_tier_for`: MiniMax Chat/Responses/Anthropic
+    // Messages, OpenAI Chat/Responses) gates the resolved free-form tier,
+    // which is injected when configured; Realtime and every other
+    // combination leave the probe body unchanged so the "test" button stays
+    // representative.
+    if target.provider.supports_service_tier_for(target.native_api)
+        && let Some(wire_key) = target.provider.service_tier_wire_key()
+        && let Some(tier) = target
+            .service_tier
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
         && let Some(object) = payload.as_object_mut()
     {
         object.insert(
-            "service_tier".to_string(),
-            serde_json::Value::String(target.service_tier.as_str().to_string()),
+            wire_key.to_string(),
+            serde_json::Value::String(tier.to_string()),
         );
     }
     // P4 (issue #230): route the probe through the runtime helper so the

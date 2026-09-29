@@ -3736,7 +3736,12 @@ components:
         scope:
           type: string
         service_tier:
-          $ref: '#/components/schemas/MinimaxServiceTier'
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #637: free-form service-tier override. `None`/blank inherits
+            (no override); a model-route target override wins over this value.
     EndpointSettingRequest:
       type: object
       properties:
@@ -4522,11 +4527,6 @@ components:
         user_id:
           type: integer
           format: int64
-    MinimaxServiceTier:
-      type: string
-      enum:
-      - standard
-      - priority
     ModelEndpointRule:
       type: object
       required:
@@ -4712,6 +4712,14 @@ components:
         rule_id:
           type: string
           format: uuid
+        service_tier:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #637: per-target free-form service-tier override. `None`/blank
+            inherits the endpoint value (or leaves the caller/provider default
+            intact when the endpoint is blank too).
         target_id:
           type: string
           format: uuid
@@ -4801,6 +4809,14 @@ components:
             Issue #368 Phase B: per-target proxy override. `None` (omitted/null)
             means keep on PATCH / inherit on create; `Some("")` means clear to
             inherit; `Some(url)` must use `http/https/socks5/socks5h`.
+        service_tier:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #637: per-target free-form service-tier override. `None`
+            (omitted/null/empty) means inherit the endpoint value; `Some(value)`
+            is trimmed and wins over the endpoint override.
         thinking_downgrade_enabled:
           type: boolean
           description: |-
@@ -5153,7 +5169,12 @@ components:
         scope:
           type: string
         service_tier:
-          $ref: '#/components/schemas/MinimaxServiceTier'
+          type:
+          - string
+          - 'null'
+          description: |-
+            Issue #637: free-form endpoint service-tier override. `None` means
+            inherit (no override); a model-route target override wins over it.
         updated_at:
           type: string
           format: date-time

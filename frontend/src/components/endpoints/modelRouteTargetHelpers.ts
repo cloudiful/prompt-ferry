@@ -96,8 +96,17 @@ export function hasTargetSettings(
     (target.dev_system_normalize ?? false) ||
     (target.thinking_downgrade_enabled ?? false) ||
     hasTargetThinkingEffort(target) ||
-    hasTargetCompactMode(target)
+    hasTargetCompactMode(target) ||
+    hasTargetServiceTier(target)
   )
+}
+
+// Issue #637: a configured free-form tier is non-default, so it must light up
+// the target settings gear like the other overrides.
+export function hasTargetServiceTier(
+  target: ModelRouteTargetForm | null | undefined,
+): boolean {
+  return (target?.service_tier ?? '').trim() !== ''
 }
 
 export function hasTargetThinkingEffort(

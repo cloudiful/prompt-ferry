@@ -2,10 +2,15 @@
 import { computed } from 'vue'
 import ProxySettingsFields from '@/components/shared/ProxySettingsFields.vue'
 import ScheduleWindowsFields from '@/components/shared/ScheduleWindowsFields.vue'
+import ServiceTierOverrideField from '@/components/shared/ServiceTierOverrideField.vue'
+import SettingsFieldRow from '@/components/shared/SettingsFieldRow.vue'
+import type { EndpointProvider } from '@/generated/admin-api'
 import type { ModelRouteTargetForm } from '@/models'
+import { supportsServiceTierFor } from '@/models/endpoints/service-tier'
 
 const props = defineProps<{
   t: TranslateFn
+  endpointProvider?: EndpointProvider | null
 }>()
 
 const target = defineModel<ModelRouteTargetForm>('target', { required: true })
@@ -50,6 +55,23 @@ const nativeApiSelection = computed({
   },
 })
 
+// Issue #637: expose the free-form target override only when the selected
+// endpoint provider and this target's port type are a documented pair; the
+// provider travels from the endpoint picker into this settings view.
+const serviceTierEligible = computed(() =>
+  supportsServiceTierFor(
+    props.endpointProvider ?? null,
+    nativeApiSelection.value,
+  ),
+)
+
+const serviceTier = computed({
+  get: () => target.value?.service_tier ?? null,
+  set: (value: string | null) => {
+    if (target.value) target.value.service_tier = value
+  },
+})
+
 const touched = computed({
   get: () => target.value?.active_windows_touched ?? false,
   set: (value: boolean) => {
@@ -86,22 +108,10 @@ const compactMode = computed({
     v-if="target"
     class="grid gap-3 rounded border border-default bg-muted p-3"
   >
-    <div class="grid gap-2">
-      <div class="flex items-center gap-1">
-        <span class="text-xs font-medium text-default">{{
-          t('modelRouteNativeApi')
-        }}</span>
-        <UTooltip :text="t('modelRouteNativeApiHint')">
-          <UButton
-            type="button"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-info"
-            :aria-label="t('modelRouteNativeApiHint')"
-          />
-        </UTooltip>
-      </div>
+    <SettingsFieldRow
+      :label="t('modelRouteNativeApi')"
+      :hint="t('modelRouteNativeApiHint')"
+    >
       <USelect
         v-model="nativeApiSelection"
         class="w-full"
@@ -118,67 +128,37 @@ const compactMode = computed({
         label-key="label"
         value-key="value"
       />
-    </div>
-    <div class="grid gap-2 border-t border-default pt-3">
-      <div class="flex items-center gap-1">
-        <span class="text-xs font-medium text-default">{{
-          t('proxyUrlOverride')
-        }}</span>
-        <UTooltip :text="t('proxyUrlOverrideHint')">
-          <UButton
-            type="button"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-info"
-            :aria-label="t('proxyUrlOverrideHint')"
-          />
-        </UTooltip>
-      </div>
+    </SettingsFieldRow>
+    <ServiceTierOverrideField
+      v-if="serviceTierEligible"
+      v-model="serviceTier"
+      :t="t"
+      input-id="target-service-tier"
+    />
+    <SettingsFieldRow
+      :label="t('proxyUrlOverride')"
+      :hint="t('proxyUrlOverrideHint')"
+    >
       <ProxySettingsFields
         v-model:proxy-url="proxyUrl"
         v-model:has-saved="hasSaved"
         :t="t"
       />
-    </div>
-    <div class="grid gap-2 border-t border-default pt-3">
-      <div class="flex items-center gap-1">
-        <span class="text-xs font-medium text-default">{{
-          t('scheduleWindows')
-        }}</span>
-        <UTooltip :text="t('scheduleWindowsHint')">
-          <UButton
-            type="button"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-info"
-            :aria-label="t('scheduleWindowsHint')"
-          />
-        </UTooltip>
-      </div>
+    </SettingsFieldRow>
+    <SettingsFieldRow
+      :label="t('scheduleWindows')"
+      :hint="t('scheduleWindowsHint')"
+    >
       <ScheduleWindowsFields
         v-model:windows="windows"
         v-model:touched="touched"
         :t="t"
       />
-    </div>
-    <div class="grid gap-2 border-t border-default pt-3">
-      <div class="flex items-center gap-1">
-        <span class="text-xs font-medium text-default">{{
-          t('thinkingEffortOverride')
-        }}</span>
-        <UTooltip :text="t('thinkingEffortOverrideHint')">
-          <UButton
-            type="button"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-info"
-            :aria-label="t('thinkingEffortOverrideHint')"
-          />
-        </UTooltip>
-      </div>
+    </SettingsFieldRow>
+    <SettingsFieldRow
+      :label="t('thinkingEffortOverride')"
+      :hint="t('thinkingEffortOverrideHint')"
+    >
       <USelect
         v-model="thinkingEffort"
         class="w-full"
@@ -195,23 +175,8 @@ const compactMode = computed({
         label-key="label"
         value-key="value"
       />
-    </div>
-    <div class="grid gap-2 border-t border-default pt-3">
-      <div class="flex items-center gap-1">
-        <span class="text-xs font-medium text-default">{{
-          t('compactMode')
-        }}</span>
-        <UTooltip :text="t('compactModeHint')">
-          <UButton
-            type="button"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-info"
-            :aria-label="t('compactModeHint')"
-          />
-        </UTooltip>
-      </div>
+    </SettingsFieldRow>
+    <SettingsFieldRow :label="t('compactMode')" :hint="t('compactModeHint')">
       <USelect
         v-model="compactMode"
         class="w-full"
@@ -223,50 +188,25 @@ const compactMode = computed({
         label-key="label"
         value-key="value"
       />
-    </div>
-    <div
-      class="flex items-center justify-between gap-2 border-t border-default pt-3"
-    >
-      <div class="flex min-w-0 items-center gap-1">
-        <span class="font-medium text-default">{{ t('normalizeLabel') }}</span>
-        <UTooltip :text="t('normalizeHint')">
-          <UButton
-            type="button"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-info"
-            :aria-label="t('normalizeHint')"
-          />
-        </UTooltip>
+    </SettingsFieldRow>
+    <SettingsFieldRow :label="t('normalizeLabel')" :hint="t('normalizeHint')">
+      <div class="flex md:justify-end">
+        <USwitch
+          v-model="target.dev_system_normalize"
+          :aria-label="t('normalizeLabel')"
+        />
       </div>
-      <USwitch
-        v-model="target.dev_system_normalize"
-        :aria-label="t('normalizeLabel')"
-      />
-    </div>
-    <div
-      class="flex items-center justify-between gap-2 border-t border-default pt-3"
+    </SettingsFieldRow>
+    <SettingsFieldRow
+      :label="t('thinkingDowngradeLabel')"
+      :hint="t('thinkingDowngradeHint')"
     >
-      <div class="flex min-w-0 items-center gap-1">
-        <span class="font-medium text-default">{{
-          t('thinkingDowngradeLabel')
-        }}</span>
-        <UTooltip :text="t('thinkingDowngradeHint')">
-          <UButton
-            type="button"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-info"
-            :aria-label="t('thinkingDowngradeHint')"
-          />
-        </UTooltip>
+      <div class="flex md:justify-end">
+        <USwitch
+          v-model="target.thinking_downgrade_enabled"
+          :aria-label="t('thinkingDowngradeLabel')"
+        />
       </div>
-      <USwitch
-        v-model="target.thinking_downgrade_enabled"
-        :aria-label="t('thinkingDowngradeLabel')"
-      />
-    </div>
+    </SettingsFieldRow>
   </div>
 </template>

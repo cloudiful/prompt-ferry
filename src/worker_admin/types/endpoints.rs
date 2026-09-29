@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     config::NativeApi,
-    db::{self, EndpointPlan, EndpointProvider, EndpointRegion, MinimaxServiceTier},
+    db::{self, EndpointPlan, EndpointProvider, EndpointRegion},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
@@ -33,8 +33,10 @@ pub struct EndpointRequest {
     /// the R2b OAuth login flow and is rejected until it lands.
     #[serde(default)]
     pub plan: Option<EndpointPlan>,
+    /// Issue #637: free-form service-tier override. `None`/blank inherits
+    /// (no override); a model-route target override wins over this value.
     #[serde(default)]
-    pub service_tier: MinimaxServiceTier,
+    pub service_tier: Option<String>,
     pub base_url: String,
     pub api_key: String,
     #[serde(default)]

@@ -89,7 +89,7 @@ pub(super) fn build_codex_upstream_request(
 /// normalization (model mapping + `store: false`), which also hands back an
 /// owned buffer.
 fn transformed_body(route: &db::RouteConfig, raw: &[u8], codex_backend: bool) -> Vec<u8> {
-    let body = apply_minimax_service_tier(route, raw);
+    let body = apply_service_tier_override(route, raw);
     let body = apply_minimax_reasoning_split(route, body.as_ref());
     let body = apply_minimax_reasoning_echo_restore(route, body.as_ref());
     let body = apply_deepseek_thinking(route, body.as_ref());
@@ -101,38 +101,51 @@ fn transformed_body(route: &db::RouteConfig, raw: &[u8], codex_backend: bool) ->
     }
 }
 
-/// Inject the endpoint-configured MiniMax `service_tier` into an upstream
-/// JSON request body. Only MiniMax endpoints are modified; generic
-/// endpoints return the body unchanged so client-supplied values are
-/// never forwarded or overridden. The configured value overwrites any
-/// existing `service_tier` field. When the field already carries the
-/// configured value the parsed body is discarded and the original bytes are
-/// borrowed, so an already-correct request is forwarded byte-for-byte
-/// instead of being needlessly re-serialized. Non-JSON or non-object bodies
-/// are likewise returned unchanged.
-pub(super) fn apply_minimax_service_tier<'a>(
+/// Inject the resolved free-form `service_tier` override into an upstream
+/// JSON request body. Only supported provider/protocol combinations (via
+/// the shared [`crate::db::EndpointProvider::supports_service_tier_for`]
+/// matrix: MiniMax Chat/Responses/Anthropic Messages, OpenAI
+/// Chat/Responses) are modified, and only when a non-empty override is
+/// configured; with no override the body is returned unchanged so the
+/// caller's existing field/provider default is preserved. Realtime and all
+/// other providers/protocols return the body unchanged. The configured
+/// value overwrites any existing wire-key field. When the field already
+/// carries the configured value the parsed body is discarded and the
+/// original bytes are borrowed, so an already-correct request is forwarded
+/// byte-for-byte instead of being needlessly re-serialized. Non-JSON or
+/// non-object bodies are likewise returned unchanged.
+pub(super) fn apply_service_tier_override<'a>(
     route: &db::RouteConfig,
     body: &'a [u8],
 ) -> Cow<'a, [u8]> {
-    if route.provider != crate::db::EndpointProvider::Minimax {
+    if !route.provider.supports_service_tier_for(route.native_api) {
         return Cow::Borrowed(body);
     }
+    let Some(wire_key) = route.provider.service_tier_wire_key() else {
+        return Cow::Borrowed(body);
+    };
+    // Issue #637: no configured override leaves the caller's field intact.
+    // The persistence boundary already trims blanks to `None`; re-trim
+    // defensively so a blank value can never inject an empty tier.
+    let Some(requested) = route
+        .service_tier
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Cow::Borrowed(body);
+    };
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
         return Cow::Borrowed(body);
     };
     let Some(object) = value.as_object_mut() else {
         return Cow::Borrowed(body);
     };
-    let requested = route.service_tier.as_str();
-    if object
-        .get("service_tier")
-        .and_then(serde_json::Value::as_str)
-        == Some(requested)
-    {
+    if object.get(wire_key).and_then(serde_json::Value::as_str) == Some(requested) {
         return Cow::Borrowed(body);
     }
     object.insert(
-        "service_tier".to_string(),
+        wire_key.to_string(),
         serde_json::Value::String(requested.to_string()),
     );
     Cow::Owned(serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec()))
@@ -474,6 +487,13 @@ mod codex_auth_tests;
 mod codex_header_tests;
 #[cfg(test)]
 mod codex_test_support;
+/// Issue #637 P3: service-tier override behavior tests (supported
+/// MiniMax/OpenAI Chat+Responses injection, caller preservation, provider
+/// exclusions, Codex parity). Split out like the Codex modules so this file
+/// stays bounded; shared fixtures live in the module root with core
+/// semantics and protocol parity in focused child files.
+#[cfg(test)]
+mod service_tier_tests;
 
 #[cfg(test)]
 mod tests {
@@ -527,7 +547,7 @@ mod tests {
             upstream_model: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
@@ -564,7 +584,7 @@ mod tests {
             upstream_model: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
@@ -644,7 +664,7 @@ mod tests {
             upstream_model: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
@@ -703,7 +723,7 @@ mod tests {
             upstream_model: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
@@ -760,7 +780,7 @@ mod tests {
             upstream_model: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
@@ -820,7 +840,7 @@ mod tests {
             upstream_model: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
@@ -867,7 +887,7 @@ mod tests {
             upstream_model: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
@@ -925,7 +945,7 @@ mod tests {
             upstream_model: Some("opencode-model".to_string()),
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
@@ -965,7 +985,7 @@ mod tests {
             upstream_model: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
@@ -999,7 +1019,7 @@ mod tests {
         );
     }
 
-    fn minimax_route(tier: crate::db::MinimaxServiceTier) -> RouteConfig {
+    fn minimax_route(tier: Option<&str>) -> RouteConfig {
         RouteConfig {
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
@@ -1014,7 +1034,7 @@ mod tests {
             upstream_model: None,
             route_selection_reason: RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::Minimax,
-            service_tier: tier,
+            service_tier: tier.map(str::to_string),
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
@@ -1026,134 +1046,20 @@ mod tests {
     fn generic_route() -> RouteConfig {
         RouteConfig {
             provider: crate::db::EndpointProvider::Generic,
-            service_tier: crate::db::MinimaxServiceTier::Standard,
+            service_tier: None,
             proxy_url: None,
             dev_system_normalize: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
 
-            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+            ..minimax_route(None)
         }
-    }
-
-    #[test]
-    fn minimax_injects_configured_service_tier_over_body_value() {
-        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
-        let body = br#"{"model":"MiniMax-M2","service_tier":"standard"}"#;
-        let injected = apply_minimax_service_tier(&route, body);
-        let value: serde_json::Value = serde_json::from_slice(injected.as_ref()).unwrap();
-        assert_eq!(value["service_tier"], "priority");
-        assert_eq!(value["model"], "MiniMax-M2");
-        assert!(matches!(&injected, Cow::Owned(_)));
-    }
-
-    #[test]
-    fn minimax_defaults_to_standard_when_body_omits_tier() {
-        let route = minimax_route(crate::db::MinimaxServiceTier::Standard);
-        let injected = apply_minimax_service_tier(&route, br#"{"model":"MiniMax-M2"}"#);
-        let value: serde_json::Value = serde_json::from_slice(injected.as_ref()).unwrap();
-        assert_eq!(value["service_tier"], "standard");
-    }
-
-    #[test]
-    fn generic_endpoints_leave_body_unchanged() {
-        let route = generic_route();
-        let body = br#"{"model":"gpt-5","service_tier":"priority"}"#;
-        let injected = apply_minimax_service_tier(&route, body);
-        assert!(matches!(&injected, Cow::Borrowed(_)));
-        assert_eq!(injected.as_ref(), body);
-    }
-
-    #[test]
-    fn non_json_bodies_pass_through_unchanged() {
-        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
-        let body = b"not-json";
-        assert_eq!(apply_minimax_service_tier(&route, body).as_ref(), body);
-        let array_body = b"[1,2,3]";
-        assert_eq!(
-            apply_minimax_service_tier(&route, array_body).as_ref(),
-            array_body
-        );
-    }
-
-    #[test]
-    fn minimax_service_tier_skips_reserialization_when_already_configured() {
-        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
-        // Deliberately non-canonical key order/whitespace: an already-correct
-        // tier must be forwarded byte-for-byte, not re-serialized (issue #259
-        // prefix-cache stability).
-        let body = br#"{ "service_tier" : "priority" , "model" : "m" }"#;
-        let injected = apply_minimax_service_tier(&route, body);
-        assert!(matches!(&injected, Cow::Borrowed(_)));
-        assert_eq!(injected.as_ref(), body);
-    }
-
-    #[test]
-    fn minimax_reserialization_is_deterministic_and_key_sorted() {
-        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
-        // serde_json's default Map is a BTreeMap (no `preserve_order` feature
-        // in Cargo.toml), so keys are emitted in sorted order deterministically.
-        let body = br#"{"z":1,"model":"m","a":{"b":1,"a":2}}"#;
-        let first = apply_minimax_service_tier(&route, body);
-        let second = apply_minimax_service_tier(&route, body);
-        assert_eq!(first.as_ref(), second.as_ref());
-        assert_eq!(
-            first.as_ref(),
-            br#"{"a":{"a":2,"b":1},"model":"m","service_tier":"priority","z":1}"#
-        );
-    }
-
-    #[test]
-    fn build_upstream_request_injects_tier_for_buffered_and_passthrough() {
-        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
-        for body in [
-            PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
-            PreparedRequestBody::PassthroughStream(br#"{"model":"m"}"#.to_vec()),
-        ] {
-            let request = build_upstream_request(
-                &Client::new(),
-                &Method::POST,
-                "https://api.minimaxi.com/v1/chat/completions",
-                &route,
-                &body,
-                &[],
-                None,
-            )
-            .build()
-            .unwrap();
-            let bytes = request
-                .body()
-                .and_then(|body| body.as_bytes())
-                .expect("upstream body bytes");
-            let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
-            assert_eq!(value["service_tier"], "priority");
-        }
-        let generic = generic_route();
-        let request = build_upstream_request(
-            &Client::new(),
-            &Method::POST,
-            "https://api.minimaxi.com/v1/chat/completions",
-            &generic,
-            &PreparedRequestBody::BufferedBytes(
-                br#"{"model":"m","service_tier":"priority"}"#.to_vec(),
-            ),
-            &[],
-            None,
-        )
-        .build()
-        .unwrap();
-        let bytes = request
-            .body()
-            .and_then(|body| body.as_bytes())
-            .expect("generic body bytes");
-        let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
-        assert_eq!(value["service_tier"], "priority");
     }
 
     #[test]
     fn minimax_reasoning_split_defaults_to_true_when_missing() {
-        let route = minimax_route(crate::db::MinimaxServiceTier::Standard);
+        let route = minimax_route(None);
         let injected = apply_minimax_reasoning_split(&route, br#"{"model":"MiniMax-M2"}"#);
         let value: serde_json::Value = serde_json::from_slice(&injected).unwrap();
         assert_eq!(value["reasoning_split"], true);
@@ -1162,7 +1068,7 @@ mod tests {
 
     #[test]
     fn minimax_reasoning_split_preserves_thinking_and_explicit_values() {
-        let route = minimax_route(crate::db::MinimaxServiceTier::Standard);
+        let route = minimax_route(None);
         for body in [
             br#"{"model":"m","reasoning_split":false}"#.as_slice(),
             br#"{"model":"m","reasoning_split":true}"#.as_slice(),
@@ -1193,7 +1099,7 @@ mod tests {
         let body = br#"{"model":"gpt-5"}"#;
         assert_eq!(apply_minimax_reasoning_split(&generic, body).as_ref(), body);
 
-        let minimax = minimax_route(crate::db::MinimaxServiceTier::Standard);
+        let minimax = minimax_route(None);
         for body in [b"not-json".as_slice(), b"[1,2,3]".as_slice()] {
             assert_eq!(apply_minimax_reasoning_split(&minimax, body).as_ref(), body);
         }
@@ -1208,7 +1114,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
-            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+            ..minimax_route(None)
         };
         let echo = br#"{"include":["reasoning.encrypted_content"],"input":[{"id":"resp_1_rs","type":"reasoning","encrypted_content":"minimax-resp_1_rs","summary":[{"type":"summary_text","text":"think"}]}]}"#;
         let out = apply_minimax_reasoning_echo_restore(&responses, echo);
@@ -1228,7 +1134,7 @@ mod tests {
 
     #[test]
     fn minimax_reasoning_echo_restore_is_limited_to_responses_routes() {
-        let chat = minimax_route(crate::db::MinimaxServiceTier::Standard);
+        let chat = minimax_route(None);
         let echo = br#"{"messages":[{"role":"user","content":"hi"}]}"#;
         assert_eq!(
             apply_minimax_reasoning_echo_restore(&chat, echo).as_ref(),
@@ -1259,7 +1165,7 @@ mod tests {
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
 
-            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+            ..minimax_route(None)
         }
     }
 
@@ -1431,7 +1337,7 @@ mod tests {
                 thinking_effort_override: None,
                 compact_mode: crate::db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
-                ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+                ..minimax_route(None)
             };
             assert_eq!(
                 apply_minimax_reasoning_split(&route, body).as_ref(),
@@ -1468,7 +1374,11 @@ mod tests {
 
     #[test]
     fn build_upstream_request_defaults_reasoning_split_for_buffered_and_passthrough() {
-        let route = minimax_route(crate::db::MinimaxServiceTier::Priority);
+        // Issue #637: the tier override applies without a protocol gate
+        // (MiniMax/OpenAI publish `service_tier` on Chat and Responses), so
+        // this Chat-native reasoning assertion uses an untiered route to
+        // isolate the `reasoning_split` default.
+        let route = minimax_route(None);
         for body in [
             PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
             PreparedRequestBody::PassthroughStream(br#"{"model":"m"}"#.to_vec()),
@@ -1490,7 +1400,6 @@ mod tests {
                 .expect("upstream body bytes");
             let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
             assert_eq!(value["reasoning_split"], true);
-            assert_eq!(value["service_tier"], "priority");
         }
 
         for (raw, expected) in [
@@ -1572,7 +1481,7 @@ mod tests {
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
 
-            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+            ..minimax_route(None)
         }
     }
 
@@ -1639,7 +1548,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
-            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+            ..minimax_route(None)
         };
         assert_eq!(
             upstream_url_for_route(&chat, "/v1/chat/completions"),
@@ -1652,7 +1561,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
-            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+            ..minimax_route(None)
         };
         assert_eq!(
             upstream_url_for_route(&responses, "/v1/responses"),
@@ -1731,7 +1640,7 @@ mod tests {
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
 
-            ..minimax_route(crate::db::MinimaxServiceTier::Standard)
+            ..minimax_route(None)
         }
     }
 

@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use crate::{
     config::NativeApi,
     db::types::{
-        EndpointApiKey, EndpointCreate, EndpointPage, MinimaxServiceTier, ProviderEndpoint,
-        ProviderEndpointRow, RouteConfig,
+        EndpointApiKey, EndpointCreate, EndpointPage, ProviderEndpoint, ProviderEndpointRow,
+        RouteConfig, normalize_service_tier,
     },
 };
 
@@ -42,7 +42,7 @@ pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<R
             upstream_model: None,
             route_selection_reason: crate::db::RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::from_str(&row.provider),
-            service_tier: MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
+            service_tier: normalize_service_tier(row.service_tier.as_deref()),
             proxy_url: row.proxy_url,
             // Issue #392 Phase K: direct endpoint routes never normalize.
             dev_system_normalize: false,
@@ -114,6 +114,9 @@ pub async fn create_endpoint(pool: &PgPool, input: EndpointCreate) -> Result<Pro
         None | Some([]) => None,
         Some(windows) => crate::db::routes::storage_value(windows),
     };
+    // Issue #637: trim the free-form override; blank persists as inherit
+    // (NULL) so the provider/caller default is preserved.
+    let service_tier = normalize_service_tier(input.service_tier.as_deref());
     let endpoint = sqlx::query_file_as!(
         ProviderEndpointRow,
         "src/sql/endpoints/create_endpoint.sql",
@@ -122,7 +125,7 @@ pub async fn create_endpoint(pool: &PgPool, input: EndpointCreate) -> Result<Pro
         input.name,
         input.provider.as_str(),
         input.provider_region.map(|region| region.as_str()),
-        input.service_tier.as_str(),
+        service_tier.as_deref(),
         input.base_url,
         input.native_api.as_str(),
         input.native_api_source.as_str(),
@@ -159,6 +162,8 @@ pub async fn create_endpoint_with_mcp(
         None | Some([]) => None,
         Some(windows) => crate::db::routes::storage_value(windows),
     };
+    // Issue #637: trim the free-form override; blank persists as inherit.
+    let service_tier = normalize_service_tier(input.service_tier.as_deref());
     let endpoint = sqlx::query_file_as!(
         ProviderEndpointRow,
         "src/sql/endpoints/create_endpoint_with_mcp.sql",
@@ -167,7 +172,7 @@ pub async fn create_endpoint_with_mcp(
         input.name,
         input.provider.as_str(),
         input.provider_region.map(|region| region.as_str()),
-        input.service_tier.as_str(),
+        service_tier.as_deref(),
         input.base_url,
         input.native_api.as_str(),
         input.native_api_source.as_str(),
@@ -201,6 +206,8 @@ pub async fn update_endpoint(
         None | Some([]) => None,
         Some(windows) => crate::db::routes::storage_value(windows),
     };
+    // Issue #637: trim the free-form override; blank persists as inherit.
+    let service_tier = normalize_service_tier(input.service_tier.as_deref());
     let endpoint = sqlx::query_file_as!(
         ProviderEndpointRow,
         "src/sql/endpoints/update_endpoint.sql",
@@ -210,7 +217,7 @@ pub async fn update_endpoint(
         input.name,
         input.provider.as_str(),
         input.provider_region.map(|region| region.as_str()),
-        input.service_tier.as_str(),
+        service_tier.as_deref(),
         input.base_url,
         input.native_api.as_str(),
         input.native_api_source.as_str(),

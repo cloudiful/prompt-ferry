@@ -235,7 +235,7 @@ pub(crate) async fn insert_endpoint(
                 .provider_region
                 .map(|value| value.as_str()),
         )
-        .bind(endpoint.endpoint.service_tier.as_str())
+        .bind(endpoint.endpoint.service_tier.as_deref())
         .bind(&endpoint.endpoint.base_url)
         .bind(endpoint.endpoint.native_api.as_str())
         .bind(endpoint.endpoint.native_api_source.as_str())
@@ -350,6 +350,8 @@ pub(crate) async fn insert_route(
                     trimmed.to_string()
                 }
             })
+            // Issue #637: free-form override; blank means inherit (NULL).
+            .bind(target.service_tier.as_deref())
             .execute(&mut **transaction)
             .await?;
     }
@@ -401,6 +403,8 @@ pub(crate) async fn insert_encrypted_route(
                     trimmed.to_string()
                 }
             })
+            // Issue #637: free-form override; blank means inherit (NULL).
+            .bind(target.target.service_tier.as_deref())
             .execute(&mut **transaction)
             .await?;
     }

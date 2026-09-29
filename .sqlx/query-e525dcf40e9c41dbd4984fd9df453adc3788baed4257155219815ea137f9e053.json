@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, COALESCE(service_tier, 'standard') AS service_tier, base_url, native_api, native_api_source, api_key, proxy_url, active_windows, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\nFROM provider_endpoints\nORDER BY updated_at DESC, endpoint_id DESC\nOFFSET $1\nLIMIT $2\n",
+  "query": "SELECT endpoint_id, scope, owner_user_id, name, provider, provider_region, service_tier, base_url, native_api, native_api_source, api_key, proxy_url, active_windows, key_lb_enabled, enabled, mcp_enabled, created_at, updated_at\nFROM provider_endpoints\nWHERE endpoint_id = $1\n",
   "describe": {
     "columns": [
       {
@@ -73,7 +73,12 @@
         "ordinal": 6,
         "name": "service_tier",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "service_tier"
+          }
+        }
       },
       {
         "ordinal": 7,
@@ -199,8 +204,7 @@
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -210,7 +214,7 @@
       false,
       false,
       true,
-      null,
+      true,
       false,
       false,
       false,
@@ -224,5 +228,5 @@
       false
     ]
   },
-  "hash": "d2fb60ceaf1f077be77339700660fa510d6f1dd5922324ebc9e172e41c7f097c"
+  "hash": "e525dcf40e9c41dbd4984fd9df453adc3788baed4257155219815ea137f9e053"
 }

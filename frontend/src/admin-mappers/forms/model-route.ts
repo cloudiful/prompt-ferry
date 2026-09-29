@@ -5,6 +5,7 @@ import type {
   StreamDeltaBatchingSettings,
 } from '../../generated/admin-api'
 import type { ModelRouteForm, StreamDeltaBatchingForm } from '../../models'
+import { normalizeServiceTier } from './endpoint'
 
 const TARGET_NATIVE_APIS: readonly NativeApi[] = [
   'auto',
@@ -77,6 +78,8 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         thinking_downgrade_enabled: false,
         // Issue #464: inherit (follow caller) by default.
         thinking_effort_override: null,
+        // Issue #637: inherit (endpoint/caller default) by default.
+        service_tier: null,
         // Issue #502 Task 5: passthrough (native) by default.
         compact_mode: 'passthrough',
         // Issue #409 Phase 2: default Auto (follow caller).
@@ -151,6 +154,9 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
         (target as { thinking_effort_override?: unknown } | undefined)
           ?.thinking_effort_override,
       ),
+      // Issue #637: free-form tier override; legacy payloads miss it
+      // (means inherit). Null/blank means inherit.
+      service_tier: normalizeServiceTier(target?.service_tier),
       // Issue #502 Task 5: compact mode; legacy payloads miss it
       // (means passthrough).
       compact_mode: normalizeCompactMode(
@@ -220,6 +226,10 @@ export function modelRouteFormToRequest(
           thinking_effort_override: normalizeThinkingEffort(
             target?.thinking_effort_override,
           ),
+          // Issue #637: always sent (null means inherit) so a save or
+          // enable toggle round-trips a configured override instead of
+          // clearing it.
+          service_tier: normalizeServiceTier(target?.service_tier),
           // Issue #502 Task 5: always sent (passthrough default).
           compact_mode: normalizeCompactMode(target?.compact_mode),
           // Issue #409 Phase 2: always sent (Auto default follows caller;

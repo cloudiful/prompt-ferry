@@ -226,30 +226,6 @@ impl RoutingStrategy {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MinimaxServiceTier {
-    #[default]
-    Standard,
-    Priority,
-}
-
-impl MinimaxServiceTier {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Standard => "standard",
-            Self::Priority => "priority",
-        }
-    }
-
-    pub(crate) fn parse_lossy(value: Option<&str>) -> Self {
-        match value {
-            Some("priority") => Self::Priority,
-            _ => Self::Standard,
-        }
-    }
-}
-
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManagedRelayConfig {
     pub relay_id: Uuid,
@@ -352,8 +328,10 @@ pub struct ProviderEndpointConfig {
     pub name: String,
     pub provider: EndpointProvider,
     pub provider_region: Option<EndpointRegion>,
+    /// Issue #637: free-form service-tier override (TEXT NULL). `None`/blank
+    /// means inherit (no override).
     #[serde(default)]
-    pub service_tier: MinimaxServiceTier,
+    pub service_tier: Option<String>,
     pub base_url: String,
     pub native_api: NativeApi,
     pub native_api_source: NativeApiSource,
@@ -451,6 +429,11 @@ pub struct ModelRouteTargetConfig {
     // `compact_mode` TEXT column. Always sent (no omit).
     #[serde(default = "default_target_compact_mode")]
     pub compact_mode: String,
+    /// Issue #637: per-target free-form service-tier override. `None`/blank
+    /// inherits the endpoint value. SQLite persists the 0034 `service_tier`
+    /// TEXT column (NULL means inherit).
+    #[serde(default)]
+    pub service_tier: Option<String>,
 }
 
 impl fmt::Debug for ModelRouteTargetConfig {
@@ -475,6 +458,7 @@ impl fmt::Debug for ModelRouteTargetConfig {
             )
             .field("thinking_effort_override", &self.thinking_effort_override)
             .field("compact_mode", &self.compact_mode)
+            .field("service_tier", &self.service_tier)
             .finish()
     }
 }

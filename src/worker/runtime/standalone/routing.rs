@@ -112,14 +112,12 @@ fn target_from_endpoint(
             crate::standalone_config::EndpointProvider::OpenAi => db::EndpointProvider::OpenAi,
             crate::standalone_config::EndpointProvider::Generic => db::EndpointProvider::Generic,
         },
-        service_tier: match endpoint.service_tier {
-            crate::standalone_config::MinimaxServiceTier::Priority => {
-                db::MinimaxServiceTier::Priority
-            }
-            crate::standalone_config::MinimaxServiceTier::Standard => {
-                db::MinimaxServiceTier::Standard
-            }
-        },
+        // Issue #637: target override wins over the endpoint value; both
+        // blank/NULL means inherit.
+        service_tier: db::resolve_service_tier(
+            endpoint.service_tier.as_deref(),
+            target.service_tier.as_deref(),
+        ),
         proxy_url: endpoint.proxy_url.clone(),
         proxy_url_override: target.proxy_url_override.clone(),
         active_windows: target.active_windows.clone(),
@@ -184,8 +182,7 @@ mod tests {
     use super::*;
     use crate::config::{NativeApi, NativeApiSource};
     use crate::standalone_config::{
-        EndpointProvider, EndpointRegion, MinimaxServiceTier, ModelRouteTargetConfig,
-        ProviderEndpointConfig,
+        EndpointProvider, EndpointRegion, ModelRouteTargetConfig, ProviderEndpointConfig,
     };
     use uuid::Uuid;
 
@@ -198,7 +195,7 @@ mod tests {
                 name: "endpoint".to_string(),
                 provider: EndpointProvider::Generic,
                 provider_region: Some(EndpointRegion::Global),
-                service_tier: MinimaxServiceTier::Standard,
+                service_tier: None,
                 base_url: "https://example.test".to_string(),
                 native_api: NativeApi::Responses,
                 native_api_source: NativeApiSource::Manual,
@@ -233,6 +230,7 @@ mod tests {
                         thinking_effort_override: None,
                         compact_mode: "passthrough".to_string(),
                         thinking_downgrade_enabled: false,
+                        service_tier: None,
                     }],
                 },
                 ModelRouteConfig {
@@ -255,6 +253,7 @@ mod tests {
                         thinking_effort_override: None,
                         compact_mode: "passthrough".to_string(),
                         thinking_downgrade_enabled: false,
+                        service_tier: None,
                     }],
                 },
             ],
@@ -276,7 +275,7 @@ mod tests {
                 name: "minimax".to_string(),
                 provider: ScProvider::Minimax,
                 provider_region: Some(EndpointRegion::Global),
-                service_tier: MinimaxServiceTier::Priority,
+                service_tier: Some("priority".to_string()),
                 base_url: "https://api.minimaxi.com".to_string(),
                 native_api: NativeApi::Chat,
                 native_api_source: NativeApiSource::Manual,
@@ -310,6 +309,8 @@ mod tests {
                     thinking_effort_override: None,
                     compact_mode: "passthrough".to_string(),
                     thinking_downgrade_enabled: false,
+                    // Issue #637: inherit the endpoint override.
+                    service_tier: None,
                 }],
             }],
             ..StandaloneConfig::default()
@@ -318,6 +319,6 @@ mod tests {
             standalone_model_route_candidate(&snapshot, 1, Some("anything")).expect("candidate");
         let target = &candidate.targets[0];
         assert_eq!(target.provider, db::EndpointProvider::Minimax);
-        assert_eq!(target.service_tier, db::MinimaxServiceTier::Priority);
+        assert_eq!(target.service_tier.as_deref(), Some("priority"));
     }
 }

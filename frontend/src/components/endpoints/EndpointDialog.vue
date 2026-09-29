@@ -8,6 +8,7 @@ import EndpointOAuthSection from '@/components/endpoints/EndpointOAuthSection.vu
 import EndpointProviderFields from '@/components/endpoints/EndpointProviderFields.vue'
 import ProxySettingsFields from '@/components/shared/ProxySettingsFields.vue'
 import ScheduleWindowsFields from '@/components/shared/ScheduleWindowsFields.vue'
+import SettingsFieldRow from '@/components/shared/SettingsFieldRow.vue'
 
 const props = defineProps<{
   busy: boolean
@@ -252,49 +253,24 @@ function applyOAuthStatus(next: {
               t('endpointSettings')
             }}</span>
           </div>
-          <div class="grid gap-2 rounded border border-default bg-muted p-3">
-            <div class="flex items-center gap-1">
-              <span class="text-xs font-medium text-default">{{
-                t('proxyUrl')
-              }}</span>
-              <UTooltip :text="t('proxyUrlHint')">
-                <UButton
-                  type="button"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-info"
-                  :aria-label="t('proxyUrlHint')"
-                />
-              </UTooltip>
-            </div>
-            <ProxySettingsFields
-              v-model:proxy-url="form.proxy_url"
-              v-model:has-saved="form.has_saved_proxy_url"
-              :t="t"
-            />
-          </div>
-          <div class="grid gap-2 rounded border border-default bg-muted p-3">
-            <div class="flex items-center gap-1">
-              <span class="text-xs font-medium text-default">{{
-                t('scheduleWindows')
-              }}</span>
-              <UTooltip :text="t('scheduleWindowsHint')">
-                <UButton
-                  type="button"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-info"
-                  :aria-label="t('scheduleWindowsHint')"
-                />
-              </UTooltip>
-            </div>
-            <ScheduleWindowsFields
-              v-model:windows="form.active_windows"
-              v-model:touched="form.active_windows_touched"
-              :t="t"
-            />
+          <div class="grid gap-3 rounded border border-default bg-muted p-3">
+            <SettingsFieldRow :label="t('proxyUrl')" :hint="t('proxyUrlHint')">
+              <ProxySettingsFields
+                v-model:proxy-url="form.proxy_url"
+                v-model:has-saved="form.has_saved_proxy_url"
+                :t="t"
+              />
+            </SettingsFieldRow>
+            <SettingsFieldRow
+              :label="t('scheduleWindows')"
+              :hint="t('scheduleWindowsHint')"
+            >
+              <ScheduleWindowsFields
+                v-model:windows="form.active_windows"
+                v-model:touched="form.active_windows_touched"
+                :t="t"
+              />
+            </SettingsFieldRow>
           </div>
         </template>
         <div class="flex justify-end gap-2 pt-1">

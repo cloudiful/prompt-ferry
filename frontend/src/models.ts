@@ -9,7 +9,6 @@ import type {
   SessionRouteOptionsResponse,
   EndpointProvider,
   EndpointRegion,
-  MinimaxServiceTier,
   UsageClearScope,
 } from './generated/admin-api'
 
@@ -27,7 +26,10 @@ export type EndpointForm = {
   name: string
   provider: EndpointProvider
   provider_region: EndpointRegion | null
-  service_tier: MinimaxServiceTier
+  // Issue #637: free-form service-tier override. null/blank means inherit
+  // (no override); a non-empty value is sent trimmed and wins over the
+  // provider/caller default.
+  service_tier: string | null
   base_url: string
   api_keys: EndpointApiKeyForm[]
   key_lb_enabled: boolean
@@ -87,6 +89,12 @@ export type ModelRouteTargetForm = {
   // none/minimal/low/medium/high/xhigh/max and force-replaces the caller
   // value. Always sent as string|null (no omit).
   thinking_effort_override: string | null
+  // Issue #637: per-target free-form service-tier override. null/blank
+  // means inherit (endpoint value, else caller/provider default).
+  // Optional for legacy forms (same precedent as `native_api?`); the
+  // mapper normalizes missing values to inherit. Carried invisibly until
+  // the P4 control lands; always sent as string|null (no omit).
+  service_tier?: string | null
   // Issue #502 Task 5: per-target compact mode. 'passthrough' (default)
   // keeps native passthrough; 'self_summarize' enables ferry-side handoff
   // summarization for non-Responses targets; 'off' rejects compact.

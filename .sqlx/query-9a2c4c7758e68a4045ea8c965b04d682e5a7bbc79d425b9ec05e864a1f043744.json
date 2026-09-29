@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,\n       COALESCE(e.enabled, FALSE) AS \"endpoint_enabled!\",\n       t.position, t.enabled, t.upstream_model,\n       COALESCE(t.native_api, 'auto') AS \"native_api!\",\n        t.proxy_url_override,\n        t.active_windows,\n        COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\",\n        COALESCE(t.thinking_downgrade_enabled, FALSE) AS \"thinking_downgrade_enabled!\",\n        t.thinking_effort_override,\n        t.compact_mode,\n       t.created_at, t.updated_at\nFROM model_route_targets t\nLEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE t.rule_id = ANY($1)\nORDER BY t.rule_id ASC, t.position ASC, t.created_at ASC\n",
+  "query": "SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,\n       COALESCE(e.enabled, FALSE) AS \"endpoint_enabled!\",\n       t.position, t.enabled, t.upstream_model,\n       COALESCE(t.native_api, 'auto') AS \"native_api!\",\n        t.proxy_url_override,\n        t.active_windows,\n        COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\",\n        COALESCE(t.thinking_downgrade_enabled, FALSE) AS \"thinking_downgrade_enabled!\",\n        t.thinking_effort_override,\n        t.compact_mode,\n        t.service_tier,\n       t.created_at, t.updated_at\nFROM model_route_targets t\nLEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE t.rule_id = ANY($1)\nORDER BY t.rule_id ASC, t.position ASC, t.created_at ASC\n",
   "describe": {
     "columns": [
       {
@@ -150,6 +150,17 @@
       },
       {
         "ordinal": 15,
+        "name": "service_tier",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_route_targets",
+            "name": "service_tier"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -160,7 +171,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -192,9 +203,10 @@
       null,
       true,
       false,
+      true,
       false,
       false
     ]
   },
-  "hash": "6c6d1af68ac231d97d36166d28906583beb5db3cbd3186e76a0c2f2b75d84e86"
+  "hash": "9a2c4c7758e68a4045ea8c965b04d682e5a7bbc79d425b9ec05e864a1f043744"
 }

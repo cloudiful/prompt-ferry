@@ -14,7 +14,7 @@ use super::{
 use crate::db::{EndpointOAuthToken, EndpointOAuthTokenSet};
 use crate::relay_secrets::RelaySecretManager;
 
-const CURRENT_SCHEMA_VERSION: i64 = 33;
+const CURRENT_SCHEMA_VERSION: i64 = 34;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {

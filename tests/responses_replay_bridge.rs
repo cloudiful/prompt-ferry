@@ -206,6 +206,7 @@ async fn opencode_go_chat_history_passes_through_without_local_rejection() -> an
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -348,6 +349,7 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
                     thinking_effort_override: None,
                     compact_mode: db::CompactMode::Passthrough,
                     thinking_downgrade_enabled: false,
+                    service_tier: None,
                 },
                 db::ModelRouteTargetCreate {
                     endpoint_id: right_code.endpoint_id,
@@ -360,6 +362,7 @@ async fn responses_session_header_creates_affinity_and_conversation() -> anyhow:
                     thinking_effort_override: None,
                     compact_mode: db::CompactMode::Passthrough,
                     thinking_downgrade_enabled: false,
+                    service_tier: None,
                 },
             ],
         },
@@ -478,6 +481,7 @@ async fn raw_passthrough_keeps_previous_response_id_without_replay_state() -> an
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -577,6 +581,7 @@ async fn raw_passthrough_keeps_conversation_without_replay_state() -> anyhow::Re
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -672,6 +677,7 @@ async fn rejects_stateful_responses_routed_to_chat_native_target() -> anyhow::Re
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )
@@ -770,6 +776,7 @@ async fn rejects_responses_routed_to_anthropic_native_target() -> anyhow::Result
                 thinking_effort_override: None,
                 compact_mode: db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                service_tier: None,
             }],
         },
     )

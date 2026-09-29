@@ -115,6 +115,46 @@ fn compact_off_rejects_every_target() {
 }
 
 #[test]
+fn routeless_responses_to_chat_rejects_caller_tier() {
+    // Issue #637: the route-less entry points carry no provider context, so
+    // a caller `service_tier` is denied by default exactly like an
+    // unsupported provider — rejected here on Responses→Chat.
+    let error = prepare_upstream_request(
+        "/v1/responses",
+        br#"{"model":"m","input":"hi","service_tier":"priority"}"#,
+        NativeApi::Chat,
+        false,
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "unsupported_feature");
+    assert!(error.message.contains("service_tier"));
+}
+
+#[test]
+fn routeless_chat_to_responses_forwards_caller_tier() {
+    // Issue #637: caller-compatibility baseline — the route-less entry
+    // point forwards the caller field on Chat→Responses for every provider
+    // (no configured value preserves the caller's field); the
+    // configuration-based override stays gated in the live transform.
+    let prepared = prepare_upstream_request_with_compact(
+        "/v1/chat/completions",
+        br#"{"model":"m","messages":[{"role":"user","content":"hi"}],"service_tier":"priority"}"#,
+        NativeApi::Responses,
+        false,
+        None,
+        CompactMode::Passthrough,
+    )
+    .unwrap();
+    assert_eq!(prepared.path, "/v1/responses");
+    let PreparedRequestBody::BufferedBytes(body) = prepared.body else {
+        panic!("chat to Responses translation must buffer");
+    };
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["service_tier"].as_str(), Some("priority"));
+}
+
+#[test]
 fn compact_passthrough_rejects_cross_protocol_targets_by_default() {
     for native_api in [
         NativeApi::Chat,

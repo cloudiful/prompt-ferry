@@ -130,7 +130,6 @@ const showClear = computed(
   <div class="grid gap-3 text-xs">
     <div v-if="hasSaved" class="flex items-center gap-2">
       <UBadge :label="t('saved')" color="neutral" />
-      <span class="text-muted">{{ t('proxySavedHidden') }}</span>
     </div>
     <USelect
       :model-value="currentScheme"
@@ -149,9 +148,6 @@ const showClear = computed(
       :aria-label="t('proxyAddress')"
       @update:model-value="onAddressUpdate($event as string)"
     />
-    <p v-if="hasSaved" class="text-xs leading-snug text-muted">
-      {{ t('proxyKeepHint') }}
-    </p>
     <div v-if="showClear" class="flex justify-start">
       <UButton
         type="button"

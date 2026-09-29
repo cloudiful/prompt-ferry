@@ -100,6 +100,46 @@ impl EndpointProvider {
     pub fn supports_chatgpt_subscription_plan(self) -> bool {
         matches!(self, Self::OpenAi)
     }
+
+    /// Issue #637: whether this provider publishes the top-level
+    /// `service_tier` field on its Chat Completions and Responses contracts.
+    /// Only MiniMax and OpenAI are confirmed (their accepted value
+    /// vocabularies differ, so values stay free-form); every other provider
+    /// keeps the previous behavior — the compatibility translation rejects
+    /// or drops the caller field and no override is injected. The table
+    /// stays conservative: a new provider needs contract evidence before it
+    /// can flip this. Shared by the live transform, the route probe and the
+    /// compatibility translation.
+    pub fn supports_service_tier(self) -> bool {
+        matches!(self, Self::Minimax | Self::OpenAi)
+    }
+
+    /// Issue #637: provider-native wire key for the free-form service-tier
+    /// override (`None` means no override concept). Shares the
+    /// [`Self::supports_service_tier`] bit so a future/different native key
+    /// stays representable without changing UI semantics.
+    pub fn service_tier_wire_key(self) -> Option<&'static str> {
+        self.supports_service_tier().then_some("service_tier")
+    }
+
+    /// Issue #637: documented protocol matrix for the free-form
+    /// service-tier override. MiniMax publishes the top-level
+    /// `service_tier` field on Chat, Responses and Anthropic Messages;
+    /// OpenAI on Chat and Responses. Realtime, `Auto` (always resolved
+    /// before forwarding) and every other provider/protocol combination
+    /// are excluded. Shared by the live transform and the route probe; the
+    /// compatibility translation only ever handles Chat/Responses targets,
+    /// where it defers to [`Self::supports_service_tier`].
+    pub fn supports_service_tier_for(self, native_api: NativeApi) -> bool {
+        match self {
+            Self::Minimax => matches!(
+                native_api,
+                NativeApi::Chat | NativeApi::Responses | NativeApi::AnthropicMessages
+            ),
+            Self::OpenAi => matches!(native_api, NativeApi::Chat | NativeApi::Responses),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -222,35 +262,13 @@ fn redacted_secret_len(value: &str) -> String {
     format!("[REDACTED; {} bytes]", value.len())
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MinimaxServiceTier {
-    #[default]
-    Standard,
-    Priority,
-}
-
-impl MinimaxServiceTier {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Standard => "standard",
-            Self::Priority => "priority",
-        }
-    }
-
-    pub fn from_str(value: &str) -> Self {
-        match value {
-            "priority" => Self::Priority,
-            _ => Self::Standard,
-        }
-    }
-
-    pub fn from_optional(value: Option<&str>) -> Self {
-        match value {
-            Some("priority") => Self::Priority,
-            _ => Self::Standard,
-        }
-    }
+/// Issue #637: normalize a free-form service-tier override. Values are
+/// trimmed and blank/whitespace-only input becomes `None` (no override), so
+/// the caller's provider field/default stays intact.
+pub fn normalize_service_tier(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
@@ -281,6 +299,8 @@ pub struct ProviderEndpointRow {
     pub name: String,
     pub provider: String,
     pub provider_region: Option<String>,
+    /// Issue #637: free-form service-tier override (TEXT NULL). `None`/blank
+    /// means inherit (no override).
     pub service_tier: Option<String>,
     pub base_url: String,
     pub native_api: String,
@@ -317,8 +337,10 @@ pub struct ProviderEndpoint {
     /// contract backward-compatible, mirroring `has_proxy_url`.
     #[serde(default)]
     pub plan: EndpointPlan,
+    /// Issue #637: free-form endpoint service-tier override. `None` means
+    /// inherit (no override); a model-route target override wins over it.
     #[serde(default)]
-    pub service_tier: MinimaxServiceTier,
+    pub service_tier: Option<String>,
     pub base_url: String,
     pub native_api: String,
     pub native_api_source: String,
@@ -378,7 +400,7 @@ impl From<ProviderEndpointRow> for ProviderEndpoint {
             // token; the unified repository enriches both fields from token
             // presence before serving admin responses.
             plan: EndpointPlan::default(),
-            service_tier: MinimaxServiceTier::from_optional(value.service_tier.as_deref()),
+            service_tier: normalize_service_tier(value.service_tier.as_deref()),
             base_url: value.base_url,
             native_api: value.native_api,
             native_api_source: value.native_api_source,
@@ -404,8 +426,10 @@ pub struct EndpointCreate {
     pub name: String,
     pub provider: EndpointProvider,
     pub provider_region: Option<EndpointRegion>,
+    /// Issue #637: free-form service-tier override; trimmed by the write
+    /// path and stored as NULL when omitted/blank (inherit).
     #[serde(default)]
-    pub service_tier: MinimaxServiceTier,
+    pub service_tier: Option<String>,
     pub base_url: String,
     pub native_api: NativeApi,
     pub native_api_source: NativeApiSource,
@@ -719,6 +743,87 @@ mod tests {
     }
 
     #[test]
+    fn only_minimax_and_openai_support_service_tier() {
+        // Issue #637: the shared capability bit behind the live transform,
+        // the route probe and the compatibility translation.
+        for provider in [EndpointProvider::Minimax, EndpointProvider::OpenAi] {
+            assert!(provider.supports_service_tier(), "{provider:?}");
+            assert_eq!(provider.service_tier_wire_key(), Some("service_tier"));
+        }
+        for provider in [
+            EndpointProvider::Generic,
+            EndpointProvider::CommandCode,
+            EndpointProvider::OpencodeGo,
+            EndpointProvider::OpenRouter,
+            EndpointProvider::Glm,
+            EndpointProvider::DeepSeek,
+        ] {
+            assert!(!provider.supports_service_tier(), "{provider:?}");
+            assert_eq!(provider.service_tier_wire_key(), None);
+        }
+    }
+
+    #[test]
+    fn service_tier_protocol_matrix_covers_documented_contracts() {
+        // Issue #637: MiniMax Chat/Responses/Anthropic Messages, OpenAI
+        // Chat/Responses; Realtime, Auto and everything else excluded.
+        use crate::config::NativeApi;
+        for native_api in [
+            NativeApi::Chat,
+            NativeApi::Responses,
+            NativeApi::AnthropicMessages,
+        ] {
+            assert!(
+                EndpointProvider::Minimax.supports_service_tier_for(native_api),
+                "{native_api:?}"
+            );
+        }
+        for native_api in [NativeApi::Chat, NativeApi::Responses] {
+            assert!(
+                EndpointProvider::OpenAi.supports_service_tier_for(native_api),
+                "{native_api:?}"
+            );
+        }
+        for native_api in [
+            NativeApi::AnthropicMessages,
+            NativeApi::Realtime,
+            NativeApi::Auto,
+        ] {
+            assert!(
+                !EndpointProvider::OpenAi.supports_service_tier_for(native_api),
+                "{native_api:?}"
+            );
+        }
+        for native_api in [NativeApi::Realtime, NativeApi::Auto] {
+            assert!(
+                !EndpointProvider::Minimax.supports_service_tier_for(native_api),
+                "{native_api:?}"
+            );
+        }
+        for provider in [
+            EndpointProvider::Generic,
+            EndpointProvider::CommandCode,
+            EndpointProvider::OpencodeGo,
+            EndpointProvider::OpenRouter,
+            EndpointProvider::Glm,
+            EndpointProvider::DeepSeek,
+        ] {
+            for native_api in [
+                NativeApi::Chat,
+                NativeApi::Responses,
+                NativeApi::AnthropicMessages,
+                NativeApi::Realtime,
+                NativeApi::Auto,
+            ] {
+                assert!(
+                    !provider.supports_service_tier_for(native_api),
+                    "{provider:?} {native_api:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn oauth_token_debug_redacts_both_secrets() {
         // Issue #599 R2a: refresh tokens must never reach logs. The Debug
         // impl renders byte counts; a regression that echoes a secret fails
@@ -773,26 +878,21 @@ mod tests {
     }
 
     #[test]
-    fn service_tier_defaults_to_standard_and_parses_priority() {
-        assert_eq!(MinimaxServiceTier::default(), MinimaxServiceTier::Standard);
+    fn service_tier_is_free_form_and_blank_means_inherit() {
+        // Issue #637: the free-form override trims values and treats
+        // blank/whitespace as unset (inherit).
+        assert_eq!(normalize_service_tier(None), None);
+        assert_eq!(normalize_service_tier(Some("")), None);
+        assert_eq!(normalize_service_tier(Some("   ")), None);
         assert_eq!(
-            MinimaxServiceTier::from_optional(None),
-            MinimaxServiceTier::Standard
+            normalize_service_tier(Some(" priority ")),
+            Some("priority".to_string())
         );
         assert_eq!(
-            MinimaxServiceTier::from_optional(Some("priority")),
-            MinimaxServiceTier::Priority
+            normalize_service_tier(Some("fast")),
+            Some("fast".to_string())
         );
-        assert_eq!(
-            MinimaxServiceTier::from_optional(Some("standard")),
-            MinimaxServiceTier::Standard
-        );
-        assert_eq!(
-            MinimaxServiceTier::from_optional(Some("legacy-unknown")),
-            MinimaxServiceTier::Standard
-        );
-        assert_eq!(MinimaxServiceTier::Priority.as_str(), "priority");
-        // Legacy/omitted JSON values deserialize as standard.
+        // Legacy/omitted JSON values deserialize as inherit (null).
         let create: EndpointCreate = serde_json::from_value(serde_json::json!({
             "scope": "admin",
             "name": "legacy",
@@ -807,6 +907,6 @@ mod tests {
             "enabled": true
         }))
         .expect("legacy endpoint create without service_tier");
-        assert_eq!(create.service_tier, MinimaxServiceTier::Standard);
+        assert_eq!(create.service_tier, None);
     }
 }

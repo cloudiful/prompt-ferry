@@ -111,7 +111,7 @@ pub async fn list_visible_model_route_endpoints_strict(
             upstream_model: None,
             route_selection_reason: crate::db::RouteSelectionReason::Default,
             provider: crate::db::EndpointProvider::from_str(&row.provider),
-            service_tier: crate::db::MinimaxServiceTier::from_optional(row.service_tier.as_deref()),
+            service_tier: crate::db::normalize_service_tier(row.service_tier.as_deref()),
             proxy_url: row.proxy_url,
             // Issue #392 Phase K: direct endpoint routes never normalize.
             dev_system_normalize: false,

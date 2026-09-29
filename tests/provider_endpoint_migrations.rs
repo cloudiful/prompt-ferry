@@ -526,7 +526,7 @@ async fn standalone_0014_fresh_migration_supports_command_code_opencode_go_and_o
     let path = standalone_temp_path("fresh");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 34);
 
     let ddl: String = sqlx::query(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'standalone_provider_endpoints'",
@@ -693,7 +693,7 @@ async fn standalone_0014_upgrade_from_v13_preserves_rows_and_widens_provider() -
     // 0015 (issue #230) adds `glm` and 0016 (issue #287) adds `deepseek`;
     // 0032 (issue #589) adds `openai`; the final schema version tracks the
     // newest standalone migration after the pending migrations apply.
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 34);
     let preserved: i64 = sqlx::query(
         "SELECT COUNT(*) FROM standalone_provider_endpoints WHERE name = 'legacy-minimax'",
     )
@@ -739,7 +739,7 @@ async fn standalone_0025_quota_cleanup_preserves_route_targets() -> anyhow::Resu
     let path = standalone_temp_path("quota25");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 34);
     // No quota columns remain.
     for table in ["standalone_model_routes", "standalone_mcp_servers"] {
         let cols: Vec<String> = if table == "standalone_model_routes" {
@@ -809,18 +809,28 @@ async fn standalone_0032_openai_rebuild_preserves_referencing_rows() -> anyhow::
     let path = standalone_temp_path("openai32");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 34);
 
     insert_standalone_endpoint(&pool, "pinned-ds", "deepseek", None).await?;
     insert_standalone_endpoint_key(&pool, "pinned-ds").await?;
     insert_standalone_route_target(&pool, "pinned-ds").await?;
 
-    // Drop the 0032/0033 bookkeeping and the schema version so the next
-    // open() re-applies the migrations against a table that already has
-    // referencing rows, exercising the DROP/RENAME rebuild with foreign keys
-    // enabled. 0033 (issue #599) only creates its own table, so replaying it
-    // alongside 0032 keeps the scenario focused on the 0032 rebuild.
-    sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (32, 33)")
+    // Rewind to the schema-31 state so the next open() re-applies the
+    // 0032/0033/0034 migrations against a table that already has referencing
+    // rows, exercising the DROP/RENAME rebuild with foreign keys enabled.
+    // Issue #637's 0034 relaxed `service_tier` to nullable and added the
+    // target column, so the pre-0034 shape is restored first: 0032's endpoint
+    // rebuild declares `service_tier NOT NULL`, and 0034 re-adds the dropped
+    // target column. 0033 (issue #599) only creates its own table, so
+    // replaying it alongside 0032 keeps the scenario focused on the 0032
+    // rebuild.
+    sqlx::query("UPDATE standalone_provider_endpoints SET service_tier = 'standard'")
+        .execute(&pool)
+        .await?;
+    sqlx::query("ALTER TABLE standalone_model_route_targets DROP COLUMN service_tier")
+        .execute(&pool)
+        .await?;
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (32, 33, 34)")
         .execute(&pool)
         .await?;
     sqlx::query(
@@ -833,7 +843,7 @@ async fn standalone_0032_openai_rebuild_preserves_referencing_rows() -> anyhow::
 
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 34);
     let children: i64 = sqlx::query(
         "SELECT (SELECT COUNT(*) FROM standalone_endpoint_keys) \
               + (SELECT COUNT(*) FROM standalone_model_route_targets)",
@@ -1045,7 +1055,7 @@ async fn standalone_0033_oauth_token_envelope_table() -> anyhow::Result<()> {
     let path = standalone_temp_path("oauth33");
     let store = StandaloneConfigStore::open(&path).await?;
     let pool = db::connect_sqlite(&path).await?;
-    assert_eq!(standalone_schema_version(&pool).await?, 33);
+    assert_eq!(standalone_schema_version(&pool).await?, 34);
 
     let columns: Vec<String> =
         sqlx::query("SELECT name FROM pragma_table_info('standalone_endpoint_oauth_tokens')")

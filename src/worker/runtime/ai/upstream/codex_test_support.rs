@@ -25,7 +25,7 @@ pub(super) fn openai_responses_route() -> RouteConfig {
         upstream_model: None,
         route_selection_reason: RouteSelectionReason::Default,
         provider: crate::db::EndpointProvider::OpenAi,
-        service_tier: crate::db::MinimaxServiceTier::Standard,
+        service_tier: None,
         proxy_url: None,
         dev_system_normalize: false,
         thinking_downgrade_enabled: false,
