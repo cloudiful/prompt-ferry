@@ -1,0 +1,6 @@
+-- Issue #653 Phase P2: intentionally a no-op.
+--
+-- The index `idx_request_record_block_refs_block_hash` is created and owned by
+-- `20260923135234_partition_request_family` on the partitioned parent. Dropping
+-- it here would tear down an index this migration did not build, so the revert
+-- path leaves the schema untouched.
