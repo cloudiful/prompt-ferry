@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n    o.conversation_id,\n    o.endpoint_id,\n    o.endpoint_key_id,\n    k.key_label AS endpoint_key_label,\n    pe.name AS endpoint_name,\n    o.created_by_user_id,\n    o.created_at,\n    o.updated_at\nFROM conversation_endpoint_overrides o\nLEFT JOIN provider_endpoints pe ON pe.endpoint_id = o.endpoint_id\nLEFT JOIN endpoint_api_keys k ON k.key_id = o.endpoint_key_id\nWHERE o.conversation_id = $1\n",
+  "query": "SELECT\n    o.conversation_id AS \"conversation_id!\",\n    o.endpoint_id,\n    o.endpoint_key_id,\n    k.key_label AS endpoint_key_label,\n    pe.name AS endpoint_name,\n    o.created_by_user_id,\n    o.created_at AS \"created_at!\",\n    o.updated_at\nFROM conversation_endpoint_overrides o\nLEFT JOIN provider_endpoints pe ON pe.endpoint_id = o.endpoint_id\nLEFT JOIN endpoint_api_keys k ON k.key_id = o.endpoint_key_id\nWHERE o.conversation_id = $1\n",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "conversation_id",
+        "name": "conversation_id!",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -71,7 +71,7 @@
       },
       {
         "ordinal": 6,
-        "name": "created_at",
+        "name": "created_at!",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
@@ -108,5 +108,5 @@
       false
     ]
   },
-  "hash": "1a6105689bb6e551caf524f60759b1028ea0449432b24e65eda56abd1b8d78ea"
+  "hash": "96151dbabada063d6b221f3e84a7262281d5a0935e6f1616f8451f5ef9852e38"
 }
