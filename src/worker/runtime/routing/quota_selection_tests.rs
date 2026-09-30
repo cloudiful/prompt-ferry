@@ -195,6 +195,62 @@ fn command_code_key_usage(
     }
 }
 
+#[tokio::test]
+async fn quota_key_lb_skips_command_code_key_with_exhausted_monthly_pool() {
+    // Issue #656: both USD windows still read 100%, but the premium monthly
+    // pool came back empty so the whole key must drop out of the pool while a
+    // key with positive monthly pools stays routable.
+    let endpoint_id = uuid::Uuid::new_v4();
+    let exhausted_key_id = uuid::Uuid::new_v4();
+    let available_key_id = uuid::Uuid::new_v4();
+    let route = command_code_route(endpoint_id, exhausted_key_id, available_key_id);
+    let exhausted = with_balances(
+        command_code_key_usage(exhausted_key_id, "exhausted", Some(100.0), Some(100.0)),
+        CommandCodeBalances {
+            monthly_credits: 0.1155473458,
+            purchased_credits: 0.0,
+            free_credits: 0.0,
+            remaining_credits: 0.0,
+        },
+    );
+    let available = with_balances(
+        command_code_key_usage(available_key_id, "available", Some(100.0), Some(100.0)),
+        CommandCodeBalances {
+            monthly_credits: 5.0,
+            purchased_credits: 0.0,
+            free_credits: 0.0,
+            remaining_credits: 5.0,
+        },
+    );
+    let cache = TokenPlanQuotaCache::default();
+    cache
+        .store_for_test(
+            endpoint_id,
+            TokenPlanUsageResponse {
+                local_today_tokens: None,
+                provider: db::EndpointProvider::CommandCode,
+                provider_region: None,
+                keys: vec![exhausted, available],
+            },
+        )
+        .await;
+
+    let selected = materialize_route_api_key_selection_with_quota(
+        &route,
+        &command_code_request(),
+        &RequestPromptLog::default(),
+        Some(&cache),
+    );
+
+    assert_eq!(selected.selection.key_id, Some(available_key_id));
+    assert_eq!(selected.selection.key_label.as_deref(), Some("available"));
+}
+
+fn with_balances(mut key: TokenPlanKeyUsage, balances: CommandCodeBalances) -> TokenPlanKeyUsage {
+    key.balances = Some(balances);
+    key
+}
+
 fn command_code_route(
     endpoint_id: uuid::Uuid,
     exhausted_key_id: uuid::Uuid,

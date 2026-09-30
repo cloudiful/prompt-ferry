@@ -6,9 +6,9 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::command_code_parsing::{
-    build_window_usage, command_code_business_error, parse_credits_section,
-    parse_subscription_plan, parse_summary_present, parse_whoami_org_id, parse_window_entry,
-    plan_monthly_credits,
+    build_window_usage, command_code_business_error, effective_monthly_credits,
+    effective_remaining_credits, parse_credits_section, parse_subscription_plan,
+    parse_summary_present, parse_whoami_org_id, parse_window_entry,
 };
 use super::json_scalars::{failed_key, truncate_message, value_as_string};
 use crate::worker_admin_types::{CommandCodeBalances, TokenPlanKeyUsage};
@@ -163,18 +163,20 @@ pub(crate) async fn fetch_command_code_key_usage(
         );
     }
     let balances = parsed_credits.as_ref().map(|parsed| {
-        let monthly = plan_id
-            .as_deref()
-            .and_then(plan_monthly_credits)
-            .or(parsed.monthly)
-            .unwrap_or(0.0);
+        let monthly = effective_monthly_credits(parsed.monthly, plan_id.as_deref());
         let purchased = parsed.purchased.unwrap_or(0.0);
         let free = parsed.free.unwrap_or(0.0);
         CommandCodeBalances {
             monthly_credits: monthly,
             purchased_credits: purchased,
             free_credits: free,
-            remaining_credits: monthly + purchased + free,
+            remaining_credits: effective_remaining_credits(
+                monthly,
+                purchased,
+                free,
+                parsed.premium_monthly,
+                parsed.opensource_monthly,
+            ),
         }
     });
     let (five_hour, weekly) = parsed_credits

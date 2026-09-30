@@ -5,13 +5,18 @@
 //! stays depleted for a long time. Windows with no reset signal keep their
 //! raw remaining, degrading to the plain min-bottleneck behavior.
 
+use super::command_code_parsing::command_code_balance_exhausted;
 use super::quota_urgency::{
     FIVE_HOUR_SECONDS, MONTHLY_SECONDS, WEEKLY_SECONDS, seconds_until, urgent_remaining,
 };
 use crate::worker_admin_types::{TokenPlanKeyUsage, TokenPlanModelUsage, TokenPlanWindowUsage};
 
-/// Tightest CommandCode USD window after urgency lifting.
+/// Tightest CommandCode USD window after urgency lifting. A key with no
+/// effective balance left drops to weight 0 (issue #656).
 pub(crate) fn command_code_weight_percent(key: &TokenPlanKeyUsage) -> Option<f64> {
+    if command_code_balance_exhausted(key) {
+        return Some(0.0);
+    }
     [
         (key.five_hour.as_ref(), FIVE_HOUR_SECONDS),
         (key.weekly.as_ref(), WEEKLY_SECONDS),

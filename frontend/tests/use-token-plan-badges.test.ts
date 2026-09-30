@@ -109,6 +109,7 @@ test('empty usage renders empty badges', () => {
     deepseekCurrency: null,
     deepseekAvailable: null,
     localTodayTokens: null,
+    commandCodeExhausted: false,
     usage: null,
   })
 })
@@ -201,6 +202,147 @@ test('CommandCode USD: short = five_hour, long = weekly', async () => {
   })
   await prefetchTokenPlanUsage('ep-cc')
   const badges = useTokenPlanBadges('ep-cc')
+  expect(badges.value.short).toBe(75)
+  expect(badges.value.long).toBe(40)
+  // Window percentages survive a positive effective balance unchanged.
+  expect(badges.value.commandCodeExhausted).toBe(false)
+})
+
+// Issue #656: the backend drops a CommandCode key from routing when its
+// effective remaining credit balance bottoms out, even though the 5h/weekly
+// windows may still read high. The badge must not advertise that quota.
+test('CommandCode: an exhausted effective balance suppresses the window percentages', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'command_code',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [],
+        // Mirrors the issue's real response and the backend's effective
+        // balance: monthly 0.1155 with a zero premium pool collapses to 0.
+        balances: {
+          monthly_credits: 0.1155473458,
+          purchased_credits: 0,
+          free_credits: 0,
+          remaining_credits: 0,
+        },
+        five_hour: { remaining_percent: 100, reset_at: null },
+        weekly: { remaining_percent: 100, reset_at: null },
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-cc-exhausted')
+  const badges = useTokenPlanBadges('ep-cc-exhausted')
+  expect(badges.value.commandCodeExhausted).toBe(true)
+  expect(badges.value.short).toBeNull()
+  expect(badges.value.long).toBeNull()
+
+  const t = ((key: string) => key) as unknown as TranslateFn
+  const pills = tokenPlanBadgePills(badges.value, t)
+  expect(pills.map((pill) => pill.label)).toEqual(['tokenPlanNoQuota'])
+  expect(pills[0]?.color).toBe('hsl(0 80% 45%)')
+  expect(pills[0]?.title).toBe('tokenPlanUnavailable')
+})
+
+test('CommandCode: an exhausted key with no windows still reports no quota', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'command_code',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [],
+        balances: {
+          monthly_credits: 0,
+          purchased_credits: 0,
+          free_credits: 0,
+          remaining_credits: 0,
+        },
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-cc-payg-exhausted')
+  const badges = useTokenPlanBadges('ep-cc-payg-exhausted')
+  expect(badges.value.commandCodeExhausted).toBe(true)
+  expect(badges.value.short).toBeNull()
+  expect(badges.value.long).toBeNull()
+  const t = ((key: string) => key) as unknown as TranslateFn
+  expect(
+    tokenPlanBadgePills(badges.value, t).map((pill) => pill.label),
+  ).toEqual(['tokenPlanNoQuota'])
+})
+
+test('CommandCode: exhausted keys stay out of the average while healthy keys still route', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'command_code',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k-exhausted',
+        key_label: 'k-exhausted',
+        ok: true,
+        model_remains: [],
+        balances: {
+          monthly_credits: 0,
+          purchased_credits: 0,
+          free_credits: 0,
+          remaining_credits: 0,
+        },
+        // A routing-excluded key must not lift the endpoint average.
+        five_hour: { remaining_percent: 100, reset_at: null },
+        weekly: { remaining_percent: 100, reset_at: null },
+      },
+      {
+        key_id: 'k-healthy',
+        key_label: 'k-healthy',
+        ok: true,
+        model_remains: [],
+        balances: {
+          monthly_credits: 5,
+          purchased_credits: 0,
+          free_credits: 0,
+          remaining_credits: 5,
+        },
+        five_hour: { remaining_percent: 50, reset_at: null },
+        weekly: { remaining_percent: 60, reset_at: null },
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-cc-mixed')
+  const badges = useTokenPlanBadges('ep-cc-mixed')
+  expect(badges.value.commandCodeExhausted).toBe(false)
+  expect(badges.value.short).toBe(50)
+  expect(badges.value.long).toBe(60)
+  const t = ((key: string) => key) as unknown as TranslateFn
+  expect(
+    tokenPlanBadgePills(badges.value, t).map((pill) => pill.label),
+  ).toEqual(['tokenPlanShortBadge 50%', 'tokenPlanLongBadge 60%'])
+})
+
+test('CommandCode: absent balances keep the window percentages', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'command_code',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k',
+        key_label: 'k',
+        ok: true,
+        model_remains: [],
+        // Older/PAYG payloads omit the balances section: no exhaustion signal.
+        five_hour: { remaining_percent: 75, reset_at: null },
+        weekly: { remaining_percent: 40, reset_at: null },
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-cc-no-balances')
+  const badges = useTokenPlanBadges('ep-cc-no-balances')
+  expect(badges.value.commandCodeExhausted).toBe(false)
   expect(badges.value.short).toBe(75)
   expect(badges.value.long).toBe(40)
 })
@@ -522,6 +664,7 @@ test('tokenPlanBadgePills derives the static quota pill pair', () => {
       deepseekCurrency: null,
       deepseekAvailable: null,
       localTodayTokens: null,
+      commandCodeExhausted: false,
     },
     t,
   )
@@ -545,6 +688,7 @@ test('tokenPlanBadgePills pairs the OpenRouter balance with provider spend', () 
       deepseekCurrency: null,
       deepseekAvailable: null,
       localTodayTokens: null,
+      commandCodeExhausted: false,
     },
     t,
   )
@@ -568,6 +712,7 @@ test('tokenPlanBadgePills falls back to local tokens when OpenRouter has no spen
       deepseekCurrency: null,
       deepseekAvailable: null,
       localTodayTokens: 0,
+      commandCodeExhausted: false,
     },
     t,
   )
@@ -591,6 +736,7 @@ test('tokenPlanBadgePills pairs the DeepSeek balance with local today tokens', (
       deepseekCurrency: 'CNY',
       deepseekAvailable: true,
       localTodayTokens: 1234,
+      commandCodeExhausted: false,
     },
     t,
   )
@@ -610,6 +756,7 @@ test('tokenPlanBadgePills pairs the DeepSeek balance with local today tokens', (
       deepseekCurrency: 'USD',
       deepseekAvailable: false,
       localTodayTokens: 0,
+      commandCodeExhausted: false,
     },
     t,
   )

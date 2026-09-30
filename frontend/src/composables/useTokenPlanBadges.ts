@@ -46,6 +46,12 @@ export type TokenPlanPillSource = {
   deepseekAvailable: boolean | null
   // Locally aggregated AI tokens for the endpoint since UTC midnight.
   localTodayTokens: number | null
+  // CommandCode only (issue #656): `true` when every ok key on the endpoint
+  // reports an empty effective credit balance (`balances.remaining_credits <=
+  // 0`), i.e. routing has excluded the whole endpoint. The window averages
+  // then omit those keys and a no-quota pill replaces the percentages, so the
+  // badge never advertises usable 5h/weekly quota that routing will not use.
+  commandCodeExhausted: boolean
 }
 
 export type TokenPlanBadges = TokenPlanPillSource & {
@@ -66,6 +72,10 @@ type KeyBadges = {
   deepseekTotal: number | null
   deepseekCurrency: string | null
   deepseekAvailable: boolean | null
+  // CommandCode equivalent of the backend `command_code_balance_exhausted`
+  // signal: a reported balance with no credits left. `false` when no balances
+  // are reported (older/PAYG payloads) so routing-compatible windows survive.
+  exhausted: boolean
 }
 
 const EMPTY_SOURCE: TokenPlanPillSource = {
@@ -79,6 +89,7 @@ const EMPTY_SOURCE: TokenPlanPillSource = {
   deepseekCurrency: null,
   deepseekAvailable: null,
   localTodayTokens: null,
+  commandCodeExhausted: false,
 }
 
 const EMPTY_BADGES: TokenPlanBadges = { ...EMPTY_SOURCE, usage: null }
@@ -193,10 +204,14 @@ function computeKeyBadges(key: TokenPlanKeyUsage): KeyBadges {
       deepseekTotal: null,
       deepseekCurrency: null,
       deepseekAvailable: null,
+      exhausted: false,
     }
   }
   const or = openrouterSignal(key)
   const bal = key.deepseek_balance
+  // Only CommandCode reports credit balances; a non-positive remaining is the
+  // effective exhaustion the backend uses to drop the key from routing.
+  const remainingCredits = finiteNumber(key.balances?.remaining_credits)
   return {
     ok: true,
     short: keyShortPercent(key),
@@ -207,6 +222,7 @@ function computeKeyBadges(key: TokenPlanKeyUsage): KeyBadges {
     deepseekTotal: finiteNumber(bal?.total_balance),
     deepseekCurrency: bal?.currency ?? null,
     deepseekAvailable: bal ? bal.is_available : null,
+    exhausted: remainingCredits !== null && remainingCredits <= 0,
   }
 }
 
@@ -217,12 +233,22 @@ function computeBadges(usage: TokenPlanUsageResponse | null): TokenPlanBadges {
   const longs: number[] = []
   let openrouter: KeyBadges | null = null
   let deepseek: KeyBadges | null = null
+  let okKeys = 0
+  let exhaustedKeys = 0
   for (const key of usage.keys.map(computeKeyBadges)) {
     if (!key.ok) continue
+    okKeys += 1
     // Window providers: arithmetic mean across every key that reports the
-    // window (missing windows are skipped, not treated as zero).
-    if (key.short !== null) shorts.push(key.short)
-    if (key.long !== null) longs.push(key.long)
+    // window (missing windows are skipped, not treated as zero). Exhausted
+    // CommandCode keys are routing-excluded, so their windows must not raise
+    // the average; when every ok key is exhausted the no-quota pill below
+    // takes over instead of a percentage.
+    if (key.exhausted) {
+      exhaustedKeys += 1
+    } else {
+      if (key.short !== null) shorts.push(key.short)
+      if (key.long !== null) longs.push(key.long)
+    }
     // Balance providers keep the first ok key that carries a signal, matching
     // the pre-P2 single-pill behavior (an account balance is not averaged).
     if (
@@ -246,6 +272,7 @@ function computeBadges(usage: TokenPlanUsageResponse | null): TokenPlanBadges {
     deepseekCurrency: deepseek?.deepseekCurrency ?? null,
     deepseekAvailable: deepseek?.deepseekAvailable ?? null,
     localTodayTokens: finiteNumber(usage.local_today_tokens),
+    commandCodeExhausted: okKeys > 0 && exhaustedKeys === okKeys,
     usage,
   }
 }
@@ -340,6 +367,18 @@ export function tokenPlanBadgePills(
     return pills
   }
   const pills: TokenPlanBadgePill[] = []
+  // Issue #656: an endpoint whose CommandCode keys are all out of effective
+  // monthly credits is excluded from routing, so a 0%-colored no-quota pill
+  // replaces the window percentages instead of advertising unusable quota.
+  if (source.commandCodeExhausted) {
+    return [
+      {
+        label: t('tokenPlanNoQuota'),
+        color: badgeColorForPercent(0),
+        title: t('tokenPlanUnavailable'),
+      },
+    ]
+  }
   if (source.short !== null) {
     pills.push({
       label: `${t('tokenPlanShortBadge')} ${source.short.toFixed(0)}%`,
