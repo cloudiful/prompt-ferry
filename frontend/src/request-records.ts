@@ -1,5 +1,15 @@
 import type { RequestRecordState } from './generated/admin-api'
 import type { MessageKey } from './i18n'
+import type { RequestRecordTiming } from './models/request-record-formatting'
+
+export type RequestRecordStateSeverity = 'secondary' | 'success' | 'warn'
+
+export type RequestRecordStateBadge = {
+  id: 'state' | 'output'
+  labelKey: MessageKey
+  color: RequestRecordStateSeverity | 'neutral'
+  variant?: 'subtle'
+}
 
 export function isRequestRecordTerminal(
   state?: RequestRecordState | null,
@@ -28,7 +38,7 @@ export function requestRecordStateLabelKey(
 
 export function requestRecordStateTagSeverity(
   state: RequestRecordState,
-): 'secondary' | 'success' | 'warn' {
+): RequestRecordStateSeverity {
   switch (state) {
     case 'received':
       return 'secondary'
@@ -43,4 +53,44 @@ export function requestRecordStateTagSeverity(
     case 'aborted':
       return 'warn'
   }
+}
+
+/**
+ * Issue #657 P2: the status capsules of one request row, shared by the AI HTTP
+ * and MCP lists. A running `upstream_processing` row reads as waiting for a
+ * response until the first meaningful output is recorded (`ttft_ms`), and as
+ * streaming output afterwards; a terminal row always keeps its own state and
+ * only gains the auxiliary output capsule when `ttft_ms` exists.
+ */
+export function requestRecordStateBadges(
+  record: RequestRecordTiming,
+): RequestRecordStateBadge[] {
+  const state = record.request_state
+  const stateBadge: RequestRecordStateBadge = {
+    id: 'state',
+    labelKey:
+      state === 'upstream_processing'
+        ? runningRequestStateLabelKey(record)
+        : requestRecordStateLabelKey(state),
+    color: requestRecordStateTagSeverity(state),
+  }
+  if (!isRequestRecordTerminal(state) || record.ttft_ms == null) {
+    return [stateBadge]
+  }
+  return [
+    stateBadge,
+    {
+      id: 'output',
+      labelKey: 'requestOutputStarted',
+      color: 'neutral',
+      variant: 'subtle',
+    },
+  ]
+}
+
+/** Issue #657 P2: `ttft_ms` splits the running state into the two phases. */
+function runningRequestStateLabelKey(record: RequestRecordTiming): MessageKey {
+  return record.ttft_ms == null
+    ? 'requestStateWaitingForResponse'
+    : 'requestStateStreamingOutput'
 }

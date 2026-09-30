@@ -51,8 +51,8 @@ pub use detail::{
 };
 pub use endpoint_usage::endpoint_today_tokens;
 pub use insert::{
-    RequestRecordStateInput, record_request_record, record_request_record_with_raw_store,
-    record_request_state,
+    RequestRecordStateInput, record_request_first_output, record_request_record,
+    record_request_record_with_raw_store, record_request_state,
 };
 pub use metadata_maintenance::{
     RequestRecordClearReport, RequestRecordPruneReport, cleanup_orphan_request_record_leases,

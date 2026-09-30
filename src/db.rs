@@ -117,7 +117,7 @@ pub use usage::{
     latest_usage_event_by_conversation, latest_usage_event_locator_by_conversation,
     latest_usage_event_locator_by_provider_conversation_key, list_active_request_record_ids,
     list_request_record_facets, list_request_record_tool_calls, list_request_records,
-    prune_usage_events, record_cache_alert, record_request_record,
+    prune_usage_events, record_cache_alert, record_request_first_output, record_request_record,
     record_request_record_with_raw_store, record_request_state, replay_snapshot_before_or_at_seq,
     request_record_summary, request_records_overview, run_raw_payload_maintenance,
     set_cache_alert_settings, upsert_conversation_redaction_session,

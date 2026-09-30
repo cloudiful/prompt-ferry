@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Issue #657 Phase P1: persist the first meaningful output instant on the\n-- running request row so the request list can tell \"waiting for response\"\n-- apart from \"streaming output\" without a new column or a new state.\n-- Idempotent by construction: a value already recorded for this request always\n-- wins, so a retry, a repeated observation, or a write that races the terminal\n-- record can never move the instant or overwrite the final timing. Only\n-- `ttft_ms` and `updated_at` are touched: the request state and every other\n-- terminal field stay exactly as the request family wrote them.\nUPDATE request_records\nSET ttft_ms = COALESCE(ttft_ms, $1),\n    updated_at = NOW()\nWHERE request_id = $2\n  AND event_kind = 'request'\n  AND ($3::TIMESTAMPTZ IS NULL OR created_at = $3)\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b7cfbd60137ae2bedd53e619f489d94349f0aa8d35e479b1d6e1610e505114de"
+}

@@ -3,9 +3,31 @@ import type {
   RequestRecordTiming,
 } from '../models/request-record-formatting'
 import {
+  type RequestRecordStateBadge,
   requestRecordStateTagSeverity,
   requestRecordStateLabelKey,
+  requestRecordStateBadges,
 } from '../request-records'
+
+/** Issue #657 P2: a shared state capsule with its label already translated. */
+export type RequestRecordStateChip = Omit<
+  RequestRecordStateBadge,
+  'labelKey'
+> & {
+  label: string
+}
+
+export function formatRequestStateBadges(
+  labels: TranslateFn,
+  record: RequestRecordTiming,
+): RequestRecordStateChip[] {
+  return requestRecordStateBadges(record).map((badge) => ({
+    id: badge.id,
+    label: labels(badge.labelKey),
+    color: badge.color,
+    variant: badge.variant,
+  }))
+}
 
 export function formatBytes(value?: number | null): string {
   if (value == null) return '-'

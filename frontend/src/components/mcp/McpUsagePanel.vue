@@ -6,6 +6,7 @@ import type { RequestRecordFilterModel, RequestRecordRowView } from '@/models'
 import type { RequestRecordFormatting } from '@/models/request-record-formatting'
 import type { UsageWorkspaceView } from '@/models/usage'
 import { REQUEST_RECORD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
+import { formatRequestStateBadges } from '@/composables/useUsageFormatting'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import UsageRecordsToolbar from '@/components/usage/UsageRecordsToolbar.vue'
 import McpUsageDetailDialog from './McpUsageDetailDialog.vue'
@@ -164,12 +165,11 @@ const sorting = computed<SortingState>({
         <template #request_state-cell="{ row }">
           <div class="flex items-center gap-1 whitespace-nowrap">
             <UBadge
-              :label="
-                formatting.formatRequestStateLabel(row.original.request_state)
-              "
-              :color="
-                formatting.requestStateSeverity(row.original.request_state)
-              "
+              v-for="chip in formatRequestStateBadges(t, row.original)"
+              :key="chip.id"
+              :label="chip.label"
+              :color="chip.color"
+              :variant="chip.variant"
             />
             <UBadge
               :label="`HTTP ${row.original.status ?? '-'}`"

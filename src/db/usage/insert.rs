@@ -260,6 +260,29 @@ pub async fn record_request_state(pool: &PgPool, input: RequestRecordStateInput<
     Ok(())
 }
 
+/// Issue #657 Phase P1: stamp the first meaningful output instant on the
+/// running request row. The update keeps an already recorded `ttft_ms` and
+/// leaves every other column (state included) untouched, so a repeated
+/// observation, an upstream retry, or a write racing the terminal record stays
+/// idempotent. Returns the affected row count; `created_at` pins the update to
+/// the row's partition when known.
+pub async fn record_request_first_output(
+    pool: &PgPool,
+    request_id: uuid::Uuid,
+    created_at: Option<DateTime<Utc>>,
+    ttft_ms: i64,
+) -> Result<u64> {
+    let result = sqlx::query_file!(
+        "src/sql/usage/update_request_record_first_output.sql",
+        ttft_ms,
+        request_id,
+        created_at,
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 #[cfg(test)]
 mod tests {
     fn max_placeholder(sql: &str) -> usize {
@@ -311,5 +334,24 @@ mod tests {
 
         assert_eq!(insert_column_count(upsert_sql), 74);
         assert_eq!(max_placeholder(upsert_sql), 74);
+    }
+
+    #[test]
+    fn first_output_update_is_idempotent_and_keeps_other_columns() {
+        let statement = include_str!("../../sql/usage/update_request_record_first_output.sql")
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("--"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // The recorded instant always wins, so the write can never move ttft.
+        assert!(statement.contains("ttft_ms = COALESCE(ttft_ms, $1)"));
+        // The request state and the terminal columns are never rewritten.
+        assert!(!statement.contains("request_state"));
+        assert!(!statement.contains("status"));
+        assert!(!statement.contains("ok"));
+        // The row identity is the request id plus its partition instant.
+        assert!(statement.contains("request_id = $2"));
+        assert!(statement.contains("created_at = $3"));
     }
 }

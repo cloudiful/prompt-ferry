@@ -33,7 +33,7 @@ use super::request_attempts::{UpstreamAttemptFailure, UpstreamFailurePhase};
 use super::responses_summary_stream::ResponsesReasoningSummarySseFilter;
 use super::stream_restore::SseRestoreFilter;
 use super::streaming_terminal::{failure_details, finish_failure};
-use super::streaming_usage::observe_usage_chunk;
+use super::streaming_usage::{observe_usage_chunk, record_first_output};
 use super::upstream_restore::restore_ai_response_json_blocking;
 
 struct UpstreamStreamDiag {
@@ -509,12 +509,16 @@ pub(super) async fn forward_streaming_response(
                     return Err(anyhow!("upstream_response_too_large"));
                 }
                 stream_diag.record_upstream_chunk(chunk.len());
-                observe_usage_chunk(
-                    &mut capture,
-                    &mut ttft_ms,
-                    &chunk,
-                    request_ctx.elapsed_ms(),
-                );
+                // Issue #657 Phase P1: the instant the first meaningful output
+                // block arrives is persisted on the running record right away,
+                // so the request list can leave the waiting state before the
+                // request terminates. Only the chunk that starts the output
+                // reports a value, and the write never overwrites one.
+                if let Some(first_output_ms) =
+                    observe_usage_chunk(&mut capture, &mut ttft_ms, &chunk, request_ctx.elapsed_ms())
+                {
+                    record_first_output(services, request_ctx, first_output_ms).await;
+                }
                 if raw_content_logging_enabled {
                     append_limited_capture(
                         &mut raw_response_body,
