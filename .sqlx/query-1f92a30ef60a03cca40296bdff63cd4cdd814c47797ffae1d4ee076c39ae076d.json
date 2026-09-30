@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT setting_key, setting_value, updated_at\nFROM worker_settings\nORDER BY setting_key ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "setting_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "worker_settings",
+            "name": "setting_key"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "setting_value",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "worker_settings",
+            "name": "setting_value"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "worker_settings",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1f92a30ef60a03cca40296bdff63cd4cdd814c47797ffae1d4ee076c39ae076d"
+}

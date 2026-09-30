@@ -10,6 +10,9 @@ pub mod chatgpt_backend;
 // `chatgpt_backend` bounded.
 mod codex_claims;
 mod codex_request_headers;
+mod config_audit;
+mod config_export;
+mod config_import;
 mod endpoint_usage;
 mod endpoints;
 mod mcp;
@@ -74,8 +77,9 @@ pub(super) use crate::{
 use tower_http::cors::CorsLayer;
 
 use self::{
-    approvals::*, auth::*, billing::*, endpoint_usage::*, endpoints::*, mcp::*, model_routes::*,
-    relays::*, session_routing::*, settings::*, settings_cache_alert::*, usage::*, users::*,
+    approvals::*, auth::*, billing::*, config_audit::*, config_export::*, config_import::*,
+    endpoint_usage::*, endpoints::*, mcp::*, model_routes::*, relays::*, session_routing::*,
+    settings::*, settings_cache_alert::*, usage::*, users::*,
 };
 
 pub(super) use self::support::*;

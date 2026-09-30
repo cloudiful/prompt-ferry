@@ -13,30 +13,56 @@
 //!   - `client_keys.rs` for per-user client keys (admin and self-service)
 //!   - `settings.rs` for worker-level JSON settings
 //!   - `capabilities.rs` for per-path capability gating
+//!   - `snapshot*.rs` and `archive.rs` for the encrypted configuration export
+//!   - `audit.rs` for the administrator configuration archive audit trail
 
+pub mod archive;
+pub mod audit;
 pub mod capabilities;
 pub mod client_keys;
 pub mod endpoints;
 pub mod endpoints_map;
 pub mod endpoints_sqlite;
+pub mod import;
 pub mod mcp;
 pub mod model_routes;
 pub mod model_routes_map;
 pub mod relays;
 pub mod relays_map;
 pub mod settings;
+pub mod snapshot;
+mod snapshot_pg_map;
+mod snapshot_postgres;
+pub mod snapshot_source;
+mod snapshot_sqlite;
 
 use sqlx::PgPool;
 use std::sync::Arc;
 
 use crate::{relay_secrets::RelaySecretManager, standalone_config::StandaloneConfigStore};
 
+pub use audit::{
+    ConfigAuditAction, ConfigAuditDomainCount, ConfigAuditEntry, ConfigAuditPage,
+    ConfigAuditRecord, record_best_effort, repository_backend_kind,
+};
 pub use capabilities::Capability;
 pub use client_keys::{UnifiedClientKey, UnifiedClientKeyCreated};
 pub use endpoints::{UnifiedEndpointApiKey, UnifiedEndpointPage, UnifiedProviderEndpoint};
+pub use import::{
+    ConfigImportApplied, ConfigImportDomainDiff, ConfigImportDomainSummary, ConfigImportPreview,
+    ImportError, apply_config_import, preview_config_import,
+};
 pub use model_routes::{UnifiedModelRoute, UnifiedModelRoutePage, UnifiedModelRouteTarget};
 pub use relays::{ManagedRelaySecrets, UnifiedManagedRelay, relay_secrets_for_state};
 pub use settings::UnifiedSetting;
+pub use snapshot::{
+    ClientKeySnapshot, ConfigBackendKind, ConfigSnapshot, EndpointApiKeySnapshot,
+    EndpointOAuthSnapshot, EndpointSnapshot, McpCredentialSnapshot, McpServerSnapshot,
+    ModelRouteSnapshot, ModelRouteTargetSnapshot, RelaySnapshot, SNAPSHOT_FORMAT_VERSION,
+    SecretRecovery, SettingSnapshot, SnapshotDomainSummary, SnapshotDomains, SnapshotManifest,
+    UserRedactionConfigSnapshot, UserSnapshot,
+};
+pub use snapshot_source::build_config_snapshot;
 
 #[derive(Clone)]
 pub enum ConfigRepository {

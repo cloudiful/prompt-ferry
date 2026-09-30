@@ -264,6 +264,142 @@ export type CommandCodeWindowUsage = {
 
 export type CompactMode = 'passthrough' | 'self_summarize' | 'off';
 
+export type ConfigAuditAction = 'export' | 'import';
+
+/**
+ * One domain's non-secret record counts inside an audited archive.
+ */
+export type ConfigAuditDomainCount = {
+    name: string;
+    records: number;
+    unrecoverable_secrets: number;
+};
+
+/**
+ * One audited attempt as returned by the admin list endpoint.
+ */
+export type ConfigAuditEntry = {
+    action: ConfigAuditAction;
+    /**
+     * Login of the operator, resolved from `actor_user_id`. `None` once the
+     * account was deleted; the audit row itself survives.
+     */
+    actor_login_name?: string | null;
+    actor_user_id?: number | null;
+    archive_bytes?: number | null;
+    audit_id: number;
+    backend_kind: string;
+    created_at: string;
+    domains: Array<ConfigAuditDomainCount>;
+    error_code?: string | null;
+    error_message?: string | null;
+    format_version?: number | null;
+    payload_fingerprint?: string | null;
+    success: boolean;
+};
+
+/**
+ * One page of the audit trail, newest first.
+ */
+export type ConfigAuditPage = {
+    entries: Array<ConfigAuditEntry>;
+    first: number;
+    rows: number;
+    total: number;
+};
+
+export type ConfigExportDomainSummary = {
+    name: string;
+    records: number;
+    unrecoverable_secrets: number;
+};
+
+/**
+ * Non-secret metadata about the produced archive. Returned by the metadata
+ * variant so an operator can record the package fingerprint before storing
+ * the bytes.
+ */
+export type ConfigExportMetadata = {
+    backend_kind: string;
+    domains: Array<ConfigExportDomainSummary>;
+    format_version: number;
+    /**
+     * SHA-256 (lowercase hex) of the snapshot payload; identifies the
+     * package contents without revealing them.
+     */
+    payload_fingerprint: string;
+};
+
+/**
+ * Passphrase-encrypted export request.
+ */
+export type ConfigExportRequest = {
+    /**
+     * Passphrase sealing the archive. Never stored, never logged, never
+     * placed in a URL.
+     */
+    passphrase: string;
+};
+
+/**
+ * Result of a committed import.
+ */
+export type ConfigImportApplied = {
+    backend_kind: string;
+    domains: Array<ConfigImportDomainSummary>;
+    format_version: number;
+    payload_fingerprint: string;
+};
+
+/**
+ * Per-domain dry-run difference. Counts and identifiers only; never payloads.
+ */
+export type ConfigImportDomainDiff = {
+    archive_records: number;
+    creates: number;
+    deletes: number;
+    name: string;
+    target_records: number;
+    unrecoverable_secrets: number;
+    updates: number;
+};
+
+/**
+ * One domain restored by a committed import.
+ */
+export type ConfigImportDomainSummary = {
+    name: string;
+    records: number;
+    unrecoverable_secrets: number;
+};
+
+/**
+ * Non-secret preview of what an import would change.
+ */
+export type ConfigImportPreview = {
+    backend_kind: string;
+    domains: Array<ConfigImportDomainDiff>;
+    exported_at: string;
+    format_version: number;
+    payload_fingerprint: string;
+    warnings: Array<string>;
+};
+
+/**
+ * Passphrase-encrypted import request.
+ */
+export type ConfigImportRequest = {
+    /**
+     * Standard base64 of the `.pfce` archive returned by the export endpoint.
+     */
+    archive_base64: string;
+    /**
+     * Passphrase that sealed the archive. Never stored, logged, or placed in
+     * a URL.
+     */
+    passphrase: string;
+};
+
 export type ConversationEndpointOverride = {
     conversation_id: string;
     created_at: string;
@@ -2124,6 +2260,158 @@ export type BillingSummaryResponses = {
 };
 
 export type BillingSummaryResponse2 = BillingSummaryResponses[keyof BillingSummaryResponses];
+
+export type ListConfigAuditData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Zero-based offset into the trail, ordered newest first.
+         */
+        first?: number;
+        /**
+         * Maximum number of entries to return.
+         */
+        rows?: number;
+    };
+    url: '/api/v1/admin/config-audit';
+};
+
+export type ListConfigAuditErrors = {
+    /**
+     * Administrator session required
+     */
+    403: unknown;
+};
+
+export type ListConfigAuditResponses = {
+    /**
+     * One page of recorded configuration export/import attempts, newest first. Non-secret metadata only: the passphrase, the archive bytes, and secret values are never stored or returned.
+     */
+    200: ConfigAuditPage;
+};
+
+export type ListConfigAuditResponse = ListConfigAuditResponses[keyof ListConfigAuditResponses];
+
+export type ExportConfigData = {
+    body: ConfigExportRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/config-export';
+};
+
+export type ExportConfigErrors = {
+    /**
+     * Passphrase rejected (too short or too long)
+     */
+    400: unknown;
+    /**
+     * Administrator session required
+     */
+    403: unknown;
+};
+
+export type ExportConfigResponses = {
+    /**
+     * Passphrase-sealed configuration archive (`application/octet-stream`). The response carries the snapshot fingerprint, backend kind, and format version as non-secret headers; the passphrase is never echoed.
+     */
+    200: Array<number>;
+};
+
+export type ExportConfigResponse = ExportConfigResponses[keyof ExportConfigResponses];
+
+export type ConfigExportMetadataData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/config-export/metadata';
+};
+
+export type ConfigExportMetadataErrors = {
+    /**
+     * Administrator session required
+     */
+    403: unknown;
+};
+
+export type ConfigExportMetadataResponses = {
+    /**
+     * Non-secret export manifest summary for the audit trail
+     */
+    200: ConfigExportMetadata;
+};
+
+export type ConfigExportMetadataResponse = ConfigExportMetadataResponses[keyof ConfigExportMetadataResponses];
+
+export type ImportConfigData = {
+    body: ConfigImportRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/config-import';
+};
+
+export type ImportConfigErrors = {
+    /**
+     * Wrong passphrase, tampered archive, or invalid request body
+     */
+    400: unknown;
+    /**
+     * Administrator session required
+     */
+    403: unknown;
+    /**
+     * Archive exceeds the accepted size
+     */
+    413: unknown;
+    /**
+     * Backend mismatch or a domain the target cannot store
+     */
+    422: unknown;
+};
+
+export type ImportConfigResponses = {
+    /**
+     * The archive was validated and applied atomically. Counts and fingerprint only; the passphrase is never echoed.
+     */
+    200: ConfigImportApplied;
+};
+
+export type ImportConfigResponse = ImportConfigResponses[keyof ImportConfigResponses];
+
+export type PreviewConfigImportData = {
+    body: ConfigImportRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/config-import/preview';
+};
+
+export type PreviewConfigImportErrors = {
+    /**
+     * Wrong passphrase, tampered archive, or invalid request body
+     */
+    400: unknown;
+    /**
+     * Administrator session required
+     */
+    403: unknown;
+    /**
+     * Archive exceeds the accepted size
+     */
+    413: unknown;
+    /**
+     * Backend mismatch or a domain the target cannot store
+     */
+    422: unknown;
+};
+
+export type PreviewConfigImportResponses = {
+    /**
+     * Per-domain create/update/delete counts and warnings. Read-only; no configuration is written and no payload is returned.
+     */
+    200: ConfigImportPreview;
+};
+
+export type PreviewConfigImportResponse = PreviewConfigImportResponses[keyof PreviewConfigImportResponses];
 
 export type DeleteConversationEndpointOverrideData = {
     body?: never;

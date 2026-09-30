@@ -6,6 +6,9 @@ use super::{
     },
     auth::{__path_auth_login, __path_auth_logout, __path_auth_me},
     bridge::__path_bridge_status,
+    config_audit::__path_list_config_audit,
+    config_export::{__path_config_export_metadata, __path_export_config},
+    config_import::{__path_import_config, __path_preview_config_import},
     endpoints::{
         __path_create_endpoint, __path_delete_endpoint, __path_list_endpoints,
         __path_oauth_browser_complete, __path_oauth_browser_start, __path_oauth_clear,
@@ -58,6 +61,10 @@ use super::{
         __path_reset_password, __path_update_client_key, __path_update_user,
     },
 };
+use crate::db::config_repository::{
+    ConfigAuditAction, ConfigAuditDomainCount, ConfigAuditEntry, ConfigAuditPage,
+    ConfigImportApplied, ConfigImportDomainDiff, ConfigImportDomainSummary, ConfigImportPreview,
+};
 use crate::{
     db,
     llm_review::LlmReviewSettings,
@@ -66,25 +73,27 @@ use crate::{
     worker_admin_types::{
         ApprovalPageResponse, AvailableModel, AvailableModelsResponse, BridgeStatus,
         CacheAlertSettings, CacheAlertSettingsResponse, ClientKey, ClientKeyPageResponse,
-        CommandCodeBalances, CommandCodeWindowUsage, ConversationEndpointOverrideRequest,
-        CreateClientKeyRequest, CreateClientKeyResponse, CreateUserRequest, DeepSeekBalance,
-        EndpointOAuthStatusResponse, EndpointPageResponse, EndpointRequest, EndpointSettingRequest,
-        EndpointTestResponse, ManagedRelay, ManagedRelayListResponse, ManagedRelayPatchRequest,
-        ManagedRelayRequest, ManagedRelaySecretPatch, ManagedRelayStatus, McpCatalogItem,
-        McpCatalogResponse, McpProviderDescriptor, McpServer, McpServerPageResponse,
-        McpServerRequest, McpTestResponse, MeResponse, ModelRoutePageResponse, ModelRouteRequest,
-        ModelRouteTargetRequest, ModelRouteTestRequest, ModelRouteTestResponse,
-        ModelRouteWhitelistRequest, ModelRouteWhitelistResponse, OAuthBrowserCompleteRequest,
-        OAuthBrowserStartResponse, OAuthDeviceStartResponse, OAuthFlowRequest, OAuthLoginResponse,
-        OAuthLoginStatus, OpenRouterBalance, OpenRouterSpend, OpencodeGoWindowUsage,
-        RawObjectStoreBackend, RawObjectStoreSecretPatch, RawObjectStoreSettingsRequest,
-        RawObjectStoreSettingsResponse, RelayIpPolicyResponse, RequestContentLoggingRequest,
-        RequestContentLoggingResponse, RequestRecordFullMessage, RequestRecordFullResponse,
-        RequestRecordOverviewRange, RequestRecordPruneResponse, RequestRecordsClearRequest,
-        RequestRecordsClearResponse, ResetPasswordRequest, SessionAffinityResetResponse,
-        SessionAffinityState, SessionAffinityStatus, SessionRouteOptionsResponse,
-        TokenPlanKeyUsage, TokenPlanModelUsage, TokenPlanUsageResponse, TokenPlanWindowUsage,
-        UpdateClientKeyRequest, UserOptionsResponse, UserPageResponse,
+        CommandCodeBalances, CommandCodeWindowUsage, ConfigExportDomainSummary,
+        ConfigExportMetadata, ConfigExportRequest, ConfigImportRequest,
+        ConversationEndpointOverrideRequest, CreateClientKeyRequest, CreateClientKeyResponse,
+        CreateUserRequest, DeepSeekBalance, EndpointOAuthStatusResponse, EndpointPageResponse,
+        EndpointRequest, EndpointSettingRequest, EndpointTestResponse, ManagedRelay,
+        ManagedRelayListResponse, ManagedRelayPatchRequest, ManagedRelayRequest,
+        ManagedRelaySecretPatch, ManagedRelayStatus, McpCatalogItem, McpCatalogResponse,
+        McpProviderDescriptor, McpServer, McpServerPageResponse, McpServerRequest, McpTestResponse,
+        MeResponse, ModelRoutePageResponse, ModelRouteRequest, ModelRouteTargetRequest,
+        ModelRouteTestRequest, ModelRouteTestResponse, ModelRouteWhitelistRequest,
+        ModelRouteWhitelistResponse, OAuthBrowserCompleteRequest, OAuthBrowserStartResponse,
+        OAuthDeviceStartResponse, OAuthFlowRequest, OAuthLoginResponse, OAuthLoginStatus,
+        OpenRouterBalance, OpenRouterSpend, OpencodeGoWindowUsage, RawObjectStoreBackend,
+        RawObjectStoreSecretPatch, RawObjectStoreSettingsRequest, RawObjectStoreSettingsResponse,
+        RelayIpPolicyResponse, RequestContentLoggingRequest, RequestContentLoggingResponse,
+        RequestRecordFullMessage, RequestRecordFullResponse, RequestRecordOverviewRange,
+        RequestRecordPruneResponse, RequestRecordsClearRequest, RequestRecordsClearResponse,
+        ResetPasswordRequest, SessionAffinityResetResponse, SessionAffinityState,
+        SessionAffinityStatus, SessionRouteOptionsResponse, TokenPlanKeyUsage, TokenPlanModelUsage,
+        TokenPlanUsageResponse, TokenPlanWindowUsage, UpdateClientKeyRequest, UserOptionsResponse,
+        UserPageResponse,
     },
 };
 
@@ -279,7 +288,12 @@ pub(super) struct RoutingApiDoc;
         reject_approval,
         bridge_status,
         get_cache_alert_setting,
-        set_cache_alert_setting
+        set_cache_alert_setting,
+        export_config,
+        config_export_metadata,
+        preview_config_import,
+        import_config,
+        list_config_audit
     ),
     components(
         schemas(
@@ -336,14 +350,27 @@ pub(super) struct RoutingApiDoc;
             db::RequestRecordFacets,
             db::RequestRecordListRow,
             db::RequestRecordPage,
-            db::RequestRecordSummary
+            db::RequestRecordSummary,
+            ConfigExportDomainSummary,
+            ConfigExportMetadata,
+            ConfigExportRequest,
+            ConfigAuditAction,
+            ConfigAuditDomainCount,
+            ConfigAuditEntry,
+            ConfigAuditPage,
+            ConfigImportApplied,
+            ConfigImportDomainDiff,
+            ConfigImportDomainSummary,
+            ConfigImportPreview,
+            ConfigImportRequest
         )
     ),
     tags(
         (name = "request-records", description = "Request record reporting"),
         (name = "settings", description = "Worker and admin settings"),
         (name = "approvals", description = "Manual approval workflow"),
-        (name = "bridge", description = "Bridge runtime status")
+        (name = "bridge", description = "Bridge runtime status"),
+        (name = "config", description = "Encrypted configuration migration")
     )
 )]
 pub(super) struct OperationsApiDoc;

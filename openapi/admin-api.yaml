@@ -461,6 +461,127 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BillingSummaryResponse'
+  /api/v1/admin/config-audit:
+    get:
+      tags:
+      - config
+      operationId: list_config_audit
+      parameters:
+      - name: first
+        in: query
+        description: Zero-based offset into the trail, ordered newest first.
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        description: Maximum number of entries to return.
+        required: false
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: 'One page of recorded configuration export/import attempts, newest first. Non-secret metadata only: the passphrase, the archive bytes, and secret values are never stored or returned.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigAuditPage'
+        '403':
+          description: Administrator session required
+  /api/v1/admin/config-export:
+    post:
+      tags:
+      - config
+      operationId: export_config
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigExportRequest'
+        required: true
+      responses:
+        '200':
+          description: Passphrase-sealed configuration archive (`application/octet-stream`). The response carries the snapshot fingerprint, backend kind, and format version as non-secret headers; the passphrase is never echoed.
+          content:
+            application/octet-stream:
+              schema:
+                type: array
+                items:
+                  type: integer
+                  format: int32
+                  minimum: 0
+        '400':
+          description: Passphrase rejected (too short or too long)
+        '403':
+          description: Administrator session required
+  /api/v1/admin/config-export/metadata:
+    post:
+      tags:
+      - config
+      operationId: config_export_metadata
+      responses:
+        '200':
+          description: Non-secret export manifest summary for the audit trail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigExportMetadata'
+        '403':
+          description: Administrator session required
+  /api/v1/admin/config-import:
+    post:
+      tags:
+      - config
+      operationId: import_config
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigImportRequest'
+        required: true
+      responses:
+        '200':
+          description: The archive was validated and applied atomically. Counts and fingerprint only; the passphrase is never echoed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigImportApplied'
+        '400':
+          description: Wrong passphrase, tampered archive, or invalid request body
+        '403':
+          description: Administrator session required
+        '413':
+          description: Archive exceeds the accepted size
+        '422':
+          description: Backend mismatch or a domain the target cannot store
+  /api/v1/admin/config-import/preview:
+    post:
+      tags:
+      - config
+      operationId: preview_config_import
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigImportRequest'
+        required: true
+      responses:
+        '200':
+          description: Per-domain create/update/delete counts and warnings. Read-only; no configuration is written and no payload is returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigImportPreview'
+        '400':
+          description: Wrong passphrase, tampered archive, or invalid request body
+        '403':
+          description: Administrator session required
+        '413':
+          description: Archive exceeds the accepted size
+        '422':
+          description: Backend mismatch or a domain the target cannot store
   /api/v1/admin/conversations/{conversation_id}/endpoint-override:
     get:
       tags:
@@ -3408,6 +3529,285 @@ components:
       - passthrough
       - self_summarize
       - off
+    ConfigAuditAction:
+      type: string
+      enum:
+      - export
+      - import
+    ConfigAuditDomainCount:
+      type: object
+      description: One domain's non-secret record counts inside an audited archive.
+      required:
+      - name
+      - records
+      - unrecoverable_secrets
+      properties:
+        name:
+          type: string
+        records:
+          type: integer
+          minimum: 0
+        unrecoverable_secrets:
+          type: integer
+          minimum: 0
+    ConfigAuditEntry:
+      type: object
+      description: One audited attempt as returned by the admin list endpoint.
+      required:
+      - audit_id
+      - action
+      - backend_kind
+      - success
+      - domains
+      - created_at
+      properties:
+        action:
+          $ref: '#/components/schemas/ConfigAuditAction'
+        actor_login_name:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Login of the operator, resolved from `actor_user_id`. `None` once the
+            account was deleted; the audit row itself survives.
+        actor_user_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        archive_bytes:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        audit_id:
+          type: integer
+          format: int64
+        backend_kind:
+          type: string
+          example: sqlite
+        created_at:
+          type: string
+          format: date-time
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigAuditDomainCount'
+        error_code:
+          type:
+          - string
+          - 'null'
+        error_message:
+          type:
+          - string
+          - 'null'
+        format_version:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        payload_fingerprint:
+          type:
+          - string
+          - 'null'
+        success:
+          type: boolean
+    ConfigAuditPage:
+      type: object
+      description: One page of the audit trail, newest first.
+      required:
+      - total
+      - first
+      - rows
+      - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigAuditEntry'
+        first:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+    ConfigExportDomainSummary:
+      type: object
+      required:
+      - name
+      - records
+      - unrecoverable_secrets
+      properties:
+        name:
+          type: string
+        records:
+          type: integer
+          minimum: 0
+        unrecoverable_secrets:
+          type: integer
+          minimum: 0
+    ConfigExportMetadata:
+      type: object
+      description: |-
+        Non-secret metadata about the produced archive. Returned by the metadata
+        variant so an operator can record the package fingerprint before storing
+        the bytes.
+      required:
+      - backend_kind
+      - format_version
+      - payload_fingerprint
+      - domains
+      properties:
+        backend_kind:
+          type: string
+          example: postgres
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigExportDomainSummary'
+        format_version:
+          type: integer
+          format: int32
+          minimum: 0
+        payload_fingerprint:
+          type: string
+          description: |-
+            SHA-256 (lowercase hex) of the snapshot payload; identifies the
+            package contents without revealing them.
+    ConfigExportRequest:
+      type: object
+      description: Passphrase-encrypted export request.
+      required:
+      - passphrase
+      properties:
+        passphrase:
+          type: string
+          description: |-
+            Passphrase sealing the archive. Never stored, never logged, never
+            placed in a URL.
+          writeOnly: true
+    ConfigImportApplied:
+      type: object
+      description: Result of a committed import.
+      required:
+      - backend_kind
+      - format_version
+      - payload_fingerprint
+      - domains
+      properties:
+        backend_kind:
+          type: string
+          example: sqlite
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigImportDomainSummary'
+        format_version:
+          type: integer
+          format: int32
+          minimum: 0
+        payload_fingerprint:
+          type: string
+    ConfigImportDomainDiff:
+      type: object
+      description: Per-domain dry-run difference. Counts and identifiers only; never payloads.
+      required:
+      - name
+      - archive_records
+      - target_records
+      - creates
+      - updates
+      - deletes
+      - unrecoverable_secrets
+      properties:
+        archive_records:
+          type: integer
+          minimum: 0
+        creates:
+          type: integer
+          minimum: 0
+        deletes:
+          type: integer
+          minimum: 0
+        name:
+          type: string
+        target_records:
+          type: integer
+          minimum: 0
+        unrecoverable_secrets:
+          type: integer
+          minimum: 0
+        updates:
+          type: integer
+          minimum: 0
+    ConfigImportDomainSummary:
+      type: object
+      description: One domain restored by a committed import.
+      required:
+      - name
+      - records
+      - unrecoverable_secrets
+      properties:
+        name:
+          type: string
+        records:
+          type: integer
+          minimum: 0
+        unrecoverable_secrets:
+          type: integer
+          minimum: 0
+    ConfigImportPreview:
+      type: object
+      description: Non-secret preview of what an import would change.
+      required:
+      - backend_kind
+      - format_version
+      - exported_at
+      - payload_fingerprint
+      - domains
+      - warnings
+      properties:
+        backend_kind:
+          type: string
+          example: sqlite
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigImportDomainDiff'
+        exported_at:
+          type: string
+        format_version:
+          type: integer
+          format: int32
+          minimum: 0
+        payload_fingerprint:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: string
+    ConfigImportRequest:
+      type: object
+      description: Passphrase-encrypted import request.
+      required:
+      - passphrase
+      - archive_base64
+      properties:
+        archive_base64:
+          type: string
+          description: Standard base64 of the `.pfce` archive returned by the export endpoint.
+          writeOnly: true
+        passphrase:
+          type: string
+          description: |-
+            Passphrase that sealed the archive. Never stored, logged, or placed in
+            a URL.
+          writeOnly: true
+      additionalProperties: false
     ConversationEndpointOverride:
       type: object
       required:
@@ -7477,5 +7877,7 @@ tags:
   description: Manual approval workflow
 - name: bridge
   description: Bridge runtime status
+- name: config
+  description: Encrypted configuration migration
 - name: billing
   description: Usage billing and pricing
