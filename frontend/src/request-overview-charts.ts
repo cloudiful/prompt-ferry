@@ -57,18 +57,18 @@ export function createTrendOption(input: {
   const series = isAi
     ? [
         {
-          name: input.labels.input,
-          type: 'bar',
-          stack: 'tokens',
-          data: input.trend.map((item) => item.tokens.input_tokens),
-          itemStyle: { color: theme.input },
-        },
-        {
           name: input.labels.cacheRead,
           type: 'bar',
           stack: 'tokens',
           data: input.trend.map((item) => item.tokens.cache_read_tokens),
           itemStyle: { color: theme.cached },
+        },
+        {
+          name: input.labels.input,
+          type: 'bar',
+          stack: 'tokens',
+          data: input.trend.map((item) => item.tokens.input_tokens),
+          itemStyle: { color: theme.input },
         },
         {
           name: input.labels.cacheWrite,
