@@ -252,7 +252,15 @@
       ]
     },
     "nullable": [
-      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
       true,
       false,
       true,
@@ -264,16 +272,8 @@
       true,
       true,
       true,
-      false,
-      false,
-      false,
       true,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false
+      true
     ]
   },
   "hash": "890b21e902ee4f1156333835a5ea2cd8b0517121e38e2fb59f82b8720efbac46"
