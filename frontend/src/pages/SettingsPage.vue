@@ -5,6 +5,7 @@ import PageIntro from '../components/PageIntro.vue'
 import { setLocale, useLocale } from '../composables/useLocale'
 import SettingsGeneralTab from '../components/settings/SettingsGeneralTab.vue'
 import SettingsCacheAlertSection from '../components/settings/SettingsCacheAlertSection.vue'
+import SettingsConfigArchiveTab from '../components/settings/SettingsConfigArchiveTab.vue'
 import SettingsNetworkTab from '../components/settings/SettingsNetworkTab.vue'
 import SettingsRequestsTab from '../components/settings/SettingsRequestsTab.vue'
 import SettingsReviewTab from '../components/settings/SettingsReviewTab.vue'
@@ -293,6 +294,11 @@ onBeforeUnmount(() => {
 
     <SettingsCacheAlertSection
       v-else-if="session.isAdmin && activeSection === 'cache-alert'"
+      :t="t"
+    />
+
+    <SettingsConfigArchiveTab
+      v-else-if="session.isAdmin && activeSection === 'config-archive'"
       :t="t"
     />
   </div>

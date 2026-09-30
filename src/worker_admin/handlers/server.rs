@@ -306,6 +306,7 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             "/admin/config-export/metadata",
             post(config_export_metadata),
         )
+        .route("/admin/config-audit", get(list_config_audit))
         // The configuration archive travels base64-encoded in a JSON body, so
         // these two routes carry their own body limit instead of the default.
         .merge(config_import_routes())
@@ -471,6 +472,7 @@ mod admin_routing_tests {
                 "/admin/config-import/preview",
                 Some(Capability::ConfigImport),
             ),
+            ("/admin/config-audit", Some(Capability::ConfigAudit)),
             ("/auth/me", None),
         ] {
             assert_eq!(

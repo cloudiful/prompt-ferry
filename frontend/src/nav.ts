@@ -188,6 +188,13 @@ export const navItems: NavItem[] = [
         adminOnly: true,
         isActive: (route) => route.path === '/settings/cache-alert',
       },
+      {
+        path: '/settings/config-archive',
+        labelKey: 'settingsConfigArchive',
+        to: { path: '/settings/config-archive' },
+        adminOnly: true,
+        isActive: (route) => route.path === '/settings/config-archive',
+      },
     ],
   },
 ]

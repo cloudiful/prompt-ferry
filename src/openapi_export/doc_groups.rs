@@ -6,6 +6,7 @@ use super::{
     },
     auth::{__path_auth_login, __path_auth_logout, __path_auth_me},
     bridge::__path_bridge_status,
+    config_audit::__path_list_config_audit,
     config_export::{__path_config_export_metadata, __path_export_config},
     config_import::{__path_import_config, __path_preview_config_import},
     endpoints::{
@@ -61,6 +62,7 @@ use super::{
     },
 };
 use crate::db::config_repository::{
+    ConfigAuditAction, ConfigAuditDomainCount, ConfigAuditEntry, ConfigAuditPage,
     ConfigImportApplied, ConfigImportDomainDiff, ConfigImportDomainSummary, ConfigImportPreview,
 };
 use crate::{
@@ -290,7 +292,8 @@ pub(super) struct RoutingApiDoc;
         export_config,
         config_export_metadata,
         preview_config_import,
-        import_config
+        import_config,
+        list_config_audit
     ),
     components(
         schemas(
@@ -351,6 +354,10 @@ pub(super) struct RoutingApiDoc;
             ConfigExportDomainSummary,
             ConfigExportMetadata,
             ConfigExportRequest,
+            ConfigAuditAction,
+            ConfigAuditDomainCount,
+            ConfigAuditEntry,
+            ConfigAuditPage,
             ConfigImportApplied,
             ConfigImportDomainDiff,
             ConfigImportDomainSummary,

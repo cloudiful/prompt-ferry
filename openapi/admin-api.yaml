@@ -461,6 +461,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BillingSummaryResponse'
+  /api/v1/admin/config-audit:
+    get:
+      tags:
+      - config
+      operationId: list_config_audit
+      parameters:
+      - name: first
+        in: query
+        description: Zero-based offset into the trail, ordered newest first.
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: rows
+        in: query
+        description: Maximum number of entries to return.
+        required: false
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: 'One page of recorded configuration export/import attempts, newest first. Non-secret metadata only: the passphrase, the archive bytes, and secret values are never stored or returned.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigAuditPage'
+        '403':
+          description: Administrator session required
   /api/v1/admin/config-export:
     post:
       tags:
@@ -3500,6 +3529,112 @@ components:
       - passthrough
       - self_summarize
       - off
+    ConfigAuditAction:
+      type: string
+      enum:
+      - export
+      - import
+    ConfigAuditDomainCount:
+      type: object
+      description: One domain's non-secret record counts inside an audited archive.
+      required:
+      - name
+      - records
+      - unrecoverable_secrets
+      properties:
+        name:
+          type: string
+        records:
+          type: integer
+          minimum: 0
+        unrecoverable_secrets:
+          type: integer
+          minimum: 0
+    ConfigAuditEntry:
+      type: object
+      description: One audited attempt as returned by the admin list endpoint.
+      required:
+      - audit_id
+      - action
+      - backend_kind
+      - success
+      - domains
+      - created_at
+      properties:
+        action:
+          $ref: '#/components/schemas/ConfigAuditAction'
+        actor_login_name:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Login of the operator, resolved from `actor_user_id`. `None` once the
+            account was deleted; the audit row itself survives.
+        actor_user_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        archive_bytes:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        audit_id:
+          type: integer
+          format: int64
+        backend_kind:
+          type: string
+          example: sqlite
+        created_at:
+          type: string
+          format: date-time
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigAuditDomainCount'
+        error_code:
+          type:
+          - string
+          - 'null'
+        error_message:
+          type:
+          - string
+          - 'null'
+        format_version:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        payload_fingerprint:
+          type:
+          - string
+          - 'null'
+        success:
+          type: boolean
+    ConfigAuditPage:
+      type: object
+      description: One page of the audit trail, newest first.
+      required:
+      - total
+      - first
+      - rows
+      - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigAuditEntry'
+        first:
+          type: integer
+          format: int64
+        rows:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
     ConfigExportDomainSummary:
       type: object
       required:

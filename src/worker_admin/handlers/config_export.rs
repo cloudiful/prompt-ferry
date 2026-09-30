@@ -8,31 +8,69 @@
 //!
 //! The passphrase arrives in the request body, is never logged, never stored,
 //! and never appears in a URL, response header, filename, or error message.
+//!
+//! Every real export attempt — the ones that produced an archive and the ones
+//! rejected before that — is recorded in the configuration archive audit
+//! trail. The metadata variant reads no archive and therefore records nothing.
 
 use super::*;
 use crate::db::config_repository::archive::{ArchiveError, encode_archive, validate_passphrase};
-use crate::db::config_repository::{ConfigSnapshot, build_config_snapshot};
+use crate::db::config_repository::{
+    ConfigAuditAction, ConfigAuditDomainCount, ConfigAuditRecord, ConfigSnapshot,
+    build_config_snapshot, record_best_effort, repository_backend_kind,
+};
+
+/// Code recorded when the snapshot could not be read at all.
+const SNAPSHOT_FAILED_CODE: &str = "config_export_snapshot_failed";
 
 pub(super) async fn export_config(
     State(state): State<AdminState>,
     headers: HeaderMap,
     Json(body): Json<ConfigExportRequest>,
 ) -> Response {
-    if let Err(response) = ensure_admin(&state, &headers).await {
-        return response.into_response();
-    }
+    let user = match ensure_admin(&state, &headers).await {
+        Ok(user) => user,
+        Err(response) => return response.into_response(),
+    };
+    let actor = Some(user.user_id);
     if let Err(err) = validate_passphrase(&body.passphrase) {
+        record_export_failure(&state, actor, None, err.code(), &err.to_string()).await;
         return archive_error_response(err);
     }
     let snapshot = match build_snapshot(&state).await {
         Ok(snapshot) => snapshot,
-        Err(err) => return internal(&state, err),
+        Err(err) => {
+            record_export_failure(&state, actor, None, SNAPSHOT_FAILED_CODE, &err.to_string())
+                .await;
+            return internal(&state, err);
+        }
     };
     let backend = snapshot.manifest.backend_kind;
+    let domains: Vec<ConfigAuditDomainCount> = snapshot
+        .manifest
+        .domains
+        .iter()
+        .map(ConfigAuditDomainCount::from)
+        .collect();
     let encoded = match encode_archive(&body.passphrase, backend, snapshot) {
         Ok(encoded) => encoded,
-        Err(err) => return archive_error_response(err),
+        Err(err) => {
+            record_export_failure(&state, actor, None, err.code(), &err.to_string()).await;
+            return archive_error_response(err);
+        }
     };
+    record_best_effort(
+        &state.config_repository,
+        ConfigAuditRecord::success(
+            actor,
+            ConfigAuditAction::Export,
+            backend,
+            encoded.bytes.len() as i64,
+            &encoded.payload_fingerprint,
+            domains,
+        ),
+    )
+    .await;
     let filename = archive_filename(backend);
     Response::builder()
         .status(StatusCode::OK)
@@ -88,6 +126,27 @@ pub(super) async fn config_export_metadata(
             .collect(),
     })
     .into_response()
+}
+
+async fn record_export_failure(
+    state: &AdminState,
+    actor: Option<i64>,
+    archive_bytes: Option<i64>,
+    error_code: &str,
+    error_message: &str,
+) {
+    record_best_effort(
+        &state.config_repository,
+        ConfigAuditRecord::failure(
+            actor,
+            ConfigAuditAction::Export,
+            repository_backend_kind(&state.config_repository),
+            archive_bytes,
+            error_code,
+            error_message,
+        ),
+    )
+    .await;
 }
 
 async fn build_snapshot(state: &AdminState) -> anyhow::Result<ConfigSnapshot> {

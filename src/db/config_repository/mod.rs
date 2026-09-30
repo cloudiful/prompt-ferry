@@ -14,8 +14,10 @@
 //!   - `settings.rs` for worker-level JSON settings
 //!   - `capabilities.rs` for per-path capability gating
 //!   - `snapshot*.rs` and `archive.rs` for the encrypted configuration export
+//!   - `audit.rs` for the administrator configuration archive audit trail
 
 pub mod archive;
+pub mod audit;
 pub mod capabilities;
 pub mod client_keys;
 pub mod endpoints;
@@ -39,6 +41,10 @@ use std::sync::Arc;
 
 use crate::{relay_secrets::RelaySecretManager, standalone_config::StandaloneConfigStore};
 
+pub use audit::{
+    ConfigAuditAction, ConfigAuditDomainCount, ConfigAuditEntry, ConfigAuditPage,
+    ConfigAuditRecord, record_best_effort, repository_backend_kind,
+};
 pub use capabilities::Capability;
 pub use client_keys::{UnifiedClientKey, UnifiedClientKeyCreated};
 pub use endpoints::{UnifiedEndpointApiKey, UnifiedEndpointPage, UnifiedProviderEndpoint};

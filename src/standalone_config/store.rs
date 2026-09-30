@@ -14,7 +14,13 @@ use super::{
 use crate::db::{EndpointOAuthToken, EndpointOAuthTokenSet};
 use crate::relay_secrets::RelaySecretManager;
 
-const CURRENT_SCHEMA_VERSION: i64 = 35;
+// The administrator configuration archive audit trail lives in its own file so
+// this store stays focused on configuration; it is a child module of `store`
+// because it needs the private pool.
+#[path = "audit.rs"]
+mod audit;
+
+const CURRENT_SCHEMA_VERSION: i64 = 36;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {

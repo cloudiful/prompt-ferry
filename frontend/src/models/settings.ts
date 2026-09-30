@@ -1,5 +1,11 @@
 export type SettingsTab =
-  'general' | 'requests' | 'network' | 'review' | 'storage' | 'cache-alert'
+  | 'general'
+  | 'requests'
+  | 'network'
+  | 'review'
+  | 'storage'
+  | 'cache-alert'
+  | 'config-archive'
 
 const adminTabs: ReadonlySet<string> = new Set<SettingsTab>([
   'requests',
@@ -7,6 +13,7 @@ const adminTabs: ReadonlySet<string> = new Set<SettingsTab>([
   'review',
   'storage',
   'cache-alert',
+  'config-archive',
 ])
 
 export function resolveSettingsTab(

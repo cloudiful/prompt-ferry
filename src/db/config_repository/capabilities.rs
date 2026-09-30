@@ -26,6 +26,7 @@ pub enum Capability {
     RawObjectStore,
     ConfigExport,
     ConfigImport,
+    ConfigAudit,
 }
 
 impl Capability {
@@ -52,6 +53,7 @@ impl Capability {
             Self::RawObjectStore => "sqlite_raw_object_store_unavailable",
             Self::ConfigExport => "sqlite_config_export_unavailable",
             Self::ConfigImport => "sqlite_config_import_unavailable",
+            Self::ConfigAudit => "sqlite_config_audit_unavailable",
         }
     }
 
@@ -80,6 +82,7 @@ impl Capability {
             Self::RawObjectStore => "raw object store configuration is not available on SQLite",
             Self::ConfigExport => "encrypted configuration export is available on SQLite",
             Self::ConfigImport => "encrypted configuration import is available on SQLite",
+            Self::ConfigAudit => "the configuration archive audit trail is available on SQLite",
         }
     }
 
@@ -101,10 +104,14 @@ impl Capability {
                 | Self::SnapshotPublication
                 | Self::ConfigExport
                 | Self::ConfigImport
+                | Self::ConfigAudit
         )
     }
 
     pub fn for_path(path: &str) -> Option<Self> {
+        if path == "/admin/config-audit" || path.starts_with("/admin/config-audit/") {
+            return Some(Self::ConfigAudit);
+        }
         if path == "/admin/config-export" || path.starts_with("/admin/config-export/") {
             return Some(Self::ConfigExport);
         }
@@ -297,6 +304,10 @@ mod tests {
             Some(Capability::ConfigImport)
         );
         assert_eq!(
+            Capability::for_path("/admin/config-audit"),
+            Some(Capability::ConfigAudit)
+        );
+        assert_eq!(
             Capability::for_path("/admin/request-records/summary"),
             Some(Capability::RequestRecords)
         );
@@ -336,5 +347,7 @@ mod tests {
         // The import replace transaction is backend-dispatched, so the SQLite
         // path keeps the same reachability as the export.
         assert!(Capability::ConfigImport.sqlite_supported());
+        // The audit trail has a standalone table on both backends.
+        assert!(Capability::ConfigAudit.sqlite_supported());
     }
 }
