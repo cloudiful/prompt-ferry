@@ -25,6 +25,7 @@ pub enum Capability {
     SnapshotPublication,
     RawObjectStore,
     ConfigExport,
+    ConfigImport,
 }
 
 impl Capability {
@@ -50,6 +51,7 @@ impl Capability {
             Self::SnapshotPublication => "sqlite_snapshot_publication_unavailable",
             Self::RawObjectStore => "sqlite_raw_object_store_unavailable",
             Self::ConfigExport => "sqlite_config_export_unavailable",
+            Self::ConfigImport => "sqlite_config_import_unavailable",
         }
     }
 
@@ -77,6 +79,7 @@ impl Capability {
             Self::SnapshotPublication => "snapshot publication is available on SQLite",
             Self::RawObjectStore => "raw object store configuration is not available on SQLite",
             Self::ConfigExport => "encrypted configuration export is available on SQLite",
+            Self::ConfigImport => "encrypted configuration import is available on SQLite",
         }
     }
 
@@ -97,12 +100,16 @@ impl Capability {
                 | Self::McpCatalog
                 | Self::SnapshotPublication
                 | Self::ConfigExport
+                | Self::ConfigImport
         )
     }
 
     pub fn for_path(path: &str) -> Option<Self> {
         if path == "/admin/config-export" || path.starts_with("/admin/config-export/") {
             return Some(Self::ConfigExport);
+        }
+        if path == "/admin/config-import" || path.starts_with("/admin/config-import/") {
+            return Some(Self::ConfigImport);
         }
         if path == "/admin/endpoints" || path == "/admin/endpoints/test" {
             return Some(Self::Endpoints);
@@ -282,6 +289,14 @@ mod tests {
             Some(Capability::ConfigExport)
         );
         assert_eq!(
+            Capability::for_path("/admin/config-import"),
+            Some(Capability::ConfigImport)
+        );
+        assert_eq!(
+            Capability::for_path("/admin/config-import/preview"),
+            Some(Capability::ConfigImport)
+        );
+        assert_eq!(
             Capability::for_path("/admin/request-records/summary"),
             Some(Capability::RequestRecords)
         );
@@ -318,5 +333,8 @@ mod tests {
         // The encrypted configuration export reads the active backend, so it
         // must stay reachable on both PostgreSQL and SQLite.
         assert!(Capability::ConfigExport.sqlite_supported());
+        // The import replace transaction is backend-dispatched, so the SQLite
+        // path keeps the same reachability as the export.
+        assert!(Capability::ConfigImport.sqlite_supported());
     }
 }

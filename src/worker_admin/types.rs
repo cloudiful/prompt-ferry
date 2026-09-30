@@ -7,6 +7,7 @@ mod billing;
 #[path = "types/cache_alert.rs"]
 mod cache_alert;
 mod config_export;
+mod config_import;
 #[path = "types/endpoints.rs"]
 mod endpoints;
 #[path = "types/mcp.rs"]
@@ -29,6 +30,7 @@ pub use auth_users::*;
 pub use billing::*;
 pub use cache_alert::*;
 pub use config_export::*;
+pub use config_import::*;
 pub use endpoints::*;
 pub use mcp::*;
 pub use mcp_provider::*;

@@ -1,4 +1,5 @@
 use super::*;
+use axum::extract::DefaultBodyLimit;
 use axum::http::{Extensions, Version};
 use axum::{
     extract::Request,
@@ -305,6 +306,9 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             "/admin/config-export/metadata",
             post(config_export_metadata),
         )
+        // The configuration archive travels base64-encoded in a JSON body, so
+        // these two routes carry their own body limit instead of the default.
+        .merge(config_import_routes())
         .route("/admin/approvals", get(list_approvals))
         .route("/admin/approvals/{approval_id}", get(get_approval))
         .route(
@@ -336,6 +340,20 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
         .fallback_service(frontend_index)
         .layer(CorsLayer::permissive())
         .layer(response_compression_layer())
+}
+
+/// Routes for the administrator configuration import.
+///
+/// The archive travels base64-encoded inside a JSON body, which is larger than
+/// the default body limit. The sub-router raises the limit to exactly the
+/// encodable archive size plus JSON envelope headroom, so oversized requests
+/// are rejected before the handler allocates anything.
+fn config_import_routes() -> Router<AdminState> {
+    let limit = MAX_ARCHIVE_BASE64_LEN + 512 * 1024;
+    Router::new()
+        .route("/admin/config-import/preview", post(preview_config_import))
+        .route("/admin/config-import", post(import_config))
+        .layer(DefaultBodyLimit::max(limit))
 }
 
 async fn reject_unsupported_sqlite_capabilities(
@@ -447,6 +465,11 @@ mod admin_routing_tests {
             (
                 "/admin/config-export/metadata",
                 Some(Capability::ConfigExport),
+            ),
+            ("/admin/config-import", Some(Capability::ConfigImport)),
+            (
+                "/admin/config-import/preview",
+                Some(Capability::ConfigImport),
             ),
             ("/auth/me", None),
         ] {

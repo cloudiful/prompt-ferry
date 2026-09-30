@@ -21,6 +21,7 @@ pub mod client_keys;
 pub mod endpoints;
 pub mod endpoints_map;
 pub mod endpoints_sqlite;
+pub mod import;
 pub mod mcp;
 pub mod model_routes;
 pub mod model_routes_map;
@@ -41,6 +42,10 @@ use crate::{relay_secrets::RelaySecretManager, standalone_config::StandaloneConf
 pub use capabilities::Capability;
 pub use client_keys::{UnifiedClientKey, UnifiedClientKeyCreated};
 pub use endpoints::{UnifiedEndpointApiKey, UnifiedEndpointPage, UnifiedProviderEndpoint};
+pub use import::{
+    ConfigImportApplied, ConfigImportDomainDiff, ConfigImportDomainSummary, ConfigImportPreview,
+    ImportError, apply_config_import, preview_config_import,
+};
 pub use model_routes::{UnifiedModelRoute, UnifiedModelRoutePage, UnifiedModelRouteTarget};
 pub use relays::{ManagedRelaySecrets, UnifiedManagedRelay, relay_secrets_for_state};
 pub use settings::UnifiedSetting;

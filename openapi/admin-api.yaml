@@ -501,6 +501,58 @@ paths:
                 $ref: '#/components/schemas/ConfigExportMetadata'
         '403':
           description: Administrator session required
+  /api/v1/admin/config-import:
+    post:
+      tags:
+      - config
+      operationId: import_config
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigImportRequest'
+        required: true
+      responses:
+        '200':
+          description: The archive was validated and applied atomically. Counts and fingerprint only; the passphrase is never echoed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigImportApplied'
+        '400':
+          description: Wrong passphrase, tampered archive, or invalid request body
+        '403':
+          description: Administrator session required
+        '413':
+          description: Archive exceeds the accepted size
+        '422':
+          description: Backend mismatch or a domain the target cannot store
+  /api/v1/admin/config-import/preview:
+    post:
+      tags:
+      - config
+      operationId: preview_config_import
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigImportRequest'
+        required: true
+      responses:
+        '200':
+          description: Per-domain create/update/delete counts and warnings. Read-only; no configuration is written and no payload is returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigImportPreview'
+        '400':
+          description: Wrong passphrase, tampered archive, or invalid request body
+        '403':
+          description: Administrator session required
+        '413':
+          description: Archive exceeds the accepted size
+        '422':
+          description: Backend mismatch or a domain the target cannot store
   /api/v1/admin/conversations/{conversation_id}/endpoint-override:
     get:
       tags:
@@ -3503,6 +3555,124 @@ components:
             Passphrase sealing the archive. Never stored, never logged, never
             placed in a URL.
           writeOnly: true
+    ConfigImportApplied:
+      type: object
+      description: Result of a committed import.
+      required:
+      - backend_kind
+      - format_version
+      - payload_fingerprint
+      - domains
+      properties:
+        backend_kind:
+          type: string
+          example: sqlite
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigImportDomainSummary'
+        format_version:
+          type: integer
+          format: int32
+          minimum: 0
+        payload_fingerprint:
+          type: string
+    ConfigImportDomainDiff:
+      type: object
+      description: Per-domain dry-run difference. Counts and identifiers only; never payloads.
+      required:
+      - name
+      - archive_records
+      - target_records
+      - creates
+      - updates
+      - deletes
+      - unrecoverable_secrets
+      properties:
+        archive_records:
+          type: integer
+          minimum: 0
+        creates:
+          type: integer
+          minimum: 0
+        deletes:
+          type: integer
+          minimum: 0
+        name:
+          type: string
+        target_records:
+          type: integer
+          minimum: 0
+        unrecoverable_secrets:
+          type: integer
+          minimum: 0
+        updates:
+          type: integer
+          minimum: 0
+    ConfigImportDomainSummary:
+      type: object
+      description: One domain restored by a committed import.
+      required:
+      - name
+      - records
+      - unrecoverable_secrets
+      properties:
+        name:
+          type: string
+        records:
+          type: integer
+          minimum: 0
+        unrecoverable_secrets:
+          type: integer
+          minimum: 0
+    ConfigImportPreview:
+      type: object
+      description: Non-secret preview of what an import would change.
+      required:
+      - backend_kind
+      - format_version
+      - exported_at
+      - payload_fingerprint
+      - domains
+      - warnings
+      properties:
+        backend_kind:
+          type: string
+          example: sqlite
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigImportDomainDiff'
+        exported_at:
+          type: string
+        format_version:
+          type: integer
+          format: int32
+          minimum: 0
+        payload_fingerprint:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: string
+    ConfigImportRequest:
+      type: object
+      description: Passphrase-encrypted import request.
+      required:
+      - passphrase
+      - archive_base64
+      properties:
+        archive_base64:
+          type: string
+          description: Standard base64 of the `.pfce` archive returned by the export endpoint.
+          writeOnly: true
+        passphrase:
+          type: string
+          description: |-
+            Passphrase that sealed the archive. Never stored, logged, or placed in
+            a URL.
+          writeOnly: true
+      additionalProperties: false
     ConversationEndpointOverride:
       type: object
       required:

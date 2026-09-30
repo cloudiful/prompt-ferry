@@ -12,6 +12,7 @@ macro_rules! standalone_query {
 }
 
 mod coordinator;
+mod import;
 mod models;
 mod request_leases;
 mod rows;
@@ -23,6 +24,7 @@ mod validation;
 mod write;
 
 pub(crate) use coordinator::StandaloneCoordinatorStore;
+pub use import::{ImportEndpointAdminKey, ImportEndpointOAuth, ImportMcpServer, ImportUser};
 pub use models::{
     BootstrapSeed, ClientKeyConfig, EndpointApiKeyConfig, EndpointProvider, EndpointRegion,
     ManagedRelayConfig, ModelRouteConfig, ModelRouteTargetConfig, ProviderEndpointConfig,

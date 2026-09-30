@@ -9,6 +9,7 @@ mod auth;
 mod billing;
 mod bridge;
 mod config_export;
+mod config_import;
 mod doc;
 mod doc_groups;
 mod endpoints;

@@ -7,6 +7,7 @@ use super::{
     auth::{__path_auth_login, __path_auth_logout, __path_auth_me},
     bridge::__path_bridge_status,
     config_export::{__path_config_export_metadata, __path_export_config},
+    config_import::{__path_import_config, __path_preview_config_import},
     endpoints::{
         __path_create_endpoint, __path_delete_endpoint, __path_list_endpoints,
         __path_oauth_browser_complete, __path_oauth_browser_start, __path_oauth_clear,
@@ -59,6 +60,9 @@ use super::{
         __path_reset_password, __path_update_client_key, __path_update_user,
     },
 };
+use crate::db::config_repository::{
+    ConfigImportApplied, ConfigImportDomainDiff, ConfigImportDomainSummary, ConfigImportPreview,
+};
 use crate::{
     db,
     llm_review::LlmReviewSettings,
@@ -68,25 +72,26 @@ use crate::{
         ApprovalPageResponse, AvailableModel, AvailableModelsResponse, BridgeStatus,
         CacheAlertSettings, CacheAlertSettingsResponse, ClientKey, ClientKeyPageResponse,
         CommandCodeBalances, CommandCodeWindowUsage, ConfigExportDomainSummary,
-        ConfigExportMetadata, ConfigExportRequest, ConversationEndpointOverrideRequest,
-        CreateClientKeyRequest, CreateClientKeyResponse, CreateUserRequest, DeepSeekBalance,
-        EndpointOAuthStatusResponse, EndpointPageResponse, EndpointRequest, EndpointSettingRequest,
-        EndpointTestResponse, ManagedRelay, ManagedRelayListResponse, ManagedRelayPatchRequest,
-        ManagedRelayRequest, ManagedRelaySecretPatch, ManagedRelayStatus, McpCatalogItem,
-        McpCatalogResponse, McpProviderDescriptor, McpServer, McpServerPageResponse,
-        McpServerRequest, McpTestResponse, MeResponse, ModelRoutePageResponse, ModelRouteRequest,
-        ModelRouteTargetRequest, ModelRouteTestRequest, ModelRouteTestResponse,
-        ModelRouteWhitelistRequest, ModelRouteWhitelistResponse, OAuthBrowserCompleteRequest,
-        OAuthBrowserStartResponse, OAuthDeviceStartResponse, OAuthFlowRequest, OAuthLoginResponse,
-        OAuthLoginStatus, OpenRouterBalance, OpenRouterSpend, OpencodeGoWindowUsage,
-        RawObjectStoreBackend, RawObjectStoreSecretPatch, RawObjectStoreSettingsRequest,
-        RawObjectStoreSettingsResponse, RelayIpPolicyResponse, RequestContentLoggingRequest,
-        RequestContentLoggingResponse, RequestRecordFullMessage, RequestRecordFullResponse,
-        RequestRecordOverviewRange, RequestRecordPruneResponse, RequestRecordsClearRequest,
-        RequestRecordsClearResponse, ResetPasswordRequest, SessionAffinityResetResponse,
-        SessionAffinityState, SessionAffinityStatus, SessionRouteOptionsResponse,
-        TokenPlanKeyUsage, TokenPlanModelUsage, TokenPlanUsageResponse, TokenPlanWindowUsage,
-        UpdateClientKeyRequest, UserOptionsResponse, UserPageResponse,
+        ConfigExportMetadata, ConfigExportRequest, ConfigImportRequest,
+        ConversationEndpointOverrideRequest, CreateClientKeyRequest, CreateClientKeyResponse,
+        CreateUserRequest, DeepSeekBalance, EndpointOAuthStatusResponse, EndpointPageResponse,
+        EndpointRequest, EndpointSettingRequest, EndpointTestResponse, ManagedRelay,
+        ManagedRelayListResponse, ManagedRelayPatchRequest, ManagedRelayRequest,
+        ManagedRelaySecretPatch, ManagedRelayStatus, McpCatalogItem, McpCatalogResponse,
+        McpProviderDescriptor, McpServer, McpServerPageResponse, McpServerRequest, McpTestResponse,
+        MeResponse, ModelRoutePageResponse, ModelRouteRequest, ModelRouteTargetRequest,
+        ModelRouteTestRequest, ModelRouteTestResponse, ModelRouteWhitelistRequest,
+        ModelRouteWhitelistResponse, OAuthBrowserCompleteRequest, OAuthBrowserStartResponse,
+        OAuthDeviceStartResponse, OAuthFlowRequest, OAuthLoginResponse, OAuthLoginStatus,
+        OpenRouterBalance, OpenRouterSpend, OpencodeGoWindowUsage, RawObjectStoreBackend,
+        RawObjectStoreSecretPatch, RawObjectStoreSettingsRequest, RawObjectStoreSettingsResponse,
+        RelayIpPolicyResponse, RequestContentLoggingRequest, RequestContentLoggingResponse,
+        RequestRecordFullMessage, RequestRecordFullResponse, RequestRecordOverviewRange,
+        RequestRecordPruneResponse, RequestRecordsClearRequest, RequestRecordsClearResponse,
+        ResetPasswordRequest, SessionAffinityResetResponse, SessionAffinityState,
+        SessionAffinityStatus, SessionRouteOptionsResponse, TokenPlanKeyUsage, TokenPlanModelUsage,
+        TokenPlanUsageResponse, TokenPlanWindowUsage, UpdateClientKeyRequest, UserOptionsResponse,
+        UserPageResponse,
     },
 };
 
@@ -283,7 +288,9 @@ pub(super) struct RoutingApiDoc;
         get_cache_alert_setting,
         set_cache_alert_setting,
         export_config,
-        config_export_metadata
+        config_export_metadata,
+        preview_config_import,
+        import_config
     ),
     components(
         schemas(
@@ -343,7 +350,12 @@ pub(super) struct RoutingApiDoc;
             db::RequestRecordSummary,
             ConfigExportDomainSummary,
             ConfigExportMetadata,
-            ConfigExportRequest
+            ConfigExportRequest,
+            ConfigImportApplied,
+            ConfigImportDomainDiff,
+            ConfigImportDomainSummary,
+            ConfigImportPreview,
+            ConfigImportRequest
         )
     ),
     tags(
