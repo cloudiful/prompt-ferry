@@ -328,6 +328,8 @@ OpenAI 端点支持两种「上游计划」（Admin → 上游端点 → OpenAI�
    （`gpt-6-sol`、`gpt-6-astra`、`gpt-6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、
    `gpt-5.6-luna`、`gpt-5.2-codex`、`gpt-5.1-codex` 等）原样保留并去掉思考
    强度后缀；未知模型原样透传，由上游返回真实的模型错误；模型为空时回退到 `gpt-6-sol`。
+   订阅后端只接受 Codex 的请求形状，因此客户端的 `max_output_tokens` 会被丢弃而非转发
+   （该后端会将其视为不支持的参数并拒绝）。
 
 订阅额度仅在端点对话框展示（5 小时/周窗口），不参与路由权重，也不计入 Platform
 API 用量；两套凭据相互独立：切换到官方 API Key 计划会清除已存的 OAuth 凭据，切离
