@@ -6,6 +6,7 @@ import {
   canSaveTargets,
   createTargetColumns,
   createTargetMeta,
+  hasTargetSchedule,
   hasTargetSettings,
   targetProxySummary,
   targetScheduleSummary,
@@ -253,14 +254,16 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
                         class="hidden shrink-0 items-center gap-1 text-muted lg:flex"
                       >
                         <span>{{ targetProxySummary(row.original, t) }}</span>
-                        <span aria-hidden="true">·</span>
-                        <UTooltip
-                          :text="targetScheduleTooltip(row.original, t)"
-                        >
-                          <span>{{
-                            targetScheduleSummary(row.original, t)
-                          }}</span>
-                        </UTooltip>
+                        <template v-if="hasTargetSchedule(row.original)">
+                          <span aria-hidden="true">·</span>
+                          <UTooltip
+                            :text="targetScheduleTooltip(row.original, t)"
+                          >
+                            <span>{{
+                              targetScheduleSummary(row.original, t)
+                            }}</span>
+                          </UTooltip>
+                        </template>
                       </div>
                       <UButton
                         type="button"
@@ -281,8 +284,10 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
                   </div>
                   <div class="flex items-center gap-1 text-muted lg:hidden">
                     <span>{{ targetProxySummary(row.original, t) }}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{{ targetScheduleSummary(row.original, t) }}</span>
+                    <template v-if="hasTargetSchedule(row.original)">
+                      <span aria-hidden="true">·</span>
+                      <span>{{ targetScheduleSummary(row.original, t) }}</span>
+                    </template>
                   </div>
                 </div>
               </template>
