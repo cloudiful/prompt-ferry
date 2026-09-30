@@ -392,7 +392,9 @@ Setup:
    `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.2-codex`, `gpt-5.1-codex`, …) are
    kept (reasoning-effort suffixes folded in); unknown models pass through unchanged so the
    upstream backend returns the true model error, and an empty model falls back to
-   `gpt-6-sol`.
+   `gpt-6-sol`. The subscription backend accepts only the Codex request shape, so a
+   caller-supplied `max_output_tokens` is dropped instead of forwarded (the backend rejects
+   it as an unsupported parameter).
 
 The subscription quota is display-only in the endpoint dialog (5-hour/weekly windows): it never
 affects routing weight and stays separate from Platform API usage. The two credential sets are

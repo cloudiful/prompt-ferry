@@ -54,7 +54,8 @@ pub(super) fn build_upstream_request(
 /// Issue #599 R2c: ChatGPT (Codex) backend request builder. The URL already
 /// points at the Codex backend; auth comes from the stored OAuth token (bearer
 /// plus `chatgpt-account-id`), the body is normalized onto a Codex model with
-/// `store: false`, and issue #599 R2f.1 mirrors the caller's stable
+/// `store: false` and without the Responses parameters that backend rejects,
+/// and issue #599 R2f.1 mirrors the caller's stable
 /// `session-id` plus the token's compute-residency claim. The platform builder
 /// above is untouched.
 pub(super) fn build_codex_upstream_request(

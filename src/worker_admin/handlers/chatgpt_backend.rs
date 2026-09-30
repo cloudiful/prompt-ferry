@@ -132,10 +132,22 @@ fn known_codex_model(name: &str) -> Option<&'static str> {
         .copied()
 }
 
-/// Rewrite a Responses request body for the Codex backend: normalize `model`
-/// and force the stateless `store: false` flag. Borrows the original bytes
-/// when nothing changes (prefix-cache stable), so an already-normalized body
-/// is forwarded byte-for-byte.
+/// Responses parameters the ChatGPT (Codex) subscription backend rejects.
+///
+/// Its accepted body is the Codex CLI's own request shape — `model`,
+/// `instructions`, `input`, `tools`, `tool_choice`, `parallel_tool_calls`,
+/// `reasoning`, `store`, `stream`, `stream_options`, `include`,
+/// `service_tier`, `prompt_cache_key`, `text`, `client_metadata`,
+/// `access_programs`. An output cap has no equivalent there, so a
+/// caller-supplied one is dropped instead of forwarded: `/codex/responses`
+/// answers `400 {"detail":"Unsupported parameter: max_output_tokens"}`.
+const CODEX_UNSUPPORTED_PARAMS: [&str; 1] = ["max_output_tokens"];
+
+/// Rewrite a Responses request body for the Codex backend: normalize `model`,
+/// force the stateless `store: false` flag, and drop the Responses parameters
+/// the subscription backend rejects. Borrows the original bytes when nothing
+/// changes (prefix-cache stable), so an already-normalized body is forwarded
+/// byte-for-byte.
 pub fn normalize_codex_request_body<'a>(body: &'a [u8]) -> Cow<'a, [u8]> {
     let Ok(mut value) = serde_json::from_slice::<Value>(body) else {
         return Cow::Borrowed(body);
@@ -154,6 +166,11 @@ pub fn normalize_codex_request_body<'a>(body: &'a [u8]) -> Cow<'a, [u8]> {
     if object.get("store") != Some(&Value::Bool(false)) {
         object.insert("store".to_string(), Value::Bool(false));
         changed = true;
+    }
+    for parameter in CODEX_UNSUPPORTED_PARAMS {
+        if object.remove(parameter).is_some() {
+            changed = true;
+        }
     }
     if changed {
         Cow::Owned(serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec()))
@@ -484,3 +501,6 @@ fn truncate(message: &str) -> String {
     truncated.push_str("...");
     truncated
 }
+
+#[cfg(test)]
+mod tests;
