@@ -8,6 +8,7 @@ mod approvals;
 mod auth;
 mod billing;
 mod bridge;
+mod config_export;
 mod doc;
 mod doc_groups;
 mod endpoints;

@@ -8,6 +8,7 @@
 use anyhow::{Context, Result};
 use serde::{Serialize, de::DeserializeOwned};
 
+use super::snapshot::SettingSnapshot;
 use super::{PostgresConfigRepository, SqliteConfigRepository};
 use crate::standalone_config::SettingConfig;
 
@@ -77,6 +78,26 @@ impl super::ConfigRepository {
             Self::Sqlite(repo) => repo.set_bool_setting(key, enabled).await,
         }
     }
+}
+
+/// Every row of `worker_settings`, used by the encrypted configuration export.
+/// Settings are configuration, never runtime history.
+pub(super) async fn list_all_settings_postgres(
+    pool: &sqlx::PgPool,
+) -> Result<Vec<SettingSnapshot>> {
+    Ok(sqlx::query_file!("src/sql/settings/list_all_settings.sql")
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|row| SettingSnapshot {
+            key: row.setting_key,
+            // `worker_settings` has no per-row version; the standalone
+            // backend owns that column and always exports its own value.
+            version: 1,
+            value: row.setting_value,
+            updated_at: Some(row.updated_at),
+        })
+        .collect())
 }
 
 impl PostgresConfigRepository {

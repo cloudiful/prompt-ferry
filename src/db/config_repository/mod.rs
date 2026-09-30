@@ -13,7 +13,9 @@
 //!   - `client_keys.rs` for per-user client keys (admin and self-service)
 //!   - `settings.rs` for worker-level JSON settings
 //!   - `capabilities.rs` for per-path capability gating
+//!   - `snapshot*.rs` and `archive.rs` for the encrypted configuration export
 
+pub mod archive;
 pub mod capabilities;
 pub mod client_keys;
 pub mod endpoints;
@@ -25,6 +27,11 @@ pub mod model_routes_map;
 pub mod relays;
 pub mod relays_map;
 pub mod settings;
+pub mod snapshot;
+mod snapshot_pg_map;
+mod snapshot_postgres;
+pub mod snapshot_source;
+mod snapshot_sqlite;
 
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -37,6 +44,14 @@ pub use endpoints::{UnifiedEndpointApiKey, UnifiedEndpointPage, UnifiedProviderE
 pub use model_routes::{UnifiedModelRoute, UnifiedModelRoutePage, UnifiedModelRouteTarget};
 pub use relays::{ManagedRelaySecrets, UnifiedManagedRelay, relay_secrets_for_state};
 pub use settings::UnifiedSetting;
+pub use snapshot::{
+    ClientKeySnapshot, ConfigBackendKind, ConfigSnapshot, EndpointApiKeySnapshot,
+    EndpointOAuthSnapshot, EndpointSnapshot, McpCredentialSnapshot, McpServerSnapshot,
+    ModelRouteSnapshot, ModelRouteTargetSnapshot, RelaySnapshot, SNAPSHOT_FORMAT_VERSION,
+    SecretRecovery, SettingSnapshot, SnapshotDomainSummary, SnapshotDomains, SnapshotManifest,
+    UserRedactionConfigSnapshot, UserSnapshot,
+};
+pub use snapshot_source::build_config_snapshot;
 
 #[derive(Clone)]
 pub enum ConfigRepository {

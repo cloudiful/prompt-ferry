@@ -300,6 +300,11 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             "/settings/raw-object-store",
             get(get_raw_object_store).patch(set_raw_object_store),
         )
+        .route("/admin/config-export", post(export_config))
+        .route(
+            "/admin/config-export/metadata",
+            post(config_export_metadata),
+        )
         .route("/admin/approvals", get(list_approvals))
         .route("/admin/approvals/{approval_id}", get(get_approval))
         .route(
@@ -438,6 +443,11 @@ mod admin_routing_tests {
             ("/admin/approvals", Some(Capability::Approvals)),
             ("/admin/billing/summary", Some(Capability::Billing)),
             ("/me/models", Some(Capability::AvailableModels)),
+            ("/admin/config-export", Some(Capability::ConfigExport)),
+            (
+                "/admin/config-export/metadata",
+                Some(Capability::ConfigExport),
+            ),
             ("/auth/me", None),
         ] {
             assert_eq!(

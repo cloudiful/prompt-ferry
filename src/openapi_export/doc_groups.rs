@@ -6,6 +6,7 @@ use super::{
     },
     auth::{__path_auth_login, __path_auth_logout, __path_auth_me},
     bridge::__path_bridge_status,
+    config_export::{__path_config_export_metadata, __path_export_config},
     endpoints::{
         __path_create_endpoint, __path_delete_endpoint, __path_list_endpoints,
         __path_oauth_browser_complete, __path_oauth_browser_start, __path_oauth_clear,
@@ -66,7 +67,8 @@ use crate::{
     worker_admin_types::{
         ApprovalPageResponse, AvailableModel, AvailableModelsResponse, BridgeStatus,
         CacheAlertSettings, CacheAlertSettingsResponse, ClientKey, ClientKeyPageResponse,
-        CommandCodeBalances, CommandCodeWindowUsage, ConversationEndpointOverrideRequest,
+        CommandCodeBalances, CommandCodeWindowUsage, ConfigExportDomainSummary,
+        ConfigExportMetadata, ConfigExportRequest, ConversationEndpointOverrideRequest,
         CreateClientKeyRequest, CreateClientKeyResponse, CreateUserRequest, DeepSeekBalance,
         EndpointOAuthStatusResponse, EndpointPageResponse, EndpointRequest, EndpointSettingRequest,
         EndpointTestResponse, ManagedRelay, ManagedRelayListResponse, ManagedRelayPatchRequest,
@@ -279,7 +281,9 @@ pub(super) struct RoutingApiDoc;
         reject_approval,
         bridge_status,
         get_cache_alert_setting,
-        set_cache_alert_setting
+        set_cache_alert_setting,
+        export_config,
+        config_export_metadata
     ),
     components(
         schemas(
@@ -336,14 +340,18 @@ pub(super) struct RoutingApiDoc;
             db::RequestRecordFacets,
             db::RequestRecordListRow,
             db::RequestRecordPage,
-            db::RequestRecordSummary
+            db::RequestRecordSummary,
+            ConfigExportDomainSummary,
+            ConfigExportMetadata,
+            ConfigExportRequest
         )
     ),
     tags(
         (name = "request-records", description = "Request record reporting"),
         (name = "settings", description = "Worker and admin settings"),
         (name = "approvals", description = "Manual approval workflow"),
-        (name = "bridge", description = "Bridge runtime status")
+        (name = "bridge", description = "Bridge runtime status"),
+        (name = "config", description = "Encrypted configuration migration")
     )
 )]
 pub(super) struct OperationsApiDoc;

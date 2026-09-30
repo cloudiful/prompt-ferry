@@ -579,7 +579,10 @@ async fn sqlite_minimax_endpoint_creates_managed_mcp_projection() {
     close_repository(store, path).await;
 }
 
+mod archive_tests;
 mod keep_tests;
+mod snapshot_fixtures;
+mod snapshot_tests;
 
 #[tokio::test]
 async fn model_route_crud_round_trips_with_target_persistence() {

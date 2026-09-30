@@ -316,6 +316,33 @@ impl super::ConfigRepository {
             }
         }
     }
+
+    /// Every MCP credential of every server, secrets included.
+    ///
+    /// Used only by the encrypted configuration export: the payload is sealed
+    /// with the operator passphrase before it leaves the process. Runtime
+    /// code paths keep using the per-server listing.
+    pub async fn list_all_mcp_credentials(&self) -> Result<Vec<crate::db::McpCredential>> {
+        if let Some(pool) = self.as_postgres() {
+            return list_all_credentials_postgres(pool).await;
+        }
+        let mut credentials = Vec::new();
+        for server in self.list_all_mcp_servers().await? {
+            credentials.extend(self.list_mcp_credentials(server.server_id).await?);
+        }
+        Ok(credentials)
+    }
+}
+
+async fn list_all_credentials_postgres(
+    pool: &sqlx::PgPool,
+) -> Result<Vec<crate::db::McpCredential>> {
+    Ok(sqlx::query_file_as!(
+        crate::db::McpCredential,
+        "src/sql/mcp_credentials/list_credentials_all.sql",
+    )
+    .fetch_all(pool)
+    .await?)
 }
 
 fn input_from_endpoint(endpoint: &ProviderEndpoint, name: String, enabled: bool) -> McpServerInput {

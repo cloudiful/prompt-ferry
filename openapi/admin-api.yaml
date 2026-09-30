@@ -461,6 +461,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BillingSummaryResponse'
+  /api/v1/admin/config-export:
+    post:
+      tags:
+      - config
+      operationId: export_config
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigExportRequest'
+        required: true
+      responses:
+        '200':
+          description: Passphrase-sealed configuration archive (`application/octet-stream`). The response carries the snapshot fingerprint, backend kind, and format version as non-secret headers; the passphrase is never echoed.
+          content:
+            application/octet-stream:
+              schema:
+                type: array
+                items:
+                  type: integer
+                  format: int32
+                  minimum: 0
+        '400':
+          description: Passphrase rejected (too short or too long)
+        '403':
+          description: Administrator session required
+  /api/v1/admin/config-export/metadata:
+    post:
+      tags:
+      - config
+      operationId: config_export_metadata
+      responses:
+        '200':
+          description: Non-secret export manifest summary for the audit trail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigExportMetadata'
+        '403':
+          description: Administrator session required
   /api/v1/admin/conversations/{conversation_id}/endpoint-override:
     get:
       tags:
@@ -3408,6 +3448,61 @@ components:
       - passthrough
       - self_summarize
       - off
+    ConfigExportDomainSummary:
+      type: object
+      required:
+      - name
+      - records
+      - unrecoverable_secrets
+      properties:
+        name:
+          type: string
+        records:
+          type: integer
+          minimum: 0
+        unrecoverable_secrets:
+          type: integer
+          minimum: 0
+    ConfigExportMetadata:
+      type: object
+      description: |-
+        Non-secret metadata about the produced archive. Returned by the metadata
+        variant so an operator can record the package fingerprint before storing
+        the bytes.
+      required:
+      - backend_kind
+      - format_version
+      - payload_fingerprint
+      - domains
+      properties:
+        backend_kind:
+          type: string
+          example: postgres
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigExportDomainSummary'
+        format_version:
+          type: integer
+          format: int32
+          minimum: 0
+        payload_fingerprint:
+          type: string
+          description: |-
+            SHA-256 (lowercase hex) of the snapshot payload; identifies the
+            package contents without revealing them.
+    ConfigExportRequest:
+      type: object
+      description: Passphrase-encrypted export request.
+      required:
+      - passphrase
+      properties:
+        passphrase:
+          type: string
+          description: |-
+            Passphrase sealing the archive. Never stored, never logged, never
+            placed in a URL.
+          writeOnly: true
     ConversationEndpointOverride:
       type: object
       required:
@@ -7477,5 +7572,7 @@ tags:
   description: Manual approval workflow
 - name: bridge
   description: Bridge runtime status
+- name: config
+  description: Encrypted configuration migration
 - name: billing
   description: Usage billing and pricing

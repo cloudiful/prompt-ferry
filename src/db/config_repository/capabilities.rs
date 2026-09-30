@@ -24,6 +24,7 @@ pub enum Capability {
     AvailableModels,
     SnapshotPublication,
     RawObjectStore,
+    ConfigExport,
 }
 
 impl Capability {
@@ -48,6 +49,7 @@ impl Capability {
             Self::AvailableModels => "sqlite_available_models_unavailable",
             Self::SnapshotPublication => "sqlite_snapshot_publication_unavailable",
             Self::RawObjectStore => "sqlite_raw_object_store_unavailable",
+            Self::ConfigExport => "sqlite_config_export_unavailable",
         }
     }
 
@@ -74,6 +76,7 @@ impl Capability {
             Self::AvailableModels => "available model discovery is not yet available on SQLite",
             Self::SnapshotPublication => "snapshot publication is available on SQLite",
             Self::RawObjectStore => "raw object store configuration is not available on SQLite",
+            Self::ConfigExport => "encrypted configuration export is available on SQLite",
         }
     }
 
@@ -93,10 +96,14 @@ impl Capability {
                 | Self::McpCredentials
                 | Self::McpCatalog
                 | Self::SnapshotPublication
+                | Self::ConfigExport
         )
     }
 
     pub fn for_path(path: &str) -> Option<Self> {
+        if path == "/admin/config-export" || path.starts_with("/admin/config-export/") {
+            return Some(Self::ConfigExport);
+        }
         if path == "/admin/endpoints" || path == "/admin/endpoints/test" {
             return Some(Self::Endpoints);
         }
@@ -267,6 +274,14 @@ mod tests {
         );
         assert_eq!(Capability::for_path("/admin/mcp-quota-groups"), None);
         assert_eq!(
+            Capability::for_path("/admin/config-export"),
+            Some(Capability::ConfigExport)
+        );
+        assert_eq!(
+            Capability::for_path("/admin/config-export/metadata"),
+            Some(Capability::ConfigExport)
+        );
+        assert_eq!(
             Capability::for_path("/admin/request-records/summary"),
             Some(Capability::RequestRecords)
         );
@@ -300,5 +315,8 @@ mod tests {
         assert!(!Capability::AvailableModels.sqlite_supported());
         assert!(!Capability::ModelRouteTest.sqlite_supported());
         assert!(!Capability::RawObjectStore.sqlite_supported());
+        // The encrypted configuration export reads the active backend, so it
+        // must stay reachable on both PostgreSQL and SQLite.
+        assert!(Capability::ConfigExport.sqlite_supported());
     }
 }
