@@ -2,14 +2,18 @@ import { expect, test } from 'bun:test'
 import {
   clearAdminApiKeyOutsideOpenAi,
   createEmptyEndpointForm,
+  duplicateEndpointApiKeyLabelIndexes,
   endpointFormToRequest,
   endpointToForm,
   resolveAdminApiKeyRequest,
 } from '../src/admin-mappers/forms/endpoint'
-import type { ProviderEndpoint } from '../src/generated/admin-api'
+import type {
+  EndpointApiKey,
+  ProviderEndpoint,
+} from '../src/generated/admin-api'
 import { messages } from '../src/i18n'
 import { endpointOpenAiMessages } from '../src/i18n/modules/endpoints.openai'
-import type { EndpointForm } from '../src/models'
+import type { EndpointApiKeyForm, EndpointForm } from '../src/models'
 import { isOrganizationUsageEligible } from '../src/models/endpoints/quota'
 
 function endpointFixture(
@@ -33,8 +37,37 @@ function endpointFixture(
   }
 }
 
+function apiKeyFixture(
+  overrides: Partial<EndpointApiKey> = {},
+): EndpointApiKey {
+  return {
+    created_at: '2026-09-27T00:00:00Z',
+    enabled: true,
+    endpoint_id: 'endpoint-openai',
+    key_id: 'key-a',
+    key_label: 'primary',
+    position: 0,
+    updated_at: '2026-09-27T00:00:00Z',
+    ...overrides,
+  }
+}
+
 function formWith(overrides: Partial<EndpointForm>): EndpointForm {
   return { ...createEmptyEndpointForm(), provider: 'openai', ...overrides }
+}
+
+function savedKey(
+  keyId: string,
+  overrides: Partial<EndpointApiKeyForm> = {},
+): EndpointApiKeyForm {
+  return {
+    key_label: '',
+    api_key: '',
+    has_saved_key: true,
+    enabled: true,
+    key_id: keyId,
+    ...overrides,
+  }
 }
 
 test('new endpoint forms never carry an Admin API Key by default', () => {
@@ -183,5 +216,94 @@ test('Admin API Key and organization usage copy exists in both locales', () => {
     // The org-level / UTC scope and the separation from subscription quota
     // must be stated where the operator reads it.
     expect(endpointMessages.endpointOrganizationUsageHint).toContain('UTC')
+  }
+})
+
+test('endpointToForm echoes every stored key nickname for editing', () => {
+  const primary = apiKeyFixture({ key_label: 'primary' })
+  const form = endpointToForm(
+    endpointFixture({
+      api_keys: [
+        primary,
+        { ...primary, key_id: 'key-b', key_label: 'backup', enabled: false },
+      ],
+    }),
+  )
+  expect(
+    form.api_keys.map((key) => [key.key_id, key.key_label, key.enabled]),
+  ).toEqual([
+    ['key-a', 'primary', true],
+    ['key-b', 'backup', false],
+  ])
+  // The nickname is editable while the secret stays masked.
+  expect(
+    form.api_keys.every((key) => key.api_key === '' && key.has_saved_key),
+  ).toBe(true)
+})
+
+test('endpointFormToRequest submits edited nicknames and keeps cleared ones', () => {
+  // Regression: the request filtered on label-or-secret, so clearing a nickname
+  // deleted the stored key on save. The server matches a blank row by key_id
+  // and keeps its secret and label.
+  const request = endpointFormToRequest(
+    formWith({
+      api_keys: [
+        savedKey('key-a', { key_label: '  primary-eu  ' }),
+        savedKey('key-b', { key_label: '   ' }),
+        savedKey('key-c'),
+      ],
+    }),
+  )
+  const submitted = request.api_keys?.map(
+    (key) => `${key.key_id}:${key.key_label}`,
+  )
+  expect(submitted).toEqual(['key-a:primary-eu', 'key-b:', 'key-c:'])
+})
+
+test('an untouched new key row is discarded, a named one is submitted', () => {
+  const newKey = { ...createEmptyEndpointForm().api_keys[0] }
+  const request = endpointFormToRequest(
+    formWith({
+      api_keys: [
+        savedKey('key-a', { key_label: 'primary' }),
+        newKey,
+        { ...newKey, key_label: 'new key' },
+      ],
+    }),
+  )
+  // A new key still needs its secret; only its nickname may stay blank.
+  expect(request.api_keys?.map((key) => key.key_label)).toEqual([
+    'primary',
+    'new key',
+  ])
+})
+
+test('duplicate nicknames are reported per row before submit', () => {
+  const rows = (labels: string[]) => labels.map((key_label) => ({ key_label }))
+  // Exact match after trimming, mirroring the server duplicate check.
+  const found = duplicateEndpointApiKeyLabelIndexes(
+    rows(['primary', ' Primary ', '', 'primary', 'primary']),
+  )
+  expect(found).toEqual([0, 3, 4])
+  expect(
+    duplicateEndpointApiKeyLabelIndexes(rows(['primary', 'backup'])),
+  ).toEqual([])
+})
+
+test('endpoint key nickname copy exists in both locales', () => {
+  const keys = [
+    'apiKeyName',
+    'apiKeyNameDefault',
+    'apiKeyNameDuplicate',
+    'endpointApiKeysHint',
+  ]
+  for (const locale of ['zh-CN', 'en-US'] as const) {
+    const localeMessages = messages[locale] as Record<string, string>
+    for (const key of keys) {
+      expect(localeMessages[key].length).toBeGreaterThan(0)
+    }
+    // Usage lists show the nickname, so the placeholder mirrors the
+    // server-side positional default in both locales.
+    expect(localeMessages.apiKeyNameDefault).toBe('key {index}')
   }
 })

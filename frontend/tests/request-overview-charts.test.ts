@@ -21,6 +21,7 @@ Object.defineProperty(globalThis, 'localStorage', {
 })
 
 const { createTrendOption } = await import('../src/request-overview-charts')
+const { themeMode } = await import('../src/theme/appTheme')
 
 const labels = {
   cacheRead: 'Input (cache hit)',
@@ -285,4 +286,93 @@ test('trend MCP axis and tooltip compact request counts', () => {
   expect(text).toContain('1.5K')
   // Raw series values stay numeric for ECharts stacking.
   expect(seriesOf(option)[0]?.data).toEqual([2_500_000])
+})
+
+type Rgb = readonly [number, number, number]
+
+/** Chart surface behind the transparent option, per app theme mode. */
+const CHART_SURFACE: Record<'dark' | 'light', Rgb> = {
+  dark: [5, 10, 7],
+  light: [255, 255, 255],
+}
+
+function channels(color: string): number[] {
+  const value = color.trim()
+  if (!value.startsWith('#')) {
+    return (value.match(/[\d.]+/g) ?? []).map(Number)
+  }
+  const hex = value.slice(1)
+  const full =
+    hex.length === 3 ? [...hex].map((char) => char + char).join('') : hex
+  return [0, 2, 4].map((at) => parseInt(full.slice(at, at + 2), 16))
+}
+
+/** WCAG relative luminance. */
+function luminance(rgb: Rgb): number {
+  const [r, g, b] = rgb.map((channel) => {
+    const value = channel / 255
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** WCAG contrast ratio of a hex or rgba() chart color against the surface. */
+function contrastOn(color: string, surface: Rgb): number {
+  const parts = channels(color)
+  const alpha = parts.length > 3 ? parts[3] : 1
+  const flat = [0, 1, 2].map(
+    (at) => parts[at] * alpha + surface[at] * (1 - alpha),
+  ) as unknown as Rgb
+  const values = [luminance(flat), luminance(surface)]
+  return (Math.max(...values) + 0.05) / (Math.min(...values) + 0.05)
+}
+
+test('trend chart colors stay readable on the surface in both modes', () => {
+  const failures: string[] = []
+  const firstSeriesColor = new Map<'dark' | 'light', string>()
+  for (const mode of ['light', 'dark'] as const) {
+    themeMode.value = mode
+    const surface = CHART_SURFACE[mode]
+    for (const category of ['ai', 'mcp'] as const) {
+      const option = createTrendOption({
+        category,
+        labels,
+        trend: [trendBucket()],
+        formatTime: (value) => value,
+        formatCompact: formatTokenQuantity,
+      })
+      const splitLine = (
+        option as unknown as {
+          yAxis: Array<{ splitLine?: { lineStyle?: { color?: string } } }>
+        }
+      ).yAxis[0]?.splitLine
+      // WCAG AA for text, 3:1 for bars/lines/axis, and a visible-but-quiet grid.
+      const checks: Array<[string, string, number]> = [
+        ['legend', option.legend.textStyle.color, 4.5],
+        ['axis label', option.xAxis.axisLabel.color, 4.5],
+        ['tooltip text', option.tooltip.textStyle.color, 4.5],
+        ['axis line', option.xAxis.axisLine.lineStyle.color, 3],
+        ['grid', splitLine?.lineStyle?.color ?? '', 1.4],
+        ...seriesOf(option).map((series) => [
+          `series ${series.name}`,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (series as any).itemStyle?.color ?? '',
+          3,
+        ]),
+      ]
+      for (const [label, color, floor] of checks) {
+        const ratio = contrastOn(color, surface)
+        if (ratio < floor) {
+          failures.push(
+            `${mode}/${category}/${label} ${color} ${ratio.toFixed(2)}:1 < ${floor}:1`,
+          )
+        }
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      firstSeriesColor.set(mode, (seriesOf(option)[0] as any).itemStyle.color)
+    }
+  }
+  expect(failures).toEqual([])
+  // The palette is mode-driven: a theme switch must redraw with other colors.
+  expect(firstSeriesColor.get('light')).not.toBe(firstSeriesColor.get('dark'))
 })

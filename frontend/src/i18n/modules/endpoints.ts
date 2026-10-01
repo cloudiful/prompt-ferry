@@ -2,6 +2,9 @@ export const endpointMessages = {
   'zh-CN': {
     addTarget: '新增目标',
     addApiKey: '新增 API key',
+    apiKeyName: '名称',
+    apiKeyNameDefault: 'key {index}',
+    apiKeyNameDuplicate: '名称与其他 key 重复，请先改成唯一名称',
     apiKeyOptionalOnEdit: '留空则保持现有 API key',
     baseUrl: '基础地址',
     baseUrlHint:
@@ -30,7 +33,8 @@ export const endpointMessages = {
     endpointDeleted: '上游节点已删除',
     endpointSaved: '上游节点已保存',
     endpointTestIdle: '未测试',
-    endpointApiKeysHint: '可管理多个 API key；编辑时留空会保留已有密钥。',
+    endpointApiKeysHint:
+      '可管理多个 API key；名称会显示在套餐用量与路由详情中，留空按顺序自动命名。编辑时密钥留空会保留已有密钥。',
     endpointKeyLbEnabled: '启用 endpoint key 分流',
     endpointSourceAuto: '按调用端自动',
     endpointSourceDetected: '历史兼容',
@@ -176,6 +180,9 @@ export const endpointMessages = {
   'en-US': {
     addTarget: 'Add target',
     addApiKey: 'Add API key',
+    apiKeyName: 'Name',
+    apiKeyNameDefault: 'key {index}',
+    apiKeyNameDuplicate: 'Name duplicates another key; use a unique name',
     apiKeyOptionalOnEdit: 'Leave blank to keep the current API key',
     baseUrl: 'Base URL',
     baseUrlHint:
@@ -205,7 +212,7 @@ export const endpointMessages = {
     endpointSaved: 'Endpoint saved',
     endpointTestIdle: 'Not tested',
     endpointApiKeysHint:
-      'Manage multiple API keys. Leave a field blank while editing to keep the stored secret.',
+      'Manage multiple API keys. The name shows in token plan usage and routing details; leave it blank to auto-name by position. Leave a secret blank while editing to keep the stored one.',
     endpointKeyLbEnabled: 'Enable endpoint key balancing',
     endpointSourceAuto: 'Automatic by caller protocol',
     endpointSourceDetected: 'Legacy compatible',

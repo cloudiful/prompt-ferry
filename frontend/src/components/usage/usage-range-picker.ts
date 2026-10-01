@@ -82,6 +82,19 @@ export function rangesEqual(
   )
 }
 
+/**
+ * The calendar selection a (preset, stored window) pair may display. A preset
+ * owns its window, so an earlier custom selection must not stay highlighted
+ * over it; a custom selection echoes the stored window so it round-trips.
+ */
+export function calendarRangeForValue(
+  value: string,
+  start?: string | null,
+  end?: string | null,
+): UsageCalendarRange | null {
+  return value === 'custom' ? parseRange(start, end) : null
+}
+
 /** `YYYY-MM-DD – YYYY-MM-DD` label for a complete calendar range. */
 export function formatRangeLabel(range?: UsageCalendarRange | null): string {
   if (!isCompleteRange(range)) return ''

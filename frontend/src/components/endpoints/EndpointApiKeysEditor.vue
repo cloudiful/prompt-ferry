@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import { computed } from 'vue'
+import { duplicateEndpointApiKeyLabelIndexes } from '@/admin-mappers'
 import type { EndpointForm } from '@/models'
 
 const props = defineProps<{
@@ -16,7 +17,12 @@ const rows = computed<ApiKeyRow[]>(() =>
     index,
   })),
 )
+const duplicateLabelIndexes = computed<Set<number>>(
+  () =>
+    new Set(duplicateEndpointApiKeyLabelIndexes(form.value?.api_keys ?? [])),
+)
 const columns = computed<TableColumn<ApiKeyRow>[]>(() => [
+  { id: 'label', header: props.t('apiKeyName') },
   { id: 'key', header: props.t('apiKey') },
   { id: 'status', header: props.t('status') },
   { id: 'actions' },
@@ -69,13 +75,24 @@ function rowPlaceholder(index: number): string {
     : props.t('apiKey')
 }
 
-function apiKeyValue(index: number): string {
-  return form.value?.api_keys?.[index]?.api_key ?? ''
+function rowValue<K extends 'api_key' | 'key_label'>(
+  index: number,
+  field: K,
+): string {
+  return form.value?.api_keys?.[index]?.[field] ?? ''
 }
 
-function setApiKeyValue(index: number, value: string): void {
+function setRowValue<K extends 'api_key' | 'key_label'>(
+  index: number,
+  field: K,
+  value: string,
+): void {
   const entry = form.value?.api_keys?.[index]
-  if (entry) entry.api_key = value
+  if (entry) entry[field] = value
+}
+
+function labelPlaceholder(index: number): string {
+  return props.t('apiKeyNameDefault', { index: index + 1 })
 }
 
 function apiKeyEnabled(index: number): boolean {
@@ -126,16 +143,36 @@ function setApiKeyEnabled(index: number, value: boolean): void {
       class="min-w-0"
       :ui="{ th: 'whitespace-nowrap' }"
     >
+      <template #label-cell="{ row }">
+        <div class="grid min-w-0 gap-0.5">
+          <UInput
+            :model-value="rowValue(row.original.index, 'key_label')"
+            class="min-w-0 flex-1"
+            :placeholder="labelPlaceholder(row.original.index)"
+            @update:model-value="
+              setRowValue(row.original.index, 'key_label', $event)
+            "
+          />
+          <p
+            v-if="duplicateLabelIndexes.has(row.original.index)"
+            class="text-xs text-error"
+          >
+            {{ t('apiKeyNameDuplicate') }}
+          </p>
+        </div>
+      </template>
       <template #key-cell="{ row }">
         <div class="flex min-w-0 items-center gap-2">
           <div v-if="rowHasSavedKey(row.original.index)" class="shrink-0">
             <UBadge :label="t('saved')" color="neutral" />
           </div>
           <UInput
-            :model-value="apiKeyValue(row.original.index)"
+            :model-value="rowValue(row.original.index, 'api_key')"
             class="min-w-0 flex-1"
             :placeholder="rowPlaceholder(row.original.index)"
-            @update:model-value="setApiKeyValue(row.original.index, $event)"
+            @update:model-value="
+              setRowValue(row.original.index, 'api_key', $event)
+            "
           />
         </div>
       </template>

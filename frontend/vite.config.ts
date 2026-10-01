@@ -92,6 +92,10 @@ export default defineConfig({
       icons: bundledLucideIcons.map((name) => `lucide:${name}`),
     }),
     ui({
+      // The app owns `<html class="dark">` through `prompt-ferry:theme-mode`;
+      // Nuxt UI's color-mode controller would restore the system preference and
+      // drop the class the first-paint script set.
+      colorMode: false,
       experimental: { componentDetection: true },
       ui: {
         colors: {

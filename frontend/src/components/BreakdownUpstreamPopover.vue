@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import type { RequestRecordOverviewBreakdownRow } from '@/generated/admin-api'
 import { useLocale } from '@/composables/useLocale'
-import type { RequestOverviewPerspective } from '@/request-overview'
+import {
+  splitFailedOnlyDetailEntries,
+  type RequestOverviewPerspective,
+} from '@/request-overview'
 import type { RequestRecordFormatting } from '../models/request-record-formatting'
 
 /**
@@ -82,6 +85,23 @@ const visible = computed(() =>
     : (props.row.upstream_count ?? 0) > 1,
 )
 
+// Issue #34 P3: fully failed zero-token rows are collapsed by default; the
+// hidden request count stays on screen with a control that reveals them.
+const revealFailedOnly = ref(false)
+const split = computed(() => splitFailedOnlyDetailEntries(entries.value))
+const shownEntries = computed(() =>
+  revealFailedOnly.value
+    ? [...split.value.visible, ...split.value.failedOnly]
+    : split.value.visible,
+)
+
+watch(
+  () => props.row,
+  () => {
+    revealFailedOnly.value = false
+  },
+)
+
 const columns = computed<TableColumn<DetailEntry>[]>(() => {
   const headers: TableColumn<DetailEntry>[] = []
   if (!isUpstream.value) {
@@ -142,9 +162,31 @@ const columns = computed<TableColumn<DetailEntry>[]>(() => {
               : t('overviewUpstreamBreakdown')
           }}
         </div>
+        <div
+          v-if="split.failedOnly.length"
+          class="mb-2 flex items-center justify-between gap-2 text-xs text-muted"
+        >
+          <span>{{
+            t('overviewFailedOnlyHidden', {
+              count: formatting.formatCount(split.failedRequestCount),
+            })
+          }}</span>
+          <UButton
+            type="button"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            :label="
+              revealFailedOnly
+                ? t('overviewFailedOnlyHide')
+                : t('overviewFailedOnlyReveal')
+            "
+            @click.stop="revealFailedOnly = !revealFailedOnly"
+          />
+        </div>
         <UTable
-          v-if="entries.length"
-          :data="entries"
+          v-if="shownEntries.length"
+          :data="shownEntries"
           :columns="columns"
           class="w-full"
           :ui="{
@@ -186,7 +228,7 @@ const columns = computed<TableColumn<DetailEntry>[]>(() => {
             )
           }}</template>
         </UTable>
-        <div v-else class="text-xs text-dimmed">
+        <div v-else-if="!split.failedOnly.length" class="text-xs text-dimmed">
           {{ t('overviewUpstreamEmpty') }}
         </div>
       </div>

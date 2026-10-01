@@ -3,6 +3,7 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import type { DateRange } from 'reka-ui'
 import type { RequestRecordOverviewRange } from '@/generated/admin-api'
 import {
+  calendarRangeForValue,
   formatRangeLabel,
   isCompleteRange,
   parseRange,
@@ -26,7 +27,7 @@ const emit = defineEmits<{
 const open = ref(false)
 const selectedValue = ref(props.value)
 const calendarRange = shallowRef<DateRange | null>(
-  parseRange(props.start, props.end),
+  calendarRangeForValue(props.value, props.start, props.end),
 )
 
 const options = computed(() => [
@@ -51,21 +52,37 @@ watch(
   () => [props.start, props.end, props.value] as const,
   () => {
     selectedValue.value = props.value
-    const range = parseRange(props.start, props.end)
-    if (range) calendarRange.value = range
+    // Issue #34 P2: a preset owns the window it just applied, so the calendar
+    // must not keep a custom selection from an earlier range highlighted.
+    calendarRange.value = calendarRangeForValue(
+      props.value,
+      props.start,
+      props.end,
+    )
   },
 )
 
 function selectPreset(value: UsageRangePreset): void {
   selectedValue.value = value
   if (value === 'custom') return
+  calendarRange.value = calendarRangeForValue(value, props.start, props.end)
   open.value = false
   emit('apply', { range: value })
 }
 
 function applyCustomRange(range?: DateRange | null): void {
   if (!isCompleteRange(range)) return
-  if (rangesEqual(parseRange(props.start, props.end), range)) return
+  if (rangesEqual(parseRange(props.start, props.end), range)) {
+    // Nothing to apply: keep the stored selection so the trigger label and the
+    // calendar cannot disagree about the active range.
+    selectedValue.value = props.value
+    calendarRange.value = calendarRangeForValue(
+      props.value,
+      props.start,
+      props.end,
+    )
+    return
+  }
   const input = toCustomRangeInput(range)
   if (!input) return
   selectedValue.value = 'custom'

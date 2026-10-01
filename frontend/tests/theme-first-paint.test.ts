@@ -372,3 +372,28 @@ test('the served HTML carries the dark default on the root before any script', (
     /color-scheme:\s*dark/,
   )
 })
+
+// --- P1: the app theme stays the only `<html class="dark">` controller ---
+
+/** The plugin list `src/main.ts` installs through `@nuxt/ui/vue-plugin`. */
+async function nuxtUiRuntimePlugins(): Promise<string> {
+  const { default: config } = await import('../vite.config')
+  const plugins = (config.plugins ?? []).flat(Infinity) as Array<{
+    name?: string
+    resolveId?: (id: string) => string | undefined
+    load?: (id: string) => string | undefined
+  }>
+  const plugin = plugins.find((entry) => entry.name === 'nuxt:ui:plugins')
+  if (!plugin?.resolveId || !plugin.load) {
+    throw new Error('vite.config.ts no longer exposes the Nuxt UI plugins')
+  }
+  return plugin.load(plugin.resolveId('@nuxt/ui/vue-plugin')) ?? ''
+}
+
+test('Nuxt UI installs no color-mode controller that could fight the app theme', async () => {
+  const module = await nuxtUiRuntimePlugins()
+
+  expect(module).not.toContain('color-mode')
+  // Disabling the controller must leave Nuxt UI's other runtime plugins in place.
+  expect(module).toContain('plugins/colors.js')
+})

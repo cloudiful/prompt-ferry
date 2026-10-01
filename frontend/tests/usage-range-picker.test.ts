@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { parseDate } from '@internationalized/date'
 import type { DateRange } from 'reka-ui'
 import {
+  calendarRangeForValue,
   exclusiveEndIso,
   formatRangeLabel,
   isCompleteRange,
@@ -137,4 +138,30 @@ test('formatRangeLabel renders both selected dates', () => {
     '2026-09-01 – 2026-09-30',
   )
   expect(formatRangeLabel(null)).toBe('')
+})
+
+test('a custom selection echoes the stored window', () => {
+  const echoed = calendarRangeForValue(
+    'custom',
+    '2026-09-01T00:00:00.000Z',
+    '2026-10-01T00:00:00.000Z',
+  )
+  expect(echoed?.start?.toString()).toBe('2026-09-01')
+  expect(echoed?.end?.toString()).toBe('2026-09-30')
+})
+
+test('a quick preset leaves no custom calendar selection behind', () => {
+  // Regression: picking a preset kept the previous custom dates highlighted in
+  // the calendar, so reopening the picker offered a stale range.
+  for (const preset of ['24h', '7d', '30d', 'month']) {
+    expect(
+      calendarRangeForValue(
+        preset,
+        '2026-09-01T00:00:00.000Z',
+        '2026-10-01T00:00:00.000Z',
+      ),
+    ).toBeNull()
+  }
+  // A custom value without a stored window still has nothing to highlight.
+  expect(calendarRangeForValue('custom', '', '')).toBeNull()
 })

@@ -3,7 +3,7 @@ import type {
   EndpointRequest,
   ProviderEndpoint,
 } from '../../generated/admin-api'
-import type { EndpointForm } from '../../models'
+import type { EndpointApiKeyForm, EndpointForm } from '../../models'
 
 // Issue #637: service tiers are free-form strings, not a fixed enum. Trim the
 // value and treat blank/whitespace-only input as inherit (`null`) so the
@@ -66,6 +66,46 @@ export function resolveAdminApiKeyRequest(form: {
   if (form.admin_api_key_clear) return ''
   const trimmed = (form.admin_api_key ?? '').trim()
   return trimmed !== '' ? trimmed : undefined
+}
+
+// Issue #34 P1: `key_label` is the operator-facing nickname shown in token plan
+// usage and routing details. The server rejects duplicate non-empty labels, so
+// the editor reports them before submit; blank labels are normalized to the
+// positional default server-side and never collide.
+export function duplicateEndpointApiKeyLabelIndexes(
+  keys: ReadonlyArray<Pick<EndpointApiKeyForm, 'key_label'>>,
+): number[] {
+  const firstIndexByLabel = new Map<string, number>()
+  const duplicates = new Set<number>()
+  for (const [index, key] of (keys ?? []).entries()) {
+    const label = (key?.key_label ?? '').trim()
+    if (label === '') continue
+    const first = firstIndexByLabel.get(label)
+    if (first === undefined) {
+      firstIndexByLabel.set(label, index)
+      continue
+    }
+    duplicates.add(first)
+    duplicates.add(index)
+  }
+  return [...duplicates]
+}
+
+// Issue #34 P1: the editor exposes the nickname next to the secret, so clearing
+// a label must not drop the key. The server matches a submitted row to the
+// stored one by `key_id` and keeps both the secret and the label when the
+// request fields are blank, so a saved row is always submitted; only a row with
+// nothing stored and nothing typed is discarded.
+export function isSubmittedEndpointApiKey(
+  key: Partial<EndpointApiKeyForm> | null | undefined,
+): boolean {
+  if (!key) return false
+  return (
+    key.has_saved_key === true ||
+    (key.key_id ?? '') !== '' ||
+    (key.key_label ?? '').trim() !== '' ||
+    (key.api_key ?? '').trim() !== ''
+  )
 }
 
 export function createEmptyEndpointForm(): EndpointForm {
@@ -225,13 +265,15 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
     // Issue #589 P2c: Admin API Key save/keep/clear, OpenAI-only.
     admin_api_key: resolveAdminApiKeyRequest(safe),
     api_keys: apiKeys
+      // Issue #34 P1: keep the row before mapping so `has_saved_key` still
+      // tells a cleared-label saved key apart from an empty new row.
+      .filter(isSubmittedEndpointApiKey)
       .map((key) => ({
         key_label: (key.key_label ?? '').trim(),
         api_key: key.api_key ?? '',
         enabled: key.enabled ?? true,
         key_id: key.key_id || undefined,
-      }))
-      .filter((key) => key.key_label || key.api_key),
+      })),
     key_lb_enabled: safe.key_lb_enabled ?? false,
     base_url: (safe.base_url ?? '').trim(),
     enabled: safe.enabled ?? true,
