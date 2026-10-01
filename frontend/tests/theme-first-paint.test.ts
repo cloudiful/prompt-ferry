@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { THEME_MODE_STORAGE_KEY } from '../src/storage'
+import {
+  THEME_MODE_STORAGE_KEY,
+  readStorage,
+  writeStorage,
+} from '../src/storage'
 
 const indexHtml = readFileSync(
   new URL('../index.html', import.meta.url),
@@ -225,4 +229,146 @@ test('missing localStorage still applies the dark default', () => {
 
   expect(element.classList.contains('dark')).toBe(true)
   expect(element.style.colorScheme).toBe('dark')
+})
+
+// --- P1: LibreWolf/Firefox storage failures and inline/runtime parity ---
+
+const baseCss = readFileSync(
+  new URL('../src/styles/base.css', import.meta.url),
+  'utf8',
+)
+
+type Globals = Record<string, unknown>
+
+/** Runs `body` with `overrides` installed as globals, then restores them. */
+async function withGlobals<T>(
+  overrides: Globals,
+  body: () => T | Promise<T>,
+): Promise<T> {
+  const globals = globalThis as Globals
+  const saved = new Map<string, unknown>()
+  for (const [key, value] of Object.entries(overrides)) {
+    saved.set(key, globals[key])
+    if (value === undefined) delete globals[key]
+    else globals[key] = value
+  }
+  try {
+    return await body()
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete globals[key]
+      else globals[key] = value
+    }
+  }
+}
+
+let loadCounter = 0
+/** A fresh module instance, so every case runs its own startup path. */
+function loadThemeModule(): Promise<typeof import('../src/theme/appTheme')> {
+  loadCounter += 1
+  return import(`../src/theme/appTheme?case=${loadCounter}`)
+}
+
+function documentStub(element: DocumentElementStub): Globals {
+  return { document: { documentElement: element } }
+}
+
+test('a blocked store never breaks a read or a write', async () => {
+  const blocked = {
+    getItem() {
+      throw new Error('storage blocked')
+    },
+    setItem() {
+      throw new Error('quota exceeded')
+    },
+  }
+
+  for (const localStorage of [undefined, blocked]) {
+    await withGlobals({ localStorage }, () => {
+      expect(readStorage(THEME_MODE_STORAGE_KEY)).toBeNull()
+      expect(() => writeStorage(THEME_MODE_STORAGE_KEY, 'light')).not.toThrow()
+    })
+  }
+})
+
+test('the theme module starts dark and writes nothing when storage is blocked', async () => {
+  const writes: Array<[string, string]> = []
+
+  const theme = await withGlobals(
+    {
+      localStorage: {
+        getItem() {
+          throw new Error('storage blocked')
+        },
+        setItem: (key: string, value: string) => writes.push([key, value]),
+      },
+    },
+    loadThemeModule,
+  )
+
+  expect(theme.themeMode.value).toBe('dark')
+  expect(writes).toEqual([])
+})
+
+test('the theme module starts from the persisted mode without rewriting it', async () => {
+  const writes: Array<[string, string]> = []
+
+  const theme = await withGlobals(
+    {
+      localStorage: {
+        getItem: (key: string) =>
+          key === THEME_MODE_STORAGE_KEY ? 'light' : null,
+        setItem: (key: string, value: string) => writes.push([key, value]),
+      },
+    },
+    loadThemeModule,
+  )
+
+  expect(theme.themeMode.value).toBe('light')
+  // Module initialization must not undo a correct first paint by persisting.
+  expect(writes).toEqual([])
+
+  const element = createDocumentElement()
+  await withGlobals(documentStub(element), () => theme.initTheme())
+
+  expect(element.classList.contains('dark')).toBe(false)
+  expect(element.style.colorScheme).toBe('light')
+})
+
+test('the inline init and the runtime resolve every stored value identically', async () => {
+  const theme = await loadThemeModule()
+  const cases: Array<string | null> = [
+    'dark',
+    'light',
+    null,
+    '',
+    'Dark',
+    'LIGHT',
+    'light ',
+    'true',
+    '0',
+  ]
+
+  for (const stored of cases) {
+    const inline = runThemeInit(stored)
+    const runtime = createDocumentElement()
+
+    await withGlobals(documentStub(runtime), () =>
+      theme.applyThemeToDocument(theme.resolveThemeMode(stored)),
+    )
+
+    expect(runtime.classList.contains('dark')).toBe(
+      inline.classList.contains('dark'),
+    )
+    expect(runtime.style.colorScheme).toBe(inline.style.colorScheme)
+  }
+})
+
+test('the served HTML carries the dark default on the root before any script', () => {
+  expect(indexHtml.match(/<html[^>]*>/)?.[0]).toMatch(
+    /class="[^"]*\bdark\b[^"]*"/,
+  )
+  expect(baseCss.match(/:root\s*\{([^}]*)\}/)?.[1]).toMatch(
+    /color-scheme:\s*dark/,
+  )
 })

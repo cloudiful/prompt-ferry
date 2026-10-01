@@ -28,6 +28,10 @@ select {
 
 :root {
   --ui-header-height: 3rem;
+  /* First-paint default: keeps the served canvas dark even when the inline
+     head script is blocked. The theme runtime overrides this with an inline
+     style once a persisted light selection is resolved. */
+  color-scheme: dark;
 }
 
 /* Dashboard chrome: consistent sidebar navigation typography */

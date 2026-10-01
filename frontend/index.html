@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,7 +9,10 @@
     <script id="theme-first-paint">
       // Apply the persisted theme synchronously before the module entry paints,
       // so browsers that paint before the deferred module bundle (Firefox/LibreWolf)
-      // never flash the default light theme.
+      // never flash the default light theme. Mirrors resolveThemeMode and
+      // applyThemeToDocument in src/theme/appTheme.ts, which stay the source of
+      // truth; <html class="dark"> and the :root color-scheme in base.css carry
+      // the dark default if this script is blocked.
       ;(() => {
         let mode = 'dark'
         try {
