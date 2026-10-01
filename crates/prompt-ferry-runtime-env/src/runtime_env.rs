@@ -8,11 +8,10 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-const DATABASE_URL_ENV_KEYS: &[&str] = &[
-    "PROMPT_FERRY_DEV_DATABASE_URL",
-    "PROMPT_FERRY_WORKER__DATABASE_URL",
-    "DATABASE_URL",
-];
+/// Canonical environment variable carrying the PostgreSQL URL. The worker
+/// config file field `worker.database_url` and an explicit `--database-url`
+/// CLI argument remain supported; no other environment alias is read.
+const DATABASE_URL_ENV_KEYS: &[&str] = &["DATABASE_URL"];
 
 pub fn load_dotenv(path: impl AsRef<Path>) -> Result<()> {
     load_dotenv_if_exists(path)
@@ -270,10 +269,8 @@ mod tests {
     }
 
     #[test]
-    fn database_url_resolution_prefers_arg_then_new_then_database_url() {
+    fn database_url_resolution_prefers_arg_then_database_url_env() {
         unsafe {
-            std::env::remove_var("PROMPT_FERRY_DEV_DATABASE_URL");
-            std::env::remove_var("PROMPT_FERRY_WORKER__DATABASE_URL");
             std::env::remove_var("DATABASE_URL");
         }
 
@@ -284,36 +281,13 @@ mod tests {
             "postgres://arg"
         );
 
-        unsafe { std::env::set_var("PROMPT_FERRY_DEV_DATABASE_URL", "postgres://new-dev") };
-        assert_eq!(
-            resolve_database_url(None).unwrap().database_url,
-            "postgres://new-dev"
-        );
-
-        unsafe {
-            std::env::remove_var("PROMPT_FERRY_DEV_DATABASE_URL");
-            std::env::set_var("PROMPT_FERRY_WORKER__DATABASE_URL", "postgres://worker");
-        }
-        assert_eq!(
-            resolve_database_url(None).unwrap().database_url,
-            "postgres://worker"
-        );
-
-        unsafe {
-            std::env::remove_var("PROMPT_FERRY_DEV_DATABASE_URL");
-            std::env::remove_var("PROMPT_FERRY_WORKER__DATABASE_URL");
-            std::env::set_var("DATABASE_URL", "postgres://default");
-        }
+        unsafe { std::env::set_var("DATABASE_URL", "postgres://default") };
         assert_eq!(
             resolve_database_url(None).unwrap().database_url,
             "postgres://default"
         );
 
-        unsafe {
-            std::env::remove_var("PROMPT_FERRY_DEV_DATABASE_URL");
-            std::env::remove_var("PROMPT_FERRY_WORKER__DATABASE_URL");
-            std::env::remove_var("DATABASE_URL");
-        }
+        unsafe { std::env::remove_var("DATABASE_URL") };
     }
 
     #[test]

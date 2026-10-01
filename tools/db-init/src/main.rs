@@ -5,16 +5,14 @@ use sqlx::migrate::Migrator;
 
 static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 
-const DATABASE_URL_ENV_KEYS: &[&str] = &[
-    "PROMPT_FERRY_DEV_DATABASE_URL",
-    "PROMPT_FERRY_WORKER__DATABASE_URL",
-    "DATABASE_URL",
-];
+/// Canonical PostgreSQL URL environment variable. An explicit
+/// `--database-url` argument and the worker config field remain supported.
+const DATABASE_URL_ENV_KEYS: &[&str] = &["DATABASE_URL"];
 
 #[derive(Debug, Parser)]
 #[command(name = "db_init", about = "Database helpers for prompt-ferry")]
 struct Cli {
-    #[arg(long, env = "PROMPT_FERRY_DEV_DATABASE_URL")]
+    #[arg(long, env = "DATABASE_URL")]
     database_url: Option<String>,
 }
 

@@ -41,7 +41,13 @@ use prompt_ferry_runtime_env::relay_secrets::RelaySecretManager;
 use reqwest::Client;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::postgres::PgPoolOptions;
+#[allow(dead_code)]
+mod test_db_url {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/test_db_url.rs"
+    ));
+}
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex as AsyncMutex, MutexGuard};
 use tower::ServiceExt;
@@ -482,8 +488,7 @@ impl OAuthAdminFixture {
         user_store
             .bootstrap_admin("oauth-admin", "oauth-password")
             .await?;
-        let pool = PgPoolOptions::new()
-            .connect_lazy("postgres://postgres:postgres@localhost/prompt_ferry")?;
+        let pool = test_db_url::lazy_test_pool();
         let state = AdminState::new(AdminStateInit {
             pool: pool.clone(),
             lease_pool: pool.clone(),

@@ -16,8 +16,15 @@ use crate::{
 use anyhow::anyhow;
 use base64::Engine as _;
 use chrono::Utc;
-use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
+
+#[allow(dead_code)]
+mod test_db_url {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/test_db_url.rs"
+    ));
+}
 
 use super::ai::upstream::upstream_url_for_route;
 use super::connect::is_expected_relay_disconnect;
@@ -61,7 +68,7 @@ fn rejects_upstream_base_url_with_v1_path() {
 #[test]
 fn managed_mode_rejects_invalid_encryption_key() {
     let config = WorkerConfig {
-        database_url: "postgres://postgres:postgres@localhost/prompt_ferry".to_string(),
+        database_url: test_db_url::lazy_test_database_url(),
         upstream_api_key: String::new(),
         relay_urls: Vec::new(),
         worker_token: "token".to_string(),
@@ -74,7 +81,7 @@ fn managed_mode_rejects_invalid_encryption_key() {
 #[test]
 fn managed_mode_allows_zero_relays_with_master_key() {
     let config = WorkerConfig {
-        database_url: "postgres://postgres:postgres@localhost/prompt_ferry".to_string(),
+        database_url: test_db_url::lazy_test_database_url(),
         upstream_api_key: String::new(),
         relay_urls: Vec::new(),
         worker_token: "token".to_string(),
@@ -541,9 +548,7 @@ pub(super) fn session_affinity_services(
     runtime_state: WorkerRuntimeState,
     replay_cache: ReplayCache,
 ) -> RuntimeServices {
-    let pool = PgPoolOptions::new()
-        .connect_lazy("postgres://postgres:postgres@localhost/prompt_ferry")
-        .expect("lazy pool");
+    let pool = test_db_url::lazy_test_pool();
     let catalog_cache = McpCatalogCache::new();
     let admin_state = AdminState::new(AdminStateInit {
         pool: pool.clone(),

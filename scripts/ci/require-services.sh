@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Fail fast when the PostgreSQL / Valkey test services are absent or unreachable.
+# Fail fast when the Valkey test service is absent or unreachable.
 #
-# Every service-backed Rust test skips only when its two service env vars are
-# absent, so requiring them here (plus a TCP reachability probe) is the primary
-# no-silent-skip guarantee. This script never prints a connection URL or its
-# userinfo; it reports only the scheme, host and port.
+# Valkey is the only service the Rust workspace test run needs: the
+# response-affinity regression tests run against a real instance, and they skip
+# silently without it, so this preflight is the no-silent-skip guarantee.
+# Database-shaped test helpers are lazy pools scoped to an isolated schema that
+# never connects, so no PostgreSQL URL is read or probed here. This script never
+# prints a connection URL or its userinfo; it reports only the scheme, host and
+# port.
 set -euo pipefail
 
-: "${PROMPT_FERRY_TEST_DATABASE_URL:?PROMPT_FERRY_TEST_DATABASE_URL is required for integration tests}"
 : "${PROMPT_FERRY_TEST_VALKEY_URL:?PROMPT_FERRY_TEST_VALKEY_URL is required for Valkey-backed tests}"
 
 ATTEMPTS="${SERVICE_PROBE_ATTEMPTS:-30}"
@@ -24,11 +26,10 @@ from urllib.parse import urlsplit
 parsed = urlsplit(os.environ["URL"])
 scheme = parsed.scheme or "<none>"
 host = parsed.hostname or "<none>"
-if parsed.scheme not in {"postgres", "postgresql", "redis", "rediss"} or not parsed.hostname:
+if parsed.scheme not in {"redis", "rediss"} or not parsed.hostname:
     # Never echo the URL: it can carry a password in the userinfo segment.
     sys.exit(f"unsupported service URL: scheme={scheme} host={host}")
-default = 5432 if parsed.scheme.startswith("postgres") else 6379
-print(f"{parsed.scheme} {parsed.hostname} {parsed.port or default}")
+print(f"{parsed.scheme} {parsed.hostname} {parsed.port or 6379}")
 PY
 }
 
@@ -70,5 +71,4 @@ PY
   done
 }
 
-probe "postgres" "$PROMPT_FERRY_TEST_DATABASE_URL"
 probe "valkey" "$PROMPT_FERRY_TEST_VALKEY_URL"

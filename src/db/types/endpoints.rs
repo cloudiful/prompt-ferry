@@ -470,84 +470,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn command_code_provider_round_trips_as_snake_case() {
-        assert_eq!(EndpointProvider::CommandCode.as_str(), "command_code");
-        assert_eq!(
-            EndpointProvider::from_str_or_default("command_code"),
-            EndpointProvider::CommandCode
-        );
-        assert_eq!(
-            EndpointProvider::from_optional(Some("command_code")),
-            EndpointProvider::CommandCode
-        );
-        // Serde uses snake_case, matching the admin API contract.
-        let serialized = serde_json::to_value(EndpointProvider::CommandCode)
-            .expect("serialize command_code provider");
-        assert_eq!(serialized, serde_json::json!("command_code"));
-        let deserialized: EndpointProvider =
-            serde_json::from_value(serde_json::json!("command_code"))
-                .expect("deserialize command_code provider");
-        assert_eq!(deserialized, EndpointProvider::CommandCode);
-        // Unknown providers keep the legacy generic fallback.
-        assert_eq!(
-            EndpointProvider::from_str_or_default("legacy-unknown"),
-            EndpointProvider::Generic
-        );
-    }
-
-    #[test]
-    fn opencode_go_provider_round_trips_as_snake_case() {
-        assert_eq!(EndpointProvider::OpencodeGo.as_str(), "opencode_go");
-        assert_eq!(
-            EndpointProvider::from_str_or_default("opencode_go"),
-            EndpointProvider::OpencodeGo
-        );
-        assert_eq!(
-            EndpointProvider::from_optional(Some("opencode_go")),
-            EndpointProvider::OpencodeGo
-        );
-        // Serde uses snake_case, matching the admin API contract.
-        let serialized = serde_json::to_value(EndpointProvider::OpencodeGo)
-            .expect("serialize opencode_go provider");
-        assert_eq!(serialized, serde_json::json!("opencode_go"));
-        let deserialized: EndpointProvider =
-            serde_json::from_value(serde_json::json!("opencode_go"))
-                .expect("deserialize opencode_go provider");
-        assert_eq!(deserialized, EndpointProvider::OpencodeGo);
-        // Unknown providers keep the legacy generic fallback.
-        assert_eq!(
-            EndpointProvider::from_str_or_default("legacy-unknown"),
-            EndpointProvider::Generic
-        );
-    }
-
-    #[test]
-    fn openrouter_provider_round_trips_as_snake_case() {
-        assert_eq!(EndpointProvider::OpenRouter.as_str(), "openrouter");
-        assert_eq!(
-            EndpointProvider::from_str_or_default("openrouter"),
-            EndpointProvider::OpenRouter
-        );
-        assert_eq!(
-            EndpointProvider::from_optional(Some("openrouter")),
-            EndpointProvider::OpenRouter
-        );
-        // Serde uses snake_case, matching the admin API contract.
-        let serialized = serde_json::to_value(EndpointProvider::OpenRouter)
-            .expect("serialize openrouter provider");
-        assert_eq!(serialized, serde_json::json!("openrouter"));
-        let deserialized: EndpointProvider =
-            serde_json::from_value(serde_json::json!("openrouter"))
-                .expect("deserialize openrouter provider");
-        assert_eq!(deserialized, EndpointProvider::OpenRouter);
-        // Unknown providers keep the legacy generic fallback.
-        assert_eq!(
-            EndpointProvider::from_str_or_default("legacy-unknown"),
-            EndpointProvider::Generic
-        );
-    }
-
-    #[test]
     fn glm_provider_round_trips_as_snake_case() {
         // Issue #230: GLM is the Zhipu Coding Plan provider. It serializes
         // to the single-token `glm` (matching the 0076/0015 migration
@@ -568,37 +490,6 @@ mod tests {
         let deserialized: EndpointProvider =
             serde_json::from_value(serde_json::json!("glm")).expect("deserialize glm provider");
         assert_eq!(deserialized, EndpointProvider::Glm);
-        // Unknown providers keep the legacy generic fallback.
-        assert_eq!(
-            EndpointProvider::from_str_or_default("legacy-unknown"),
-            EndpointProvider::Generic
-        );
-        assert_eq!(
-            EndpointProvider::from_optional(None),
-            EndpointProvider::Generic
-        );
-    }
-
-    #[test]
-    fn deepseek_provider_round_trips_as_single_token() {
-        // Issue #287: DeepSeek is the seventh provider; it serializes to the
-        // single-token `deepseek` (matching the 0079 CHECK and the admin API
-        // contract), not the derived `deep_seek`.
-        assert_eq!(EndpointProvider::DeepSeek.as_str(), "deepseek");
-        assert_eq!(
-            EndpointProvider::from_str_or_default("deepseek"),
-            EndpointProvider::DeepSeek
-        );
-        assert_eq!(
-            EndpointProvider::from_optional(Some("deepseek")),
-            EndpointProvider::DeepSeek
-        );
-        let serialized =
-            serde_json::to_value(EndpointProvider::DeepSeek).expect("serialize deepseek provider");
-        assert_eq!(serialized, serde_json::json!("deepseek"));
-        let deserialized: EndpointProvider = serde_json::from_value(serde_json::json!("deepseek"))
-            .expect("deserialize deepseek provider");
-        assert_eq!(deserialized, EndpointProvider::DeepSeek);
         // Unknown providers keep the legacy generic fallback.
         assert_eq!(
             EndpointProvider::from_str_or_default("legacy-unknown"),

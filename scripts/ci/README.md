@@ -1,14 +1,13 @@
 # CI coverage scripts
 
 `#569 Phase 0` measures coverage and gates only the redaction chain. These
-scripts are reproducible locally with Docker or any reachable PostgreSQL 17 and
-Valkey.
+scripts are reproducible locally with Docker or any reachable Valkey.
 
 ## Scripts
 
 | Script | Purpose |
 | --- | --- |
-| `require-services.sh` | The no-silent-skip guarantee: fails when `PROMPT_FERRY_TEST_DATABASE_URL` / `PROMPT_FERRY_TEST_VALKEY_URL` are unset or unreachable (never prints credentials, only scheme/host/port). |
+| `require-services.sh` | The no-silent-skip guarantee: fails when `PROMPT_FERRY_TEST_VALKEY_URL` is unset or unreachable (never prints credentials, only scheme/host/port). |
 | `run-tests.sh` | Runs `cargo test --workspace -- --test-threads=1`, then `check-test-summary.py`. |
 | `check-test-summary.py` | Rejects a run with failures, `#[ignore]`d tests, or no results at all. |
 | `coverage.sh` | Runs `cargo llvm-cov --workspace --lcov`, writes the workspace + redaction baseline report, then enforces the diff gate. |
@@ -20,7 +19,6 @@ Valkey.
 ## Local reproduction
 
 ```bash
-export PROMPT_FERRY_TEST_DATABASE_URL=postgres://<user>:<password>@<host>:5432/<db>
 export PROMPT_FERRY_TEST_VALKEY_URL=redis://<host>:6379
 scripts/ci/run-tests.sh
 
@@ -59,12 +57,15 @@ test files never appear in LCOV in the first place.
 
 ## No-silent-skip guarantee
 
-Every service-backed test skips only when its two service env vars are absent,
-so `require-services.sh` requiring and reachability-probing them is the primary
-guarantee: once it passes, the skip branches cannot trigger. `check-test-summary.py`
-is the complementary summary guard (no failures, no ignored tests, results
-present). The suite is never run with `--nocapture`, and no script logs a
-connection URL.
+The only service-backed test reads `PROMPT_FERRY_TEST_VALKEY_URL` (Valkey), so
+`require-services.sh` requiring and reachability-probing it is the primary
+guarantee: once it passes, the skip branch cannot trigger. PostgreSQL is not a
+test service: the suite reads no `.env` and needs no `DATABASE_URL`, and every
+database-shaped test helper is a lazy pool pinned to an isolated `pfy_test_*`
+schema that never connects. Migrations are exercised by `cargo run --bin
+db_init` in the development environment. `check-test-summary.py` is the
+complementary summary guard (no failures, no ignored tests, results present).
+The suite is never run with `--nocapture`, and no script logs a connection URL.
 
 ## Mutation testing (#569 Phase 2)
 
@@ -78,16 +79,15 @@ cargo-mutants mutates only the root `prompt-ferry` package and silently drops
 with `cargo mutants --list-files --workspace`, which must list those six files.
 
 Mutation testing is manual-only because a batch is long-running. The run
-executes `require-services.sh` first, so the PostgreSQL/Valkey-backed tests
-cannot silently skip, and sets `RUST_TEST_THREADS=1` to keep the shared-database
-and global-redaction-lock suite serialized; `cargo-mutants` itself stays
-sequential. The report lands in `mutants.out/`. Target: survivors below 10%,
-with each surviving mutant either killed by a new assertion or waived in
-writing. `cargo mutants --shard k/n` splits one batch across bounded runs.
+executes `require-services.sh` first, so the Valkey-backed tests cannot silently
+skip, and sets `RUST_TEST_THREADS=1` to keep the global-redaction-lock suite
+serialized; `cargo-mutants` itself stays sequential. The report lands in
+`mutants.out/`. Target: survivors below 10%, with each surviving mutant either
+killed by a new assertion or waived in writing. `cargo mutants --shard k/n`
+splits one batch across bounded runs.
 
 ```bash
 cargo install cargo-mutants --locked
-export PROMPT_FERRY_TEST_DATABASE_URL=postgres://<user>:<password>@<host>:5432/<db>
 export PROMPT_FERRY_TEST_VALKEY_URL=redis://<host>:6379
 scripts/ci/require-services.sh
 RUST_TEST_THREADS=1 cargo mutants --in-place --no-shuffle --workspace

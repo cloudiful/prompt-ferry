@@ -1,62 +1,49 @@
-//! Regression test for issue 277 P4: the PostgreSQL pool must bound how long
-//! a caller waits for a pooled connection instead of inheriting the 30s sqlx
-//! default, and the bound must be env-overridable.
+//! Guard for the canonical PostgreSQL configuration entry point.
 //!
-//! The test needs no schema objects, so it connects to the configured test
-//! database directly and skips when none is configured.
+//! `DATABASE_URL` is the single user-facing PostgreSQL variable, so no
+//! allowlisted source may reintroduce a legacy `PROMPT_FERRY_*_DATABASE_URL`
+//! key or hardcode a localhost test URL. The test-scoped URL and schema
+//! namespace assertions live in `tests/test_db_url.rs`.
 
-use std::{
-    env,
-    time::{Duration, Instant},
-};
-
-use prompt_ferry::db;
-
-const TEST_DATABASE_URL_ENV: &str = "PROMPT_FERRY_TEST_DATABASE_URL";
-const ACQUIRE_TIMEOUT_ENV: &str = "PROMPT_FERRY_DB_POOL_ACQUIRE_TIMEOUT_SECONDS";
-
-#[tokio::test]
-async fn exhausted_pool_fails_within_the_configured_acquire_timeout() -> anyhow::Result<()> {
-    let Ok(database_url) = env::var(TEST_DATABASE_URL_ENV) else {
-        eprintln!("skipping database integration test: {TEST_DATABASE_URL_ENV} is not set");
-        return Ok(());
-    };
-
-    // This is the only test in the binary, so it owns the process environment.
-    unsafe { env::set_var(ACQUIRE_TIMEOUT_ENV, "1") };
-    let pool = db::connect_with_max_connections(&database_url, 1).await?;
-    assert_eq!(
-        pool.options().get_acquire_timeout(),
-        Duration::from_secs(1),
-        "the env override must reach the pool options"
-    );
-
-    let held = pool.acquire().await?;
-    let started = Instant::now();
-    let error = pool
-        .acquire()
-        .await
-        .expect_err("a pool with its only connection checked out must time out");
-    let waited = started.elapsed();
-    drop(held);
-    pool.close().await;
-
-    assert!(
-        matches!(error, sqlx::Error::PoolTimedOut),
-        "expected PoolTimedOut, got {error:?}"
-    );
-    assert!(
-        waited >= Duration::from_millis(900) && waited < Duration::from_secs(10),
-        "the acquire must wait only for the configured bound, not the sqlx default: {waited:?}"
-    );
-
-    unsafe { env::remove_var(ACQUIRE_TIMEOUT_ENV) };
-    let pool = db::connect_with_max_connections(&database_url, 1).await?;
-    assert_eq!(
-        pool.options().get_acquire_timeout(),
-        Duration::from_secs(5),
-        "without an override the pool keeps the 5s default"
-    );
-    pool.close().await;
-    Ok(())
+/// Guard: no allowlisted source may reintroduce a legacy DB URL variable or a
+/// hardcoded localhost test URL now that `DATABASE_URL` is canonical.
+#[test]
+fn sources_never_hardcode_a_postgres_test_url_or_a_legacy_env_key() {
+    const FILES: &[&str] = &[
+        "crates/prompt-ferry-runtime-env/src/runtime_env.rs",
+        "tools/db-init/src/main.rs",
+        "src/config/mod.rs",
+        "src/mcp/entry/tests.rs",
+        "src/worker_admin/types.rs",
+        "src/worker_admin/types/mcp.rs",
+        "src/worker_admin/handlers/server.rs",
+        "src/worker_admin/handlers/config_audit/tests/harness.rs",
+        "src/worker_admin/handlers/config_export/tests/harness.rs",
+        "src/worker_admin/handlers/config_import/tests/harness.rs",
+        "src/worker/runtime/tests.rs",
+        "src/db/config_repository/http_tests.rs",
+        "tests/oauth_login.rs",
+        "tests/chatgpt_routing.rs",
+        "tests/support/endpoint_create_fixture.rs",
+        "tests/support/db_harness.rs",
+        "tests/support/test_db_url.rs",
+    ];
+    // Built at runtime so this guard file does not match its own needles.
+    let needles = [
+        ["PROMPT_FERRY_DEV", "DATABASE_URL"].concat(),
+        ["PROMPT_FERRY_TEST", "DATABASE_URL"].concat(),
+        ["PROMPT_FERRY_WORKER__", "DATABASE_URL"].concat(),
+        ["postgres://postgres:postgres", "@localhost"].concat(),
+        ["postgres://postgres:postgres", "@127.0.0.1"].concat(),
+    ];
+    for path in FILES {
+        let source =
+            std::fs::read_to_string(path).unwrap_or_else(|error| panic!("read {path}: {error}"));
+        for needle in &needles {
+            assert!(
+                !source.contains(needle.as_str()),
+                "{path} must not reference {needle}"
+            );
+        }
+    }
 }

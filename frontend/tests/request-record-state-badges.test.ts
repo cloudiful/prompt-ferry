@@ -43,7 +43,7 @@ test('a running request that already produced output reads as streaming output',
   expect(chips.map((chip) => chip.color)).toEqual(['secondary'])
 })
 
-test('terminal states keep their own label and append the output capsule', () => {
+test('terminal states keep only their own state capsule', () => {
   const terminal = [
     ['completed', '成功', 'success'],
     ['failed', '失败', 'warn'],
@@ -56,19 +56,23 @@ test('terminal states keep their own label and append the output capsule', () =>
       record({ request_state, ttft_ms: 120 }),
     )
 
-    expect(labels(chips)).toEqual([stateLabel, '已开始输出'])
-    expect(chips.map((chip) => chip.id)).toEqual(['state', 'output'])
-    expect(chips.map((chip) => chip.color)).toEqual([stateColor, 'neutral'])
-    expect(chips.map((chip) => chip.variant)).toEqual([undefined, 'subtle'])
+    expect(labels(chips)).toEqual([stateLabel])
+    expect(chips.map((chip) => chip.id)).toEqual(['state'])
+    expect(chips.map((chip) => chip.color)).toEqual([stateColor])
   }
 })
 
-test('terminal history without a recorded output keeps a single state capsule', () => {
+test('terminal history never appends an auxiliary output capsule', () => {
   for (const request_state of ['completed', 'failed', 'aborted'] as const) {
-    const chips = formatRequestStateBadges(zh, record({ request_state }))
+    for (const ttft_ms of [null, 120]) {
+      const chips = formatRequestStateBadges(
+        zh,
+        record({ request_state, ttft_ms }),
+      )
 
-    expect(chips.map((chip) => chip.id)).toEqual(['state'])
-    expect(labels(chips)).not.toContain('已开始输出')
+      expect(chips.map((chip) => chip.id)).toEqual(['state'])
+      expect(labels(chips)).not.toContain('已开始输出')
+    }
   }
 })
 
@@ -85,7 +89,7 @@ test('a terminal row is never labelled as streaming output', () => {
   }
 })
 
-test('MCP history reuses the same output capsule and never reads as streaming', () => {
+test('MCP history keeps a single state capsule and never reads as streaming', () => {
   const chips = formatRequestStateBadges(
     zh,
     record({
@@ -95,8 +99,8 @@ test('MCP history reuses the same output capsule and never reads as streaming', 
     }),
   )
 
-  expect(labels(chips)).toEqual(['成功', '已开始输出'])
-  expect(chips.map((chip) => chip.id)).toEqual(['state', 'output'])
+  expect(labels(chips)).toEqual(['成功'])
+  expect(chips.map((chip) => chip.id)).toEqual(['state'])
   expect(labels(chips)).not.toContain('流式输出中')
 })
 
@@ -114,7 +118,7 @@ test('admission states keep their own labels', () => {
   ).toEqual(['待审批'])
 })
 
-test('the waiting, streaming, and output capsules are translated in both locales', () => {
+test('the waiting and streaming capsules are translated in both locales', () => {
   expect(labels(formatRequestStateBadges(en, record()))).toEqual([
     'Waiting for response',
   ])
@@ -128,14 +132,20 @@ test('the waiting, streaming, and output capsules are translated in both locales
         record({ request_state: 'failed', ttft_ms: 5 }),
       ),
     ),
-  ).toEqual(['Failed', 'Output started'])
+  ).toEqual(['Failed'])
 
   expect(messages['en-US'].requestStateWaitingForResponse).toBe(
     'Waiting for response',
   )
   expect(messages['en-US'].requestStateStreamingOutput).toBe('Streaming output')
-  expect(messages['en-US'].requestOutputStarted).toBe('Output started')
   expect(messages['zh-CN'].requestStateWaitingForResponse).toBe('等待响应')
   expect(messages['zh-CN'].requestStateStreamingOutput).toBe('流式输出中')
-  expect(messages['zh-CN'].requestOutputStarted).toBe('已开始输出')
+  expect(
+    (messages['en-US'] as unknown as Record<string, string>)
+      .requestOutputStarted,
+  ).toBeUndefined()
+  expect(
+    (messages['zh-CN'] as unknown as Record<string, string>)
+      .requestOutputStarted,
+  ).toBeUndefined()
 })

@@ -1,15 +1,15 @@
 # Contributing
 
 Thanks for contributing to `prompt-ferry`. The public project uses native Rust
-and Bun tooling, PostgreSQL for integration tests, and generated OpenAPI files
-as checked-in contract artifacts.
+and Bun tooling, Valkey for the service-backed integration tests, and generated
+OpenAPI files as checked-in contract artifacts.
 
 ## Prerequisites
 
 - Rust stable with Cargo
 - Bun 1.3.11 or a compatible Bun 1.x release
 - Nu shell for the local development scripts
-- PostgreSQL 17 for integration tests
+- Valkey for the response-affinity integration tests
 
 Do not commit `.env`, `Cargo.lock`, or `frontend/bun.lock`. The frontend uses a
 seven-day package release age policy from `frontend/bunfig.toml`.
@@ -52,9 +52,14 @@ bun run typecheck
 bun run build
 ```
 
-Database integration tests read `PROMPT_FERRY_TEST_DATABASE_URL`. They create a
-temporary schema per test run and set `search_path` to that schema; do not use
-the `public` schema or manually edit `_sqlx_migrations`.
+Database-shaped test helpers build lazy pools and URLs pinned to a fresh
+isolated `pfy_test_*` schema through an explicit `search_path`, so a test never
+reaches a shared schema and the suite needs no `DATABASE_URL`. PostgreSQL
+migrations are validated in the development environment with
+`cargo run --bin db_init`; do not use the `public` schema by hand or edit
+`_sqlx_migrations`. Export `PROMPT_FERRY_TEST_VALKEY_URL` before
+`cargo test --workspace` so the response-affinity tests run against a real
+Valkey instead of skipping.
 
 ## Generated Contracts
 

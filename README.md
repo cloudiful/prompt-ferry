@@ -132,9 +132,11 @@ Compose settings.
 ### Worker storage
 
 The worker uses one Admin API and one configuration model with either backend.
-A non-empty `PROMPT_FERRY_WORKER__DATABASE_URL` selects PostgreSQL for shared,
-durable storage. An empty value selects SQLite for local durable configuration;
-a configured but unavailable PostgreSQL database does not fall back to SQLite.
+A non-empty `DATABASE_URL` selects PostgreSQL for shared, durable storage. An
+empty value selects SQLite for local durable configuration; a configured but
+unavailable PostgreSQL database does not fall back to SQLite. The
+`worker.database_url` config file field and an explicit `--database-url`
+argument remain supported.
 Both backends support users, encrypted secrets, endpoints, routes, relays,
 settings, client keys, and MCP configuration/catalog/runtime. SQLite also
 serves the Admin API, including authentication, but does not provide durable
@@ -212,7 +214,7 @@ prompt-ferry relay
 
 ```dotenv
 # Worker host
-PROMPT_FERRY_WORKER__DATABASE_URL=
+DATABASE_URL=
 PROMPT_FERRY_WORKER__RELAY_URLS=["wss://relay.example.invalid:8788/ws/worker"]
 PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://upstream.example.invalid
 PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<upstream-api-key>

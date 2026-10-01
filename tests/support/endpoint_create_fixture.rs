@@ -23,7 +23,13 @@ use prompt_ferry::{
 };
 use prompt_ferry_runtime_env::relay_secrets::RelaySecretManager;
 use serde_json::{Value, json};
-use sqlx::postgres::PgPoolOptions;
+#[allow(dead_code)]
+mod test_db_url {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/test_db_url.rs"
+    ));
+}
 use uuid::Uuid;
 
 pub const SESSION_KEY: &str = "endpoint-create-regression";
@@ -49,8 +55,7 @@ impl Fixture {
         user_store
             .bootstrap_admin("endpoint-admin", "endpoint-password")
             .await?;
-        let pool = PgPoolOptions::new()
-            .connect_lazy("postgres://postgres:postgres@localhost/prompt_ferry")?;
+        let pool = test_db_url::lazy_test_pool();
         let state = AdminState::new(AdminStateInit {
             pool: pool.clone(),
             lease_pool: pool.clone(),

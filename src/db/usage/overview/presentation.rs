@@ -25,9 +25,10 @@ pub(super) fn summary_from_metrics(row: MetricsRow) -> RequestRecordOverviewSumm
     }
 }
 
-/// Build the aggregate token-usage presentation from a metrics row. The
-/// `full_input_tokens` is the fold-aware denominator (`SUM(normalized_full_input_tokens)`)
-/// carried through from SQL, used only for `cache_rate`; it cannot be derived here
+/// Build the aggregate token-usage presentation from a metrics row. `input_tokens`
+/// is the ordinary cache-miss input from SQL, while `full_input_tokens` is the
+/// fold-aware denominator (`SUM(normalized_full_input_tokens)`) carried through
+/// from SQL and used only for `cache_rate`; the denominator cannot be derived here
 /// because still-folded rows must fall back to `max(input, read+write)` per-row.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn token_usage(
@@ -248,6 +249,8 @@ mod tests {
         assert_eq!(summary.method_count, 0);
         assert_eq!(summary.p95_total_ms, Some(1_500.0));
         assert_eq!(summary.p95_first_token_ms, Some(120.0));
+        // `input_tokens` is the normalized ordinary miss carried through as-is.
+        assert_eq!(summary.tokens.input_tokens, 100);
         assert_eq!(summary.tokens.output_tokens, 200);
         assert_eq!(summary.tokens.total_tokens, 300);
     }

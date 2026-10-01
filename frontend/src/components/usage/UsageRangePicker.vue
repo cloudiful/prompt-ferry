@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from 'vue'
-import { CalendarDate, parseDate } from '@internationalized/date'
 import type { DateRange } from 'reka-ui'
 import type { RequestRecordOverviewRange } from '@/generated/admin-api'
+import {
+  formatRangeLabel,
+  isCompleteRange,
+  parseRange,
+  rangesEqual,
+  toCustomRangeInput,
+} from './usage-range-picker'
 
 type UsageRangePreset = RequestRecordOverviewRange
 
@@ -17,27 +23,10 @@ const emit = defineEmits<{
   apply: [input: { range: UsageRangePreset; start?: string; end?: string }]
 }>()
 
+const open = ref(false)
 const selectedValue = ref(props.value)
-
-function toCalendarDate(iso: string): CalendarDate | null {
-  const text = iso.slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null
-  try {
-    return parseDate(text)
-  } catch {
-    return null
-  }
-}
-
-function toCustomRange(start: string, end: string): DateRange | null {
-  const startDate = toCalendarDate(start)
-  const endDate = toCalendarDate(end)
-  if (!startDate || !endDate) return null
-  return { start: startDate, end: endDate }
-}
-
-const customRange = shallowRef<DateRange | null>(
-  toCustomRange(props.start, props.end),
+const calendarRange = shallowRef<DateRange | null>(
+  parseRange(props.start, props.end),
 )
 
 const options = computed(() => [
@@ -48,55 +37,89 @@ const options = computed(() => [
   { label: props.t('customRange'), value: 'custom' as const },
 ])
 
+const triggerLabel = computed(() => {
+  if (selectedValue.value === 'custom') {
+    return formatRangeLabel(calendarRange.value) || props.t('customRange')
+  }
+  return (
+    options.value.find((option) => option.value === selectedValue.value)
+      ?.label ?? props.t('timeRange')
+  )
+})
+
 watch(
-  () => [props.start, props.end, props.value],
+  () => [props.start, props.end, props.value] as const,
   () => {
-    customRange.value = toCustomRange(props.start, props.end)
     selectedValue.value = props.value
+    const range = parseRange(props.start, props.end)
+    if (range) calendarRange.value = range
   },
 )
 
 function selectPreset(value: UsageRangePreset): void {
   selectedValue.value = value
   if (value === 'custom') return
+  open.value = false
   emit('apply', { range: value })
 }
 
-function applyCustomRange(value?: DateRange | null): void {
-  const range = value ?? customRange.value
-  if (!range?.start || !range?.end) return
-  customRange.value = range
-  const startText = range.start.toString().slice(0, 10)
-  const endText = range.end.toString().slice(0, 10)
-  const end = new Date(`${endText}T00:00:00.000Z`)
-  end.setUTCDate(end.getUTCDate() + 1)
-  emit('apply', {
-    range: 'custom',
-    start: new Date(`${startText}T00:00:00.000Z`).toISOString(),
-    end: end.toISOString(),
-  })
+function applyCustomRange(range?: DateRange | null): void {
+  if (!isCompleteRange(range)) return
+  if (rangesEqual(parseRange(props.start, props.end), range)) return
+  const input = toCustomRangeInput(range)
+  if (!input) return
+  selectedValue.value = 'custom'
+  open.value = false
+  emit('apply', input)
 }
 </script>
 
 <template>
-  <div class="flex min-w-0 flex-wrap items-center gap-1.5">
-    <USelectMenu
-      :model-value="selectedValue"
-      :items="options"
-      value-key="value"
-      label-key="label"
-      class="w-32 sm:w-36"
+  <UPopover v-model:open="open" :content="{ align: 'end' }">
+    <UButton
+      color="neutral"
+      variant="outline"
+      size="sm"
+      icon="i-lucide-calendar"
+      trailing-icon="i-lucide-chevron-down"
       :aria-label="t('timeRange')"
-      @update:model-value="selectPreset"
-    />
-    <template v-if="selectedValue === 'custom'">
-      <UInputDate
-        v-model="customRange"
-        range
-        size="sm"
-        :aria-label="t('customRange')"
-        @update:model-value="applyCustomRange"
-      />
+    >
+      <span class="max-w-40 truncate">{{ triggerLabel }}</span>
+    </UButton>
+
+    <template #content>
+      <div class="flex gap-3 p-3">
+        <div class="flex flex-col gap-1">
+          <UButton
+            v-for="option in options"
+            :key="option.value"
+            size="sm"
+            block
+            class="justify-start"
+            :color="selectedValue === option.value ? 'primary' : 'neutral'"
+            :variant="selectedValue === option.value ? 'soft' : 'ghost'"
+            :label="option.label"
+            @click="selectPreset(option.value)"
+          />
+        </div>
+
+        <div class="grid content-start gap-2">
+          <UInputDate
+            v-model="calendarRange"
+            range
+            size="sm"
+            :aria-label="t('customRange')"
+            @update:model-value="applyCustomRange"
+          />
+          <UCalendar
+            v-model="calendarRange"
+            range
+            size="sm"
+            :aria-label="t('timeRange')"
+            @update:valid-model-value="applyCustomRange"
+          />
+        </div>
+      </div>
     </template>
-  </div>
+  </UPopover>
 </template>

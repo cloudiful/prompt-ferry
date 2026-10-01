@@ -23,6 +23,9 @@ pub(super) struct MetricsRow {
     pub(super) error_count: i64,
     pub(super) cache_hit_count: i64,
     pub(super) method_count: i64,
+    /// Ordinary cache-miss input (`SUM(normalized_input_tokens)`): still-folded
+    /// rows are expanded to `input - cache_read - cache_write` in SQL, so this
+    /// never re-includes the cache meters that `full_input_tokens` carries.
     pub(super) input_tokens: i64,
     pub(super) cache_read_tokens: i64,
     pub(super) cache_write_tokens: i64,

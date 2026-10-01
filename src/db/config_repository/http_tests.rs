@@ -6,7 +6,6 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::Value;
-use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -25,6 +24,14 @@ use crate::{
         UsageRetentionSettings,
     },
 };
+
+#[allow(dead_code)]
+mod test_db_url {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/test_db_url.rs"
+    ));
+}
 
 fn test_manager() -> RelaySecretManager {
     RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("test manager")
@@ -51,9 +58,7 @@ async fn test_state() -> (AdminState, Arc<StandaloneConfigStore>, PathBuf) {
         .await
         .expect("bootstrap admin");
 
-    let pool = PgPoolOptions::new()
-        .connect_lazy("postgres://postgres:postgres@localhost/prompt_ferry")
-        .expect("lazy pool");
+    let pool = test_db_url::lazy_test_pool();
     let state = AdminState::new(AdminStateInit {
         pool: pool.clone(),
         lease_pool: pool.clone(),

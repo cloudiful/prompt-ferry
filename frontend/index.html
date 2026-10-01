@@ -6,6 +6,24 @@
     <meta name="theme-color" content="#040604" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>prompt-ferry</title>
+    <script id="theme-first-paint">
+      // Apply the persisted theme synchronously before the module entry paints,
+      // so browsers that paint before the deferred module bundle (Firefox/LibreWolf)
+      // never flash the default light theme.
+      ;(() => {
+        let mode = 'dark'
+        try {
+          if (localStorage.getItem('prompt-ferry:theme-mode') === 'light') {
+            mode = 'light'
+          }
+        } catch {
+          mode = 'dark'
+        }
+        const root = document.documentElement
+        root.classList.toggle('dark', mode === 'dark')
+        root.style.colorScheme = mode
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

@@ -52,16 +52,23 @@ mod tests {
         worker_admin::AdminState,
         worker_admin_state::AdminStateInit,
     };
-    use sqlx::postgres::PgPoolOptions;
+    use sqlx::PgPool;
     use std::time::Duration;
     use uuid::Uuid;
 
-    pub(super) fn test_state() -> AdminState {
-        test_state_with_pool_url("postgres://postgres:postgres@localhost/prompt_ferry")
+    #[allow(dead_code)]
+    mod test_db_url {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/test_db_url.rs"
+        ));
     }
 
-    pub(super) fn test_state_with_pool_url(url: &str) -> AdminState {
-        let pool = PgPoolOptions::new().connect_lazy(url).expect("lazy pool");
+    pub(super) fn test_state() -> AdminState {
+        test_state_with_pool(test_db_url::lazy_test_pool())
+    }
+
+    pub(super) fn test_state_with_pool(pool: PgPool) -> AdminState {
         AdminState::new(AdminStateInit {
             pool: pool.clone(),
             lease_pool: pool.clone(),

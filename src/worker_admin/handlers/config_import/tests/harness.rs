@@ -26,6 +26,14 @@ use crate::worker_admin_types::{
 
 pub(super) const PASSPHRASE: &str = "config-import-passphrase";
 
+#[allow(dead_code)]
+mod test_db_url {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/test_db_url.rs"
+    ));
+}
+
 pub(super) fn manager() -> RelaySecretManager {
     RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager")
 }
@@ -41,9 +49,7 @@ pub(super) async fn test_state() -> (AdminState, Arc<StandaloneConfigStore>, std
         .bootstrap_admin("admin", "admin-password")
         .await
         .expect("bootstrap admin");
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .connect_lazy("postgres://postgres:postgres@localhost/prompt_ferry")
-        .expect("lazy pool");
+    let pool = test_db_url::lazy_test_pool();
     let state = AdminState::new(AdminStateInit {
         pool: pool.clone(),
         lease_pool: pool.clone(),

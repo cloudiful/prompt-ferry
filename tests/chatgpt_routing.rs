@@ -52,7 +52,13 @@ use prompt_ferry::{
 use prompt_ferry_runtime_env::relay_secrets::RelaySecretManager;
 use reqwest::Client;
 use serde_json::{Value, json};
-use sqlx::postgres::PgPoolOptions;
+#[allow(dead_code)]
+mod test_db_url {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/test_db_url.rs"
+    ));
+}
 use tokio::{net::TcpListener, sync::Mutex as AsyncMutex};
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -768,9 +774,7 @@ impl AdminFixture {
             .bootstrap_admin("chatgpt-admin", "chatgpt-password")
             .await
             .expect("bootstrap admin");
-        let pool = PgPoolOptions::new()
-            .connect_lazy("postgres://postgres:postgres@localhost/prompt_ferry")
-            .expect("lazy pool");
+        let pool = test_db_url::lazy_test_pool();
         let state = AdminState::new(AdminStateInit {
             pool: pool.clone(),
             lease_pool: pool.clone(),

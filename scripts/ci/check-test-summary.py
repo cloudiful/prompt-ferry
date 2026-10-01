@@ -4,10 +4,10 @@
 libtest captures a passing test's stderr, and a service-backed skip branch
 returns Ok without panicking, so a green log alone cannot prove per-test
 execution. The no-silent-skip guarantee therefore rests on
-`require-services.sh` (the suite's only skip condition is those two env vars
-being absent); this check is the complementary summary guard and fails when the
-run reported failures, ignored tests, or no test result at all. It never needs
-`--nocapture` and never touches credentials.
+`require-services.sh` (the suite's only skip condition is
+PROMPT_FERRY_TEST_VALKEY_URL being absent); this check is the complementary
+summary guard and fails when the run reported failures, ignored tests, or no
+test result at all. It never needs `--nocapture` and never touches credentials.
 """
 
 from __future__ import annotations

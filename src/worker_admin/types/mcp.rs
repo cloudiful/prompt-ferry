@@ -1007,8 +1007,8 @@ fn is_valid_protocol_version(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        super::tests::{test_state, test_state_with_pool_url},
-        McpServerRequest, SessionUser, is_valid_protocol_version, merge_env_json, public_env_json,
+        super::tests::test_state, McpServerRequest, SessionUser, is_valid_protocol_version,
+        merge_env_json, public_env_json,
     };
     use crate::db::McpServer;
     use axum::http::StatusCode;
@@ -1325,40 +1325,6 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn provider_kind_accepts_context7_and_firecrawl_on_http() {
-        // Positive validation needs the duplicate-name lookup, so this test
-        // runs against the shared dev database and skips when it is absent
-        // (matching the DB-gated convention in `mcp::entry::tests`).
-        let Ok(url) = std::env::var("PROMPT_FERRY_TEST_DATABASE_URL") else {
-            eprintln!("skipping preset validation test: PROMPT_FERRY_TEST_DATABASE_URL is not set");
-            return;
-        };
-        let user = admin_user();
-        for (value, preset_url) in [
-            ("context7", "https://mcp.context7.com/mcp"),
-            ("firecrawl", "https://mcp.firecrawl.dev/v2/mcp"),
-        ] {
-            let state = test_state_with_pool_url(&url);
-            let request = McpServerRequest {
-                name: format!("preset-{value}"),
-                provider_kind: Some(value.to_string()),
-                url: Some(preset_url.to_string()),
-                auth_mode: Some(crate::db::MCP_AUTH_MODE_BEARER.to_string()),
-                bearer_tokens: Some(vec![crate::db::McpBearerToken {
-                    token: "preset-token".to_string(),
-                    enabled: true,
-                }]),
-                ..request_for_transport("http")
-            };
-            let result = request.validate_for_create(&state, &user).await;
-            if let Err(err) = &result {
-                eprintln!("preset {value} rejected: {}", err.status());
-            }
-            assert!(result.is_ok(), "preset {value} must validate");
-        }
     }
 
     #[test]

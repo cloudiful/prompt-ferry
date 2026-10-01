@@ -113,9 +113,9 @@ forwarding pump 等待慢客户端的时长，默认 5000 毫秒。默认值分�
 ### Worker 存储
 
 Worker 使用同一套 Admin API 和配置模型，可选择 PostgreSQL 或 SQLite。
-`PROMPT_FERRY_WORKER__DATABASE_URL` 非空时使用 PostgreSQL，适合共享和持久化
-存储；为空时使用本地 SQLite 持久化配置。已配置但不可用的 PostgreSQL 不会自动
-降级为 SQLite。两种后端都支持用户、加密密钥、端点、路由、relay、设置、客户端
+`DATABASE_URL` 非空时使用 PostgreSQL，适合共享和持久化存储；为空时使用本地
+SQLite 持久化配置。已配置但不可用的 PostgreSQL 不会自动降级为 SQLite。
+`worker.database_url` 配置文件和显式 `--database-url` 参数仍然可用。两种后端都支持用户、加密密钥、端点、路由、relay、设置、客户端
 密钥以及 MCP 配置、目录和运行时。SQLite 同样提供 Admin API 和认证，但不提供
 持久化请求记录、原始报文保留、审批、计费、重放历史或 MCP 配额/用量账本。
 
@@ -176,7 +176,7 @@ prompt-ferry relay
 
 ```dotenv
 # Worker 主机
-PROMPT_FERRY_WORKER__DATABASE_URL=
+DATABASE_URL=
 PROMPT_FERRY_WORKER__RELAY_URLS=["wss://relay.example.invalid:8788/ws/worker"]
 PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://upstream.example.invalid
 PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<上游 API 密钥>

@@ -59,7 +59,7 @@ def ensure-frontend-deps [] {
 def default-env [] {
   {
     PROMPT_FERRY_LOGGING__LEVEL: (env-or-default "PROMPT_FERRY_LOGGING__LEVEL" "info")
-    PROMPT_FERRY_DEV_DATABASE_URL: (env-or-default "PROMPT_FERRY_DEV_DATABASE_URL" (env-or-default "PROMPT_FERRY_WORKER__DATABASE_URL" ""))
+    DATABASE_URL: (env-or-default "DATABASE_URL" "")
     PROMPT_FERRY_RELAY__BIND: (env-or-default "PROMPT_FERRY_RELAY__BIND" "127.0.0.1:8787")
     PROMPT_FERRY_RELAY__WORKER_BIND: (env-or-default "PROMPT_FERRY_RELAY__WORKER_BIND" "127.0.0.1:8788")
     PROMPT_FERRY_RELAY__CLIENT_TOKEN: (env-or-default "PROMPT_FERRY_RELAY__CLIENT_TOKEN" "dev-client-token")
@@ -67,7 +67,6 @@ def default-env [] {
     PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS: (env-or-default "PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS" "300")
     PROMPT_FERRY_WORKER__RELAY_URLS: (env-or-default "PROMPT_FERRY_WORKER__RELAY_URLS" '["ws://127.0.0.1:8788/ws/worker"]')
     PROMPT_FERRY_WORKER__WORKER_TOKEN: (env-or-default "PROMPT_FERRY_WORKER__WORKER_TOKEN" "dev-worker-token")
-    PROMPT_FERRY_WORKER__DATABASE_URL: (env-or-default "PROMPT_FERRY_WORKER__DATABASE_URL" (env-or-default "PROMPT_FERRY_DEV_DATABASE_URL" ""))
     PROMPT_FERRY_WORKER__ADMIN_BIND: (env-or-default "PROMPT_FERRY_WORKER__ADMIN_BIND" "127.0.0.1:8789")
     PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN: (env-or-default "PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN" "admin")
     PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD: (env-or-default "PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD" "change-me-now")
@@ -76,11 +75,11 @@ def default-env [] {
 }
 
 def ensure-required-env [] {
-  let db_url = (($env | get -o PROMPT_FERRY_DEV_DATABASE_URL) | default (($env | get -o PROMPT_FERRY_WORKER__DATABASE_URL) | default ""))
+  let db_url = (($env | get -o DATABASE_URL) | default "")
   if (($db_url | str trim) == "") {
     error make {
       msg: "missing database URL"
-      help: "Set PROMPT_FERRY_DEV_DATABASE_URL or PROMPT_FERRY_WORKER__DATABASE_URL in .env."
+      help: "Set DATABASE_URL in .env."
     }
   }
 }
@@ -118,7 +117,7 @@ def main [command?: string] {
       print "  full      Start relay, worker, and frontend Vite dev server"
       print "Config:"
       print "  Reads root .env automatically and treats it as the source of truth"
-      print "  PROMPT_FERRY_DEV_DATABASE_URL or PROMPT_FERRY_WORKER__DATABASE_URL is required"
+      print "  DATABASE_URL is required"
       print "  Switch local/remote settings by editing or commenting values in .env"
       print "  PROMPT_FERRY_LOGGING__LEVEL defaults to info"
       print "  managed dev defaults include a local relay secret master key if unset"

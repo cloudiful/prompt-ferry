@@ -514,15 +514,20 @@ mod tests {
         body::{Body, to_bytes},
         http::{Request, StatusCode},
     };
-    use sqlx::postgres::PgPoolOptions;
     use std::{fs, time::Duration};
     use tower::ServiceExt;
     use uuid::Uuid;
 
+    #[allow(dead_code)]
+    mod test_db_url {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/test_db_url.rs"
+        ));
+    }
+
     fn test_state() -> AdminState {
-        let pool = PgPoolOptions::new()
-            .connect_lazy("postgres://postgres:postgres@localhost/prompt_ferry")
-            .expect("lazy pool");
+        let pool = test_db_url::lazy_test_pool();
         AdminState::new(AdminStateInit {
             pool: pool.clone(),
             lease_pool: pool.clone(),

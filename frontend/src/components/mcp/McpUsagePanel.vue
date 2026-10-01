@@ -171,11 +171,6 @@ const sorting = computed<SortingState>({
               :color="chip.color"
               :variant="chip.variant"
             />
-            <UBadge
-              :label="`HTTP ${row.original.status ?? '-'}`"
-              color="neutral"
-              variant="subtle"
-            />
           </div>
         </template>
         <template #duration_ms-cell="{ row }">{{

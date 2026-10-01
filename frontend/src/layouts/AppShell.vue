@@ -102,21 +102,6 @@ async function logout(): Promise<void> {
     </UDashboardSidebar>
 
     <UDashboardPanel>
-      <template #header>
-        <UDashboardNavbar>
-          <template #leading>
-            <UButton
-              v-if="collapsed"
-              color="neutral"
-              variant="ghost"
-              icon="i-lucide-panel-left-open"
-              :aria-label="t('expandNav')"
-              class="hidden lg:inline-flex"
-              @click="collapsed = false"
-            />
-          </template>
-        </UDashboardNavbar>
-      </template>
       <template #body>
         <RouterView />
       </template>

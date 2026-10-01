@@ -14,11 +14,24 @@ WITH normalized AS (
            rr.cache_write_tokens,
            rr.request_category,
            rr.mcp_protocol_method,
-           -- Post-0072 the stored `input_tokens` is already the ordinary
-           -- (non-cache) value, so use it directly; the cache must not be
-           -- subtracted again (double-subtract of backfilled rows).
+           -- Post-0072 rows already store the ordinary (non-cache) input; rows
+           -- still in the folded shape keep the cache inside `input_tokens`, so
+           -- expand them to the ordinary miss `input - cache_read - cache_write`
+           -- (floored at 0) using the same guard as the full-input denominator.
            -- Closed loop: ordinary + cache_read + cache_write + output == total.
-           GREATEST(COALESCE(rr.input_tokens, 0), 0)::BIGINT AS normalized_input_tokens,
+           CASE
+               WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0
+                   AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)
+                   AND COALESCE(rr.input_tokens, 0)
+                       >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)
+               THEN GREATEST(
+                   COALESCE(rr.input_tokens, 0)
+                       - GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)
+                       - GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),
+                   0
+               )
+               ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)
+           END::BIGINT AS normalized_input_tokens,
            COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,
            COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,
             -- P2 (issue #205): full-input denominator `ordinary+read+write`,

@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Run the workspace suite with PostgreSQL and Valkey enabled and verify the
+# Run the workspace suite with the Valkey test service enabled and verify the
 # result: the service preflight is the no-silent-skip guarantee, and the summary
 # check rejects any run with failures, ignored tests, or no results at all.
+#
+# The run reads no `.env` and requires no `DATABASE_URL`, so it is reproducible
+# with a reachable Valkey alone.
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
