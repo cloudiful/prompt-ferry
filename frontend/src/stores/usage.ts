@@ -22,7 +22,11 @@ import {
   createUsageWorkspaceView,
   resolveUsageRangeWindow,
 } from '../models/usage'
-import type { RequestOverviewDrilldown } from '../request-overview'
+import {
+  DEFAULT_REQUEST_OVERVIEW_PERSPECTIVE,
+  type RequestOverviewDrilldown,
+  type RequestOverviewPerspective,
+} from '../request-overview'
 import type { RequestRecordOverviewResponse } from '../generated/admin-api'
 import { createRequestRecordDetailState } from './request-record-detail'
 import { createDefaultRequestRecordFilters } from './request-records-query'
@@ -45,6 +49,9 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     overview: ref<RequestRecordOverviewResponse | null>(null),
   }
   const queryState = {
+    aiPerspective: ref<RequestOverviewPerspective>(
+      DEFAULT_REQUEST_OVERVIEW_PERSPECTIVE,
+    ),
     end: ref(''),
     filters: ref<RequestRecordFilterModel>(createDefaultRequestRecordFilters()),
     first: ref(0),
@@ -136,6 +143,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     try {
       overviewState.overview.value = await fetchUsageOverview({
         requestCategory: queryState.requestCategory.value,
+        perspective: queryState.aiPerspective.value,
         range: queryState.range.value,
         start: queryState.start.value,
         end: queryState.end.value,
@@ -195,6 +203,14 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     )
   }
 
+  async function setAiPerspective(
+    nextPerspective: RequestOverviewPerspective,
+  ): Promise<void> {
+    if (queryState.aiPerspective.value === nextPerspective) return
+    queryState.aiPerspective.value = nextPerspective
+    await refreshOverview()
+  }
+
   function setRequestCategory(nextCategory: RequestRecordCategory): void {
     if (queryState.requestCategory.value === nextCategory) return
     queryState.requestCategory.value = nextCategory
@@ -228,6 +244,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
   }
 
   return {
+    aiPerspective: queryState.aiPerspective,
     affinityResetting: detailState.affinityResetting,
     clearConversationOverride: detailState.clearConversationOverride,
     clearHistory,
@@ -268,6 +285,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     rowsPerPage: queryState.rowsPerPage,
     saveConversationOverride: detailState.saveConversationOverride,
     sessionRouteOptions: detailState.sessionRouteOptions,
+    setAiPerspective,
     setRequestCategory,
     sortField: queryState.sortField,
     sortOrder: queryState.sortOrder,

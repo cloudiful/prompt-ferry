@@ -19,16 +19,19 @@ import type {
   RequestRecordRowView,
 } from '../models'
 import type { RequestRecordOverviewResponse } from '../generated/admin-api'
+import type { RequestOverviewPerspective } from '../request-overview'
 import { buildRequestRecordListQuery } from './request-records-query'
 
 export async function fetchUsageOverview(input: {
   requestCategory: RequestRecordCategory
+  perspective: RequestOverviewPerspective
   range: RequestRecordOverviewRange
   start: string
   end: string
 }): Promise<RequestRecordOverviewResponse | null> {
   return fetchRequestOverview({
     requestCategory: input.requestCategory,
+    perspective: input.perspective,
     range: input.range,
     start: input.start || undefined,
     end: input.end || undefined,

@@ -10,6 +10,7 @@ import type { UsageWorkspaceView } from '@/models/usage'
 import type {
   RequestOverviewDrilldown,
   RequestOverviewMode,
+  RequestOverviewPerspective,
 } from '@/request-overview'
 import UsageCategoryWorkspace from './UsageCategoryWorkspace.vue'
 
@@ -20,6 +21,7 @@ defineProps<{
   isAdmin: boolean
   overview: RequestRecordOverviewResponse | null
   overviewLoading: boolean
+  perspective: RequestOverviewPerspective
   t: TranslateFn
   workspace: UsageWorkspaceView
 }>()
@@ -34,6 +36,7 @@ const detailVisibleModel = defineModel<boolean>('detailVisible', {
 defineEmits<{
   'update:detailVisible': [value: boolean]
   'update:filters': [value: RequestRecordFilterModel]
+  changePerspective: [perspective: RequestOverviewPerspective]
   clearConversationOverride: []
   resetSessionAffinity: []
   drilldown: [filter: RequestOverviewDrilldown]
@@ -65,8 +68,10 @@ const McpUsagePanel = defineAsyncComponent(
     :overview="overview"
     :loading="overviewLoading"
     :category="category"
+    :perspective="perspective"
     :formatting="formatting"
     :t="t"
+    @change-perspective="$emit('changePerspective', $event)"
     @drilldown="$emit('drilldown', $event)"
   >
     <template #records>

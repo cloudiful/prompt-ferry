@@ -1612,6 +1612,11 @@ export type RequestRecordOverviewBreakdownRow = {
      */
     avg_output_tokens_per_second?: number | null;
     /**
+     * Endpoint identity for upstream rows so the client can filter records by
+     * the clicked upstream. `None` for model rows, MCP rows, and `(direct)`.
+     */
+    endpoint_id?: string | null;
+    /**
      * Number of failed requests (`ok IS FALSE` or terminal failure state).
      * `None` for rows that do not report errors (e.g. MCP breakdown).
      */
@@ -1623,6 +1628,11 @@ export type RequestRecordOverviewBreakdownRow = {
     label: string;
     mcp_server_id?: string | null;
     model?: string | null;
+    /**
+     * Per-effective-model metrics for upstream rows in the upstream
+     * perspective, ordered by `total_tokens` desc. `None` for model rows.
+     */
+    model_breakdown?: Array<RequestRecordOverviewModelBreakdown> | null;
     request_count: number;
     request_share: number;
     /**
@@ -1651,6 +1661,30 @@ export type RequestRecordOverviewBreakdownRow = {
      * provider is unknown or the row is not an MCP server row.
      */
     usage_unit?: string | null;
+};
+
+/**
+ * Per-effective-model metrics inside an upstream row. The effective model is
+ * the route-target `upstream_model` override when present, otherwise the
+ * originally requested model.
+ */
+export type RequestRecordOverviewModelBreakdown = {
+    avg_output_tokens_per_second?: number | null;
+    cache_rate?: number | null;
+    error_count: number;
+    error_rate: number;
+    model: string;
+    request_count: number;
+    /**
+     * Share of the window's requests, matching the main model table.
+     */
+    request_share: number;
+    /**
+     * Share of the window's total tokens, matching the main model table.
+     * `None` when the window has zero total tokens.
+     */
+    token_share?: number | null;
+    total_tokens: number;
 };
 
 export type RequestRecordOverviewRange = '24h' | '7d' | '30d' | 'month' | 'custom';
@@ -3315,6 +3349,12 @@ export type RequestRecordOverviewData = {
     path?: never;
     query?: {
         request_category?: RequestRecordCategory;
+        /**
+         * Top-level grouping for the AI distribution table. `Model` keeps the
+         * historical model-first rows with an upstream hover; `Upstream` groups the
+         * full filtered window by endpoint identity and shows a per-model hover.
+         */
+        perspective?: 'model' | 'upstream';
         range?: RequestRecordOverviewRange;
         start?: string;
         end?: string;

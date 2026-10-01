@@ -7,7 +7,11 @@ import type {
 } from '@/generated/admin-api'
 import { useLocale } from '@/composables/useLocale'
 import type { RequestRecordFormatting } from '../models/request-record-formatting'
-import type { RequestOverviewDrilldown } from '../request-overview'
+import {
+  breakdownDrilldownForPerspective,
+  type RequestOverviewDrilldown,
+  type RequestOverviewPerspective,
+} from '../request-overview'
 import { createTrendOption } from '../request-overview-charts'
 
 const UsageChart = defineAsyncComponent(() => import('./usage/UsageChart.vue'))
@@ -19,12 +23,14 @@ const props = defineProps<{
   overview: RequestRecordOverviewResponse | null
   loading: boolean
   category: 'ai' | 'mcp'
+  perspective: RequestOverviewPerspective
   t: TranslateFn
   formatting: RequestRecordFormatting
 }>()
 
 const emit = defineEmits<{
   drilldown: [filter: RequestOverviewDrilldown]
+  changePerspective: [perspective: RequestOverviewPerspective]
 }>()
 
 const { t } = useLocale()
@@ -32,6 +38,21 @@ const hasTraffic = computed(
   () => (props.overview?.summary.request_count ?? 0) > 0,
 )
 const breakdownRows = computed(() => props.overview?.breakdown ?? [])
+
+const perspectiveOptions = computed(() => [
+  { label: t('overviewPerspectiveModel'), value: 'model' },
+  { label: t('overviewPerspectiveUpstream'), value: 'upstream' },
+])
+const activePerspective = computed({
+  get: (): RequestOverviewPerspective => props.perspective,
+  set: (value: RequestOverviewPerspective) => emit('changePerspective', value),
+})
+const distributionTitle = computed(() => {
+  if (props.category === 'mcp') return t('overviewMcpServerDistribution')
+  return props.perspective === 'upstream'
+    ? t('overviewUpstreamDistribution')
+    : t('overviewModelDistribution')
+})
 
 const chartLabels = computed(() => ({
   cacheRead: t('overviewCacheRead'),
@@ -114,10 +135,12 @@ function formatBucket(value: string): string {
 }
 
 function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
-  emit('drilldown', {
-    model: props.category === 'ai' ? row.model : null,
-    mcp_server_id: props.category === 'mcp' ? row.mcp_server_id : null,
-  })
+  const filter = breakdownDrilldownForPerspective(
+    props.perspective,
+    props.category,
+    row,
+  )
+  if (filter) emit('drilldown', filter)
 }
 
 function onBreakdownSelect(
@@ -129,7 +152,13 @@ function onBreakdownSelect(
 
 const aiColumns = computed<TableColumn<RequestRecordOverviewBreakdownRow>[]>(
   () => [
-    { accessorKey: 'label', header: t('overviewObject') },
+    {
+      accessorKey: 'label',
+      header:
+        props.perspective === 'upstream'
+          ? t('overviewUpstreamEndpoint')
+          : t('overviewObject'),
+    },
     { accessorKey: 'request_count', header: t('requests') },
     { accessorKey: 'request_share', header: t('overviewRequestShare') },
     { id: 'tokens', header: t('overviewTotalTokens') },
@@ -189,13 +218,19 @@ function providerBadge(row: RequestRecordOverviewBreakdownRow): string {
         class="overflow-hidden rounded-lg border border-default bg-default"
       >
         <div
-          class="border-b border-default px-4 py-3 text-sm font-semibold text-highlighted"
+          class="flex items-center justify-between gap-2 border-b border-default px-4 py-3 text-sm font-semibold text-highlighted"
         >
-          {{
-            category === 'ai'
-              ? t('overviewModelDistribution')
-              : t('overviewMcpServerDistribution')
-          }}
+          <span>{{ distributionTitle }}</span>
+          <USelect
+            v-if="category === 'ai'"
+            v-model="activePerspective"
+            class="w-32"
+            size="sm"
+            :aria-label="t('overviewPerspective')"
+            :items="perspectiveOptions"
+            label-key="label"
+            value-key="value"
+          />
         </div>
         <div class="overflow-x-auto">
           <UTable
@@ -219,6 +254,7 @@ function providerBadge(row: RequestRecordOverviewBreakdownRow): string {
                 <BreakdownUpstreamPopover
                   v-if="category === 'ai'"
                   :row="row.original"
+                  :perspective="perspective"
                   :formatting="formatting"
                 />
                 <UBadge

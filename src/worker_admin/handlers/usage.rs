@@ -108,6 +108,7 @@ pub(super) async fn usage_overview(
         } else {
             None
         },
+        query.perspective.unwrap_or_default(),
     )
     .await
     {

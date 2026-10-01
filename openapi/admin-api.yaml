@@ -1636,6 +1636,21 @@ paths:
         required: false
         schema:
           $ref: '#/components/schemas/RequestRecordCategory'
+      - name: perspective
+        in: query
+        description: |-
+          AI distribution grouping: `model` (default) or `upstream`. Ignored for
+          the MCP category, whose distribution is always by MCP server.
+        required: false
+        schema:
+          type: string
+          description: |-
+            Top-level grouping for the AI distribution table. `Model` keeps the
+            historical model-first rows with an upstream hover; `Upstream` groups the
+            full filtered window by endpoint identity and shows a per-model hover.
+          enum:
+          - model
+          - upstream
       - name: range
         in: query
         required: false
@@ -6882,6 +6897,14 @@ components:
             positive output tokens and positive duration, averaged per request
             within the breakdown row. `None` when no valid samples exist or
             when the row is not an AI model row.
+        endpoint_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: |-
+            Endpoint identity for upstream rows so the client can filter records by
+            the clicked upstream. `None` for model rows, MCP rows, and `(direct)`.
         error_count:
           type:
           - integer
@@ -6907,6 +6930,15 @@ components:
           type:
           - string
           - 'null'
+        model_breakdown:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/RequestRecordOverviewModelBreakdown'
+          description: |-
+            Per-effective-model metrics for upstream rows in the upstream
+            perspective, ordered by `total_tokens` desc. `None` for model rows.
         request_count:
           type: integer
           format: int64
@@ -6959,6 +6991,56 @@ components:
             Usage unit for the provider (`requests`/`credits`), derived from the
             server-side registry so the client never re-derives it. `None` when the
             provider is unknown or the row is not an MCP server row.
+    RequestRecordOverviewModelBreakdown:
+      type: object
+      description: |-
+        Per-effective-model metrics inside an upstream row. The effective model is
+        the route-target `upstream_model` override when present, otherwise the
+        originally requested model.
+      required:
+      - model
+      - request_share
+      - request_count
+      - error_count
+      - error_rate
+      - total_tokens
+      properties:
+        avg_output_tokens_per_second:
+          type:
+          - number
+          - 'null'
+          format: double
+        cache_rate:
+          type:
+          - number
+          - 'null'
+          format: double
+        error_count:
+          type: integer
+          format: int64
+        error_rate:
+          type: number
+          format: double
+        model:
+          type: string
+        request_count:
+          type: integer
+          format: int64
+        request_share:
+          type: number
+          format: double
+          description: Share of the window's requests, matching the main model table.
+        token_share:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: |-
+            Share of the window's total tokens, matching the main model table.
+            `None` when the window has zero total tokens.
+        total_tokens:
+          type: integer
+          format: int64
     RequestRecordOverviewRange:
       type: string
       enum:

@@ -44,6 +44,26 @@ pub struct RequestRecordOverviewTrendBucket {
     pub tokens: RequestRecordOverviewTokenUsage,
 }
 
+/// Top-level grouping for the AI distribution table. `Model` keeps the
+/// historical model-first rows with an upstream hover; `Upstream` groups the
+/// full filtered window by endpoint identity and shows a per-model hover.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestRecordOverviewPerspective {
+    #[default]
+    Model,
+    Upstream,
+}
+
+impl RequestRecordOverviewPerspective {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Model => "model",
+            Self::Upstream => "upstream",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RequestRecordOverviewUpstreamBreakdown {
     pub endpoint_id: Option<Uuid>,
@@ -54,6 +74,25 @@ pub struct RequestRecordOverviewUpstreamBreakdown {
     pub request_count: i64,
     /// Share of the window's requests, matching the main model table.
     pub request_share: f64,
+    pub error_count: i64,
+    pub error_rate: f64,
+    pub total_tokens: i64,
+    /// Share of the window's total tokens, matching the main model table.
+    /// `None` when the window has zero total tokens.
+    pub token_share: Option<f64>,
+    pub cache_rate: Option<f64>,
+    pub avg_output_tokens_per_second: Option<f64>,
+}
+
+/// Per-effective-model metrics inside an upstream row. The effective model is
+/// the route-target `upstream_model` override when present, otherwise the
+/// originally requested model.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RequestRecordOverviewModelBreakdown {
+    pub model: String,
+    /// Share of the window's requests, matching the main model table.
+    pub request_share: f64,
+    pub request_count: i64,
     pub error_count: i64,
     pub error_rate: f64,
     pub total_tokens: i64,
@@ -82,9 +121,15 @@ pub struct RequestRecordOverviewBreakdownRow {
     /// Per-upstream metrics for AI model rows, ordered by `total_tokens` desc.
     /// `None` or empty when the row has a single upstream.
     pub upstream_breakdown: Option<Vec<RequestRecordOverviewUpstreamBreakdown>>,
+    /// Per-effective-model metrics for upstream rows in the upstream
+    /// perspective, ordered by `total_tokens` desc. `None` for model rows.
+    pub model_breakdown: Option<Vec<RequestRecordOverviewModelBreakdown>>,
     pub token_share: Option<f64>,
     pub tokens: RequestRecordOverviewTokenUsage,
     pub model: Option<String>,
+    /// Endpoint identity for upstream rows so the client can filter records by
+    /// the clicked upstream. `None` for model rows, MCP rows, and `(direct)`.
+    pub endpoint_id: Option<Uuid>,
     pub mcp_server_id: Option<Uuid>,
     /// Canonical MCP provider preset id (`context7`/`firecrawl`/`minimax`)
     /// resolved from `mcp_servers.provider_kind`. `None` for AI rows and for

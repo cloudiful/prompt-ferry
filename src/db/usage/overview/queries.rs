@@ -3,8 +3,9 @@ use chrono::{DateTime, Utc};
 use sqlx::FromRow;
 
 use crate::db::{
-    RequestRecordCategory, RequestRecordOverviewBreakdownRow, RequestRecordOverviewSummary,
-    RequestRecordOverviewTrendBucket, RequestRecordOverviewUpstreamBreakdown,
+    RequestRecordCategory, RequestRecordOverviewBreakdownRow, RequestRecordOverviewPerspective,
+    RequestRecordOverviewSummary, RequestRecordOverviewTrendBucket,
+    RequestRecordOverviewUpstreamBreakdown,
 };
 
 use super::OverviewWindow;
@@ -108,14 +109,35 @@ struct AiBreakdownRow {
     upstream_breakdown: Option<serde_json::Value>,
 }
 
-fn parse_upstream_breakdown(
+#[derive(Debug, FromRow)]
+struct AiUpstreamBreakdownRow {
+    label: String,
+    endpoint_id: Option<uuid::Uuid>,
+    request_count: i64,
+    request_share: f64,
+    success_count: i64,
+    error_count: i64,
+    token_share: Option<f64>,
+    cache_hit_count: i64,
+    input_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+    output_tokens: i64,
+    total_tokens: i64,
+    /// Per-row-summed full-input denominator carried from
+    /// `breakdown_ai_upstream.sql` so `cache_rate` is
+    /// `SUM(cache_read) / SUM(full_input)`.
+    full_input_tokens: i64,
+    avg_output_tokens_per_second: Option<f64>,
+    model_breakdown: Option<serde_json::Value>,
+}
+
+/// Decode a `json_agg` breakdown payload; SQL `NULL` and malformed payloads
+/// both collapse to `None` so a bad row never fabricates entries.
+fn parse_breakdown<T: serde::de::DeserializeOwned>(
     value: Option<serde_json::Value>,
-) -> Option<Vec<RequestRecordOverviewUpstreamBreakdown>> {
-    let value = value?;
-    if value.is_null() {
-        return None;
-    }
-    serde_json::from_value(value).ok()
+) -> Option<Vec<T>> {
+    serde_json::from_value(value?).ok()
 }
 
 /// Resolve the canonical provider preset and its usage unit for an MCP
@@ -211,60 +233,116 @@ pub async fn query_trend(
         .collect())
 }
 
+/// Map an upstream-perspective row into the shared breakdown shape. Endpoint
+/// rows carry `model_breakdown` for the hover and `endpoint_id` for drilldown.
+fn ai_upstream_totals(row: AiUpstreamBreakdownRow) -> RequestRecordOverviewBreakdownRow {
+    RequestRecordOverviewBreakdownRow {
+        label: row.label,
+        request_count: row.request_count,
+        request_share: row.request_share,
+        success_count: row.success_count,
+        success_rate: ratio(row.success_count, row.request_count),
+        error_count: Some(row.error_count),
+        error_rate: Some(error_rate(row.error_count, row.request_count)),
+        upstream_count: None,
+        upstream_breakdown: None,
+        model_breakdown: parse_breakdown(row.model_breakdown),
+        token_share: row.token_share,
+        tokens: token_usage(
+            row.input_tokens,
+            row.cache_read_tokens,
+            row.cache_write_tokens,
+            row.output_tokens,
+            row.total_tokens,
+            row.cache_hit_count,
+            row.request_count,
+            row.full_input_tokens,
+        ),
+        model: None,
+        endpoint_id: row.endpoint_id,
+        mcp_server_id: None,
+        server_provider_kind: None,
+        usage_unit: None,
+        avg_output_tokens_per_second: row.avg_output_tokens_per_second,
+    }
+}
+
 pub async fn query_breakdown(
     pool: &sqlx::PgPool,
     visible_user_id: Option<i64>,
     request_category: RequestRecordCategory,
     window: OverviewWindow,
     user: Option<&str>,
+    perspective: RequestRecordOverviewPerspective,
 ) -> Result<Vec<RequestRecordOverviewBreakdownRow>> {
     match request_category {
-        RequestRecordCategory::Ai => {
-            let rows = sqlx::query_file_as!(
-                AiBreakdownRow,
-                "src/sql/usage/overview/breakdown_ai_model.sql",
-                visible_user_id,
-                request_category.as_str(),
-                window.start,
-                window.end,
-                user,
-            )
-            .fetch_all(pool)
-            .await?;
-            Ok(rows
-                .into_iter()
-                .map(|row| {
-                    let row_error_rate = error_rate(row.error_count, row.request_count);
-                    RequestRecordOverviewBreakdownRow {
-                        label: row.label,
-                        request_count: row.request_count,
-                        request_share: row.request_share,
-                        success_count: row.success_count,
-                        success_rate: ratio(row.success_count, row.request_count),
-                        error_count: Some(row.error_count),
-                        error_rate: Some(row_error_rate),
-                        upstream_count: Some(row.upstream_count),
-                        upstream_breakdown: parse_upstream_breakdown(row.upstream_breakdown),
-                        token_share: row.token_share,
-                        tokens: token_usage(
-                            row.input_tokens,
-                            row.cache_read_tokens,
-                            row.cache_write_tokens,
-                            row.output_tokens,
-                            row.total_tokens,
-                            row.cache_hit_count,
-                            row.request_count,
-                            row.full_input_tokens,
-                        ),
-                        model: row.model,
-                        mcp_server_id: row.mcp_server_id,
-                        server_provider_kind: None,
-                        usage_unit: None,
-                        avg_output_tokens_per_second: row.avg_output_tokens_per_second,
-                    }
-                })
-                .collect())
-        }
+        RequestRecordCategory::Ai => match perspective {
+            RequestRecordOverviewPerspective::Upstream => {
+                let rows = sqlx::query_file_as!(
+                    AiUpstreamBreakdownRow,
+                    "src/sql/usage/overview/breakdown_ai_upstream.sql",
+                    visible_user_id,
+                    request_category.as_str(),
+                    window.start,
+                    window.end,
+                    user,
+                )
+                .fetch_all(pool)
+                .await?;
+                Ok(rows.into_iter().map(ai_upstream_totals).collect())
+            }
+            RequestRecordOverviewPerspective::Model => {
+                let rows = sqlx::query_file_as!(
+                    AiBreakdownRow,
+                    "src/sql/usage/overview/breakdown_ai_model.sql",
+                    visible_user_id,
+                    request_category.as_str(),
+                    window.start,
+                    window.end,
+                    user,
+                )
+                .fetch_all(pool)
+                .await?;
+                Ok(rows
+                    .into_iter()
+                    .map(|row| {
+                        let row_error_rate = error_rate(row.error_count, row.request_count);
+                        let upstream_breakdown: Option<
+                            Vec<RequestRecordOverviewUpstreamBreakdown>,
+                        > = parse_breakdown(row.upstream_breakdown);
+                        RequestRecordOverviewBreakdownRow {
+                            label: row.label,
+                            request_count: row.request_count,
+                            request_share: row.request_share,
+                            success_count: row.success_count,
+                            success_rate: ratio(row.success_count, row.request_count),
+                            error_count: Some(row.error_count),
+                            error_rate: Some(row_error_rate),
+                            upstream_count: Some(row.upstream_count),
+                            upstream_breakdown,
+                            model_breakdown: None,
+                            token_share: row.token_share,
+                            tokens: token_usage(
+                                row.input_tokens,
+                                row.cache_read_tokens,
+                                row.cache_write_tokens,
+                                row.output_tokens,
+                                row.total_tokens,
+                                row.cache_hit_count,
+                                row.request_count,
+                                row.full_input_tokens,
+                            ),
+                            model: row.model,
+                            endpoint_id: None,
+                            mcp_server_id: row.mcp_server_id,
+                            server_provider_kind: None,
+                            usage_unit: None,
+                            avg_output_tokens_per_second: row.avg_output_tokens_per_second,
+                        }
+                    })
+                    .collect())
+            }
+        },
         RequestRecordCategory::Mcp => {
             let rows = sqlx::query_file_as!(
                 BreakdownRow,
@@ -292,6 +370,7 @@ pub async fn query_breakdown(
                         error_rate: opt_error_rate(None, row.request_count),
                         upstream_count: None,
                         upstream_breakdown: None,
+                        model_breakdown: None,
                         token_share: row.token_share,
                         tokens: token_usage(
                             row.input_tokens,
@@ -304,6 +383,7 @@ pub async fn query_breakdown(
                             row.full_input_tokens,
                         ),
                         model: row.model,
+                        endpoint_id: None,
                         mcp_server_id: row.mcp_server_id,
                         server_provider_kind,
                         usage_unit,
@@ -338,5 +418,67 @@ mod tests {
         assert_eq!(mcp_provider_dimension(Some("legacy-unknown")), (None, None));
         assert_eq!(mcp_provider_dimension(Some("")), (None, None));
         assert_eq!(mcp_provider_dimension(None), (None, None));
+    }
+
+    fn upstream_row(model_breakdown: Option<serde_json::Value>) -> AiUpstreamBreakdownRow {
+        AiUpstreamBreakdownRow {
+            label: "endpoint-a".to_string(),
+            endpoint_id: Some(uuid::Uuid::nil()),
+            request_count: 4,
+            request_share: 0.5,
+            success_count: 3,
+            error_count: 1,
+            token_share: Some(0.25),
+            cache_hit_count: 2,
+            input_tokens: 100,
+            cache_read_tokens: 50,
+            cache_write_tokens: 0,
+            output_tokens: 200,
+            total_tokens: 350,
+            full_input_tokens: 150,
+            avg_output_tokens_per_second: Some(12.5),
+            model_breakdown,
+        }
+    }
+
+    #[test]
+    fn ai_upstream_totals_carries_endpoint_and_model_detail() {
+        let value = serde_json::json!([{
+            "model": "gpt-upstream",
+            "request_share": 0.5,
+            "request_count": 4,
+            "error_count": 1,
+            "error_rate": 0.25,
+            "total_tokens": 350,
+            "token_share": 0.25,
+            "cache_rate": 0.5,
+            "avg_output_tokens_per_second": 12.5
+        }]);
+        let row = ai_upstream_totals(upstream_row(Some(value)));
+
+        assert_eq!(row.label, "endpoint-a");
+        assert_eq!(row.endpoint_id, Some(uuid::Uuid::nil()));
+        assert!(row.model.is_none());
+        assert!(row.upstream_breakdown.is_none());
+        assert_eq!(row.error_rate, Some(0.25));
+        assert_eq!(
+            row.model_breakdown.as_deref().map(|entries| entries.len()),
+            Some(1)
+        );
+        assert_eq!(
+            row.model_breakdown
+                .as_deref()
+                .and_then(|entries| entries.first())
+                .map(|entry| entry.model.as_str()),
+            Some("gpt-upstream")
+        );
+    }
+
+    #[test]
+    fn ai_upstream_totals_tolerates_missing_model_detail() {
+        let row = ai_upstream_totals(upstream_row(None));
+
+        assert!(row.model_breakdown.is_none());
+        assert_eq!(row.endpoint_id, Some(uuid::Uuid::nil()));
     }
 }

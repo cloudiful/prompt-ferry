@@ -8,6 +8,7 @@ import type { RequestRecordFormatting } from '@/models/request-record-formatting
 import type {
   RequestOverviewMode,
   RequestOverviewDrilldown,
+  RequestOverviewPerspective,
 } from '@/request-overview'
 
 defineProps<{
@@ -16,11 +17,13 @@ defineProps<{
   formatting: RequestRecordFormatting
   loading: boolean
   overview: RequestRecordOverviewResponse | null
+  perspective: RequestOverviewPerspective
   t: TranslateFn
 }>()
 
 defineEmits<{
   drilldown: [filter: RequestOverviewDrilldown]
+  changePerspective: [perspective: RequestOverviewPerspective]
 }>()
 
 const RequestOverviewPanel = defineAsyncComponent(
@@ -35,8 +38,10 @@ const RequestOverviewPanel = defineAsyncComponent(
       :overview="overview"
       :loading="loading"
       :category="category"
+      :perspective="perspective"
       :formatting="formatting"
       :t="t"
+      @change-perspective="$emit('changePerspective', $event)"
       @drilldown="$emit('drilldown', $event)"
     />
     <slot v-else name="records" />

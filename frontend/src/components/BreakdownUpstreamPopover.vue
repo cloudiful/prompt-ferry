@@ -1,40 +1,37 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
-import type {
-  RequestRecordOverviewBreakdownRow,
-  RequestRecordOverviewUpstreamBreakdown,
-} from '@/generated/admin-api'
+import type { RequestRecordOverviewBreakdownRow } from '@/generated/admin-api'
 import { useLocale } from '@/composables/useLocale'
+import type { RequestOverviewPerspective } from '@/request-overview'
 import type { RequestRecordFormatting } from '../models/request-record-formatting'
+
+/**
+ * Normalized hover row so the model and upstream perspectives share one table.
+ * `endpoint` is only rendered in the model perspective's upstream hover.
+ */
+type DetailEntry = {
+  key: string
+  endpoint: string
+  model: string
+  request_count: number
+  request_share: number
+  total_tokens: number
+  token_share: number | null
+  cache_rate: number | null
+  error_rate: number
+  avg_output_tokens_per_second: number | null
+}
 
 const props = defineProps<{
   row: RequestRecordOverviewBreakdownRow
+  perspective: RequestOverviewPerspective
   formatting: RequestRecordFormatting
 }>()
 
 const { t } = useLocale()
 
-const visible = computed(() => (props.row.upstream_count ?? 0) > 1)
-const entries = computed(() => props.row.upstream_breakdown ?? [])
-const hasEntries = computed(() => entries.value.length > 0)
-
-const upstreamColumns = computed<
-  TableColumn<RequestRecordOverviewUpstreamBreakdown>[]
->(() => [
-  { accessorKey: 'endpoint_name', header: t('overviewUpstreamEndpoint') },
-  { id: 'model', header: t('model') },
-  { accessorKey: 'request_count', header: t('requests') },
-  { accessorKey: 'request_share', header: t('overviewRequestShare') },
-  { accessorKey: 'total_tokens', header: t('overviewTotalTokens') },
-  { accessorKey: 'token_share', header: t('overviewTokenShare') },
-  { accessorKey: 'cache_rate', header: t('overviewCacheRate') },
-  { accessorKey: 'error_rate', header: t('overviewErrorRate') },
-  {
-    accessorKey: 'avg_output_tokens_per_second',
-    header: t('overviewAvgOutputRate'),
-  },
-])
+const isUpstream = computed(() => props.perspective === 'upstream')
 
 function endpointLabel(
   endpointName: string | null | undefined,
@@ -49,6 +46,65 @@ function modelLabel(upstreamModel: string | null | undefined): string {
   if (upstreamModel && upstreamModel.length > 0) return upstreamModel
   return props.row.label
 }
+
+const entries = computed<DetailEntry[]>(() => {
+  if (isUpstream.value) {
+    return (props.row.model_breakdown ?? []).map((entry) => ({
+      key: entry.model,
+      endpoint: '-',
+      model: entry.model,
+      request_count: entry.request_count,
+      request_share: entry.request_share,
+      total_tokens: entry.total_tokens,
+      token_share: entry.token_share ?? null,
+      cache_rate: entry.cache_rate ?? null,
+      error_rate: entry.error_rate,
+      avg_output_tokens_per_second: entry.avg_output_tokens_per_second ?? null,
+    }))
+  }
+  return (props.row.upstream_breakdown ?? []).map((entry) => ({
+    key: `${entry.endpoint_id ?? 'direct'}:${entry.upstream_model ?? ''}`,
+    endpoint: endpointLabel(entry.endpoint_name, entry.endpoint_id),
+    model: modelLabel(entry.upstream_model),
+    request_count: entry.request_count,
+    request_share: entry.request_share,
+    total_tokens: entry.total_tokens,
+    token_share: entry.token_share ?? null,
+    cache_rate: entry.cache_rate ?? null,
+    error_rate: entry.error_rate,
+    avg_output_tokens_per_second: entry.avg_output_tokens_per_second ?? null,
+  }))
+})
+
+const visible = computed(() =>
+  isUpstream.value
+    ? entries.value.length > 1
+    : (props.row.upstream_count ?? 0) > 1,
+)
+
+const columns = computed<TableColumn<DetailEntry>[]>(() => {
+  const headers: TableColumn<DetailEntry>[] = []
+  if (!isUpstream.value) {
+    headers.push({
+      accessorKey: 'endpoint',
+      header: t('overviewUpstreamEndpoint'),
+    })
+  }
+  headers.push(
+    { accessorKey: 'model', header: t('model') },
+    { accessorKey: 'request_count', header: t('requests') },
+    { accessorKey: 'request_share', header: t('overviewRequestShare') },
+    { accessorKey: 'total_tokens', header: t('overviewTotalTokens') },
+    { accessorKey: 'token_share', header: t('overviewTokenShare') },
+    { accessorKey: 'cache_rate', header: t('overviewCacheRate') },
+    { accessorKey: 'error_rate', header: t('overviewErrorRate') },
+    {
+      accessorKey: 'avg_output_tokens_per_second',
+      header: t('overviewAvgOutputRate'),
+    },
+  )
+  return headers
+})
 </script>
 
 <template>
@@ -68,7 +124,11 @@ function modelLabel(upstreamModel: string | null | undefined): string {
       color="neutral"
       variant="ghost"
       icon="i-lucide-info"
-      :aria-label="t('overviewUpstreamBreakdown')"
+      :aria-label="
+        isUpstream
+          ? t('overviewModelBreakdown')
+          : t('overviewUpstreamBreakdown')
+      "
       @click.stop
     />
     <template #content>
@@ -76,29 +136,30 @@ function modelLabel(upstreamModel: string | null | undefined): string {
         class="max-h-[50vh] w-[min(38rem,calc(100vw-2rem))] overflow-auto p-3"
       >
         <div class="mb-2 text-xs font-semibold text-highlighted">
-          {{ t('overviewUpstreamBreakdown') }}
+          {{
+            isUpstream
+              ? t('overviewModelBreakdown')
+              : t('overviewUpstreamBreakdown')
+          }}
         </div>
         <UTable
-          v-if="hasEntries"
+          v-if="entries.length"
           :data="entries"
-          :columns="upstreamColumns"
+          :columns="columns"
           class="w-full"
           :ui="{
             th: 'whitespace-nowrap px-2 py-1 text-xs',
             td: 'px-2 py-1 text-xs',
           }"
         >
-          <template #endpoint_name-cell="{ row }">
+          <template #endpoint-cell="{ row }">
             <span class="font-medium text-highlighted">{{
-              endpointLabel(
-                row.original.endpoint_name,
-                row.original.endpoint_id,
-              )
+              row.original.endpoint
             }}</span>
           </template>
           <template #model-cell="{ row }">
             <span class="font-medium text-highlighted">{{
-              modelLabel(row.original.upstream_model)
+              row.original.model
             }}</span>
           </template>
           <template #request_count-cell="{ row }">{{

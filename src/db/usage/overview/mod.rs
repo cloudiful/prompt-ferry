@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 
-use crate::db::{RequestRecordCategory, RequestRecordOverviewResponse};
+use crate::db::{
+    RequestRecordCategory, RequestRecordOverviewPerspective, RequestRecordOverviewResponse,
+};
 
 mod presentation;
 mod queries;
@@ -36,6 +38,7 @@ pub struct OverviewWindow {
 struct OverviewCacheKey {
     visible_user_id: Option<i64>,
     request_category: &'static str,
+    perspective: &'static str,
     bucket: OverviewBucket,
     start_bucket: Option<i64>,
     end_bucket: Option<i64>,
@@ -74,10 +77,12 @@ pub async fn request_records_overview(
     request_category: RequestRecordCategory,
     window: OverviewWindow,
     user: Option<&str>,
+    perspective: RequestRecordOverviewPerspective,
 ) -> Result<RequestRecordOverviewResponse> {
     let key = OverviewCacheKey {
         visible_user_id,
         request_category: request_category.as_str(),
+        perspective: perspective.as_str(),
         bucket: window.bucket,
         start_bucket: window_bucket(window.start),
         end_bucket: window_bucket(window.end),
@@ -91,7 +96,14 @@ pub async fn request_records_overview(
     let (summary, trend, breakdown) = tokio::try_join!(
         queries::query_summary(pool, visible_user_id, request_category, window, user),
         queries::query_trend(pool, visible_user_id, request_category, window, user),
-        queries::query_breakdown(pool, visible_user_id, request_category, window, user),
+        queries::query_breakdown(
+            pool,
+            visible_user_id,
+            request_category,
+            window,
+            user,
+            perspective,
+        ),
     )?;
 
     let response = RequestRecordOverviewResponse {
@@ -138,6 +150,7 @@ mod tests {
         OverviewCacheKey {
             visible_user_id: Some(visible_user_id),
             request_category: "ai",
+            perspective: "model",
             bucket: OverviewBucket::Hour,
             start_bucket: Some(0),
             end_bucket: Some(1),
@@ -162,6 +175,14 @@ mod tests {
         assert_ne!(test_key(1, Some("a")), test_key(1, Some("b")));
         assert_ne!(test_key(1, None), test_key(1, Some("a")));
         assert_ne!(test_key(1, None), test_key(2, None));
+    }
+
+    #[test]
+    fn cache_key_separates_model_and_upstream_perspectives() {
+        let mut upstream = test_key(1, None);
+        upstream.perspective = "upstream";
+
+        assert_ne!(test_key(1, None), upstream);
     }
 
     #[test]

@@ -1,0 +1,137 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH normalized AS (\n    -- Upstream perspective aggregates the raw request rows (no model-level\n    -- LIMIT 50) so endpoint totals and per-model detail both use the full\n    -- filtered window. `effective_model` is the route-target override when set,\n    -- otherwise the originally requested model.\n    SELECT COALESCE(rr.upstream_model, rr.model, '(unknown)') AS effective_model,\n           rr.ok,\n           rr.request_state,\n           rr.endpoint_id,\n           rr.output_tokens AS raw_output_tokens,\n           rr.duration_ms,\n           -- Post-0072 rows already store the ordinary (non-cache) input; rows\n           -- still in the folded shape keep the cache inside `input_tokens`, so\n           -- expand them to the ordinary miss `input - cache_read - cache_write`\n           -- (floored at 0) using the same guard as the full-input denominator.\n           -- Closed loop: ordinary + cache_read + cache_write + output == total.\n           CASE\n               WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0\n                   AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)\n                   AND COALESCE(rr.input_tokens, 0)\n                       >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)\n               THEN GREATEST(\n                   COALESCE(rr.input_tokens, 0)\n                       - GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)\n                       - GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),\n                   0\n               )\n               ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)\n           END::BIGINT AS normalized_input_tokens,\n           COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,\n           COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,\n           -- P2 (issue #205): full-input denominator `ordinary+read+write`.\n           -- Still-folded rows (0072/0073 guard) fall back to `max(input,\n           -- read+write)` to avoid the ≈1.9x double-count.\n           CASE\n               WHEN COALESCE(COALESCE(rr.cache_read_tokens, rr.cached_tokens), 0) > 0\n                   AND COALESCE(rr.total_tokens, 0) >= COALESCE(rr.output_tokens, 0)\n                   AND COALESCE(rr.input_tokens, 0)\n                       >= COALESCE(rr.total_tokens, 0) - COALESCE(rr.output_tokens, 0)\n               THEN GREATEST(\n                   COALESCE(rr.input_tokens, 0),\n                   GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)\n                       + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0),\n                   0\n               )\n               ELSE GREATEST(COALESCE(rr.input_tokens, 0), 0)\n                   + GREATEST(COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0), 0)\n                   + GREATEST(COALESCE(rr.cache_write_tokens, 0), 0)\n           END::BIGINT AS normalized_full_input_tokens,\n           COALESCE(rr.output_tokens, 0)::BIGINT AS output_tokens,\n           COALESCE(rr.total_tokens, 0)::BIGINT AS total_tokens\n    FROM request_records rr\n    LEFT JOIN users u ON u.user_id = rr.user_id\n    WHERE rr.event_kind = 'request'\n      AND rr.request_category = $2\n      AND ($1::BIGINT IS NULL OR rr.user_id = $1)\n      AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)\n      AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)\n      AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)\n), grouped AS (\n    -- Endpoint identity is `endpoint_id`; requests without one collapse into\n    -- the `(direct)` row instead of merging by a shared name.\n    SELECT COALESCE(pe.name, n.endpoint_id::TEXT, '(direct)') AS label,\n           n.endpoint_id,\n           COUNT(*)::BIGINT AS request_count,\n           COUNT(*) FILTER (WHERE n.ok IS TRUE)::BIGINT AS success_count,\n           COUNT(*) FILTER (\n               WHERE n.ok IS FALSE OR n.request_state IN ('failed', 'aborted')\n           )::BIGINT AS error_count,\n           COUNT(*) FILTER (\n               WHERE n.normalized_cache_read_tokens > 0\n           )::BIGINT AS cache_hit_count,\n           COALESCE(SUM(n.normalized_input_tokens), 0)::BIGINT AS input_tokens,\n           COALESCE(SUM(n.normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,\n           COALESCE(SUM(n.normalized_cache_write_tokens), 0)::BIGINT AS cache_write_tokens,\n           COALESCE(SUM(n.output_tokens), 0)::BIGINT AS output_tokens,\n           COALESCE(SUM(GREATEST(n.total_tokens, 0)), 0)::BIGINT AS total_tokens,\n           -- Issue #226: aggregated cache denominator is the row-by-row\n           -- fold-aware SUM, not the raw `input_tokens` SUM.\n           COALESCE(SUM(n.normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens,\n           AVG(\n               CASE\n                   WHEN n.request_state = 'completed'\n                       AND n.raw_output_tokens IS NOT NULL\n                       AND n.raw_output_tokens > 0\n                       AND n.duration_ms IS NOT NULL\n                       AND n.duration_ms > 0\n                   THEN n.raw_output_tokens::NUMERIC / n.duration_ms::NUMERIC * 1000.0\n                   ELSE NULL\n               END\n           )::DOUBLE PRECISION AS avg_output_tokens_per_second\n    FROM normalized n\n    LEFT JOIN provider_endpoints pe ON pe.endpoint_id = n.endpoint_id\n    GROUP BY COALESCE(pe.name, n.endpoint_id::TEXT, '(direct)'), n.endpoint_id\n), totals AS (\n    SELECT SUM(request_count)::DOUBLE PRECISION AS request_count,\n           SUM(total_tokens)::DOUBLE PRECISION AS total_tokens\n    FROM grouped\n), models AS (\n    SELECT n.endpoint_id,\n           n.effective_model,\n           COUNT(*)::BIGINT AS request_count,\n           COUNT(*) FILTER (\n               WHERE n.ok IS FALSE OR n.request_state IN ('failed', 'aborted')\n           )::BIGINT AS error_count,\n           COALESCE(SUM(GREATEST(n.total_tokens, 0)), 0)::BIGINT AS total_tokens,\n           COALESCE(SUM(n.normalized_cache_read_tokens), 0)::BIGINT AS cache_read_tokens,\n           COALESCE(SUM(n.normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens,\n           AVG(\n               CASE\n                   WHEN n.request_state = 'completed'\n                       AND n.raw_output_tokens IS NOT NULL\n                       AND n.raw_output_tokens > 0\n                       AND n.duration_ms IS NOT NULL\n                       AND n.duration_ms > 0\n                   THEN n.raw_output_tokens::NUMERIC / n.duration_ms::NUMERIC * 1000.0\n                   ELSE NULL\n               END\n           )::DOUBLE PRECISION AS avg_output_tokens_per_second\n    FROM normalized n\n    GROUP BY n.endpoint_id, n.effective_model\n), model_agg AS (\n    SELECT m.endpoint_id,\n           json_agg(\n               json_build_object(\n                   'model', m.effective_model,\n                   'request_count', m.request_count,\n                   'request_share', CASE WHEN t.request_count > 0 THEN m.request_count::DOUBLE PRECISION / t.request_count ELSE 0 END,\n                   'error_count', m.error_count,\n                   'error_rate', CASE WHEN m.request_count > 0 THEN m.error_count::DOUBLE PRECISION / m.request_count ELSE 0 END,\n                   'total_tokens', m.total_tokens,\n                   'token_share', m.total_tokens::DOUBLE PRECISION / NULLIF(t.total_tokens, 0),\n                   'cache_rate', CASE\n                       WHEN m.full_input_tokens > 0\n                       THEN LEAST(GREATEST(m.cache_read_tokens::DOUBLE PRECISION / m.full_input_tokens, 0), 1)\n                       ELSE NULL\n                   END,\n                   'avg_output_tokens_per_second', m.avg_output_tokens_per_second\n               )\n               ORDER BY m.total_tokens DESC, m.request_count DESC, m.effective_model ASC\n           ) AS model_breakdown\n    FROM models m\n    CROSS JOIN totals t\n    GROUP BY m.endpoint_id\n)\nSELECT grouped.label AS \"label!\",\n       grouped.endpoint_id AS endpoint_id,\n       grouped.request_count AS \"request_count!\",\n       COALESCE(grouped.request_count::DOUBLE PRECISION / NULLIF(totals.request_count, 0), 0) AS \"request_share!\",\n       grouped.success_count AS \"success_count!\",\n       grouped.error_count AS \"error_count!\",\n       grouped.total_tokens::DOUBLE PRECISION / NULLIF(totals.total_tokens, 0) AS token_share,\n       grouped.cache_hit_count AS \"cache_hit_count!\",\n       grouped.input_tokens AS \"input_tokens!\",\n       grouped.cache_read_tokens AS \"cache_read_tokens!\",\n       grouped.cache_write_tokens AS \"cache_write_tokens!\",\n       grouped.output_tokens AS \"output_tokens!\",\n       grouped.total_tokens AS \"total_tokens!\",\n       grouped.full_input_tokens AS \"full_input_tokens!\",\n       grouped.avg_output_tokens_per_second AS avg_output_tokens_per_second,\n       model_agg.model_breakdown AS model_breakdown\nFROM grouped\nCROSS JOIN totals\nLEFT JOIN model_agg ON model_agg.endpoint_id IS NOT DISTINCT FROM grouped.endpoint_id\nORDER BY grouped.total_tokens DESC, grouped.request_count DESC, grouped.label ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "label!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "request_records",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "request_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "request_share!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "success_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "error_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "token_share",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "cache_hit_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "cache_read_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "cache_write_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "output_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 12,
+        "name": "total_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 13,
+        "name": "full_input_tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 14,
+        "name": "avg_output_tokens_per_second",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 15,
+        "name": "model_breakdown",
+        "type_info": "Json",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "483332be294ef14ec7ae2f75780a2a47cc2383ec26855d5aa8e6fc9a8f5e1f89"
+}

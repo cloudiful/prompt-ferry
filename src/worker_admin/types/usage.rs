@@ -28,6 +28,10 @@ pub enum RequestRecordOverviewRange {
 #[into_params(parameter_in = Query)]
 pub struct RequestRecordOverviewQuery {
     pub request_category: Option<db::RequestRecordCategory>,
+    /// AI distribution grouping: `model` (default) or `upstream`. Ignored for
+    /// the MCP category, whose distribution is always by MCP server.
+    #[param(inline)]
+    pub perspective: Option<db::RequestRecordOverviewPerspective>,
     pub range: Option<RequestRecordOverviewRange>,
     pub start: Option<chrono::DateTime<chrono::Utc>>,
     pub end: Option<chrono::DateTime<chrono::Utc>>,
