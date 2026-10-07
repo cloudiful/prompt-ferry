@@ -2,8 +2,9 @@
 # Local development entrypoint for prompt-ferry.
 # Usage: bash scripts/dev.sh <help|backend|full>
 #
-# Loads the root .env as data, applies development defaults, and delegates the
-# relay/worker/frontend process lifecycle to scripts/dev-supervisor.sh.
+# Loads the root .env as data via scripts/dev-env.sh, applies development
+# defaults, and delegates the relay/worker/frontend process lifecycle to
+# scripts/dev-supervisor.sh.
 
 if [ -z "${BASH_VERSION:-}" ]; then
   printf 'scripts/dev.sh must run under bash: bash scripts/dev.sh <help|backend|full>\n' >&2
@@ -17,13 +18,25 @@ if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
   exit 1
 fi
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
+
+die() {
+  printf 'dev.sh: %s\n' "$1" >&2
+  if [ "$#" -gt 1 ]; then
+    printf '%s\n' "$2" >&2
+  fi
+  exit 1
+}
+
+# The repository helper, never the .env file: it defines the parser and defaults.
+ENV_HELPER="$SCRIPT_DIR/dev-env.sh"
+[ -f "$ENV_HELPER" ] || die "missing $ENV_HELPER" "Run from a complete checkout of the repository."
+source "$ENV_HELPER"
 
 DOTENV_FILE="$ROOT/.env"
 SUPERVISOR="$ROOT/scripts/dev-supervisor.sh"
-
-declare -A DOTENV=()
 
 usage() {
   cat <<'EOF'
@@ -45,76 +58,6 @@ Requirements:
   bash, cargo, and curl on PATH
   full mode additionally requires bun
 EOF
-}
-
-die() {
-  printf 'dev.sh: %s\n' "$1" >&2
-  if [ "$#" -gt 1 ]; then
-    printf '%s\n' "$2" >&2
-  fi
-  exit 1
-}
-
-is_blank() {
-  [ -z "${1//[[:space:]]/}" ]
-}
-
-# Parses KEY=VALUE lines as plain data. Values are never expanded, evaluated, or
-# executed, so a .env file cannot run commands in this shell.
-load_dotenv() {
-  local file="$1" line key value
-  [ -f "$file" ] || return 0
-
-  while IFS= read -r line || [ -n "$line" ]; do
-    line="${line%$'\r'}"
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    case "$line" in
-      '' | '#'*) continue ;;
-    esac
-
-    key="${line%%=*}"
-    [ "$key" != "$line" ] || continue
-    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-
-    value="${line#*=}"
-    value="${value#"${value%%[![:space:]]*}"}"
-    value="${value%"${value##*[![:space:]]}"}"
-    if [ "${#value}" -ge 2 ]; then
-      case "$value" in
-        \"*\" | \'*\') value="${value:1:${#value}-2}" ;;
-      esac
-    fi
-
-    DOTENV["$key"]="$value"
-  done < "$file"
-}
-
-# Exports every parsed .env entry so keys this entrypoint knows nothing about
-# still reach the supervisor, as the previous Nushell `with-env` did.
-export_dotenv() {
-  local key
-  for key in "${!DOTENV[@]}"; do
-    export "$key=${DOTENV[$key]}"
-  done
-}
-
-# Known keys resolve as .env wins, then ambient, then the built-in default. A
-# blank .env value is authoritative and falls through to the default, because
-# export_dotenv has already cleared any ambient value for that key.
-resolve() {
-  local key="$1" fallback="$2" value
-  value="${DOTENV[$key]:-}"
-  if [ -n "$value" ] && ! is_blank "$value"; then
-    printf '%s' "$value"
-    return 0
-  fi
-  value="${!key:-}"
-  if [ -n "$value" ] && ! is_blank "$value"; then
-    printf '%s' "$value"
-    return 0
-  fi
-  printf '%s' "$fallback"
 }
 
 # First entry of a JSON array value, or the value itself when it is a bare URL.
@@ -191,22 +134,6 @@ ensure_frontend_deps() {
     printf 'Installing frontend dependencies with bun...\n'
     (cd "$ROOT/frontend" && bun install --no-save)
   fi
-}
-
-export_dev_env() {
-  export PROMPT_FERRY_LOGGING__LEVEL="$(resolve PROMPT_FERRY_LOGGING__LEVEL info)"
-  export DATABASE_URL="$(resolve DATABASE_URL '')"
-  export PROMPT_FERRY_RELAY__BIND="$(resolve PROMPT_FERRY_RELAY__BIND 127.0.0.1:8787)"
-  export PROMPT_FERRY_RELAY__WORKER_BIND="$(resolve PROMPT_FERRY_RELAY__WORKER_BIND 127.0.0.1:8788)"
-  export PROMPT_FERRY_RELAY__CLIENT_TOKEN="$(resolve PROMPT_FERRY_RELAY__CLIENT_TOKEN dev-client-token)"
-  export PROMPT_FERRY_RELAY__WORKER_TOKEN="$(resolve PROMPT_FERRY_RELAY__WORKER_TOKEN dev-worker-token)"
-  export PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS="$(resolve PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS 300)"
-  export PROMPT_FERRY_WORKER__RELAY_URLS="$(resolve PROMPT_FERRY_WORKER__RELAY_URLS '["ws://127.0.0.1:8788/ws/worker"]')"
-  export PROMPT_FERRY_WORKER__WORKER_TOKEN="$(resolve PROMPT_FERRY_WORKER__WORKER_TOKEN dev-worker-token)"
-  export PROMPT_FERRY_WORKER__ADMIN_BIND="$(resolve PROMPT_FERRY_WORKER__ADMIN_BIND 127.0.0.1:8789)"
-  export PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN="$(resolve PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN admin)"
-  export PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD="$(resolve PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD change-me-now)"
-  export PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY="$(resolve PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=)"
 }
 
 run_stack() {
