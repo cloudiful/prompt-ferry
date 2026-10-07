@@ -477,21 +477,17 @@ fn codex_thread_key(metadata: &CodexRequestMetadata) -> Option<&str> {
 }
 
 pub(super) fn session_header_id(headers: &[(String, String)]) -> Option<String> {
-    // Issue #633: canonical alias rules live in `session_affinity` so
-    // conversation grouping and Codex OAuth egress resolve identically.
+    // Issue #633/#701: canonical alias rules live in `session_affinity` so
+    // conversation grouping and Codex OAuth egress resolve identically, and an
+    // OpenCode V2 child request keeps its own session identity.
     crate::session_affinity::resolve_session_affinity(headers)
 }
 
-/// Issue #579 Task 2: the parent-session header an OpenCode child session sends
-/// next to its own session header. It is association and display metadata only;
-/// the conversation id still derives from the session's own `X-Session-Id`.
+/// Issue #579 Task 2 + #701: the parent-session header an OpenCode session
+/// sends next to its own session header. It is association and display metadata
+/// only; the conversation id still derives from the current session identity.
 pub(super) fn parent_session_header_id(headers: &[(String, String)]) -> Option<String> {
-    headers
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("x-parent-session-id"))
-        .map(|(_, value)| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    crate::session_affinity::resolve_parent_session_affinity(headers)
 }
 
 pub(super) fn resolve_mcp_conversation_log() -> RequestPromptLog {
@@ -569,6 +565,30 @@ mod tests {
     }
 
     #[test]
+    fn accepts_opencode_v2_child_identity_with_parent_metadata() {
+        // Issue #701: OpenCode V2 sends the child session next to lineage-root
+        // affinity headers. Conversation grouping follows the child; the parent
+        // stays metadata.
+        let headers = vec![
+            ("x-opencode-session-id".to_string(), "child".to_string()),
+            (
+                "x-opencode-parent-session-id".to_string(),
+                "parent".to_string(),
+            ),
+            ("x-session-affinity".to_string(), "parent".to_string()),
+            ("X-Session-Id".to_string(), "parent".to_string()),
+            ("x-opencode-session".to_string(), "parent".to_string()),
+            ("x-parent-session-id".to_string(), "parent".to_string()),
+        ];
+
+        assert_eq!(session_header_id(&headers).as_deref(), Some("child"));
+        assert_eq!(
+            parent_session_header_id(&headers).as_deref(),
+            Some("parent")
+        );
+    }
+
+    #[test]
     fn accepts_parent_session_identity_header() {
         let headers = vec![
             ("X-Session-Id".to_string(), "child-session".to_string()),
@@ -589,6 +609,13 @@ mod tests {
         let headers = vec![("x-parent-session-id".to_string(), "   ".to_string())];
 
         assert_eq!(parent_session_header_id(&headers), None);
+        assert_eq!(
+            parent_session_header_id(&[(
+                "x-opencode-parent-session-id".to_string(),
+                String::new(),
+            )]),
+            None
+        );
         assert_eq!(parent_session_header_id(&[]), None);
     }
 

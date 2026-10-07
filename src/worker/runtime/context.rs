@@ -230,9 +230,11 @@ impl RequestExecutionContext {
             request.request_user_agent.clone(),
             fallback_user_id,
         );
-        // Issue #579 Task 2: the managed path already carries the extracted
-        // session identity on the prompt log; standalone mode builds no prompt
-        // log, so fall back to the request headers there.
+        // Issue #579 Task 2 + #701: the managed path already carries the
+        // extracted session identity on the prompt log; standalone mode builds
+        // no prompt log, so fall back to the request headers. Both fallbacks
+        // share the one resolver, so standalone mode records the same
+        // child-scoped OpenCode V2 identity and the same parent metadata.
         if metadata.session_header_id.is_none() {
             metadata.session_header_id = session_header_id(request.headers.as_slice());
         }

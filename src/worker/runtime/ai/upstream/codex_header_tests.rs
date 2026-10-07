@@ -1,13 +1,15 @@
-//! Issue #599 R2f.1 + #633: Codex subscription request-context header parity.
+//! Issue #599 R2f.1 + #633 + #701: Codex subscription request-context header
+//! parity.
 //!
 //! These builder tests live next to `upstream.rs` instead of inside its
-//! oversized inline test module: caller session-affinity alias resolution,
-//! access-token compute residency, and the untouched platform API-key path
-//! are covered here; credential/body contracts live in `codex_auth_tests`.
+//! oversized inline test module: caller session-affinity alias resolution
+//! (including the OpenCode V2 child/parent header combination), access-token
+//! compute residency, and the untouched platform API-key path are covered
+//! here; credential/body contracts live in `codex_auth_tests`.
 
 use super::codex_test_support::{codex_request, jwt_with_claims, openai_responses_route};
 use super::*;
-use crate::session_affinity::resolve_session_affinity;
+use crate::session_affinity::{has_conflicting_session_affinity, resolve_session_affinity};
 
 #[test]
 fn codex_request_mirrors_the_caller_session_id_only() {
@@ -162,6 +164,7 @@ fn platform_builder_keeps_the_platform_model_and_store_field() {
 #[test]
 fn codex_request_resolves_each_session_alias() {
     for (header_name, header_value) in [
+        ("x-opencode-session-id", "ses_child"),
         ("x-session-id", "ses_explicit"),
         ("x-session-affinity", "ses_affinity"),
         ("x-opencode-session", "ses_opencode"),
@@ -187,8 +190,57 @@ fn codex_request_resolves_each_session_alias() {
 }
 
 #[test]
+fn codex_request_forwards_the_opencode_v2_child_session_id() {
+    // Issue #701: the upstream Codex session id must follow the child session
+    // OpenCode V2 reports, not the parent its lineage-root aliases carry.
+    let headers = vec![
+        ("x-opencode-session-id".to_string(), "ses_child".to_string()),
+        (
+            "x-opencode-parent-session-id".to_string(),
+            "ses_parent".to_string(),
+        ),
+        ("x-session-affinity".to_string(), "ses_parent".to_string()),
+        ("X-Session-Id".to_string(), "ses_parent".to_string()),
+        ("x-opencode-session".to_string(), "ses_parent".to_string()),
+        ("x-parent-session-id".to_string(), "ses_parent".to_string()),
+    ];
+    let request = codex_request(
+        br#"{"model":"gpt-5.1-codex"}"#,
+        &headers,
+        &CodexAuth::new("oauth-access-token".to_string(), false),
+    );
+    assert_eq!(request.headers().get("session-id").unwrap(), "ses_child");
+    assert_eq!(
+        resolve_session_affinity(&headers).as_deref(),
+        Some("ses_child")
+    );
+    assert!(
+        !has_conflicting_session_affinity(&headers),
+        "the expected parent-valued lineage aliases must not look like a conflict"
+    );
+}
+
+#[test]
 fn codex_request_prefers_alias_precedence() {
     let headers = vec![
+        ("session-id".to_string(), "ses_legacy".to_string()),
+        ("x-opencode-session".to_string(), "ses_opencode".to_string()),
+        ("x-session-affinity".to_string(), "ses_affinity".to_string()),
+        ("x-session-id".to_string(), "ses_explicit".to_string()),
+        ("x-opencode-session-id".to_string(), "ses_child".to_string()),
+    ];
+    let request = codex_request(
+        br#"{"model":"gpt-5.1-codex"}"#,
+        &headers,
+        &CodexAuth::new("oauth-access-token".to_string(), false),
+    );
+    assert_eq!(request.headers().get("session-id").unwrap(), "ses_child");
+    assert_eq!(
+        resolve_session_affinity(&headers).as_deref(),
+        Some("ses_child")
+    );
+
+    let legacy = vec![
         ("session-id".to_string(), "ses_legacy".to_string()),
         ("x-opencode-session".to_string(), "ses_opencode".to_string()),
         ("x-session-affinity".to_string(), "ses_affinity".to_string()),
@@ -196,14 +248,10 @@ fn codex_request_prefers_alias_precedence() {
     ];
     let request = codex_request(
         br#"{"model":"gpt-5.1-codex"}"#,
-        &headers,
+        &legacy,
         &CodexAuth::new("oauth-access-token".to_string(), false),
     );
     assert_eq!(request.headers().get("session-id").unwrap(), "ses_explicit");
-    assert_eq!(
-        resolve_session_affinity(&headers).as_deref(),
-        Some("ses_explicit")
-    );
 
     let fallback = vec![
         ("x-session-affinity".to_string(), "ses_affinity".to_string()),
@@ -220,6 +268,7 @@ fn codex_request_prefers_alias_precedence() {
 #[test]
 fn codex_request_ignores_blank_aliases() {
     let headers = vec![
+        ("x-opencode-session-id".to_string(), "   ".to_string()),
         ("x-session-id".to_string(), "   ".to_string()),
         ("x-session-affinity".to_string(), String::new()),
         ("x-opencode-session".to_string(), "ses_ok".to_string()),
@@ -295,6 +344,7 @@ fn platform_builder_ignores_all_session_aliases() {
         &route,
         &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-4o","store":true}"#.to_vec()),
         &[
+            ("x-opencode-session-id".to_string(), "ses_child".to_string()),
             ("x-session-id".to_string(), "ses_explicit".to_string()),
             ("x-session-affinity".to_string(), "ses_affinity".to_string()),
             ("x-opencode-session".to_string(), "ses_opencode".to_string()),

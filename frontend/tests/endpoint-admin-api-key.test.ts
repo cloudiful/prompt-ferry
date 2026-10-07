@@ -290,6 +290,21 @@ test('duplicate nicknames are reported per row before submit', () => {
   ).toEqual([])
 })
 
+test('conversation_seq is labelled as a request sequence in both locales', () => {
+  const zh = messages['zh-CN'].conversationSeq
+  const en = messages['en-US'].conversationSeq
+  // The badge renders the prompt-ferry request counter, so the label must not
+  // read as a conversation-scoped sequence or as an OpenCode turn count.
+  expect(en).toMatch(/request sequence/i)
+  expect(en).not.toMatch(/turn/i)
+  expect(en).not.toMatch(/conversation/i)
+  expect(zh).toBe('请求序号')
+  expect(zh).not.toBe('会话序号')
+  // Same key in both locales, so the UI label survives the locale switch.
+  const merged = messages['en-US'] as Record<string, string>
+  expect(merged.conversationSeq).toBe(en)
+})
+
 test('endpoint key nickname copy exists in both locales', () => {
   const keys = [
     'apiKeyName',
