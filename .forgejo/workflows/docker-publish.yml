@@ -27,6 +27,16 @@ jobs:
         shell: bash
         run: rm -rf ci-image-input
 
+      - name: Build frontend
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun install --no-save --minimum-release-age 604800
+          bun run openapi-ts
+          bun run build
+          test -f dist/index.html
+
       - name: Build Rust artifact
         uses: https://forgejo.cloud1ful.com/actions/workflows/actions/build-rust-artifacts@v0.3.5
         with:
@@ -46,21 +56,10 @@ jobs:
 
       - name: Prepare Docker build input
         shell: bash
-        run: mkdir -p ci-image-input/frontend-dist
+        run: mkdir -p ci-image-input
 
       - name: Export OpenAPI
         run: ci-image-input/prompt-ferry openapi export
-
-      - name: Build frontend
-        working-directory: frontend
-        shell: bash
-        run: |
-          set -euo pipefail
-          bun install --no-save --minimum-release-age 604800
-          bun run openapi-ts
-          bun run build
-          test -f dist/index.html
-          cp -R dist/. ../ci-image-input/frontend-dist/
 
       - name: Build and push Docker image
         uses: https://forgejo.cloud1ful.com/actions/workflows/actions/publish-docker-targets@v0.3.5

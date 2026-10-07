@@ -428,21 +428,39 @@ secret is never echoed, logged, or returned.
 ### Single-host binary
 
 Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases)
-and run the relay and worker together:
+and run the relay and worker together — the admin UI is embedded in the binary:
 
 ```bash
-./prompt-ferry serve
+./prompt-ferry
 ```
 
-`serve` binds the internal worker bridge to loopback and starts with no
-required secrets: an empty `PROMPT_FERRY_WORKER_TOKEN` keeps the bridge open
-only on that loopback bind, the encryption key is generated on first start,
-and the initial admin password (if needed) is written to
+The no-argument command starts relay, worker, and the embedded admin UI in one
+process and prints the local UI URL as soon as the admin listener is ready. On
+Windows it also opens that URL (loopback only) in the default browser once the
+UI is up; the console window stays open showing logs, and Ctrl+C or closing the
+console stops the service. If no browser can be opened the URL is still logged
+and the service runs normally. `prompt-ferry serve` is a compatibility alias
+for the same startup and never opens a browser.
+
+The integrated mode binds the internal worker bridge to loopback and starts
+with no required secrets: an empty `PROMPT_FERRY_WORKER_TOKEN` keeps the bridge
+open only on that loopback bind, the encryption key is generated on first
+start, and the initial admin password (if needed) is written to
 `<data-root>/prompt-ferry/bootstrap-admin.txt`. Configure a client token and
-upstream endpoint through the Admin console at <http://127.0.0.1:8789>:
+upstream endpoint through the Admin console (default
+<http://127.0.0.1:8789>):
 
 ```dotenv
 PROMPT_FERRY_RELAY__CLIENT_TOKEN=<client-token>
 PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://api.example.com
 PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<upstream-api-key>
 ```
+
+Release binaries embed the built frontend, so the release workflow builds the
+frontend before compiling the binary and the container image carries one
+artifact with no separate frontend directory. Building from source produces the
+same result after `cd frontend && bun install && bun run build`; compiling
+without a frontend build still succeeds and serves a notice page pointing at
+the Admin API instead of the UI. During frontend development,
+`PROMPT_FERRY_FRONTEND_DIST=/path/to/dist` serves a filesystem directory
+without recompiling.

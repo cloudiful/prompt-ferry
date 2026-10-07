@@ -67,6 +67,30 @@ jobs:
         with:
           version: v0.16.0
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Restore Bun install cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ matrix.target }}-${{ hashFiles('frontend/package.json', 'frontend/bunfig.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-${{ matrix.target }}-
+            ${{ runner.os }}-bun-
+
+      - name: Build frontend
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun install --no-save
+          bun run openapi-ts
+          bun run build
+          test -f dist/index.html
+
       - name: Set up MSVC environment
         if: matrix.msvc_arch != ''
         uses: ilammy/msvc-dev-cmd@v1
@@ -131,40 +155,14 @@ jobs:
           name: binary-${{ matrix.target }}
           path: binary-artifact
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.14"
-
-      - name: Restore Bun install cache
-        uses: actions/cache@v6
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ matrix.arch }}-${{ hashFiles('frontend/package.json', 'frontend/bunfig.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-${{ matrix.arch }}-
-            ${{ runner.os }}-bun-
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: bun install --no-save
-
       - name: Prepare image input directory
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p ci-image-input/frontend-dist
           install -Dm755 "binary-artifact/${BINARY_NAME}" ci-image-input/prompt-ferry
 
       - name: Export OpenAPI
         run: ci-image-input/prompt-ferry openapi export
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          bun run openapi-ts
-          bun run build
-          cp -R dist/. ../ci-image-input/frontend-dist/
 
       - name: Upload Docker input
         uses: actions/upload-artifact@v7

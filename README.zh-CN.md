@@ -354,20 +354,32 @@ OpenAI 端点可以单独保存一个可选的 Admin API Key，用于读取该 O
 ### 单机二进制
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的
-二进制文件，然后让 relay 和 worker 在同一个进程中运行：
+二进制文件，让 relay、worker 和内嵌的管理界面在同一个进程中运行：
 
 ```bash
-./prompt-ferry serve
+./prompt-ferry
 ```
 
-`serve` 会将内部 worker 桥接绑定到本机回环地址，并且首次启动无需任何必填密钥：
+不带子命令启动时，进程会一并运行 relay、worker 和内嵌的管理界面，并在管理监听器
+就绪后打印本地界面地址。在 Windows 上，界面就绪后还会用默认浏览器打开该地址
+（仅回环地址）；控制台窗口保持打开以显示日志，按 Ctrl+C 或关闭窗口即可停止服务。
+如果无法打开浏览器，地址仍会打印在日志里，服务照常运行。`prompt-ferry serve` 是
+同一启动方式的兼容别名，且永远不会打开浏览器。
+
+集成模式会将内部 worker 桥接绑定到本机回环地址，并且首次启动无需任何必填密钥：
 空的 `PROMPT_FERRY_WORKER_TOKEN` 表示该回环端口不启用 worker 认证，加密密钥会在
 首次启动时自动生成，需要的初始管理员密码会写入
 `<data-root>/prompt-ferry/bootstrap-admin.txt`。随后在管理控制台
-<http://127.0.0.1:8789> 中配置客户端令牌和上游端点：
+（默认 <http://127.0.0.1:8789>）中配置客户端令牌和上游端点：
 
 ```dotenv
 PROMPT_FERRY_RELAY__CLIENT_TOKEN=<客户端令牌>
 PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://api.example.com
 PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<上游 API 密钥>
 ```
+
+发布二进制内嵌了构建好的前端：发布流程先构建前端再编译 Rust，容器镜像因此只需要
+一个制品，不再携带独立的前端目录。从源码构建时，先执行
+`cd frontend && bun install && bun run build` 即可获得同样效果；未构建前端也能
+编译通过，此时管理界面位置会显示提示页面并指向 Admin API。前端开发时可用
+`PROMPT_FERRY_FRONTEND_DIST=/path/to/dist` 直接指定文件系统目录，无需重新编译。

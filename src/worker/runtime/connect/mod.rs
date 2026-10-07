@@ -10,7 +10,10 @@ use super::{
     build_admin_state, build_standalone_state,
     lifecycle_standalone::spawn_standalone_stale_lease_reconciler, validate_config,
 };
-use crate::{config::WorkerConfig, runtime_env};
+use crate::{
+    config::{self as app_config, WorkerConfig},
+    runtime_env,
+};
 use anyhow::Context;
 use reqwest::Client;
 use std::time::Duration;
@@ -27,6 +30,48 @@ use self::{
         spawn_standalone_relay_supervisor,
     },
 };
+
+/// Adopt the admin socket the integrated entrypoint reserved.
+///
+/// An integrated process owns the relay, the worker, and the admin UI, so it
+/// resolves and binds every address before the worker starts. Taking that
+/// socket over here — before the database migration and bootstrap that follow —
+/// means a fixed admin port cannot be claimed by another process in between,
+/// and any bind problem fails the run rather than leaving the process without
+/// its UI.
+///
+/// Returns `None` for a standalone worker, which installs no hand-off and
+/// keeps binding its own admin socket inside the admin server.
+fn bind_integrated_admin_listener(
+    config: &WorkerConfig,
+) -> anyhow::Result<Option<tokio::net::TcpListener>> {
+    if !app_config::integrated_startup::is_installed() {
+        return Ok(None);
+    }
+    let reserved =
+        app_config::integrated_startup::take_reserved_admin_listener().ok_or_else(|| {
+            anyhow::anyhow!(
+                "integrated startup reserved no admin listener, so an admin bind failure could not \
+             be reported to the integrated runner"
+            )
+        })?;
+    reserved
+        .set_nonblocking(true)
+        .context("failed to switch the reserved admin listener to non-blocking mode")?;
+    let listener = tokio::net::TcpListener::from_std(reserved)
+        .context("failed to adopt the reserved admin listener")?;
+
+    let bound_addr = listener
+        .local_addr()
+        .context("failed to read the address of the reserved admin listener")?;
+    info!(
+        %bound_addr,
+        configured_bind = %config.admin_bind,
+        "adopted the admin listener reserved by the integrated entrypoint"
+    );
+    app_config::integrated_startup::publish_bound(bound_addr);
+    Ok(Some(listener))
+}
 
 pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
     validate_config(&config)?;
@@ -52,8 +97,12 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
         .connect_timeout(Duration::from_secs(config.connect_timeout_seconds))
         .build()
         .context("failed to build upstream HTTP client")?;
+    // Bound before any slow bootstrap work, so an admin listener problem fails
+    // startup here instead of being logged by a detached task much later.
+    let admin_listener = bind_integrated_admin_listener(&config)?;
     let worker_shutdown = WorkerShutdown::new();
-    let admin_state = build_admin_state(&config, true, None, Some(&worker_shutdown)).await?;
+    let admin_state =
+        build_admin_state(&config, true, None, Some(&worker_shutdown), admin_listener).await?;
     let runtime_admin_state = if contract.backend.is_postgres() {
         admin_state.clone()
     } else {
@@ -192,7 +241,7 @@ pub(super) async fn connect_for_test_with_admin(
     config: WorkerConfig,
     client: Client,
 ) -> anyhow::Result<()> {
-    let admin_state = build_admin_state(&config, false, None, None).await?;
+    let admin_state = build_admin_state(&config, false, None, None, None).await?;
     let runtime_admin_state = if config.storage_backend().is_postgres() {
         admin_state.clone()
     } else {

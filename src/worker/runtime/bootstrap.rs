@@ -201,6 +201,35 @@ pub(super) async fn build_standalone_state(
     Ok(state)
 }
 
+/// Start the admin HTTP server on a socket the caller already bound.
+///
+/// The integrated entrypoint binds and reserves the admin socket before the
+/// worker begins its slow bootstrap and passes the result in, so a bind
+/// failure has already been reported by the time this runs. The standalone
+/// worker passes `None` and the server binds `admin_bind` itself, keeping its
+/// existing behaviour of staying up and logging a failure.
+fn start_admin_server(
+    state: AdminState,
+    config: &WorkerConfig,
+    admin_listener: Option<tokio::net::TcpListener>,
+    worker_shutdown: Option<&WorkerShutdown>,
+) {
+    let admin_config = config.clone();
+    let shutdown_rx = worker_shutdown.map(WorkerShutdown::subscribe);
+    tokio::spawn(async move {
+        let served = worker_admin::run_admin_server(
+            state,
+            &admin_config.admin_bind,
+            admin_listener,
+            shutdown_rx,
+        )
+        .await;
+        if let Err(err) = served {
+            error!(error = %err, "worker admin server stopped");
+        }
+    });
+}
+
 fn optional_file_pem(path: &str) -> anyhow::Result<Option<String>> {
     let path = path.trim();
     if path.is_empty() {
@@ -244,6 +273,7 @@ pub(super) async fn build_admin_state(
     spawn_admin_server: bool,
     secrets_dir: Option<&Path>,
     worker_shutdown: Option<&WorkerShutdown>,
+    admin_listener: Option<tokio::net::TcpListener>,
 ) -> anyhow::Result<Option<AdminState>> {
     let relay_secret_manager = relay_secrets::load_or_create_worker_config_key_for(
         config.effective_encryption_key(),
@@ -361,20 +391,7 @@ pub(super) async fn build_admin_state(
         .with_user_store(user_store)
         .with_config_repository(config_repository);
         if spawn_admin_server {
-            let admin_config = config.clone();
-            let admin_state = state.clone();
-            let shutdown_rx = worker_shutdown.map(WorkerShutdown::subscribe);
-            tokio::spawn(async move {
-                if let Err(err) = worker_admin::run_admin_server(
-                    admin_state,
-                    &admin_config.admin_bind,
-                    shutdown_rx,
-                )
-                .await
-                {
-                    error!(error = %err, "worker admin server stopped");
-                }
-            });
+            start_admin_server(state.clone(), config, admin_listener, worker_shutdown);
         }
         return Ok(Some(state));
     }
@@ -480,17 +497,7 @@ pub(super) async fn build_admin_state(
     .with_user_store(user_store)
     .with_cache_alert(cache_alert);
     if spawn_admin_server {
-        let admin_config = config.clone();
-        let admin_state = state.clone();
-        let shutdown_rx = worker_shutdown.map(WorkerShutdown::subscribe);
-        tokio::spawn(async move {
-            if let Err(err) =
-                worker_admin::run_admin_server(admin_state, &admin_config.admin_bind, shutdown_rx)
-                    .await
-            {
-                error!(error = %err, "worker admin server stopped");
-            }
-        });
+        start_admin_server(state.clone(), config, admin_listener, worker_shutdown);
 
         let mcp_catalog_service = state.mcp_catalog_service.clone();
         spawn_mcp_warmup(
@@ -728,7 +735,7 @@ mod tests {
             ..WorkerConfig::default()
         };
 
-        let state = build_admin_state(&config, false, Some(&secrets_dir), None)
+        let state = build_admin_state(&config, false, Some(&secrets_dir), None, None)
             .await
             .expect("SQLite admin state")
             .expect("admin state");
@@ -781,7 +788,7 @@ mod tests {
             ..WorkerConfig::default()
         };
 
-        let state = build_admin_state(&config, false, Some(&secrets_dir), None)
+        let state = build_admin_state(&config, false, Some(&secrets_dir), None, None)
             .await
             .expect("SQLite admin state")
             .expect("admin state");
@@ -812,7 +819,7 @@ mod tests {
             ..WorkerConfig::default()
         };
 
-        let error = match build_admin_state(&config, false, Some(&secrets_dir), None).await {
+        let error = match build_admin_state(&config, false, Some(&secrets_dir), None, None).await {
             Ok(_) => panic!("empty login must be rejected"),
             Err(error) => error,
         };

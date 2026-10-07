@@ -52,6 +52,12 @@ bun run typecheck
 bun run build
 ```
 
+The admin UI is embedded into the binary from `frontend/dist`, so run the
+frontend build before `cargo build` when you want the UI in a local binary. A
+source checkout without `frontend/dist` still compiles and serves a notice
+page instead of the UI. Frontend iteration can skip the Rust rebuild entirely
+by pointing `PROMPT_FERRY_FRONTEND_DIST` at a `dist` directory.
+
 Database-shaped test helpers build lazy pools and URLs pinned to a fresh
 isolated `pfy_test_*` schema through an explicit `search_path`, so a test never
 reaches a shared schema and the suite needs no `DATABASE_URL`. PostgreSQL

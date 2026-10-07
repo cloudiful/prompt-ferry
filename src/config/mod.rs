@@ -1,6 +1,11 @@
+pub mod binds;
+mod dotenv;
+pub(crate) mod integrated_startup;
 mod types;
 
 pub use config::{ReadOptions, read};
+pub use dotenv::{DOTENV_PATH_ENV, load_repository_env};
+pub use integrated_startup::IntegratedStartup;
 pub use types::*;
 
 use crate::{naming::CONFIG_ENV_PREFIX, runtime_env};

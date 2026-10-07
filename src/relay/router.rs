@@ -7,6 +7,7 @@ use super::{
     state::{AppState, RelayHandle, RelayState},
     worker_bridge::worker_router,
 };
+use anyhow::Context;
 use axum::{Router, body::Body, response::Response};
 use futures::StreamExt;
 use std::{
@@ -33,14 +34,45 @@ const RELAY_PUBLIC_DRAIN_BUDGET: Duration = Duration::from_secs(8);
 const RELAY_WORKER_BRIDGE_EXTRA_DRAIN: Duration = Duration::from_secs(4);
 
 pub async fn run(config: RelayConfig) -> anyhow::Result<()> {
-    run_inner(config).await
+    validate(&config)?;
+    let bind: SocketAddr = config
+        .bind
+        .parse()
+        .with_context(|| format!("invalid relay bind address `{}`", config.bind))?;
+    let worker_bind: SocketAddr = config
+        .worker_bind
+        .parse()
+        .with_context(|| format!("invalid relay worker bind address `{}`", config.worker_bind))?;
+    let public_listener = bind_listener(bind, "relay public").await?;
+    let worker_listener = bind_listener(worker_bind, "relay worker bridge").await?;
+    run_inner(config, public_listener, worker_listener).await
 }
 
 pub async fn run_embedded(config: RelayConfig) -> anyhow::Result<()> {
-    run_inner(config).await
+    run(config).await
 }
 
-async fn run_inner(config: RelayConfig) -> anyhow::Result<()> {
+/// Serve on listeners the caller already reserved.
+///
+/// The integrated entrypoint reserves every address before anything starts, so
+/// a port collision is reported before the worker connects and the derived
+/// worker relay URL names the socket that will really accept the connection.
+pub async fn run_with_listeners(
+    config: RelayConfig,
+    public_listener: std::net::TcpListener,
+    worker_listener: std::net::TcpListener,
+) -> anyhow::Result<()> {
+    validate(&config)?;
+    run_inner(
+        config,
+        into_tokio_listener(public_listener, "relay public")?,
+        into_tokio_listener(worker_listener, "relay worker bridge")?,
+    )
+    .await
+}
+
+/// Reject an unusable configuration before any socket is taken.
+fn validate(config: &RelayConfig) -> anyhow::Result<()> {
     if config.worker_heartbeat_timeout_seconds == 0 {
         anyhow::bail!("worker_heartbeat_timeout_seconds must be greater than 0");
     }
@@ -53,15 +85,37 @@ async fn run_inner(config: RelayConfig) -> anyhow::Result<()> {
     if config.response_stream_backpressure_timeout_ms == 0 {
         anyhow::bail!("response_stream_backpressure_timeout_ms must be greater than 0");
     }
-    tls::validate_relay_config(&config)?;
-    tls::validate_relay_worker_config(&config)?;
+    tls::validate_relay_config(config)?;
+    tls::validate_relay_worker_config(config)?;
     bridge_crypto::validate_settings(
         "relay",
         config.bridge_encryption_mode,
         &config.bridge_encryption_key,
-    )?;
-    let bind: SocketAddr = config.bind.parse()?;
-    let worker_bind: SocketAddr = config.worker_bind.parse()?;
+    )
+}
+
+async fn bind_listener(bind: SocketAddr, listener: &'static str) -> anyhow::Result<TcpListener> {
+    TcpListener::bind(bind).await.with_context(|| {
+        format!("failed to bind {listener} listener to `{bind}`; set port 0 to let prompt-ferry pick a free port")
+    })
+}
+
+fn into_tokio_listener(
+    listener: std::net::TcpListener,
+    name: &'static str,
+) -> anyhow::Result<TcpListener> {
+    listener.set_nonblocking(true).with_context(|| {
+        format!("failed to switch the reserved {name} listener to non-blocking mode")
+    })?;
+    TcpListener::from_std(listener)
+        .with_context(|| format!("failed to adopt the reserved {name} listener"))
+}
+
+async fn run_inner(
+    config: RelayConfig,
+    public_listener: TcpListener,
+    worker_listener: TcpListener,
+) -> anyhow::Result<()> {
     let tls_mode = config.tls_mode;
     let worker_tls_mode = config.worker_tls_mode;
     let public_config = config.clone();
@@ -85,10 +139,12 @@ async fn run_inner(config: RelayConfig) -> anyhow::Result<()> {
         None
     };
 
-    info!(%bind, ?tls_mode, "relay public listening");
-    info!(%worker_bind, ?worker_tls_mode, "relay worker listening");
-    let public_listener = TcpListener::bind(bind).await?;
-    let worker_listener = TcpListener::bind(worker_bind).await?;
+    // The listeners are already bound here, so this reports the address that
+    // is really serving rather than the configured one.
+    let public_addr = public_listener.local_addr()?;
+    let worker_addr = worker_listener.local_addr()?;
+    info!(%public_addr, ?tls_mode, "relay public listening");
+    info!(%worker_addr, ?worker_tls_mode, "relay worker listening");
     let public_shutdown_rx = shutdown_rx.clone();
     let worker_shutdown_rx = shutdown_rx.clone();
     // The public side aborts first so new client traffic stops getting

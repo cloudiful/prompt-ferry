@@ -1,18 +1,21 @@
 use super::*;
+use anyhow::Context;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{Extensions, Version};
 use axum::{
     extract::Request,
     middleware::{self, Next},
 };
+use std::path::PathBuf;
 use std::time::Duration;
-use std::{env, path::PathBuf};
 use tokio::sync::watch;
 use tower_http::compression::{
     CompressionLayer,
     predicate::{DefaultPredicate, NotForContentType, Predicate},
 };
 use tower_http::services::{ServeDir, ServeFile};
+
+use crate::config;
 
 /// Hard ceiling on how long the admin HTTP server waits for in-flight
 /// requests to drain before forcing shutdown. Sized to fit inside the
@@ -25,15 +28,29 @@ pub const ADMIN_SHUTDOWN_BUDGET: Duration = Duration::from_secs(10);
 /// has been signalled — a healthy worker is never cut off by the timeout.
 /// When `shutdown_rx` is `None` the server falls back to listening for OS
 /// signals directly (handy for `cargo run`).
+///
+/// `listener` is the socket to serve on. The integrated entrypoint passes one
+/// it already reserved, so a fixed admin port cannot be claimed by another
+/// process while the worker is still running database migrations; the
+/// standalone worker passes `None` and binds `bind_address` here.
+///
+/// The address reported after binding is the one really served: a configured
+/// port of `0` resolves here, so the startup path learns the address to open
+/// instead of echoing back what it intended to bind.
 pub async fn run_admin_server(
     state: AdminState,
-    bind: &str,
+    bind_address: &str,
+    listener: Option<tokio::net::TcpListener>,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) -> anyhow::Result<()> {
-    let bind: SocketAddr = bind.parse()?;
+    let listener = match listener {
+        Some(listener) => listener,
+        None => bind_admin_listener(bind_address).await?,
+    };
+    let bound_addr = listener.local_addr()?;
+    config::integrated_startup::publish_bound(bound_addr);
+    tracing::info!(%bound_addr, configured_bind = %bind_address, "worker admin listening");
     let app = router(state);
-    let listener = tokio::net::TcpListener::bind(bind).await?;
-    tracing::info!(%bind, "worker admin listening");
     // Both the graceful-shutdown future and the drain budget need to watch
     // the same fired signal. A single watch channel keeps them in sync.
     let (fired_tx, fired_rx) = watch::channel(false);
@@ -73,6 +90,24 @@ async fn wait_for_fired(mut rx: watch::Receiver<bool>) {
     let _ = rx.changed().await;
 }
 
+/// Bind the admin socket from a configured address.
+///
+/// Kept separate from the serve path so a caller that must treat a bind
+/// failure as a startup failure can do so before spawning the server.
+async fn bind_admin_listener(bind_address: &str) -> anyhow::Result<tokio::net::TcpListener> {
+    let bind_addr: SocketAddr = bind_address
+        .parse()
+        .with_context(|| format!("invalid worker admin bind address `{bind_address}`"))?;
+    tokio::net::TcpListener::bind(bind_addr)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to bind the worker admin listener to `{bind_address}`; set port 0 to let \
+                 prompt-ferry pick a free port"
+            )
+        })
+}
+
 /// Resolves `budget` after shutdown is signalled, and never before.
 async fn drain_deadline(rx: watch::Receiver<bool>, budget: Duration) {
     wait_for_fired(rx).await;
@@ -96,8 +131,40 @@ async fn admin_shutdown_signal() {
     }
 }
 
+/// The admin router as production serves it: API first, then the frontend.
+///
+/// `/api/v1/*` is nested ahead of the frontend routes, so API, health, and
+/// readiness routes can never be swallowed by the SPA fallback.
+///
+/// The frontend itself is resolved by [`crate::web_assets_server::frontend`]:
+/// the assets embedded in the binary by default, or the deliberate filesystem
+/// override when [`crate::web_assets::FRONTEND_DIST_ENV`] points at a built
+/// `dist` directory (frontend development without a Rust rebuild).
 pub fn router(state: AdminState) -> Router {
-    router_with_frontend_dist(state, frontend_dist_dir())
+    match crate::web_assets_server::frontend() {
+        crate::web_assets_server::Frontend::Embedded => Router::new()
+            .nest("/api/v1", api_router(state.clone()))
+            .with_state(state)
+            .route_service(
+                "/assets/{*rest}",
+                get(|Path(asset_path): Path<String>| async move {
+                    crate::web_assets_server::serve_embedded_file(&format!("assets/{asset_path}"))
+                        .await
+                }),
+            )
+            .route_service(
+                "/favicon.svg",
+                get(|| async {
+                    crate::web_assets_server::serve_embedded_file("favicon.svg").await
+                }),
+            )
+            .fallback(get(crate::web_assets_server::serve_embedded_index))
+            .layer(CorsLayer::permissive())
+            .layer(response_compression_layer()),
+        crate::web_assets_server::Frontend::Filesystem(dist) => {
+            router_with_frontend_dist(state, dist)
+        }
+    }
 }
 
 fn response_compression_layer() -> CompressionLayer<impl Predicate + Send + 'static> {
@@ -129,8 +196,16 @@ fn skip_websocket_upgrade(
     true
 }
 
-fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Router {
-    let api = Router::new()
+/// The filesystem-serving router, kept for the deliberate frontend-override
+/// development seam and its adjacent tests. Production serves from the
+/// embedded assets through [`router`].
+/// The API surface, kept separate so the SPA fallback cannot shadow it.
+///
+/// Returned with [`AdminState`] still unresolved; each caller converts once
+/// with `with_state` after mounting, because calling `with_state` twice on a
+/// mounted router strips its routes (axum consumes the router on conversion).
+fn api_router(state: AdminState) -> Router<AdminState> {
+    Router::new()
         .route("/healthz", get(admin_healthz))
         .route("/ready", get(admin_ready))
         .route("/auth/login", post(login))
@@ -328,14 +403,19 @@ fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Route
             reject_unsupported_sqlite_capabilities,
         ))
         .fallback(admin_api_fallback)
-        .with_state(state.clone());
+}
 
+/// The filesystem-serving router, kept for the deliberate frontend-override
+/// development seam and its adjacent tests. Production serves from the
+/// embedded assets through [`router`].
+fn router_with_frontend_dist(state: AdminState, frontend_dist: PathBuf) -> Router {
     let frontend_assets = ServeDir::new(frontend_dist.join("assets"));
     let frontend_index = ServeFile::new(frontend_dist.join("index.html"));
     let frontend_favicon = ServeFile::new(frontend_dist.join("favicon.svg"));
 
     Router::new()
-        .nest("/api/v1", api)
+        .nest("/api/v1", api_router(state.clone()))
+        .with_state(state)
         .nest_service("/assets", frontend_assets)
         .route_service("/favicon.svg", frontend_favicon)
         .fallback_service(frontend_index)
@@ -482,20 +562,6 @@ mod admin_routing_tests {
             );
         }
     }
-}
-
-fn frontend_dist_dir() -> PathBuf {
-    if let Ok(path) = env::var("PROMPT_FERRY_FRONTEND_DIST")
-        && !path.trim().is_empty()
-    {
-        return PathBuf::from(path);
-    }
-
-    ["/app/frontend/dist", "frontend/dist"]
-        .into_iter()
-        .map(PathBuf::from)
-        .find(|path| path.join("index.html").is_file())
-        .unwrap_or_else(|| PathBuf::from("frontend/dist"))
 }
 
 #[cfg(test)]
@@ -929,5 +995,215 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(frontend_dir);
+    }
+
+    /// Build the embedded frontend router even when the checkout carries a
+    /// `frontend/dist` that would otherwise select the filesystem override.
+    fn embedded_router(state: AdminState) -> Router {
+        Router::new()
+            .nest("/api/v1", api_router(state.clone()))
+            .with_state(state)
+            .route_service(
+                "/assets/{*rest}",
+                get(|Path(asset_path): Path<String>| async move {
+                    crate::web_assets_server::serve_embedded_file(&format!("assets/{asset_path}"))
+                        .await
+                }),
+            )
+            .route_service(
+                "/favicon.svg",
+                get(|| async {
+                    crate::web_assets_server::serve_embedded_file("favicon.svg").await
+                }),
+            )
+            .fallback(get(crate::web_assets_server::serve_embedded_index))
+            .layer(CorsLayer::permissive())
+            .layer(response_compression_layer())
+    }
+
+    /// The embedded router must serve the SPA entry from the binary — the
+    /// built page when the compile captured one, the fallback page otherwise.
+    #[tokio::test]
+    async fn embedded_router_serves_the_spa_entry_and_hashed_assets() {
+        let app = embedded_router(test_state());
+
+        let index = app
+            .clone()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(index.status(), StatusCode::OK);
+        let served_type = index
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .expect("the entry has a content type");
+        assert!(
+            served_type.starts_with("text/html"),
+            "the entry must be HTML, got {served_type}"
+        );
+        let index_body = to_bytes(index.into_body(), usize::MAX).await.unwrap();
+        let html = std::str::from_utf8(&index_body).expect("the entry is UTF-8");
+        assert!(
+            html.contains("<!doctype html") || html.contains("<html"),
+            "the embedded entry must be HTML, got: {html}"
+        );
+
+        // A no-dist build serves the fallback page, which names the remedy.
+        if !crate::web_assets::has_embedded_index() {
+            assert!(
+                html.contains("not built into this binary"),
+                "the no-dist fallback must say so, got: {html}"
+            );
+        }
+
+        // A hashed asset the built dist actually carries is served from the
+        // binary with the immutable cache policy; a no-dist build has none and
+        // every asset path 404s instead of falling back to the entry.
+        match crate::web_assets::hashed_js_asset_path() {
+            Some(asset_path) => {
+                let asset = app
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .uri(format!("/{asset_path}"))
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(asset.status(), StatusCode::OK, "asset {asset_path}");
+                assert_eq!(
+                    asset
+                        .headers()
+                        .get(header::CACHE_CONTROL)
+                        .and_then(|value| value.to_str().ok()),
+                    Some(crate::web_assets_server::IMMUTABLE_CACHE_CONTROL),
+                    "a hashed asset must carry the immutable cache policy"
+                );
+                assert_eq!(
+                    asset
+                        .headers()
+                        .get(header::CONTENT_TYPE)
+                        .and_then(|value| value.to_str().ok()),
+                    Some("text/javascript; charset=utf-8"),
+                    "the asset content type names JavaScript with the charset"
+                );
+            }
+            None => {
+                let no_assets = app
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .uri("/assets/anything.js")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    no_assets.status(),
+                    StatusCode::NOT_FOUND,
+                    "a no-dist build must not serve assets"
+                );
+            }
+        }
+
+        // An unknown asset is a 404, not an SPA fallback.
+        let missing = app
+            .oneshot(
+                Request::builder()
+                    .uri("/assets/does-not-exist.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn embedded_router_serves_the_favicon_and_keeps_api_routes_ahead_of_the_spa() {
+        let app = embedded_router(test_state());
+
+        let favicon = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/favicon.svg")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        if crate::web_assets::has_embedded_index() {
+            assert_eq!(favicon.status(), StatusCode::OK);
+            assert_eq!(
+                favicon
+                    .headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok()),
+                Some("image/svg+xml")
+            );
+        } else {
+            assert_eq!(
+                favicon.status(),
+                StatusCode::NOT_FOUND,
+                "a no-dist build embeds no favicon"
+            );
+        }
+
+        // Health stays reachable ahead of the SPA fallback.
+        let health = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(health.status(), StatusCode::OK);
+
+        // An unknown API route must return the API fallback, never the SPA.
+        let unknown_api = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/definitely-not-a-route")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unknown_api.status(), StatusCode::NOT_FOUND);
+        let body = to_bytes(unknown_api.into_body(), usize::MAX).await.unwrap();
+        let body = std::str::from_utf8(&body).unwrap_or_default();
+        assert!(
+            body.contains("not_found"),
+            "an unknown API route must answer as JSON, got: {body}"
+        );
+
+        // A deep SPA history route falls back to the entry point.
+        let spa_route = app
+            .oneshot(
+                Request::builder()
+                    .uri("/settings/relays")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(spa_route.status(), StatusCode::OK);
+        let spa_type = spa_route
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .expect("the SPA route has a content type");
+        assert!(
+            spa_type.starts_with("text/html"),
+            "a history route must resolve to the SPA entry, got {spa_type}"
+        );
     }
 }

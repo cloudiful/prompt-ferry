@@ -1,47 +1,144 @@
+//! The integrated entrypoint: relay, worker, and admin UI in one process.
+//!
+//! Both `prompt-ferry` with no subcommand and the `prompt-ferry serve`
+//! compatibility alias land here, so there is exactly one integrated startup.
+//! Every listener address is resolved and reserved before anything starts, the
+//! worker's relay URL is derived from the bridge listener that will really
+//! accept it, and the admin listener reports the address it bound.
+
 use crate::{
     cli::ServeArgs,
-    config::{AppConfig, BridgeEncryptionMode, RelayConfig, TlsMode, WorkerConfig, WorkerTlsMode},
+    config::{
+        AppConfig, BridgeEncryptionMode, IntegratedStartup, RelayConfig, ServeConfig, TlsMode,
+        WorkerConfig, WorkerTlsMode,
+        binds::{ReservedBind, local_ui_url, reserve_bind, worker_bridge_url},
+    },
     relay, worker,
 };
-use anyhow::{Context, anyhow};
-use tracing::info;
+use std::time::Duration;
+use tracing::{info, warn};
 
-pub async fn run(app_config: AppConfig, args: ServeArgs) -> anyhow::Result<()> {
-    let (relay_config, worker_config) = derive_configs(app_config, args)?;
+/// How long the admin listener gets to report the address it bound. This bounds
+/// a log line only: the relay and the worker keep running either way, and a
+/// cold database migration can legitimately take longer than this.
+const ADMIN_READY_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Which entrypoint reached the integrated startup.
+///
+/// Only the no-subcommand path is allowed to open a browser; the `serve`
+/// alias keeps its scripted, quiet behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Entrypoint {
+    NoSubcommand,
+    ServeAlias,
+}
+
+impl Entrypoint {
+    fn launch_context(self) -> crate::browser::LaunchContext {
+        crate::browser::LaunchContext {
+            no_subcommand: self == Entrypoint::NoSubcommand,
+            windows: cfg!(windows),
+        }
+    }
+}
+
+pub async fn run(
+    app_config: AppConfig,
+    args: ServeArgs,
+    entrypoint: Entrypoint,
+) -> anyhow::Result<()> {
+    let binds = IntegratedBinds::reserve(&app_config, &args)?;
+    let (relay_config, worker_config) = derive_configs(app_config, &binds);
 
     info!(
-        public_bind = %relay_config.bind,
-        internal_worker_bind = %relay_config.worker_bind,
-        admin_bind = %worker_config.admin_bind,
-        "serve mode starting"
+        public_bind = %binds.public.addr(),
+        public_bind_kind = ?binds.public.kind(),
+        internal_worker_bind = %binds.worker_bridge.addr(),
+        internal_worker_bind_kind = ?binds.worker_bridge.kind(),
+        admin_bind = %binds.admin.addr(),
+        admin_bind_kind = ?binds.admin.kind(),
+        admin_ui_url = local_ui_url(binds.admin.addr()),
+        "integrated mode starting"
     );
 
+    // The admin socket stays reserved from here until the worker adopts it, so
+    // a fixed admin port cannot be taken while the worker runs its database
+    // bootstrap. Installing the hand-off also makes a failure to bind that
+    // socket fail this run instead of leaving the process without its UI.
+    let readiness = IntegratedStartup::install(Some(binds.admin.into_listener()?));
+    report_admin_ready_when_bound(readiness, entrypoint);
+
+    // Every listener was reserved by `IntegratedBinds`, so the relay serves on
+    // exactly the addresses the worker was told about.
     tokio::try_join!(
-        relay::run_embedded(relay_config),
+        relay::run_with_listeners(
+            relay_config,
+            binds.public.into_listener()?,
+            binds.worker_bridge.into_listener()?,
+        ),
         worker::run_embedded(worker_config),
     )?;
     Ok(())
 }
 
-fn derive_configs(
-    app_config: AppConfig,
-    args: ServeArgs,
-) -> anyhow::Result<(RelayConfig, WorkerConfig)> {
-    let serve_config = app_config.serve.merge_args(args);
+/// The addresses this process serves on, reserved before startup.
+#[derive(Debug)]
+struct IntegratedBinds {
+    /// Relay public API.
+    public: ReservedBind,
+    /// Relay/worker bridge inside this process; loopback-only by construction.
+    worker_bridge: ReservedBind,
+    /// Admin UI/API address. The worker adopts this socket during its own
+    /// startup, and the bound address is reported back on the hand-off.
+    admin: ReservedBind,
+}
+
+impl IntegratedBinds {
+    fn reserve(app_config: &AppConfig, args: &ServeArgs) -> anyhow::Result<Self> {
+        let serve_config = app_config.serve.clone().merge_args(args.clone());
+        Ok(Self {
+            public: reserve_bind(&app_config.relay.bind, "relay.bind", false)?,
+            worker_bridge: reserve_bridge(&serve_config)?,
+            admin: reserve_bind(&app_config.worker.admin_bind, "worker.admin_bind", false)?,
+        })
+    }
+}
+
+fn reserve_bridge(serve_config: &ServeConfig) -> anyhow::Result<ReservedBind> {
+    reserve_bind(
+        &serve_config.internal_worker_bind,
+        "serve.internal_worker_bind",
+        true,
+    )
+}
+
+/// Derive the relay and worker configuration for integrated mode.
+///
+/// Every listener address is already reserved on `binds`, so this points the
+/// worker at the bridge and hands it the resolved admin address, then applies
+/// the in-process security overrides.
+fn derive_configs(app_config: AppConfig, binds: &IntegratedBinds) -> (RelayConfig, WorkerConfig) {
     let mut relay_config = app_config.relay;
     let mut worker_config = app_config.worker;
 
-    validate_loopback_bind(&serve_config.internal_worker_bind)?;
-    relay_config.worker_bind = serve_config.internal_worker_bind.clone();
-    worker_config.relay_urls = vec![format!("ws://{}/ws/worker", relay_config.worker_bind)];
+    relay_config.worker_bind = binds.worker_bridge.addr().to_string();
+    worker_config.relay_urls = vec![worker_bridge_url(&binds.worker_bridge)];
+    // The admin socket is already reserved above, so the worker receives the
+    // resolved address instead of the configured string. An empty value or a
+    // port of `0` would otherwise be re-parsed and rebound by the admin
+    // server, landing on a different port than the one this process reserved.
+    worker_config.admin_bind = binds.admin.addr().to_string();
 
-    // The worker-side token is authoritative in serve mode: an explicitly
-    // empty worker token fully opens serve-mode worker auth even when the
-    // relay config carries its default or a custom token.
+    // The worker-side token is authoritative in integrated mode: an explicitly
+    // empty worker token fully opens integrated worker auth even when the relay
+    // config carries its default or a custom token.
     let worker_token = worker_config.worker_token.trim().to_string();
     relay_config.worker_token = worker_token.clone();
     worker_config.worker_token = worker_token;
 
+    // The bridge never leaves this process, so transport security and payload
+    // encryption for it cannot apply and are switched off rather than silently
+    // mismatched between the two halves.
     relay_config.worker_tls_mode = TlsMode::Off;
     relay_config.worker_tls_cert.clear();
     relay_config.worker_tls_key.clear();
@@ -57,112 +154,35 @@ fn derive_configs(
     worker_config.bridge_encryption_mode = BridgeEncryptionMode::Off;
     worker_config.bridge_encryption_key.clear();
 
-    Ok((relay_config, worker_config))
+    (relay_config, worker_config)
 }
 
-fn validate_loopback_bind(bind: &str) -> anyhow::Result<()> {
-    let addr: std::net::SocketAddr = bind
-        .parse()
-        .with_context(|| format!("invalid internal worker bind address `{bind}`"))?;
-    if !addr.ip().is_loopback() {
-        return Err(anyhow!(
-            "serve internal worker bind must use a loopback address"
-        ));
-    }
-    Ok(())
+/// Report the admin address once the worker adopts the reserved socket, and
+/// open it in the browser when this entrypoint does that.
+///
+/// The worker takes the socket over during its own startup, and the address it
+/// serves is published there; this only reports it. A browser launch is
+/// best-effort and never fails the run.
+fn report_admin_ready_when_bound(startup: IntegratedStartup, entrypoint: Entrypoint) {
+    let context = entrypoint.launch_context();
+    tokio::spawn(async move {
+        match startup.wait_bound(ADMIN_READY_TIMEOUT).await {
+            Some(addr) => {
+                info!(admin_addr = %addr, ui_url = %local_ui_url(addr), "worker admin listener ready");
+                crate::browser::open_admin_ui(
+                    context,
+                    addr,
+                    &crate::browser::SystemBrowserLauncher,
+                );
+            }
+            None => warn!(
+                timeout_seconds = ADMIN_READY_TIMEOUT.as_secs(),
+                "worker admin listener did not report a bound address yet; the relay and worker keep running"
+            ),
+        }
+    });
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::AppConfig;
-
-    #[test]
-    fn derive_configs_for_serve_mode_overrides_internal_bridge_settings() {
-        let mut app_config = AppConfig::default();
-        app_config.relay.worker_token = "relay-token".to_string();
-        app_config.worker.worker_token = "worker-token".to_string();
-        app_config.worker.tls_mode = WorkerTlsMode::Mtls;
-        app_config.worker.relay_ca = "/tmp/relay-ca.pem".to_string();
-        app_config.worker.client_cert = "/tmp/client.crt".to_string();
-        app_config.worker.client_key = "/tmp/client.key".to_string();
-        app_config.worker.bridge_encryption_mode = BridgeEncryptionMode::Required;
-        app_config.worker.bridge_encryption_key = "worker-key".to_string();
-        app_config.relay.worker_tls_mode = TlsMode::Mtls;
-        app_config.relay.worker_tls_cert = "/tmp/worker.crt".to_string();
-        app_config.relay.worker_tls_key = "/tmp/worker.key".to_string();
-        app_config.relay.worker_tls_client_ca = "/tmp/worker-ca.pem".to_string();
-        app_config.relay.bridge_encryption_mode = BridgeEncryptionMode::Required;
-        app_config.relay.bridge_encryption_key = "relay-key".to_string();
-
-        let (relay_config, worker_config) =
-            derive_configs(app_config, ServeArgs::default()).unwrap();
-
-        assert_eq!(relay_config.worker_bind, "127.0.0.1:8788");
-        assert_eq!(
-            worker_config.relay_urls,
-            vec!["ws://127.0.0.1:8788/ws/worker".to_string()]
-        );
-        assert_eq!(relay_config.worker_token, "worker-token");
-        assert_eq!(worker_config.worker_token, "worker-token");
-        assert_eq!(relay_config.worker_tls_mode, TlsMode::Off);
-        assert!(relay_config.worker_tls_cert.is_empty());
-        assert!(relay_config.worker_tls_key.is_empty());
-        assert!(relay_config.worker_tls_client_ca.is_empty());
-        assert_eq!(worker_config.tls_mode, WorkerTlsMode::Off);
-        assert!(worker_config.relay_ca.is_empty());
-        assert!(worker_config.client_cert.is_empty());
-        assert!(worker_config.client_key.is_empty());
-        assert_eq!(
-            relay_config.bridge_encryption_mode,
-            BridgeEncryptionMode::Off
-        );
-        assert!(relay_config.bridge_encryption_key.is_empty());
-        assert_eq!(
-            worker_config.bridge_encryption_mode,
-            BridgeEncryptionMode::Off
-        );
-        assert!(worker_config.bridge_encryption_key.is_empty());
-    }
-
-    #[test]
-    fn serve_mode_requires_loopback_internal_worker_bind() {
-        let err = derive_configs(
-            AppConfig::default(),
-            ServeArgs {
-                internal_worker_bind: Some("0.0.0.0:8788".to_string()),
-            },
-        )
-        .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("serve internal worker bind must use a loopback address")
-        );
-    }
-
-    #[test]
-    fn serve_mode_preserves_empty_worker_token_on_both_sides() {
-        let mut app_config = AppConfig::default();
-        app_config.relay.worker_token = String::new();
-        app_config.worker.worker_token = String::new();
-
-        let (relay_config, worker_config) =
-            derive_configs(app_config, ServeArgs::default()).unwrap();
-
-        assert_eq!(relay_config.worker_token, "");
-        assert_eq!(worker_config.worker_token, "");
-    }
-
-    #[test]
-    fn serve_mode_empty_worker_token_overrides_nonempty_relay_token() {
-        let mut app_config = AppConfig::default();
-        app_config.relay.worker_token = "relay-default-token".to_string();
-        app_config.worker.worker_token = String::new();
-
-        let (relay_config, worker_config) =
-            derive_configs(app_config, ServeArgs::default()).unwrap();
-
-        assert_eq!(relay_config.worker_token, "");
-        assert_eq!(worker_config.worker_token, "");
-    }
-}
+#[path = "serve_tests.rs"]
+mod tests;

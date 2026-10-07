@@ -12,7 +12,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 WORKDIR /app
 
 COPY --chmod=755 ci-image-input/prompt-ferry /usr/local/bin/prompt-ferry
-COPY ci-image-input/frontend-dist /app/frontend/dist
 COPY --chmod=755 docker/start-prompt-ferry.sh /usr/local/bin/start-prompt-ferry.sh
 
 EXPOSE 8787 80
