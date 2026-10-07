@@ -8,7 +8,7 @@ OpenAPI files as checked-in contract artifacts.
 
 - Rust stable with Cargo
 - Bun 1.3.11 or a compatible Bun 1.x release
-- Nu shell for the local development scripts
+- Bash 4 or newer for the local development scripts
 - Valkey for the response-affinity integration tests
 
 Do not commit `.env`, `Cargo.lock`, or `frontend/bun.lock`. The frontend uses a
@@ -26,12 +26,12 @@ cargo run --bin db_init
 Use the local scripts when convenient:
 
 ```bash
-nu scripts/dev.nu backend
-nu scripts/dev.nu full
+bash scripts/dev.sh backend
+bash scripts/dev.sh full
 ```
 
-The root `.env` is the source of truth for these scripts. Avoid exporting
-conflicting `PROMPT_FERRY_*` variables in the shell.
+The root `.env` is the source of truth for these scripts, and `DATABASE_URL` is
+required. Avoid exporting conflicting `PROMPT_FERRY_*` variables in the shell.
 
 ## Validation
 
