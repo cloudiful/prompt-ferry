@@ -749,7 +749,7 @@ test('tokenPlanBadgePills pairs the DeepSeek balance with local today tokens', (
     t,
   )
   expect(available.map((pill) => pill.label)).toEqual([
-    'tokenPlanDeepSeekBalance ¥110.00',
+    '¥110.00',
     'tokenPlanLocalTodayTokens 1.2K',
   ])
   const unavailable = tokenPlanBadgePills(
@@ -769,7 +769,7 @@ test('tokenPlanBadgePills pairs the DeepSeek balance with local today tokens', (
     t,
   )
   expect(unavailable.map((pill) => pill.label)).toEqual([
-    'tokenPlanDeepSeekBalance $0.00',
+    '$0.00',
     'tokenPlanLocalTodayTokens 0',
   ])
 })

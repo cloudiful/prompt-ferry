@@ -420,7 +420,7 @@ export function tokenPlanBadgePills(
     for (const amount of source.deepseekBalances) {
       if (amount.total === null) continue
       pills.push({
-        label: `${t('tokenPlanDeepSeekBalance')} ${formatMoney(amount.currency, amount.total)}`,
+        label: formatMoney(amount.currency, amount.total),
         color,
         title: t('tokenPlanDeepSeekBalanceHint'),
       })

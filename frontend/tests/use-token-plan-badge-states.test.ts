@@ -153,8 +153,8 @@ test('every known currency gets its own pill in the reported order', async () =>
   // Two currencies, two pills: no FX conversion, no cross-currency sum, and
   // the unknown entry is named rather than dropped or shown as zero.
   expect(tokenPlanBadgePills(badges, t).map((pill) => pill.label)).toEqual([
-    'tokenPlanDeepSeekBalance ¥110.50',
-    'tokenPlanDeepSeekBalance $12.34',
+    '¥110.50',
+    '$12.34',
     'tokenPlanBalanceUnknown',
   ])
 })
@@ -172,8 +172,8 @@ test('a real zero stays a zero next to the other currencies', async () => {
   )
 
   expect(tokenPlanBadgePills(badges, t).map((pill) => pill.label)).toEqual([
-    'tokenPlanDeepSeekBalance ¥0.00',
-    'tokenPlanDeepSeekBalance $8.00',
+    '¥0.00',
+    '$8.00',
   ])
   // A reported zero is known data, so no unknown pill is appended.
   expect(tokenPlanBadgePills(badges, t)).toHaveLength(2)
@@ -222,9 +222,7 @@ test('is_available colors the pills without hiding a reported amount', async () 
 
   expect(badges.deepseekState).toBe('unavailable')
   const pills = tokenPlanBadgePills(badges, t)
-  expect(pills.map((pill) => pill.label)).toEqual([
-    'tokenPlanDeepSeekBalance $0.00',
-  ])
+  expect(pills.map((pill) => pill.label)).toEqual(['$0.00'])
   expect(pills[0]?.color).toBe('hsl(0 80% 45%)')
 })
 
@@ -275,7 +273,7 @@ test('a key reporting a known amount wins over one whose amounts are unknown', a
 
   expect(badges.deepseekBalances).toEqual([{ currency: 'CNY', total: 7 }])
   expect(tokenPlanBadgePills(badges, t).map((pill) => pill.label)).toEqual([
-    'tokenPlanDeepSeekBalance ¥7.00',
+    '¥7.00',
   ])
 })
 
@@ -348,7 +346,7 @@ test('a refresh failure keeps the last ready snapshot ready', async () => {
   expect(badges.status).toBe('ready')
   expect(badges.deepseekState).toBe('ready')
   expect(tokenPlanBadgePills(badges, t).map((pill) => pill.label)).toEqual([
-    'tokenPlanDeepSeekBalance ¥3.00',
+    '¥3.00',
   ])
   jest.setSystemTime()
 })
