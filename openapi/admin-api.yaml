@@ -2409,6 +2409,179 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/relay/auth/login:
+    post:
+      tags:
+      - relay
+      operationId: relay_auth_login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RelayLoginRequest'
+        required: true
+      responses:
+        '204':
+          description: Management session started
+        '401':
+          description: Invalid management token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/relay/auth/logout:
+    post:
+      tags:
+      - relay
+      operationId: relay_auth_logout
+      responses:
+        '204':
+          description: Management session ended
+  /api/v1/relay/auth/me:
+    get:
+      tags:
+      - relay
+      operationId: relay_auth_me
+      responses:
+        '200':
+          description: Management session state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelayAuthResponse'
+  /api/v1/relay/host:
+    get:
+      tags:
+      - relay
+      operationId: relay_host
+      responses:
+        '200':
+          description: Host role and restart state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelayHostResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/relay/host/restart:
+    post:
+      tags:
+      - relay
+      operationId: relay_request_restart
+      responses:
+        '202':
+          description: Restart requested
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/relay/host/role:
+    put:
+      tags:
+      - relay
+      operationId: relay_set_host_role
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RelayHostRoleRequest'
+        required: true
+      responses:
+        '200':
+          description: Host role recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelayHostResponse'
+        '400':
+          description: Unknown role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: The role could not be saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/relay/settings:
+    get:
+      tags:
+      - relay
+      operationId: relay_get_settings
+      responses:
+        '200':
+          description: Relay management settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelaySettingsResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+    patch:
+      tags:
+      - relay
+      operationId: relay_set_settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RelaySettingsUpdate'
+        required: true
+      responses:
+        '200':
+          description: Updated relay management settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelaySettingsResponse'
+        '400':
+          description: Invalid setting
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/relay/status:
+    get:
+      tags:
+      - relay
+      operationId: relay_status
+      responses:
+        '200':
+          description: Relay status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelayStatusResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/settings/cache-alert:
     get:
       tags:
@@ -4355,6 +4528,18 @@ components:
         remaining:
           type: number
           format: double
+    HostRole:
+      type: string
+      description: |-
+        Which services this host runs when prompt-ferry starts without a subcommand.
+
+        The role is host-local: it picks the listeners and the running components of
+        this machine, never which remote relays a worker may dial. A subcommand
+        names its own component (`relay`, `worker`, `serve`) and does not read it.
+      enum:
+      - integrated
+      - worker
+      - relay
     LlmReviewSettings:
       type: object
       required:
@@ -6085,6 +6270,14 @@ components:
         total_findings:
           type: integer
           minimum: 0
+    RelayAuthResponse:
+      type: object
+      description: Whether the caller currently holds a management session.
+      required:
+      - authenticated
+      properties:
+        authenticated:
+          type: boolean
     RelayBridgeStatus:
       type: object
       required:
@@ -6112,6 +6305,72 @@ components:
           format: uuid
         relay_url:
           type: string
+    RelayConfigView:
+      type: object
+      description: This host's relay listeners and bridge security.
+      required:
+      - bind
+      - worker_bind
+      - admin_bind
+      - client_token_configured
+      - worker_token_configured
+      - tls_enabled
+      - worker_tls_enabled
+      - bridge_encryption_required
+      - request_timeout_seconds
+      - worker_heartbeat_timeout_seconds
+      properties:
+        admin_bind:
+          type: string
+        bind:
+          type: string
+        bridge_encryption_required:
+          type: boolean
+        client_token_configured:
+          type: boolean
+          description: Whether a client token is configured; the token itself is never returned.
+        request_timeout_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+        tls_enabled:
+          type: boolean
+        worker_bind:
+          type: string
+        worker_heartbeat_timeout_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+        worker_tls_enabled:
+          type: boolean
+        worker_token_configured:
+          type: boolean
+    RelayHostResponse:
+      type: object
+      description: Which services this host runs, and whether it must restart to change them.
+      required:
+      - role
+      - restart_required
+      properties:
+        pending_role:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/HostRole'
+            description: The role recorded for the next start, when one differs.
+        restart_required:
+          type: boolean
+          description: A saved change only takes effect on the next start.
+        role:
+          $ref: '#/components/schemas/HostRole'
+          description: The role this process started as.
+    RelayHostRoleRequest:
+      type: object
+      required:
+      - role
+      properties:
+        role:
+          $ref: '#/components/schemas/HostRole'
+      additionalProperties: false
     RelayIpPolicy:
       type: object
       properties:
@@ -6137,6 +6396,61 @@ components:
           type: array
           items:
             type: string
+    RelayLoginRequest:
+      type: object
+      required:
+      - admin_token
+      properties:
+        admin_token:
+          type: string
+      additionalProperties: false
+    RelaySettingsResponse:
+      type: object
+      required:
+      - restart_required
+      - relay
+      properties:
+        relay:
+          $ref: '#/components/schemas/RelayConfigView'
+        restart_required:
+          type: boolean
+    RelaySettingsUpdate:
+      type: object
+      description: |-
+        The relay settings the management page may change.
+
+        Everything here is relay-local: it names this machine's own management
+        listener and never which remote relays a worker may dial. Each field needs a
+        restart to take effect, because the listener it names is already bound.
+      properties:
+        admin_bind:
+          type:
+          - string
+          - 'null'
+          description: The loopback bind of the relay's management listener.
+      additionalProperties: false
+    RelayStatusResponse:
+      type: object
+      description: The relay's own state, without touching a worker.
+      required:
+      - role
+      - restart_required
+      - relay
+      - worker
+      - relay_ready
+      properties:
+        relay:
+          $ref: '#/components/schemas/RelayConfigView'
+        relay_ready:
+          type: boolean
+          description: Whether the relay can already route public business traffic.
+        restart_required:
+          type: boolean
+          description: A saved role change is waiting for a restart.
+        role:
+          $ref: '#/components/schemas/HostRole'
+        worker:
+          $ref: '#/components/schemas/WorkerStatusResponse'
     RequestAbortReason:
       type: string
       enum:
@@ -7957,6 +8271,28 @@ components:
           type:
           - boolean
           - 'null'
+    WorkerStatusResponse:
+      type: object
+      description: |-
+        What the relay knows about the worker attached to it.
+
+        A relay-only host reports `connected: false` here rather than failing: the
+        management page stays usable and only the worker-owned views report that
+        there is nothing behind them.
+      required:
+      - connected
+      - connected_workers
+      properties:
+        config_version:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        connected:
+          type: boolean
+        connected_workers:
+          type: integer
+          minimum: 0
 tags:
 - name: auth
   description: Authentication and session
@@ -7984,3 +8320,5 @@ tags:
   description: Encrypted configuration migration
 - name: billing
   description: Usage billing and pricing
+- name: relay
+  description: Relay management served by the relay's own management listener

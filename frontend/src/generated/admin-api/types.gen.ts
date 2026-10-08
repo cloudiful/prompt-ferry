@@ -628,6 +628,15 @@ export type GlmWindowUsage = {
     remaining: number;
 };
 
+/**
+ * Which services this host runs when prompt-ferry starts without a subcommand.
+ *
+ * The role is host-local: it picks the listeners and the running components of
+ * this machine, never which remote relays a worker may dial. A subcommand
+ * names its own component (`relay`, `worker`, `serve`) and does not read it.
+ */
+export type HostRole = 'integrated' | 'worker' | 'relay';
+
 export type LlmReviewSettings = {
     custom_policy_text: string;
     enabled: boolean;
@@ -1363,6 +1372,13 @@ export type RedactionStatsSchema = {
     total_findings: number;
 };
 
+/**
+ * Whether the caller currently holds a management session.
+ */
+export type RelayAuthResponse = {
+    authenticated: boolean;
+};
+
 export type RelayBridgeStatus = {
     connected: boolean;
     enabled: boolean;
@@ -1370,6 +1386,44 @@ export type RelayBridgeStatus = {
     last_snapshot_version?: number | null;
     relay_id?: string | null;
     relay_url: string;
+};
+
+/**
+ * This host's relay listeners and bridge security.
+ */
+export type RelayConfigView = {
+    admin_bind: string;
+    bind: string;
+    bridge_encryption_required: boolean;
+    /**
+     * Whether a client token is configured; the token itself is never returned.
+     */
+    client_token_configured: boolean;
+    request_timeout_seconds: number;
+    tls_enabled: boolean;
+    worker_bind: string;
+    worker_heartbeat_timeout_seconds: number;
+    worker_tls_enabled: boolean;
+    worker_token_configured: boolean;
+};
+
+/**
+ * Which services this host runs, and whether it must restart to change them.
+ */
+export type RelayHostResponse = {
+    pending_role?: null | HostRole;
+    /**
+     * A saved change only takes effect on the next start.
+     */
+    restart_required: boolean;
+    /**
+     * The role this process started as.
+     */
+    role: HostRole;
+};
+
+export type RelayHostRoleRequest = {
+    role: HostRole;
 };
 
 export type RelayIpPolicy = {
@@ -1380,6 +1434,46 @@ export type RelayIpPolicy = {
 export type RelayIpPolicyResponse = {
     allowed_cidrs: Array<string>;
     trusted_proxy_cidrs: Array<string>;
+};
+
+export type RelayLoginRequest = {
+    admin_token: string;
+};
+
+export type RelaySettingsResponse = {
+    relay: RelayConfigView;
+    restart_required: boolean;
+};
+
+/**
+ * The relay settings the management page may change.
+ *
+ * Everything here is relay-local: it names this machine's own management
+ * listener and never which remote relays a worker may dial. Each field needs a
+ * restart to take effect, because the listener it names is already bound.
+ */
+export type RelaySettingsUpdate = {
+    /**
+     * The loopback bind of the relay's management listener.
+     */
+    admin_bind?: string | null;
+};
+
+/**
+ * The relay's own state, without touching a worker.
+ */
+export type RelayStatusResponse = {
+    relay: RelayConfigView;
+    /**
+     * Whether the relay can already route public business traffic.
+     */
+    relay_ready: boolean;
+    /**
+     * A saved role change is waiting for a restart.
+     */
+    restart_required: boolean;
+    role: HostRole;
+    worker: WorkerStatusResponse;
 };
 
 export type RequestAbortReason = 'downstream_closed' | 'bridge_backpressure_full' | 'bridge_backpressure_bytes_limit' | 'worker_lease_expired' | 'valkey_lease_missing' | 'relay_unknown';
@@ -1993,6 +2087,19 @@ export type UserUpdate = {
     display_name?: string | null;
     is_active?: boolean | null;
     is_admin?: boolean | null;
+};
+
+/**
+ * What the relay knows about the worker attached to it.
+ *
+ * A relay-only host reports `connected: false` here rather than failing: the
+ * management page stays usable and only the worker-owned views report that
+ * there is nothing behind them.
+ */
+export type WorkerStatusResponse = {
+    config_version?: number | null;
+    connected: boolean;
+    connected_workers: number;
 };
 
 export type ListApprovalsData = {
@@ -4067,6 +4174,223 @@ export type MeListModelsResponses = {
 };
 
 export type MeListModelsResponse = MeListModelsResponses[keyof MeListModelsResponses];
+
+export type RelayAuthLoginData = {
+    body: RelayLoginRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/relay/auth/login';
+};
+
+export type RelayAuthLoginErrors = {
+    /**
+     * Invalid management token
+     */
+    401: ErrorEnvelope;
+};
+
+export type RelayAuthLoginError = RelayAuthLoginErrors[keyof RelayAuthLoginErrors];
+
+export type RelayAuthLoginResponses = {
+    /**
+     * Management session started
+     */
+    204: void;
+};
+
+export type RelayAuthLoginResponse = RelayAuthLoginResponses[keyof RelayAuthLoginResponses];
+
+export type RelayAuthLogoutData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/relay/auth/logout';
+};
+
+export type RelayAuthLogoutResponses = {
+    /**
+     * Management session ended
+     */
+    204: void;
+};
+
+export type RelayAuthLogoutResponse = RelayAuthLogoutResponses[keyof RelayAuthLogoutResponses];
+
+export type RelayAuthMeData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/relay/auth/me';
+};
+
+export type RelayAuthMeResponses = {
+    /**
+     * Management session state
+     */
+    200: RelayAuthResponse;
+};
+
+export type RelayAuthMeResponse = RelayAuthMeResponses[keyof RelayAuthMeResponses];
+
+export type RelayHostData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/relay/host';
+};
+
+export type RelayHostErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorEnvelope;
+};
+
+export type RelayHostError = RelayHostErrors[keyof RelayHostErrors];
+
+export type RelayHostResponses = {
+    /**
+     * Host role and restart state
+     */
+    200: RelayHostResponse;
+};
+
+export type RelayHostResponse2 = RelayHostResponses[keyof RelayHostResponses];
+
+export type RelayRequestRestartData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/relay/host/restart';
+};
+
+export type RelayRequestRestartErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorEnvelope;
+};
+
+export type RelayRequestRestartError = RelayRequestRestartErrors[keyof RelayRequestRestartErrors];
+
+export type RelayRequestRestartResponses = {
+    /**
+     * Restart requested
+     */
+    202: unknown;
+};
+
+export type RelaySetHostRoleData = {
+    body: RelayHostRoleRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/relay/host/role';
+};
+
+export type RelaySetHostRoleErrors = {
+    /**
+     * Unknown role
+     */
+    400: ErrorEnvelope;
+    /**
+     * Unauthorized
+     */
+    401: ErrorEnvelope;
+    /**
+     * The role could not be saved
+     */
+    503: ErrorEnvelope;
+};
+
+export type RelaySetHostRoleError = RelaySetHostRoleErrors[keyof RelaySetHostRoleErrors];
+
+export type RelaySetHostRoleResponses = {
+    /**
+     * Host role recorded
+     */
+    200: RelayHostResponse;
+};
+
+export type RelaySetHostRoleResponse = RelaySetHostRoleResponses[keyof RelaySetHostRoleResponses];
+
+export type RelayGetSettingsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/relay/settings';
+};
+
+export type RelayGetSettingsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorEnvelope;
+};
+
+export type RelayGetSettingsError = RelayGetSettingsErrors[keyof RelayGetSettingsErrors];
+
+export type RelayGetSettingsResponses = {
+    /**
+     * Relay management settings
+     */
+    200: RelaySettingsResponse;
+};
+
+export type RelayGetSettingsResponse = RelayGetSettingsResponses[keyof RelayGetSettingsResponses];
+
+export type RelaySetSettingsData = {
+    body: RelaySettingsUpdate;
+    path?: never;
+    query?: never;
+    url: '/api/v1/relay/settings';
+};
+
+export type RelaySetSettingsErrors = {
+    /**
+     * Invalid setting
+     */
+    400: ErrorEnvelope;
+    /**
+     * Unauthorized
+     */
+    401: ErrorEnvelope;
+};
+
+export type RelaySetSettingsError = RelaySetSettingsErrors[keyof RelaySetSettingsErrors];
+
+export type RelaySetSettingsResponses = {
+    /**
+     * Updated relay management settings
+     */
+    200: RelaySettingsResponse;
+};
+
+export type RelaySetSettingsResponse = RelaySetSettingsResponses[keyof RelaySetSettingsResponses];
+
+export type RelayStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/relay/status';
+};
+
+export type RelayStatusErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorEnvelope;
+};
+
+export type RelayStatusError = RelayStatusErrors[keyof RelayStatusErrors];
+
+export type RelayStatusResponses = {
+    /**
+     * Relay status
+     */
+    200: RelayStatusResponse;
+};
+
+export type RelayStatusResponse2 = RelayStatusResponses[keyof RelayStatusResponses];
 
 export type GetCacheAlertSettingData = {
     body?: never;

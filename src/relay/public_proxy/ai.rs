@@ -43,9 +43,9 @@ use uuid::Uuid;
 
 use super::super::state::PendingRealtimeSession;
 use super::{
-    admin::is_hop_by_hop_request_header, chat_sse_error_event, responses_sse_error_event,
-    retryable_outward_code, sse_error_event,
+    chat_sse_error_event, responses_sse_error_event, retryable_outward_code, sse_error_event,
 };
+use crate::relay::worker_proxy::is_hop_by_hop_request_header;
 
 fn forwarded_ai_request_headers(headers: &HeaderMap) -> Vec<(String, String)> {
     headers
@@ -676,7 +676,7 @@ fn anthropic_outward_code(status: u16, code: &str) -> &str {
     }
 }
 
-pub(super) async fn stream_request_body(
+pub(crate) async fn stream_request_body(
     worker: &WorkerSender,
     start: BridgeRequestStart,
     compression: HttpRequestCompressionContext,

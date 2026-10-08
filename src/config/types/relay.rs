@@ -49,6 +49,18 @@ pub struct RelayConfig {
     pub worker_tls_client_ca: String,
     pub bridge_encryption_mode: BridgeEncryptionMode,
     pub bridge_encryption_key: String,
+    /// Loopback address of the relay's own management listener.
+    ///
+    /// The relay serves the management UI and its own control API here, and
+    /// proxies the worker's business API over the bridge. It is host-local and
+    /// must stay on loopback, exactly like the worker's admin listener.
+    pub admin_bind: String,
+    /// Host-local token guarding the relay management API.
+    ///
+    /// Empty means the relay generates one on first start and persists it in
+    /// the host-local configuration; it is never written to the shared
+    /// configuration a managed relay list can carry between hosts.
+    pub admin_token: String,
 }
 
 impl Default for RelayConfig {
@@ -73,6 +85,8 @@ impl Default for RelayConfig {
             worker_tls_client_ca: String::new(),
             bridge_encryption_mode: BridgeEncryptionMode::Off,
             bridge_encryption_key: String::new(),
+            admin_bind: "127.0.0.1:8790".to_string(),
+            admin_token: String::new(),
         }
     }
 }

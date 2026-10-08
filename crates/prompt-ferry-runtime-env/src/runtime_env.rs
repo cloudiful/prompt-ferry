@@ -13,6 +13,13 @@ use std::{
 /// CLI argument remain supported; no other environment alias is read.
 const DATABASE_URL_ENV_KEYS: &[&str] = &["DATABASE_URL"];
 
+/// Config application that holds the writable host-local overlay.
+///
+/// It is a separate application directory from [`CONFIG_APP_NAME`] so the
+/// relay control plane can write the keys it owns without ever rewriting — or
+/// reading a secret out of — the operator's main `config.toml`.
+const HOST_CONFIG_APP_NAME: &str = "prompt-ferry-host";
+
 pub fn load_dotenv(path: impl AsRef<Path>) -> Result<()> {
     load_dotenv_if_exists(path)
 }
@@ -87,6 +94,46 @@ pub fn create_private_file_exclusive(path: &Path, contents: &str) -> Result<bool
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
         Err(error) => Err(anyhow!(error).context(format!("failed to create {}", path.display()))),
     }
+}
+
+/// Application name of the writable host-local configuration.
+///
+/// Exposed next to [`host_config_path`] so a caller that reads or writes it
+/// through the config crate names the same application the path resolves to.
+pub fn host_config_app_name() -> &'static str {
+    HOST_CONFIG_APP_NAME
+}
+
+/// Path of the writable host-local configuration file.
+///
+/// It sits beside the main configuration in its own application directory and
+/// holds only what the relay control plane owns — the host service role and the
+/// local management token — so a save never touches the shared configuration.
+pub fn host_config_path() -> Result<PathBuf> {
+    default_config_path(HOST_CONFIG_APP_NAME)
+}
+
+/// Restrict an existing file to its owner.
+///
+/// The host-local configuration carries a management token, and the config
+/// crate writes through a temporary file with default permissions; this narrows
+/// the result afterwards. A no-op where Unix modes do not exist.
+pub fn restrict_to_owner(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(
+            |error| {
+                anyhow!(error).context(format!(
+                    "failed to restrict permissions of {}",
+                    path.display()
+                ))
+            },
+        )?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 fn private_file_options() -> std::fs::OpenOptions {
@@ -241,10 +288,56 @@ fn config_root_from(get_env: impl Fn(&str) -> Option<OsString>) -> Result<PathBu
 #[cfg(test)]
 mod tests {
     use super::{
-        create_private_file_exclusive, resolve_database_url, resolve_standalone_database_path_from,
+        create_private_file_exclusive, host_config_path, resolve_database_url,
+        resolve_standalone_database_path_from, restrict_to_owner,
     };
     use std::ffi::OsString;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn the_host_local_config_sits_beside_the_main_config_in_its_own_directory() {
+        let host = host_config_path().expect("resolve the host-local config path");
+        let main = super::default_config_path(super::CONFIG_APP_NAME).expect("main config path");
+
+        assert_ne!(
+            host.parent().and_then(|dir| dir.file_name()),
+            main.parent().and_then(|dir| dir.file_name()),
+            "the writable overlay must not be the main configuration"
+        );
+        assert_eq!(
+            host.parent()
+                .and_then(Path::parent)
+                .and_then(|dir| dir.file_name()),
+            main.parent()
+                .and_then(Path::parent)
+                .and_then(|dir| dir.file_name()),
+            "both live under the platform config root"
+        );
+        assert_ne!(
+            host.parent().and_then(|dir| dir.file_name()),
+            main.parent().and_then(|dir| dir.file_name()),
+            "the writable overlay must not be the main configuration"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restricting_a_file_leaves_it_readable_only_by_its_owner() {
+        let dir =
+            std::env::temp_dir().join(format!("prompt-ferry-restrict-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("host.toml");
+        std::fs::write(&path, "role = \"relay\"").unwrap();
+
+        restrict_to_owner(&path).unwrap();
+
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "role = \"relay\"");
+
+        std::fs::remove_dir_all(dir).ok();
+    }
 
     #[test]
     fn private_file_create_is_exclusive_and_keeps_contents() {

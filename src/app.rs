@@ -1,7 +1,7 @@
 use crate::{
     certs,
     cli::{Cli, Command, OpenapiCommand},
-    config, openapi_export, relay, serve, worker,
+    config, openapi_export, serve, worker,
 };
 use anyhow::Context;
 use clap::Parser;
@@ -52,7 +52,7 @@ async fn run_component(command: Command) -> anyhow::Result<()> {
         Command::Relay(args) => {
             let app_config = config::read_app_config().context("failed to read config")?;
             init_logging(&app_config.logging.level);
-            relay::run(app_config.relay.merge_args(args)).await
+            serve::run_relay_command(app_config, args).await
         }
         Command::Worker(args) => {
             let app_config = config::read_app_config().context("failed to read config")?;

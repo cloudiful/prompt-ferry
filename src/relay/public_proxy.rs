@@ -1,5 +1,5 @@
-mod admin;
-mod ai;
+pub(super) mod admin;
+pub(super) mod ai;
 mod mcp;
 
 use crate::{
@@ -663,7 +663,7 @@ fn token_hash_prefix(token: &str) -> String {
     hash_client_key(token).chars().take(12).collect()
 }
 
-async fn enforce_public_ip_policy(
+pub(super) async fn enforce_public_ip_policy(
     state: &AppState,
     peer_ip: IpAddr,
     headers: &HeaderMap,

@@ -17,6 +17,7 @@ mod endpoints;
 mod mcp;
 mod me;
 mod model_routes;
+mod relay_management;
 mod relays;
 mod schemas;
 mod settings;

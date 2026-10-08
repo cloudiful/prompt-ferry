@@ -1,11 +1,13 @@
 pub mod binds;
 mod dotenv;
 pub(crate) mod host_startup;
+pub mod host_store;
 pub mod integrated_bridge;
 pub(crate) mod integrated_startup;
+pub mod management_token;
 mod types;
 
-pub use config::{ReadOptions, read};
+pub use config::{ReadOptions, read, save};
 pub use dotenv::{DOTENV_PATH_ENV, load_repository_env};
 pub use integrated_startup::IntegratedStartup;
 pub use types::*;
@@ -31,6 +33,10 @@ pub fn read_app_config() -> Result<AppConfig, std::io::Error> {
     if let Some(database_url) = database_url_from_env() {
         app_config.worker.database_url = database_url;
     }
+    // The host-local overlay is applied last: it is the writable surface the
+    // relay control plane owns, so it decides the keys it defines and leaves
+    // everything else to the main configuration above.
+    host_store::apply(&mut app_config);
     Ok(app_config)
 }
 

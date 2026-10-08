@@ -9,10 +9,14 @@
 //! their contents; the SPA entry is served fresh so a redeploy is picked up on
 //! the next reload.
 
+use axum::Router;
 use axum::body::Body;
+use axum::extract::Path;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use axum::routing::get;
 use std::path::PathBuf;
+use tower_http::services::{ServeDir, ServeFile};
 
 use crate::web_assets;
 
@@ -167,6 +171,54 @@ fn content_type_for(path: &str) -> &'static str {
     }
 }
 
+/// The frontend routes a management listener mounts beside its own API.
+///
+/// Both the worker's admin listener and the relay's management listener serve
+/// the same build, so the routes live here: the hashed assets with their
+/// long-lived cache policy, the favicon, and the entry point every browser path
+/// falls back to. The caller mounts its API ahead of these, which is what keeps
+/// an API path from resolving to the page.
+///
+/// The state parameter is what lets this merge into a router that already
+/// resolved its own state.
+pub fn frontend_routes<S>() -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    match frontend() {
+        Frontend::Embedded => embedded_routes(),
+        Frontend::Filesystem(dist) => filesystem_routes(dist),
+    }
+}
+
+fn embedded_routes<S>() -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    Router::new()
+        .route_service(
+            "/assets/{*rest}",
+            get(|Path(asset_path): Path<String>| async move {
+                serve_embedded_file(&format!("assets/{asset_path}")).await
+            }),
+        )
+        .route_service(
+            "/favicon.svg",
+            get(|| async { serve_embedded_file("favicon.svg").await }),
+        )
+        .fallback(get(serve_embedded_index))
+}
+
+fn filesystem_routes<S>(dist: PathBuf) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    Router::new()
+        .nest_service("/assets", ServeDir::new(dist.join("assets")))
+        .route_service("/favicon.svg", ServeFile::new(dist.join("favicon.svg")))
+        .fallback_service(ServeFile::new(dist.join("index.html")))
+}
+
 /// The body bytes of a response, for tests.
 #[cfg(test)]
 pub(crate) async fn response_body(response: Response) -> Vec<u8> {
@@ -180,14 +232,19 @@ pub(crate) async fn response_body(response: Response) -> Vec<u8> {
 mod tests {
     use super::{
         CacheControl, Frontend, FrontendFile, IMMUTABLE_CACHE_CONTROL, content_type_for, frontend,
-        not_found, serve_embedded_index,
+        frontend_routes, not_found, serve_embedded_index,
     };
     use crate::web_assets::FRONTEND_DIST_ENV;
-    use axum::http::header;
+    use axum::{
+        Router,
+        body::Body,
+        http::{Request, header},
+    };
     use std::{
         path::PathBuf,
         sync::{Mutex, MutexGuard, OnceLock},
     };
+    use tower::ServiceExt as _;
 
     /// Environment reads are process-wide, so the override tests run one at a
     /// time and restore the variable afterwards.
@@ -310,6 +367,67 @@ mod tests {
         let response = not_found();
         assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache");
+    }
+
+    #[tokio::test]
+    async fn the_shared_frontend_routes_serve_the_entry_and_reject_a_missing_asset() {
+        // Both management listeners mount these, so what they must guarantee is
+        // checked once. Which variant answers is the caller's configuration, not
+        // a property of these routes: a checkout with a built `frontend/dist`
+        // resolves to the filesystem frontend and a backend-only one to the
+        // embedded assets. The lock keeps a test that is changing the selection
+        // from changing it underneath this one, and it is held only while the
+        // routes are built, because once built they carry the selection they were
+        // built from. The cache policy is asserted only where it is part of the
+        // contract rather than as an accident of which frontend was selected.
+        let (app, embedded): (Router<()>, bool) = {
+            let _guard = env_lock();
+            (frontend_routes(), matches!(frontend(), Frontend::Embedded))
+        };
+
+        let index = app
+            .clone()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(index.status(), axum::http::StatusCode::OK);
+        assert!(
+            index.headers()[header::CONTENT_TYPE]
+                .to_str()
+                .unwrap()
+                .starts_with("text/html"),
+            "the entry point must be HTML in either variant, got {:?}",
+            index.headers()[header::CONTENT_TYPE]
+        );
+        if embedded {
+            assert_eq!(index.headers()[header::CACHE_CONTROL], "no-cache");
+        }
+
+        // A history route resolves to the entry point rather than a 404.
+        let deep = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/settings/relays")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(deep.status(), axum::http::StatusCode::OK);
+
+        // An asset that does not exist says so in either variant, instead of
+        // falling back to the entry point.
+        let asset = app
+            .oneshot(
+                Request::builder()
+                    .uri("/assets/does-not-exist.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(asset.status(), axum::http::StatusCode::NOT_FOUND);
     }
 
     #[test]

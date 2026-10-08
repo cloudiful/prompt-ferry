@@ -3,6 +3,7 @@ use crate::{
 };
 
 use super::{
+    admin::state::RelayAdminState,
     public_proxy::public_router,
     state::{AppState, RelayHandle, RelayState},
     worker_bridge::worker_router,
@@ -13,7 +14,6 @@ use futures::StreamExt;
 use std::{
     collections::HashMap,
     future::Future,
-    net::SocketAddr,
     sync::{Arc, atomic::AtomicUsize},
     time::Duration,
 };
@@ -32,41 +32,29 @@ const RELAY_PUBLIC_DRAIN_BUDGET: Duration = Duration::from_secs(8);
 /// relay -> worker reply frames get a chance to flush after the public side has
 /// stopped accepting new client traffic.
 const RELAY_WORKER_BRIDGE_EXTRA_DRAIN: Duration = Duration::from_secs(4);
-
-pub async fn run(config: RelayConfig) -> anyhow::Result<()> {
-    validate(&config)?;
-    let bind: SocketAddr = config
-        .bind
-        .parse()
-        .with_context(|| format!("invalid relay bind address `{}`", config.bind))?;
-    let worker_bind: SocketAddr = config
-        .worker_bind
-        .parse()
-        .with_context(|| format!("invalid relay worker bind address `{}`", config.worker_bind))?;
-    let public_listener = bind_listener(bind, "relay public").await?;
-    let worker_listener = bind_listener(worker_bind, "relay worker bridge").await?;
-    run_inner(config, public_listener, worker_listener).await
-}
-
-pub async fn run_embedded(config: RelayConfig) -> anyhow::Result<()> {
-    run(config).await
-}
+/// Drain granted to the management listener once the host is stopping. It is the
+/// shortest of the three: the management listener holds no business stream, and
+/// a role change should not wait on a page that is already closing.
+const RELAY_ADMIN_DRAIN_BUDGET: Duration = Duration::from_secs(5);
 
 /// Serve on listeners the caller already reserved.
 ///
 /// The integrated entrypoint reserves every address before anything starts, so
-/// a port collision is reported before the worker connects and the derived
-/// worker relay URL names the socket that will really accept the connection.
+/// a port collision is reported before the worker connects, the derived worker
+/// relay URL names the socket that will really accept the connection, and the
+/// management listener keeps the address the startup resolved.
 pub async fn run_with_listeners(
     config: RelayConfig,
     public_listener: std::net::TcpListener,
     worker_listener: std::net::TcpListener,
+    admin_listener: std::net::TcpListener,
 ) -> anyhow::Result<()> {
     validate(&config)?;
-    run_inner(
+    run_with_tokio_listeners(
         config,
         into_tokio_listener(public_listener, "relay public")?,
         into_tokio_listener(worker_listener, "relay worker bridge")?,
+        into_tokio_listener(admin_listener, "relay management")?,
     )
     .await
 }
@@ -94,12 +82,6 @@ fn validate(config: &RelayConfig) -> anyhow::Result<()> {
     )
 }
 
-async fn bind_listener(bind: SocketAddr, listener: &'static str) -> anyhow::Result<TcpListener> {
-    TcpListener::bind(bind).await.with_context(|| {
-        format!("failed to bind {listener} listener to `{bind}`; set port 0 to let prompt-ferry pick a free port")
-    })
-}
-
 fn into_tokio_listener(
     listener: std::net::TcpListener,
     name: &'static str,
@@ -111,16 +93,23 @@ fn into_tokio_listener(
         .with_context(|| format!("failed to adopt the reserved {name} listener"))
 }
 
-async fn run_inner(
+async fn run_with_tokio_listeners(
     config: RelayConfig,
     public_listener: TcpListener,
     worker_listener: TcpListener,
+    admin_listener: TcpListener,
 ) -> anyhow::Result<()> {
     let tls_mode = config.tls_mode;
     let worker_tls_mode = config.worker_tls_mode;
     let public_config = config.clone();
     let worker_config = config.clone();
-    let (app, worker_app, _) = apps(config);
+    let relay_state = AppState {
+        config: config.clone(),
+        inner: relay_state(),
+    };
+    let (admin_state, _) = management_state(config, relay_state.clone());
+    let app = public_router(relay_state.clone());
+    let worker_app = worker_router(relay_state);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     tokio::spawn(async move {
         relay_shutdown_signal().await;
@@ -190,9 +179,11 @@ async fn run_inner(
             .map_err(anyhow::Error::from)
         }
     };
-    // Both listeners run concurrently for the whole life of the process. The
+    // Every listener runs concurrently for the whole life of the process. The
     // budgets below do not start counting until shutdown has been signalled,
-    // so a healthy relay is never interrupted by them.
+    // so a healthy relay is never interrupted by them. The management listener
+    // stops on a restart request as well, because that request is what brings
+    // this process back with the settings that were just saved.
     tokio::try_join!(
         drain_within(
             "public",
@@ -205,6 +196,12 @@ async fn run_inner(
             worker_server,
             shutdown_rx.clone(),
             RELAY_PUBLIC_DRAIN_BUDGET + RELAY_WORKER_BRIDGE_EXTRA_DRAIN,
+        ),
+        drain_within(
+            "management",
+            super::admin::serve(admin_state, admin_listener),
+            shutdown_rx.clone(),
+            RELAY_ADMIN_DRAIN_BUDGET,
         ),
     )?;
     Ok(())
@@ -267,6 +264,12 @@ async fn relay_shutdown_signal() {
     }
 }
 
+/// The two relay-facing routers and the handle their shared state is reached
+/// through.
+///
+/// The management router is deliberately not part of this tuple: it owns the
+/// relay's host configuration rather than relay traffic, and the startup builds
+/// it through [`management_state`] on the same relay state.
 pub fn apps(config: RelayConfig) -> (Router, Router, RelayHandle) {
     let inner = relay_state();
     let state = AppState {
@@ -276,6 +279,31 @@ pub fn apps(config: RelayConfig) -> (Router, Router, RelayHandle) {
     let public_app = public_router(state.clone());
     let worker_app = worker_router(state);
     (public_app, worker_app, RelayHandle { inner })
+}
+
+/// The management state and its router, built from the same relay state the
+/// public listener serves so the two cannot describe different relays.
+pub(crate) fn management_state(config: RelayConfig, state: AppState) -> (RelayAdminState, Router) {
+    let role = active_role();
+    let handle = RelayHandle {
+        inner: state.inner.clone(),
+    };
+    let admin_state = RelayAdminState::new(&config, role, state, handle);
+    (admin_state.clone(), super::admin::router(admin_state))
+}
+
+/// The role this relay process is running as.
+///
+/// The role-driven startups record it before anything binds, so the management
+/// page reports the role that was actually started. A standalone `relay`
+/// command records none, and it is running a relay and nothing else.
+fn active_role() -> crate::config::HostRole {
+    crate::config::host_startup::active().unwrap_or(crate::config::HostRole::Relay)
+}
+
+#[cfg(test)]
+pub(crate) fn test_relay_state() -> Arc<RelayState> {
+    relay_state()
 }
 
 fn relay_state() -> Arc<RelayState> {
