@@ -163,6 +163,14 @@ onMounted(refresh)
     </PageIntro>
 
     <section class="grid min-w-0 max-w-full gap-3">
+      <UAlert
+        v-if="relayStore.lastError"
+        color="neutral"
+        variant="subtle"
+        icon="i-lucide-info"
+        :title="t('relayWorkerDisconnected')"
+        :description="t('relayWorkerUnavailable')"
+      />
       <UTable
         :data="relayStore.relays"
         :columns="relayColumns"

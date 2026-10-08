@@ -27,6 +27,10 @@ export const useRelaysStore = defineStore('relays', () => {
   const total = ref(0)
   const connectedCount = ref(0)
   const enabledCount = ref(0)
+  // Scoped Worker availability: the remote list is Worker business state.
+  // A failed refresh keeps the last list and records the reason instead of
+  // failing the page; it never touches the host-local role.
+  const lastError = ref<string | null>(null)
 
   async function refresh(
     nextFirst = first.value,
@@ -47,6 +51,7 @@ export const useRelaysStore = defineStore('relays', () => {
       rows.value = response.rows
       connectedCount.value = response.connected_count
       enabledCount.value = response.enabled_count
+      lastError.value = null
       if (
         relays.value.length === 0 &&
         total.value > 0 &&
@@ -56,11 +61,17 @@ export const useRelaysStore = defineStore('relays', () => {
           Math.floor((total.value - 1) / rows.value) * rows.value
         await refresh(previousFirst, rows.value)
       }
+    } catch (cause) {
+      lastError.value =
+        cause instanceof Error ? cause.message : 'Failed to load relays'
+      throw cause
     } finally {
       loading.value = false
     }
   }
 
+  // Remote `enabled` only controls the Worker's connection target. It never
+  // calls the host role endpoint and never changes this host's role.
   async function saveRelay(
     relayId: string | null,
     body: ManagedRelayRequest | ManagedRelayPatchRequest,
@@ -111,6 +122,7 @@ export const useRelaysStore = defineStore('relays', () => {
     connectedCount,
     enabledCount,
     first,
+    lastError,
     loading,
     reconnectRelay,
     reconnectingRelayId,

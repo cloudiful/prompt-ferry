@@ -4,12 +4,14 @@ import { computed, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { useLocale } from '@/composables/useLocale'
 import { visibleNavItems } from '@/nav'
+import { useRelaySessionStore } from '@/stores/relay-session'
 import { useSessionStore } from '@/stores/session'
 
 const collapsed = ref(false)
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
+const relaySession = useRelaySessionStore()
 const { t } = useLocale()
 const openNavigationSections = ref<string[]>([])
 
@@ -52,6 +54,11 @@ watch(
 async function logout(): Promise<void> {
   await session.logout()
   await router.replace('/login')
+}
+
+async function relayLogout(): Promise<void> {
+  // Relay-token logout never touches the Worker session.
+  await relaySession.logout()
 }
 </script>
 
@@ -96,6 +103,16 @@ async function logout(): Promise<void> {
             :aria-label="t('logout')"
             :block="!isCollapsed"
             @click="logout"
+          />
+          <UButton
+            v-if="relaySession.authenticated"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-server"
+            :label="isCollapsed ? undefined : t('relayHost')"
+            :aria-label="t('relayHost')"
+            :block="!isCollapsed"
+            @click="relayLogout"
           />
         </div>
       </template>

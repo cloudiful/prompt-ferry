@@ -84,6 +84,13 @@ export const navItems: NavItem[] = [
     adminOnly: true,
   },
   {
+    section: 'relay-host',
+    labelKey: 'relayHost',
+    iconActive: 'i-lucide-server',
+    iconInactive: 'i-lucide-server',
+    loader: () => import('./pages/RelayHostPage.vue'),
+  },
+  {
     section: 'redaction',
     labelKey: 'redaction',
     iconActive: 'i-lucide-shield-check',
@@ -206,6 +213,13 @@ export function visibleNavItems(isAdmin: boolean): NavItem[] {
       ...item,
       children: item.children?.filter((child) => isAdmin || !child.adminOnly),
     }))
+}
+
+// The Relay host page owns a separate relay-token session and must open
+// without a Worker. The router bypasses the Worker `session.me` guard for
+// exactly these paths and never maps the relay identity onto `isAdmin`.
+export function isRelayHostPath(path: string): boolean {
+  return path === '/relay-host' || path.startsWith('/relay-host/')
 }
 
 export function defaultNavSection(isAdmin: boolean): NavigationSection {

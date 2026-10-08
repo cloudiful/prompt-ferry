@@ -193,6 +193,7 @@ export type NavigationSection =
   | 'endpoints'
   | 'mcp'
   | 'relays'
+  | 'relay-host'
   | 'redaction'
   | 'request-records'
   | 'billing'

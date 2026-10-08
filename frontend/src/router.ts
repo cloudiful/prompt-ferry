@@ -1,7 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { pinia } from './pinia'
+import { useRelaySessionStore } from './stores/relay-session'
 import { useSessionStore } from './stores/session'
-import { defaultNavSection, navItems } from './nav'
+import { defaultNavSection, isRelayHostPath, navItems } from './nav'
+
+export { isRelayHostPath }
 
 const appRoutes = navItems.flatMap((item) => {
   if (!item.children?.length) {
@@ -54,6 +57,21 @@ export const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  // The Relay host page owns a separate relay-token session and must open
+  // without a Worker: it never reads `session.me`/`isAdmin` and never
+  // redirects to the Worker login when the Worker is absent.
+  if (isRelayHostPath(to.path)) {
+    const relaySession = useRelaySessionStore(pinia)
+    if (!relaySession.bootstrapped) {
+      try {
+        await relaySession.bootstrap()
+      } catch {
+        // The host page renders its own token form on failure.
+      }
+    }
+    return true
+  }
+
   const session = useSessionStore(pinia)
   const isPublic = to.matched.some((record) => record.meta.public)
   if (!session.bootstrapped) {
