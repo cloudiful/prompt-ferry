@@ -52,8 +52,13 @@ impl TokenPlanQuotaCache {
         pool: &PgPool,
         endpoint_id: Uuid,
     ) -> Result<Option<TokenPlanUsageResponse>> {
-        if self.is_fresh(endpoint_id).await {
-            return Ok(self.snapshot(endpoint_id).await);
+        // Both freshness checks read the entry once: the TTL verdict and the
+        // payload come from the same guarded read, so a concurrent refresh
+        // cannot answer one half of the question. The double check around the
+        // per-endpoint refresh lock is unchanged, so a request that queued
+        // behind an in-flight refresh still serves the fresh snapshot.
+        if let Some(usage) = self.fresh_snapshot(endpoint_id).await {
+            return Ok(Some(usage));
         }
 
         let lock = {
@@ -65,8 +70,8 @@ impl TokenPlanQuotaCache {
         };
         let _guard = lock.lock().await;
 
-        if self.is_fresh(endpoint_id).await {
-            return Ok(self.snapshot(endpoint_id).await);
+        if let Some(usage) = self.fresh_snapshot(endpoint_id).await {
+            return Ok(Some(usage));
         }
 
         let Some(endpoint) = db::get_endpoint(pool, endpoint_id).await? else {
@@ -99,14 +104,6 @@ impl TokenPlanQuotaCache {
         Ok(Some(usage))
     }
 
-    pub(crate) async fn snapshot(&self, endpoint_id: Uuid) -> Option<TokenPlanUsageResponse> {
-        self.entries
-            .read()
-            .await
-            .get(&endpoint_id)
-            .map(|entry| entry.usage.clone())
-    }
-
     pub(crate) async fn invalidate(&self, endpoint_id: Uuid) {
         self.entries.write().await.remove(&endpoint_id);
         self.reservations
@@ -115,12 +112,14 @@ impl TokenPlanQuotaCache {
             .retain(|(id, _), _| *id != endpoint_id);
     }
 
-    pub(crate) async fn is_fresh(&self, endpoint_id: Uuid) -> bool {
+    /// One guarded read that answers "is there a snapshot inside the TTL, and
+    /// what is it" together, so a caller never checks freshness and then reads
+    /// the payload through a second lock acquisition that a concurrent refresh
+    /// could have replaced in between.
+    pub(crate) async fn fresh_snapshot(&self, endpoint_id: Uuid) -> Option<TokenPlanUsageResponse> {
         let entries = self.entries.read().await;
-        let Some(entry) = entries.get(&endpoint_id) else {
-            return false;
-        };
-        entry.fetched_at.elapsed() < REFRESH_AFTER
+        let entry = entries.get(&endpoint_id)?;
+        (entry.fetched_at.elapsed() < REFRESH_AFTER).then(|| entry.usage.clone())
     }
 
     /// Raw (urgency-free) remaining percent. Exhaustion checks use this so a
@@ -321,15 +320,51 @@ mod tests {
         cache
             .store_for_test(endpoint_id, opencode_go_usage(key_id, 80.0))
             .await;
-        assert!(cache.is_fresh(endpoint_id).await);
-        assert!(cache.snapshot(endpoint_id).await.is_some());
+        assert!(
+            cache
+                .fresh_snapshot(endpoint_id)
+                .await
+                .expect("stored snapshot is fresh")
+                .keys[0]
+                .key_id
+                == key_id
+        );
 
         cache.invalidate(endpoint_id).await;
 
-        // `refresh_if_due` short-circuits on `is_fresh`. An invalidated entry
-        // must stop being fresh so the next `refresh_candidate_quota` call
+        // `refresh_if_due` short-circuits on a fresh snapshot. An invalidated
+        // entry must stop being fresh so the next `refresh_candidate_quota` call
         // refetches instead of serving the pre-exhaustion snapshot (issue #310).
-        assert!(!cache.is_fresh(endpoint_id).await);
-        assert!(cache.snapshot(endpoint_id).await.is_none());
+        assert!(cache.fresh_snapshot(endpoint_id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn fresh_snapshot_serves_the_stored_payload_for_its_own_endpoint_only() {
+        let cache = TokenPlanQuotaCache::default();
+        let endpoint_id = Uuid::new_v4();
+        let other_endpoint_id = Uuid::new_v4();
+        let key_id = Uuid::new_v4();
+        cache
+            .store_for_test(endpoint_id, opencode_go_usage(key_id, 80.0))
+            .await;
+
+        // The single read returns the cached payload unchanged (same key, same
+        // window), not a rebuilt or defaulted one.
+        let served = cache
+            .fresh_snapshot(endpoint_id)
+            .await
+            .expect("fresh entry");
+        assert_eq!(served.keys.len(), 1);
+        assert_eq!(served.keys[0].key_id, key_id);
+        assert_eq!(
+            served.keys[0]
+                .opencodego_rolling
+                .as_ref()
+                .and_then(|window| window.percent),
+            Some(20.0)
+        );
+        // A cold endpoint still reads as absent, so a fresh hit and an empty
+        // cache stay distinguishable by one call.
+        assert!(cache.fresh_snapshot(other_endpoint_id).await.is_none());
     }
 }

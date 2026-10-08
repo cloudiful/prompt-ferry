@@ -166,7 +166,8 @@ pub(crate) fn model_weight_percent(
 mod tests {
     use super::*;
     use crate::worker_admin_types::{
-        DeepSeekBalance, OpenRouterBalance, OpenRouterSpend, TokenPlanWindowUsage,
+        DeepSeekBalance, DeepSeekCurrencyBalance, OpenRouterBalance, OpenRouterSpend,
+        TokenPlanWindowUsage,
     };
 
     fn usage(interval: Option<f64>, weekly: Option<f64>) -> TokenPlanModelUsage {
@@ -300,10 +301,12 @@ mod tests {
         key.openrouter_balance = None;
         key.deepseek_balance = Some(DeepSeekBalance {
             is_available,
-            currency: "CNY".to_string(),
-            total_balance: 110.0,
-            granted_balance: 10.0,
-            topped_up_balance: 100.0,
+            balances: vec![DeepSeekCurrencyBalance {
+                currency: "CNY".to_string(),
+                total_balance: Some(110.0),
+                granted_balance: Some(10.0),
+                topped_up_balance: Some(100.0),
+            }],
         });
         key
     }

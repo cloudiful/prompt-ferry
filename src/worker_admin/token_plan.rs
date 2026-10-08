@@ -122,20 +122,57 @@ fn enabled_keys(endpoint: &ProviderEndpoint) -> Vec<(Uuid, String, String)> {
     }
 }
 
+/// Whether the endpoint has anything to read quota from. The admin handler
+/// gates its response on the same predicate, so the enabled-key rule lives here
+/// once instead of being restated per caller.
+pub(crate) fn has_enabled_key(endpoint: &ProviderEndpoint) -> bool {
+    !enabled_keys(endpoint).is_empty()
+}
+
+/// Enabled keys for one provider fetch, or the shared rejection every provider
+/// uses when the endpoint has none.
+fn require_enabled_keys(endpoint: &ProviderEndpoint) -> Result<Vec<(Uuid, String, String)>> {
+    let keys = enabled_keys(endpoint);
+    if keys.is_empty() {
+        return Err(anyhow!("endpoint has no enabled API key"));
+    }
+    Ok(keys)
+}
+
+/// Pooled client for the endpoint's proxy against the host that provider is
+/// actually contacted on. Proxy/timeout/pooling behavior is unchanged; only the
+/// error wrapper is shared.
+fn proxy_client(endpoint: &ProviderEndpoint, host_url: &str) -> Result<Client> {
+    client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), host_url)
+        .map_err(|message| anyhow!("{message}"))
+}
+
+/// The shared response envelope for a provider fetch: no local token rollup
+/// (the handler attaches it for the balance providers) plus the provider and
+/// region the fetch was made for. Key payloads stay provider-specific.
+fn provider_usage_response(
+    provider: EndpointProvider,
+    provider_region: Option<EndpointRegion>,
+    keys: Vec<TokenPlanKeyUsage>,
+) -> TokenPlanUsageResponse {
+    TokenPlanUsageResponse {
+        local_today_tokens: None,
+        provider,
+        provider_region,
+        keys,
+    }
+}
+
 async fn fetch_minimax_endpoint_usage(
     endpoint: &ProviderEndpoint,
 ) -> Result<TokenPlanUsageResponse> {
     let region = endpoint
         .provider_region
         .ok_or_else(|| anyhow!("MiniMax endpoint has no provider region"))?;
-    let keys = enabled_keys(endpoint);
-    if keys.is_empty() {
-        return Err(anyhow!("endpoint has no enabled API key"));
-    }
+    let keys = require_enabled_keys(endpoint)?;
 
     let url = usage_url(region);
-    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), url)
-        .map_err(|message| anyhow!("{message}"))?;
+    let client = proxy_client(endpoint, url)?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_minimax_key_usage(client.clone(), url, key_id, key_label, secret)
     }))
@@ -143,24 +180,19 @@ async fn fetch_minimax_endpoint_usage(
     .collect::<Vec<_>>()
     .await;
 
-    Ok(TokenPlanUsageResponse {
-        local_today_tokens: None,
-        provider: endpoint.provider,
-        provider_region: Some(region),
-        keys: key_results,
-    })
+    Ok(provider_usage_response(
+        endpoint.provider,
+        Some(region),
+        key_results,
+    ))
 }
 
 async fn fetch_command_code_endpoint_usage(
     endpoint: &ProviderEndpoint,
 ) -> Result<TokenPlanUsageResponse> {
-    let keys = enabled_keys(endpoint);
-    if keys.is_empty() {
-        return Err(anyhow!("endpoint has no enabled API key"));
-    }
+    let keys = require_enabled_keys(endpoint)?;
 
-    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), COMMAND_CODE_BASE)
-        .map_err(|message| anyhow!("{message}"))?;
+    let client = proxy_client(endpoint, COMMAND_CODE_BASE)?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_command_code_key_usage(client.clone(), COMMAND_CODE_BASE, key_id, key_label, secret)
     }))
@@ -168,24 +200,19 @@ async fn fetch_command_code_endpoint_usage(
     .collect::<Vec<_>>()
     .await;
 
-    Ok(TokenPlanUsageResponse {
-        local_today_tokens: None,
-        provider: endpoint.provider,
-        provider_region: endpoint.provider_region,
-        keys: key_results,
-    })
+    Ok(provider_usage_response(
+        endpoint.provider,
+        endpoint.provider_region,
+        key_results,
+    ))
 }
 
 async fn fetch_opencode_go_endpoint_usage(
     endpoint: &ProviderEndpoint,
 ) -> Result<TokenPlanUsageResponse> {
-    let keys = enabled_keys(endpoint);
-    if keys.is_empty() {
-        return Err(anyhow!("endpoint has no enabled API key"));
-    }
+    let keys = require_enabled_keys(endpoint)?;
 
-    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), OPENCODE_GO_BASE)
-        .map_err(|message| anyhow!("{message}"))?;
+    let client = proxy_client(endpoint, OPENCODE_GO_BASE)?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_opencode_go_key_usage(client.clone(), OPENCODE_GO_BASE, key_id, key_label, secret)
     }))
@@ -193,21 +220,17 @@ async fn fetch_opencode_go_endpoint_usage(
     .collect::<Vec<_>>()
     .await;
 
-    Ok(TokenPlanUsageResponse {
-        local_today_tokens: None,
-        provider: endpoint.provider,
-        provider_region: endpoint.provider_region,
-        keys: key_results,
-    })
+    Ok(provider_usage_response(
+        endpoint.provider,
+        endpoint.provider_region,
+        key_results,
+    ))
 }
 
 async fn fetch_openrouter_endpoint_usage(
     endpoint: &ProviderEndpoint,
 ) -> Result<TokenPlanUsageResponse> {
-    let keys = enabled_keys(endpoint);
-    if keys.is_empty() {
-        return Err(anyhow!("endpoint has no enabled API key"));
-    }
+    let keys = require_enabled_keys(endpoint)?;
 
     // Issue #248: preset providers derive their official base; the stored
     // base is only a fallback for a legacy/custom host.
@@ -216,8 +239,7 @@ async fn fetch_openrouter_endpoint_usage(
         &endpoint.base_url,
         crate::config::NativeApi::Chat.into(),
     );
-    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), &base)
-        .map_err(|message| anyhow!("{message}"))?;
+    let client = proxy_client(endpoint, &base)?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_openrouter_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
     }))
@@ -225,19 +247,15 @@ async fn fetch_openrouter_endpoint_usage(
     .collect::<Vec<_>>()
     .await;
 
-    Ok(TokenPlanUsageResponse {
-        local_today_tokens: None,
-        provider: endpoint.provider,
-        provider_region: endpoint.provider_region,
-        keys: key_results,
-    })
+    Ok(provider_usage_response(
+        endpoint.provider,
+        endpoint.provider_region,
+        key_results,
+    ))
 }
 
 async fn fetch_glm_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPlanUsageResponse> {
-    let keys = enabled_keys(endpoint);
-    if keys.is_empty() {
-        return Err(anyhow!("endpoint has no enabled API key"));
-    }
+    let keys = require_enabled_keys(endpoint)?;
 
     // Issue #248: derive the GLM origin from the official Chat family root
     // instead of trusting a stored base that may carry a stale path.
@@ -246,8 +264,7 @@ async fn fetch_glm_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
         &endpoint.base_url,
         crate::config::NativeApi::Chat.into(),
     );
-    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), &base)
-        .map_err(|message| anyhow!("{message}"))?;
+    let client = proxy_client(endpoint, &base)?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_glm_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
     }))
@@ -255,21 +272,17 @@ async fn fetch_glm_endpoint_usage(endpoint: &ProviderEndpoint) -> Result<TokenPl
     .collect::<Vec<_>>()
     .await;
 
-    Ok(TokenPlanUsageResponse {
-        local_today_tokens: None,
-        provider: endpoint.provider,
-        provider_region: endpoint.provider_region,
-        keys: key_results,
-    })
+    Ok(provider_usage_response(
+        endpoint.provider,
+        endpoint.provider_region,
+        key_results,
+    ))
 }
 
 async fn fetch_deepseek_endpoint_usage(
     endpoint: &ProviderEndpoint,
 ) -> Result<TokenPlanUsageResponse> {
-    let keys = enabled_keys(endpoint);
-    if keys.is_empty() {
-        return Err(anyhow!("endpoint has no enabled API key"));
-    }
+    let keys = require_enabled_keys(endpoint)?;
 
     // Issue #248: preset providers derive their official base; the stored
     // base is only a fallback for a legacy/custom host.
@@ -278,8 +291,7 @@ async fn fetch_deepseek_endpoint_usage(
         &endpoint.base_url,
         crate::config::NativeApi::Chat.into(),
     );
-    let client = client_for_endpoint_proxy(endpoint.proxy_url.as_deref(), &base)
-        .map_err(|message| anyhow!("{message}"))?;
+    let client = proxy_client(endpoint, &base)?;
     let key_results = stream::iter(keys.into_iter().map(|(key_id, key_label, secret)| {
         fetch_deepseek_key_usage(client.clone(), base.clone(), key_id, key_label, secret)
     }))
@@ -287,12 +299,11 @@ async fn fetch_deepseek_endpoint_usage(
     .collect::<Vec<_>>()
     .await;
 
-    Ok(TokenPlanUsageResponse {
-        local_today_tokens: None,
-        provider: endpoint.provider,
-        provider_region: endpoint.provider_region,
-        keys: key_results,
-    })
+    Ok(provider_usage_response(
+        endpoint.provider,
+        endpoint.provider_region,
+        key_results,
+    ))
 }
 
 fn usage_url(region: EndpointRegion) -> &'static str {
@@ -538,6 +549,154 @@ fn response_error(body: &Value) -> (Option<String>, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn endpoint_with(
+        provider: EndpointProvider,
+        api_keys: Vec<(Uuid, bool, &str)>,
+        single_key: &str,
+    ) -> ProviderEndpoint {
+        let now = chrono::Utc::now();
+        ProviderEndpoint {
+            endpoint_id: Uuid::new_v4(),
+            scope: "admin".to_string(),
+            owner_user_id: None,
+            name: "guarded endpoint".to_string(),
+            provider,
+            provider_region: None,
+            plan: db::EndpointPlan::PlatformApiKey,
+            service_tier: None,
+            base_url: "https://token-plan-guard.example.test".to_string(),
+            native_api: "chat".to_string(),
+            native_api_source: "manual".to_string(),
+            api_key: single_key.to_string(),
+            proxy_url: None,
+            has_oauth_token: false,
+            has_proxy_url: false,
+            has_admin_api_key: false,
+            active_windows: Vec::new(),
+            key_lb_enabled: false,
+            enabled: true,
+            mcp_enabled: false,
+            created_at: now,
+            updated_at: now,
+            api_keys: api_keys
+                .into_iter()
+                .enumerate()
+                .map(|(position, (key_id, enabled, secret))| db::EndpointApiKey {
+                    key_id,
+                    endpoint_id: Uuid::nil(),
+                    key_label: format!("key-{position}"),
+                    api_key: secret.to_string(),
+                    position: position as i32,
+                    enabled,
+                    created_at: now,
+                    updated_at: now,
+                })
+                .collect(),
+        }
+    }
+
+    // The provider fetchers and the admin handler must never disagree about
+    // whether an endpoint has a usable key: one shared predicate backs both, so
+    // a rejected response and a rejected fetch stay the same decision.
+    #[test]
+    fn the_enabled_key_gate_is_shared_by_fetchers_and_the_admin_handler() {
+        let key_id = Uuid::new_v4();
+        let other_key_id = Uuid::new_v4();
+        let endpoint_with_keys = |api_keys: Vec<(Uuid, bool, &str)>, single: &str| {
+            endpoint_with(EndpointProvider::Glm, api_keys, single)
+        };
+        let cases = [
+            (endpoint_with_keys(vec![], ""), false),
+            (
+                endpoint_with_keys(vec![(key_id, false, "secret")], ""),
+                false,
+            ),
+            // A blank stored secret is as unusable as a disabled key.
+            (endpoint_with_keys(vec![(key_id, true, "   ")], ""), false),
+            (endpoint_with_keys(vec![(key_id, true, "secret")], ""), true),
+            // With no usable stored key the endpoint-level secret stays the
+            // fallback: one entry under the endpoint's own name and a nil id.
+            (
+                endpoint_with_keys(vec![(key_id, false, "secret")], "legacy"),
+                true,
+            ),
+        ];
+
+        for (endpoint, usable) in cases {
+            assert_eq!(
+                has_enabled_key(&endpoint),
+                usable,
+                "handler gate disagrees for {:?}",
+                endpoint.api_keys
+            );
+            match require_enabled_keys(&endpoint) {
+                Ok(keys) => {
+                    assert!(usable, "fetch guard must reject {:?}", endpoint.api_keys);
+                    assert_eq!(keys.len(), 1, "only the usable key is fetched");
+                    if endpoint.api_key.trim().is_empty() {
+                        assert_eq!(keys[0].0, key_id);
+                    } else {
+                        assert_eq!(keys[0].0, Uuid::nil());
+                        assert_eq!(keys[0].1, "guarded endpoint");
+                        assert_eq!(keys[0].2, "legacy");
+                    }
+                }
+                Err(err) => {
+                    assert!(!usable, "fetch guard must accept {:?}", endpoint.api_keys);
+                    assert_eq!(err.to_string(), "endpoint has no enabled API key");
+                }
+            }
+        }
+
+        // A list with exactly one enabled key contributes only that key.
+        let listed = require_enabled_keys(&endpoint_with_keys(
+            vec![(key_id, false, "secret"), (other_key_id, true, "secret")],
+            "",
+        ))
+        .expect("one enabled key");
+        assert_eq!(
+            listed,
+            vec![(other_key_id, "key-1".to_string(), "secret".to_string())]
+        );
+    }
+
+    #[test]
+    fn provider_usage_response_keeps_the_shared_envelope_and_the_key_payload() {
+        let key_id = Uuid::new_v4();
+        let key = failed_key(
+            key_id,
+            "key-0".to_string(),
+            Some(502),
+            None,
+            "upstream".into(),
+        );
+        let response = provider_usage_response(
+            EndpointProvider::DeepSeek,
+            Some(EndpointRegion::Cn),
+            vec![key],
+        );
+
+        assert_eq!(response.provider, EndpointProvider::DeepSeek);
+        assert_eq!(response.provider_region, Some(EndpointRegion::Cn));
+        // The local rollup stays empty: the handler attaches it for the balance
+        // providers, so the fetch envelope must not invent one.
+        assert_eq!(response.local_today_tokens, None);
+        assert_eq!(response.keys.len(), 1);
+        assert_eq!(response.keys[0].key_id, key_id);
+        assert_eq!(response.keys[0].status, Some(502));
+    }
+
+    #[tokio::test]
+    async fn providers_without_a_token_plan_api_still_reject_before_any_request() {
+        for provider in [EndpointProvider::Generic, EndpointProvider::OpenAi] {
+            let endpoint = endpoint_with(provider, vec![(Uuid::new_v4(), true, "secret")], "");
+            let err = fetch_endpoint_usage(&endpoint)
+                .await
+                .expect_err("provider has no token plan API");
+            assert_eq!(err.to_string(), "endpoint provider has no token plan API");
+        }
+    }
 
     #[test]
     fn parses_minimax_percent_and_epoch_fields() {

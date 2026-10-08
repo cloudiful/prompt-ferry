@@ -64,9 +64,23 @@ const badgeStubs = {
     computed(() => ({
       marker: `QUOTA:${typeof id === 'string' ? id : id.value}`,
     })),
-  tokenPlanBadgePills: (source: { marker: string }) => [
-    { label: source.marker, color: '', title: '' },
-  ],
+}
+
+// Densities each list view asked the shared badge surface for, in render
+// order. Both views must go through that one surface instead of keeping their
+// own pill markup, so the assertion is "which density did the view pass",
+// not "which pill markup does the view own".
+export const badgeDensities: string[] = []
+
+const badgeRenderStubs = {
+  renderTokenPlanBadges: (
+    source: { marker: string },
+    _t: (key: string) => string,
+    density: string,
+  ) => {
+    badgeDensities.push(density)
+    return h('span', { 'data-badge-density': density }, source.marker)
+  },
 }
 
 const stub = (name: string) =>
@@ -122,6 +136,7 @@ const tableStub = defineComponent({
 })
 
 const MODULE_STUBS: Record<string, unknown> = {
+  '@/components/endpoints/tokenPlanBadgeRender': badgeRenderStubs,
   '@/composables/useTokenPlanBadges': badgeStubs,
   '@/composables/useTokenPlanUsageCache': { prefetchTokenPlanBatch },
   '@/models/endpoints/quota': { isQuotaEligible },
