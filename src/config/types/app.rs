@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-use super::{RelayConfig, ServeConfig, WorkerConfig};
+use super::{HostConfig, RelayConfig, ServeConfig, WorkerConfig};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
+    /// Settings that describe this machine, not a shared deployment.
+    pub host: HostConfig,
     pub relay: RelayConfig,
     pub serve: ServeConfig,
     pub worker: WorkerConfig,

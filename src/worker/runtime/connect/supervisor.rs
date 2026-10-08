@@ -9,8 +9,12 @@ use uuid::Uuid;
 
 use super::{
     WorkerConfig, WorkerRuntimeState,
-    config::{managed_relay_connection_config, relay_fingerprint as managed_relay_fingerprint},
+    config::{
+        RelayTargets, managed_relay_connection_config,
+        relay_fingerprint as managed_relay_fingerprint, relay_targets,
+    },
     run_relay_loop,
+    support::MissingRelayTarget,
 };
 use crate::worker::runtime::standalone::StandaloneRuntimeState;
 use crate::worker_admin;
@@ -35,8 +39,10 @@ pub(super) async fn spawn_managed_relay_supervisor(
     let state = admin_state.clone();
     relay_tasks.spawn(async move {
         let mut tasks: HashMap<Uuid, ManagedRelayTask> = HashMap::new();
+        let mut missing = MissingRelayTarget::default();
         let _ =
             reconcile_managed_relays(&config, &client, &state, &runtime_state, &mut tasks).await;
+        missing.observe(!tasks.is_empty(), "managed relay list");
         loop {
             tokio::select! {
                 _ = runtime_state.wait_for_shutdown() => break,
@@ -54,6 +60,7 @@ pub(super) async fn spawn_managed_relay_supervisor(
                                 &mut tasks,
                             )
                             .await;
+                            missing.observe(!tasks.is_empty(), "managed relay list");
                             let _ = response.send(result);
                         }
                         worker_admin::RelaySupervisorCommand::Reconnect { relay_id, response } => {
@@ -204,19 +211,25 @@ pub(super) async fn spawn_standalone_relay_supervisor(
     runtime_state: WorkerRuntimeState,
     relay_tasks: &mut JoinSet<()>,
 ) -> anyhow::Result<()> {
+    // Resolved once: the role of this process is fixed for its whole lifetime,
+    // and every reload reconciles against the same connection sources.
+    let targets = relay_targets();
     relay_tasks.spawn(async move {
         let mut tasks = HashMap::<String, StandaloneRelayTask>::new();
+        let mut missing = MissingRelayTarget::default();
         if let Err(err) = reconcile_standalone_relays(
             &config,
             &client,
             &standalone_state,
             &runtime_state,
+            targets,
             &mut tasks,
         )
         .await
         {
             tracing::warn!(error = %err, "initial SQLite relay reconcile failed");
         }
+        missing.observe(!tasks.is_empty(), standalone_target_source(targets));
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -230,10 +243,12 @@ pub(super) async fn spawn_standalone_relay_supervisor(
                                 &client,
                                 &standalone_state,
                                 &runtime_state,
+                                targets,
                                 &mut tasks,
                             ).await {
                                  tracing::warn!(error = %err, "SQLite relay reconcile failed after configuration reload");
                             }
+                            missing.observe(!tasks.is_empty(), standalone_target_source(targets));
                             let _ = crate::worker::runtime::standalone::publish_snapshot(&standalone_state).await;
                         }
                         Ok(false) => {
@@ -242,10 +257,12 @@ pub(super) async fn spawn_standalone_relay_supervisor(
                                 &client,
                                 &standalone_state,
                                 &runtime_state,
+                                targets,
                                 &mut tasks,
                             ).await {
                                 tracing::warn!(error = %err, "SQLite relay reconcile failed");
                             }
+                            missing.observe(!tasks.is_empty(), standalone_target_source(targets));
                         }
                         Err(err) => tracing::warn!(error = %err, "SQLite configuration reload failed"),
                     }
@@ -259,6 +276,15 @@ pub(super) async fn spawn_standalone_relay_supervisor(
     Ok(())
 }
 
+/// Name the connection sources this startup dials, for the missing-connection
+/// report.
+fn standalone_target_source(targets: RelayTargets) -> &'static str {
+    match targets {
+        RelayTargets::RemoteRelayList => "remote relay list",
+        RelayTargets::RemoteRelayListOrConfiguredFallback => "remote relay list and static URLs",
+    }
+}
+
 #[derive(Debug)]
 struct StandaloneRelayTask {
     fingerprint: String,
@@ -270,10 +296,12 @@ async fn reconcile_standalone_relays(
     client: &reqwest::Client,
     standalone_state: &StandaloneRuntimeState,
     runtime_state: &WorkerRuntimeState,
+    targets: RelayTargets,
     tasks: &mut HashMap<String, StandaloneRelayTask>,
 ) -> anyhow::Result<()> {
     let relays =
-        super::config::standalone_relay_connection_configs(config, standalone_state).await?;
+        super::config::standalone_relay_connection_configs(config, standalone_state, targets)
+            .await?;
     let desired = relays
         .iter()
         .map(|relay| (relay.relay_key.clone(), relay_fingerprint(relay)))

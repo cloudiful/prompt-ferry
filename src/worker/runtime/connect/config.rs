@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    config::{BridgeEncryptionMode, TlsMode, WorkerConfig, normalize_relay_url},
+    config::{self, BridgeEncryptionMode, HostRole, TlsMode, WorkerConfig, normalize_relay_url},
     standalone_config::ManagedRelayConfig,
     tls, worker_admin,
 };
@@ -24,6 +24,30 @@ pub(super) struct RelayConnectionConfig {
     pub(super) client_key_pem: Option<String>,
     pub(super) bridge_encryption_mode: BridgeEncryptionMode,
     pub(super) bridge_encryption_key: String,
+}
+
+/// Where this process gets its relay connection targets from.
+///
+/// A host that runs no local relay of its own — the `worker` role — dials only
+/// the enabled remote relay list. The static `worker.relay_urls` list names the
+/// in-process bridge of the `integrated` role, which such a host does not run,
+/// so it is not a target here. Every other startup keeps that list as the
+/// fallback for a configuration store that holds no relay yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RelayTargets {
+    /// Only the enabled remote relay list.
+    RemoteRelayList,
+    /// The enabled remote relay list, falling back to the static
+    /// `worker.relay_urls` list.
+    RemoteRelayListOrConfiguredFallback,
+}
+
+/// Resolve the connection sources for this process' startup.
+pub(super) fn relay_targets() -> RelayTargets {
+    match config::host_startup::active() {
+        Some(HostRole::Worker) => RelayTargets::RemoteRelayList,
+        _ => RelayTargets::RemoteRelayListOrConfiguredFallback,
+    }
 }
 
 pub(super) fn simple_relay_connection_configs(
@@ -91,9 +115,15 @@ pub(super) async fn managed_relay_connection_config(
     })
 }
 
+/// The enabled remote relay list, plus the static `worker.relay_urls` list when
+/// this startup accepts it as a fallback.
+///
+/// An empty result is a valid state: the worker stays up and connects once a
+/// relay is added, and never falls back to another role.
 pub(super) async fn standalone_relay_connection_configs(
     config: &WorkerConfig,
     state: &StandaloneRuntimeState,
+    targets: RelayTargets,
 ) -> anyhow::Result<Vec<RelayConnectionConfig>> {
     let snapshot = state.snapshot().await;
     let persisted = snapshot
@@ -102,7 +132,7 @@ pub(super) async fn standalone_relay_connection_configs(
         .filter(|relay| relay.enabled)
         .map(|relay| standalone_relay_connection_config(config, relay))
         .collect::<anyhow::Result<Vec<_>>>()?;
-    if persisted.is_empty() {
+    if persisted.is_empty() && targets == RelayTargets::RemoteRelayListOrConfiguredFallback {
         return simple_relay_connection_configs(config);
     }
     Ok(persisted)

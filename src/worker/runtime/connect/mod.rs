@@ -31,14 +31,14 @@ use self::{
     },
 };
 
-/// Adopt the admin socket the integrated entrypoint reserved.
+/// Adopt the admin socket the startup entrypoint reserved.
 ///
-/// An integrated process owns the relay, the worker, and the admin UI, so it
-/// resolves and binds every address before the worker starts. Taking that
-/// socket over here — before the database migration and bootstrap that follow —
-/// means a fixed admin port cannot be claimed by another process in between,
-/// and any bind problem fails the run rather than leaving the process without
-/// its UI.
+/// A role-driven process owns the relay, the worker, and the management UI, so
+/// it resolves and binds every address it serves before the worker starts.
+/// Taking that socket over here — before the database migration and bootstrap
+/// that follow — means a fixed admin port cannot be claimed by another process
+/// in between, and any bind problem fails the run rather than leaving the
+/// process without its UI.
 ///
 /// Returns `None` for a standalone worker, which installs no hand-off and
 /// keeps binding its own admin socket inside the admin server.
@@ -67,7 +67,7 @@ fn bind_integrated_admin_listener(
     info!(
         %bound_addr,
         configured_bind = %config.admin_bind,
-        "adopted the admin listener reserved by the integrated entrypoint"
+        "adopted the admin listener reserved by the startup entrypoint"
     );
     app_config::integrated_startup::publish_bound(bound_addr);
     Ok(Some(listener))

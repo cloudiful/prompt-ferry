@@ -1,5 +1,6 @@
 use anyhow::Error;
 use tokio_tungstenite::tungstenite::Error as WsError;
+use tracing::info;
 
 use crate::usage::truncate_chars;
 
@@ -38,6 +39,35 @@ pub(crate) fn format_error_chain(err: &Error) -> String {
     truncate_chars(&parts.join(": "), 512)
 }
 
+/// Reports a host that currently has no relay to connect to.
+///
+/// Having no connection is not a startup failure and never changes the role: the
+/// worker keeps serving and connects as soon as an enabled relay appears. The
+/// report is per transition, because the reconcilers run on a timer.
+#[derive(Debug, Default)]
+pub(crate) struct MissingRelayTarget {
+    reported: bool,
+}
+
+impl MissingRelayTarget {
+    /// Record the connection state of this host, reporting a newly missing
+    /// connection once.
+    pub(crate) fn observe(&mut self, has_targets: bool, source: &'static str) {
+        if has_targets {
+            self.reported = false;
+            return;
+        }
+        if std::mem::replace(&mut self.reported, true) {
+            return;
+        }
+        info!(
+            source,
+            "no enabled relay connection is available; the worker stays up and connects once one is \
+             configured"
+        );
+    }
+}
+
 pub(crate) async fn shutdown_signal() {
     #[cfg(unix)]
     {
@@ -58,7 +88,7 @@ pub(crate) async fn shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::format_error_chain;
+    use super::{MissingRelayTarget, format_error_chain};
     use anyhow::anyhow;
 
     #[test]
@@ -67,6 +97,27 @@ mod tests {
         assert_eq!(
             format_error_chain(&err),
             "websocket read failed: unexpected EOF"
+        );
+    }
+
+    #[test]
+    fn a_missing_connection_is_reported_once_per_transition() {
+        let mut target = MissingRelayTarget::default();
+
+        // The report is a state machine over the connection state, so it is
+        // checked through the flag it keeps: the first empty observation
+        // reports, a repeated one does not, and a connection in between arms
+        // the next report.
+        target.observe(false, "remote relay list");
+        assert!(target.reported, "the first empty reconcile must report");
+        target.observe(false, "remote relay list");
+        assert!(target.reported, "a repeated empty reconcile stays reported");
+        target.observe(true, "remote relay list");
+        assert!(!target.reported, "a connected host has nothing to report");
+        target.observe(false, "remote relay list");
+        assert!(
+            target.reported,
+            "losing the connection again reports once more"
         );
     }
 }
