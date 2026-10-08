@@ -3964,27 +3964,48 @@ components:
       type: object
       description: |-
         DeepSeek account balance (`GET /user/balance`). The API reports amounts as
-        decimal strings, so the parser coerces both strings and numbers. A balance
-        carries no quota window: `is_available` alone drives routing weight.
+        decimal strings, so the parser coerces both strings and numbers; a missing,
+        `null`, or unparseable amount is `null` (unknown) while a real zero stays
+        `0`. Every parseable currency entry is preserved with its identifier
+        normalized to upper case. A balance carries no quota window:
+        `is_available` alone drives routing weight.
       required:
       - is_available
+      - balances
+      properties:
+        balances:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeepSeekCurrencyBalance'
+          description: |-
+            Every parseable `balance_infos` entry, ordered by currency and then by
+            amount, so a repeated currency stays complete and deterministic.
+        is_available:
+          type: boolean
+    DeepSeekCurrencyBalance:
+      type: object
+      description: |-
+        One DeepSeek currency entry. `None` amounts are unknown — the provider
+        omitted the field or the parser could not coerce it — never a zero.
+      required:
       - currency
-      - total_balance
-      - granted_balance
-      - topped_up_balance
       properties:
         currency:
           type: string
         granted_balance:
-          type: number
+          type:
+          - number
+          - 'null'
           format: double
-        is_available:
-          type: boolean
         topped_up_balance:
-          type: number
+          type:
+          - number
+          - 'null'
           format: double
         total_balance:
-          type: number
+          type:
+          - number
+          - 'null'
           format: double
     EndpointApiKey:
       type: object

@@ -1,5 +1,19 @@
 use super::super::openai_org_usage;
+use super::super::token_plan;
 use super::*;
+
+/// Token-plan usage exists for the six preset providers with a fetcher; every
+/// other provider gets this one answer, whether it is rejected up front or
+/// drops out of the quota cache.
+const TOKEN_PLAN_UNSUPPORTED_MESSAGE: &str = "token plan usage is only available for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM and DeepSeek endpoints";
+
+fn unsupported_token_plan_provider() -> Response {
+    error(
+        StatusCode::BAD_REQUEST,
+        "unsupported_provider",
+        TOKEN_PLAN_UNSUPPORTED_MESSAGE,
+    )
+}
 
 pub(super) async fn token_plan_usage(
     State(state): State<AdminState>,
@@ -45,11 +59,7 @@ pub(super) async fn token_plan_usage(
         // OpenAI (issue #589 P1) has no token-plan surface yet; the
         // organization-level usage view lands in P2.
         db::EndpointProvider::Generic | db::EndpointProvider::OpenAi => {
-            return error(
-                StatusCode::BAD_REQUEST,
-                "unsupported_provider",
-                "token plan usage is only available for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM and DeepSeek endpoints",
-            );
+            return unsupported_token_plan_provider();
         }
     };
     // Region stays mandatory only for MiniMax; the other presets
@@ -62,12 +72,7 @@ pub(super) async fn token_plan_usage(
             "MiniMax endpoint has no provider region",
         );
     }
-    let has_enabled_key = endpoint
-        .api_keys
-        .iter()
-        .any(|key| key.enabled && !key.api_key.trim().is_empty())
-        || !endpoint.api_key.trim().is_empty();
-    if !has_enabled_key {
+    if !token_plan::has_enabled_key(&endpoint) {
         return error(
             StatusCode::BAD_REQUEST,
             "missing_api_key",
@@ -103,11 +108,7 @@ pub(super) async fn token_plan_usage(
             }
             Json(usage).into_response()
         }
-        Ok(None) => error(
-            StatusCode::BAD_REQUEST,
-            "unsupported_provider",
-            "token plan usage is only available for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM and DeepSeek endpoints",
-        ),
+        Ok(None) => unsupported_token_plan_provider(),
         Err(err) => internal(&state, err),
     }
 }

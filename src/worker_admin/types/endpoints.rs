@@ -361,15 +361,27 @@ pub struct OpenRouterSpend {
 }
 
 /// DeepSeek account balance (`GET /user/balance`). The API reports amounts as
-/// decimal strings, so the parser coerces both strings and numbers. A balance
-/// carries no quota window: `is_available` alone drives routing weight.
+/// decimal strings, so the parser coerces both strings and numbers; a missing,
+/// `null`, or unparseable amount is `null` (unknown) while a real zero stays
+/// `0`. Every parseable currency entry is preserved with its identifier
+/// normalized to upper case. A balance carries no quota window:
+/// `is_available` alone drives routing weight.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct DeepSeekBalance {
     pub is_available: bool,
+    /// Every parseable `balance_infos` entry, ordered by currency and then by
+    /// amount, so a repeated currency stays complete and deterministic.
+    pub balances: Vec<DeepSeekCurrencyBalance>,
+}
+
+/// One DeepSeek currency entry. `None` amounts are unknown — the provider
+/// omitted the field or the parser could not coerce it — never a zero.
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub struct DeepSeekCurrencyBalance {
     pub currency: String,
-    pub total_balance: f64,
-    pub granted_balance: f64,
-    pub topped_up_balance: f64,
+    pub total_balance: Option<f64>,
+    pub granted_balance: Option<f64>,
+    pub topped_up_balance: Option<f64>,
 }
 
 /// One GLM quota window (`TOKENS_LIMIT` or `CREDIT_LIMIT` row in the

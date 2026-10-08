@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TokenPlanUsageResponse } from '@/generated/admin-api'
+import { deepseekBalanceRows } from '@/components/endpoints/tokenPlanBadgeRender'
 import {
-  formatMoney,
   useTokenPlanTicker,
   useTokenPlanWindowEntries,
 } from '@/composables/useTokenPlanWindowEntries'
@@ -220,32 +220,27 @@ const {
                               : t('tokenPlanUnavailable')
                           }}</span
                         >
+                      </div>
+                      <div
+                        v-for="(entry, entryIndex) in deepseekBalanceRows(
+                          key.deepseek_balance,
+                          t,
+                        )"
+                        :key="`${entry.currency}:${entryIndex}`"
+                        class="flex flex-wrap gap-x-4 gap-y-1 text-xs"
+                      >
+                        <span class="font-semibold">{{ entry.currency }}</span>
                         <span
                           >{{ t('tokenPlanTotalBalance') }}:
-                          {{
-                            formatMoney(
-                              key.deepseek_balance.currency,
-                              key.deepseek_balance.total_balance,
-                            )
-                          }}</span
+                          {{ entry.total }}</span
                         >
                         <span
                           >{{ t('tokenPlanGrantedBalance') }}:
-                          {{
-                            formatMoney(
-                              key.deepseek_balance.currency,
-                              key.deepseek_balance.granted_balance,
-                            )
-                          }}</span
+                          {{ entry.granted }}</span
                         >
                         <span
                           >{{ t('tokenPlanToppedUpBalance') }}:
-                          {{
-                            formatMoney(
-                              key.deepseek_balance.currency,
-                              key.deepseek_balance.topped_up_balance,
-                            )
-                          }}</span
+                          {{ entry.toppedUp }}</span
                         >
                       </div>
                     </div>

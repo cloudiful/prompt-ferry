@@ -107,7 +107,7 @@ pub(crate) async fn fetch_deepseek_key_usage(
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use serde_json::json;
     #[test]
     fn balance_url_appends_path_once() {
         assert_eq!(
@@ -123,5 +123,39 @@ mod tests {
             balance_url("https://api.deepseek.com/v1"),
             "https://api.deepseek.com/user/balance"
         );
+    }
+
+    #[test]
+    fn multi_currency_body_carries_every_entry_in_order() {
+        // Contract fixture for the #712 shape: two currencies in non-sorted,
+        // mixed-case input normalize to a sorted, upper-cased list, and the
+        // fetcher forwards the whole parsed balance untouched (no arithmetic,
+        // no FX folding).
+        let body = json!({
+            "is_available": true,
+            "balance_infos": [
+                {"currency": "usd", "total_balance": "7.25"},
+                {"currency": "CNY", "total_balance": "110.00",
+                 "granted_balance": "10.00", "topped_up_balance": "100.00"}
+            ]
+        });
+        let parsed = parse_deepseek_balance(&body).expect("balance");
+        let currencies = parsed
+            .balance
+            .balances
+            .iter()
+            .map(|entry| entry.currency.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(currencies, vec!["CNY", "USD"]);
+        assert!(parsed.balance.is_available);
+        assert_eq!(parsed.balance.balances[1].total_balance, Some(7.25));
+    }
+
+    #[test]
+    fn availability_signal_survives_without_currency_entries() {
+        let parsed =
+            parse_deepseek_balance(&json!({"is_available": false})).expect("flag-only balance");
+        assert!(!parsed.balance.is_available);
+        assert!(parsed.balance.balances.is_empty());
     }
 }

@@ -167,6 +167,30 @@ export function progressColor(window: TokenPlanWindowUsage): string {
   return `hsl(${hue} 80% 45%)`
 }
 
+// Reset-window countdown text, split out of the composable so the boundaries
+// are unit-testable without mounting it. A window of a full day or more renders
+// days, hours and minutes; everything shorter keeps the existing hour/minute,
+// minute-only and second-only output, and a window in the past stays expired.
+// `null` means the window reported no usable reset anchor at all.
+export function formatResetDuration(ms: number | null, t: TranslateFn): string {
+  if (ms === null) return '-'
+  if (ms <= 0) return t('tokenPlanExpired')
+  const totalSeconds = Math.floor(ms / 1000)
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  if (days > 0) {
+    return t('tokenPlanResetExpiresDaysHoursMinutes', { days, hours, minutes })
+  }
+  if (hours > 0) {
+    return t('tokenPlanResetExpiresHoursMinutes', { hours, minutes })
+  }
+  if (minutes > 0) {
+    return t('tokenPlanResetExpiresMinutes', { minutes })
+  }
+  return t('tokenPlanResetExpiresSeconds', { seconds: totalSeconds })
+}
+
 export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
   function keyWindows(key: TokenPlanKeyUsage): TokenPlanWindowUsage[] {
     return key.model_remains.flatMap((model) =>
@@ -206,19 +230,7 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
   }
 
   function formatRemaining(window: TokenPlanWindowUsage): string {
-    const ms = remainingMs(window)
-    if (ms === null) return '-'
-    if (ms <= 0) return t('tokenPlanExpired')
-    const totalSeconds = Math.floor(ms / 1000)
-    const hours = Math.floor(totalSeconds / 3600)
-    const minutes = Math.floor((totalSeconds % 3600) / 60)
-    if (hours > 0) {
-      return t('tokenPlanResetExpiresHoursMinutes', { hours, minutes })
-    }
-    if (minutes > 0) {
-      return t('tokenPlanResetExpiresMinutes', { minutes })
-    }
-    return t('tokenPlanResetExpiresSeconds', { seconds: totalSeconds })
+    return formatResetDuration(remainingMs(window), t)
   }
 
   function ccEntries(key: TokenPlanKeyUsage): CcEntry[] {

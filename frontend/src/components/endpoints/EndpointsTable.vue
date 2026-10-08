@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import { computed, defineComponent, h, watch, type PropType } from 'vue'
+import { computed, defineComponent, watch, type PropType } from 'vue'
 import EndpointNameCell from '@/components/endpoints/EndpointNameCell.vue'
+import { renderTokenPlanBadges } from '@/components/endpoints/tokenPlanBadgeRender'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
-import {
-  tokenPlanBadgePills,
-  useTokenPlanBadges,
-} from '@/composables/useTokenPlanBadges'
+import { useTokenPlanBadges } from '@/composables/useTokenPlanBadges'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
 import type { EndpointListItemView } from '@/models/endpoints'
 import { isQuotaEligible } from '@/models/endpoints/quota'
@@ -78,9 +76,9 @@ watch(
   { immediate: true },
 )
 
-// Inline usage-badge subcomponent. Lives in the same SFC so we don't
-// have to introduce a brand-new file: the table is the only consumer
-// on desktop. The mobile card renders its own compact variant inline.
+// Inline usage-badge subcomponent. The pill markup itself is not owned here:
+// the shared density-aware surface renders it for both the table and the
+// mobile card, and this component only supplies the table density.
 const EndpointUsageBadges = defineComponent({
   name: 'EndpointUsageBadges',
   props: {
@@ -95,24 +93,7 @@ const EndpointUsageBadges = defineComponent({
     // shift (e.g. after an inline edit) and the badge must re-evaluate
     // against the new endpoint id without a remount.
     const badges = useTokenPlanBadges(computed(() => props.endpointId))
-    const pillBase =
-      'inline-flex items-center rounded-full border border-default bg-elevated px-1.5 py-px text-[0.7rem] font-semibold whitespace-nowrap'
-
-    return () => {
-      const nodes = tokenPlanBadgePills(badges.value, props.t).map((pill) =>
-        h(
-          'span',
-          { class: pillBase, style: { color: pill.color }, title: pill.title },
-          pill.label,
-        ),
-      )
-      if (nodes.length > 0) {
-        return h('span', { class: 'inline-flex items-center gap-1' }, nodes)
-      }
-      // Cache not yet populated: render a dash so the row height stays
-      // stable while the lazy prefetch resolves.
-      return h('span', { class: 'text-xs text-muted' }, '—')
-    }
+    return () => renderTokenPlanBadges(badges.value, props.t, 'table')
   },
 })
 </script>

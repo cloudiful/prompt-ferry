@@ -100,14 +100,15 @@ test('empty usage renders empty badges', () => {
   const badges = useTokenPlanBadges('ep-empty')
   expect(badges.value).toEqual({
     mode: 'window',
+    status: 'loading',
     short: null,
     long: null,
     openrouterBalance: null,
     openrouterRemaining: null,
     openrouterDailySpend: null,
-    deepseekTotal: null,
-    deepseekCurrency: null,
+    deepseekBalances: [],
     deepseekAvailable: null,
+    deepseekState: 'loading',
     localTodayTokens: null,
     commandCodeExhausted: false,
     usage: null,
@@ -506,10 +507,14 @@ test('DeepSeek exposes the balance and the backend local today tokens', async ()
         model_remains: [],
         deepseek_balance: {
           is_available: true,
-          currency: 'CNY',
-          total_balance: 110,
-          granted_balance: 10,
-          topped_up_balance: 100,
+          balances: [
+            {
+              currency: 'CNY',
+              total_balance: 110,
+              granted_balance: 10,
+              topped_up_balance: 100,
+            },
+          ],
         },
       },
     ],
@@ -517,9 +522,12 @@ test('DeepSeek exposes the balance and the backend local today tokens', async ()
   await prefetchTokenPlanUsage('ep-ds')
   const badges = useTokenPlanBadges('ep-ds')
   expect(badges.value.mode).toBe('deepseek')
-  expect(badges.value.deepseekTotal).toBe(110)
-  expect(badges.value.deepseekCurrency).toBe('CNY')
+  expect(badges.value.status).toBe('ready')
+  expect(badges.value.deepseekBalances).toEqual([
+    { currency: 'CNY', total: 110 },
+  ])
   expect(badges.value.deepseekAvailable).toBe(true)
+  expect(badges.value.deepseekState).toBe('ready')
   expect(badges.value.localTodayTokens).toBe(1234)
 })
 
@@ -660,9 +668,9 @@ test('tokenPlanBadgePills derives the static quota pill pair', () => {
       openrouterBalance: null,
       openrouterRemaining: null,
       openrouterDailySpend: null,
-      deepseekTotal: null,
-      deepseekCurrency: null,
+      deepseekBalances: [],
       deepseekAvailable: null,
+      deepseekState: 'unknown',
       localTodayTokens: null,
       commandCodeExhausted: false,
     },
@@ -684,9 +692,9 @@ test('tokenPlanBadgePills pairs the OpenRouter balance with provider spend', () 
       openrouterBalance: 42.5,
       openrouterRemaining: 42.5,
       openrouterDailySpend: 1.5,
-      deepseekTotal: null,
-      deepseekCurrency: null,
+      deepseekBalances: [],
       deepseekAvailable: null,
+      deepseekState: 'unknown',
       localTodayTokens: null,
       commandCodeExhausted: false,
     },
@@ -708,9 +716,9 @@ test('tokenPlanBadgePills falls back to local tokens when OpenRouter has no spen
       openrouterBalance: null,
       openrouterRemaining: null,
       openrouterDailySpend: null,
-      deepseekTotal: null,
-      deepseekCurrency: null,
+      deepseekBalances: [],
       deepseekAvailable: null,
+      deepseekState: 'unknown',
       localTodayTokens: 0,
       commandCodeExhausted: false,
     },
@@ -732,9 +740,9 @@ test('tokenPlanBadgePills pairs the DeepSeek balance with local today tokens', (
       openrouterBalance: null,
       openrouterRemaining: null,
       openrouterDailySpend: null,
-      deepseekTotal: 110,
-      deepseekCurrency: 'CNY',
+      deepseekBalances: [{ currency: 'CNY', total: 110 }],
       deepseekAvailable: true,
+      deepseekState: 'ready',
       localTodayTokens: 1234,
       commandCodeExhausted: false,
     },
@@ -752,9 +760,9 @@ test('tokenPlanBadgePills pairs the DeepSeek balance with local today tokens', (
       openrouterBalance: null,
       openrouterRemaining: null,
       openrouterDailySpend: null,
-      deepseekTotal: 0,
-      deepseekCurrency: 'USD',
+      deepseekBalances: [{ currency: 'USD', total: 0 }],
       deepseekAvailable: false,
+      deepseekState: 'unavailable',
       localTodayTokens: 0,
       commandCodeExhausted: false,
     },

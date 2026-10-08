@@ -451,15 +451,30 @@ export type CustomStringScopeSchema = 'text' | 'line';
 
 /**
  * DeepSeek account balance (`GET /user/balance`). The API reports amounts as
- * decimal strings, so the parser coerces both strings and numbers. A balance
- * carries no quota window: `is_available` alone drives routing weight.
+ * decimal strings, so the parser coerces both strings and numbers; a missing,
+ * `null`, or unparseable amount is `null` (unknown) while a real zero stays
+ * `0`. Every parseable currency entry is preserved with its identifier
+ * normalized to upper case. A balance carries no quota window:
+ * `is_available` alone drives routing weight.
  */
 export type DeepSeekBalance = {
-    currency: string;
-    granted_balance: number;
+    /**
+     * Every parseable `balance_infos` entry, ordered by currency and then by
+     * amount, so a repeated currency stays complete and deterministic.
+     */
+    balances: Array<DeepSeekCurrencyBalance>;
     is_available: boolean;
-    topped_up_balance: number;
-    total_balance: number;
+};
+
+/**
+ * One DeepSeek currency entry. `None` amounts are unknown — the provider
+ * omitted the field or the parser could not coerce it — never a zero.
+ */
+export type DeepSeekCurrencyBalance = {
+    currency: string;
+    granted_balance?: number | null;
+    topped_up_balance?: number | null;
+    total_balance?: number | null;
 };
 
 export type EndpointApiKey = {

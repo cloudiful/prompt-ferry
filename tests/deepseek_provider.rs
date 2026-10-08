@@ -9,7 +9,7 @@
 use prompt_ferry::{
     db::EndpointProvider,
     standalone_config,
-    worker_admin_types::{DeepSeekBalance, TokenPlanKeyUsage},
+    worker_admin_types::{DeepSeekBalance, DeepSeekCurrencyBalance, TokenPlanKeyUsage},
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -59,10 +59,12 @@ fn standalone_provider_round_trips_deepseek() {
 fn balance() -> DeepSeekBalance {
     DeepSeekBalance {
         is_available: true,
-        currency: "CNY".to_string(),
-        total_balance: 110.0,
-        granted_balance: 10.0,
-        topped_up_balance: 100.0,
+        balances: vec![DeepSeekCurrencyBalance {
+            currency: "CNY".to_string(),
+            total_balance: Some(110.0),
+            granted_balance: Some(10.0),
+            topped_up_balance: Some(100.0),
+        }],
     }
 }
 
@@ -93,14 +95,52 @@ fn key_usage_serde_omits_absent_deepseek_balance() {
     // A key carrying no DeepSeek section must not serialize it.
     let absent = serde_json::to_value(key(None)).expect("serialize key");
     assert!(absent.get("deepseek_balance").is_none());
-    // A key with balance serializes each field under its section.
+    // A key with a balance serializes each currency entry with its amounts.
     let present = serde_json::to_value(key(Some(balance()))).expect("serialize key");
     assert_eq!(present["deepseek_balance"]["is_available"], json!(true));
-    assert_eq!(present["deepseek_balance"]["currency"], json!("CNY"));
-    assert_eq!(present["deepseek_balance"]["total_balance"], json!(110.0));
-    assert_eq!(present["deepseek_balance"]["granted_balance"], json!(10.0));
     assert_eq!(
-        present["deepseek_balance"]["topped_up_balance"],
+        present["deepseek_balance"]["balances"][0]["currency"],
+        json!("CNY")
+    );
+    assert_eq!(
+        present["deepseek_balance"]["balances"][0]["total_balance"],
+        json!(110.0)
+    );
+    assert_eq!(
+        present["deepseek_balance"]["balances"][0]["granted_balance"],
+        json!(10.0)
+    );
+    assert_eq!(
+        present["deepseek_balance"]["balances"][0]["topped_up_balance"],
         json!(100.0)
     );
+}
+
+#[test]
+fn key_usage_serde_serializes_null_amounts_and_empty_balances() {
+    // An unknown amount serializes as null, never as a fabricated zero.
+    let unknown = DeepSeekBalance {
+        is_available: true,
+        balances: vec![DeepSeekCurrencyBalance {
+            currency: "USD".to_string(),
+            total_balance: None,
+            granted_balance: Some(0.0),
+            topped_up_balance: None,
+        }],
+    };
+    let serialized = serde_json::to_value(unknown).expect("serialize balance");
+    assert_eq!(
+        serialized["balances"][0]["total_balance"],
+        json!(serde_json::Value::Null)
+    );
+    // A real zero survives as zero.
+    assert_eq!(serialized["balances"][0]["granted_balance"], json!(0.0));
+    // Availability with no parseable entry keeps an empty array.
+    let flag_only = serde_json::to_value(DeepSeekBalance {
+        is_available: false,
+        balances: Vec::new(),
+    })
+    .expect("serialize flag-only balance");
+    assert_eq!(flag_only["is_available"], json!(false));
+    assert_eq!(flag_only["balances"], json!([]));
 }

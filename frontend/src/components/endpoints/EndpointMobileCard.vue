@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { computed, defineComponent, h, watch, type PropType } from 'vue'
+import { computed, defineComponent, watch, type PropType } from 'vue'
+import { renderTokenPlanBadges } from '@/components/endpoints/tokenPlanBadgeRender'
 import ProviderIcon from '@/components/providers/ProviderIcon.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
-import {
-  tokenPlanBadgePills,
-  useTokenPlanBadges,
-} from '@/composables/useTokenPlanBadges'
+import { useTokenPlanBadges } from '@/composables/useTokenPlanBadges'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
 import type { EndpointListItemView } from '@/models/endpoints'
 import { isQuotaEligible } from '@/models/endpoints/quota'
@@ -41,10 +39,10 @@ watch(
   { immediate: true },
 )
 
-// Inline usage-badge subcomponent for the mobile card. Compact pill
-// pair wrapping across the row so the wider card surface can afford the
-// verbose "短窗 42% / 长窗 73%" labels; balance providers pair their
-// balance with a today-usage pill.
+// Inline usage-badge subcomponent for the mobile card. The wrapping pill row
+// and the pill classes come from the shared density-aware surface, so the card
+// only contributes its `card` density: the wider surface affords the verbose
+// "短窗 42% / 长窗 73%" labels and wraps them across the row.
 const EndpointMobileUsageBadges = defineComponent({
   name: 'EndpointMobileUsageBadges',
   props: {
@@ -58,22 +56,7 @@ const EndpointMobileUsageBadges = defineComponent({
     // edit) the badge must re-evaluate against the new endpoint id
     // without a remount.
     const badges = useTokenPlanBadges(computed(() => props.endpointId))
-    const pillBase =
-      'inline-flex items-center rounded-full border border-default bg-elevated px-2 py-px text-[0.74rem] font-semibold whitespace-nowrap'
-
-    return () => {
-      const nodes = tokenPlanBadgePills(badges.value, props.t).map((pill) =>
-        h(
-          'span',
-          { class: pillBase, style: { color: pill.color }, title: pill.title },
-          pill.label,
-        ),
-      )
-      if (nodes.length > 0) {
-        return h('span', { class: 'flex flex-wrap items-center gap-1' }, nodes)
-      }
-      return h('span', { class: 'text-[0.74rem] text-muted' }, '—')
-    }
+    return () => renderTokenPlanBadges(badges.value, props.t, 'card')
   },
 })
 </script>

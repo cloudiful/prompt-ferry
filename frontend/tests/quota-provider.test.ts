@@ -8,6 +8,7 @@ import { createEndpointListItemView } from '../src/models/endpoints/endpoint-ite
 import { isQuotaEligible } from '../src/models/endpoints/quota'
 import * as endpointsApi from '../src/stores/endpoints-api'
 import {
+  badgeDensities,
   prefetchTokenPlanBatch,
   renderEndpointMobileCard,
   renderEndpointsTable,
@@ -162,8 +163,22 @@ test('mobile card renders subscription quota only for eligible rows', async () =
   }
 })
 
+test('both list views render badges through the one shared surface', async () => {
+  badgeDensities.length = 0
+  const table = await renderEndpointsTable([minimaxItem])
+  expect(table).toContain('data-badge-density="table"')
+  expect(badgeDensities).toEqual(['table'])
+
+  badgeDensities.length = 0
+  const card = await renderEndpointMobileCard(minimaxItem)
+  expect(card).toContain('data-badge-density="card"')
+  expect(badgeDensities).toEqual(['card'])
+})
+
 const { useEndpointTokenPlanUsage } =
   await import('../src/composables/useEndpointTokenPlanUsage')
+const { __resetTokenPlanCacheForTests } =
+  await import('../src/composables/useTokenPlanUsageCache')
 
 test('the usage dialog gate follows the shared eligibility', async () => {
   const cases = [
@@ -173,6 +188,7 @@ test('the usage dialog gate follows the shared eligibility', async () => {
     [genericItem, false],
   ] as const
   for (const [item, opens] of cases) {
+    __resetTokenPlanCacheForTests()
     fetchTokenPlanUsage.mockClear()
     const usage = useEndpointTokenPlanUsage(
       () => item,
@@ -189,4 +205,19 @@ test('the usage dialog gate follows the shared eligibility', async () => {
   await missing.openTokenPlanUsage('missing')
   expect(missing.tokenPlanUsageVisible.value).toBe(false)
   expect(fetchTokenPlanUsage).toHaveBeenCalledTimes(0)
+})
+
+test('the usage dialog reads the shared cache instead of refetching', async () => {
+  __resetTokenPlanCacheForTests()
+  fetchTokenPlanUsage.mockClear()
+  const usage = useEndpointTokenPlanUsage(
+    () => minimaxItem,
+    mock(() => {}),
+  )
+  // First open pays for the request; the list prefetch would have done the
+  // same, and the second open of the same endpoint is a pure cache read.
+  await usage.openTokenPlanUsage(minimaxItem.endpoint_id)
+  expect(fetchTokenPlanUsage).toHaveBeenCalledTimes(1)
+  await usage.openTokenPlanUsage(minimaxItem.endpoint_id)
+  expect(fetchTokenPlanUsage).toHaveBeenCalledTimes(1)
 })

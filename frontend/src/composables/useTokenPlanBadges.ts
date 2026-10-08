@@ -4,6 +4,13 @@ import type {
   TokenPlanUsageResponse,
   TokenPlanWindowUsage,
 } from '@/generated/admin-api'
+import {
+  deepseekBalanceAmounts,
+  deepseekBalanceState,
+  type DeepSeekBalanceAmount,
+  type DeepSeekBalanceState,
+  type TokenPlanFetchState,
+} from '@/models/endpoints/quota'
 import { formatTokenQuantity } from './useUsageFormatting'
 import {
   ccAsWindow,
@@ -14,8 +21,9 @@ import {
   remainingPercent,
 } from './useTokenPlanWindowEntries'
 import {
-  getCachedTokenPlanUsage,
+  getTokenPlanUsageSnapshot,
   prefetchTokenPlanUsage,
+  type TokenPlanUsageSnapshot,
 } from './useTokenPlanUsageCache'
 
 // Badge rendering family: window providers average their per-key remaining
@@ -28,6 +36,11 @@ export type TokenPlanBadgeMode = 'window' | 'openrouter' | 'deepseek'
 // aggregate and the tests can construct a source without the raw payload.
 export type TokenPlanPillSource = {
   mode: TokenPlanBadgeMode
+  // Fetch state of the shared usage snapshot: `loading` until the first
+  // payload lands, `ready` with data, `error` when the cold fetch failed and
+  // the negative-cache entry is all the cache holds. Explicit so a failed
+  // request is never mistaken for a provider that reports nothing.
+  status: TokenPlanFetchState
   // Arithmetic mean across the ok keys' short-window remaining percent
   // (0..100). `null` when no key reports a short window.
   short: number | null
@@ -40,10 +53,17 @@ export type TokenPlanPillSource = {
   openrouterRemaining: number | null
   // OpenRouter provider-reported spend today (USD).
   openrouterDailySpend: number | null
-  // DeepSeek account balance and its `is_available` routing flag.
-  deepseekTotal: number | null
-  deepseekCurrency: string | null
+  // Every DeepSeek currency entry the account reports, in the payload's
+  // deterministic order and never merged across currencies. An entry whose
+  // `total` is `null` is unknown and renders no amount; a reported `0` stays
+  // a real zero.
+  deepseekBalances: DeepSeekBalanceAmount[]
+  // Provider-reported DeepSeek availability, read from `is_available`
+  // independently of the amounts above.
   deepseekAvailable: boolean | null
+  // Display state of the DeepSeek balance surface: the fetch state first,
+  // then provider availability, then whether any amount is known.
+  deepseekState: DeepSeekBalanceState
   // Locally aggregated AI tokens for the endpoint since UTC midnight.
   localTodayTokens: number | null
   // CommandCode only (issue #656): `true` when every ok key on the endpoint
@@ -69,8 +89,11 @@ type KeyBadges = {
   openrouterRemaining: number | null
   openrouterBalance: number | null
   openrouterDailySpend: number | null
-  deepseekTotal: number | null
-  deepseekCurrency: string | null
+  deepseekBalances: DeepSeekBalanceAmount[]
+  // `true` when the key reports a `deepseek_balance` at all, so an
+  // all-unknown balance still surfaces the unknown state instead of looking
+  // like a key that never reported one.
+  deepseekReported: boolean
   deepseekAvailable: boolean | null
   // CommandCode equivalent of the backend `command_code_balance_exhausted`
   // signal: a reported balance with no credits left. `false` when no balances
@@ -80,19 +103,18 @@ type KeyBadges = {
 
 const EMPTY_SOURCE: TokenPlanPillSource = {
   mode: 'window',
+  status: 'loading',
   short: null,
   long: null,
   openrouterBalance: null,
   openrouterRemaining: null,
   openrouterDailySpend: null,
-  deepseekTotal: null,
-  deepseekCurrency: null,
+  deepseekBalances: [],
   deepseekAvailable: null,
+  deepseekState: 'loading',
   localTodayTokens: null,
   commandCodeExhausted: false,
 }
-
-const EMPTY_BADGES: TokenPlanBadges = { ...EMPTY_SOURCE, usage: null }
 
 function finiteNumber(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -201,14 +223,13 @@ function computeKeyBadges(key: TokenPlanKeyUsage): KeyBadges {
       openrouterRemaining: null,
       openrouterBalance: null,
       openrouterDailySpend: null,
-      deepseekTotal: null,
-      deepseekCurrency: null,
+      deepseekBalances: [],
+      deepseekReported: false,
       deepseekAvailable: null,
       exhausted: false,
     }
   }
   const or = openrouterSignal(key)
-  const bal = key.deepseek_balance
   // Only CommandCode reports credit balances; a non-positive remaining is the
   // effective exhaustion the backend uses to drop the key from routing.
   const remainingCredits = finiteNumber(key.balances?.remaining_credits)
@@ -219,20 +240,36 @@ function computeKeyBadges(key: TokenPlanKeyUsage): KeyBadges {
     openrouterRemaining: or.remaining,
     openrouterBalance: or.balance,
     openrouterDailySpend: or.daily,
-    deepseekTotal: finiteNumber(bal?.total_balance),
-    deepseekCurrency: bal?.currency ?? null,
-    deepseekAvailable: bal ? bal.is_available : null,
+    // DeepSeek carries every currency entry through as reported: no FX
+    // conversion, no cross-currency sum, an unknown amount left `null`, and
+    // `is_available` read independently of the amounts.
+    deepseekBalances: deepseekBalanceAmounts(key.deepseek_balance),
+    deepseekReported: key.deepseek_balance != null,
+    deepseekAvailable: key.deepseek_balance?.is_available ?? null,
     exhausted: remainingCredits !== null && remainingCredits <= 0,
   }
 }
 
-function computeBadges(usage: TokenPlanUsageResponse | null): TokenPlanBadges {
-  if (!usage) return EMPTY_BADGES
+function computeBadges(snapshot: TokenPlanUsageSnapshot): TokenPlanBadges {
+  const status = snapshot.state
+  if (snapshot.usage === null) {
+    // No payload: the badge state can only describe the request. Window and
+    // OpenRouter pills stay empty exactly as before, so a row that has not
+    // loaded yet still renders its placeholder instead of a fabricated zero.
+    return {
+      ...EMPTY_SOURCE,
+      status,
+      deepseekState: deepseekBalanceState(status, [], null),
+      usage: null,
+    }
+  }
+  const usage = snapshot.usage
   const mode = badgeMode(usage.provider)
   const shorts: number[] = []
   const longs: number[] = []
   let openrouter: KeyBadges | null = null
   let deepseek: KeyBadges | null = null
+  let deepseekUnknown: KeyBadges | null = null
   let okKeys = 0
   let exhaustedKeys = 0
   for (const key of usage.keys.map(computeKeyBadges)) {
@@ -259,18 +296,35 @@ function computeBadges(usage: TokenPlanUsageResponse | null): TokenPlanBadges {
     ) {
       openrouter = key
     }
-    if (deepseek === null && key.deepseekTotal !== null) deepseek = key
+    // The DeepSeek account balance is never summed across keys: a key that
+    // reports a known amount wins, and an account whose amounts are all unknown
+    // still reports its availability instead of looking absent.
+    const knownTotal = key.deepseekBalances.some(
+      (amount) => amount.total !== null,
+    )
+    if (knownTotal && deepseek === null) deepseek = key
+    if (!knownTotal && deepseekUnknown === null && key.deepseekReported) {
+      deepseekUnknown = key
+    }
   }
+  const deepseekKey = deepseek ?? deepseekUnknown
+  const deepseekBalances = deepseekKey?.deepseekBalances ?? []
+  const deepseekAvailable = deepseekKey?.deepseekAvailable ?? null
   return {
     mode,
+    status,
     short: mean(shorts),
     long: mean(longs),
     openrouterBalance: openrouter?.openrouterBalance ?? null,
     openrouterRemaining: openrouter?.openrouterRemaining ?? null,
     openrouterDailySpend: openrouter?.openrouterDailySpend ?? null,
-    deepseekTotal: deepseek?.deepseekTotal ?? null,
-    deepseekCurrency: deepseek?.deepseekCurrency ?? null,
-    deepseekAvailable: deepseek?.deepseekAvailable ?? null,
+    deepseekBalances,
+    deepseekAvailable,
+    deepseekState: deepseekBalanceState(
+      status,
+      deepseekBalances,
+      deepseekAvailable,
+    ),
     localTodayTokens: finiteNumber(usage.local_today_tokens),
     commandCodeExhausted: okKeys > 0 && exhaustedKeys === okKeys,
     usage,
@@ -292,7 +346,7 @@ export function useTokenPlanBadges(
   // (no `watch`) still get fresh data on the next tick. The cache is
   // idempotent — re-mounting is a no-op for fresh entries.
   void prefetchTokenPlanUsage(idRef.value)
-  return computed(() => computeBadges(getCachedTokenPlanUsage(idRef.value)))
+  return computed(() => computeBadges(getTokenPlanUsageSnapshot(idRef.value)))
 }
 
 // Re-export the adapt helpers so the badge template can color its pills
@@ -319,7 +373,8 @@ export type TokenPlanBadgePill = {
 
 // Build the pill descriptors for one endpoint. Window providers emit a
 // short/long pair (each slot omitted when no key reports that window);
-// balance providers emit a balance + today-usage pair.
+// balance providers emit a balance + today-usage pair. A DeepSeek balance that
+// reports no known amount names its state instead of showing an amount.
 export function tokenPlanBadgePills(
   source: TokenPlanPillSource,
   t: TranslateFn,
@@ -352,14 +407,37 @@ export function tokenPlanBadgePills(
   }
   if (source.mode === 'deepseek') {
     const pills: TokenPlanBadgePill[] = []
-    if (source.deepseekTotal !== null) {
+    // One pill per known currency, in the payload's deterministic order and
+    // never summed across currencies. An unknown amount contributes no amount;
+    // `is_available` only colors the pills, so a real zero under an
+    // unavailable account stays visible.
+    const color = badgeColorForPercent(
+      source.deepseekAvailable === false ? 0 : 100,
+    )
+    const known = source.deepseekBalances.filter(
+      (amount) => amount.total !== null,
+    ).length
+    for (const amount of source.deepseekBalances) {
+      if (amount.total === null) continue
       pills.push({
-        label: `${t('tokenPlanDeepSeekBalance')} ${formatMoney(source.deepseekCurrency, source.deepseekTotal)}`,
-        color: badgeColorForPercent(
-          source.deepseekAvailable === false ? 0 : 100,
-        ),
+        label: `${t('tokenPlanDeepSeekBalance')} ${formatMoney(amount.currency, amount.total)}`,
+        color,
         title: t('tokenPlanDeepSeekBalanceHint'),
       })
+    }
+    // Name the missing information instead of inventing an amount: an account
+    // with nothing known says so once, and a mixed payload names the unknown
+    // entries alongside the known currencies instead of dropping them.
+    // `loading`/`error` need a provider this payload-less badge does not have
+    // yet, so they stay with the shared surface that knows the provider.
+    if (known === 0) {
+      pills.push(
+        source.deepseekState === 'unavailable'
+          ? namedPill(t('tokenPlanUnavailable'), badgeColorForPercent(0))
+          : namedPill(t('tokenPlanBalanceUnknown')),
+      )
+    } else if (known < source.deepseekBalances.length) {
+      pills.push(namedPill(t('tokenPlanBalanceUnknown')))
     }
     if (source.localTodayTokens !== null) {
       pills.push(localTodayPill(source.localTodayTokens, t))
@@ -402,4 +480,10 @@ function localTodayPill(tokens: number, t: TranslateFn): TokenPlanBadgePill {
     color: '',
     title: t('tokenPlanLocalTodayTokensHint'),
   }
+}
+
+// State pill whose own label is also the tooltip: the balance surface says
+// what it knows without inventing an amount to explain.
+function namedPill(label: string, color = ''): TokenPlanBadgePill {
+  return { label, color, title: label }
 }
