@@ -18,6 +18,22 @@
 # pull -> up. A worker-only roll may keep the relay pinned ONLY while
 # BRIDGE_WIRE_VERSION / FRAME_VERSION are unchanged; bumping either requires a
 # joint rollout of relay and worker.
+#
+# Split topology: `relay` is the relay-only host role and `worker` is the
+# worker-only one, so no local relay/worker bridge is shared between the two
+# containers beyond the worker's own dial of relay:8788. The relay also owns a
+# loopback management listener (relay.admin_bind, default 127.0.0.1:8790) that
+# serves the relay's own page, settings, host role, and restart action without a
+# worker. It is loopback-only by design, so it stays inside the relay container
+# and is deliberately not published here; it is reached from inside that
+# container (for example `docker compose exec relay`), or by adding a local-only
+# `ports` mapping plus a loopback `relay.admin_bind` in a deployment that needs a
+# browser on the host. The worker admin console on 8789 keeps serving the worker
+# business API. Set PROMPT_FERRY_RELAY__ADMIN_TOKEN in .env to keep the relay
+# management token stable across recreations: it is passed through to the relay
+# container below, and when it is left unset the relay generates one into the
+# container filesystem (under the config root, e.g.
+# /root/.config/prompt-ferry-host/config.toml), which does not survive `down`.
 
 services:
   postgres:
@@ -47,6 +63,7 @@ services:
       PROMPT_FERRY_RELAY__WORKER_BIND: 0.0.0.0:8788
       PROMPT_FERRY_RELAY__CLIENT_TOKEN: ${PROMPT_FERRY_RELAY__CLIENT_TOKEN:?set PROMPT_FERRY_RELAY__CLIENT_TOKEN in .env}
       PROMPT_FERRY_RELAY__WORKER_TOKEN: ${PROMPT_FERRY_WORKER_TOKEN:?set PROMPT_FERRY_WORKER_TOKEN in .env}
+      PROMPT_FERRY_RELAY__ADMIN_TOKEN: ${PROMPT_FERRY_RELAY__ADMIN_TOKEN:-}
       PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS: ${PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS:-300}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8787/healthz || exit 1"]

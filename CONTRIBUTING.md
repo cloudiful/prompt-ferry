@@ -49,6 +49,7 @@ cd frontend
 bun install --no-save
 bun run format:check
 bun run typecheck
+bun run test
 bun run build
 ```
 
@@ -79,7 +80,10 @@ bun run openapi-ts
 
 Commit generated changes to `openapi/admin-api.yaml` and
 `frontend/src/generated/admin-api/**` together with the source change. Do not
-hand-edit generated files or add handwritten admin API DTOs.
+hand-edit generated files or add handwritten admin API DTOs. The document covers
+the worker admin API and the relay management API; the relay routes are served
+by the relay's own loopback management listener but share the one `/api/v1`
+contract, so adding a route means adding its `utoipa` stub in the same change.
 
 SQLx query metadata is generated after database or SQL changes:
 

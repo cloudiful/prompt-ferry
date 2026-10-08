@@ -24,6 +24,9 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 - Per-request reasoning controls: Chat `reasoning_effort` and Responses `reasoning.effort`, including DeepSeek `max`; Chat compatibility maps unsupported `developer` roles to `system`.
 - Configurable redaction for forwarded content, logs, and usage details.
 - Users, client API keys, upstream endpoints, model routes, and multiple relays.
+- A host-local service role: one binary can start as relay + embedded worker
+  (the default), worker only, or relay only, and the relay serves the management
+  page and its own settings without a worker.
 - First-class upstream presets for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM, DeepSeek, and OpenAI
   Platform; preset base URLs (`https://api.openai.com` for OpenAI) are derived server-side, so only the
   inference API key is configured. Other OpenAI-compatible hosts keep using the Generic provider with an
@@ -85,9 +88,16 @@ re-download the Python runtime and dependencies. A plain container `restart`
 keeps the filesystem; `down`/recreate without these volumes would lose the
 caches.
 
-Open the admin console at <http://127.0.0.1:8789>. After signing in, configure
-an upstream endpoint, model route, user, and client API key. Point an
-OpenAI-compatible client at the relay:
+Open the admin console at <http://127.0.0.1:8789>. This is the worker's own
+admin listener, and it keeps serving the worker business API — upstreams,
+providers, routes, quotas, usage. The `relay` container additionally runs a
+loopback management listener on `127.0.0.1:8790` inside that container, serving
+the relay's own page, settings, host service role, and restart action. The
+Compose file deliberately does not publish it: a management surface stays on
+loopback, so reach it from inside the container (for example
+`docker compose exec relay`) unless you add a local-only `ports` mapping for it.
+After signing in to the worker console, configure an upstream endpoint, model
+route, user, and client API key. Point an OpenAI-compatible client at the relay:
 
 ```dotenv
 OPENAI_BASE_URL=http://127.0.0.1:8787/v1
@@ -149,12 +159,13 @@ optional and can provide shared coordination/cache acceleration; without it,
 SQLite uses SQLite coordination and PostgreSQL uses its existing backend or
 bounded local fallbacks according to the state semantics.
 
-The worker and relay may run on separate machines with
-`prompt-ferry relay` and `prompt-ferry worker`. The relay-worker bridge
-protocol is unchanged: the worker needs network access to the relay's worker
-bind, and clients need access to the relay's public bind. Configure relay URLs
-with repeatable `--relay-url` options or the `relay_urls` configuration list
-(for environment overrides, `PROMPT_FERRY_WORKER__RELAY_URLS` is a JSON array).
+The worker and relay may run on separate machines with `prompt-ferry relay` and
+`prompt-ferry worker`, or on one host by setting the role to `worker` or `relay`
+and starting the binary with no subcommand. The relay-worker bridge protocol is
+unchanged: the worker needs network access to the relay's worker bind, and
+clients need access to the relay's public bind. Configure relay URLs with
+repeatable `--relay-url` options or the `relay_urls` configuration list (for
+environment overrides, `PROMPT_FERRY_WORKER__RELAY_URLS` is a JSON array).
 
 On first startup, an empty SQLite database is bootstrapped from the static
 worker settings, including relay URLs, upstream base URL and API key, TLS, and
@@ -206,6 +217,11 @@ PROMPT_FERRY_RELAY__BIND=0.0.0.0:8787
 PROMPT_FERRY_RELAY__WORKER_BIND=0.0.0.0:8788
 PROMPT_FERRY_RELAY__CLIENT_TOKEN=<client-token>
 PROMPT_FERRY_RELAY__WORKER_TOKEN=<worker-token>
+# Loopback only; the relay's own management page. Publish it through a port
+# forward or an SSH tunnel, never on a routable address.
+PROMPT_FERRY_RELAY__ADMIN_BIND=127.0.0.1:8790
+# Optional; generated and persisted to the host-local configuration when unset.
+PROMPT_FERRY_RELAY__ADMIN_TOKEN=<relay-management-token>
 ```
 
 ```bash
@@ -428,26 +444,93 @@ secret is never echoed, logged, or returned.
 ### Single-host binary
 
 Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases)
-and run the relay and worker together — the admin UI is embedded in the binary:
+and start it with no subcommand:
 
 ```bash
 ./prompt-ferry
 ```
 
-The no-argument command starts relay, worker, and the embedded admin UI in one
-process and prints the local UI URL as soon as the admin listener is ready. On
-Windows it also opens that URL (loopback only) in the default browser once the
-UI is up; the console window stays open showing logs, and Ctrl+C or closing the
-console stops the service. If no browser can be opened the URL is still logged
-and the service runs normally. `prompt-ferry serve` is a compatibility alias
-for the same startup and never opens a browser.
+With no subcommand the binary reads the host role and starts only the services
+that role names, then logs the local management URL for the role it started. In
+the `integrated` and `worker` roles that URL is also opened in the default
+browser on Windows (loopback only), because the user double-clicked an
+executable; the console window stays open showing logs, and Ctrl+C or closing
+the console stops the service. If no browser can be opened the URL is still
+logged and the service runs normally. The `relay` role logs its management URL
+only and never opens a browser.
 
-The integrated mode binds the internal worker bridge to loopback and starts
-with no required secrets: an empty `PROMPT_FERRY_WORKER_TOKEN` keeps the bridge
-open only on that loopback bind, the encryption key is generated on first
-start, and the initial admin password (if needed) is written to
+The role is host-local configuration that selects this machine's listeners and
+running components. It has exactly three values, and an installation that never
+configures one starts in the default `integrated` role, so an existing single-host
+deployment upgrades without any change:
+
+| Role | Local relay | Local worker | Management entry point |
+| --- | --- | --- | --- |
+| `integrated` (default) | yes | embedded, bridged in-process | relay management page (worker admin listener also serves the worker) |
+| `worker` | no | yes, dialing the enabled remote relays | the worker's own admin listener |
+| `relay` | yes | no | relay management page only |
+
+The role is independent of the remote relay list. The managed relays are the
+worker's connection targets; enabling, disabling, or deleting one of them never
+changes what this host runs, and a worker-only host with an empty remote list
+keeps running instead of falling back to `integrated`.
+
+A role names listeners and running components, so it is resolved once at startup
+rather than applied to a serving process. Saving a role or the management bind
+from the management page records it and reports that a restart is required;
+"Restart now" stops the process so a supervisor brings it back with the saved
+settings. A configuration file or environment variable is read the same way at
+the next start:
+
+```dotenv
+PROMPT_FERRY_HOST__ROLE=relay
+```
+
+The relay serves the same management page in `integrated` and `relay` roles, so
+the page, the relay settings, the role, and the restart action work with no
+worker attached. Worker business requests — upstreams, providers, routes,
+quotas, usage — keep flowing through the relay to the connected worker over the
+existing bridge, with their original `/api/v1/...` path and query string; with no
+worker connected the page stays open and reports that worker features are
+unavailable. The relay owns only its own configuration, state, and lifecycle
+API; it never duplicates worker persistence or routing.
+
+The relay management listener is loopback-only (default `127.0.0.1:8790`,
+`relay.admin_bind` / `PROMPT_FERRY_RELAY__ADMIN_BIND`), and every non-static
+route on it requires the host-local management token, either as a
+`Authorization: Bearer` header or as a session exchanged through
+`POST /api/v1/relay/auth/login`. The token is resolved before anything is
+served: set `relay.admin_token` yourself, or let the relay generate one and
+persist it to the host-local configuration file (`0600` on Unix) on first start.
+A host that cannot store a generated token refuses to start rather than
+exposing an open control API. This token is separate from every other
+credential in the deployment: it is not the relay client token, not the
+`/ws/worker` worker token, and not a worker admin login.
+
+The relay management token and the host role live in a small host-local overlay
+next to the main configuration, in their own `prompt-ferry-host` application
+directory:
+
+```text
+$XDG_CONFIG_HOME/prompt-ferry-host/config.toml   (Linux; ~/.config/... otherwise)
+~/Library/Application Support/prompt-ferry-host/config.toml   (macOS)
+%APPDATA%\prompt-ferry-host\config.toml   (Windows)
+```
+
+The overlay wins over the main configuration for the keys it defines and is
+silent about everything else, and a save rewrites only that file — the main
+`config.toml` an operator maintains by hand is never rewritten, and the role
+never enters the shared managed-relay configuration or the business database.
+`/healthz`, the login/logout/session routes, and the static assets are the only
+unauthenticated paths on the management listener; the SPA fallback is last, so
+`/api/v1` cannot be used to reach the page without authenticating.
+
+The integrated role binds the internal worker bridge to loopback and starts with
+no required secrets: an empty `PROMPT_FERRY_WORKER_TOKEN` keeps the bridge open
+only on that loopback bind, the encryption key is generated on first start, and
+the initial admin password (if needed) is written to
 `<data-root>/prompt-ferry/bootstrap-admin.txt`. Configure a client token and
-upstream endpoint through the Admin console (default
+upstream endpoint through the worker admin console (default
 <http://127.0.0.1:8789>):
 
 ```dotenv
@@ -455,6 +538,13 @@ PROMPT_FERRY_RELAY__CLIENT_TOKEN=<client-token>
 PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://api.example.com
 PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<upstream-api-key>
 ```
+
+The `relay`, `worker`, and `serve` subcommands remain the compatibility and
+headless entry points: `prompt-ferry relay` starts a relay-only host,
+`prompt-ferry worker` starts a worker, and `prompt-ferry serve` always starts
+the integrated pair even when a different role is configured (it logs a warning
+instead of silently honoring the stored role). To run a configured `worker` or
+`relay` role, start the binary with no subcommand.
 
 Release binaries embed the built frontend, so the release workflow builds the
 frontend before compiling the binary and the container image carries one

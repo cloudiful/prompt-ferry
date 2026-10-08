@@ -23,6 +23,8 @@
 - 支持按请求调整思考强度：Chat 使用 `reasoning_effort`，Responses 使用 `reasoning.effort`，包括 DeepSeek 的 `max`；Chat 兼容层会将上游不接受的 `developer` 角色转换为 `system`。
 - 支持对转发内容、日志和用量详情进行配置化脱敏。
 - 支持用户、客户端 API Key、上游端点、模型路由和多 relay 管理。
+- 支持本机服务角色：同一个二进制可按需启动为 Relay + 内置 Worker（默认）、
+  仅 Worker 或仅 Relay；Relay 即使没有 Worker 也能提供自己的管理页面与设置。
 - 内置 MiniMax、CommandCode、OpencodeGo、OpenRouter、GLM、DeepSeek 与 OpenAI Platform 一等上游预设；
   预设基础地址由服务端推导（OpenAI 为 `https://api.openai.com`），只需配置推理 API Key。其他
   OpenAI-compatible 上游继续使用通用 provider 并显式填写基础地址。
@@ -72,8 +74,13 @@ Compose 已通过命名卷持久化 worker 的 uv 缓存（`/root/.cache/uv` 与
 `/root/.local/share/uv`），重建容器时无需重新下载 Python 运行时与依赖。容器
 `restart` 会保留文件系统；若没有这些卷，`down`/重建会丢失缓存。
 
-打开管理控制台：<http://127.0.0.1:8789>。登录后配置上游端点、模型路由、
-用户和客户端 API Key，再将 OpenAI 兼容客户端指向 relay：
+打开管理控制台：<http://127.0.0.1:8789>。这是 worker 自己的管理监听器，继续提供
+worker 业务 API——上游、provider、路由、配额、用量。`relay` 容器另外在该容器内的
+`127.0.0.1:8790` 上运行一个回环管理监听器，提供 Relay 自己的页面、设置、本机服务角色与
+重启操作。Compose 文件有意不发布该端口：管理入口只留在回环地址，需要时可用
+`docker compose exec relay` 在容器内访问，或自行添加仅限本机的 `ports` 映射。登录管理
+控制台后，配置上游端点、模型路由、用户和客户端 API Key，再将 OpenAI 兼容客户端指向
+relay：
 
 ```dotenv
 OPENAI_BASE_URL=http://127.0.0.1:8787/v1
@@ -123,11 +130,12 @@ SQLite 适合单个 worker；需要多 worker 或完整高级持久化能力时�
 Valkey 是可选的，可用于共享协调和缓存加速；未配置时，SQLite 使用 SQLite 协调，
 PostgreSQL 按状态语义使用现有后端或有限的本地内存降级。
 
-relay 和 worker 可以部署在不同机器上，分别运行
-`prompt-ferry relay` 和 `prompt-ferry worker`。relay-worker 桥接协议不变：worker
-必须能访问 relay 的 worker bind，客户端必须能访问 relay 的 public bind。relay URL
-可通过可重复的 `--relay-url` 参数或 `relay_urls` 配置列表设置；使用环境变量覆盖时，
-`PROMPT_FERRY_WORKER__RELAY_URLS` 的值应为 JSON 数组。
+relay 和 worker 可以部署在不同机器上，分别运行 `prompt-ferry relay` 和
+`prompt-ferry worker`；也可以在同一主机上把角色设为 `worker` 或 `relay`，然后不带子
+命令启动二进制。relay-worker 桥接协议不变：worker 必须能访问 relay 的 worker bind，
+客户端必须能访问 relay 的 public bind。relay URL 可通过可重复的 `--relay-url` 参数或
+`relay_urls` 配置列表设置；使用环境变量覆盖时，`PROMPT_FERRY_WORKER__RELAY_URLS` 的值
+应为 JSON 数组。
 
 首次启动时，空的 SQLite 数据库会从静态 worker 设置引导，包括 relay URL、上游基础地址、
 TLS 以及桥接加密设置；也可以稍后通过 Admin 引导流程创建第一个上游端点。引导完成后以
@@ -168,6 +176,10 @@ PROMPT_FERRY_RELAY__BIND=0.0.0.0:8787
 PROMPT_FERRY_RELAY__WORKER_BIND=0.0.0.0:8788
 PROMPT_FERRY_RELAY__CLIENT_TOKEN=<client-token>
 PROMPT_FERRY_RELAY__WORKER_TOKEN=<worker-token>
+# 仅回环；Relay 自己的管理页面。请通过端口转发或 SSH 隧道访问，不要暴露到可路由地址。
+PROMPT_FERRY_RELAY__ADMIN_BIND=127.0.0.1:8790
+# 可选；未设置时自动生成并持久化到 host-local 配置。
+PROMPT_FERRY_RELAY__ADMIN_TOKEN=<relay-management-token>
 ```
 
 ```bash
@@ -354,22 +366,72 @@ OpenAI 端点可以单独保存一个可选的 Admin API Key，用于读取该 O
 ### 单机二进制
 
 从 [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases) 下载对应平台的
-二进制文件，让 relay、worker 和内嵌的管理界面在同一个进程中运行：
+二进制文件，不带子命令启动：
 
 ```bash
 ./prompt-ferry
 ```
 
-不带子命令启动时，进程会一并运行 relay、worker 和内嵌的管理界面，并在管理监听器
-就绪后打印本地界面地址。在 Windows 上，界面就绪后还会用默认浏览器打开该地址
-（仅回环地址）；控制台窗口保持打开以显示日志，按 Ctrl+C 或关闭窗口即可停止服务。
-如果无法打开浏览器，地址仍会打印在日志里，服务照常运行。`prompt-ferry serve` 是
-同一启动方式的兼容别名，且永远不会打开浏览器。
+不带子命令启动时，二进制会读取本机服务角色，只启动该角色对应的服务，并打印该角色
+的本机管理地址。在 `integrated` 与 `worker` 角色下，Windows 还会用默认浏览器打开该
+地址（仅回环地址），因为用户是双击了可执行文件；控制台窗口保持打开以显示日志，按
+Ctrl+C 或关闭窗口即可停止服务。如果无法打开浏览器，地址仍会打印在日志里，服务照常运行。
+`relay` 角色只打印管理地址，不会打开浏览器。
+
+角色是本机配置，用来决定这台机器的监听器和运行组件，只有三种取值。未配置角色的既有
+单机部署会按默认的 `integrated` 升级，无需任何改动：
+
+| 角色 | 本机 Relay | 本机 Worker | 管理入口 |
+| --- | --- | --- | --- |
+| `integrated`（默认） | 有 | 内置，进程内桥接 | Relay 管理页面（worker 管理监听器继续服务 worker） |
+| `worker` | 无 | 有，连接已启用的远程 Relay | worker 自己的管理监听器 |
+| `relay` | 有 | 无 | 仅 Relay 管理页面 |
+
+角色与远程 relay 列表相互独立。受管 relay 是 worker 的连接目标，启用、停用或删除其中
+任意一个都不会改变本机的运行角色；仅 Worker 且远程列表为空时会保持运行，不会回落到
+`integrated`。
+
+角色决定监听器与运行组件，因此只在启动时解析一次，不会应用到正在服务的进程上。在管理
+页面保存角色或管理监听地址都会记录该值并提示需要重启；「立即重启」会停止进程，由守护
+程序带着已保存的设置重新拉起。配置文件或环境变量同样在下一次启动时读取：
+
+```dotenv
+PROMPT_FERRY_HOST__ROLE=relay
+```
+
+`integrated` 和 `relay` 角色下都由 Relay 提供同一个管理页面，因此即使没有 worker 连入，
+页面、Relay 设置、角色与重启操作依然可用。Worker 业务请求——上游、provider、路由、配额、
+用量——继续经由 Relay 通过既有桥接转发给已连接的 worker，并保留原始 `/api/v1/...` 路径
+和查询参数；没有 worker 连入时页面照常打开，只提示 worker 功能暂不可用。Relay 只拥有
+自身配置、状态与生命周期 API，不复制 Worker 的持久化与路由逻辑。
+
+Relay 管理监听器仅监听回环地址（默认 `127.0.0.1:8790`，配置项 `relay.admin_bind` /
+`PROMPT_FERRY_RELAY__ADMIN_BIND`），其上每个非静态路由都要求本机管理 token，可以直接用
+`Authorization: Bearer` 头携带，也可以通过 `POST /api/v1/relay/auth/login` 换取会话。
+该 token 在服务任何内容之前解析完成：请自行设置 `relay.admin_token`，或让 Relay 首次
+启动时生成一个并持久化到 host-local 配置文件（Unix 下权限为 `0600`）。无法持久化生成
+token 的主机将拒绝启动，而不是暴露一个无认证的控制 API。该 token 与部署中的其他凭据
+相互独立：既不是 relay 客户端令牌，也不是 `/ws/worker` 的 worker token，更不是 worker
+管理员登录凭据。
+
+Relay 管理 token 与本机角色保存在主配置旁的 host-local overlay 中，位于独立的
+`prompt-ferry-host` 应用目录下：
+
+```text
+$XDG_CONFIG_HOME/prompt-ferry-host/config.toml   （Linux；否则为 ~/.config/...）
+~/Library/Application Support/prompt-ferry-host/config.toml   （macOS）
+%APPDATA%\prompt-ferry-host\config.toml   （Windows）
+```
+
+overlay 只对自身定义的键覆盖主配置，其余保持静默；保存时仅重写该文件，运维手工维护的
+主 `config.toml` 永远不会被改写，角色也从不进入可多主机共享的受管 relay 配置或业务
+数据库。管理监听器上仅 `/healthz`、登录/登出/会话路由与静态资源无需认证；SPA fallback
+排在最后，因此无法绕过认证通过 `/api/v1` 访问页面。
 
 集成模式会将内部 worker 桥接绑定到本机回环地址，并且首次启动无需任何必填密钥：
-空的 `PROMPT_FERRY_WORKER_TOKEN` 表示该回环端口不启用 worker 认证，加密密钥会在
-首次启动时自动生成，需要的初始管理员密码会写入
-`<data-root>/prompt-ferry/bootstrap-admin.txt`。随后在管理控制台
+空的 `PROMPT_FERRY_WORKER_TOKEN` 表示该回环端口不启用 worker 认证，加密密钥会在首次
+启动时自动生成，需要的初始管理员密码会写入
+`<data-root>/prompt-ferry/bootstrap-admin.txt`。随后在 worker 管理控制台
 （默认 <http://127.0.0.1:8789>）中配置客户端令牌和上游端点：
 
 ```dotenv
@@ -377,6 +439,12 @@ PROMPT_FERRY_RELAY__CLIENT_TOKEN=<客户端令牌>
 PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://api.example.com
 PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<上游 API 密钥>
 ```
+
+`relay`、`worker` 和 `serve` 子命令仍是兼容与无桌面部署入口：
+`prompt-ferry relay` 启动仅 Relay 的主机，`prompt-ferry worker` 启动 Worker，
+`prompt-ferry serve` 始终以一体模式启动，即使配置了其他角色也如此（它会输出警告日志，
+而不是静默采用已保存的角色）。要按已保存的 `worker` 或 `relay` 角色运行，请不带子命令
+启动二进制。
 
 发布二进制内嵌了构建好的前端：发布流程先构建前端再编译 Rust，容器镜像因此只需要
 一个制品，不再携带独立的前端目录。从源码构建时，先执行
