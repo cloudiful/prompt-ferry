@@ -12,10 +12,11 @@ pub(super) async fn send_upstream_request(
     client: &Client,
     method: &Method,
     url: &str,
+    path: &str,
     route: &db::RouteConfig,
     body: &PreparedRequestBody,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    build_upstream_request(client, method, url, route, body, &[], None)
+    build_upstream_request(client, method, url, route, path, body, &[], None)
         .send()
         .await
 }
@@ -25,6 +26,7 @@ pub(super) fn build_upstream_request(
     method: &Method,
     url: &str,
     route: &db::RouteConfig,
+    path: &str,
     body: &PreparedRequestBody,
     request_headers: &[(String, String)],
     conversation_id: Option<uuid::Uuid>,
@@ -48,7 +50,7 @@ pub(super) fn build_upstream_request(
         PreparedRequestBody::PassthroughStream(bytes)
         | PreparedRequestBody::BufferedBytes(bytes) => bytes.as_slice(),
     };
-    request_builder.body(transformed_body(route, raw, false))
+    request_builder.body(transformed_body(route, path, raw, false))
 }
 
 /// Issue #599 R2c: ChatGPT (Codex) backend request builder. The URL already
@@ -63,6 +65,7 @@ pub(super) fn build_codex_upstream_request(
     method: &Method,
     url: &str,
     route: &db::RouteConfig,
+    path: &str,
     body: &PreparedRequestBody,
     auth: &CodexAuth,
     request_headers: &[(String, String)],
@@ -80,21 +83,28 @@ pub(super) fn build_codex_upstream_request(
     );
     let builder =
         chatgpt_backend::with_codex_request_headers(builder, &auth.access_token, request_headers);
-    builder.body(transformed_body(route, raw, true))
+    builder.body(transformed_body(route, path, raw, true))
 }
 
 /// Shared provider body pipeline. Each transform borrows the bytes when
 /// nothing needs rewriting, so an unchanged body is forwarded byte-for-byte
 /// (prefix-cache stable) and the only owned allocation is the final buffer
-/// reqwest takes ownership of. `codex_backend` appends the ChatGPT (Codex)
-/// normalization (model mapping + `store: false`), which also hands back an
-/// owned buffer.
-fn transformed_body(route: &db::RouteConfig, raw: &[u8], codex_backend: bool) -> Vec<u8> {
+/// reqwest takes ownership of. `path` is the prepared upstream path, consumed
+/// by the OpenRouter Responses prompt-cache gate (issue #757 P1).
+/// `codex_backend` appends the ChatGPT (Codex) normalization (model mapping +
+/// `store: false`), which also hands back an owned buffer.
+fn transformed_body(
+    route: &db::RouteConfig,
+    path: &str,
+    raw: &[u8],
+    codex_backend: bool,
+) -> Vec<u8> {
     let body = apply_service_tier_override(route, raw);
     let body = apply_minimax_reasoning_split(route, body.as_ref());
     let body = apply_minimax_reasoning_echo_restore(route, body.as_ref());
     let body = apply_deepseek_thinking(route, body.as_ref());
     let body = apply_anthropic_cache_control(route, body);
+    let body = super::prompt_cache::apply_openrouter_prompt_cache(route, path, body);
     if codex_backend {
         chatgpt_backend::normalize_codex_request_body(body.as_ref()).into_owned()
     } else {
@@ -557,6 +567,7 @@ mod tests {
             &Client::new(),
             &Method::POST,
             &format!("http://{address}/v1/responses"),
+            "/v1/responses",
             &route,
             &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
         )
@@ -595,6 +606,7 @@ mod tests {
             &Method::POST,
             "https://example.test/v1/messages",
             &route,
+            "/v1/messages",
             &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
             &[
                 ("anthropic-version".to_string(), "2024-10-22".to_string()),
@@ -677,6 +689,7 @@ mod tests {
             &Method::POST,
             "https://api.opencode.ai/v1/responses",
             &route,
+            "/v1/responses",
             &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
             &[
                 (
@@ -736,6 +749,7 @@ mod tests {
             &Method::POST,
             "https://opencode.ai/zen/go/v1/responses",
             &route,
+            "/v1/responses",
             &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
             &[],
             Some(conversation_id),
@@ -793,6 +807,7 @@ mod tests {
             &Method::POST,
             "https://opencode.ai/v1/responses",
             &route,
+            "/v1/responses",
             &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
             &[
                 ("x-opencode-session".to_string(), "   ".to_string()),
@@ -851,6 +866,7 @@ mod tests {
             &Method::POST,
             "https://sub.opencode.ai/v1/chat/completions",
             &route,
+            "/v1/chat/completions",
             &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
             &[],
             None,
@@ -900,6 +916,7 @@ mod tests {
             &Method::POST,
             "https://api.openai.com/v1/chat/completions",
             &route,
+            "/v1/chat/completions",
             &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
             &[
                 (
@@ -958,6 +975,7 @@ mod tests {
             &Method::POST,
             "https://api.example.com/v1/chat/completions",
             &route,
+            "/v1/chat/completions",
             &PreparedRequestBody::BufferedBytes(br#"{"model":"opencode"}"#.to_vec()),
             &[],
             Some(conversation_id),
@@ -996,6 +1014,7 @@ mod tests {
             &Method::POST,
             "https://API.OpEnCoDe.AI/v1/responses",
             &route,
+            "/v1/responses",
             &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
             &[
                 (
@@ -1250,6 +1269,7 @@ mod tests {
                 &Method::POST,
                 "https://api.deepseek.com/v1/chat/completions",
                 &route,
+                "/v1/chat/completions",
                 &body,
                 &[],
                 None,
@@ -1280,6 +1300,7 @@ mod tests {
                 &Method::POST,
                 "https://api.deepseek.com/v1/chat/completions",
                 &route,
+                "/v1/chat/completions",
                 &body,
                 &[],
                 None,
@@ -1352,6 +1373,7 @@ mod tests {
                     &Method::POST,
                     "https://api.minimaxi.com/v1/chat/completions",
                     &route,
+                    "/v1/chat/completions",
                     &prepared,
                     &[],
                     None,
@@ -1387,6 +1409,7 @@ mod tests {
                 &Method::POST,
                 "https://api.minimaxi.com/v1/chat/completions",
                 &route,
+                "/v1/chat/completions",
                 &body,
                 &[],
                 None,
@@ -1417,6 +1440,7 @@ mod tests {
                     &Method::POST,
                     "https://api.minimaxi.com/v1/chat/completions",
                     &route,
+                    "/v1/chat/completions",
                     &body,
                     &[],
                     None,
@@ -1438,6 +1462,7 @@ mod tests {
             &Method::POST,
             "https://api.minimaxi.com/v1/chat/completions",
             &generic,
+            "/v1/chat/completions",
             &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
             &[],
             None,
@@ -1456,6 +1481,7 @@ mod tests {
             &Method::POST,
             "https://api.minimaxi.com/v1/chat/completions",
             &route,
+            "/v1/chat/completions",
             &PreparedRequestBody::BufferedBytes(b"not-json".to_vec()),
             &[],
             None,

@@ -5,6 +5,7 @@ pub(super) mod glm_envelope;
 #[cfg(test)]
 mod glm_envelope_tests;
 pub(super) mod models;
+pub(super) mod prompt_cache;
 pub(super) mod proxy;
 pub(super) mod realtime;
 pub(super) mod request;

@@ -52,6 +52,7 @@ pub(super) fn codex_request(
         &Method::POST,
         "https://chatgpt.com/backend-api/codex/responses",
         &openai_responses_route(),
+        "/v1/responses",
         &PreparedRequestBody::BufferedBytes(body.to_vec()),
         auth,
         headers,

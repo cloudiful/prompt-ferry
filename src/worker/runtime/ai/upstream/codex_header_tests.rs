@@ -136,6 +136,7 @@ fn platform_builder_keeps_the_platform_model_and_store_field() {
         &Method::POST,
         "https://api.openai.com/v1/responses",
         &route,
+        "/v1/responses",
         &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-4o","store":true}"#.to_vec()),
         &[("session-id".to_string(), "session-1".to_string())],
         None,
@@ -342,6 +343,7 @@ fn platform_builder_ignores_all_session_aliases() {
         &Method::POST,
         "https://api.openai.com/v1/responses",
         &route,
+        "/v1/responses",
         &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-4o","store":true}"#.to_vec()),
         &[
             ("x-opencode-session-id".to_string(), "ses_child".to_string()),
