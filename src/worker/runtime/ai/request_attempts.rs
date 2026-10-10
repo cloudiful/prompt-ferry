@@ -324,6 +324,14 @@ pub(super) async fn forward_route_request(
                 request_ctx.request_prompt_log.conversation_id,
             ),
         };
+        if route.provider == db::EndpointProvider::OpenAi && chatgpt_auth.is_some() {
+            if let Some(service) = services
+                .admin_state()
+                .and_then(|state| state.chatgpt_quota_service.as_deref())
+            {
+                service.notify_selected_request(route.route_id);
+            }
+        }
         let send_result = upstream_request.send().await;
         match send_result {
             Err(err) => {

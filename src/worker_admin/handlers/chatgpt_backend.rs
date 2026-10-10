@@ -19,6 +19,7 @@ use reqwest::{Client, RequestBuilder};
 use serde_json::Value;
 use uuid::Uuid;
 
+use super::chatgpt_quota_windows;
 use super::codex_claims;
 use super::oauth_client::{
     CHATGPT_ISSUER, ChatgptOAuthError, OAuthTokenResponse, refresh_chatgpt_tokens,
@@ -271,6 +272,8 @@ pub enum ChatgptBackendError {
     NotConfigured(String),
     /// The refresh grant was rejected; the stored token has been cleared.
     InvalidGrant(String),
+    /// The ChatGPT quota operation exceeded its HTTP request timeout.
+    Timeout,
     /// The ChatGPT backend rejected or could not serve the request.
     Upstream {
         status: Option<u16>,
@@ -284,6 +287,7 @@ impl std::fmt::Display for ChatgptBackendError {
             Self::NotConfigured(message) | Self::InvalidGrant(message) => {
                 formatter.write_str(message)
             }
+            Self::Timeout => formatter.write_str("ChatGPT quota request timed out"),
             Self::Upstream { status, message } => match status {
                 Some(status) => write!(formatter, "{message} (HTTP {status})"),
                 None => formatter.write_str(message),
@@ -336,7 +340,21 @@ pub async fn fetch_chatgpt_quota(
     access_token: &str,
     account_id: Option<&str>,
 ) -> Result<ChatgptQuota, ChatgptBackendError> {
-    let base = chatgpt_backend_base_url();
+    fetch_chatgpt_quota_at(
+        client,
+        &chatgpt_backend_base_url(),
+        access_token,
+        account_id,
+    )
+    .await
+}
+
+async fn fetch_chatgpt_quota_at(
+    client: &Client,
+    base: &str,
+    access_token: &str,
+    account_id: Option<&str>,
+) -> Result<ChatgptQuota, ChatgptBackendError> {
     let mut last_status = None;
     for path in CHATGPT_USAGE_PATHS {
         let response = with_codex_headers(
@@ -348,14 +366,40 @@ pub async fn fetch_chatgpt_quota(
         )
         .send()
         .await
-        .map_err(|error| ChatgptBackendError::Upstream {
-            status: error.status().map(|status| status.as_u16()),
-            message: truncate(&error.to_string()),
+        .map_err(|error| {
+            if error.is_timeout() {
+                ChatgptBackendError::Timeout
+            } else {
+                ChatgptBackendError::Upstream {
+                    status: error.status().map(|status| status.as_u16()),
+                    message: truncate(&error.to_string()),
+                }
+            }
         })?;
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = response.text().await.map_err(|error| {
+            if error.is_timeout() {
+                ChatgptBackendError::Timeout
+            } else {
+                ChatgptBackendError::Upstream {
+                    status: Some(status.as_u16()),
+                    message: "ChatGPT usage response body could not be read".to_string(),
+                }
+            }
+        })?;
         if status.is_success() {
-            let value = serde_json::from_str::<Value>(&body).unwrap_or(Value::Null);
+            let value = serde_json::from_str::<Value>(&body).map_err(|_| {
+                ChatgptBackendError::Upstream {
+                    status: Some(status.as_u16()),
+                    message: "ChatGPT usage response was not valid JSON".to_string(),
+                }
+            })?;
+            if !value.is_object() {
+                return Err(ChatgptBackendError::Upstream {
+                    status: Some(status.as_u16()),
+                    message: "ChatGPT usage response was not a JSON object".to_string(),
+                });
+            }
             return Ok(parse_chatgpt_quota(&value));
         }
         if matches!(status.as_u16(), 404 | 405) {
@@ -389,10 +433,10 @@ pub fn parse_chatgpt_quota(value: &Value) -> ChatgptQuota {
             .and_then(Value::as_bool),
         primary: rate_limit
             .and_then(|rate_limit| rate_limit.get("primary_window"))
-            .map(parse_quota_window),
+            .and_then(chatgpt_quota_windows::parse_window),
         secondary: rate_limit
             .and_then(|rate_limit| rate_limit.get("secondary_window"))
-            .map(parse_quota_window),
+            .and_then(chatgpt_quota_windows::parse_window),
         has_credits: credits
             .and_then(|credits| credits.get("has_credits"))
             .and_then(Value::as_bool),
@@ -403,18 +447,6 @@ pub fn parse_chatgpt_quota(value: &Value) -> ChatgptQuota {
             .and_then(|credits| credits.get("balance"))
             .and_then(Value::as_str)
             .map(str::to_string),
-    }
-}
-
-fn parse_quota_window(value: &Value) -> ChatgptQuotaWindow {
-    ChatgptQuotaWindow {
-        used_percent: value.get("used_percent").and_then(Value::as_f64),
-        limit_window_seconds: value.get("limit_window_seconds").and_then(Value::as_i64),
-        reset_after_seconds: value.get("reset_after_seconds").and_then(Value::as_i64),
-        reset_at: value
-            .get("reset_at")
-            .and_then(Value::as_i64)
-            .and_then(|seconds| DateTime::from_timestamp(seconds, 0)),
     }
 }
 

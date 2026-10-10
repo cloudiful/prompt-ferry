@@ -496,6 +496,13 @@ pub(super) async fn build_admin_state(
     })
     .with_user_store(user_store)
     .with_cache_alert(cache_alert);
+    let quota_service = Arc::new(
+        worker_admin::chatgpt_quota_service::ChatGptQuotaService::new(
+            state.pool.clone(),
+            state.config_repository.clone(),
+        ),
+    );
+    let state = state.with_chatgpt_quota_service(quota_service);
     if spawn_admin_server {
         start_admin_server(state.clone(), config, admin_listener, worker_shutdown);
 

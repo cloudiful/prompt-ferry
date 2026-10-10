@@ -90,12 +90,14 @@ export function isTokenPlanUsageFresh(endpointId: string): boolean {
 // failure without the cache having to throw.
 function fetchTokenPlanUsageOnce(
   endpointId: string,
+  force = false,
 ): Promise<TokenPlanFetchOutcome> {
-  const pending = inflight.get(endpointId)
+  const flightKey = `${force ? 'force' : 'automatic'}:${endpointId}`
+  const pending = inflight.get(flightKey)
   if (pending) return pending
   const promise = (async (): Promise<TokenPlanFetchOutcome> => {
     try {
-      const usage = await fetchTokenPlanUsage(endpointId)
+      const usage = await fetchTokenPlanUsage(endpointId, force)
       cache[endpointId] = { usage, fetchedAt: Date.now() }
       return { ok: true, cause: null }
     } catch (cause) {
@@ -113,10 +115,10 @@ function fetchTokenPlanUsageOnce(
       cache[endpointId] = { usage: null, fetchedAt: Date.now() }
       return { ok: false, cause }
     } finally {
-      inflight.delete(endpointId)
+      inflight.delete(flightKey)
     }
   })()
-  inflight.set(endpointId, promise)
+  inflight.set(flightKey, promise)
   return promise
 }
 
@@ -180,7 +182,7 @@ export async function requestTokenPlanUsage(
   if (options.refresh) {
     return resolvedRequest(
       endpointId,
-      await fetchTokenPlanUsageOnce(endpointId),
+      await fetchTokenPlanUsageOnce(endpointId, true),
     )
   }
   const entry = cache[endpointId]

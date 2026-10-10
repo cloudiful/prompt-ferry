@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    endpoint_id,\n    lease_owner,\n    lease_expires_at,\n    last_attempt_at,\n    last_success_at,\n    consecutive_failures,\n    next_retry_at,\n    last_error_code\nFROM chatgpt_quota_refresh_state\nWHERE endpoint_id = $1;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "chatgpt_quota_refresh_state",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "lease_owner",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "chatgpt_quota_refresh_state",
+            "name": "lease_owner"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "lease_expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "chatgpt_quota_refresh_state",
+            "name": "lease_expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "last_attempt_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "chatgpt_quota_refresh_state",
+            "name": "last_attempt_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "last_success_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "chatgpt_quota_refresh_state",
+            "name": "last_success_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "consecutive_failures",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "chatgpt_quota_refresh_state",
+            "name": "consecutive_failures"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "next_retry_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "chatgpt_quota_refresh_state",
+            "name": "next_retry_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_error_code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "chatgpt_quota_refresh_state",
+            "name": "last_error_code"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "7ccedcef8a8a79cbf0524704050b6e5e48dfc241bedd16ad61812a972dcc798b"
+}

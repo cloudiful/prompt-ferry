@@ -26,11 +26,9 @@ SELECT
     upserted.conversation_id AS "conversation_id!",
     upserted.endpoint_id AS "endpoint_id!",
     upserted.endpoint_key_id AS "endpoint_key_id?",
-    k.key_label AS "endpoint_key_label?",
-    pe.name AS "endpoint_name?",
+    (SELECT k.key_label FROM endpoint_api_keys k WHERE k.key_id = upserted.endpoint_key_id) AS "endpoint_key_label?",
+    (SELECT pe.name FROM provider_endpoints pe WHERE pe.endpoint_id = upserted.endpoint_id) AS "endpoint_name?",
     upserted.created_by_user_id AS "created_by_user_id?",
     upserted.created_at AS "created_at!",
     upserted.updated_at AS "updated_at!"
 FROM upserted
-LEFT JOIN provider_endpoints pe ON pe.endpoint_id = upserted.endpoint_id
-LEFT JOIN endpoint_api_keys k ON k.key_id = upserted.endpoint_key_id

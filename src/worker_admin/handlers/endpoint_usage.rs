@@ -1,3 +1,4 @@
+use super::super::chatgpt_quota_normalize;
 use super::super::openai_org_usage;
 use super::super::token_plan;
 use super::*;
@@ -19,6 +20,7 @@ pub(super) async fn token_plan_usage(
     State(state): State<AdminState>,
     headers: HeaderMap,
     Path(endpoint_id): Path<Uuid>,
+    Query(query): Query<TokenPlanUsageQuery>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response.into_response();
@@ -28,16 +30,20 @@ pub(super) async fn token_plan_usage(
         Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
         Err(err) => return internal(&state, err),
     };
-    // Issue #599 R2c: ChatGPT subscription endpoints have no provider
-    // token-plan API. Their quota is the display-only 5h/week window pair from
-    // the Codex backend, adapted into the shared window shape. It never enters
-    // the routing weight cache and stays separate from Platform API usage.
+    // ChatGPT subscription quota is display-only and remains separate from
+    // routing weights and Platform API usage.
     // Attempt 4: the unified read above is dual-backend (PG/SQLite) so the
     // SQLite-backed admin state reaches this branch; the PG-only read below
     // stays for the other providers to keep their behavior identical.
     if unified.provider == db::EndpointProvider::OpenAi {
         let endpoint = unified.into_pg();
-        return chatgpt_subscription_usage(&state, endpoint_id, &endpoint).await;
+        return chatgpt_subscription_usage(
+            &state,
+            endpoint_id,
+            &endpoint,
+            query.force.unwrap_or(false),
+        )
+        .await;
     }
     let endpoint = match db::get_endpoint(&state.pool, endpoint_id).await {
         Ok(Some(endpoint)) => endpoint,
@@ -120,7 +126,34 @@ async fn chatgpt_subscription_usage(
     state: &AdminState,
     endpoint_id: Uuid,
     endpoint: &db::ProviderEndpoint,
+    force: bool,
 ) -> Response {
+    if let Some(service) = state.chatgpt_quota_service.as_ref() {
+        return match service.read(endpoint, force).await {
+            Ok(usage) => Json(usage).into_response(),
+            Err(crate::worker_admin::chatgpt_quota_service::ChatGptQuotaError::NotConfigured) => {
+                error(
+                    StatusCode::BAD_REQUEST,
+                    "oauth_login_required",
+                    "complete the ChatGPT OAuth login for this endpoint first",
+                )
+            }
+            Err(error_code) => {
+                let status = if error_code
+                    == crate::worker_admin::chatgpt_quota_service::ChatGptQuotaError::Storage
+                {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                } else {
+                    StatusCode::BAD_GATEWAY
+                };
+                error(
+                    status,
+                    &format!("chatgpt_quota_{}", error_code.code()),
+                    "ChatGPT subscription quota is unavailable",
+                )
+            }
+        };
+    }
     let token = match state
         .config_repository
         .get_endpoint_oauth_token(endpoint_id)
@@ -174,70 +207,7 @@ fn chatgpt_quota_response(
     endpoint: &db::ProviderEndpoint,
     quota: chatgpt_backend::ChatgptQuota,
 ) -> TokenPlanUsageResponse {
-    let key_label = quota
-        .plan_type
-        .clone()
-        .map(|plan_type| format!("ChatGPT {plan_type}"))
-        .unwrap_or_else(|| "ChatGPT subscription".to_string());
-    let windows_present = quota.primary.is_some() || quota.secondary.is_some();
-    let model_remains = if windows_present {
-        vec![TokenPlanModelUsage {
-            model_name: quota
-                .plan_type
-                .clone()
-                .unwrap_or_else(|| "chatgpt".to_string()),
-            interval: quota.primary.as_ref().map(chatgpt_quota_window),
-            weekly: quota.secondary.as_ref().map(chatgpt_quota_window),
-        }]
-    } else {
-        Vec::new()
-    };
-    TokenPlanUsageResponse {
-        provider: endpoint.provider,
-        provider_region: endpoint.provider_region,
-        keys: vec![TokenPlanKeyUsage {
-            key_id: endpoint
-                .api_keys
-                .first()
-                .map(|key| key.key_id)
-                .unwrap_or_default(),
-            key_label,
-            ok: true,
-            status: None,
-            error_code: None,
-            error_message: None,
-            model_remains,
-            balances: None,
-            five_hour: None,
-            weekly: None,
-            opencodego_rolling: None,
-            opencodego_weekly: None,
-            opencodego_monthly: None,
-            openrouter_balance: None,
-            openrouter_spend: None,
-            glm_five_hour: None,
-            glm_weekly: None,
-            deepseek_balance: None,
-        }],
-        local_today_tokens: None,
-    }
-}
-
-fn chatgpt_quota_window(window: &chatgpt_backend::ChatgptQuotaWindow) -> TokenPlanWindowUsage {
-    TokenPlanWindowUsage {
-        status: None,
-        remaining_percent: window
-            .used_percent
-            .map(|used| (100.0 - used).clamp(0.0, 100.0)),
-        total_count: None,
-        usage_count: None,
-        boost_permille: None,
-        start_at: None,
-        end_at: window.reset_at,
-        remains_time_ms: window
-            .reset_after_seconds
-            .and_then(|seconds| seconds.checked_mul(1000)),
-    }
+    chatgpt_quota_normalize::response_from_quota(endpoint, quota)
 }
 
 /// Issue #589 P2b: OpenAI Platform organization usage and spend. Reads the
@@ -345,10 +315,14 @@ mod tests {
         }
     }
 
-    fn window(used_percent: f64, reset_after_seconds: i64) -> ChatgptQuotaWindow {
+    fn window(
+        used_percent: Option<f64>,
+        window_seconds: i64,
+        reset_after_seconds: i64,
+    ) -> ChatgptQuotaWindow {
         ChatgptQuotaWindow {
-            used_percent: Some(used_percent),
-            limit_window_seconds: Some(18_000),
+            used_percent,
+            limit_window_seconds: Some(window_seconds),
             reset_after_seconds: Some(reset_after_seconds),
             reset_at: Some(Utc::now() + chrono::Duration::seconds(reset_after_seconds)),
         }
@@ -370,10 +344,13 @@ mod tests {
     }
 
     #[test]
-    fn quota_response_maps_percent_windows_into_model_remains() {
+    fn quota_response_emits_canonical_windows_and_no_positional_slots() {
         let response = chatgpt_quota_response(
             &endpoint_fixture(),
-            quota(Some(window(25.0, 3_600)), Some(window(120.0, 86_400))),
+            quota(
+                Some(window(Some(25.0), 18_000, 3_600)),
+                Some(window(Some(100.0), 604_800, 86_400)),
+            ),
         );
         assert_eq!(response.provider, db::EndpointProvider::OpenAi);
         let key = &response.keys[0];
@@ -382,13 +359,58 @@ mod tests {
         assert_eq!(key.key_id, Uuid::nil());
         let model = &key.model_remains[0];
         assert_eq!(model.model_name, "plus");
-        let interval = model.interval.as_ref().expect("5h window");
-        assert_eq!(interval.remaining_percent, Some(75.0));
-        assert_eq!(interval.remains_time_ms, Some(3_600_000));
-        let weekly = model.weekly.as_ref().expect("weekly window");
-        // A used share above 100 clamps to zero remaining instead of going negative.
-        assert_eq!(weekly.remaining_percent, Some(0.0));
-        assert_eq!(weekly.remains_time_ms, Some(86_400_000));
+        // The positional slots are never fabricated for ChatGPT.
+        assert!(model.interval.is_none());
+        assert!(model.weekly.is_none());
+        let windows = model.windows.as_ref().expect("canonical windows");
+        assert_eq!(windows.len(), 2);
+        let primary = &windows[0];
+        assert_eq!(primary.source_window, "primary");
+        assert_eq!(primary.window_seconds, Some(18_000));
+        assert_eq!(primary.used_percent, Some(25.0));
+        assert_eq!(primary.remaining_percent, Some(75.0));
+        assert_eq!(primary.availability, SubscriptionWindowAvailability::Known);
+        assert!(primary.reset_at.is_some());
+        assert_eq!(primary.reset_after_seconds, Some(3_600));
+        let secondary = &windows[1];
+        assert_eq!(secondary.source_window, "secondary");
+        assert_eq!(secondary.window_seconds, Some(604_800));
+        // A genuine exhausted window keeps its real zero.
+        assert_eq!(secondary.used_percent, Some(100.0));
+        assert_eq!(secondary.remaining_percent, Some(0.0));
+        assert_eq!(
+            secondary.availability,
+            SubscriptionWindowAvailability::Known
+        );
+    }
+
+    #[test]
+    fn quota_response_with_a_weekly_only_window_invents_no_five_hour_slot() {
+        let response = chatgpt_quota_response(
+            &endpoint_fixture(),
+            quota(Some(window(Some(2.0), 604_800, 86_400)), None),
+        );
+        let model = &response.keys[0].model_remains[0];
+        let windows = model.windows.as_ref().expect("canonical windows");
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].window_seconds, Some(604_800));
+        assert_eq!(windows[0].remaining_percent, Some(98.0));
+    }
+
+    #[test]
+    fn quota_response_keeps_an_unknown_percentage_unknown() {
+        let response = chatgpt_quota_response(
+            &endpoint_fixture(),
+            quota(Some(window(None, 604_800, 0)), None),
+        );
+        let model = &response.keys[0].model_remains[0];
+        let windows = model.windows.as_ref().expect("canonical windows");
+        assert_eq!(windows[0].used_percent, None);
+        assert_eq!(windows[0].remaining_percent, None);
+        assert_eq!(
+            windows[0].availability,
+            SubscriptionWindowAvailability::Unknown
+        );
     }
 
     #[test]

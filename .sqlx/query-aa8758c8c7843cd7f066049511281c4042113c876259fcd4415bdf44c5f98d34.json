@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS (\n    SELECT snapshot_id\n    FROM chatgpt_quota_snapshots\n    WHERE observed_at < $1\n    ORDER BY observed_at, snapshot_id\n    LIMIT $2\n    FOR UPDATE SKIP LOCKED\n)\nDELETE FROM chatgpt_quota_snapshots AS snapshots\nUSING expired\nWHERE snapshots.snapshot_id = expired.snapshot_id;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aa8758c8c7843cd7f066049511281c4042113c876259fcd4415bdf44c5f98d34"
+}

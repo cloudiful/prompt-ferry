@@ -28,6 +28,7 @@
 - 内置 MiniMax、CommandCode、OpencodeGo、OpenRouter、GLM、DeepSeek 与 OpenAI Platform 一等上游预设；
   预设基础地址由服务端推导（OpenAI 为 `https://api.openai.com`），只需配置推理 API Key。其他
   OpenAI-compatible 上游继续使用通用 provider 并显式填写基础地址。
+- 管理控制台可查看 OpenAI ChatGPT 订阅额度快照及 30 天历史（需要 PostgreSQL）；采集和隐私说明见[额度快照文档](docs/quota-snapshots.zh-CN.md)。
 - 支持 HTTP/stdio MCP 聚合；SQLite 支持 MCP 配置、目录和运行时执行，MCP 配额及用量账本需要 PostgreSQL。
 - 支持 MCP 凭据配额：按凭据或共享配额组设置请求/credits 预算，原子预占、按使用率均衡多个 API key、
   认证/限流失败自动冷却，并支持 Firecrawl 等按 credits 计费的 `creditsUsed` 校准。

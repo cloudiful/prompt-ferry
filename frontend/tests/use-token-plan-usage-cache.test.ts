@@ -14,7 +14,10 @@ Object.defineProperty(globalThis, 'localStorage', {
 // the rest of the module's exports are stubbed so other test files can
 // share the same module registry without seeing missing exports.
 const fetchTokenPlanUsage = mock(
-  async (_endpointId: string): Promise<TokenPlanUsageResponse> => ({
+  async (
+    _endpointId: string,
+    _force?: boolean,
+  ): Promise<TokenPlanUsageResponse> => ({
     keys: [],
     provider: 'minimax',
     provider_region: null,
@@ -83,6 +86,7 @@ const {
   isTokenPlanUsageFresh,
   prefetchTokenPlanBatch,
   prefetchTokenPlanUsage,
+  requestTokenPlanUsage,
   TOKEN_PLAN_CACHE_TTL_MS,
 } = await import('../src/composables/useTokenPlanUsageCache')
 
@@ -90,7 +94,10 @@ beforeEach(() => {
   __resetTokenPlanCacheForTests()
   fetchTokenPlanUsage.mockReset()
   fetchTokenPlanUsage.mockImplementation(
-    async (_endpointId: string): Promise<TokenPlanUsageResponse> => ({
+    async (
+    _endpointId: string,
+    _force?: boolean,
+  ): Promise<TokenPlanUsageResponse> => ({
       keys: [],
       provider: 'minimax',
       provider_region: null,
@@ -143,6 +150,25 @@ test('prefetchTokenPlanUsage coalesces concurrent callers onto one in-flight pro
   for (const result of results) {
     expect(result?.provider).toBe('minimax')
   }
+})
+
+test('manual refresh forwards force and coalesces concurrent force requests', async () => {
+  let release!: () => void
+  const pending = new Promise<TokenPlanUsageResponse>((resolve) => {
+    release = () => resolve({ keys: [], provider: 'openai', provider_region: null })
+  })
+  fetchTokenPlanUsage.mockImplementationOnce(async (_endpointId, force) => {
+    expect(force).toBe(true)
+    return pending
+  })
+
+  const first = requestTokenPlanUsage('ep-force', { refresh: true })
+  const second = requestTokenPlanUsage('ep-force', { refresh: true })
+  release()
+  await Promise.all([first, second])
+
+  expect(fetchTokenPlanUsage).toHaveBeenCalledTimes(1)
+  expect(fetchTokenPlanUsage.mock.calls[0]).toEqual(['ep-force', true])
 })
 
 test('prefetchTokenPlanBatch caps in-flight fetches at the supplied concurrency', async () => {

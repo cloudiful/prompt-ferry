@@ -121,6 +121,8 @@ fn token_plan_key_usage(
             model_name: "general".to_string(),
             interval: Some(window(remaining_percent)),
             weekly: Some(window(remaining_percent)),
+            windows: None,
+            observation: None,
         }],
         balances: None,
         five_hour: None,

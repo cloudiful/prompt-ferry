@@ -144,6 +144,11 @@ const showNewModelRouteButton = computed(() => activeSection.value === 'routes')
 
     <TokenPlanUsageDialog
       v-model:visible="tokenPlanUsageVisible"
+      :endpoint-id="tokenPlanUsageEndpointId"
+      :provider="
+        endpointsStore.findEndpointById(tokenPlanUsageEndpointId)?.provider ??
+        null
+      "
       :endpoint-name="
         endpointsStore.findEndpointById(tokenPlanUsageEndpointId)?.name ?? ''
       "

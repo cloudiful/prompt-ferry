@@ -8,6 +8,12 @@ use crate::{
     db::{self, EndpointPlan, EndpointProvider, EndpointRegion},
 };
 
+// Issue #759 P1: the canonical ChatGPT subscription window envelope lives in a
+// sibling file so `endpoints.rs` keeps its owned request/response types focused.
+#[path = "subscription_windows.rs"]
+mod subscription_windows;
+pub use subscription_windows::*;
+
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct EndpointApiKeyRequest {
     pub key_label: String,
@@ -235,6 +241,14 @@ pub struct EndpointOAuthStatusResponse {
     pub expired: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct TokenPlanUsageQuery {
+    #[serde(default)]
+    #[param(default = false)]
+    pub force: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TokenPlanUsageResponse {
     pub provider: EndpointProvider,
@@ -304,6 +318,15 @@ pub struct TokenPlanModelUsage {
     pub model_name: String,
     pub interval: Option<TokenPlanWindowUsage>,
     pub weekly: Option<TokenPlanWindowUsage>,
+    /// Issue #759 P1: canonical ChatGPT subscription windows with their real
+    /// reported duration. Populated only for ChatGPT subscription endpoints;
+    /// every other provider leaves it `None` and keeps the positional
+    /// `interval`/`weekly` slots unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub windows: Option<Vec<SubscriptionWindowUsage>>,
+    /// Observation freshness/error state for persisted ChatGPT quota snapshots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<SubscriptionQuotaObservation>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

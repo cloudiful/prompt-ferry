@@ -364,7 +364,11 @@ async fn usage_handler(
             "plan_type": "plus",
             "rate_limit": {
                 "limit_reached": false,
-                "primary_window": { "used_percent": 10, "reset_after_seconds": 1440 },
+                "primary_window": {
+                    "used_percent": 10,
+                    "limit_window_seconds": 18000,
+                    "reset_after_seconds": 1440
+                },
             },
         })),
     )
@@ -932,9 +936,16 @@ async fn admin_token_plan_usage_returns_chatgpt_windows_and_requires_a_login() {
     let usage = response_json(response).await;
     assert_eq!(usage["provider"], "openai");
     assert_eq!(usage["keys"][0]["ok"], true);
-    let window = &usage["keys"][0]["model_remains"][0]["interval"];
+    let model = &usage["keys"][0]["model_remains"][0];
+    let window = &model["windows"][0];
+    assert_eq!(window["source_window"], "primary");
+    assert_eq!(window["window_seconds"], json!(18_000));
+    assert_eq!(window["used_percent"], json!(10.0));
     assert_eq!(window["remaining_percent"], json!(90.0));
-    assert_eq!(window["remains_time_ms"], json!(1_440_000));
+    assert_eq!(window["availability"], "known");
+    assert_eq!(window["reset_after_seconds"], json!(1_440));
+    assert!(model["interval"].is_null());
+    assert!(model["weekly"].is_null());
     assert_eq!(
         usage_ref.paths.lock().unwrap().as_slice(),
         ["/wham/usage"],

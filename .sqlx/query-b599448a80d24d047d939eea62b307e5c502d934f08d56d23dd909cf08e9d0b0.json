@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT endpoint.endpoint_id\nFROM provider_endpoints AS endpoint\nWHERE endpoint.enabled = TRUE\n  AND endpoint.provider = 'openai'\n  AND EXISTS (\n      SELECT 1\n      FROM endpoint_oauth_tokens AS oauth\n      WHERE oauth.endpoint_id = endpoint.endpoint_id\n        AND oauth.refresh_token IS NOT NULL\n  )\nORDER BY endpoint.endpoint_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "endpoint_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b599448a80d24d047d939eea62b307e5c502d934f08d56d23dd909cf08e9d0b0"
+}

@@ -6,6 +6,7 @@ import {
   listEndpoints,
   listModelRoutes,
   organizationUsage,
+  quotaSnapshotHistory,
   testEndpoint,
   tokenPlanUsage,
   testModelRoute,
@@ -22,6 +23,7 @@ import type {
   ModelRouteTestResponse,
   OpenAiOrganizationUsageResponse,
   ProviderEndpoint,
+  QuotaSnapshotHistoryResponse,
   TokenPlanUsageResponse,
 } from '../generated/admin-api'
 import {
@@ -89,9 +91,27 @@ export async function runEndpointTest(
 
 export async function fetchTokenPlanUsage(
   endpointId: string,
+  force = false,
 ): Promise<TokenPlanUsageResponse> {
   return expectData(
-    await tokenPlanUsage<true>(withData({ path: { endpoint_id: endpointId } })),
+    await tokenPlanUsage<true>(
+      withData({ path: { endpoint_id: endpointId }, query: { force } }),
+    ),
+  )
+}
+
+export async function fetchQuotaSnapshotHistory(
+  endpointId: string,
+  limit = 50,
+  beforeId?: string,
+): Promise<QuotaSnapshotHistoryResponse> {
+  return expectData(
+    await quotaSnapshotHistory<true>(
+      withData({
+        path: { endpoint_id: endpointId },
+        query: { limit, ...(beforeId ? { before_id: beforeId } : {}) },
+      }),
+    ),
   )
 }
 

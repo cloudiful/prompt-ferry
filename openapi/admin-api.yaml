@@ -1018,6 +1018,64 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/quota-history:
+    get:
+      tags:
+      - endpoints
+      operationId: quota_snapshot_history
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+          maximum: 200
+          minimum: 1
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OpenAI quota history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaSnapshotHistoryResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/admin/endpoints/{endpoint_id}/test:
     post:
       tags:
@@ -1051,6 +1109,12 @@ paths:
         schema:
           type: string
           format: uuid
+      - name: force
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
       responses:
         '200':
           description: Token plan usage
@@ -5934,6 +5998,51 @@ components:
         updated_at:
           type: string
           format: date-time
+    QuotaSnapshotHistoryItem:
+      type: object
+      required:
+      - snapshot_id
+      - observed_at
+      - windows
+      - source
+      properties:
+        limit_reached:
+          type:
+          - boolean
+          - 'null'
+        observed_at:
+          type: string
+          format: date-time
+        plan_type:
+          type:
+          - string
+          - 'null'
+        snapshot_id:
+          type: string
+        source:
+          type: string
+        windows:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubscriptionWindowUsage'
+    QuotaSnapshotHistoryResponse:
+      type: object
+      required:
+      - items
+      - retention_days
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaSnapshotHistoryItem'
+        next_cursor:
+          type:
+          - string
+          - 'null'
+        retention_days:
+          type: integer
+          format: int32
+          minimum: 0
     RawObjectStoreBackend:
       type: string
       description: Raw object-store backend selected by the administrator.
@@ -7966,6 +8075,95 @@ components:
         max_buffer_chars:
           type: integer
           minimum: 0
+    SubscriptionQuotaObservation:
+      type: object
+      description: Freshness and durable refresh status for a successful quota observation.
+      required:
+      - stale
+      - refreshing
+      properties:
+        last_error_code:
+          type:
+          - string
+          - 'null'
+        next_retry_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        observed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        refreshing:
+          type: boolean
+        source:
+          type:
+          - string
+          - 'null'
+        stale:
+          type: boolean
+    SubscriptionWindowAvailability:
+      type: string
+      description: |-
+        Whether a subscription window carries a usable usage figure. `Unknown` means
+        the window exists upstream but reported no usable percentage, so the display
+        must show an unknown marker instead of a fabricated `0%`.
+      enum:
+      - known
+      - unknown
+    SubscriptionWindowUsage:
+      type: object
+      description: |-
+        One ChatGPT subscription rate-limit window. `source_window` records the
+        upstream slot it came from (`primary` or `secondary`) while `window_seconds`
+        carries the real reported duration, so labels derive from the reported value
+        rather than a positional assumption.
+      required:
+      - source_window
+      - availability
+      properties:
+        availability:
+          $ref: '#/components/schemas/SubscriptionWindowAvailability'
+          description: |-
+            `known` when the usage figure is present, `unknown` when the upstream
+            returned the window but no usable percentage.
+        remaining_percent:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: |-
+            `100 - used_percent` whenever the used share is known. A genuine
+            `used_percent = 100` yields `Some(0.0)`.
+        reset_after_seconds:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        reset_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        source_window:
+          type: string
+          description: 'Upstream slot this window came from: `primary` or `secondary`.'
+        used_percent:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Reported used share `0..=100`. `None` when absent or out of range.
+        window_seconds:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: |-
+            Reported window length in seconds. `None` when the upstream omitted or
+            reported a non-positive duration.
     TlsMode:
       type: string
       enum:
@@ -8082,10 +8280,26 @@ components:
           - $ref: '#/components/schemas/TokenPlanWindowUsage'
         model_name:
           type: string
+        observation:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/SubscriptionQuotaObservation'
+            description: Observation freshness/error state for persisted ChatGPT quota snapshots.
         weekly:
           oneOf:
           - type: 'null'
           - $ref: '#/components/schemas/TokenPlanWindowUsage'
+        windows:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/SubscriptionWindowUsage'
+          description: |-
+            Issue #759 P1: canonical ChatGPT subscription windows with their real
+            reported duration. Populated only for ChatGPT subscription endpoints;
+            every other provider leaves it `None` and keeps the positional
+            `interval`/`weekly` slots unchanged.
     TokenPlanUsageResponse:
       type: object
       required:

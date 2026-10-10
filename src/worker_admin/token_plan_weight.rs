@@ -175,6 +175,8 @@ mod tests {
             model_name: "general".to_string(),
             interval: interval.map(window),
             weekly: weekly.map(window),
+            windows: None,
+            observation: None,
         }
     }
 
@@ -223,6 +225,8 @@ mod tests {
                 remains_time_ms: None,
             }),
             weekly: None,
+            windows: None,
+            observation: None,
         };
         assert_eq!(reserved_percent(&model, 100), 10.0);
         assert_eq!(reserved_percent(&model, 2_000), 100.0);

@@ -1245,6 +1245,21 @@ export type ProviderEndpoint = {
     updated_at: string;
 };
 
+export type QuotaSnapshotHistoryItem = {
+    limit_reached?: boolean | null;
+    observed_at: string;
+    plan_type?: string | null;
+    snapshot_id: string;
+    source: string;
+    windows: Array<SubscriptionWindowUsage>;
+};
+
+export type QuotaSnapshotHistoryResponse = {
+    items: Array<QuotaSnapshotHistoryItem>;
+    next_cursor?: string | null;
+    retention_days: number;
+};
+
 /**
  * Raw object-store backend selected by the administrator.
  */
@@ -1992,6 +2007,59 @@ export type StreamDeltaBatchingSettings = {
     max_buffer_chars: number;
 };
 
+/**
+ * Freshness and durable refresh status for a successful quota observation.
+ */
+export type SubscriptionQuotaObservation = {
+    last_error_code?: string | null;
+    next_retry_at?: string | null;
+    observed_at?: string | null;
+    refreshing: boolean;
+    source?: string | null;
+    stale: boolean;
+};
+
+/**
+ * Whether a subscription window carries a usable usage figure. `Unknown` means
+ * the window exists upstream but reported no usable percentage, so the display
+ * must show an unknown marker instead of a fabricated `0%`.
+ */
+export type SubscriptionWindowAvailability = 'known' | 'unknown';
+
+/**
+ * One ChatGPT subscription rate-limit window. `source_window` records the
+ * upstream slot it came from (`primary` or `secondary`) while `window_seconds`
+ * carries the real reported duration, so labels derive from the reported value
+ * rather than a positional assumption.
+ */
+export type SubscriptionWindowUsage = {
+    /**
+     * `known` when the usage figure is present, `unknown` when the upstream
+     * returned the window but no usable percentage.
+     */
+    availability: SubscriptionWindowAvailability;
+    /**
+     * `100 - used_percent` whenever the used share is known. A genuine
+     * `used_percent = 100` yields `Some(0.0)`.
+     */
+    remaining_percent?: number | null;
+    reset_after_seconds?: number | null;
+    reset_at?: string | null;
+    /**
+     * Upstream slot this window came from: `primary` or `secondary`.
+     */
+    source_window: string;
+    /**
+     * Reported used share `0..=100`. `None` when absent or out of range.
+     */
+    used_percent?: number | null;
+    /**
+     * Reported window length in seconds. `None` when the upstream omitted or
+     * reported a non-positive duration.
+     */
+    window_seconds?: number | null;
+};
+
 export type TlsMode = 'off' | 'server' | 'mtls';
 
 export type TokenPlanKeyUsage = {
@@ -2018,7 +2086,15 @@ export type TokenPlanKeyUsage = {
 export type TokenPlanModelUsage = {
     interval?: null | TokenPlanWindowUsage;
     model_name: string;
+    observation?: null | SubscriptionQuotaObservation;
     weekly?: null | TokenPlanWindowUsage;
+    /**
+     * Issue #759 P1: canonical ChatGPT subscription windows with their real
+     * reported duration. Populated only for ChatGPT subscription endpoints;
+     * every other provider leaves it `None` and keeps the positional
+     * `interval`/`weekly` slots unchanged.
+     */
+    windows?: Array<SubscriptionWindowUsage> | null;
 };
 
 export type TokenPlanUsageResponse = {
@@ -2968,6 +3044,39 @@ export type OrganizationUsageResponses = {
 
 export type OrganizationUsageResponse = OrganizationUsageResponses[keyof OrganizationUsageResponses];
 
+export type QuotaSnapshotHistoryData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: {
+        limit?: number;
+        before_id?: string;
+    };
+    url: '/api/v1/admin/endpoints/{endpoint_id}/quota-history';
+};
+
+export type QuotaSnapshotHistoryErrors = {
+    400: ErrorEnvelope;
+    404: ErrorEnvelope;
+    500: ErrorEnvelope;
+    503: ErrorEnvelope;
+};
+
+export type QuotaSnapshotHistoryError = QuotaSnapshotHistoryErrors[keyof QuotaSnapshotHistoryErrors];
+
+export type QuotaSnapshotHistoryResponses = {
+    /**
+     * OpenAI quota history
+     */
+    200: QuotaSnapshotHistoryResponse;
+};
+
+export type QuotaSnapshotHistoryResponse2 = QuotaSnapshotHistoryResponses[keyof QuotaSnapshotHistoryResponses];
+
 export type TestEndpointData = {
     body?: never;
     path: {
@@ -2997,7 +3106,9 @@ export type TokenPlanUsageData = {
          */
         endpoint_id: string;
     };
-    query?: never;
+    query?: {
+        force?: boolean;
+    };
     url: '/api/v1/admin/endpoints/{endpoint_id}/token-plan-usage';
 };
 

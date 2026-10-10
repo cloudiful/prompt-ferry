@@ -6,6 +6,10 @@ import type {
   TokenPlanKeyUsage,
   TokenPlanWindowUsage,
 } from '@/generated/admin-api'
+import {
+  subscriptionQuotaMinimumRemainingPercent,
+  subscriptionQuotaWindowCount,
+} from './subscriptionQuotaWindows'
 
 // Window entries shared by the token-plan dialog (issues #184 P4, #193 P2,
 // #203 P2, #230 P3). MiniMax windows reuse percent/countdown rendering
@@ -194,20 +198,23 @@ export function formatResetDuration(ms: number | null, t: TranslateFn): string {
 export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
   function keyWindows(key: TokenPlanKeyUsage): TokenPlanWindowUsage[] {
     return key.model_remains.flatMap((model) =>
-      [model.interval, model.weekly].filter(
-        (window): window is TokenPlanWindowUsage => window != null,
-      ),
+      model.windows == null
+        ? [model.interval, model.weekly].filter(
+            (window): window is TokenPlanWindowUsage => window != null,
+          )
+        : [],
     )
   }
 
   function keyWindowCount(key: TokenPlanKeyUsage): number {
-    return keyWindows(key).length
+    return subscriptionQuotaWindowCount(key, keyWindows(key).length)
   }
 
   function minimumRemainingPercent(key: TokenPlanKeyUsage): number | null {
-    const windows = keyWindows(key)
-    if (windows.length === 0) return null
-    return Math.min(...windows.map(remainingPercent))
+    return subscriptionQuotaMinimumRemainingPercent(
+      key,
+      keyWindows(key).map(remainingPercent),
+    )
   }
 
   function endTimeMs(window: TokenPlanWindowUsage): number | null {

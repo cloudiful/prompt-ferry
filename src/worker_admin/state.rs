@@ -18,6 +18,7 @@ use sqlx::PgPool;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 use uuid::Uuid;
 
+use super::chatgpt_quota_service::ChatGptQuotaService;
 use super::openai_org_usage_cache::OpenAiOrgUsageCache;
 use super::token_plan_cache::TokenPlanQuotaCache;
 use crate::{
@@ -115,6 +116,7 @@ pub struct AdminState {
     pub(crate) token_plan_quota: TokenPlanQuotaCache,
     /// Issue #589 P2b: display-only OpenAI organization usage cache.
     pub(crate) openai_org_usage: OpenAiOrgUsageCache,
+    pub(crate) chatgpt_quota_service: Option<Arc<ChatGptQuotaService>>,
 }
 
 pub struct AdminStateInit {
@@ -173,6 +175,7 @@ impl AdminState {
             endpoint_model_cache: init.endpoint_model_cache,
             token_plan_quota: TokenPlanQuotaCache::default(),
             openai_org_usage: OpenAiOrgUsageCache::default(),
+            chatgpt_quota_service: None,
         }
     }
 
@@ -213,6 +216,11 @@ impl AdminState {
 
     pub fn with_config_repository(mut self, repository: ConfigRepository) -> Self {
         self.config_repository = repository;
+        self
+    }
+
+    pub(crate) fn with_chatgpt_quota_service(mut self, service: Arc<ChatGptQuotaService>) -> Self {
+        self.chatgpt_quota_service = Some(service);
         self
     }
 

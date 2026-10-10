@@ -2,7 +2,9 @@ use std::borrow::Cow;
 
 use serde_json::{Value, json};
 
-use super::normalize_codex_request_body;
+use super::{
+    ChatgptBackendError, fetch_chatgpt_quota_at, normalize_codex_request_body, parse_chatgpt_quota,
+};
 
 fn normalize(body: &Value) -> Value {
     let bytes = serde_json::to_vec(body).expect("test body serializes");
@@ -99,5 +101,81 @@ fn passes_non_json_and_non_object_bodies_through_unchanged() {
             normalize_codex_request_body(body),
             Cow::Borrowed(_)
         ));
+    }
+}
+
+#[test]
+fn quota_parser_omits_absent_null_empty_and_malformed_windows() {
+    for payload in [
+        json!({}),
+        json!({ "rate_limit": {} }),
+        json!({ "rate_limit": { "primary_window": null } }),
+        json!({ "rate_limit": { "primary_window": {} } }),
+        json!({
+            "rate_limit": {
+                "primary_window": { "used_percent": null },
+                "secondary_window": { "reset_at": "not-a-timestamp" }
+            }
+        }),
+    ] {
+        let quota = parse_chatgpt_quota(&payload);
+        assert!(quota.primary.is_none(), "payload={payload}");
+        assert!(quota.secondary.is_none(), "payload={payload}");
+    }
+}
+
+#[test]
+fn quota_parser_preserves_real_duration_and_unknown_usage() {
+    let quota = parse_chatgpt_quota(&json!({
+        "rate_limit": {
+            "primary_window": { "used_percent": 2.0, "limit_window_seconds": 604800 },
+            "secondary_window": { "used_percent": null, "limit_window_seconds": 18000 }
+        }
+    }));
+    let primary = quota.primary.expect("weekly window");
+    assert_eq!(primary.used_percent, Some(2.0));
+    assert_eq!(primary.limit_window_seconds, Some(604800));
+    let secondary = quota.secondary.expect("unknown usage window");
+    assert_eq!(secondary.used_percent, None);
+    assert_eq!(secondary.limit_window_seconds, Some(18000));
+}
+
+async fn spawn_quota_mock(body: &'static str) -> String {
+    let router =
+        axum::Router::new().fallback(move || async move { (axum::http::StatusCode::OK, body) });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind quota fixture");
+    let addr = listener.local_addr().expect("quota fixture address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn malformed_http_success_json_is_not_a_quota_observation() {
+    for (body, expected) in [
+        (
+            "{ malformed",
+            "ChatGPT usage response was not valid JSON (HTTP 200)",
+        ),
+        (
+            "[]",
+            "ChatGPT usage response was not a JSON object (HTTP 200)",
+        ),
+    ] {
+        let base = spawn_quota_mock(body).await;
+        let error = fetch_chatgpt_quota_at(&reqwest::Client::new(), &base, "fixture", None)
+            .await
+            .expect_err("malformed success must not become an empty quota observation");
+        assert!(matches!(
+            error,
+            ChatgptBackendError::Upstream {
+                status: Some(200),
+                ..
+            }
+        ));
+        assert_eq!(error.to_string(), expected);
     }
 }

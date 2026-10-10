@@ -20,6 +20,7 @@ import {
   progressColor,
   remainingPercent,
 } from './useTokenPlanWindowEntries'
+import { subscriptionQuotaMinimumForBand } from './subscriptionQuotaWindows'
 import {
   getTokenPlanUsageSnapshot,
   prefetchTokenPlanUsage,
@@ -131,19 +132,19 @@ function badgeMode(provider: string): TokenPlanBadgeMode {
   return 'window'
 }
 
-// Short window: min(5h / rolling / interval) within one key. MiniMax
-// surfaces each model_remains entry separately so we iterate them;
-// CommandCode / OpencodeGo / GLM each carry a single short-window slot.
-// We deliberately exclude OpenRouter (credit-balance-only, handled
-// separately) and any empty `remaining_percent`.
+// Short windows come from each provider's short slot or from a canonical
+// subscription window whose reported duration is under one day.
 function keyShortPercent(key: TokenPlanKeyUsage): number | null {
   const candidates: number[] = []
   for (const model of key.model_remains) {
+    if (model.windows != null) continue
     const window = model.interval as TokenPlanWindowUsage | null | undefined
     if (window && window.remaining_percent != null) {
       candidates.push(remainingPercent(window))
     }
   }
+  const subscription = subscriptionQuotaMinimumForBand(key, 'short')
+  if (subscription !== null) candidates.push(subscription)
   const five = ccAsWindow(key.five_hour)
   if (five && five.remaining_percent != null) {
     candidates.push(remainingPercent(five))
@@ -159,16 +160,19 @@ function keyShortPercent(key: TokenPlanKeyUsage): number | null {
   return candidates.length === 0 ? null : Math.min(...candidates)
 }
 
-// Long window: min(weekly, monthly) within one key. MiniMax weekly,
-// CommandCode weekly (USD), OpencodeGo weekly+monthly, GLM weekly.
+// Long windows come from each provider's long slot or from a canonical
+// subscription window whose reported duration is at least one day.
 function keyLongPercent(key: TokenPlanKeyUsage): number | null {
   const candidates: number[] = []
   for (const model of key.model_remains) {
+    if (model.windows != null) continue
     const window = model.weekly as TokenPlanWindowUsage | null | undefined
     if (window && window.remaining_percent != null) {
       candidates.push(remainingPercent(window))
     }
   }
+  const subscription = subscriptionQuotaMinimumForBand(key, 'long')
+  if (subscription !== null) candidates.push(subscription)
   const weekly = ccAsWindow(key.weekly)
   if (weekly && weekly.remaining_percent != null) {
     candidates.push(remainingPercent(weekly))

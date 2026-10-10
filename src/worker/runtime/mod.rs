@@ -6,6 +6,7 @@ mod bridge;
 #[cfg(test)]
 mod bridge_tests;
 mod cache_alert_monitor;
+mod chatgpt_quota_collector;
 pub(super) mod compaction;
 mod connect;
 mod context;

@@ -1,0 +1,102 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    o.conversation_id AS \"conversation_id!\",\n    o.endpoint_id,\n    o.endpoint_key_id,\n    (SELECT k.key_label FROM endpoint_api_keys k WHERE k.key_id = o.endpoint_key_id) AS endpoint_key_label,\n    (SELECT pe.name FROM provider_endpoints pe WHERE pe.endpoint_id = o.endpoint_id) AS endpoint_name,\n    o.created_by_user_id,\n    o.created_at AS \"created_at!\",\n    o.updated_at\nFROM conversation_endpoint_overrides o\nWHERE o.conversation_id = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "conversation_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "conversation_endpoint_overrides",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "conversation_endpoint_overrides",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "endpoint_key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "conversation_endpoint_overrides",
+            "name": "endpoint_key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "endpoint_key_label",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "endpoint_name",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_by_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "conversation_endpoint_overrides",
+            "name": "created_by_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "conversation_endpoint_overrides",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "conversation_endpoint_overrides",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null,
+      null,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "a9e90289b76f7fc44975486f7d21e05f59d433a3e5aa31549284b8bc27f0388a"
+}

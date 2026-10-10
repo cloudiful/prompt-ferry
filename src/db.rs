@@ -8,6 +8,7 @@ mod mcp_credentials;
 mod partition_ddl;
 mod partition_maintenance;
 mod pool_wait;
+pub mod quota_snapshots;
 mod relays;
 mod routes;
 mod routing_state;

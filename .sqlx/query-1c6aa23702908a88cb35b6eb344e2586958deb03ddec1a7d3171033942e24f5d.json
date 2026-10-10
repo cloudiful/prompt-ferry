@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE chatgpt_quota_refresh_state\nSET lease_owner = NULL,\n    lease_expires_at = NULL,\n    last_attempt_at = $3,\n    consecutive_failures = CASE\n        WHEN consecutive_failures < 2147483647 THEN consecutive_failures + 1\n        ELSE consecutive_failures\n    END,\n    next_retry_at = $4,\n    last_error_code = $5\nWHERE endpoint_id = $1\n  AND lease_owner = $2\n  AND lease_expires_at > clock_timestamp()\nRETURNING endpoint_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "chatgpt_quota_refresh_state",
+            "name": "endpoint_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1c6aa23702908a88cb35b6eb344e2586958deb03ddec1a7d3171033942e24f5d"
+}

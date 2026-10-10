@@ -440,6 +440,8 @@ fn parse_model_usage(value: &Value) -> Option<TokenPlanModelUsage> {
         model_name,
         interval: parse_window(object, WindowKind::Interval),
         weekly: parse_window(object, WindowKind::Weekly),
+        windows: None,
+        observation: None,
     })
 }
 

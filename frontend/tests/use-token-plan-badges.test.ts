@@ -557,6 +557,54 @@ test('non-ok keys are skipped when aggregating', async () => {
   expect(badges.value.long).toBeNull()
 })
 
+test('subscription badges classify canonical windows by their reported duration', async () => {
+  fetchTokenPlanUsage.mockResolvedValueOnce({
+    provider: 'openai',
+    provider_region: null,
+    keys: [
+      {
+        key_id: 'k-chatgpt',
+        key_label: 'ChatGPT subscription',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'plus',
+            interval: { remaining_percent: 99 },
+            weekly: { remaining_percent: 98 },
+            windows: [
+              {
+                source_window: 'primary',
+                window_seconds: 18_000,
+                used_percent: 100,
+                remaining_percent: 0,
+                availability: 'known',
+              },
+              {
+                source_window: 'secondary',
+                window_seconds: 604_800,
+                used_percent: 25,
+                remaining_percent: 75,
+                availability: 'known',
+              },
+              {
+                source_window: 'unknown',
+                window_seconds: null,
+                used_percent: 10,
+                remaining_percent: 90,
+                availability: 'known',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  })
+  await prefetchTokenPlanUsage('ep-chatgpt-windows')
+  const badges = useTokenPlanBadges('ep-chatgpt-windows')
+  expect(badges.value.short).toBe(0)
+  expect(badges.value.long).toBe(75)
+})
+
 test('useTokenPlanBadges reacts when the cache is populated after mount', async () => {
   // The composable auto-prefetches on setup, so configure the mock
   // *before* invoking it. We then explicitly await it so the test

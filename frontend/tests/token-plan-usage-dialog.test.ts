@@ -5,6 +5,7 @@ import { compileScript, parse } from 'vue/compiler-sfc'
 import { renderToString } from 'vue/server-renderer'
 import type {
   DeepSeekBalance,
+  EndpointProvider,
   TokenPlanKeyUsage,
   TokenPlanUsageResponse,
 } from '../src/generated/admin-api'
@@ -106,6 +107,19 @@ const component = (() => {
     if (spec === '@/composables/useTokenPlanWindowEntries') {
       return tokenPlanFormatting
     }
+    if (spec === '@/components/endpoints/SubscriptionQuotaWindows.vue') {
+      return {
+        name: 'SubscriptionQuotaWindows',
+        props: ['windows'],
+        render(this: { windows: Array<{ source_window: string }> }) {
+          return h(
+            'div',
+            { 'data-subscription-windows': true },
+            this.windows.map((window) => window.source_window).join(','),
+          )
+        },
+      }
+    }
     if (spec === '@/components/endpoints/tokenPlanBadgeRender') {
       return tokenPlanBadgeRender
     }
@@ -121,6 +135,14 @@ const modalStub = {
   name: 'UModal',
   render(this: { $slots: Record<string, (() => unknown) | undefined> }) {
     return h('div', { 'data-stub': 'UModal' }, this.$slots.body?.())
+  },
+}
+
+const badgeStub = {
+  name: 'UBadge',
+  props: ['label'],
+  render(this: { label?: string }) {
+    return h('span', { 'data-stub': 'UBadge' }, this.label)
   },
 }
 
@@ -154,24 +176,117 @@ function usagePayload(balance: DeepSeekBalance): TokenPlanUsageResponse {
   } as TokenPlanUsageResponse
 }
 
-async function render(usage: TokenPlanUsageResponse | null): Promise<string> {
+async function render(
+  usage: TokenPlanUsageResponse | null,
+  options: { loading?: boolean; visible?: boolean } = {},
+): Promise<string> {
   const app = createSSRApp({
     render: () =>
       h(component as never, {
+        endpointId: 'endpoint-id',
         endpointName: 'deepseek endpoint',
-        loading: false,
+        loading: options.loading ?? false,
+        provider:
+          (usage?.provider as EndpointProvider | undefined) ?? 'deepseek',
         t: (key: string) => key,
         usage,
-        visible: false,
+        visible: options.visible ?? false,
       }),
   })
   app.component('UModal', modalStub as never)
   app.component('UCollapsible', collapsibleStub as never)
   app.component('UProgress', slotStub('UProgress') as never)
   app.component('UButton', slotStub('UButton') as never)
-  app.component('UBadge', slotStub('UBadge') as never)
+  app.component('UBadge', badgeStub as never)
   return renderToString(app)
 }
+
+test('reviewer: current quota refresh keeps the expanded history component mounted', async () => {
+  const usage = {
+    provider: 'openai',
+    provider_region: null,
+    keys: [],
+  } as TokenPlanUsageResponse
+  const before = await render(usage, { visible: true })
+  const during = await render(usage, { visible: true, loading: true })
+  expect(before).toContain('data-stub="SubscriptionQuotaHistory.vue"')
+  expect(during).toContain('data-stub="SubscriptionQuotaHistory.vue"')
+})
+
+test('the dialog renders canonical windows instead of positional slots', async () => {
+  const html = await render({
+    keys: [
+      {
+        key_id: 'k-chatgpt',
+        key_label: 'ChatGPT',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'plus',
+            interval: { remaining_percent: 99 },
+            weekly: { remaining_percent: 98 },
+            windows: [
+              {
+                source_window: 'primary',
+                window_seconds: 18_000,
+                used_percent: 2,
+                remaining_percent: 98,
+                availability: 'known',
+              },
+              {
+                source_window: 'secondary',
+                window_seconds: 604_800,
+                used_percent: null,
+                remaining_percent: null,
+                availability: 'unknown',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    provider: 'openai',
+    provider_region: null,
+  })
+  expect(html).toContain('data-subscription-windows')
+  expect(html).toContain('primary,secondary')
+  expect(html).not.toContain('5-hour window')
+  expect(html).not.toContain('Weekly window')
+})
+
+test('a stale last-good ChatGPT snapshot is not labeled as currently available', async () => {
+  const usage: TokenPlanUsageResponse = {
+    keys: [
+      {
+        key_id: 'k-chatgpt',
+        key_label: 'ChatGPT',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'plus',
+            interval: null,
+            weekly: null,
+            windows: [],
+            observation: {
+              observed_at: '2026-10-10T12:00:00Z',
+              source: 'manual',
+              stale: true,
+              last_error_code: 'upstream',
+              next_retry_at: null,
+              refreshing: false,
+            },
+          },
+        ],
+      },
+    ],
+    provider: 'openai',
+    provider_region: null,
+  } as TokenPlanUsageResponse
+
+  const html = await render(usage)
+  expect(html).toContain('quotaCachedObservation')
+  expect(html).not.toContain('tokenPlanAvailable')
+})
 
 test('every reported currency is listed in payload order, never combined', async () => {
   const html = await render(

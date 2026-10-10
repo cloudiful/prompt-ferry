@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import type { TokenPlanUsageResponse } from '@/generated/admin-api'
+import { computed } from 'vue'
+import type {
+  EndpointProvider,
+  TokenPlanKeyUsage,
+  TokenPlanUsageResponse,
+} from '@/generated/admin-api'
+import SubscriptionQuotaHistory from '@/components/endpoints/SubscriptionQuotaHistory.vue'
+import SubscriptionQuotaWindows from '@/components/endpoints/SubscriptionQuotaWindows.vue'
 import { deepseekBalanceRows } from '@/components/endpoints/tokenPlanBadgeRender'
 import {
   useTokenPlanTicker,
@@ -7,8 +14,10 @@ import {
 } from '@/composables/useTokenPlanWindowEntries'
 
 const props = defineProps<{
+  endpointId: string
   endpointName: string
   loading: boolean
+  provider: EndpointProvider | null
   t: TranslateFn
   usage: TokenPlanUsageResponse | null
 }>()
@@ -31,6 +40,49 @@ const {
   openrouterEntries,
   formatOpenRouterCredits,
 } = useTokenPlanWindowEntries(props.t, nowMs)
+
+function minimumRemainingLabel(key: TokenPlanKeyUsage): string {
+  const minimum =
+    minimumRemainingPercent(key) ??
+    ccMinRemaining(key) ??
+    progressWindowMinRemaining(key)
+  return minimum === null
+    ? props.t('tokenPlanMinRemainingUnknown')
+    : props.t('tokenPlanMinRemaining', { percent: minimum.toFixed(1) })
+}
+
+function hasStaleObservation(key: TokenPlanKeyUsage): boolean {
+  const observation = key.model_remains.find(
+    (model) => model.observation,
+  )?.observation
+  return observation?.stale === true || observation?.last_error_code != null
+}
+
+function keyStatusLabel(key: TokenPlanKeyUsage): string {
+  if (hasStaleObservation(key)) return props.t('quotaCachedObservation')
+  return key.ok
+    ? props.t('tokenPlanAvailable')
+    : props.t('tokenPlanUnavailable')
+}
+
+function keyStatusColor(
+  key: TokenPlanKeyUsage,
+): 'neutral' | 'success' | 'error' {
+  if (hasStaleObservation(key)) return 'neutral'
+  return key.ok ? 'success' : 'error'
+}
+
+const historyRefreshKey = computed(() => {
+  const observation = props.usage?.keys
+    .flatMap((key) => key.model_remains)
+    .find((model) => model.observation)?.observation
+  if (!observation) return ''
+  return [
+    observation.observed_at ?? '',
+    observation.last_error_code ?? '',
+    observation.source ?? '',
+  ].join('|')
+})
 </script>
 
 <template>
@@ -73,12 +125,8 @@ const {
                         key.key_label
                       }}</span>
                       <UBadge
-                        :label="
-                          key.ok
-                            ? t('tokenPlanAvailable')
-                            : t('tokenPlanUnavailable')
-                        "
-                        :color="key.ok ? 'success' : 'error'"
+                        :label="keyStatusLabel(key)"
+                        :color="keyStatusColor(key)"
                         variant="subtle"
                       />
                       <UBadge
@@ -98,15 +146,7 @@ const {
                       "
                       class="shrink-0 text-xs text-dimmed"
                     >
-                      {{
-                        t('tokenPlanMinRemaining', {
-                          percent: (
-                            minimumRemainingPercent(key) ??
-                            ccMinRemaining(key) ??
-                            progressWindowMinRemaining(key)
-                          )?.toFixed(1),
-                        })
-                      }}
+                      {{ minimumRemainingLabel(key) }}
                       ·
                       {{
                         t('tokenPlanWindowCount', {
@@ -343,64 +383,73 @@ const {
                         <div class="break-words font-medium text-highlighted">
                           {{ model.model_name }}
                         </div>
-                        <div
-                          v-if="model.interval"
-                          class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
-                        >
-                          <span class="text-dimmed">{{
-                            t('tokenPlanInterval')
-                          }}</span>
-                          <UProgress
-                            class="token-plan-progress h-1.5"
-                            :model-value="usedPercent(model.interval)"
-                            :style="{
-                              '--token-plan-progress-color': progressColor(
-                                model.interval,
-                              ),
-                            }"
-                          />
+                        <SubscriptionQuotaWindows
+                          v-if="model.windows != null"
+                          :now-ms="nowMs"
+                          :observation="model.observation ?? null"
+                          :t="t"
+                          :windows="model.windows"
+                        />
+                        <template v-else>
                           <div
-                            class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
+                            v-if="model.interval"
+                            class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
                           >
                             <span class="text-dimmed">{{
-                              formatRemaining(model.interval)
+                              t('tokenPlanInterval')
                             }}</span>
-                            <span class="shrink-0 font-semibold"
-                              >{{
-                                remainingPercent(model.interval).toFixed(1)
-                              }}%</span
+                            <UProgress
+                              class="token-plan-progress h-1.5"
+                              :model-value="usedPercent(model.interval)"
+                              :style="{
+                                '--token-plan-progress-color': progressColor(
+                                  model.interval,
+                                ),
+                              }"
+                            />
+                            <div
+                              class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
                             >
+                              <span class="text-dimmed">{{
+                                formatRemaining(model.interval)
+                              }}</span>
+                              <span class="shrink-0 font-semibold"
+                                >{{
+                                  remainingPercent(model.interval).toFixed(1)
+                                }}%</span
+                              >
+                            </div>
                           </div>
-                        </div>
-                        <div
-                          v-if="model.weekly"
-                          class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
-                        >
-                          <span class="text-dimmed">{{
-                            t('tokenPlanWeekly')
-                          }}</span>
-                          <UProgress
-                            class="token-plan-progress h-1.5"
-                            :model-value="usedPercent(model.weekly)"
-                            :style="{
-                              '--token-plan-progress-color': progressColor(
-                                model.weekly,
-                              ),
-                            }"
-                          />
                           <div
-                            class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
+                            v-if="model.weekly"
+                            class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
                           >
                             <span class="text-dimmed">{{
-                              formatRemaining(model.weekly)
+                              t('tokenPlanWeekly')
                             }}</span>
-                            <span class="shrink-0 font-semibold"
-                              >{{
-                                remainingPercent(model.weekly).toFixed(1)
-                              }}%</span
+                            <UProgress
+                              class="token-plan-progress h-1.5"
+                              :model-value="usedPercent(model.weekly)"
+                              :style="{
+                                '--token-plan-progress-color': progressColor(
+                                  model.weekly,
+                                ),
+                              }"
+                            />
+                            <div
+                              class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
                             >
+                              <span class="text-dimmed">{{
+                                formatRemaining(model.weekly)
+                              }}</span>
+                              <span class="shrink-0 font-semibold"
+                                >{{
+                                  remainingPercent(model.weekly).toFixed(1)
+                                }}%</span
+                              >
+                            </div>
                           </div>
-                        </div>
+                        </template>
                       </div>
                     </div>
                   </template>
@@ -414,6 +463,14 @@ const {
         </template>
 
         <p v-else class="text-dimmed">{{ t('tokenPlanNoUsage') }}</p>
+        <SubscriptionQuotaHistory
+          v-if="visible && provider === 'openai' && endpointId"
+          :key="endpointId"
+          :endpoint-id="endpointId"
+          :now-ms="nowMs"
+          :refresh-key="historyRefreshKey"
+          :t="t"
+        />
       </div>
     </template>
   </UModal>

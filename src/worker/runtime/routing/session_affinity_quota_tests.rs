@@ -149,6 +149,8 @@ fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
                     model_name: "general".to_string(),
                     interval: Some(window(*remaining_percent)),
                     weekly: Some(window(*remaining_percent)),
+                    windows: None,
+                    observation: None,
                 }],
                 balances: None,
                 five_hour: None,
@@ -768,6 +770,8 @@ fn model_window(
             remains_time_ms: resets_in_ms,
         }),
         weekly: None,
+        windows: None,
+        observation: None,
     }
 }
 

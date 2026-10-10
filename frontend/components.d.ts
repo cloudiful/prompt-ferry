@@ -87,6 +87,8 @@ declare module 'vue' {
     SettingsStorageCredentials: typeof import('./src/components/settings/SettingsStorageCredentials.vue')['default']
     SettingsStorageTab: typeof import('./src/components/settings/SettingsStorageTab.vue')['default']
     StreamDeltaBatchingFields: typeof import('./src/components/shared/StreamDeltaBatchingFields.vue')['default']
+    SubscriptionQuotaHistory: typeof import('./src/components/endpoints/SubscriptionQuotaHistory.vue')['default']
+    SubscriptionQuotaWindows: typeof import('./src/components/endpoints/SubscriptionQuotaWindows.vue')['default']
     TablePagination: typeof import('./src/components/shared/TablePagination.vue')['default']
     TestResultPopover: typeof import('./src/components/shared/TestResultPopover.vue')['default']
     TokenPlanUsageDialog: typeof import('./src/components/endpoints/TokenPlanUsageDialog.vue')['default']

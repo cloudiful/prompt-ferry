@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO chatgpt_quota_refresh_state AS state (\n    endpoint_id,\n    lease_owner,\n    lease_expires_at,\n    last_attempt_at\n)\nSELECT $1, $2, $4, $3\nWHERE $4 > clock_timestamp()\n  AND $4 <= clock_timestamp() + INTERVAL '60 seconds'\nON CONFLICT (endpoint_id) DO UPDATE\nSET lease_owner = EXCLUDED.lease_owner,\n    lease_expires_at = EXCLUDED.lease_expires_at,\n    last_attempt_at = EXCLUDED.last_attempt_at\nWHERE (state.lease_expires_at IS NULL OR state.lease_expires_at <= clock_timestamp())\n  AND EXCLUDED.lease_expires_at > clock_timestamp()\n  AND EXCLUDED.lease_expires_at <= clock_timestamp() + INTERVAL '60 seconds'\nRETURNING endpoint_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "chatgpt_quota_refresh_state",
+            "name": "endpoint_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "92786f1d88efbe3440c552df83bf2231f2d8cd42c9aaf9bd5f5888245e5fb22c"
+}

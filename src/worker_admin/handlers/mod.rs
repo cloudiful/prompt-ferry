@@ -5,6 +5,9 @@ mod billing;
 // public so the runtime request path can reach the same helpers the admin
 // handlers use (the pattern already used by `pub mod oauth`).
 pub mod chatgpt_backend;
+// Issue #759 P1: strict ChatGPT quota-window parsing, split out to keep
+// `chatgpt_backend` bounded.
+mod chatgpt_quota_windows;
 // Issue #599 R2f.1: access-token claim extraction and the request-context
 // header helper shared by the ChatGPT mapping layer, split out to keep
 // `chatgpt_backend` bounded.
@@ -21,6 +24,7 @@ mod model_routes;
 pub mod oauth;
 mod oauth_client;
 mod oauth_session;
+mod quota_history;
 mod relay_input;
 mod relay_secrets;
 mod relay_validation;
@@ -78,8 +82,8 @@ use tower_http::cors::CorsLayer;
 
 use self::{
     approvals::*, auth::*, billing::*, config_audit::*, config_export::*, config_import::*,
-    endpoint_usage::*, endpoints::*, mcp::*, model_routes::*, relays::*, session_routing::*,
-    settings::*, settings_cache_alert::*, usage::*, users::*,
+    endpoint_usage::*, endpoints::*, mcp::*, model_routes::*, quota_history::*, relays::*,
+    session_routing::*, settings::*, settings_cache_alert::*, usage::*, users::*,
 };
 
 pub(super) use self::support::*;

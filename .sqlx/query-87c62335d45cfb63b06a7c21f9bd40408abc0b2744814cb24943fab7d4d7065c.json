@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n    o.conversation_id AS \"conversation_id!\",\n    o.endpoint_id,\n    o.endpoint_key_id,\n    k.key_label AS endpoint_key_label,\n    pe.name AS endpoint_name,\n    o.created_by_user_id,\n    o.created_at AS \"created_at!\",\n    o.updated_at\nFROM conversation_endpoint_overrides o\nLEFT JOIN provider_endpoints pe ON pe.endpoint_id = o.endpoint_id\nLEFT JOIN endpoint_api_keys k ON k.key_id = o.endpoint_key_id\nWHERE o.conversation_id = $1\n",
+  "query": "WITH upserted AS (\n    INSERT INTO conversation_endpoint_overrides(\n        conversation_id,\n        endpoint_id,\n        endpoint_key_id,\n        created_by_user_id,\n        created_at,\n        updated_at\n    )\n    VALUES ($1, $2, $3, $4, NOW(), NOW())\n    ON CONFLICT(conversation_id)\n    DO UPDATE SET\n        endpoint_id = EXCLUDED.endpoint_id,\n        endpoint_key_id = EXCLUDED.endpoint_key_id,\n        created_by_user_id = EXCLUDED.created_by_user_id,\n        updated_at = NOW()\n    RETURNING\n        conversation_id,\n        endpoint_id,\n        endpoint_key_id,\n        created_by_user_id,\n        created_at,\n        updated_at\n)\nSELECT\n    upserted.conversation_id AS \"conversation_id!\",\n    upserted.endpoint_id AS \"endpoint_id!\",\n    upserted.endpoint_key_id AS \"endpoint_key_id?\",\n    (SELECT k.key_label FROM endpoint_api_keys k WHERE k.key_id = upserted.endpoint_key_id) AS \"endpoint_key_label?\",\n    (SELECT pe.name FROM provider_endpoints pe WHERE pe.endpoint_id = upserted.endpoint_id) AS \"endpoint_name?\",\n    upserted.created_by_user_id AS \"created_by_user_id?\",\n    upserted.created_at AS \"created_at!\",\n    upserted.updated_at AS \"updated_at!\"\nFROM upserted\n",
   "describe": {
     "columns": [
       {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "endpoint_id",
+        "name": "endpoint_id!",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -27,7 +27,7 @@
       },
       {
         "ordinal": 2,
-        "name": "endpoint_key_id",
+        "name": "endpoint_key_id?",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -38,29 +38,19 @@
       },
       {
         "ordinal": 3,
-        "name": "endpoint_key_label",
+        "name": "endpoint_key_label?",
         "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "endpoint_api_keys",
-            "name": "key_label"
-          }
-        }
+        "origin": "Expression"
       },
       {
         "ordinal": 4,
-        "name": "endpoint_name",
+        "name": "endpoint_name?",
         "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "provider_endpoints",
-            "name": "name"
-          }
-        }
+        "origin": "Expression"
       },
       {
         "ordinal": 5,
-        "name": "created_by_user_id",
+        "name": "created_by_user_id?",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -82,7 +72,7 @@
       },
       {
         "ordinal": 7,
-        "name": "updated_at",
+        "name": "updated_at!",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
@@ -94,19 +84,22 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8"
       ]
     },
     "nullable": [
-      true,
-      true,
-      true,
-      true,
+      false,
       false,
       true,
+      null,
+      null,
       true,
-      true
+      false,
+      false
     ]
   },
-  "hash": "96151dbabada063d6b221f3e84a7262281d5a0935e6f1616f8451f5ef9852e38"
+  "hash": "87c62335d45cfb63b06a7c21f9bd40408abc0b2744814cb24943fab7d4d7065c"
 }

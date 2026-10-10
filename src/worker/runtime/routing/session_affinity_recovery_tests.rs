@@ -488,6 +488,8 @@ fn exhausted_key_usage(key_id: uuid::Uuid) -> TokenPlanUsageResponse {
                     end_at: None,
                     remains_time_ms: None,
                 }),
+                windows: None,
+                observation: None,
             }],
             balances: None,
             five_hour: None,

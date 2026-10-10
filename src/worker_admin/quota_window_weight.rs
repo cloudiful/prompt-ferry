@@ -206,6 +206,8 @@ mod tests {
             model_name: "general".into(),
             interval: Some(window(10.0)),
             weekly: None,
+            windows: None,
+            observation: None,
         };
         urgent.interval.as_mut().unwrap().remains_time_ms = Some(5 * 60 * 1_000);
         assert!(effective_weight_percent(&urgent).unwrap() > 10.0);
@@ -213,6 +215,8 @@ mod tests {
             model_name: "general".into(),
             interval: Some(window(10.0)),
             weekly: None,
+            windows: None,
+            observation: None,
         };
         assert_eq!(effective_weight_percent(&raw), Some(10.0));
     }
