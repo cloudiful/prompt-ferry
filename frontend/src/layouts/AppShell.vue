@@ -119,6 +119,24 @@ async function relayLogout(): Promise<void> {
     </UDashboardSidebar>
 
     <UDashboardPanel>
+      <template #header>
+        <UDashboardNavbar
+          v-if="collapsed"
+          :toggle="false"
+          class="hidden lg:flex"
+        >
+          <template #leading>
+            <UButton
+              color="neutral"
+              variant="ghost"
+              icon="i-lucide-panel-left-open"
+              :aria-label="t('expandNav')"
+              @click="collapsed = false"
+            />
+          </template>
+        </UDashboardNavbar>
+      </template>
+
       <template #body>
         <RouterView />
       </template>
