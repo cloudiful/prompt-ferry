@@ -21,6 +21,14 @@ pub(super) async fn refresh_candidate_quota(
         return;
     };
     for target in &candidate.targets {
+        state
+            .token_plan_quota
+            .hydrate_chatgpt_subscription(
+                state.chatgpt_quota_service.as_deref(),
+                target.endpoint_id,
+                target.provider,
+            )
+            .await;
         if let Err(error) = state
             .token_plan_quota
             .refresh_if_due(&state.pool, target.endpoint_id)

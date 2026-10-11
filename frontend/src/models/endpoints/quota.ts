@@ -47,12 +47,10 @@ export function isOrganizationUsageEligible(
   return source.provider === 'openai' && source.has_admin_api_key === true
 }
 
-// Cache-level state of one token-plan usage snapshot. `loading` is a cold
-// entry (nothing cached yet), `ready` carries a payload, and `error` is the
-// negative-cache entry a failed cold fetch pins for one TTL window. A
-// dedicated value is what keeps a failed request from rendering like a
-// provider that simply reports nothing.
-export type TokenPlanFetchState = 'loading' | 'ready' | 'error'
+// Cache-level state of one token-plan usage snapshot. `stale` preserves the
+// last good payload without treating its quota as current; `error` is a pinned
+// cold-fetch failure.
+export type TokenPlanFetchState = 'loading' | 'ready' | 'stale' | 'error'
 
 // One DeepSeek currency entry as the display surface consumes it. `total` is
 // `null` when the amount is unknown — the provider omitted it or the parser
@@ -65,7 +63,7 @@ export type DeepSeekBalanceAmount = {
 // Badge state of the DeepSeek balance surface: the fetch state first, then the
 // provider's own availability, which stays independent of the amounts.
 export type DeepSeekBalanceState =
-  'loading' | 'ready' | 'unavailable' | 'unknown' | 'error'
+  'loading' | 'ready' | 'stale' | 'unavailable' | 'unknown' | 'error'
 
 function reportedAmount(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null

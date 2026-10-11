@@ -205,6 +205,9 @@ pub(super) async fn forward_non_stream_chat_response(
         response_headers,
     )
     .await?;
+    if let Some(feedback) = &context.attempt_feedback {
+        feedback.completed_success();
+    }
     let usage_event_id = Box::pin(
         services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
@@ -356,6 +359,9 @@ pub(super) async fn forward_non_stream_responses_response(
         response_headers,
     )
     .await?;
+    if let Some(feedback) = &context.attempt_feedback {
+        feedback.completed_success();
+    }
     let usage_event_id = Box::pin(
         services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
@@ -484,6 +490,9 @@ pub(super) async fn forward_non_stream_anthropic_response(
         response_headers,
     )
     .await?;
+    if let Some(feedback) = &context.attempt_feedback {
+        feedback.completed_success();
+    }
     let usage_event_id = Box::pin(
         services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)

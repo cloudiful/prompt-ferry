@@ -18,10 +18,14 @@ mod mcp_provider;
 mod model_routes;
 #[path = "types/quota_snapshots.rs"]
 mod quota_snapshots;
+#[path = "types/quota_status.rs"]
+mod quota_status;
 #[path = "types/relays.rs"]
 mod relays;
 #[path = "types/settings.rs"]
 mod settings;
+#[path = "types/token_plan.rs"]
+mod token_plan;
 #[path = "types/usage.rs"]
 mod usage;
 
@@ -40,8 +44,10 @@ pub use mcp::*;
 pub use mcp_provider::*;
 pub use model_routes::*;
 pub use quota_snapshots::*;
+pub use quota_status::*;
 pub use relays::*;
 pub use settings::*;
+pub use token_plan::*;
 pub use usage::*;
 
 #[cfg(test)]

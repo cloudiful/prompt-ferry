@@ -16,16 +16,49 @@ mod fetch;
 mod policy;
 mod read;
 mod refresh;
+mod routing;
 #[cfg(test)]
 pub(crate) mod tests;
 
 pub(crate) use fetch::ChatGptQuotaFetcher;
 use fetch::StoredOAuthQuotaFetcher;
 use policy::{ACTIVITY_LOOKBACK, RefreshTrigger, periodic_due, stale};
+pub(crate) use routing::{ChatGptQuotaRoutingSnapshot, RoutingSnapshot};
 
 const REQUEST_WAKE_QUEUE_CAPACITY: usize = 256;
 const REQUEST_WAKE_THROTTLE: Duration = Duration::from_secs(60);
+const QUOTA_ERROR_WAKE_THROTTLE: Duration = Duration::from_secs(10);
 pub(crate) const MAX_CONCURRENT_QUOTA_READS: usize = 4;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RequestWakeReason {
+    SelectedRequest,
+    QuotaError,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RequestWake {
+    pub endpoint_id: Uuid,
+    pub reason: RequestWakeReason,
+}
+
+pub(crate) struct RequestWakeReceiver(mpsc::Receiver<RequestWake>);
+
+impl RequestWakeReceiver {
+    pub(crate) async fn recv_event(&mut self) -> Option<RequestWake> {
+        self.0.recv().await
+    }
+
+    #[cfg(test)]
+    pub(crate) fn try_recv_event(&mut self) -> Result<RequestWake, mpsc::error::TryRecvError> {
+        self.0.try_recv()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn try_recv(&mut self) -> Result<Uuid, mpsc::error::TryRecvError> {
+        self.0.try_recv().map(|wake| wake.endpoint_id)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ChatGptQuotaError {
@@ -77,9 +110,10 @@ pub(super) struct ServiceInner {
     pub fetcher: Arc<dyn ChatGptQuotaFetcher>,
     pub endpoint_locks: Mutex<HashMap<Uuid, Weak<Mutex<()>>>>,
     pub quota_slots: Arc<Semaphore>,
-    request_wake_tx: mpsc::Sender<Uuid>,
-    request_wake_rx: StdMutex<Option<mpsc::Receiver<Uuid>>>,
+    request_wake_tx: mpsc::Sender<RequestWake>,
+    request_wake_rx: StdMutex<Option<mpsc::Receiver<RequestWake>>>,
     last_request_wake: StdMutex<HashMap<Uuid, Instant>>,
+    last_quota_error_wake: StdMutex<HashMap<Uuid, Instant>>,
 }
 
 impl ChatGptQuotaService {
@@ -103,37 +137,69 @@ impl ChatGptQuotaService {
                 request_wake_tx,
                 request_wake_rx: StdMutex::new(Some(request_wake_rx)),
                 last_request_wake: StdMutex::new(HashMap::new()),
+                last_quota_error_wake: StdMutex::new(HashMap::new()),
             }),
         }
     }
 
-    pub(crate) fn take_request_wake_receiver(&self) -> Option<mpsc::Receiver<Uuid>> {
+    pub(crate) fn take_request_wake_receiver(&self) -> Option<RequestWakeReceiver> {
         self.inner
             .request_wake_rx
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .take()
+            .map(RequestWakeReceiver)
     }
 
     pub(crate) fn notify_selected_request(&self, endpoint_id: Uuid) {
+        self.notify_wake(
+            endpoint_id,
+            RequestWakeReason::SelectedRequest,
+            REQUEST_WAKE_THROTTLE,
+            &self.inner.last_request_wake,
+        );
+    }
+
+    pub(crate) fn notify_quota_error(&self, endpoint_id: Uuid) {
+        self.notify_wake(
+            endpoint_id,
+            RequestWakeReason::QuotaError,
+            QUOTA_ERROR_WAKE_THROTTLE,
+            &self.inner.last_quota_error_wake,
+        );
+    }
+
+    fn notify_wake(
+        &self,
+        endpoint_id: Uuid,
+        reason: RequestWakeReason,
+        throttle: Duration,
+        last_wake: &StdMutex<HashMap<Uuid, Instant>>,
+    ) {
         if endpoint_id.is_nil() {
             return;
         }
         let now = Instant::now();
-        let mut last_wake = self
-            .inner
-            .last_request_wake
+        let mut last_wake = last_wake
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        last_wake.retain(|_, seen| now.duration_since(*seen) < REQUEST_WAKE_THROTTLE);
+        last_wake.retain(|_, seen| now.duration_since(*seen) < throttle);
         if last_wake
             .get(&endpoint_id)
-            .is_some_and(|seen| now.duration_since(*seen) < REQUEST_WAKE_THROTTLE)
+            .is_some_and(|seen| now.duration_since(*seen) < throttle)
         {
             return;
         }
         last_wake.insert(endpoint_id, now);
-        if self.inner.request_wake_tx.try_send(endpoint_id).is_err() {
+        if self
+            .inner
+            .request_wake_tx
+            .try_send(RequestWake {
+                endpoint_id,
+                reason,
+            })
+            .is_err()
+        {
             last_wake.remove(&endpoint_id);
         }
     }
@@ -159,6 +225,24 @@ impl ChatGptQuotaService {
         }
         let completion = self
             .refresh_shared(endpoint_id, RefreshTrigger::Request, now, None)
+            .await;
+        if completion.snapshot.is_none() {
+            return Err(completion.error.unwrap_or(ChatGptQuotaError::Upstream));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn refresh_after_quota_error(
+        &self,
+        endpoint_id: Uuid,
+    ) -> Result<(), ChatGptQuotaError> {
+        match self.routing_snapshot(endpoint_id).await {
+            Ok(RoutingSnapshot::NoSubscription) => return Ok(()),
+            Ok(RoutingSnapshot::Subscription(_)) | Err(ChatGptQuotaError::InvalidQuota) => {}
+            Err(error) => return Err(error),
+        }
+        let completion = self
+            .refresh_shared_forced(endpoint_id, RefreshTrigger::Request, Utc::now(), None)
             .await;
         if completion.snapshot.is_none() {
             return Err(completion.error.unwrap_or(ChatGptQuotaError::Upstream));

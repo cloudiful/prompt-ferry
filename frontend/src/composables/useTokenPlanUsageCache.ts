@@ -2,6 +2,7 @@ import { reactive } from 'vue'
 import type { TokenPlanFetchState } from '@/models/endpoints/quota'
 import type { TokenPlanUsageResponse } from '@/generated/admin-api'
 import { fetchTokenPlanUsage } from '@/stores/endpoints-api'
+import { createTokenPlanCacheExpiry } from './tokenPlanCacheExpiry'
 
 // 60s aligns with backend `TokenPlanQuotaCache::REFRESH_AFTER` so the
 // dialog and the inline badges never race past the upstream TTL. After
@@ -14,6 +15,9 @@ export const TOKEN_PLAN_CACHE_TTL_MS = 60_000
 type CachedUsage = {
   usage: TokenPlanUsageResponse | null
   fetchedAt: number
+  lastAttemptAt: number
+  refreshFailed: boolean
+  refreshing: boolean
 }
 
 // Result of one awaited fetch. The payload is deliberately absent: the caller
@@ -38,28 +42,30 @@ const cache = reactive<Record<string, CachedUsage>>({})
 // the same pending promise — no duplicate `/api/v1/endpoints/{id}/usage`
 // request.
 const inflight = new Map<string, Promise<TokenPlanFetchOutcome>>()
+const cacheExpiry = createTokenPlanCacheExpiry()
 
-// A cache read paired with the fetch state it represents. Surfaces that render
-// a badge need both: `usage` alone reports `null` for a cold cache *and* for a
-// failed cold fetch, which is how a fetch error used to render like a provider
-// that reports nothing.
+// A cache read paired with its fetch state: stale snapshots remain visible as
+// detail but cannot claim that their quota is current.
 export type TokenPlanUsageSnapshot = {
   state: TokenPlanFetchState
   usage: TokenPlanUsageResponse | null
 }
 
-// Stale-while-revalidate read of the shared snapshot: the last payload is
-// returned regardless of freshness, so the table keeps rendering the previous
-// numbers while the background refresh resolves, and the fetch state says
-// which of the three situations the entry represents.
+// Stale-while-revalidate read of the shared snapshot: the last payload remains
+// available while refresh runs, and its fetch state prevents stale quota from
+// being presented as a current observation.
 export function getTokenPlanUsageSnapshot(
   endpointId: string,
 ): TokenPlanUsageSnapshot {
+  cacheExpiry.readRevision()
   const entry = cache[endpointId]
   if (!entry) return { state: 'loading', usage: null }
-  // A stale entry is still `ready`: stale-while-revalidate keeps serving the
-  // last payload, and a failed refresh of a usable snapshot keeps it too.
-  return { state: entry.usage === null ? 'error' : 'ready', usage: entry.usage }
+  if (entry.usage === null) {
+    return { state: entry.refreshing ? 'loading' : 'error', usage: null }
+  }
+  const stale =
+    entry.refreshFailed || Date.now() - entry.fetchedAt >= TOKEN_PLAN_CACHE_TTL_MS
+  return { state: stale ? 'stale' : 'ready', usage: entry.usage }
 }
 
 // Payload-only view of the same read, for the consumers that render numbers
@@ -76,18 +82,16 @@ export function getCachedTokenPlanUsage(
 export function isTokenPlanUsageFresh(endpointId: string): boolean {
   const entry = cache[endpointId]
   if (!entry) return false
-  return Date.now() - entry.fetchedAt < TOKEN_PLAN_CACHE_TTL_MS
+  const checkedAt = entry.usage === null ? entry.lastAttemptAt : entry.fetchedAt
+  return (
+    !entry.refreshFailed || entry.usage === null
+  ) && Date.now() - checkedAt < TOKEN_PLAN_CACHE_TTL_MS
 }
 
 // Shared fetch path: cold fetch, background refresh and a caller's deliberate
-// refresh all go through here so the in-flight dedup and the negative-cache
-// handling live in exactly one place. On success we always overwrite the
-// snapshot; on failure we keep whatever snapshot was already cached and only
-// bump `fetchedAt` so the SWR layer backs off rather than retrying
-// immediately. A cold fetch (no prior snapshot) falls through to the
-// negative-cache write so we don't storm the upstream on a dead key. The
-// rejection cause rides along so a caller that awaits the read can report the
-// failure without the cache having to throw.
+// refresh all use one in-flight table. Failed refreshes preserve the last good
+// payload and its timestamp while recording a separate retry time; cold
+// failures stay negative-cached for one TTL window.
 function fetchTokenPlanUsageOnce(
   endpointId: string,
   force = false,
@@ -95,26 +99,51 @@ function fetchTokenPlanUsageOnce(
   const flightKey = `${force ? 'force' : 'automatic'}:${endpointId}`
   const pending = inflight.get(flightKey)
   if (pending) return pending
+  const existing = cache[endpointId]
+  if (existing) {
+    existing.refreshing = true
+  } else {
+    cache[endpointId] = {
+      usage: null,
+      fetchedAt: 0,
+      lastAttemptAt: Date.now(),
+      refreshFailed: false,
+      refreshing: true,
+    }
+  }
   const promise = (async (): Promise<TokenPlanFetchOutcome> => {
     try {
       const usage = await fetchTokenPlanUsage(endpointId, force)
-      cache[endpointId] = { usage, fetchedAt: Date.now() }
+      const now = Date.now()
+      cache[endpointId] = {
+        usage,
+        fetchedAt: now,
+        lastAttemptAt: now,
+        refreshFailed: false,
+        refreshing: false,
+      }
+      cacheExpiry.schedule(endpointId, now + TOKEN_PLAN_CACHE_TTL_MS)
       return { ok: true, cause: null }
     } catch (cause) {
-      const existing = cache[endpointId]
-      if (existing && existing.usage !== null) {
-        // Refresh failed but we still have a usable snapshot — keep it
-        // and refresh the timestamp so the SWR layer treats the entry
-        // as fresh for one TTL window (back-off). The table never
-        // blanks out for one network RTT while the upstream recovers.
-        existing.fetchedAt = Date.now()
+      const now = Date.now()
+      const current = cache[endpointId]
+      if (current && current.usage !== null) {
+        current.lastAttemptAt = now
+        current.refreshFailed = true
+        cacheExpiry.remove(endpointId)
         return { ok: false, cause }
       }
-      // Cold fetch failed (no prior snapshot): pin a negative entry so
-      // a follow-up within the TTL window skips the network.
-      cache[endpointId] = { usage: null, fetchedAt: Date.now() }
+      cache[endpointId] = {
+        usage: null,
+        fetchedAt: 0,
+        lastAttemptAt: now,
+        refreshFailed: true,
+        refreshing: false,
+      }
+      cacheExpiry.remove(endpointId)
       return { ok: false, cause }
     } finally {
+      if (cache[endpointId]) cache[endpointId]!.refreshing = false
       inflight.delete(flightKey)
     }
   })()
@@ -186,19 +215,24 @@ export async function requestTokenPlanUsage(
     )
   }
   const entry = cache[endpointId]
-  // Cold entry: first observation pays the network cost.
   if (!entry) {
     return resolvedRequest(
       endpointId,
       await fetchTokenPlanUsageOnce(endpointId),
     )
   }
-  // Fresh hit: avoid the network round-trip. A pinned negative entry is fresh
-  // too — its failure was already reported when it happened.
+  if (entry.refreshing) {
+    if (entry.usage === null) {
+      const pending =
+        inflight.get(`automatic:${endpointId}`) ??
+        inflight.get(`force:${endpointId}`)
+      if (pending) return resolvedRequest(endpointId, await pending)
+    }
+    return { ...warmRequest(endpointId), requested: true }
+  }
   if (isTokenPlanUsageFresh(endpointId)) return warmRequest(endpointId)
-  // Stale entry: stale-while-revalidate — return the snapshot immediately and
-  // kick a background refresh so the next observation sees the fresh payload
-  // without forcing the caller to await it.
+  const retryDue = Date.now() - entry.lastAttemptAt >= TOKEN_PLAN_CACHE_TTL_MS
+  if (!retryDue) return warmRequest(endpointId)
   void fetchTokenPlanUsageOnce(endpointId)
   return { ...warmRequest(endpointId), requested: true }
 }
@@ -240,4 +274,5 @@ export async function prefetchTokenPlanBatch(
 export function __resetTokenPlanCacheForTests(): void {
   for (const key of Object.keys(cache)) delete cache[key]
   inflight.clear()
+  cacheExpiry.clear()
 }

@@ -1,4 +1,14 @@
+mod candidate_quota_selection;
 mod key_pool;
+mod quota_eligibility;
+#[cfg(test)]
+mod quota_eligibility_tests;
+mod quota_probe;
+mod quota_unavailable;
+mod route_key_eligibility;
+mod session_quota_selection;
+pub(in crate::worker::runtime) use quota_probe::QuotaProbePermit;
+pub(in crate::worker::runtime) use quota_unavailable::QuotaUnavailableError;
 #[cfg(test)]
 mod quota_deepseek_tests;
 #[cfg(test)]

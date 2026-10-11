@@ -355,6 +355,7 @@ impl RequestExecutionContext {
 #[derive(Debug, Clone)]
 pub(super) struct RouteExecutionContext {
     pub(super) route: db::RouteConfig,
+    pub(super) attempt_feedback: Option<super::ai::quota_feedback::AttemptFeedback>,
     pub(super) endpoint_id: Option<Uuid>,
     pub(super) model_route_rule_id: Option<Uuid>,
     pub(super) route_selection_reason: db::RouteSelectionReason,
@@ -377,6 +378,7 @@ impl RouteExecutionContext {
     pub(super) fn new(route: &db::RouteConfig) -> Self {
         Self {
             route: route.clone(),
+            attempt_feedback: None,
             endpoint_id: Some(route.route_id).filter(|id| !id.is_nil()),
             model_route_rule_id: route.model_route_rule_id,
             route_selection_reason: route.route_selection_reason,
@@ -384,6 +386,14 @@ impl RouteExecutionContext {
                 route.thinking_effort_override.as_deref(),
             ),
         }
+    }
+
+    pub(super) fn with_attempt_feedback(
+        mut self,
+        feedback: super::ai::quota_feedback::AttemptFeedback,
+    ) -> Self {
+        self.attempt_feedback = Some(feedback);
+        self
     }
 }
 

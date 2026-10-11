@@ -1,5 +1,4 @@
-//! Unified key-pool routing failover: an endpoint is skipped only when all of
-//! its units are exhausted, and an all-exhausted pool still resolves a route.
+//! Unified key-pool routing failover and exhausted-capacity rejection.
 //! Shared fixtures live in `unified_pool_fixtures`.
 
 use super::super::tests::session_affinity_services;
@@ -62,7 +61,7 @@ async fn pool_falls_over_to_another_endpoint_only_when_all_its_units_are_dead() 
 }
 
 #[tokio::test]
-async fn pool_with_every_unit_dead_still_resolves_a_route() {
+async fn pool_with_every_unit_dead_returns_typed_quota_unavailable() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
     let services = session_affinity_services(runtime_state, replay_cache);
@@ -95,9 +94,25 @@ async fn pool_with_every_unit_dead_still_resolves_a_route() {
         .store_for_test(endpoint_b, opencode_go_usage(&[(dead_b, "dead-b", 0.0)]))
         .await;
 
-    let (endpoint_id, _, _) = route_selected_endpoint(&services, &candidate, "client-1").await;
-    assert!(
-        endpoint_id == endpoint_a || endpoint_id == endpoint_b,
-        "an all-exhausted pool must still resolve a route"
+    let context = super::session_affinity_tests::request_context(
+        uuid::Uuid::new_v4(),
+        crate::worker::runtime::prompt_log::RequestPromptLog::default(),
     );
+    let result = super::select_route_for_candidate(
+        &services,
+        &context,
+        &candidate,
+        &super::unified_pool_fixtures::request("client-1"),
+        1,
+        Some("client-1"),
+    )
+    .await;
+    match result {
+        Err(error) => assert!(
+            error
+                .downcast_ref::<super::QuotaUnavailableError>()
+                .is_some()
+        ),
+        Ok(_) => panic!("all known exhausted units must be rejected"),
+    }
 }

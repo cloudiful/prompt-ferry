@@ -126,6 +126,9 @@ pub(super) async fn forward_non_stream_responses_to_chat_response(
         restored_body,
     )
     .await?;
+    if let Some(feedback) = &context.attempt_feedback {
+        feedback.completed_success();
+    }
 
     let usage_event_id = Box::pin(
         services.record_usage_event(

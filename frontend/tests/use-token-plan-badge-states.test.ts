@@ -323,7 +323,7 @@ test('a failed cold fetch reads as an error instead of a ready zero', async () =
   expect(labels.some((label) => label.includes('0.00'))).toBe(false)
 })
 
-test('a refresh failure keeps the last ready snapshot ready', async () => {
+test('a refresh failure preserves raw data but marks the cached quota stale', async () => {
   const start = new Date('2026-10-08T00:00:00.000Z')
   jest.setSystemTime(start)
   const usage = deepseekUsage({
@@ -335,18 +335,18 @@ test('a refresh failure keeps the last ready snapshot ready', async () => {
   expect(getTokenPlanUsageSnapshot('ep-swr-error').state).toBe('ready')
 
   // Cross the TTL so the prefetch really re-fetches, then let that refresh
-  // fail: the entry keeps its snapshot, so the badge must stay ready instead
-  // of dropping into an error state that hides real numbers.
+  // fail: preserve the raw snapshot without presenting its quota as current.
   jest.setSystemTime(new Date(start.getTime() + TOKEN_PLAN_CACHE_TTL_MS + 1))
   fetchTokenPlanUsage.mockRejectedValueOnce(new Error('usage 503'))
   await prefetchTokenPlanUsage('ep-swr-error')
   await new Promise<void>((resolve) => setTimeout(resolve, 0))
 
   const badges = useTokenPlanBadges('ep-swr-error').value
-  expect(badges.status).toBe('ready')
-  expect(badges.deepseekState).toBe('ready')
+  expect(badges.status).toBe('stale')
+  expect(badges.deepseekState).toBe('stale')
   expect(tokenPlanBadgePills(badges, t).map((pill) => pill.label)).toEqual([
-    '¥3.00',
+    'tokenPlanQuotaUnknown',
   ])
+  expect(badges.usage).toEqual(usage)
   jest.setSystemTime()
 })

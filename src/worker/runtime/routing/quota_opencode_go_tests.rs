@@ -56,6 +56,7 @@ fn opencode_go_key_usage(
         status: Some(200),
         error_code: None,
         error_message: None,
+        quota_status: None,
         model_remains: Vec::new(),
         balances: None,
         five_hour: None,
@@ -163,7 +164,8 @@ async fn quota_key_lb_uses_tighter_opencode_go_window_and_single_arm() {
         &opencode_go_request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
 
     assert_eq!(selected.selection.key_id, Some(single_arm_key_id));
     assert_eq!(selected.selection.key_label.as_deref(), Some("available"));
@@ -204,7 +206,8 @@ async fn quota_key_lb_skips_opencode_go_key_with_no_remaining_window() {
         &opencode_go_request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
 
     assert_eq!(selected.selection.key_id, Some(available_key_id));
     assert_eq!(selected.selection.key_label.as_deref(), Some("available"));
@@ -239,7 +242,8 @@ async fn quota_key_lb_still_routes_payg_opencode_go_key_without_windows() {
         &opencode_go_request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
 
     assert_eq!(selected.selection.key_id, Some(payg_key_id));
     assert_eq!(selected.selection.key_label.as_deref(), Some("payg"));

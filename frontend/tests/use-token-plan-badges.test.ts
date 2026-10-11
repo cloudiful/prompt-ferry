@@ -101,6 +101,9 @@ test('empty usage renders empty badges', () => {
   expect(badges.value).toEqual({
     mode: 'window',
     status: 'loading',
+    quotaState: 'unknown',
+    quotaPartial: false,
+    quotaMetadataPresent: false,
     short: null,
     long: null,
     openrouterBalance: null,
@@ -126,7 +129,7 @@ test('MiniMax windows: short/long are the arithmetic mean across keys', async ()
         ok: true,
         model_remains: [
           {
-            model_name: 'g',
+            model_name: 'general',
             interval: { remaining_percent: 50 },
             weekly: { remaining_percent: 80 },
           },
@@ -138,7 +141,7 @@ test('MiniMax windows: short/long are the arithmetic mean across keys', async ()
         ok: true,
         model_remains: [
           {
-            model_name: 'g',
+            model_name: 'general',
             interval: { remaining_percent: 30 },
             weekly: { remaining_percent: 60 },
           },
@@ -166,7 +169,7 @@ test('keys without a window are skipped, not averaged as zero', async () => {
         ok: true,
         model_remains: [
           {
-            model_name: 'g',
+            model_name: 'general',
             interval: { remaining_percent: 60 },
             weekly: { remaining_percent: 90 },
           },
@@ -543,7 +546,7 @@ test('non-ok keys are skipped when aggregating', async () => {
         error_message: 'rate limited',
         model_remains: [
           {
-            model_name: 'g',
+            model_name: 'general',
             interval: { remaining_percent: 5 },
             weekly: { remaining_percent: 5 },
           },
@@ -620,7 +623,7 @@ test('useTokenPlanBadges reacts when the cache is populated after mount', async 
         ok: true,
         model_remains: [
           {
-            model_name: 'g',
+            model_name: 'general',
             interval: { remaining_percent: 91 },
             weekly: { remaining_percent: 92 },
           },
@@ -656,7 +659,7 @@ test('useTokenPlanBadges tracks a computed ref of endpointId across swaps', asyn
         ok: true,
         model_remains: [
           {
-            model_name: 'g',
+            model_name: 'general',
             interval: { remaining_percent: 50 },
             weekly: { remaining_percent: 60 },
           },
@@ -759,6 +762,8 @@ test('tokenPlanBadgePills falls back to local tokens when OpenRouter has no spen
   const pills = tokenPlanBadgePills(
     {
       mode: 'openrouter',
+      quotaState: 'unknown',
+      quotaPartial: false,
       short: null,
       long: null,
       openrouterBalance: null,
@@ -773,7 +778,7 @@ test('tokenPlanBadgePills falls back to local tokens when OpenRouter has no spen
     t,
   )
   expect(pills.map((pill) => pill.label)).toEqual([
-    'tokenPlanOpenRouterRemaining tokenPlanNoQuota',
+    'tokenPlanQuotaUnknown',
     'tokenPlanLocalTodayTokens 0',
   ])
 })

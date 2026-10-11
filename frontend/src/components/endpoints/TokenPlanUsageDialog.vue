@@ -7,8 +7,10 @@ import type {
 } from '@/generated/admin-api'
 import SubscriptionQuotaHistory from '@/components/endpoints/SubscriptionQuotaHistory.vue'
 import SubscriptionQuotaWindows from '@/components/endpoints/SubscriptionQuotaWindows.vue'
+import TokenPlanKeyQuotaStatus from '@/components/endpoints/TokenPlanKeyQuotaStatus.vue'
 import { deepseekBalanceRows } from '@/components/endpoints/tokenPlanBadgeRender'
 import {
+  knownRemainingPercent,
   useTokenPlanTicker,
   useTokenPlanWindowEntries,
 } from '@/composables/useTokenPlanWindowEntries'
@@ -49,27 +51,6 @@ function minimumRemainingLabel(key: TokenPlanKeyUsage): string {
   return minimum === null
     ? props.t('tokenPlanMinRemainingUnknown')
     : props.t('tokenPlanMinRemaining', { percent: minimum.toFixed(1) })
-}
-
-function hasStaleObservation(key: TokenPlanKeyUsage): boolean {
-  const observation = key.model_remains.find(
-    (model) => model.observation,
-  )?.observation
-  return observation?.stale === true || observation?.last_error_code != null
-}
-
-function keyStatusLabel(key: TokenPlanKeyUsage): string {
-  if (hasStaleObservation(key)) return props.t('quotaCachedObservation')
-  return key.ok
-    ? props.t('tokenPlanAvailable')
-    : props.t('tokenPlanUnavailable')
-}
-
-function keyStatusColor(
-  key: TokenPlanKeyUsage,
-): 'neutral' | 'success' | 'error' {
-  if (hasStaleObservation(key)) return 'neutral'
-  return key.ok ? 'success' : 'error'
 }
 
 const historyRefreshKey = computed(() => {
@@ -124,10 +105,9 @@ const historyRefreshKey = computed(() => {
                       <span class="truncate font-semibold text-highlighted">{{
                         key.key_label
                       }}</span>
-                      <UBadge
-                        :label="keyStatusLabel(key)"
-                        :color="keyStatusColor(key)"
-                        variant="subtle"
+                      <TokenPlanKeyQuotaStatus
+                        :status="key.quota_status ?? null"
+                        :t="t"
                       />
                       <UBadge
                         v-if="key.openrouter_balance?.is_free_tier"
@@ -307,6 +287,7 @@ const historyRefreshKey = computed(() => {
                     >
                       <span class="text-dimmed">{{ t(entry.labelKey) }}</span>
                       <UProgress
+                        v-if="knownRemainingPercent(entry.adapted) !== null"
                         class="token-plan-progress h-1.5"
                         :model-value="usedPercent(entry.adapted)"
                         :style="{
@@ -321,11 +302,13 @@ const historyRefreshKey = computed(() => {
                         <span class="text-dimmed">{{
                           formatRemaining(entry.adapted)
                         }}</span>
-                        <span class="shrink-0 font-semibold"
-                          >{{
-                            remainingPercent(entry.adapted).toFixed(1)
-                          }}%</span
-                        >
+                        <span class="shrink-0 font-semibold">
+                          {{
+                            knownRemainingPercent(entry.adapted) === null
+                              ? '—'
+                              : `${remainingPercent(entry.adapted).toFixed(1)}%`
+                          }}
+                        </span>
                       </div>
                       <span class="text-dimmed sm:col-span-2 sm:col-start-2"
                         >{{ entry.raw.used.toFixed(2) }} /
@@ -339,6 +322,7 @@ const historyRefreshKey = computed(() => {
                     >
                       <span class="text-dimmed">{{ t(entry.labelKey) }}</span>
                       <UProgress
+                        v-if="knownRemainingPercent(entry.adapted) !== null"
                         class="token-plan-progress h-1.5"
                         :model-value="usedPercent(entry.adapted)"
                         :style="{
@@ -353,11 +337,13 @@ const historyRefreshKey = computed(() => {
                         <span class="text-dimmed">{{
                           formatRemaining(entry.adapted)
                         }}</span>
-                        <span class="shrink-0 font-semibold"
-                          >{{
-                            remainingPercent(entry.adapted).toFixed(1)
-                          }}%</span
-                        >
+                        <span class="shrink-0 font-semibold">
+                          {{
+                            knownRemainingPercent(entry.adapted) === null
+                              ? '—'
+                              : `${remainingPercent(entry.adapted).toFixed(1)}%`
+                          }}
+                        </span>
                       </div>
                       <span
                         v-if="entry.subline"
@@ -399,6 +385,7 @@ const historyRefreshKey = computed(() => {
                               t('tokenPlanInterval')
                             }}</span>
                             <UProgress
+                              v-if="knownRemainingPercent(model.interval) !== null"
                               class="token-plan-progress h-1.5"
                               :model-value="usedPercent(model.interval)"
                               :style="{
@@ -413,11 +400,13 @@ const historyRefreshKey = computed(() => {
                               <span class="text-dimmed">{{
                                 formatRemaining(model.interval)
                               }}</span>
-                              <span class="shrink-0 font-semibold"
-                                >{{
-                                  remainingPercent(model.interval).toFixed(1)
-                                }}%</span
-                              >
+                              <span class="shrink-0 font-semibold">
+                                {{
+                                  knownRemainingPercent(model.interval) === null
+                                    ? '—'
+                                    : `${remainingPercent(model.interval).toFixed(1)}%`
+                                }}
+                              </span>
                             </div>
                           </div>
                           <div
@@ -428,6 +417,7 @@ const historyRefreshKey = computed(() => {
                               t('tokenPlanWeekly')
                             }}</span>
                             <UProgress
+                              v-if="knownRemainingPercent(model.weekly) !== null"
                               class="token-plan-progress h-1.5"
                               :model-value="usedPercent(model.weekly)"
                               :style="{
@@ -442,11 +432,13 @@ const historyRefreshKey = computed(() => {
                               <span class="text-dimmed">{{
                                 formatRemaining(model.weekly)
                               }}</span>
-                              <span class="shrink-0 font-semibold"
-                                >{{
-                                  remainingPercent(model.weekly).toFixed(1)
-                                }}%</span
-                              >
+                              <span class="shrink-0 font-semibold">
+                                {{
+                                  knownRemainingPercent(model.weekly) === null
+                                    ? '—'
+                                    : `${remainingPercent(model.weekly).toFixed(1)}%`
+                                }}
+                              </span>
                             </div>
                           </div>
                         </template>

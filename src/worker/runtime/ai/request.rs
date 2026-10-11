@@ -8,7 +8,7 @@ use super::super::{
 use super::{
     errors::{respond_with_affinity_error, respond_with_client_error, respond_with_local_error},
     models::{ModelsRequestContext, process_models_request},
-    request_attempts::{ForwardOutcome, RouteForwardRequest, forward_route_request},
+    request_attempts::{ForwardOutcome, RouteForwardRequest, forward_route_request_with_probe},
     request_init::initialize_request,
     request_routes::{RouteResolution, resolve_route},
     request_support::mark_function_call_outputs_received,
@@ -80,22 +80,43 @@ pub(in crate::worker::runtime) async fn process_request(
         return Ok(());
     }
 
-    let mut route = match Box::pin(resolve_route(&request, config, services, &request_ctx)).await {
-        Ok(RouteResolution::Ready { route }) => *route,
-        Ok(RouteResolution::Responded) => return Ok(()),
-        Err(err) => {
-            if let Some(affinity_error) = err.downcast_ref::<RouteAffinityError>() {
-                return Box::pin(respond_with_affinity_error(
-                    services,
-                    &request,
-                    &request_ctx,
-                    affinity_error.clone(),
-                ))
-                .await;
+    let (mut route, quota_probe) =
+        match Box::pin(resolve_route(&request, config, services, &request_ctx)).await {
+            Ok(RouteResolution::Ready { route, quota_probe }) => (*route, quota_probe),
+            Ok(RouteResolution::Responded) => return Ok(()),
+            Err(err) => {
+                if err
+                    .downcast_ref::<super::super::routing::QuotaUnavailableError>()
+                    .is_some()
+                {
+                    return Box::pin(respond_with_local_error(
+                        services,
+                        &request,
+                        &request_ctx,
+                        FailurePayload {
+                            status: StatusCode::TOO_MANY_REQUESTS,
+                            error_code: super::super::routing::QuotaUnavailableError::CODE
+                                .to_string(),
+                            error_message: super::super::routing::QuotaUnavailableError::MESSAGE
+                                .to_string(),
+                            upstream_error_body: None,
+                            response_body: None,
+                        },
+                    ))
+                    .await;
+                }
+                if let Some(affinity_error) = err.downcast_ref::<RouteAffinityError>() {
+                    return Box::pin(respond_with_affinity_error(
+                        services,
+                        &request,
+                        &request_ctx,
+                        affinity_error.clone(),
+                    ))
+                    .await;
+                }
+                return Err(err);
             }
-            return Err(err);
-        }
-    };
+        };
 
     if let Err(err) = resolve_auto_protocol(&mut route, &request.path) {
         let route_ctx = RouteExecutionContext::new(&route);
@@ -109,16 +130,19 @@ pub(in crate::worker::runtime) async fn process_request(
         .await;
     }
 
-    let outcome = Box::pin(forward_route_request(RouteForwardRequest {
-        services,
-        request: &request,
-        request_ctx: &mut request_ctx,
-        route: &route,
-        method: &method,
-        redact_content,
-        content_logging_enabled,
-        raw_content_logging_enabled,
-    }))
+    let outcome = Box::pin(forward_route_request_with_probe(
+        RouteForwardRequest {
+            services,
+            request: &request,
+            request_ctx: &mut request_ctx,
+            route: &route,
+            method: &method,
+            redact_content,
+            content_logging_enabled,
+            raw_content_logging_enabled,
+        },
+        quota_probe,
+    ))
     .await?;
     let route_ctx = RouteExecutionContext::new(&route);
     let err = match outcome {

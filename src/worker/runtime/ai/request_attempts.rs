@@ -22,6 +22,7 @@ use super::{
         ThinkingEchoRetrySignal, forward_upstream_response, respond_upstream_error,
     },
     proxy,
+    quota_feedback::AttemptFeedbackFactory,
     request_logging::log_prepared_upstream_summary,
     request_support::{
         PreparedRouteRequest, ai_route_usage_log, prepare_upstream_request_for_route,
@@ -105,8 +106,16 @@ pub(super) struct RouteForwardRequest<'a> {
     pub(super) raw_content_logging_enabled: bool,
 }
 
+#[cfg(test)]
 pub(super) async fn forward_route_request(
     input: RouteForwardRequest<'_>,
+) -> anyhow::Result<ForwardOutcome> {
+    forward_route_request_with_probe(input, None).await
+}
+
+pub(super) async fn forward_route_request_with_probe(
+    input: RouteForwardRequest<'_>,
+    mut quota_probe: Option<crate::worker::runtime::routing::QuotaProbePermit>,
 ) -> anyhow::Result<ForwardOutcome> {
     let RouteForwardRequest {
         services,
@@ -119,6 +128,11 @@ pub(super) async fn forward_route_request(
         raw_content_logging_enabled,
     } = input;
     let mut route = route.clone();
+    let mut feedback_factory = AttemptFeedbackFactory::new(
+        services.admin_state().map(|state| &state.token_plan_quota),
+        &route,
+        quota_probe.clone(),
+    );
 
     let prepared = match prepare_upstream_request_for_route(
         services.admin_state(),
@@ -195,6 +209,7 @@ pub(super) async fn forward_route_request(
             request_ctx,
             &route,
             &prepared,
+            &feedback_factory,
             ResponseLoggingContext {
                 redact_content,
                 content_logging_enabled,
@@ -255,22 +270,6 @@ pub(super) async fn forward_route_request(
     let mut quota_failovers = 0usize;
     loop {
         let attempt_number = attempt + 1;
-        let route_ctx = RouteExecutionContext::new(&route);
-        let response_ctx = ResponseForwardContext {
-            route_ctx: &route_ctx,
-            request,
-            request_ctx: &*request_ctx,
-            upstream_redacted_request_json: prepared.upstream_redacted_request_json.clone(),
-            upstream_restore_session: prepared.upstream_restore_session.clone(),
-            logging: ResponseLoggingContext {
-                redact_content,
-                content_logging_enabled,
-                raw_content_logging_enabled,
-            },
-            response_adapter: prepared.response_adapter,
-            services,
-            quota_failover_enabled: !route.api_keys.is_empty(),
-        };
         // Issue #368 Phase D: per-route proxy client. Direct routes clone
         // the shared client unchanged; proxy routes use the pooled client.
         // Invalid proxy fails closed without echoing userinfo.
@@ -332,6 +331,7 @@ pub(super) async fn forward_route_request(
                 service.notify_selected_request(route.route_id);
             }
         }
+        let attempt_feedback = feedback_factory.begin_attempt();
         let send_result = upstream_request.send().await;
         match send_result {
             Err(err) => {
@@ -410,6 +410,24 @@ pub(super) async fn forward_route_request(
                         }
                     }
                 }
+                let route_ctx = RouteExecutionContext::new(&route)
+                    .with_attempt_feedback(attempt_feedback.clone());
+                let response_ctx = ResponseForwardContext {
+                    route_ctx: &route_ctx,
+                    request,
+                    request_ctx: &*request_ctx,
+                    upstream_redacted_request_json: prepared.upstream_redacted_request_json.clone(),
+                    upstream_restore_session: prepared.upstream_restore_session.clone(),
+                    logging: ResponseLoggingContext {
+                        redact_content,
+                        content_logging_enabled,
+                        raw_content_logging_enabled,
+                    },
+                    response_adapter: prepared.response_adapter,
+                    attempt_feedback: route_ctx.attempt_feedback.clone(),
+                    services,
+                    quota_failover_enabled: !route.api_keys.is_empty(),
+                };
                 let outcome =
                     Box::pin(handle_attempt_response(response, response_ctx.cloned())).await?;
                 match outcome {
@@ -422,6 +440,7 @@ pub(super) async fn forward_route_request(
                                 last_retried_phase,
                             );
                         }
+                        attempt_feedback.release_probe();
                         if thinking_retried {
                             tracing::info!(
                                 event = "thinking_echo_retry_sent",
@@ -479,19 +498,28 @@ pub(super) async fn forward_route_request(
                             signal.response_headers,
                         ))
                         .await?;
+                        attempt_feedback.release_probe();
                         return Ok(ForwardOutcome::Handled);
                     }
                     AttemptOutcome::QuotaFailover(signal) => {
-                        if let Some(failover_route) = next_quota_failover_route(
+                        if let Some((failover_route, failover_probe)) = next_quota_failover_route(
                             &route,
                             request,
                             request_ctx,
                             services,
                             quota_failovers,
-                        ) {
+                        )
+                        .await
+                        {
                             log_quota_failover_retry(request_ctx, &route, &failover_route);
                             quota_failovers += 1;
                             route = failover_route;
+                            quota_probe = failover_probe;
+                            feedback_factory = AttemptFeedbackFactory::new(
+                                services.admin_state().map(|state| &state.token_plan_quota),
+                                &route,
+                                quota_probe.clone(),
+                            );
                             attempt += 1;
                             continue;
                         }
@@ -559,6 +587,7 @@ async fn handle_self_summarize_compact(
     request_ctx: &RequestExecutionContext,
     route: &db::RouteConfig,
     prepared: &PreparedUpstreamRequest,
+    feedback_factory: &AttemptFeedbackFactory,
     logging: ResponseLoggingContext,
 ) -> anyhow::Result<ForwardOutcome> {
     let route_ctx = RouteExecutionContext::new(route);
@@ -583,30 +612,36 @@ async fn handle_self_summarize_compact(
         .upstream_model
         .as_deref()
         .or(request_ctx.request_model.as_deref());
-    let (body, summary) = match super::super::compaction::run_self_summarize_compact(
-        &proxy_client,
-        &summarize_url,
-        &route.api_key,
-        route.native_api,
-        &request_bytes,
-        model_fallback,
-    )
-    .await
-    {
-        Ok(ok) => ok,
-        Err(err) => {
-            return Ok(fail(
-                "compact_summarize_failed",
-                format!("self-summarize compact failed: {err}"),
-            ));
-        }
-    };
+    let (body, summary, attempt_feedback) =
+        match super::super::compaction::run_self_summarize_compact(
+            &proxy_client,
+            &summarize_url,
+            &route.api_key,
+            route.native_api,
+            &request_bytes,
+            model_fallback,
+            services,
+            route,
+            feedback_factory,
+        )
+        .await
+        {
+            Ok(ok) => ok,
+            Err(err) => {
+                return Ok(fail(
+                    "compact_summarize_failed",
+                    format!("self-summarize compact failed: {err}"),
+                ));
+            }
+        };
     if let Err(err) = send_compact_json(services, &request.request_id, body.clone()).await {
+        attempt_feedback.release_probe();
         return Ok(ForwardOutcome::TransportError {
             error: err,
             terminal_recorded: false,
         });
     }
+    attempt_feedback.completed_success();
     let response_prompt = logging
         .content_logging_enabled
         .then(|| {
@@ -765,17 +800,19 @@ async fn handle_attempt_response(
 /// Re-select an API key on the same endpoint after a live quota-exhaustion
 /// response, excluding the key that just failed. Returns `None` when there
 /// is no other key to rotate to or the failover budget is exhausted.
-fn next_quota_failover_route(
+async fn next_quota_failover_route(
     route: &db::RouteConfig,
     request: &BufferedBridgeRequest,
     request_ctx: &RequestExecutionContext,
     services: &RuntimeServices,
     quota_failovers: usize,
-) -> Option<db::RouteConfig> {
+) -> Option<(
+    db::RouteConfig,
+    Option<crate::worker::runtime::routing::QuotaProbePermit>,
+)> {
     if quota_failovers >= MAX_QUOTA_FAILOVERS {
         return None;
     }
-    let quota_cache = services.admin_state().map(|state| &state.token_plan_quota);
     let failed_key_id = route.endpoint_key_id;
     let failed_secret = route.api_key.as_str();
     let mut candidate = route.clone();
@@ -786,12 +823,24 @@ fn next_quota_failover_route(
     if candidate.api_keys.is_empty() {
         return None;
     }
+    if let Some(state) = services.admin_state() {
+        state
+            .token_plan_quota
+            .hydrate_chatgpt_subscription(
+                state.chatgpt_quota_service.as_deref(),
+                route.route_id,
+                route.provider,
+            )
+            .await;
+    }
+    let quota_cache = services.admin_state().map(|state| &state.token_plan_quota);
     let selection = materialize_route_api_key_selection_with_quota(
         &candidate,
         request,
         &request_ctx.request_prompt_log,
         quota_cache,
-    );
+    )
+    .ok()?;
     if selection.selection.secret == route.api_key {
         return None;
     }
@@ -799,7 +848,7 @@ fn next_quota_failover_route(
     candidate.endpoint_key_id = selection.selection.key_id;
     candidate.endpoint_key_label = selection.selection.key_label;
     candidate.route_selection_reason = db::RouteSelectionReason::QuotaFailover;
-    Some(candidate)
+    Some((candidate, selection.quota_probe))
 }
 
 fn log_quota_failover_retry(

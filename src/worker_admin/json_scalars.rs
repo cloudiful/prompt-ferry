@@ -55,6 +55,7 @@ pub(crate) fn failed_key(
         error_code,
         error_message: Some(error_message),
         model_remains: Vec::new(),
+        quota_status: None,
         balances: None,
         five_hour: None,
         weekly: None,

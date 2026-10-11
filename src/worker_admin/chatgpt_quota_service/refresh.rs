@@ -26,9 +26,32 @@ impl ChatGptQuotaService {
         arrival: DateTime<Utc>,
         periodic_active: Option<bool>,
     ) -> RefreshCompletion {
+        self.refresh_with_force(endpoint_id, trigger, arrival, periodic_active, false)
+            .await
+    }
+
+    pub(super) async fn refresh_shared_forced(
+        &self,
+        endpoint_id: Uuid,
+        trigger: RefreshTrigger,
+        arrival: DateTime<Utc>,
+        periodic_active: Option<bool>,
+    ) -> RefreshCompletion {
+        self.refresh_with_force(endpoint_id, trigger, arrival, periodic_active, true)
+            .await
+    }
+
+    async fn refresh_with_force(
+        &self,
+        endpoint_id: Uuid,
+        trigger: RefreshTrigger,
+        arrival: DateTime<Utc>,
+        periodic_active: Option<bool>,
+        force: bool,
+    ) -> RefreshCompletion {
         match timeout(
             SERVICE_TIMEOUT,
-            self.refresh_serialized(endpoint_id, trigger, arrival, periodic_active),
+            self.refresh_serialized(endpoint_id, trigger, arrival, periodic_active, force),
         )
         .await
         {
@@ -52,6 +75,7 @@ impl ChatGptQuotaService {
         trigger: RefreshTrigger,
         arrival: DateTime<Utc>,
         periodic_active: Option<bool>,
+        force: bool,
     ) -> RefreshCompletion {
         let endpoint_lock = {
             let mut locks = self.inner.endpoint_locks.lock().await;
@@ -74,17 +98,18 @@ impl ChatGptQuotaService {
         }
         if !trigger.is_manual() {
             let now = Utc::now();
-            let due = match trigger {
-                RefreshTrigger::Request => snapshot
-                    .as_ref()
-                    .is_none_or(|snapshot| stale(snapshot.observed_at, now)),
-                RefreshTrigger::Periodic => periodic_due(
-                    state.as_ref().and_then(|state| state.last_success_at),
-                    periodic_active.unwrap_or(false),
-                    now,
-                ),
-                RefreshTrigger::Manual => true,
-            };
+            let due = force
+                || match trigger {
+                    RefreshTrigger::Request => snapshot
+                        .as_ref()
+                        .is_none_or(|snapshot| stale(snapshot.observed_at, now)),
+                    RefreshTrigger::Periodic => periodic_due(
+                        state.as_ref().and_then(|state| state.last_success_at),
+                        periodic_active.unwrap_or(false),
+                        now,
+                    ),
+                    RefreshTrigger::Manual => true,
+                };
             if !due
                 || state
                     .as_ref()
@@ -135,7 +160,7 @@ impl ChatGptQuotaService {
             drop(permit);
             drop(endpoint_guard);
             return self
-                .wait_for_replica(endpoint_id, trigger, arrival, periodic_active)
+                .wait_for_replica(endpoint_id, trigger, arrival, periodic_active, force)
                 .await;
         }
         let previous_failures = state

@@ -284,7 +284,7 @@ test('a stale last-good ChatGPT snapshot is not labeled as currently available',
   } as TokenPlanUsageResponse
 
   const html = await render(usage)
-  expect(html).toContain('quotaCachedObservation')
+  expect(html).toContain('data-subscription-windows')
   expect(html).not.toContain('tokenPlanAvailable')
 })
 

@@ -1,12 +1,22 @@
 use serde_json::Value;
 
-use crate::config::NativeApi;
+use crate::{
+    config::NativeApi,
+    db::RouteConfig,
+    worker::runtime::{
+        ai::quota_feedback::{AttemptFeedback, AttemptFeedbackFactory},
+        context::RuntimeServices,
+    },
+};
 
 pub mod prune;
+#[cfg(test)]
+#[path = "quota_feedback_tests.rs"]
+mod quota_feedback_tests;
 pub mod summarize;
 
 pub use prune::prune_for_compact;
-pub use summarize::{assemble_compaction_response, self_compact_via_upstream, tail_user_messages};
+pub use summarize::{assemble_compaction_response, tail_user_messages};
 
 const COMPACT_TAIL_TOKENS: usize = 15_000;
 
@@ -15,14 +25,17 @@ const COMPACT_TAIL_TOKENS: usize = 15_000;
 /// history), summarize via the same-route upstream, and assemble the
 /// plaintext `response.compaction` body. Returns `(body, summary_text)`.
 /// Never fabricates `encrypted_content` and never calls compact recursively.
-pub async fn run_self_summarize_compact(
+pub(super) async fn run_self_summarize_compact(
     client: &reqwest::Client,
     summarize_url: &str,
     api_key: &str,
     native_api: NativeApi,
     request_body: &[u8],
     model_fallback: Option<&str>,
-) -> anyhow::Result<(Vec<u8>, String)> {
+    services: &RuntimeServices,
+    route: &RouteConfig,
+    feedback_factory: &AttemptFeedbackFactory,
+) -> anyhow::Result<(Vec<u8>, String, AttemptFeedback)> {
     let value: Value = serde_json::from_slice(request_body)
         .map_err(|err| anyhow::anyhow!("compact body must be JSON object: {err}"))?;
     let model = value
@@ -46,7 +59,7 @@ pub async fn run_self_summarize_compact(
         _ => anyhow::bail!("compact.input must be array or string"),
     };
     let (head, history) = prune_for_compact(items, COMPACT_TAIL_TOKENS);
-    let summary = self_compact_via_upstream(
+    let (summary, feedback) = summarize::self_compact_via_upstream(
         client,
         summarize_url,
         api_key,
@@ -54,10 +67,13 @@ pub async fn run_self_summarize_compact(
         &head,
         &history,
         model,
+        services,
+        route,
+        feedback_factory,
     )
     .await?;
     let tail = tail_user_messages(&history, COMPACT_TAIL_TOKENS);
     let response = assemble_compaction_response(&tail, &summary, model);
     let body = serde_json::to_vec(&response)?;
-    Ok((body, summary))
+    Ok((body, summary, feedback))
 }

@@ -9,6 +9,36 @@ import {
   requestTokenPlanUsage,
 } from './useTokenPlanUsageCache'
 
+function usageForFetchState(
+  usage: TokenPlanUsageResponse | null,
+  state: ReturnType<typeof getTokenPlanUsageSnapshot>['state'],
+): TokenPlanUsageResponse | null {
+  if (usage === null || state !== 'stale') return usage
+  return {
+    ...usage,
+    keys: usage.keys.map((key) => {
+      const status = key.quota_status
+      if (
+        status?.state === 'cooling' &&
+        status.cooldown_until != null &&
+        Date.parse(status.cooldown_until) > Date.now()
+      ) {
+        return key
+      }
+      return {
+        ...key,
+        quota_status: {
+          state: 'unknown',
+          observed_at: status?.observed_at ?? null,
+          cooldown_until: null,
+          refresh_failed: status?.refresh_failed ?? false,
+          scope: 'text_inference',
+        },
+      }
+    }),
+  }
+}
+
 export function useEndpointTokenPlanUsage(
   findEndpointById: (endpointId: string) => ProviderEndpoint | null,
   onError: (cause: unknown) => void,
@@ -30,10 +60,8 @@ export function useEndpointTokenPlanUsage(
     // so the dialog paints the cached snapshot before any await and a stale
     // entry keeps its numbers on screen while the shared policy revalidates.
     const cached = getTokenPlanUsageSnapshot(nextEndpointId)
-    usage.value = cached.usage
-    // Only a cold or failed entry shows the spinner; a cached ready snapshot
-    // (fresh or stale) stays visible instead of blanking to loading.
-    loading.value = cached.state !== 'ready'
+    usage.value = usageForFetchState(cached.usage, cached.state)
+    loading.value = cached.usage === null
     try {
       // Always go through the shared request policy, even for a cached ready
       // snapshot: a fresh entry is a zero-request warm hit, while a stale entry
@@ -42,7 +70,7 @@ export function useEndpointTokenPlanUsage(
       const result = await requestTokenPlanUsage(nextEndpointId, options)
       // A slower open for another endpoint must not overwrite the current one.
       if (endpointId.value !== nextEndpointId) return
-      usage.value = result.usage
+      usage.value = usageForFetchState(result.usage, result.state)
       // Report only a failure this open actually awaited: a pinned negative
       // entry is replayed silently instead of re-toasting on every open.
       if (result.failed) onError(result.cause)

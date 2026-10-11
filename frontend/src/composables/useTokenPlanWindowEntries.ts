@@ -103,14 +103,17 @@ export function formatMoney(
   return `${currencySymbol(currency)}${value.toFixed(2)}`
 }
 
-// Pure adapt helpers exposed at module scope so the badge composable
-// (which only needs remaining-percent math, no t/nowMs) can reuse the
-// same provider-specific folding logic without instantiating the full
-// dialog composable.
+// Pure adapt helpers shared by the dialog and badges without instantiating
+// the dialog's ticker.
+export function knownRemainingPercent(window: TokenPlanWindowUsage): number | null {
+  const value = window.remaining_percent
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
+    ? value
+    : null
+}
+
 export function remainingPercent(window: TokenPlanWindowUsage): number {
-  const raw = window.remaining_percent
-  if (raw == null || !Number.isFinite(raw)) return 0
-  return Math.max(0, Math.min(100, raw))
+  return knownRemainingPercent(window) ?? 0
 }
 
 export function usedPercent(window: TokenPlanWindowUsage): number {
@@ -195,6 +198,11 @@ export function formatResetDuration(ms: number | null, t: TranslateFn): string {
   return t('tokenPlanResetExpiresSeconds', { seconds: totalSeconds })
 }
 
+function minimumKnownRemaining(windows: TokenPlanWindowUsage[]): number | null {
+  const known = windows.map(knownRemainingPercent).filter((value): value is number => value !== null)
+  return known.length ? Math.min(...known) : null
+}
+
 export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
   function keyWindows(key: TokenPlanKeyUsage): TokenPlanWindowUsage[] {
     return key.model_remains.flatMap((model) =>
@@ -211,9 +219,10 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
   }
 
   function minimumRemainingPercent(key: TokenPlanKeyUsage): number | null {
+    const known = minimumKnownRemaining(keyWindows(key))
     return subscriptionQuotaMinimumRemainingPercent(
       key,
-      keyWindows(key).map(remainingPercent),
+      known === null ? [] : [known],
     )
   }
 
@@ -265,8 +274,7 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
     const adapted = [ccAsWindow(key.five_hour), ccAsWindow(key.weekly)].filter(
       (window): window is TokenPlanWindowUsage => window != null,
     )
-    if (adapted.length === 0) return null
-    return Math.min(...adapted.map(remainingPercent))
+    return minimumKnownRemaining(adapted)
   }
 
   function opencodeGoEntries(key: TokenPlanKeyUsage): OpencodeGoEntry[] {
@@ -289,8 +297,7 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
       opencodeGoAsWindow(key.opencodego_weekly),
       opencodeGoAsWindow(key.opencodego_monthly),
     ].filter((window): window is TokenPlanWindowUsage => window != null)
-    if (adapted.length === 0) return null
-    return Math.min(...adapted.map(remainingPercent))
+    return minimumKnownRemaining(adapted)
   }
 
   function glmEntries(key: TokenPlanKeyUsage): GlmEntry[] {
@@ -311,16 +318,11 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
       glmAsWindow(key.glm_five_hour),
       glmAsWindow(key.glm_weekly),
     ].filter((window): window is TokenPlanWindowUsage => window != null)
-    if (adapted.length === 0) return null
-    return Math.min(...adapted.map(remainingPercent))
+    return minimumKnownRemaining(adapted)
   }
 
-  // Unified progress-window entries: opencodeGo + GLM rendered on the
-  // same 3-column row template. GLM adds a used/total subline because
-  // its raw payload carries `current_value` + `limit`; OpencodeGo
-  // payload has no used/total so its subline is null. Keeping both
-  // providers on one entry list lets the dialog render them with a
-  // single v-for instead of two parallel blocks.
+  // OpencodeGo and GLM share one row template; only GLM has a used/total
+  // subline.
   function progressWindowEntries(
     key: TokenPlanKeyUsage,
   ): ProgressWindowEntry[] {

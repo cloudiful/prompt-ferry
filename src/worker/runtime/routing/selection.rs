@@ -2,8 +2,12 @@ use super::super::{
     RequestExecutionContext, context::RuntimeServices, prompt_log::RequestPromptLog,
     request_assembly::BufferedBridgeRequest,
 };
-use super::key_pool;
 use super::quota_selection::{refresh_candidate_quota, request_model};
+use super::{
+    candidate_quota_selection::CandidateSelection,
+    quota_eligibility::{QuotaContext, reserve},
+    quota_probe::{self, ProbeClaim, QuotaProbePermit},
+};
 use crate::{
     db, endpoint_models,
     worker_admin::{
@@ -16,13 +20,7 @@ use tracing::{info, warn};
 
 pub(in crate::worker::runtime) struct SelectedRoute {
     pub(in crate::worker::runtime) route: db::RouteConfig,
-}
-
-struct CandidateSelection<'a> {
-    target: &'a db::ModelRouteCandidateTarget,
-    key: db::EndpointApiKeySelection,
-    reason: db::RouteSelectionReason,
-    invalid_override: bool,
+    pub(in crate::worker::runtime) quota_probe: Option<QuotaProbePermit>,
 }
 
 pub(in crate::worker::runtime) async fn discover_dynamic_model_route(
@@ -122,21 +120,46 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
                 selected.key_selection,
                 selected.route_selection_reason,
             ),
+            quota_probe: selected.quota_probe,
         }));
     }
 
     let request_model = request_model(request);
     let quota_cache = services.admin_state().map(|state| &state.token_plan_quota);
     refresh_candidate_quota(services, candidate).await;
-    let Some(selected) = select_unified_candidate(
-        candidate,
-        request,
-        &request_ctx.request_prompt_log,
-        quota_cache,
-        request_model.as_deref(),
-        routing_key,
-    ) else {
-        return Ok(None);
+    let mut selected_with_probe = None;
+    for _ in 0..quota_probe::candidate_claim_limit(candidate) {
+        let Some(selected) = select_unified_candidate(
+            candidate,
+            request,
+            &request_ctx.request_prompt_log,
+            quota_cache,
+            request_model.as_deref(),
+            routing_key,
+        )?
+        else {
+            return Ok(None);
+        };
+        match quota_probe::claim(
+            quota_cache,
+            selected.target.endpoint_id,
+            selected.key.key_id,
+        ) {
+            ProbeClaim::NotRequired => {
+                reserve_selected_key(quota_cache, request, &selected);
+                selected_with_probe = Some((selected, None));
+                break;
+            }
+            ProbeClaim::Reserved(permit) => {
+                reserve_selected_key(quota_cache, request, &selected);
+                selected_with_probe = Some((selected, Some(permit)));
+                break;
+            }
+            ProbeClaim::LostRace => {}
+        }
+    }
+    let Some((selected, quota_probe)) = selected_with_probe else {
+        return Err(super::quota_unavailable::QuotaUnavailableError.into());
     };
     clear_invalid_conversation_endpoint_key_override(
         services,
@@ -152,7 +175,21 @@ pub(in crate::worker::runtime) async fn select_route_for_candidate(
             selected.key,
             selected.reason,
         ),
+        quota_probe,
     }))
+}
+
+fn reserve_selected_key(
+    quota_cache: Option<&TokenPlanQuotaCache>,
+    request: &BufferedBridgeRequest,
+    selected: &CandidateSelection<'_>,
+) {
+    reserve(
+        quota_cache,
+        selected.target.endpoint_id,
+        selected.key.key_id,
+        estimate_input_tokens(&request.body),
+    );
 }
 
 fn select_unified_candidate<'a>(
@@ -162,67 +199,20 @@ fn select_unified_candidate<'a>(
     quota_cache: Option<&TokenPlanQuotaCache>,
     model: Option<&str>,
     routing_key: Option<&str>,
-) -> Option<CandidateSelection<'a>> {
+) -> anyhow::Result<Option<CandidateSelection<'a>>> {
     let stable_key = routing_stable_key(request, request_prompt_log, routing_key);
-    let estimated = estimate_input_tokens(&request.body);
-
-    if let Some(endpoint_id) = request_prompt_log.conversation_override_endpoint_id
-        && let Some(target) = candidate.targets.iter().find(|target| {
-            // Issue #378 Phase I: window-inactive override targets do not
-            // participate (same worker-local clock as the pool filter).
-            // Issue #392 Phase K: effective windows (target-nonempty else
-            // endpoint else all-day).
-            target.enabled
-                && target.endpoint_id == endpoint_id
-                && db::effective_stored_is_active_at(
-                    target.active_windows.as_deref(),
-                    target.endpoint_active_windows.as_deref(),
-                    db::worker_local_minutes_now(),
-                )
-        })
-    {
-        let units = key_pool::target_units(target, quota_cache, model);
-        let drawn = key_pool::draw(&units, &stable_key, quota_cache, estimated);
-        let key = drawn
-            .map(|unit| unit.selection())
-            .unwrap_or_else(|| target_secret(target));
-        let (key, invalid_override) = key_pool::apply_override(
-            target,
-            key,
-            request_prompt_log.conversation_override_endpoint_key_id,
-        );
-        return Some(CandidateSelection {
-            target,
-            key,
-            reason: db::RouteSelectionReason::ConversationOverride,
-            invalid_override,
-        });
-    }
-
-    let mut units = key_pool::candidate_units(candidate, quota_cache, model, None);
-    if units.is_empty() {
-        units = key_pool::candidate_units_without_quota(candidate, None);
-    }
-    let unit = key_pool::draw(&units, &stable_key, quota_cache, estimated)?;
-    let (key, invalid_override) = key_pool::apply_override(
-        unit.target,
-        unit.selection(),
+    let selected = super::candidate_quota_selection::select(
+        candidate,
+        quota_cache,
+        QuotaContext {
+            model,
+            path: &request.path,
+        },
+        &stable_key,
+        request_prompt_log.conversation_override_endpoint_id,
         request_prompt_log.conversation_override_endpoint_key_id,
-    );
-    Some(CandidateSelection {
-        target: unit.target,
-        key,
-        reason: db::RouteSelectionReason::Default,
-        invalid_override,
-    })
-}
-
-fn target_secret(target: &db::ModelRouteCandidateTarget) -> db::EndpointApiKeySelection {
-    db::EndpointApiKeySelection {
-        key_id: None,
-        key_label: None,
-        secret: target.api_key.clone(),
-    }
+    )?;
+    Ok(selected)
 }
 
 /// Session identity first (conversation / previous response / provider
@@ -243,7 +233,7 @@ fn routing_stable_key(
         .unwrap_or_else(|| "default".to_string())
 }
 
-fn route_from_target(
+pub(super) fn route_from_target(
     target: &db::ModelRouteCandidateTarget,
     user_id: i64,
     rule_id: uuid::Uuid,
@@ -337,6 +327,7 @@ pub(in crate::worker::runtime) fn materialize_route_api_key_selection(
     request_prompt_log: &RequestPromptLog,
 ) -> EndpointApiKeySelectionResult {
     materialize_route_api_key_selection_with_quota(route, request, request_prompt_log, None)
+        .expect("unrestricted test route has credentials")
 }
 
 pub(in crate::worker::runtime) fn materialize_route_api_key_selection_with_quota(
@@ -344,58 +335,8 @@ pub(in crate::worker::runtime) fn materialize_route_api_key_selection_with_quota
     request: &BufferedBridgeRequest,
     request_prompt_log: &RequestPromptLog,
     quota_cache: Option<&TokenPlanQuotaCache>,
-) -> EndpointApiKeySelectionResult {
-    let model = request_model(request);
-    let model = model.as_deref();
-    if let Some(override_key_id) = request_prompt_log.conversation_override_endpoint_key_id {
-        if let Some(selection) = key_pool::override_route_key(route, override_key_id) {
-            return EndpointApiKeySelectionResult {
-                selection,
-                invalid_conversation_override: false,
-            };
-        }
-        let (selection, _) = draw_route_key(route, request, request_prompt_log, quota_cache, model);
-        return EndpointApiKeySelectionResult {
-            selection,
-            invalid_conversation_override: true,
-        };
-    }
-    let (selection, _) = draw_route_key(route, request, request_prompt_log, quota_cache, model);
-    EndpointApiKeySelectionResult {
-        selection,
-        invalid_conversation_override: false,
-    }
-}
-
-fn draw_route_key(
-    route: &db::RouteConfig,
-    request: &BufferedBridgeRequest,
-    request_prompt_log: &RequestPromptLog,
-    quota_cache: Option<&TokenPlanQuotaCache>,
-    model: Option<&str>,
-) -> (db::EndpointApiKeySelection, bool) {
-    let units = key_pool::route_units(route, quota_cache, model);
-    let stable_key = endpoint_key_stickiness_value(request, request_prompt_log);
-    let estimated = estimate_input_tokens(&request.body);
-    if let Some(stable_key) = stable_key
-        && let Some(unit) =
-            key_pool::draw_route(&units, &stable_key, route.route_id, quota_cache, estimated)
-    {
-        return (unit.key.clone(), false);
-    }
-    units
-        .first()
-        .map(|unit| (unit.key.clone(), false))
-        .unwrap_or_else(|| {
-            (
-                db::EndpointApiKeySelection {
-                    key_id: None,
-                    key_label: None,
-                    secret: route.api_key.clone(),
-                },
-                false,
-            )
-        })
+) -> anyhow::Result<EndpointApiKeySelectionResult> {
+    super::route_key_eligibility::materialize(route, request, request_prompt_log, quota_cache)
 }
 
 pub(in crate::worker::runtime) async fn clear_invalid_conversation_endpoint_key_override(
@@ -422,10 +363,7 @@ pub(in crate::worker::runtime) async fn clear_invalid_conversation_endpoint_key_
     }
 }
 
-pub(in crate::worker::runtime) struct EndpointApiKeySelectionResult {
-    pub(in crate::worker::runtime) selection: db::EndpointApiKeySelection,
-    pub(in crate::worker::runtime) invalid_conversation_override: bool,
-}
+pub(in crate::worker::runtime) use super::route_key_eligibility::EndpointApiKeySelectionResult;
 
 #[cfg(test)]
 mod tests {

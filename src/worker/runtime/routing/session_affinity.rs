@@ -8,7 +8,6 @@ use crate::{
     response_affinity::{
         ResponseAffinityBinding, ResponseAffinityStore, api_key_fingerprint, log_unavailable,
     },
-    routing::candidate_target_by_endpoint,
     worker::runtime::context::AffinityFailureAudit,
     worker_admin::token_plan_cache::{TokenPlanQuotaCache, estimate_input_tokens},
 };
@@ -17,12 +16,16 @@ use super::super::{
     RequestExecutionContext, context::RuntimeServices, prompt_log::RequestPromptLog,
     request_assembly::BufferedBridgeRequest,
 };
-use super::key_pool;
 use super::quota_selection::{refresh_candidate_quota, request_model};
+use super::quota_unavailable::QuotaUnavailableError;
 use super::selection::endpoint_key_stickiness_value;
 use super::session_affinity_quota::{
     BindingSelection, binding_for_selection, log_quota_failover, quota_failover_selection,
     selection_for_binding,
+};
+use super::{
+    quota_eligibility::{QuotaContext, reserve},
+    quota_probe::{self, ProbeClaim, QuotaProbePermit},
 };
 
 #[derive(Debug, Clone)]
@@ -52,7 +55,7 @@ impl RouteAffinityError {
         }
     }
 
-    fn target_unavailable(audit: AffinityFailureAudit) -> Self {
+    pub(super) fn target_unavailable(audit: AffinityFailureAudit) -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
             code: "responses_session_affinity_target_unavailable",
@@ -83,13 +86,7 @@ pub(super) struct SessionAffinitySelection<'a> {
     pub(super) target: &'a db::ModelRouteCandidateTarget,
     pub(super) key_selection: db::EndpointApiKeySelection,
     pub(super) route_selection_reason: db::RouteSelectionReason,
-}
-
-struct NewSessionUnit<'a> {
-    target: &'a db::ModelRouteCandidateTarget,
-    key: db::EndpointApiKeySelection,
-    reason: db::RouteSelectionReason,
-    invalid_override: bool,
+    pub(super) quota_probe: Option<QuotaProbePermit>,
 }
 
 pub(super) async fn select<'a>(
@@ -132,13 +129,34 @@ pub(super) async fn select<'a>(
             if override_conflicts_with_binding(&current_binding, request_prompt_log) {
                 return Err(anyhow::Error::new(RouteAffinityError::conflict(audit)));
             }
-            match selection_for_binding(candidate, &current_binding, request, Some(quota_cache)) {
+            let binding_selection = match selection_for_binding(
+                candidate,
+                &current_binding,
+                request,
+                Some(quota_cache),
+            ) {
+                BindingSelection::Selected(mut selection) => {
+                    if claim_selection_probe(quota_cache, &mut selection) {
+                        BindingSelection::Selected(selection)
+                    } else {
+                        BindingSelection::QuotaExhausted
+                    }
+                }
+                other => other,
+            };
+            match binding_selection {
                 BindingSelection::Selected(selection) => {
                     heal_stale_binding(&store, &cache_key, &current_binding, &selection).await;
+                    reserve(
+                        Some(quota_cache),
+                        selection.target.endpoint_id,
+                        selection.key_selection.key_id,
+                        estimated,
+                    );
                     return Ok(selection);
                 }
                 BindingSelection::QuotaExhausted => {
-                    let Some((selection, replacement)) = quota_failover_selection(
+                    let Some((selection, replacement)) = quota_failover_with_probe(
                         candidate,
                         &current_binding,
                         request,
@@ -147,9 +165,7 @@ pub(super) async fn select<'a>(
                         &stable_identity,
                         estimated,
                     ) else {
-                        return Err(anyhow::Error::new(RouteAffinityError::target_unavailable(
-                            audit,
-                        )));
+                        return Err(anyhow::Error::new(QuotaUnavailableError));
                     };
                     match store
                         .replace_if_current(&cache_key, &current_binding, &replacement)
@@ -161,6 +177,12 @@ pub(super) async fn select<'a>(
                                 &current_binding,
                                 &replacement,
                                 request_prompt_log,
+                            );
+                            reserve(
+                                Some(quota_cache),
+                                selection.target.endpoint_id,
+                                selection.key_selection.key_id,
+                                estimated,
                             );
                             return Ok(selection);
                         }
@@ -186,6 +208,15 @@ pub(super) async fn select<'a>(
                     }
                 }
                 BindingSelection::Unavailable => {
+                    if request_prompt_log
+                        .request_previous_response_id
+                        .as_deref()
+                        .is_some_and(|id| !id.trim().is_empty())
+                    {
+                        return Err(anyhow::Error::new(RouteAffinityError::target_unavailable(
+                            audit,
+                        )));
+                    }
                     // 仅 StaleEndpoint/StaleKey 走自动重绑；QuotaExhausted 已在上一个分支处理，conflict 已提前 return。
                     if !matches!(
                         crate::routing::bound_binding_state(candidate, &current_binding),
@@ -224,8 +255,10 @@ pub(super) async fn select<'a>(
             &stable_identity,
             &AffinityFailureAudit::default(),
             quota_cache,
-            model.as_deref(),
-            estimated,
+            QuotaContext {
+                model: model.as_deref(),
+                path: &request.path,
+            },
         )?;
         let created = match store.get_or_create(&cache_key, &candidate_binding).await {
             Ok(binding) => binding,
@@ -235,6 +268,12 @@ pub(super) async fn select<'a>(
             }
         };
         if created == candidate_binding {
+            reserve(
+                Some(quota_cache),
+                selection.target.endpoint_id,
+                selection.key_selection.key_id,
+                estimated,
+            );
             return Ok(selection);
         }
         binding = Some(created);
@@ -243,6 +282,50 @@ pub(super) async fn select<'a>(
     Err(anyhow::Error::new(RouteAffinityError::target_unavailable(
         binding_audit(candidate.rule_id, binding.as_ref(), request_prompt_log),
     )))
+}
+
+fn claim_selection_probe(
+    quota_cache: &TokenPlanQuotaCache,
+    selection: &mut SessionAffinitySelection<'_>,
+) -> bool {
+    match quota_probe::claim(
+        Some(quota_cache),
+        selection.target.endpoint_id,
+        selection.key_selection.key_id,
+    ) {
+        ProbeClaim::NotRequired => true,
+        ProbeClaim::Reserved(permit) => {
+            selection.quota_probe = Some(permit);
+            true
+        }
+        ProbeClaim::LostRace => false,
+    }
+}
+
+fn quota_failover_with_probe<'a>(
+    candidate: &'a db::ModelRouteCandidate,
+    binding: &ResponseAffinityBinding,
+    request: &BufferedBridgeRequest,
+    request_prompt_log: &RequestPromptLog,
+    quota_cache: &TokenPlanQuotaCache,
+    stable_identity: &str,
+    estimated: u64,
+) -> Option<(SessionAffinitySelection<'a>, ResponseAffinityBinding)> {
+    for _ in 0..quota_probe::candidate_claim_limit(candidate) {
+        let (mut selection, replacement) = quota_failover_selection(
+            candidate,
+            binding,
+            request,
+            request_prompt_log,
+            quota_cache,
+            stable_identity,
+            estimated,
+        )?;
+        if claim_selection_probe(quota_cache, &mut selection) {
+            return Some((selection, replacement));
+        }
+    }
+    None
 }
 
 fn binding_audit(
@@ -287,138 +370,35 @@ fn select_new_binding<'a>(
     stable_identity: &str,
     audit: &AffinityFailureAudit,
     quota_cache: &TokenPlanQuotaCache,
-    model: Option<&str>,
-    estimated_tokens: u64,
+    context: QuotaContext<'_>,
 ) -> Result<(SessionAffinitySelection<'a>, ResponseAffinityBinding)> {
-    let selected = select_new_session_unit(
-        candidate,
-        request_prompt_log,
-        stable_identity,
-        quota_cache,
-        model,
-        estimated_tokens,
-        audit,
-    )?;
-    if selected.invalid_override {
-        return Err(anyhow::Error::new(RouteAffinityError::conflict(
-            audit.clone(),
-        )));
-    }
-    let binding = binding_for_selection(selected.target, &selected.key);
-    Ok((
-        SessionAffinitySelection {
+    for _ in 0..quota_probe::candidate_claim_limit(candidate) {
+        let selected = super::session_quota_selection::select(
+            candidate,
+            request_prompt_log,
+            stable_identity,
+            quota_cache,
+            context,
+            audit,
+        )?;
+        if selected.invalid_override {
+            return Err(anyhow::Error::new(RouteAffinityError::conflict(
+                audit.clone(),
+            )));
+        }
+        let mut selection = SessionAffinitySelection {
             target: selected.target,
             key_selection: selected.key,
             route_selection_reason: selected.reason,
-        },
-        binding,
-    ))
-}
-
-fn select_new_session_unit<'a>(
-    candidate: &'a db::ModelRouteCandidate,
-    request_prompt_log: &RequestPromptLog,
-    stable_identity: &str,
-    quota_cache: &TokenPlanQuotaCache,
-    model: Option<&str>,
-    estimated_tokens: u64,
-    audit: &AffinityFailureAudit,
-) -> Result<NewSessionUnit<'a>> {
-    if let Some(endpoint_id) = request_prompt_log.conversation_override_endpoint_id {
-        let target = candidate_target_by_endpoint(candidate, endpoint_id)
-            .filter(|target| {
-                target.enabled
-                    && crate::db::stored_is_active_at(
-                        target.active_windows.as_deref(),
-                        crate::db::worker_local_minutes_now(),
-                    )
-            })
-            .ok_or_else(|| {
-                anyhow::Error::new(RouteAffinityError::target_unavailable(audit.clone()))
-            })?;
-        let (key, invalid_override) = select_target_unit(
-            target,
-            request_prompt_log,
-            stable_identity,
-            quota_cache,
-            model,
-            estimated_tokens,
-        );
-        return Ok(NewSessionUnit {
-            target,
-            key,
-            reason: db::RouteSelectionReason::ConversationOverride,
-            invalid_override,
-        });
+            quota_probe: None,
+        };
+        if !claim_selection_probe(quota_cache, &mut selection) {
+            continue;
+        }
+        let binding = binding_for_selection(selection.target, &selection.key_selection);
+        return Ok((selection, binding));
     }
-
-    if let Some(target) = request_prompt_log
-        .preferred_endpoint_id
-        .and_then(|endpoint_id| candidate_target_by_endpoint(candidate, endpoint_id))
-        .filter(|target| {
-            target.enabled
-                && crate::db::stored_is_active_at(
-                    target.active_windows.as_deref(),
-                    crate::db::worker_local_minutes_now(),
-                )
-        })
-    {
-        let (key, invalid_override) = select_target_unit(
-            target,
-            request_prompt_log,
-            stable_identity,
-            quota_cache,
-            model,
-            estimated_tokens,
-        );
-        return Ok(NewSessionUnit {
-            target,
-            key,
-            reason: db::RouteSelectionReason::SessionAffinity,
-            invalid_override,
-        });
-    }
-
-    let mut units = key_pool::candidate_units(candidate, Some(quota_cache), model, None);
-    if units.is_empty() {
-        units = key_pool::candidate_units_without_quota(candidate, None);
-    }
-    let unit = key_pool::draw(&units, stable_identity, Some(quota_cache), estimated_tokens)
-        .ok_or_else(|| anyhow::Error::new(RouteAffinityError::target_unavailable(audit.clone())))?;
-    let (key, invalid_override) = key_pool::apply_override(
-        unit.target,
-        unit.selection(),
-        request_prompt_log.conversation_override_endpoint_key_id,
-    );
-    Ok(NewSessionUnit {
-        target: unit.target,
-        key,
-        reason: db::RouteSelectionReason::SessionAffinity,
-        invalid_override,
-    })
-}
-
-fn select_target_unit(
-    target: &db::ModelRouteCandidateTarget,
-    request_prompt_log: &RequestPromptLog,
-    stable_identity: &str,
-    quota_cache: &TokenPlanQuotaCache,
-    model: Option<&str>,
-    estimated_tokens: u64,
-) -> (db::EndpointApiKeySelection, bool) {
-    let units = key_pool::target_units(target, Some(quota_cache), model);
-    let drawn = key_pool::draw(&units, stable_identity, Some(quota_cache), estimated_tokens)
-        .map(|unit| unit.selection())
-        .unwrap_or_else(|| db::EndpointApiKeySelection {
-            key_id: None,
-            key_label: None,
-            secret: target.api_key.clone(),
-        });
-    key_pool::apply_override(
-        target,
-        drawn,
-        request_prompt_log.conversation_override_endpoint_key_id,
-    )
+    Err(anyhow::Error::new(QuotaUnavailableError))
 }
 
 fn override_conflicts_with_binding(

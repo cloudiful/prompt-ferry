@@ -1,6 +1,16 @@
 use serde_json::{Value, json};
 
-use crate::config::NativeApi;
+use crate::{
+    config::NativeApi,
+    db::RouteConfig,
+    upstream_error::is_quota_exhaustion,
+    worker::runtime::{
+        ai::quota_feedback::{
+            AttemptFeedback, AttemptFeedbackFactory, parse_retry_after, schedule_quota_refresh,
+        },
+        context::RuntimeServices,
+    },
+};
 
 /// Four-part handoff prompt for the self-summarize upstream call:
 /// progress + decisions, constraints + preferences, remaining TODOs,
@@ -136,7 +146,7 @@ pub fn assemble_compaction_response(tail: &[Value], summary: &str, model: &str) 
 /// Anthropic targets use `/v1/messages`; Responses targets never reach here
 /// (they passthrough natively). Never sends `context_management` and never
 /// posts to `/v1/responses/compact`, so compact never recurses.
-pub async fn self_compact_via_upstream(
+pub(super) async fn self_compact_via_upstream(
     client: &reqwest::Client,
     summarize_url: &str,
     api_key: &str,
@@ -144,7 +154,10 @@ pub async fn self_compact_via_upstream(
     head: &[Value],
     history: &[Value],
     model: &str,
-) -> anyhow::Result<String> {
+    services: &RuntimeServices,
+    route: &RouteConfig,
+    feedback_factory: &AttemptFeedbackFactory,
+) -> anyhow::Result<(String, AttemptFeedback)> {
     let input = build_summarize_input(head, history);
     let (body, is_chat) = match native_api {
         NativeApi::Chat => (
@@ -180,24 +193,59 @@ pub async fn self_compact_via_upstream(
             .header("anthropic-version", "2023-06-01"),
         _ => request.bearer_auth(api_key),
     };
-    let response = request
-        .send()
-        .await
-        .map_err(|err| anyhow::anyhow!("summarize upstream request failed: {err}"))?;
+    let attempt_feedback = feedback_factory.begin_attempt();
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(err) => {
+            attempt_feedback.release_probe();
+            return Err(anyhow::anyhow!("summarize upstream request failed: {err}"));
+        }
+    };
     let status = response.status();
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|err| anyhow::anyhow!("summarize upstream body failed: {err}"))?;
+    let status_is_429 = status == http::StatusCode::TOO_MANY_REQUESTS;
+    if status_is_429 {
+        attempt_feedback.record_429(parse_retry_after(response.headers()));
+    }
+    let bytes = match response.bytes().await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            if status_is_429 {
+                schedule_quota_refresh(services, route);
+            }
+            attempt_feedback.release_probe();
+            return Err(anyhow::anyhow!("summarize upstream body failed: {err}"));
+        }
+    };
+    let quota_exhausted =
+        !status.is_success() && is_quota_exhaustion(&String::from_utf8_lossy(&bytes));
+    if quota_exhausted {
+        if !status_is_429 {
+            attempt_feedback.record_429(None);
+        }
+        if let Some(state) = services.admin_state() {
+            state.token_plan_quota.invalidate(route.route_id).await;
+        }
+    }
+    if status_is_429 || quota_exhausted {
+        schedule_quota_refresh(services, route);
+    }
     if !status.is_success() {
+        attempt_feedback.release_probe();
         anyhow::bail!("summarize upstream returned {}", status.as_u16());
     }
-    if is_chat {
+    let summary = if is_chat {
         extract_summary_text_from_chat_body(&bytes)
     } else if native_api == NativeApi::AnthropicMessages {
         extract_anthropic_summary_text(&bytes)
     } else {
         extract_summary_text_from_responses_body(&bytes)
+    };
+    match summary {
+        Ok(summary) => Ok((summary, attempt_feedback)),
+        Err(err) => {
+            attempt_feedback.release_probe();
+            Err(err)
+        }
     }
 }
 

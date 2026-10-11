@@ -93,8 +93,9 @@ use crate::{
         RequestRecordsClearRequest, RequestRecordsClearResponse, ResetPasswordRequest,
         SessionAffinityResetResponse, SessionAffinityState, SessionAffinityStatus,
         SessionRouteOptionsResponse, SubscriptionQuotaObservation, SubscriptionWindowAvailability,
-        SubscriptionWindowUsage, TokenPlanKeyUsage, TokenPlanModelUsage, TokenPlanUsageResponse,
-        TokenPlanWindowUsage, UpdateClientKeyRequest, UserOptionsResponse, UserPageResponse,
+        SubscriptionWindowUsage, TokenPlanKeyUsage, TokenPlanModelUsage, TokenPlanQuotaState,
+        TokenPlanQuotaStatus, TokenPlanUsageResponse, TokenPlanWindowUsage, UpdateClientKeyRequest,
+        UserOptionsResponse, UserPageResponse,
     },
 };
 
@@ -203,6 +204,8 @@ pub(super) struct IdentityApiDoc;
             OAuthLoginResponse,
             OAuthLoginStatus,
             TokenPlanUsageResponse,
+            TokenPlanQuotaStatus,
+            TokenPlanQuotaState,
             QuotaSnapshotHistoryItem,
             QuotaSnapshotHistoryResponse,
             TokenPlanKeyUsage,

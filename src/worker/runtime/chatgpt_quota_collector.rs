@@ -1,10 +1,14 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
-use crate::{config::WorkerConfig, worker_admin::chatgpt_quota_service::ChatGptQuotaService};
+use crate::{
+    config::WorkerConfig,
+    worker_admin::chatgpt_quota_service::{
+        ChatGptQuotaService, RequestWakeReason, RequestWakeReceiver,
+    },
+};
 use scheduler::{Job, Schedule, Task, TaskContext};
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::task::JoinHandle;
 use tracing::warn;
-use uuid::Uuid;
 
 use super::{
     background_job::{connect_coordinated_store, coordinated_scheduler, run_coordinated_scheduler},
@@ -80,32 +84,41 @@ fn periodic_coordination_configured(valkey_url: &str) -> bool {
 
 async fn run_request_wakes(
     service: Arc<ChatGptQuotaService>,
-    mut receiver: mpsc::Receiver<Uuid>,
+    mut receiver: RequestWakeReceiver,
     control: RuntimeControl,
 ) {
     loop {
-        let endpoint_id = tokio::select! {
+        let wake = tokio::select! {
             _ = control.wait_for_shutdown() => break,
-            endpoint_id = receiver.recv() => match endpoint_id {
-                Some(endpoint_id) => endpoint_id,
+            wake = receiver.recv_event() => match wake {
+                Some(wake) => wake,
                 None => break,
+            }
+        };
+        let refresh = async {
+            match wake.reason {
+                RequestWakeReason::SelectedRequest => {
+                    service.refresh_selected_request(wake.endpoint_id).await
+                }
+                RequestWakeReason::QuotaError => {
+                    service.refresh_after_quota_error(wake.endpoint_id).await
+                }
             }
         };
         tokio::select! {
             _ = control.wait_for_shutdown() => break,
-            result = tokio::time::timeout(
-                REQUEST_WAKE_TIMEOUT,
-                service.refresh_selected_request(endpoint_id),
-            ) => match result {
+            result = tokio::time::timeout(REQUEST_WAKE_TIMEOUT, refresh) => match result {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => warn!(
-                    endpoint_id = %endpoint_id,
+                    endpoint_id = %wake.endpoint_id,
                     error = error.code(),
-                    "selected-request ChatGPT quota refresh failed"
+                    wake_reason = ?wake.reason,
+                    "ChatGPT quota request wake refresh failed"
                 ),
                 Err(_) => warn!(
-                    endpoint_id = %endpoint_id,
-                    "selected-request ChatGPT quota refresh exceeded its time budget"
+                    endpoint_id = %wake.endpoint_id,
+                    wake_reason = ?wake.reason,
+                    "ChatGPT quota request wake refresh exceeded its time budget"
                 ),
             }
         }

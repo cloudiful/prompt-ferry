@@ -7,6 +7,7 @@ mod glm_envelope_tests;
 pub(super) mod models;
 pub(super) mod prompt_cache;
 pub(super) mod proxy;
+pub(super) mod quota_feedback;
 pub(super) mod realtime;
 pub(super) mod request;
 pub(super) mod request_attempts;

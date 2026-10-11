@@ -11,6 +11,7 @@ use super::{ChatGptQuotaError, ChatGptQuotaFetcher};
 mod concurrency;
 mod failure;
 mod policy;
+mod routing_snapshot;
 mod support;
 
 pub(crate) fn fake_fetcher(quota: ChatgptQuota) -> FakeFetcher {

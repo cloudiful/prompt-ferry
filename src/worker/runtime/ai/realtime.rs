@@ -20,7 +20,11 @@ use crate::{
     worker::runtime::{RealtimeInboundMessage, context::RuntimeServices},
 };
 
-use super::{request_init::InitializedRequest, request_routes::resolve_route};
+use super::{
+    quota_feedback::{AttemptFeedbackFactory, parse_retry_after, schedule_quota_refresh},
+    request_init::InitializedRequest,
+    request_routes::resolve_route,
+};
 
 pub(in crate::worker::runtime) async fn start_realtime_session(
     request: RealtimeSessionStart,
@@ -36,6 +40,9 @@ pub(in crate::worker::runtime) async fn start_realtime_session(
     ))
     .await
     {
+        let quota_unavailable = err
+            .downcast_ref::<super::super::routing::QuotaUnavailableError>()
+            .is_some();
         let message = err.to_string();
         let (code, message) = message
             .strip_prefix("unsupported_auto_protocol: ")
@@ -45,8 +52,18 @@ pub(in crate::worker::runtime) async fn start_realtime_session(
             .out_tx
             .send(BridgeMessage::ResponseError(ResponseError {
                 request_id: request.request_id.clone(),
-                status: StatusCode::BAD_GATEWAY.as_u16(),
-                code: code.to_string(),
+                status: if quota_unavailable {
+                    StatusCode::TOO_MANY_REQUESTS
+                } else {
+                    StatusCode::BAD_GATEWAY
+                }
+                .as_u16(),
+                code: if quota_unavailable {
+                    super::super::routing::QuotaUnavailableError::CODE
+                } else {
+                    code
+                }
+                .to_string(),
                 message,
             }))
             .await;
@@ -65,7 +82,12 @@ async fn run_realtime_session(
     config: &WorkerConfig,
     services: &RuntimeServices,
 ) -> anyhow::Result<()> {
-    let route = resolve_realtime_route(request, config, services).await?;
+    let (route, quota_probe) = resolve_realtime_route(request, config, services).await?;
+    let feedback_factory = AttemptFeedbackFactory::new(
+        services.admin_state().map(|state| &state.token_plan_quota),
+        &route,
+        quota_probe,
+    );
     let effective_model = route.upstream_model.as_deref().unwrap_or(&request.model);
     // P4 (issue #230): route the WebSocket URL through the runtime
     // helper so the GLM `/v1` strip applies; a GLM Realtime base
@@ -97,9 +119,13 @@ async fn run_realtime_session(
             .max_message_size(Some(crate::bridge_wire::BRIDGE_WS_MAX_MESSAGE_BYTES))
             .max_frame_size(Some(crate::bridge_wire::BRIDGE_WS_MAX_FRAME_BYTES)),
     );
-    let (upstream_socket, _) = connect_async_with_config(ws_request, ws_config, false)
-        .await
-        .context("failed to connect upstream Realtime websocket")?;
+    let attempt_feedback = feedback_factory.begin_attempt();
+    let (upstream_socket, _) = settle_handshake(
+        connect_async_with_config(ws_request, ws_config, false).await,
+        &attempt_feedback,
+        services,
+        &route,
+    )?;
     info!(request_id = %request.request_id, endpoint_id = %route.route_id, model = %effective_model, requested_model = %request.model, "connected upstream Realtime websocket");
 
     let (mut upstream_tx, mut upstream_rx) = upstream_socket.split();
@@ -177,11 +203,39 @@ async fn run_realtime_session(
     Ok(())
 }
 
+fn settle_handshake<T>(
+    result: Result<T, tokio_tungstenite::tungstenite::Error>,
+    feedback: &super::quota_feedback::AttemptFeedback,
+    services: &RuntimeServices,
+    route: &crate::db::RouteConfig,
+) -> anyhow::Result<T> {
+    match result {
+        Ok(response) => {
+            feedback.completed_success();
+            Ok(response)
+        }
+        Err(err) => {
+            if let tokio_tungstenite::tungstenite::Error::Http(response) = &err
+                && response.status() == StatusCode::TOO_MANY_REQUESTS
+            {
+                feedback.record_429(parse_retry_after(response.headers()));
+                schedule_quota_refresh(services, route);
+            } else {
+                feedback.release_probe();
+            }
+            Err(err).context("failed to connect upstream Realtime websocket")
+        }
+    }
+}
+
 async fn resolve_realtime_route(
     request: &RealtimeSessionStart,
     config: &WorkerConfig,
     services: &RuntimeServices,
-) -> anyhow::Result<crate::db::RouteConfig> {
+) -> anyhow::Result<(
+    crate::db::RouteConfig,
+    Option<crate::worker::runtime::routing::QuotaProbePermit>,
+)> {
     let fake_request = crate::worker::runtime::request_assembly::BufferedBridgeRequest {
         request_id: request.request_id.clone(),
         method: "GET".to_string(),
@@ -200,16 +254,20 @@ async fn resolve_realtime_route(
     };
     let InitializedRequest { request_ctx, .. } =
         super::request_init::initialize_request(&fake_request, services).await?;
-    let mut route = match resolve_route(&fake_request, config, services, &request_ctx).await? {
-        super::request_routes::RouteResolution::Ready { route } => *route,
-        super::request_routes::RouteResolution::Responded => {
-            return Err(anyhow!("realtime route was unexpectedly resolved"));
-        }
-    };
+    let (mut route, quota_probe) =
+        match resolve_route(&fake_request, config, services, &request_ctx).await? {
+            super::request_routes::RouteResolution::Ready { route, quota_probe } => {
+                (*route, quota_probe)
+            }
+            super::request_routes::RouteResolution::Responded => {
+                return Err(anyhow!("realtime route was unexpectedly resolved"));
+            }
+        };
     super::request::resolve_auto_protocol(&mut route, &request.path)
         .map_err(|err| anyhow!("{}: {}", err.code, err.message))?;
-    (route.native_api == NativeApi::Realtime)
-        .then_some(route)
+    let supports_realtime = route.native_api == NativeApi::Realtime;
+    supports_realtime
+        .then_some((route, quota_probe))
         .ok_or_else(|| {
             anyhow!(
                 "selected endpoint does not support realtime for model {}",
@@ -234,3 +292,7 @@ fn reject_unsupported_client_event(event_json_text: &str) -> anyhow::Result<()> 
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "realtime/quota_feedback_tests.rs"]
+mod quota_feedback_tests;

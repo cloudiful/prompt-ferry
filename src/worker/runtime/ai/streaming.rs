@@ -845,6 +845,9 @@ pub(super) async fn forward_streaming_response(
         &mut stream_diag,
     )
     .await?;
+    if let Some(feedback) = &context.attempt_feedback {
+        feedback.completed_success();
+    }
     stream_diag.record_timings(request_ctx.elapsed_ms(), ttft_ms);
     stream_diag.mark_terminal("completed", None);
     stream_diag.finish();
@@ -1070,6 +1073,9 @@ async fn forward_buffered_non_sse_response(
         &mut stream_diag,
     )
     .await?;
+    if let Some(feedback) = &context.attempt_feedback {
+        feedback.completed_success();
+    }
     stream_diag.record_timings(request_ctx.elapsed_ms(), None);
     stream_diag.mark_terminal("completed", None);
     stream_diag.finish();

@@ -42,13 +42,20 @@ pub(super) fn selection_for_binding<'a>(
     let Some(key_selection) = select_bound_api_key(target, binding) else {
         return BindingSelection::Unavailable;
     };
-    if let (Some(quota_cache), Some(key_id)) = (quota_cache, key_selection.key_id)
-        && key_quota_exhausted(
-            quota_cache,
-            target.endpoint_id,
-            key_id,
-            request_model(request).as_deref(),
-        )
+    let model = request_model(request);
+    let context = super::quota_eligibility::QuotaContext {
+        model: model.as_deref(),
+        path: &request.path,
+    }
+    .effective(target.upstream_model.as_deref());
+    if super::quota_eligibility::assess(
+        quota_cache,
+        target.endpoint_id,
+        key_selection.key_id,
+        context,
+    )
+    .weight()
+    .is_none()
     {
         return BindingSelection::QuotaExhausted;
     }
@@ -56,6 +63,7 @@ pub(super) fn selection_for_binding<'a>(
         target,
         key_selection,
         route_selection_reason: db::RouteSelectionReason::SessionAffinity,
+        quota_probe: None,
     })
 }
 
@@ -68,20 +76,6 @@ pub(super) fn binding_for_selection(
         endpoint_key_id: key_selection.key_id,
         endpoint_key_fingerprint: api_key_fingerprint(&key_selection.secret),
     }
-}
-
-/// A key is exhausted when the quota cache has a known window and its
-/// remaining percentage has bottomed out. Keys without a quota signal
-/// (PAYG, unsupported providers) are never treated as exhausted.
-pub(super) fn key_quota_exhausted(
-    cache: &TokenPlanQuotaCache,
-    endpoint_id: uuid::Uuid,
-    key_id: uuid::Uuid,
-    model: Option<&str>,
-) -> bool {
-    cache
-        .key_remaining_percent_now(endpoint_id, key_id, model)
-        .is_some_and(|remaining| remaining <= 0.0)
 }
 
 fn previous_response_chain(request_prompt_log: &RequestPromptLog) -> bool {
@@ -126,26 +120,27 @@ pub(super) fn quota_failover_selection<'a>(
     request_prompt_log: &RequestPromptLog,
     quota_cache: &TokenPlanQuotaCache,
     stable_key: &str,
-    estimated_tokens: u64,
+    _estimated_tokens: u64,
 ) -> Option<(SessionAffinitySelection<'a>, ResponseAffinityBinding)> {
     let model = request_model(request);
-    let model = model.as_deref();
+    let context = super::quota_eligibility::QuotaContext {
+        model: model.as_deref(),
+        path: &request.path,
+    };
     let exclude = bound_unit_id(candidate, binding);
     let chained = previous_response_chain(request_prompt_log);
-    let mut units =
-        key_pool::candidate_units_all_keys(candidate, Some(quota_cache), model, exclude);
-    if units.is_empty() {
-        units = key_pool::candidate_units_without_quota_all_keys(candidate, exclude);
-    }
+    let mut pool = key_pool::candidate_units(candidate, Some(quota_cache), context, exclude, true);
     if chained {
-        units.retain(|unit| unit.target.endpoint_id == binding.endpoint_id);
+        pool.units
+            .retain(|unit| unit.target.endpoint_id == binding.endpoint_id);
     }
-    let unit = key_pool::draw(&units, stable_key, Some(quota_cache), estimated_tokens)?;
+    let unit = key_pool::draw(&pool.units, stable_key)?;
     Some((
         SessionAffinitySelection {
             target: unit.target,
             key_selection: unit.key.clone(),
             route_selection_reason: db::RouteSelectionReason::QuotaFailover,
+            quota_probe: None,
         },
         binding_for_selection(unit.target, &unit.key),
     ))

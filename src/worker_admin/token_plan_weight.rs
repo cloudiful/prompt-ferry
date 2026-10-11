@@ -65,20 +65,24 @@ pub(crate) fn apply_reservation_backpressure(remaining: f64, draws: u64) -> f64 
     clamp_percent(remaining / (1.0 + draws as f64 * RESERVATION_BACKPRESSURE_PER_DRAW))
 }
 
-pub(crate) fn model_usage<'a>(
+pub(crate) fn model_usage_scoped<'a>(
     key: &'a TokenPlanKeyUsage,
     model: Option<&str>,
+    allow_general: bool,
 ) -> Option<&'a TokenPlanModelUsage> {
     let model = model?.trim();
     key.model_remains
         .iter()
         .find(|usage| usage.model_name.eq_ignore_ascii_case(model))
         .or_else(|| {
-            key.model_remains
-                .iter()
-                .find(|usage| usage.model_name.eq_ignore_ascii_case("general"))
+            allow_general
+                .then(|| {
+                    key.model_remains
+                        .iter()
+                        .find(|usage| usage.model_name.eq_ignore_ascii_case("general"))
+                })
+                .flatten()
         })
-        .or_else(|| (key.model_remains.len() == 1).then(|| &key.model_remains[0]))
 }
 
 // OpenRouter remaining percent (issue #203 P3): a finite key-level cap
@@ -253,6 +257,7 @@ mod tests {
             status: Some(200),
             error_code: None,
             error_message: None,
+            quota_status: None,
             model_remains: Vec::new(),
             balances: None,
             five_hour: None,

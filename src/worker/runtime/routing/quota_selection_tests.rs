@@ -81,7 +81,8 @@ async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
         &request,
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
 
     assert_eq!(selected.selection.key_id, Some(available_key_id));
     assert_eq!(selected.selection.key_label.as_deref(), Some("available"));
@@ -117,6 +118,7 @@ fn token_plan_key_usage(
         status: Some(200),
         error_code: None,
         error_message: None,
+        quota_status: None,
         model_remains: vec![TokenPlanModelUsage {
             model_name: "general".to_string(),
             interval: Some(window(remaining_percent)),
@@ -177,6 +179,7 @@ fn command_code_key_usage(
         status: Some(200),
         error_code: None,
         error_message: None,
+        quota_status: None,
         model_remains: Vec::new(),
         balances: Some(CommandCodeBalances {
             monthly_credits: 80.0,
@@ -242,7 +245,8 @@ async fn quota_key_lb_skips_command_code_key_with_exhausted_monthly_pool() {
         &command_code_request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
 
     assert_eq!(selected.selection.key_id, Some(available_key_id));
     assert_eq!(selected.selection.key_label.as_deref(), Some("available"));
@@ -330,7 +334,8 @@ async fn quota_key_lb_skips_command_code_key_with_no_remaining_window() {
         &command_code_request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
 
     assert_eq!(selected.selection.key_id, Some(available_key_id));
     assert_eq!(selected.selection.key_label.as_deref(), Some("available"));
@@ -365,7 +370,8 @@ async fn quota_key_lb_uses_tighter_command_code_window_and_single_arm() {
         &command_code_request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
 
     assert_eq!(selected.selection.key_id, Some(single_arm_key_id));
     assert_eq!(selected.selection.key_label.as_deref(), Some("available"));
@@ -416,7 +422,8 @@ async fn quota_key_lb_still_routes_payg_command_code_key_without_windows() {
         &command_code_request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
 
     assert_eq!(selected.selection.key_id, Some(payg_key_id));
     assert_eq!(selected.selection.key_label.as_deref(), Some("payg"));

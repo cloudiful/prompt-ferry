@@ -14,6 +14,7 @@ use super::{
     glm_envelope::{
         EnvelopePreflightOutcome, consume_envelope_preflight, envelope_preflight_eligible,
     },
+    quota_feedback::{parse_retry_after, schedule_quota_refresh},
     request_support::ai_route_usage_log,
     streaming::forward_streaming_response,
     upstream::read_response_sample,
@@ -51,6 +52,7 @@ pub(super) struct ResponseForwardContext<'a> {
     pub(super) upstream_restore_session: Option<crate::redact_upstream::UpstreamRedactionSession>,
     pub(super) logging: ResponseLoggingContext,
     pub(super) response_adapter: ResponseAdapter,
+    pub(super) attempt_feedback: Option<super::quota_feedback::AttemptFeedback>,
     pub(super) services: &'a RuntimeServices,
     /// When true, an upstream quota-exhaustion response that has not yet sent
     /// `ResponseStart` is handed back to the retry loop instead of being
@@ -71,6 +73,7 @@ impl ResponseForwardContext<'_> {
             upstream_restore_session: self.upstream_restore_session.clone(),
             logging: self.logging,
             response_adapter: self.response_adapter,
+            attempt_feedback: self.attempt_feedback.clone(),
             services: self.services,
             quota_failover_enabled: self.quota_failover_enabled,
         }
@@ -144,6 +147,10 @@ pub(super) async fn forward_upstream_response(
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
     let upstream_response_headers = forwarded_response_headers(response.headers());
+    let status_is_429 = status == http::StatusCode::TOO_MANY_REQUESTS;
+    if status_is_429 && let Some(feedback) = &context.attempt_feedback {
+        feedback.record_429(parse_retry_after(response.headers()));
+    }
     // Issue #599 R2f.3: the header is authoritative when it names an event
     // stream; every other response is classified from its actual body prefix
     // after the success check below.
@@ -155,8 +162,16 @@ pub(super) async fn forward_upstream_response(
         let body = read_response_sample(response, ERROR_BODY_SAMPLE_BYTES).await;
         let body_text = String::from_utf8_lossy(&body).to_string();
         let quota_exhausted = is_quota_exhaustion(&body_text);
-        if quota_exhausted && let Some(state) = services.admin_state() {
-            state.token_plan_quota.invalidate(route.route_id).await;
+        if quota_exhausted {
+            if !status_is_429 && let Some(feedback) = &context.attempt_feedback {
+                feedback.record_429(None);
+            }
+            if let Some(state) = services.admin_state() {
+                state.token_plan_quota.invalidate(route.route_id).await;
+            }
+        }
+        if status_is_429 || quota_exhausted {
+            schedule_quota_refresh(services, route);
         }
         // This branch runs before any `ResponseStart` is emitted, so a quota
         // exhaustion is failover-eligible for streaming requests too: the

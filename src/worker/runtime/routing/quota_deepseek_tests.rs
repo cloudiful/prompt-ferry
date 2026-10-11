@@ -34,6 +34,7 @@ fn deepseek_key(key_id: Uuid, label: &str, is_available: bool) -> TokenPlanKeyUs
         status: Some(200),
         error_code: None,
         error_message: None,
+        quota_status: None,
         model_remains: Vec::new(),
         balances: None,
         five_hour: None,
@@ -137,7 +138,8 @@ async fn quota_key_lb_skips_unavailable_deepseek_key() {
         &request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
     assert_eq!(selected.selection.key_id, Some(available));
     assert_eq!(selected.selection.key_label.as_deref(), Some("available"));
 }
@@ -161,7 +163,8 @@ async fn quota_key_lb_still_routes_unavailable_deepseek_key_without_signal() {
         &request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
     assert_eq!(selected.selection.key_id, Some(unknown));
     assert_eq!(selected.selection.key_label.as_deref(), Some("unknown"));
 }
@@ -201,7 +204,8 @@ async fn quota_key_lb_zeroes_a_key_that_reports_unavailable_without_amounts() {
         &request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
     assert_eq!(selected.selection.key_id, Some(available));
     assert_eq!(selected.selection.key_label.as_deref(), Some("available"));
 }

@@ -466,6 +466,7 @@ fn exhausted_key_usage(key_id: uuid::Uuid) -> TokenPlanUsageResponse {
             status: Some(200),
             error_code: None,
             error_message: None,
+            quota_status: None,
             model_remains: vec![TokenPlanModelUsage {
                 model_name: "general".to_string(),
                 interval: Some(TokenPlanWindowUsage {

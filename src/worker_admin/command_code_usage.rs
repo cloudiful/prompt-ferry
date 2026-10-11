@@ -197,6 +197,7 @@ pub(crate) async fn fetch_command_code_key_usage(
         status: whoami_status,
         error_code: None,
         error_message: None,
+        quota_status: None,
         model_remains: Vec::new(),
         balances,
         five_hour,

@@ -79,6 +79,7 @@ impl ChatGptQuotaService {
         trigger: RefreshTrigger,
         arrival: DateTime<Utc>,
         periodic_active: Option<bool>,
+        force: bool,
     ) -> RefreshCompletion {
         let deadline = Instant::now() + WAIT_FOR_REPLICA;
         loop {
@@ -96,6 +97,15 @@ impl ChatGptQuotaService {
                         .is_some_and(|expires_at| expires_at > Utc::now())
             });
             if !lease_active {
+                if force {
+                    return Box::pin(self.refresh_shared_forced(
+                        endpoint_id,
+                        trigger,
+                        arrival,
+                        periodic_active,
+                    ))
+                    .await;
+                }
                 return Box::pin(self.refresh_shared(
                     endpoint_id,
                     trigger,

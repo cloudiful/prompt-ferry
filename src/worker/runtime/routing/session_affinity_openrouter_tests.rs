@@ -28,6 +28,7 @@ fn openrouter_key(
         status: Some(200),
         error_code: None,
         error_message: None,
+        quota_status: None,
         model_remains: Vec::new(),
         balances: None,
         five_hour: None,

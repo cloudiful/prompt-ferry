@@ -1,6 +1,6 @@
 # ChatGPT quota snapshots
 
-The admin console keeps a bounded history of successful OpenAI ChatGPT subscription quota observations. The quota dialog shows the observation time and whether the displayed values are cached, stale, refreshing, or being shown after a failed refresh. A failed refresh does not replace the last successful observation.
+The admin console keeps a bounded history of successful OpenAI ChatGPT subscription quota observations. The quota dialog shows the observation time and whether the displayed values are cached, stale, refreshing, or being shown after a failed refresh. A failed refresh does not replace the last successful observation. The per-key default-text status is unknown for stale, failed, or reset-passed observations; raw windows and history remain visible. See [quota feedback](quota-feedback.md) for status and summary behavior.
 
 ## Requirements and collection
 

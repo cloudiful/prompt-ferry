@@ -83,6 +83,7 @@ mock.module('../src/stores/endpoints-api', () => ({
 const {
   __resetTokenPlanCacheForTests,
   getCachedTokenPlanUsage,
+  getTokenPlanUsageSnapshot,
   isTokenPlanUsageFresh,
   prefetchTokenPlanBatch,
   prefetchTokenPlanUsage,
@@ -259,8 +260,8 @@ test('getCachedTokenPlanUsage returns the stale value (not null) after the TTL w
   jest.setSystemTime(new Date(start.getTime() + TOKEN_PLAN_CACHE_TTL_MS + 1))
 
   expect(isTokenPlanUsageFresh('ep-stale')).toBe(false)
-  // Stale value must still be readable; the previous implementation
-  // dropped to `null` here, which blanked the row for one network RTT.
+  expect(getTokenPlanUsageSnapshot('ep-stale').state).toBe('stale')
+  // Stale detail remains readable without being represented as current quota.
   expect(getCachedTokenPlanUsage('ep-stale')).toEqual(snapshot)
 
   jest.setSystemTime()
@@ -346,11 +347,8 @@ test('prefetchTokenPlanUsage coalesces concurrent stale callers onto one backgro
   jest.setSystemTime()
 })
 
-// P2: when a background refresh fails after we already have a usable
-// snapshot, the cache must NOT overwrite it with `null`. The table
-// should keep rendering the last known numbers while the upstream
-// recovers, and the next prefetch within the (refreshed) TTL window
-// must NOT immediately re-hit the network — that's the back-off.
+// When a background refresh fails, preserve the last payload but keep its
+// quota stale; the retry window must not falsely make it fresh.
 test('refresh failure preserves the prior snapshot and backs off (no null overwrite)', async () => {
   const start = new Date('2026-09-10T00:00:00.000Z')
   jest.setSystemTime(start)
@@ -390,12 +388,10 @@ test('refresh failure preserves the prior snapshot and backs off (no null overwr
   // here, which blanked the row for the entire recovery window.
   expect(getCachedTokenPlanUsage('ep-backoff')).toEqual(snapshot)
 
-  // Back-off: the failed refresh bumped `fetchedAt`, so the entry is
-  // now "fresh" again and the next prefetch within the TTL window
-  // must NOT immediately retry the network. The caller gets the
-  // snapshot; only a follow-up past the TTL would kick another
-  // background fetch.
-  expect(isTokenPlanUsageFresh('ep-backoff')).toBe(true)
+  // The retry back-off is separate from observation freshness: the preserved
+  // payload remains stale while repeated reads avoid another request.
+  expect(isTokenPlanUsageFresh('ep-backoff')).toBe(false)
+  expect(getTokenPlanUsageSnapshot('ep-backoff').state).toBe('stale')
   await prefetchTokenPlanUsage('ep-backoff')
   expect(fetchTokenPlanUsage).toHaveBeenCalledTimes(2)
 

@@ -372,6 +372,7 @@ async fn fetch_minimax_key_usage(
             status: Some(status),
             error_code: None,
             error_message: None,
+            quota_status: None,
             model_remains,
             balances: None,
             five_hour: None,

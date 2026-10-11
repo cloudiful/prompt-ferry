@@ -11,6 +11,7 @@ use super::super::{
 pub(super) enum RouteResolution {
     Ready {
         route: Box<db::RouteConfig>,
+        quota_probe: Option<crate::worker::runtime::routing::QuotaProbePermit>,
     },
     #[allow(dead_code)]
     Responded,
@@ -71,10 +72,12 @@ async fn resolve_standalone_route(
         .ok_or_else(|| anyhow!("route not found"))?;
         return Ok(RouteResolution::Ready {
             route: Box::new(selected.route),
+            quota_probe: selected.quota_probe,
         });
     }
     Ok(RouteResolution::Ready {
         route: Box::new(default_route_for_user(config, user_id)),
+        quota_probe: None,
     })
 }
 
@@ -84,6 +87,7 @@ async fn resolve_no_state_route(
 ) -> anyhow::Result<RouteResolution> {
     Ok(RouteResolution::Ready {
         route: Box::new(default_route(config, request)),
+        quota_probe: None,
     })
 }
 
@@ -120,6 +124,7 @@ async fn resolve_admin_route(
         .ok_or_else(|| anyhow!("route not found"))?;
         return Ok(RouteResolution::Ready {
             route: Box::new(selected.route),
+            quota_probe: selected.quota_probe,
         });
     }
 
@@ -139,6 +144,14 @@ async fn resolve_admin_route(
     let mut route = dynamic_route
         .or(fallback_route)
         .ok_or_else(|| anyhow!("route not found"))?;
+    state
+        .token_plan_quota
+        .hydrate_chatgpt_subscription(
+            state.chatgpt_quota_service.as_deref(),
+            route.route_id,
+            route.provider,
+        )
+        .await;
     if let Err(err) = state
         .token_plan_quota
         .refresh_if_due(&state.pool, route.route_id)
@@ -155,7 +168,7 @@ async fn resolve_admin_route(
         request,
         &request_ctx.request_prompt_log,
         Some(&state.token_plan_quota),
-    );
+    )?;
     clear_invalid_conversation_endpoint_key_override(
         services,
         &request_ctx.request_prompt_log,
@@ -167,6 +180,7 @@ async fn resolve_admin_route(
     route.endpoint_key_label = key_selection.selection.key_label;
     Ok(RouteResolution::Ready {
         route: Box::new(route),
+        quota_probe: key_selection.quota_probe,
     })
 }
 
@@ -363,7 +377,7 @@ mod tests {
     impl ReadyRoute for RouteResolution {
         fn ready_route(self) -> crate::db::RouteConfig {
             match self {
-                Self::Ready { route } => *route,
+                Self::Ready { route, .. } => *route,
                 Self::Responded => panic!("route unexpectedly responded"),
             }
         }

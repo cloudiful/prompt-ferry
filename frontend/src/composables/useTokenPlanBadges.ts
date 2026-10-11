@@ -2,7 +2,6 @@ import { computed, type ComputedRef, type Ref } from 'vue'
 import type {
   TokenPlanKeyUsage,
   TokenPlanUsageResponse,
-  TokenPlanWindowUsage,
 } from '@/generated/admin-api'
 import {
   deepseekBalanceAmounts,
@@ -13,14 +12,16 @@ import {
 } from '@/models/endpoints/quota'
 import { formatTokenQuantity } from './useUsageFormatting'
 import {
-  ccAsWindow,
   formatMoney,
-  glmAsWindow,
-  opencodeGoAsWindow,
   progressColor,
   remainingPercent,
 } from './useTokenPlanWindowEntries'
-import { subscriptionQuotaMinimumForBand } from './subscriptionQuotaWindows'
+import {
+  keyLongPercent,
+  keyShortPercent,
+  summarizeTokenPlanQuota,
+  type TokenPlanQuotaSummaryState,
+} from './tokenPlanQuotaSummary'
 import {
   getTokenPlanUsageSnapshot,
   prefetchTokenPlanUsage,
@@ -42,7 +43,10 @@ export type TokenPlanPillSource = {
   // the negative-cache entry is all the cache holds. Explicit so a failed
   // request is never mistaken for a provider that reports nothing.
   status: TokenPlanFetchState
-  // Arithmetic mean across the ok keys' short-window remaining percent
+  quotaState?: TokenPlanQuotaSummaryState
+  quotaPartial?: boolean
+  quotaMetadataPresent?: boolean
+  // Arithmetic mean across the effective keys' short-window remaining percent
   // (0..100). `null` when no key reports a short window.
   short: number | null
   // Arithmetic mean across the ok keys' long-window remaining percent.
@@ -85,8 +89,6 @@ export type TokenPlanBadges = TokenPlanPillSource & {
 // per-key breakdown is only an intermediate of the aggregate.
 type KeyBadges = {
   ok: boolean
-  short: number | null
-  long: number | null
   openrouterRemaining: number | null
   openrouterBalance: number | null
   openrouterDailySpend: number | null
@@ -96,15 +98,14 @@ type KeyBadges = {
   // like a key that never reported one.
   deepseekReported: boolean
   deepseekAvailable: boolean | null
-  // CommandCode equivalent of the backend `command_code_balance_exhausted`
-  // signal: a reported balance with no credits left. `false` when no balances
-  // are reported (older/PAYG payloads) so routing-compatible windows survive.
-  exhausted: boolean
 }
 
 const EMPTY_SOURCE: TokenPlanPillSource = {
   mode: 'window',
   status: 'loading',
+  quotaState: 'unknown',
+  quotaPartial: false,
+  quotaMetadataPresent: false,
   short: null,
   long: null,
   openrouterBalance: null,
@@ -121,72 +122,10 @@ function finiteNumber(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function mean(values: number[]): number | null {
-  if (values.length === 0) return null
-  return values.reduce((sum, value) => sum + value, 0) / values.length
-}
-
 function badgeMode(provider: string): TokenPlanBadgeMode {
   if (provider === 'openrouter') return 'openrouter'
   if (provider === 'deepseek') return 'deepseek'
   return 'window'
-}
-
-// Short windows come from each provider's short slot or from a canonical
-// subscription window whose reported duration is under one day.
-function keyShortPercent(key: TokenPlanKeyUsage): number | null {
-  const candidates: number[] = []
-  for (const model of key.model_remains) {
-    if (model.windows != null) continue
-    const window = model.interval as TokenPlanWindowUsage | null | undefined
-    if (window && window.remaining_percent != null) {
-      candidates.push(remainingPercent(window))
-    }
-  }
-  const subscription = subscriptionQuotaMinimumForBand(key, 'short')
-  if (subscription !== null) candidates.push(subscription)
-  const five = ccAsWindow(key.five_hour)
-  if (five && five.remaining_percent != null) {
-    candidates.push(remainingPercent(five))
-  }
-  const rolling = opencodeGoAsWindow(key.opencodego_rolling)
-  if (rolling && rolling.remaining_percent != null) {
-    candidates.push(remainingPercent(rolling))
-  }
-  const glmFive = glmAsWindow(key.glm_five_hour)
-  if (glmFive && glmFive.remaining_percent != null) {
-    candidates.push(remainingPercent(glmFive))
-  }
-  return candidates.length === 0 ? null : Math.min(...candidates)
-}
-
-// Long windows come from each provider's long slot or from a canonical
-// subscription window whose reported duration is at least one day.
-function keyLongPercent(key: TokenPlanKeyUsage): number | null {
-  const candidates: number[] = []
-  for (const model of key.model_remains) {
-    if (model.windows != null) continue
-    const window = model.weekly as TokenPlanWindowUsage | null | undefined
-    if (window && window.remaining_percent != null) {
-      candidates.push(remainingPercent(window))
-    }
-  }
-  const subscription = subscriptionQuotaMinimumForBand(key, 'long')
-  if (subscription !== null) candidates.push(subscription)
-  const weekly = ccAsWindow(key.weekly)
-  if (weekly && weekly.remaining_percent != null) {
-    candidates.push(remainingPercent(weekly))
-  }
-  for (const window of [
-    opencodeGoAsWindow(key.opencodego_weekly),
-    opencodeGoAsWindow(key.opencodego_monthly),
-    glmAsWindow(key.glm_weekly),
-  ]) {
-    if (window && window.remaining_percent != null) {
-      candidates.push(remainingPercent(window))
-    }
-  }
-  return candidates.length === 0 ? null : Math.min(...candidates)
 }
 
 // OpenRouter's remaining credit and today spend. `limit_remaining` is the
@@ -222,25 +161,17 @@ function computeKeyBadges(key: TokenPlanKeyUsage): KeyBadges {
   if (!key.ok) {
     return {
       ok: false,
-      short: null,
-      long: null,
       openrouterRemaining: null,
       openrouterBalance: null,
       openrouterDailySpend: null,
       deepseekBalances: [],
       deepseekReported: false,
       deepseekAvailable: null,
-      exhausted: false,
     }
   }
   const or = openrouterSignal(key)
-  // Only CommandCode reports credit balances; a non-positive remaining is the
-  // effective exhaustion the backend uses to drop the key from routing.
-  const remainingCredits = finiteNumber(key.balances?.remaining_credits)
   return {
     ok: true,
-    short: keyShortPercent(key),
-    long: keyLongPercent(key),
     openrouterRemaining: or.remaining,
     openrouterBalance: or.balance,
     openrouterDailySpend: or.daily,
@@ -250,48 +181,29 @@ function computeKeyBadges(key: TokenPlanKeyUsage): KeyBadges {
     deepseekBalances: deepseekBalanceAmounts(key.deepseek_balance),
     deepseekReported: key.deepseek_balance != null,
     deepseekAvailable: key.deepseek_balance?.is_available ?? null,
-    exhausted: remainingCredits !== null && remainingCredits <= 0,
   }
 }
 
 function computeBadges(snapshot: TokenPlanUsageSnapshot): TokenPlanBadges {
   const status = snapshot.state
   if (snapshot.usage === null) {
-    // No payload: the badge state can only describe the request. Window and
-    // OpenRouter pills stay empty exactly as before, so a row that has not
-    // loaded yet still renders its placeholder instead of a fabricated zero.
     return {
       ...EMPTY_SOURCE,
       status,
+      quotaState: 'unknown',
+      quotaPartial: false,
       deepseekState: deepseekBalanceState(status, [], null),
       usage: null,
     }
   }
   const usage = snapshot.usage
+  const summary = summarizeTokenPlanQuota(usage.provider, usage.keys, status)
   const mode = badgeMode(usage.provider)
-  const shorts: number[] = []
-  const longs: number[] = []
   let openrouter: KeyBadges | null = null
   let deepseek: KeyBadges | null = null
   let deepseekUnknown: KeyBadges | null = null
-  let okKeys = 0
-  let exhaustedKeys = 0
-  for (const key of usage.keys.map(computeKeyBadges)) {
+  for (const key of summary.usableKeys.map(computeKeyBadges)) {
     if (!key.ok) continue
-    okKeys += 1
-    // Window providers: arithmetic mean across every key that reports the
-    // window (missing windows are skipped, not treated as zero). Exhausted
-    // CommandCode keys are routing-excluded, so their windows must not raise
-    // the average; when every ok key is exhausted the no-quota pill below
-    // takes over instead of a percentage.
-    if (key.exhausted) {
-      exhaustedKeys += 1
-    } else {
-      if (key.short !== null) shorts.push(key.short)
-      if (key.long !== null) longs.push(key.long)
-    }
-    // Balance providers keep the first ok key that carries a signal, matching
-    // the pre-P2 single-pill behavior (an account balance is not averaged).
     if (
       openrouter === null &&
       (key.openrouterBalance !== null ||
@@ -300,9 +212,6 @@ function computeBadges(snapshot: TokenPlanUsageSnapshot): TokenPlanBadges {
     ) {
       openrouter = key
     }
-    // The DeepSeek account balance is never summed across keys: a key that
-    // reports a known amount wins, and an account whose amounts are all unknown
-    // still reports its availability instead of looking absent.
     const knownTotal = key.deepseekBalances.some(
       (amount) => amount.total !== null,
     )
@@ -313,12 +222,17 @@ function computeBadges(snapshot: TokenPlanUsageSnapshot): TokenPlanBadges {
   }
   const deepseekKey = deepseek ?? deepseekUnknown
   const deepseekBalances = deepseekKey?.deepseekBalances ?? []
-  const deepseekAvailable = deepseekKey?.deepseekAvailable ?? null
+  const deepseekAvailable =
+    deepseekKey?.deepseekAvailable ??
+    (summary.state === 'exhausted' ? false : null)
   return {
     mode,
     status,
-    short: mean(shorts),
-    long: mean(longs),
+    quotaState: summary.state,
+    quotaPartial: summary.partial,
+    quotaMetadataPresent: usage.keys.some((key) => key.quota_status != null),
+    short: summary.short,
+    long: summary.long,
     openrouterBalance: openrouter?.openrouterBalance ?? null,
     openrouterRemaining: openrouter?.openrouterRemaining ?? null,
     openrouterDailySpend: openrouter?.openrouterDailySpend ?? null,
@@ -330,7 +244,9 @@ function computeBadges(snapshot: TokenPlanUsageSnapshot): TokenPlanBadges {
       deepseekAvailable,
     ),
     localTodayTokens: finiteNumber(usage.local_today_tokens),
-    commandCodeExhausted: okKeys > 0 && exhaustedKeys === okKeys,
+    commandCodeExhausted:
+      usage.provider === 'command_code' &&
+      (summary.allExhausted || summary.legacyCommandCodeNoQuota),
     usage,
   }
 }
@@ -383,21 +299,37 @@ export function tokenPlanBadgePills(
   source: TokenPlanPillSource,
   t: TranslateFn,
 ): TokenPlanBadgePill[] {
+  if (source.status === 'loading' || source.status === 'error') return []
+  const state = source.quotaState ?? 'unknown'
   if (source.mode === 'openrouter') {
-    const pills: TokenPlanBadgePill[] = [
-      {
+    const pills: TokenPlanBadgePill[] = []
+    const hasBalance =
+      source.openrouterBalance !== null || source.openrouterRemaining !== null
+    if (state === 'cooling' || state === 'exhausted') {
+      pills.push(quotaStatePill(state, t))
+    } else if (state === 'unknown' && !hasBalance) {
+      pills.push(quotaStatePill('unknown', t))
+    } else if (state === 'available' && !hasBalance) {
+      pills.push(quotaStatePill('available', t))
+    } else {
+      pills.push({
         label:
           source.openrouterBalance !== null
             ? `${t('tokenPlanOpenRouterRemaining')} ${formatMoney('USD', source.openrouterBalance)}`
-            : `${t('tokenPlanOpenRouterRemaining')} ${t('tokenPlanNoQuota')}`,
+            : `${t('tokenPlanOpenRouterRemaining')} ${t('tokenPlanQuotaUnknown')}`,
         color:
           source.openrouterRemaining !== null
             ? badgeColorForPercent(source.openrouterRemaining)
             : '',
         title: t('tokenPlanOpenRouterBalanceHint'),
-      },
-    ]
-    // Provider-reported spend wins; the local aggregate is the fallback.
+      })
+      if (
+        state === 'unknown' &&
+        (source.quotaMetadataPresent || source.status === 'stale')
+      ) {
+        pills.push(quotaStatePill('unknown', t))
+      }
+    }
     if (source.openrouterDailySpend !== null) {
       pills.push({
         label: `${t('tokenPlanSpendDaily')} ${formatMoney('USD', source.openrouterDailySpend)}`,
@@ -407,51 +339,54 @@ export function tokenPlanBadgePills(
     } else if (source.localTodayTokens !== null) {
       pills.push(localTodayPill(source.localTodayTokens, t))
     }
+    if (state === 'partial') pills.push(quotaStatePill('partial', t))
     return pills
   }
   if (source.mode === 'deepseek') {
     const pills: TokenPlanBadgePill[] = []
-    // One pill per known currency, in the payload's deterministic order and
-    // never summed across currencies. An unknown amount contributes no amount;
-    // `is_available` only colors the pills, so a real zero under an
-    // unavailable account stays visible.
-    const color = badgeColorForPercent(
-      source.deepseekAvailable === false ? 0 : 100,
-    )
-    const known = source.deepseekBalances.filter(
-      (amount) => amount.total !== null,
-    ).length
-    for (const amount of source.deepseekBalances) {
-      if (amount.total === null) continue
-      pills.push({
-        label: formatMoney(amount.currency, amount.total),
-        color,
-        title: t('tokenPlanDeepSeekBalanceHint'),
-      })
-    }
-    // Name the missing information instead of inventing an amount: an account
-    // with nothing known says so once, and a mixed payload names the unknown
-    // entries alongside the known currencies instead of dropping them.
-    // `loading`/`error` need a provider this payload-less badge does not have
-    // yet, so they stay with the shared surface that knows the provider.
-    if (known === 0) {
-      pills.push(
-        source.deepseekState === 'unavailable'
-          ? namedPill(t('tokenPlanUnavailable'), badgeColorForPercent(0))
-          : namedPill(t('tokenPlanBalanceUnknown')),
-      )
-    } else if (known < source.deepseekBalances.length) {
-      pills.push(namedPill(t('tokenPlanBalanceUnknown')))
+    if (state === 'cooling' || state === 'exhausted') {
+      pills.push(quotaStatePill(state, t))
+    } else if (state === 'unknown' && (source.quotaMetadataPresent || source.status === 'stale')) {
+      pills.push(quotaStatePill('unknown', t))
+    } else {
+      const legacyUnavailable =
+        !source.quotaMetadataPresent && source.deepseekState === 'unavailable'
+      const color = legacyUnavailable
+        ? badgeColorForPercent(0)
+        : state === 'unknown'
+          ? ''
+          : badgeColorForPercent(100)
+      const known = source.deepseekBalances.filter(
+        (amount) => amount.total !== null,
+      ).length
+      for (const amount of source.deepseekBalances) {
+        if (amount.total === null) continue
+        pills.push({
+          label: formatMoney(amount.currency, amount.total),
+          color,
+          title: t('tokenPlanDeepSeekBalanceHint'),
+        })
+      }
+      if (known === 0 && legacyUnavailable) {
+        pills.push(namedPill(t('tokenPlanUnavailable'), badgeColorForPercent(0)))
+      } else if (known === 0 || known < source.deepseekBalances.length) {
+        pills.push(namedPill(t('tokenPlanBalanceUnknown')))
+      }
+      if (state === 'available' && known === 0) {
+        pills.push(quotaStatePill('available', t))
+      }
+      if (state === 'partial') pills.push(quotaStatePill('partial', t))
     }
     if (source.localTodayTokens !== null) {
       pills.push(localTodayPill(source.localTodayTokens, t))
     }
     return pills
   }
+  if (state === 'cooling') return [quotaStatePill('cooling', t)]
+  if (state === 'available' && source.short === null && source.long === null) {
+    return [quotaStatePill('available', t)]
+  }
   const pills: TokenPlanBadgePill[] = []
-  // Issue #656: an endpoint whose CommandCode keys are all out of effective
-  // monthly credits is excluded from routing, so a 0%-colored no-quota pill
-  // replaces the window percentages instead of advertising unusable quota.
   if (source.commandCodeExhausted) {
     return [
       {
@@ -465,15 +400,28 @@ export function tokenPlanBadgePills(
     pills.push({
       label: `${t('tokenPlanShortBadge')} ${source.short.toFixed(0)}%`,
       color: badgeColorForPercent(source.short),
-      title: t('tokenPlanShortBadgeHint'),
+      title:
+        state === 'unknown' ? t('tokenPlanQuotaUnknown') : t('tokenPlanShortBadgeHint'),
     })
   }
   if (source.long !== null) {
     pills.push({
       label: `${t('tokenPlanLongBadge')} ${source.long.toFixed(0)}%`,
       color: badgeColorForPercent(source.long),
-      title: t('tokenPlanLongBadgeHint'),
+      title:
+        state === 'unknown' ? t('tokenPlanQuotaUnknown') : t('tokenPlanLongBadgeHint'),
     })
+  }
+  if (
+    state === 'unknown' &&
+    pills.length === 0 &&
+    (source.quotaMetadataPresent || source.status === 'stale')
+  ) {
+    pills.push(quotaStatePill('unknown', t))
+  } else if (state === 'partial') {
+    pills.push(quotaStatePill('partial', t))
+  } else if (state === 'exhausted' && pills.length === 0) {
+    pills.push(quotaStatePill('exhausted', t))
   }
   return pills
 }
@@ -484,6 +432,30 @@ function localTodayPill(tokens: number, t: TranslateFn): TokenPlanBadgePill {
     color: '',
     title: t('tokenPlanLocalTodayTokensHint'),
   }
+}
+
+function quotaStatePill(
+  state: TokenPlanQuotaSummaryState,
+  t: TranslateFn,
+): TokenPlanBadgePill {
+  const label =
+    state === 'available'
+      ? t('tokenPlanAvailable')
+      : state === 'cooling'
+        ? t('tokenPlanQuotaCooling')
+        : state === 'exhausted'
+          ? t('tokenPlanUnavailable')
+          : state === 'partial'
+            ? t('tokenPlanQuotaPartial')
+            : t('tokenPlanQuotaUnknown')
+  return namedPill(
+    label,
+    state === 'exhausted'
+      ? badgeColorForPercent(0)
+      : state === 'available'
+        ? badgeColorForPercent(100)
+        : '',
+  )
 }
 
 // State pill whose own label is also the tooltip: the balance surface says

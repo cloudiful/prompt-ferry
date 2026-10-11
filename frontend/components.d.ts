@@ -91,6 +91,7 @@ declare module 'vue' {
     SubscriptionQuotaWindows: typeof import('./src/components/endpoints/SubscriptionQuotaWindows.vue')['default']
     TablePagination: typeof import('./src/components/shared/TablePagination.vue')['default']
     TestResultPopover: typeof import('./src/components/shared/TestResultPopover.vue')['default']
+    TokenPlanKeyQuotaStatus: typeof import('./src/components/endpoints/TokenPlanKeyQuotaStatus.vue')['default']
     TokenPlanUsageDialog: typeof import('./src/components/endpoints/TokenPlanUsageDialog.vue')['default']
     TranscriptManagedPreview: typeof import('./src/components/usage/detail/TranscriptManagedPreview.vue')['default']
     TranscriptPreviewPane: typeof import('./src/components/usage/detail/TranscriptPreviewPane.vue')['default']

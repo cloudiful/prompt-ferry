@@ -38,6 +38,7 @@ fn openrouter_key(
         status: Some(200),
         error_code: None,
         error_message: None,
+        quota_status: None,
         model_remains: Vec::new(),
         balances: None,
         five_hour: None,
@@ -144,7 +145,8 @@ async fn quota_key_lb_skips_openrouter_key_with_no_remaining() {
         &request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
     assert_eq!(selected.selection.key_id, Some(available));
     assert_eq!(selected.selection.key_label.as_deref(), Some("available"));
 }
@@ -176,7 +178,8 @@ async fn quota_key_lb_unlimited_openrouter_key_carries_full_weight() {
         &request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
     assert_eq!(selected.selection.key_id, Some(unlimited));
     assert_eq!(selected.selection.key_label.as_deref(), Some("unlimited"));
 }
@@ -202,7 +205,8 @@ async fn quota_key_lb_still_routes_payg_openrouter_key_without_signal() {
         &request(),
         &RequestPromptLog::default(),
         Some(&cache),
-    );
+    )
+    .expect("eligible quota key");
     assert_eq!(selected.selection.key_id, Some(payg));
     assert_eq!(selected.selection.key_label.as_deref(), Some("payg"));
 }

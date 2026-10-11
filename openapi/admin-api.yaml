@@ -8258,6 +8258,11 @@ components:
             description: |-
               OpenRouter spend (`GET /api/v1/key` usage fields). None when missing
               — degraded.
+        quota_status:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TokenPlanQuotaStatus'
+            description: Effective default-text quota state; raw provider detail remains unchanged.
         status:
           type:
           - integer
@@ -8300,6 +8305,36 @@ components:
             reported duration. Populated only for ChatGPT subscription endpoints;
             every other provider leaves it `None` and keeps the positional
             `interval`/`weekly` slots unchanged.
+    TokenPlanQuotaState:
+      type: string
+      enum:
+      - available
+      - exhausted
+      - unknown
+      - cooling
+    TokenPlanQuotaStatus:
+      type: object
+      required:
+      - state
+      - scope
+      properties:
+        cooldown_until:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        observed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        refresh_failed:
+          type: boolean
+        scope:
+          type: string
+          example: text_inference
+        state:
+          $ref: '#/components/schemas/TokenPlanQuotaState'
     TokenPlanUsageResponse:
       type: object
       required:

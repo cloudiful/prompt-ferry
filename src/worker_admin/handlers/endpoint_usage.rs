@@ -1,5 +1,6 @@
 use super::super::chatgpt_quota_normalize;
 use super::super::openai_org_usage;
+use super::super::quota_status;
 use super::super::token_plan;
 use super::*;
 
@@ -88,7 +89,7 @@ pub(super) async fn token_plan_usage(
 
     match state
         .token_plan_quota
-        .refresh_if_due(&state.pool, endpoint_id)
+        .refresh(&state.pool, endpoint_id, query.force.unwrap_or(false))
         .await
     {
         Ok(Some(mut usage)) => {
@@ -112,7 +113,12 @@ pub(super) async fn token_plan_usage(
                     ),
                 }
             }
-            Json(usage).into_response()
+            Json(quota_status::decorate_usage(
+                &state.token_plan_quota,
+                endpoint_id,
+                usage,
+            ))
+            .into_response()
         }
         Ok(None) => unsupported_token_plan_provider(),
         Err(err) => internal(&state, err),
@@ -130,7 +136,12 @@ async fn chatgpt_subscription_usage(
 ) -> Response {
     if let Some(service) = state.chatgpt_quota_service.as_ref() {
         return match service.read(endpoint, force).await {
-            Ok(usage) => Json(usage).into_response(),
+            Ok(usage) => Json(quota_status::decorate_usage(
+                &state.token_plan_quota,
+                endpoint_id,
+                usage,
+            ))
+            .into_response(),
             Err(crate::worker_admin::chatgpt_quota_service::ChatGptQuotaError::NotConfigured) => {
                 error(
                     StatusCode::BAD_REQUEST,
@@ -194,7 +205,12 @@ async fn chatgpt_subscription_usage(
     match chatgpt_backend::fetch_chatgpt_quota(&client, &token.access_token, account_id.as_deref())
         .await
     {
-        Ok(quota) => Json(chatgpt_quota_response(endpoint, quota)).into_response(),
+        Ok(quota) => Json(quota_status::decorate_usage(
+            &state.token_plan_quota,
+            endpoint_id,
+            chatgpt_quota_response(endpoint, quota),
+        ))
+        .into_response(),
         Err(err) => error(
             StatusCode::BAD_GATEWAY,
             "chatgpt_quota_unavailable",

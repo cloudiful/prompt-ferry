@@ -4,8 +4,8 @@ use super::super::{
     tests::{session_affinity_candidate, session_affinity_services},
 };
 use super::{
-    RouteAffinityError, select_route_for_candidate,
-    session_affinity_quota::quota_failover_selection, session_affinity_tests::request_context,
+    select_route_for_candidate, session_affinity_quota::quota_failover_selection,
+    session_affinity_tests::request_context,
 };
 use crate::{
     db,
@@ -145,6 +145,7 @@ fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
                 status: Some(200),
                 error_code: None,
                 error_message: None,
+                quota_status: None,
                 model_remains: vec![TokenPlanModelUsage {
                     model_name: "general".to_string(),
                     interval: Some(window(*remaining_percent)),
@@ -207,6 +208,7 @@ fn command_code_key(
         status: Some(200),
         error_code: None,
         error_message: None,
+        quota_status: None,
         model_remains: Vec::new(),
         balances: Some(CommandCodeBalances {
             monthly_credits: 80.0,
@@ -646,11 +648,10 @@ async fn previous_response_chain_does_not_leave_the_bound_endpoint() {
         Ok(_) => panic!("previous_response_id chains must not migrate to another endpoint"),
         Err(error) => error,
     };
-    assert_eq!(
+    assert!(
         error
-            .downcast_ref::<RouteAffinityError>()
-            .map(|error| error.code),
-        Some("responses_session_affinity_target_unavailable")
+            .downcast_ref::<super::QuotaUnavailableError>()
+            .is_some()
     );
 }
 
@@ -737,6 +738,7 @@ fn model_key(
         status: Some(200),
         error_code: None,
         error_message: None,
+        quota_status: None,
         model_remains,
         balances: None,
         five_hour: None,

@@ -2079,6 +2079,7 @@ export type TokenPlanKeyUsage = {
     opencodego_weekly?: null | OpencodeGoWindowUsage;
     openrouter_balance?: null | OpenRouterBalance;
     openrouter_spend?: null | OpenRouterSpend;
+    quota_status?: null | TokenPlanQuotaStatus;
     status?: number | null;
     weekly?: null | CommandCodeWindowUsage;
 };
@@ -2095,6 +2096,16 @@ export type TokenPlanModelUsage = {
      * `interval`/`weekly` slots unchanged.
      */
     windows?: Array<SubscriptionWindowUsage> | null;
+};
+
+export type TokenPlanQuotaState = 'available' | 'exhausted' | 'unknown' | 'cooling';
+
+export type TokenPlanQuotaStatus = {
+    cooldown_until?: string | null;
+    observed_at?: string | null;
+    refresh_failed?: boolean;
+    scope: string;
+    state: TokenPlanQuotaState;
 };
 
 export type TokenPlanUsageResponse = {

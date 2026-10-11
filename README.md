@@ -31,7 +31,7 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
   Platform; preset base URLs (`https://api.openai.com` for OpenAI) are derived server-side, so only the
   inference API key is configured. Other OpenAI-compatible hosts keep using the Generic provider with an
   explicit base URL.
-- OpenAI ChatGPT subscription quota snapshots and 30-day history are available in the admin console with PostgreSQL; see [quota snapshots](docs/quota-snapshots.md) for collection and privacy details.
+- The admin console shows effective default-text quota summaries with raw per-key detail. OpenAI ChatGPT subscription quotas also include persisted snapshots and 30-day history with PostgreSQL; see [quota feedback](docs/quota-feedback.md) and [quota snapshots](docs/quota-snapshots.md).
 - MCP aggregation for HTTP and stdio servers, with SQLite support for configuration, catalog, and runtime execution; MCP quota and usage ledgers require PostgreSQL.
 - MCP credential quota: per-credential and shared quota-group budgets (requests or credits) with
   atomic reservation, usage-ratio balancing across API keys, cooldown on auth/throttle failures,
