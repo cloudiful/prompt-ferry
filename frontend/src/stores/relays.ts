@@ -1,22 +1,16 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import {
-  createRelay,
-  deleteRelay,
-  listRelays,
-  reconnectRelay as requestRelayReconnect,
-  updateRelay,
-} from '../generated/admin-api'
-import type {
-  ManagedRelay,
-  ManagedRelayPatchRequest,
-  ManagedRelayRequest,
-} from '../generated/admin-api'
+import { listRelays } from '../generated/admin-api'
+import type { ManagedRelay } from '../generated/admin-api'
 import { expectData, withData } from '../api'
 import {
   STANDARD_PAGE_SIZE_OPTIONS,
   useStoredPageSize,
 } from '../table-pagination'
+import { useAsyncAction } from '../composables/useAsyncAction'
+import { RELAY_KEY_PREFIX, createRelayActions } from './relays-actions'
+import { pendingRowsById } from './record-action-types'
+import { computed } from 'vue'
 
 export const useRelaysStore = defineStore('relays', () => {
   const relays = ref<ManagedRelay[]>([])
@@ -72,64 +66,35 @@ export const useRelaysStore = defineStore('relays', () => {
 
   // Remote `enabled` only controls the Worker's connection target. It never
   // calls the host role endpoint and never changes this host's role.
-  async function saveRelay(
-    relayId: string | null,
-    body: ManagedRelayRequest | ManagedRelayPatchRequest,
-  ): Promise<ManagedRelay> {
-    const saved = relayId
-      ? expectData(
-          await updateRelay<true>(
-            withData({
-              path: { relay_id: relayId },
-              body: body as ManagedRelayPatchRequest,
-            }),
-          ),
-        )
-      : expectData(
-          await createRelay<true>(
-            withData({
-              body: body as ManagedRelayRequest,
-            }),
-          ),
-        )
-    await refresh()
-    return saved
-  }
+  //
+  // The guard lives here rather than at each call site, so a relay can be gated
+  // against every operation that would write it.
+  const guard = useAsyncAction()
+  const actions = createRelayActions({
+    guard,
+    refresh: () => refresh(),
+    relays: { relays, reconnectingRelayId },
+  })
 
-  async function removeRelay(relayId: string): Promise<void> {
-    await deleteRelay<true>(withData({ path: { relay_id: relayId } }))
-    await refresh()
-  }
-
-  async function reconnectRelay(relayId: string): Promise<ManagedRelay> {
-    reconnectingRelayId.value = relayId
-    try {
-      const relay = expectData(
-        await requestRelayReconnect<true>(
-          withData({
-            path: { relay_id: relayId },
-          }),
-        ),
-      )
-      await refresh()
-      return relay
-    } finally {
-      reconnectingRelayId.value = null
-    }
-  }
+  // Per-row view of the guard. `loading` stays the fetch-only busy flag, so a
+  // write never blanks the whole page.
+  const relayPendingActions = computed(() =>
+    pendingRowsById(guard.pendingActions.value, RELAY_KEY_PREFIX),
+  )
 
   return {
+    ...actions,
     connectedCount,
     enabledCount,
     first,
+    isPending: guard.isPending,
     lastError,
     loading,
-    reconnectRelay,
+    pendingActions: guard.pendingActions,
     reconnectingRelayId,
     refresh,
+    relayPendingActions,
     relays,
-    removeRelay,
-    saveRelay,
     rows,
     total,
   }

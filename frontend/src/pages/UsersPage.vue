@@ -8,17 +8,21 @@ import { useUsersPage } from '@/composables/useUsersPage'
 const {
   busy,
   createUserForm,
+  createUserPending,
   createUserVisible,
   deleteUser,
+  openCreateUser,
   openResetPassword,
-  resetPasswordUser,
   resetPasswordDialogVisible,
+  resetPasswordPending,
+  resetPasswordUser,
   resetPasswordValue,
   refresh,
   saveUser,
   submitCreateUser,
   submitResetPassword,
   t,
+  userPendingActions,
   usersWorkspace,
   onPage,
 } = useUsersPage()
@@ -41,11 +45,8 @@ const {
         <UButton
           size="sm"
           :aria-label="t('createUser')"
-          @click="
-            () => {
-              createUserVisible = true
-            }
-          "
+          :disabled="createUserPending"
+          @click="openCreateUser"
         >
           <span aria-hidden="true" class="md:hidden">新增</span>
           <span aria-hidden="true" class="hidden md:inline">{{
@@ -57,6 +58,7 @@ const {
 
     <UsersPanel
       :t="t"
+      :pending-keys="userPendingActions"
       :workspace="usersWorkspace"
       @open-reset-password="openResetPassword"
       @save-user="saveUser"
@@ -68,6 +70,7 @@ const {
       v-model:visible="createUserVisible"
       v-model:form="createUserForm"
       :busy="busy"
+      :save-pending="createUserPending"
       :t="t"
       @submit="submitCreateUser"
     />
@@ -76,6 +79,7 @@ const {
       v-model:visible="resetPasswordDialogVisible"
       v-model:password="resetPasswordValue"
       :busy="busy"
+      :save-pending="resetPasswordPending"
       :t="t"
       :user="resetPasswordUser"
       @submit="submitResetPassword"

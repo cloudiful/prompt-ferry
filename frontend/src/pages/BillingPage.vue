@@ -10,6 +10,7 @@ import BillingPriceRuleDialog from '@/components/billing/BillingPriceRuleDialog.
 import BillingPriceRulesPanel from '@/components/billing/BillingPriceRulesPanel.vue'
 import BillingSummaryPanel from '@/components/billing/BillingSummaryPanel.vue'
 import { useLocale } from '@/composables/useLocale'
+import { useBillingPageActions } from '@/composables/useBillingPageActions'
 import { useNotifier } from '@/composables/useNotifier'
 import { useUsersStore } from '@/stores/users'
 import { useSessionStore } from '@/stores/session'
@@ -34,6 +35,24 @@ const periodEnd = ref('')
 const priceRuleVisible = ref(false)
 const priceRuleForm = ref<BillingPriceRuleForm>(newBillingPriceRuleForm())
 const detailVisible = ref(false)
+let detailOpenVersion = 0
+
+const {
+  deletePriceRule,
+  priceRulePending,
+  priceRuleSavePending,
+  reprice,
+  savePriceRule,
+  togglePriceRule,
+} = useBillingPageActions({
+  billing,
+  confirm: (message) => window.confirm(message),
+  notifyApiError,
+  notifySuccess,
+  priceRuleForm,
+  priceRuleVisible,
+  t,
+})
 
 async function refresh(): Promise<void> {
   try {
@@ -62,53 +81,12 @@ async function applyFilters(filters: BillingChargeFilters): Promise<void> {
 }
 
 async function openDetail(chargeId: number): Promise<void> {
+  const openVersion = ++detailOpenVersion
+  detailVisible.value = true
   try {
     await billing.openDetail(chargeId)
-    detailVisible.value = true
   } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
-async function savePriceRule(): Promise<void> {
-  const form = priceRuleForm.value
-  try {
-    await billing.savePriceRule(
-      {
-        public_model: form.public_model.trim(),
-        input_rate: form.input_rate.trim(),
-        cache_read_rate: form.cache_read_rate.trim(),
-        cache_write_rate: form.cache_write_rate.trim(),
-        output_rate: form.output_rate.trim(),
-        effective_from: new Date(form.effective_from).toISOString(),
-      },
-      form.price_rule_id,
-    )
-    priceRuleVisible.value = false
-    notifySuccess(
-      form.price_rule_id ? t('priceRuleUpdated') : t('priceRuleCreated'),
-    )
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
-async function togglePriceRule(
-  rule: (typeof billing.priceRules)[number],
-): Promise<void> {
-  try {
-    await billing.togglePriceRule(rule)
-    notifySuccess(rule.enabled ? t('priceRuleDisabled') : t('priceRuleEnabled'))
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
-async function reprice(): Promise<void> {
-  try {
-    const count = await billing.reprice()
-    notifySuccess(t('repriced', { count }))
-  } catch (cause) {
+    if (detailOpenVersion === openVersion) detailVisible.value = false
     notifyApiError(cause)
   }
 }
@@ -125,18 +103,6 @@ async function download(kind: 'details' | 'monthly'): Promise<void> {
 function openPriceRule(rule?: (typeof billing.priceRules)[number]): void {
   priceRuleForm.value = newBillingPriceRuleForm(rule)
   priceRuleVisible.value = true
-}
-
-async function deletePriceRule(
-  rule: (typeof billing.priceRules)[number],
-): Promise<void> {
-  if (!window.confirm(t('priceRuleDeleteConfirm'))) return
-  try {
-    await billing.removePriceRule(rule.price_rule_id)
-    notifySuccess(t('priceRuleDeleted'))
-  } catch (cause) {
-    notifyApiError(cause)
-  }
 }
 
 onMounted(async () => {
@@ -194,6 +160,8 @@ onMounted(async () => {
           color="warning"
           variant="outline"
           icon="i-lucide-calculator"
+          :loading="billing.repricePending"
+          :disabled="billing.repricePending"
           @click="reprice"
           >{{ t('reprice') }}</UButton
         >
@@ -239,6 +207,8 @@ onMounted(async () => {
       v-if="session.isAdmin"
       :first="billing.priceRuleFirst"
       :loading="billing.priceRulesLoading"
+      :pending-actions="billing.pendingPriceRuleActions"
+      :create-pending="billing.createPending"
       :rules="billing.priceRules"
       :rows="billing.priceRuleRows"
       :total="billing.priceRuleTotal"
@@ -252,7 +222,8 @@ onMounted(async () => {
     <BillingPriceRuleDialog
       v-model:visible="priceRuleVisible"
       v-model:form="priceRuleForm"
-      :busy="billing.loading"
+      :busy="priceRulePending"
+      :save-pending="priceRuleSavePending"
       :t="t"
       @save="savePriceRule"
     />

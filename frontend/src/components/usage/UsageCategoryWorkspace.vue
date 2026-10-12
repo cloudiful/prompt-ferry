@@ -18,6 +18,7 @@ defineProps<{
   loading: boolean
   overview: RequestRecordOverviewResponse | null
   perspective: RequestOverviewPerspective
+  perspectivePending: boolean
   t: TranslateFn
 }>()
 
@@ -39,6 +40,7 @@ const RequestOverviewPanel = defineAsyncComponent(
       :loading="loading"
       :category="category"
       :perspective="perspective"
+      :perspective-pending="perspectivePending"
       :formatting="formatting"
       :t="t"
       @change-perspective="$emit('changePerspective', $event)"

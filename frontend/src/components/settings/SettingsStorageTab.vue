@@ -23,7 +23,6 @@ const draft = reactive({
 
 const s3AccessKeyInput = ref('')
 const s3SecretKeyInput = ref('')
-const saving = ref(false)
 const localError = ref<string | null>(null)
 
 const backendOptions = computed(() => [
@@ -52,15 +51,17 @@ watch(() => settingsStore.rawObjectStore, syncFromStore, {
   immediate: true,
 })
 
+const storagePending = computed(
+  () => !!settingsStore.settingsPendingActions.storage,
+)
 const isS3 = computed(() => draft.backend === 's3')
 const isLocal = computed(() => draft.backend === 'local')
 const isUnavailable = computed(() => Boolean(settingsStore.rawObjectStoreError))
 
-function buildSecretPatch(input: string) {
-  const t = input.trim()
-  if (t) return { mode: 'replace' as const, value: t }
-  return { mode: 'keep' as const }
-}
+const buildSecretPatch = (input: string) =>
+  input.trim()
+    ? { mode: 'replace' as const, value: input.trim() }
+    : { mode: 'keep' as const }
 
 async function save(): Promise<void> {
   localError.value = null
@@ -69,9 +70,8 @@ async function save(): Promise<void> {
     notifyApiError(new Error(`${props.t('storageS3Bucket')} is required`))
     return
   }
-  saving.value = true
   try {
-    await settingsStore.saveRawObjectStore({
+    const outcome = await settingsStore.saveRawObjectStore({
       backend: draft.backend,
       local_dir: draft.local_dir,
       s3_endpoint: draft.s3_endpoint,
@@ -83,13 +83,13 @@ async function save(): Promise<void> {
       s3_access_key: buildSecretPatch(s3AccessKeyInput.value),
       s3_secret_key: buildSecretPatch(s3SecretKeyInput.value),
     })
-    syncFromStore()
-    notifySuccess(props.t('storageSaved'))
+    if (outcome.executed) {
+      syncFromStore()
+      notifySuccess(props.t('storageSaved'))
+    }
   } catch (cause) {
     localError.value = cause instanceof Error ? cause.message : String(cause)
     notifyApiError(cause)
-  } finally {
-    saving.value = false
   }
 }
 
@@ -125,7 +125,7 @@ async function refresh(): Promise<void> {
           <UButton
             size="sm"
             icon="i-lucide-save"
-            :loading="saving || settingsStore.loading"
+            :loading="storagePending || settingsStore.loading"
             :disabled="isUnavailable"
             @click="save"
           >

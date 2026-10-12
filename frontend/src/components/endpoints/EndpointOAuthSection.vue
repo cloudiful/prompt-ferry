@@ -1,56 +1,60 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type {
-  EndpointOAuthStatusResponse,
-  OAuthBrowserStartResponse,
-  OAuthDeviceStartResponse,
-  TokenPlanUsageResponse,
-} from '@/generated/admin-api'
-import {
-  oauthBrowserComplete,
-  oauthBrowserStart,
-  oauthClear,
-  oauthDevicePoll,
-  oauthDeviceStart,
-  oauthRefresh,
-  oauthStatus,
-  tokenPlanUsage,
-} from '@/generated/admin-api'
-import { expectData, formatApiError, withData } from '@/api'
+import { computed, toRef } from 'vue'
+import type { EndpointOAuthStatusResponse } from '@/generated/admin-api'
+import EndpointOAuthBrowserLogin from '@/components/endpoints/EndpointOAuthBrowserLogin.vue'
+import EndpointOAuthDeviceLogin from '@/components/endpoints/EndpointOAuthDeviceLogin.vue'
+import { useEndpointOAuthActions } from '@/composables/useEndpointOAuthActions'
 import {
   useTokenPlanTicker,
   useTokenPlanWindowEntries,
 } from '@/composables/useTokenPlanWindowEntries'
+import type { RunEndpointOAuthAction } from '@/stores/endpoint-oauth-action-types'
 
 const props = defineProps<{
   endpointId: string
+  runAction?: RunEndpointOAuthAction
   t: TranslateFn
 }>()
 
 const emit = defineEmits<{
   status: [
-    payload: {
-      plan: EndpointOAuthStatusResponse['plan']
-      has_oauth_token: boolean
-    },
+    payload: Pick<EndpointOAuthStatusResponse, 'plan' | 'has_oauth_token'>,
   ]
 }>()
 
-const status = ref<EndpointOAuthStatusResponse | null>(null)
-const quota = ref<TokenPlanUsageResponse | null>(null)
-const quotaError = ref('')
-const statusError = ref('')
-const refreshing = ref(false)
-const clearing = ref(false)
-const device = ref<OAuthDeviceStartResponse | null>(null)
-const deviceBusy = ref(false)
-const deviceMessage = ref('')
-const browser = ref<OAuthBrowserStartResponse | null>(null)
-const browserBusy = ref(false)
-const browserMessage = ref('')
-const redirectUrl = ref('')
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
+const endpointId = toRef(props, 'endpointId')
+const oauth = useEndpointOAuthActions({
+  endpointId,
+  onStatus: (payload) => emit('status', payload),
+  runAction: props.runAction,
+})
+const {
+  browserFlow,
+  clearToken,
+  clearing,
+  deviceFlow,
+  quota,
+  quotaError,
+  refreshToken,
+  refreshing,
+  status,
+  statusError,
+} = oauth
+const {
+  browser,
+  busy: browserBusy,
+  completeBrowser,
+  message: browserMessage,
+  redirectUrl,
+  startBrowser,
+} = browserFlow
+const {
+  device,
+  message: deviceMessage,
+  polling,
+  startDevice,
+  starting: deviceStarting,
+} = deviceFlow
 const tickerVisible = computed(() => quota.value !== null)
 const nowMs = useTokenPlanTicker(tickerVisible)
 const { usedPercent, progressColor, formatRemaining } =
@@ -64,15 +68,12 @@ const expiresAt = computed(() => {
 })
 const needsLogin = computed(() => !hasToken.value)
 const quotaEntry = computed(() => quota.value?.keys[0] ?? null)
-// Issue #599 R2c: the ChatGPT quota adapter returns one model-remains entry
-// whose interval/weekly pair are the 5h and weekly subscription windows.
 const fiveHourWindow = computed(
   () => quotaEntry.value?.model_remains[0]?.interval ?? null,
 )
 const weeklyWindow = computed(
   () => quotaEntry.value?.model_remains[0]?.weekly ?? null,
 )
-const hasQuotaWindows = computed(() => quotaRows.value.length > 0)
 const quotaRows = computed(() => {
   const rows: Array<{
     key: string
@@ -95,6 +96,7 @@ const quotaRows = computed(() => {
   }
   return rows
 })
+const actionsEnabled = computed(() => props.runAction !== undefined)
 
 function statusLabel(token: boolean, expired: boolean): string {
   if (!token) return props.t('endpointOAuthNotLoggedIn')
@@ -103,176 +105,8 @@ function statusLabel(token: boolean, expired: boolean): string {
     : props.t('endpointOAuthLoggedIn')
 }
 
-async function loadStatus(): Promise<void> {
-  statusError.value = ''
-  try {
-    const next = expectData(
-      await oauthStatus<true>(
-        withData({ path: { endpoint_id: props.endpointId } }),
-      ),
-    )
-    status.value = next
-    emit('status', {
-      plan: next.plan,
-      has_oauth_token: next.has_oauth_token,
-    })
-    if (next.has_oauth_token) await loadQuota()
-    else {
-      quota.value = null
-      quotaError.value = ''
-    }
-  } catch (error) {
-    statusError.value = formatApiError(error)
-  }
-}
-
-async function loadQuota(): Promise<void> {
-  quotaError.value = ''
-  try {
-    quota.value = expectData(
-      await tokenPlanUsage<true>(
-        withData({ path: { endpoint_id: props.endpointId } }),
-      ),
-    )
-  } catch (error) {
-    quota.value = null
-    quotaError.value = formatApiError(error)
-  }
-}
-
-function stopPolling(): void {
-  if (pollTimer !== null) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}
-
-async function startDevice(): Promise<void> {
-  deviceMessage.value = ''
-  deviceBusy.value = true
-  try {
-    device.value = expectData(
-      await oauthDeviceStart<true>(
-        withData({ path: { endpoint_id: props.endpointId } }),
-      ),
-    )
-    scheduleDevicePoll()
-  } catch (error) {
-    deviceMessage.value = formatApiError(error)
-  } finally {
-    deviceBusy.value = false
-  }
-}
-
-function scheduleDevicePoll(): void {
-  stopPolling()
-  const seconds = Math.max(1, device.value?.interval_seconds ?? 5)
-  pollTimer = setInterval(() => {
-    void pollDevice()
-  }, seconds * 1000)
-}
-
-async function pollDevice(): Promise<void> {
-  const flow = device.value
-  if (!flow) return
-  try {
-    const result = expectData(
-      await oauthDevicePoll<true>(
-        withData({
-          path: { endpoint_id: props.endpointId },
-          body: { flow_id: flow.flow_id },
-        }),
-      ),
-    )
-    if (result.status === 'complete') {
-      stopPolling()
-      device.value = null
-      await loadStatus()
-    }
-  } catch (error) {
-    // A terminal flow error (expired/denied/upstream) ends the wait; the
-    // operator can start a fresh login.
-    stopPolling()
-    device.value = null
-    deviceMessage.value = formatApiError(error)
-  }
-}
-
-async function startBrowser(): Promise<void> {
-  browserMessage.value = ''
-  browserBusy.value = true
-  try {
-    browser.value = expectData(
-      await oauthBrowserStart<true>(
-        withData({ path: { endpoint_id: props.endpointId } }),
-      ),
-    )
-  } catch (error) {
-    browserMessage.value = formatApiError(error)
-  } finally {
-    browserBusy.value = false
-  }
-}
-
-async function completeBrowser(): Promise<void> {
-  const flow = browser.value
-  if (!flow) return
-  browserBusy.value = true
-  browserMessage.value = ''
-  try {
-    const result = expectData(
-      await oauthBrowserComplete<true>(
-        withData({
-          path: { endpoint_id: props.endpointId },
-          body: {
-            flow_id: flow.flow_id,
-            redirect_url: redirectUrl.value.trim(),
-          },
-        }),
-      ),
-    )
-    if (result.status === 'complete') {
-      browser.value = null
-      redirectUrl.value = ''
-      await loadStatus()
-    }
-  } catch (error) {
-    browserMessage.value = formatApiError(error)
-  } finally {
-    browserBusy.value = false
-  }
-}
-
-async function refreshToken(): Promise<void> {
-  refreshing.value = true
-  statusError.value = ''
-  try {
-    status.value = expectData(
-      await oauthRefresh<true>(
-        withData({ path: { endpoint_id: props.endpointId } }),
-      ),
-    )
-    await loadQuota()
-  } catch (error) {
-    statusError.value = formatApiError(error)
-  } finally {
-    refreshing.value = false
-  }
-}
-
-async function clearToken(): Promise<void> {
-  clearing.value = true
-  statusError.value = ''
-  try {
-    await oauthClear<true>(
-      withData({ path: { endpoint_id: props.endpointId } }),
-    )
-    await loadStatus()
-  } catch (error) {
-    statusError.value = formatApiError(error)
-  } finally {
-    clearing.value = false
-  }
+function updateRedirectUrl(value: string): void {
+  redirectUrl.value = value
 }
 
 async function copy(value: string): Promise<void> {
@@ -282,27 +116,6 @@ async function copy(value: string): Promise<void> {
     // Clipboard access is optional; the value stays selectable on screen.
   }
 }
-
-onMounted(() => {
-  if (props.endpointId) void loadStatus()
-})
-
-onBeforeUnmount(stopPolling)
-
-watch(
-  () => props.endpointId,
-  () => {
-    stopPolling()
-    status.value = null
-    quota.value = null
-    quotaError.value = ''
-    statusError.value = ''
-    device.value = null
-    browser.value = null
-    redirectUrl.value = ''
-    if (props.endpointId) void loadStatus()
-  },
-)
 </script>
 
 <template>
@@ -339,6 +152,7 @@ watch(
           variant="soft"
           icon="i-lucide-refresh-cw"
           :loading="refreshing"
+          :disabled="!actionsEnabled"
           @click="refreshToken"
           >{{ t('endpointOAuthRefresh') }}</UButton
         >
@@ -350,12 +164,15 @@ watch(
           variant="soft"
           icon="i-lucide-trash-2"
           :loading="clearing"
+          :disabled="!actionsEnabled"
           @click="clearToken"
           >{{ t('endpointOAuthClear') }}</UButton
         >
       </div>
     </div>
-    <p v-if="statusError" class="break-words text-error">{{ statusError }}</p>
+    <p v-if="statusError" class="break-words text-error">
+      {{ statusError }}
+    </p>
     <p v-if="hasToken && expiresAt" class="text-dimmed">
       {{ t('endpointOAuthExpiresAt') }}: {{ expiresAt }}
     </p>
@@ -365,7 +182,7 @@ watch(
         t('endpointOAuthQuota')
       }}</span>
       <p class="text-xs text-dimmed">{{ t('endpointOAuthQuotaHint') }}</p>
-      <template v-if="hasQuotaWindows">
+      <template v-if="quotaRows.length">
         <div
           v-for="row in quotaRows"
           :key="row.key"
@@ -393,119 +210,28 @@ watch(
     </div>
 
     <div v-if="needsLogin" class="grid gap-3 border-t border-default pt-3">
-      <div class="grid gap-2">
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-xs font-medium text-default">{{
-            t('endpointOAuthDeviceLogin')
-          }}</span>
-          <UButton
-            type="button"
-            size="xs"
-            color="primary"
-            variant="soft"
-            :loading="deviceBusy"
-            @click="startDevice"
-            >{{ t('endpointOAuthDeviceStart') }}</UButton
-          >
-        </div>
-        <p class="text-xs text-dimmed">{{ t('endpointOAuthDeviceHint') }}</p>
-        <template v-if="device">
-          <div class="flex items-center gap-2">
-            <code class="rounded bg-muted px-2 py-1 font-mono text-sm">{{
-              device.user_code
-            }}</code>
-            <UButton
-              type="button"
-              size="xs"
-              color="neutral"
-              variant="ghost"
-              icon="i-lucide-copy"
-              :aria-label="t('endpointOAuthCopy')"
-              @click="copy(device.user_code)"
-            />
-          </div>
-          <p class="text-xs text-dimmed">
-            {{ t('endpointOAuthDeviceWaiting') }}
-            <a
-              class="underline"
-              :href="device.verification_uri"
-              target="_blank"
-              rel="noreferrer"
-              >{{ device.verification_uri }}</a
-            >
-          </p>
-        </template>
-        <p v-if="deviceMessage" class="break-words text-error">
-          {{ deviceMessage }}
-        </p>
-      </div>
-
-      <div class="grid gap-2 border-t border-default pt-3">
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-xs font-medium text-default">{{
-            t('endpointOAuthBrowserLogin')
-          }}</span>
-          <UButton
-            type="button"
-            size="xs"
-            color="primary"
-            variant="soft"
-            :loading="browserBusy"
-            @click="startBrowser"
-            >{{ t('endpointOAuthBrowserStart') }}</UButton
-          >
-        </div>
-        <p class="text-xs text-dimmed">{{ t('endpointOAuthBrowserHint') }}</p>
-        <template v-if="browser">
-          <div class="grid gap-1">
-            <label class="text-xs text-muted" for="endpoint-oauth-authorize">
-              {{ t('endpointOAuthAuthorizeUrl') }}
-            </label>
-            <div class="flex items-center gap-2">
-              <UInput
-                id="endpoint-oauth-authorize"
-                class="w-full"
-                :model-value="browser.authorize_url"
-                readonly
-              />
-              <UButton
-                type="button"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                icon="i-lucide-copy"
-                :aria-label="t('endpointOAuthCopy')"
-                @click="copy(browser.authorize_url)"
-              />
-            </div>
-          </div>
-          <div class="grid gap-1">
-            <label class="text-xs text-muted" for="endpoint-oauth-redirect">
-              {{ t('endpointOAuthRedirectUrl') }}
-            </label>
-            <UInput
-              id="endpoint-oauth-redirect"
-              v-model="redirectUrl"
-              class="w-full"
-              :placeholder="t('endpointOAuthRedirectPlaceholder')"
-            />
-          </div>
-          <div class="flex justify-end">
-            <UButton
-              type="button"
-              size="xs"
-              color="primary"
-              :loading="browserBusy"
-              :disabled="redirectUrl.trim() === ''"
-              @click="completeBrowser"
-              >{{ t('endpointOAuthComplete') }}</UButton
-            >
-          </div>
-        </template>
-        <p v-if="browserMessage" class="break-words text-error">
-          {{ browserMessage }}
-        </p>
-      </div>
+      <EndpointOAuthDeviceLogin
+        :actions-enabled="actionsEnabled"
+        :device="device"
+        :message="deviceMessage"
+        :polling="polling"
+        :starting="deviceStarting"
+        :t="t"
+        @copy="copy"
+        @start="startDevice"
+      />
+      <EndpointOAuthBrowserLogin
+        :actions-enabled="actionsEnabled"
+        :browser="browser"
+        :busy="browserBusy"
+        :message="browserMessage"
+        :redirect-url="redirectUrl"
+        :t="t"
+        @complete="completeBrowser"
+        @copy="copy"
+        @start="startBrowser"
+        @update:redirect-url="updateRedirectUrl"
+      />
     </div>
   </div>
 </template>

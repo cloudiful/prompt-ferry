@@ -13,10 +13,23 @@ defineEmits<{
   page: [event: TablePageChange]
 }>()
 
-const props = defineProps<{
-  t: TranslateFn
-  workspace: UsersWorkspaceView
-}>()
+const props = withDefaults(
+  defineProps<{
+    /** Which rows are gated, and by which action. Absent means nothing is. */
+    pendingKeys?: Readonly<Record<string, string>>
+    t: TranslateFn
+    workspace: UsersWorkspaceView
+  }>(),
+  { pendingKeys: () => ({}) },
+)
+
+/** One user's write is in flight: its row's controls are gated. */
+const isPending = (userId: number) =>
+  Object.hasOwn(props.pendingKeys, String(userId))
+
+/** Only the control that started the write spins; the rest are just disabled. */
+const pendingAction = (userId: number, action: string) =>
+  isPending(userId) && props.pendingKeys[String(userId)] === action
 
 const columns = computed<TableColumn<UserListItemView>[]>(() => [
   { accessorKey: 'login_name', header: props.t('user') },
@@ -68,7 +81,8 @@ const tableToggleLabelClass =
               size="sm"
               color="neutral"
               variant="ghost"
-              :loading="workspace.busy"
+              :loading="pendingAction(item.user.user_id, 'reset')"
+              :disabled="isPending(item.user.user_id)"
               @click="$emit('openResetPassword', item.user)"
             >
               <UIcon name="i-lucide-key-round" class="h-4 w-4" />
@@ -76,7 +90,8 @@ const tableToggleLabelClass =
             <UButton
               size="sm"
               variant="ghost"
-              :loading="workspace.busy"
+              :loading="pendingAction(item.user.user_id, 'save')"
+              :disabled="isPending(item.user.user_id)"
               @click="$emit('saveUser', item.user)"
             >
               <UIcon name="i-lucide-save" class="h-4 w-4" />
@@ -85,7 +100,8 @@ const tableToggleLabelClass =
               size="sm"
               color="error"
               variant="ghost"
-              :loading="workspace.busy"
+              :loading="pendingAction(item.user.user_id, 'delete')"
+              :disabled="isPending(item.user.user_id)"
               @click="$emit('deleteUser', item.user)"
             >
               <UIcon name="i-lucide-trash-2" class="h-4 w-4" />
@@ -103,7 +119,8 @@ const tableToggleLabelClass =
           <UButton
             size="sm"
             variant="ghost"
-            :loading="workspace.busy"
+            :loading="pendingAction(item.user.user_id, 'save')"
+            :disabled="isPending(item.user.user_id)"
             @click="$emit('saveUser', item.user)"
           >
             <UIcon name="i-lucide-save" class="h-4 w-4" />
@@ -169,7 +186,8 @@ const tableToggleLabelClass =
             color="neutral"
             variant="ghost"
             :aria-label="t('resetPassword')"
-            :loading="workspace.busy"
+            :loading="pendingAction(row.original.user.user_id, 'reset')"
+            :disabled="isPending(row.original.user.user_id)"
             @click="$emit('openResetPassword', row.original.user)"
             ><UIcon name="i-lucide-key-round" class="h-4 w-4"
           /></UButton>
@@ -177,7 +195,8 @@ const tableToggleLabelClass =
             size="sm"
             variant="ghost"
             :aria-label="t('save')"
-            :loading="workspace.busy"
+            :loading="pendingAction(row.original.user.user_id, 'save')"
+            :disabled="isPending(row.original.user.user_id)"
             @click="$emit('saveUser', row.original.user)"
             ><UIcon name="i-lucide-save" class="h-4 w-4"
           /></UButton>
@@ -186,7 +205,8 @@ const tableToggleLabelClass =
             color="error"
             variant="ghost"
             :aria-label="t('delete')"
-            :loading="workspace.busy"
+            :loading="pendingAction(row.original.user.user_id, 'delete')"
+            :disabled="isPending(row.original.user.user_id)"
             @click="$emit('deleteUser', row.original.user)"
             ><UIcon name="i-lucide-trash-2" class="h-4 w-4"
           /></UButton>

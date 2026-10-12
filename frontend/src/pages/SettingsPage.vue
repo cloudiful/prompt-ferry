@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import PageIntro from '../components/PageIntro.vue'
 import { setLocale, useLocale } from '../composables/useLocale'
+import { useNotifier } from '../composables/useNotifier'
+import { useSettingsPageActions } from '../composables/useSettingsPageActions'
 import SettingsGeneralTab from '../components/settings/SettingsGeneralTab.vue'
 import SettingsCacheAlertSection from '../components/settings/SettingsCacheAlertSection.vue'
 import SettingsConfigArchiveTab from '../components/settings/SettingsConfigArchiveTab.vue'
@@ -10,10 +12,10 @@ import SettingsNetworkTab from '../components/settings/SettingsNetworkTab.vue'
 import SettingsRequestsTab from '../components/settings/SettingsRequestsTab.vue'
 import SettingsReviewTab from '../components/settings/SettingsReviewTab.vue'
 import SettingsStorageTab from '../components/settings/SettingsStorageTab.vue'
-import { useNotifier } from '../composables/useNotifier'
 import { resolveSettingsTab } from '../models/settings'
 import { useSessionStore } from '../stores/session'
 import { useSettingsStore } from '../stores/settings'
+import { settingFormKey } from '../stores/settings-actions'
 import { setThemeMode, useThemeMode } from '@/theme/appTheme'
 
 const session = useSessionStore()
@@ -21,163 +23,35 @@ const settingsStore = useSettingsStore()
 const route = useRoute()
 const { locale, t } = useLocale()
 const themeMode = useThemeMode()
-const { notifyApiError, notifySuccess } = useNotifier()
+const { notifyApiError } = useNotifier()
 
 const activeSection = computed(() =>
   resolveSettingsTab(route.path.split('/')[2] ?? null, session.isAdmin),
 )
-const requestAutosaveReady = { value: false }
-let requestContentLoggingSnapshot = ''
-let usageRetentionSnapshot = ''
-let streamDeltaBatchingSnapshot = ''
-let modelRouteWhitelistSnapshot = ''
 
-const serialize = (value: unknown): string => JSON.stringify(value)
+const { adoptLoadedSettings, dispose, saveRelayIpWhitelist, saveLlmReview } =
+  useSettingsPageActions({ activeSection, store: settingsStore, t })
 
-function syncRequestSnapshots(): void {
-  requestContentLoggingSnapshot = serialize(settingsStore.requestContentLogging)
-  usageRetentionSnapshot = serialize(settingsStore.usageRetention)
-  streamDeltaBatchingSnapshot = serialize(settingsStore.streamDeltaBatching)
-  modelRouteWhitelistSnapshot = serialize(settingsStore.modelRouteWhitelist)
-}
+onBeforeUnmount(dispose)
 
-function createAutosaveController(options: {
-  delayMs: number
-  getSnapshot: () => string
-  getSavedSnapshot: () => string
-  setSavedSnapshot: (value: string) => void
-  save: () => Promise<void>
-}): { schedule: () => void; dispose: () => void } {
-  let timer: ReturnType<typeof setTimeout> | null = null
-  let saving = false
-  let queued = false
-
-  async function flush(): Promise<void> {
-    timer = null
-    if (
-      !requestAutosaveReady.value ||
-      settingsStore.loading ||
-      activeSection.value !== 'requests'
-    ) {
-      return
-    }
-
-    const snapshot = options.getSnapshot()
-    if (snapshot === options.getSavedSnapshot()) {
-      return
-    }
-
-    if (saving) {
-      queued = true
-      return
-    }
-
-    saving = true
-    try {
-      await options.save()
-      options.setSavedSnapshot(options.getSnapshot())
-    } catch (cause) {
-      notifyApiError(cause)
-    } finally {
-      saving = false
-      if (queued) {
-        queued = false
-        void flush()
-      }
-    }
-  }
-
-  function schedule(): void {
-    if (
-      !requestAutosaveReady.value ||
-      settingsStore.loading ||
-      activeSection.value !== 'requests'
-    ) {
-      return
-    }
-
-    if (timer) {
-      clearTimeout(timer)
-    }
-    timer = setTimeout(() => {
-      void flush()
-    }, options.delayMs)
-  }
-
-  function dispose(): void {
-    if (timer) {
-      clearTimeout(timer)
-      timer = null
-    }
-  }
-
-  return { schedule, dispose }
-}
-
-const requestContentLoggingAutosave = createAutosaveController({
-  delayMs: 250,
-  getSnapshot: () => serialize(settingsStore.requestContentLogging),
-  getSavedSnapshot: () => requestContentLoggingSnapshot,
-  setSavedSnapshot: (value) => {
-    requestContentLoggingSnapshot = value
-  },
-  save: () => settingsStore.saveRequestContentLogging(),
-})
-
-const streamDeltaBatchingAutosave = createAutosaveController({
-  delayMs: 300,
-  getSnapshot: () => serialize(settingsStore.streamDeltaBatching),
-  getSavedSnapshot: () => streamDeltaBatchingSnapshot,
-  setSavedSnapshot: (value) => {
-    streamDeltaBatchingSnapshot = value
-  },
-  save: () => settingsStore.saveStreamDeltaBatching(),
-})
-
-const usageRetentionAutosave = createAutosaveController({
-  delayMs: 250,
-  getSnapshot: () => serialize(settingsStore.usageRetention),
-  getSavedSnapshot: () => usageRetentionSnapshot,
-  setSavedSnapshot: (value) => {
-    usageRetentionSnapshot = value
-  },
-  save: () => settingsStore.saveUsageRetention(),
-})
-
-const modelRouteWhitelistAutosave = createAutosaveController({
-  delayMs: 150,
-  getSnapshot: () => serialize(settingsStore.modelRouteWhitelist),
-  getSavedSnapshot: () => modelRouteWhitelistSnapshot,
-  setSavedSnapshot: (value) => {
-    modelRouteWhitelistSnapshot = value
-  },
-  save: () => settingsStore.saveModelRouteWhitelist(),
-})
+const relayIpWhitelistPending = computed(
+  () => !!settingsStore.settingsPendingActions.relayIpWhitelist,
+)
+const llmReviewPending = computed(
+  () => !!settingsStore.settingsPendingActions.llmReview,
+)
+const modelRouteWhitelistPending = computed(() =>
+  settingsStore.isPending(settingFormKey('modelRouteWhitelist')),
+)
+const streamDeltaBatchingPending = computed(() =>
+  settingsStore.isPending(settingFormKey('streamDeltaBatching')),
+)
 
 async function refresh(): Promise<void> {
   try {
     await settingsStore.refresh()
-    syncRequestSnapshots()
-    requestAutosaveReady.value = true
+    adoptLoadedSettings()
     await session.refreshBridgeStatus()
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
-async function saveRelayIpWhitelist(): Promise<void> {
-  try {
-    await settingsStore.saveRelayIpWhitelist()
-    notifySuccess(t('saved'))
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
-async function saveLlmReview(): Promise<void> {
-  try {
-    await settingsStore.saveLlmReview()
-    notifySuccess(t('llmReviewSaved'))
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -189,45 +63,6 @@ onMounted(async () => {
   } else {
     await session.refreshBridgeStatus()
   }
-})
-
-watch(
-  () => settingsStore.usageRetention,
-  () => {
-    usageRetentionAutosave.schedule()
-  },
-  { deep: true },
-)
-
-watch(
-  () => settingsStore.requestContentLogging,
-  () => {
-    requestContentLoggingAutosave.schedule()
-  },
-  { deep: true },
-)
-
-watch(
-  () => settingsStore.streamDeltaBatching,
-  () => {
-    streamDeltaBatchingAutosave.schedule()
-  },
-  { deep: true },
-)
-
-watch(
-  () => settingsStore.modelRouteWhitelist,
-  () => {
-    modelRouteWhitelistAutosave.schedule()
-  },
-  { deep: true },
-)
-
-onBeforeUnmount(() => {
-  requestContentLoggingAutosave.dispose()
-  usageRetentionAutosave.dispose()
-  streamDeltaBatchingAutosave.dispose()
-  modelRouteWhitelistAutosave.dispose()
 })
 </script>
 
@@ -265,6 +100,9 @@ onBeforeUnmount(() => {
       v-model:usage-retention="settingsStore.usageRetention"
       v-model:stream-delta-batching="settingsStore.streamDeltaBatching"
       v-model:model-route-whitelist="settingsStore.modelRouteWhitelist"
+      :pending-retention-form="settingsStore.pendingRetentionForm"
+      :model-route-whitelist-pending="modelRouteWhitelistPending"
+      :stream-delta-batching-pending="streamDeltaBatchingPending"
       :t="t"
     />
 
@@ -272,6 +110,7 @@ onBeforeUnmount(() => {
       v-else-if="session.isAdmin && activeSection === 'network'"
       v-model:relay-ip-whitelist="settingsStore.relayIpWhitelist"
       :busy="settingsStore.loading"
+      :pending="relayIpWhitelistPending"
       :t="t"
       @save-relay-ip-whitelist="saveRelayIpWhitelist"
     />
@@ -283,6 +122,7 @@ onBeforeUnmount(() => {
         settingsStore.llmReviewWebhookHeadersText
       "
       :busy="settingsStore.loading"
+      :pending="llmReviewPending"
       :t="t"
       @save-llm-review="saveLlmReview"
     />

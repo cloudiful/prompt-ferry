@@ -1,23 +1,15 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import {
-  createUser,
-  deleteUser,
-  listUsers,
-  listUserOptions,
-  resetPassword,
-  updateUser,
-} from '../generated/admin-api'
-import type {
-  CreateUserRequest,
-  User,
-  UserUpdate,
-} from '../generated/admin-api'
+import { listUserOptions, listUsers } from '../generated/admin-api'
+import type { User } from '../generated/admin-api'
 import { expectData, withData } from '../api'
 import {
   STANDARD_PAGE_SIZE_OPTIONS,
   useStoredPageSize,
 } from '../table-pagination'
+import { useAsyncAction } from '../composables/useAsyncAction'
+import { USER_KEY_PREFIX, createUserActions } from './users-actions'
+import { pendingRowsById } from './record-action-types'
 
 export const useUsersStore = defineStore('users', () => {
   const users = ref<User[]>([])
@@ -69,58 +61,34 @@ export const useUsersStore = defineStore('users', () => {
     }
   }
 
-  async function saveUser(userId: number, input: UserUpdate): Promise<User> {
-    const saved = expectData(
-      await updateUser<true>(
-        withData({ path: { user_id: userId }, body: input }),
-      ),
-    )
-    users.value = users.value.map((item) =>
-      item.user_id === saved.user_id ? saved : item,
-    )
-    pageUsers.value = pageUsers.value.map((item) =>
-      item.user_id === saved.user_id ? saved : item,
-    )
-    return saved
-  }
+  // The guard lives here rather than at each call site, so a user can be gated
+  // against every operation that would write that account.
+  const guard = useAsyncAction()
+  const actions = createUserActions({
+    guard,
+    loadPage: () => loadPage(),
+    users: { users, pageUsers },
+  })
 
-  async function createNewUser(input: CreateUserRequest): Promise<User> {
-    const created = expectData(
-      await createUser<true>(withData({ body: input })),
-    )
-    users.value = [...users.value, created]
-    await loadPage()
-    return created
-  }
-
-  async function removeUser(userId: number): Promise<void> {
-    await deleteUser<true>(withData({ path: { user_id: userId } }))
-    users.value = users.value.filter((user) => user.user_id !== userId)
-    await loadPage()
-  }
-
-  async function resetUserPassword(
-    userId: number,
-    password: string,
-  ): Promise<void> {
-    await resetPassword<true>(
-      withData({ path: { user_id: userId }, body: { password } }),
-    )
-  }
+  // Per-row view of the guard. `loading` stays the fetch-only busy flag, so a
+  // write never blanks the whole page.
+  const userPendingActions = computed(() =>
+    pendingRowsById(guard.pendingActions.value, USER_KEY_PREFIX),
+  )
 
   return {
-    createNewUser,
+    ...actions,
     first,
+    isPending: guard.isPending,
     loading,
     loadPage,
     loadUsers,
     pageUsers,
-    removeUser,
-    resetUserPassword,
-    saveUser,
+    pendingActions: guard.pendingActions,
+    rows,
     totalUsers,
     total,
-    rows,
+    userPendingActions,
     users,
   }
 })

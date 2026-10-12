@@ -5,13 +5,25 @@ import type { ApiKeyItemView, ApiKeysWorkspaceView } from '@/models'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
-const props = defineProps<{
-  first: number
-  rows: number
-  total: number
-  t: TranslateFn
-  workspace: ApiKeysWorkspaceView
-}>()
+const props = withDefaults(
+  defineProps<{
+    first: number
+    /** Which rows are gated, and by which action. Absent means nothing is. */
+    pendingKeys?: Readonly<Record<string, string>>
+    rows: number
+    total: number
+    t: TranslateFn
+    workspace: ApiKeysWorkspaceView
+  }>(),
+  { pendingKeys: () => ({}) },
+)
+
+/** One key's write is in flight: its row's write controls are gated. */
+const isPending = (keyId: string) => Object.hasOwn(props.pendingKeys, keyId)
+
+/** Only the control that started the write spins; the rest are just disabled. */
+const pendingAction = (keyId: string, action: string) =>
+  isPending(keyId) && props.pendingKeys[keyId] === action
 
 const draftLabels = ref<Record<string, string>>({})
 
@@ -69,6 +81,7 @@ function commitLabel(keyItem: ApiKeyItemView): void {
               size="sm"
               class="w-full"
               :aria-label="t('name')"
+              :disabled="isPending(keyItem.key_id)"
               @update:model-value="updateLabel(keyItem.key_id, $event)"
               @keydown.enter.prevent="commitLabel(keyItem)"
               @blur="commitLabel(keyItem)"
@@ -86,6 +99,7 @@ function commitLabel(keyItem: ApiKeyItemView): void {
             <USwitch
               :model-value="keyItem.enabled"
               :aria-label="t('status')"
+              :disabled="isPending(keyItem.key_id)"
               @update:model-value="$emit('toggleKey', keyItem.key_id)"
             />
           </label>
@@ -131,6 +145,8 @@ function commitLabel(keyItem: ApiKeyItemView): void {
             color="error"
             variant="ghost"
             :aria-label="t('delete')"
+            :loading="pendingAction(keyItem.key_id, 'delete')"
+            :disabled="isPending(keyItem.key_id)"
             @click="$emit('deleteKey', keyItem.key_id)"
           >
             {{ t('delete') }}
@@ -217,6 +233,8 @@ function commitLabel(keyItem: ApiKeyItemView): void {
             color="error"
             variant="ghost"
             :aria-label="t('delete')"
+            :loading="pendingAction(row.original.key_id, 'delete')"
+            :disabled="isPending(row.original.key_id)"
             @click="$emit('deleteKey', row.original.key_id)"
           >
             {{ t('delete') }}

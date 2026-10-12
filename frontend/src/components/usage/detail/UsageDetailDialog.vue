@@ -10,6 +10,7 @@ import UsageTranscriptSection from './UsageTranscriptSection.vue'
 const AUTOMATIC_KEY_VALUE = '__automatic__'
 
 const props = defineProps<{
+  conversationAction?: string
   detail: UsageDetailWorkspaceView
   t: TranslateFn
 }>()
@@ -28,6 +29,9 @@ const emit = defineEmits<{
 }>()
 
 const visible = defineModel<boolean>('visible', { required: true })
+const writePending = computed(
+  () => props.detail.override_saving || props.detail.affinity_resetting,
+)
 const selectedOverrideEndpointId = ref('')
 const selectedOverrideEndpointKeyId = ref(AUTOMATIC_KEY_VALUE)
 
@@ -84,6 +88,8 @@ function saveOverride(): void {
   <UModal
     v-model:open="visible"
     :title="t('requestDetails')"
+    :dismissible="!writePending"
+    :close="!writePending"
     :ui="{ content: 'sm:max-w-6xl', body: 'max-h-[80vh] overflow-y-auto' }"
   >
     <template #body>
@@ -101,6 +107,7 @@ function saveOverride(): void {
               selectedOverrideEndpointKeyId
             "
             :event="detail.record"
+            :conversation-action="conversationAction"
             :conversation-override="detail.conversation_override"
             :override-saving="detail.override_saving"
             :affinity-resetting="detail.affinity_resetting"

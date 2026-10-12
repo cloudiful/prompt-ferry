@@ -9,7 +9,7 @@ import RestartRequiredBanner from '@/components/relays/RestartRequiredBanner.vue
 import PageIntro from '../components/PageIntro.vue'
 import { useLocale } from '../composables/useLocale'
 import { useNotifier } from '../composables/useNotifier'
-import type { HostRole } from '../generated/admin-api'
+import { useRelayHostPageActions } from '../composables/useRelayHostPageActions'
 import { canManageWorker } from '../models/endpoints/capability'
 import { useRelayHostStore } from '../stores/relay-host'
 import { useRelaySessionStore } from '../stores/relay-session'
@@ -23,6 +23,16 @@ const form = ref(createEmptyRelayHostForm())
 const tokenInput = ref('')
 const showToken = ref(false)
 const bootstrapping = ref(true)
+const {
+  bannerRestartPending,
+  hostPendingAction,
+  hostWritePending,
+  requestRestart,
+  roleActionTarget,
+  saveSettings,
+  selectRole,
+  settingsRestartPending,
+} = useRelayHostPageActions({ form, hostStore, t })
 
 const authenticated = computed(() => relaySession.authenticated)
 const restartRequired = computed(
@@ -60,43 +70,12 @@ async function loginWithToken(): Promise<void> {
   const token = tokenInput.value.trim()
   if (!token) return
   try {
-    await relaySession.login(token)
-    tokenInput.value = ''
+    const result = await relaySession.login(token)
+    if (!result.executed) return
+    if (tokenInput.value.trim() === token) tokenInput.value = ''
     await hostStore.refresh()
     syncForm()
     notifySuccess(t('saved'))
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
-async function selectRole(role: HostRole): Promise<void> {
-  // The remote relay list (`/relays`) never flows through here: saving a
-  // host role only calls the host role endpoint.
-  try {
-    form.value.role = role
-    await hostStore.saveRole(role)
-    syncForm()
-    notifySuccess(t('relayRoleSaved'))
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
-async function saveSettings(): Promise<void> {
-  try {
-    await hostStore.saveSettings(form.value.admin_bind)
-    syncForm()
-    notifySuccess(t('saved'))
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
-async function requestRestart(): Promise<void> {
-  try {
-    await hostStore.requestRestart()
-    notifySuccess(t('relayRestartRequested'))
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -133,6 +112,8 @@ onMounted(bootstrap)
           size="sm"
           color="neutral"
           variant="ghost"
+          :loading="relaySession.busy"
+          :disabled="relaySession.busy"
           @click="relayLogout"
           >{{ t('logout') }}</UButton
         >
@@ -152,11 +133,12 @@ onMounted(bootstrap)
           :type="showToken ? 'text' : 'password'"
           :placeholder="t('relayHostTokenPlaceholder')"
           autocomplete="off"
+          :disabled="relaySession.busy"
           class="w-full"
         />
         <UButton
           :loading="relaySession.busy"
-          :disabled="!tokenInput.trim()"
+          :disabled="relaySession.busy || !tokenInput.trim()"
           @click="loginWithToken"
           >{{ t('login') }}</UButton
         >
@@ -166,8 +148,9 @@ onMounted(bootstrap)
     <template v-else-if="authenticated">
       <RestartRequiredBanner
         v-if="restartRequired"
-        :busy="hostStore.restarting"
-        @restart="requestRestart"
+        :busy="bannerRestartPending"
+        :pending="hostWritePending"
+        @restart="requestRestart('banner')"
       />
 
       <UAlert
@@ -186,7 +169,9 @@ onMounted(bootstrap)
         <HostRoleCards
           :current-role="hostStore.role"
           :pending-role="hostStore.pendingRole"
-          :busy="hostStore.savingRole"
+          :busy="hostPendingAction === 'role'"
+          :pending-role-action="roleActionTarget"
+          :write-pending="hostWritePending"
           @select="selectRole"
         />
       </section>
@@ -203,6 +188,7 @@ onMounted(bootstrap)
         >
           <UInput
             v-model="form.admin_bind"
+            :disabled="hostWritePending"
             placeholder="127.0.0.1:8790"
             class="w-full"
           />
@@ -211,7 +197,8 @@ onMounted(bootstrap)
           <div class="flex w-full justify-end gap-2">
             <UButton
               size="sm"
-              :loading="hostStore.savingSettings"
+              :loading="hostPendingAction === 'settings'"
+              :disabled="hostWritePending"
               @click="saveSettings"
               >{{ t('save') }}</UButton
             >
@@ -219,8 +206,9 @@ onMounted(bootstrap)
               size="sm"
               color="warning"
               variant="outline"
-              :loading="hostStore.restarting"
-              @click="requestRestart"
+              :loading="settingsRestartPending"
+              :disabled="hostWritePending"
+              @click="requestRestart('settings')"
               >{{ t('relayRestartNow') }}</UButton
             >
           </div>

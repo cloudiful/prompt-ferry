@@ -7,6 +7,11 @@ defineProps<{
   busy: boolean
   mcpFirst: number
   mcpRows: number
+  /**
+   * Which rows are gated, and by which action. A pass-through only: the page
+   * owns the map and this panel just carries it to the rows.
+   */
+  pendingKeys?: Readonly<Record<string, string>>
   t: TranslateFn
   testingMcpServerId: string
   workspaceView: McpServerWorkspaceView
@@ -28,6 +33,7 @@ defineEmits<{
     :mcp-first="mcpFirst"
     :mcp-rows="mcpRows"
     :mcp-total="workspaceView.total_count"
+    :pending-keys="pendingKeys"
     :t="t"
     :testing-mcp-server-id="testingMcpServerId"
     @delete-mcp-server="$emit('deleteMcpServer', $event)"

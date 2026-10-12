@@ -5,6 +5,8 @@ import SettingsCard from './SettingsCard.vue'
 
 defineProps<{
   busy: boolean
+  /** This section's own save is in flight, not merely a page refresh. */
+  pending?: boolean
   t: TranslateFn
 }>()
 
@@ -36,11 +38,13 @@ defineEmits<{
             v-model="llmReview.enabled"
             id="settings-llm-review-enabled"
             :aria-label="t('llmReview')"
+            :disabled="pending || busy"
           />
           <UButton
             size="sm"
             icon="i-lucide-save"
-            :loading="busy"
+            :loading="pending || busy"
+            :disabled="pending || busy"
             @click="$emit('saveLlmReview')"
             >{{ t('save') }}</UButton
           >
@@ -49,7 +53,7 @@ defineEmits<{
       <LlmReviewSettingsCard
         v-model:llm-review="llmReview"
         v-model:webhook-headers-text="llmReviewWebhookHeadersText"
-        :busy="busy"
+        :busy="busy || pending"
         :t="t"
       />
     </SettingsCard>

@@ -5,27 +5,21 @@ import {
   useStoredPageSize,
 } from '../table-pagination'
 import type {
-  EndpointRequest,
   EndpointTestResponse,
   ModelEndpointRule,
-  ModelRouteRequest,
   ModelRouteTestResponse,
   ProviderEndpoint,
 } from '../generated/admin-api'
 import { useLocale } from '../composables/useLocale'
+import { useAsyncAction } from '../composables/useAsyncAction'
 import { createEndpointsWorkspaceView } from '../models/endpoints'
+import { fetchEndpointsPage, fetchModelRoutesPage } from './endpoints-api'
 import {
-  deleteEndpointById,
-  deleteModelRouteById,
-  fetchEndpointsPage,
-  fetchModelRoutesPage,
-  persistEndpoint,
-  persistModelRoute,
-  runEndpointTest as requestEndpointTest,
-  runModelRouteProbe,
-  updateEndpointEnabled,
-  updateModelRouteEnabled,
-} from './endpoints-api'
+  ENDPOINT_KEY_PREFIX,
+  MODEL_ROUTE_KEY_PREFIX,
+  createEndpointActions,
+  pendingRowsById,
+} from './endpoint-actions'
 
 export const useEndpointsStore = defineStore('endpoints', () => {
   const { t } = useLocale()
@@ -165,103 +159,37 @@ export const useEndpointsStore = defineStore('endpoints', () => {
     }
   }
 
-  async function saveEndpoint(
-    endpointId: string | null,
-    body: EndpointRequest,
-  ): Promise<ProviderEndpoint> {
-    const saved = await persistEndpoint(endpointId, body)
-    await reloadWorkspace()
-    return saved
-  }
+  // The guard lives here rather than at each call site, so a record can be
+  // gated against every operation that would write it, not just the one the
+  // caller happened to remember.
+  const guard = useAsyncAction()
+  const actions = createEndpointActions({
+    endpoints: {
+      items: endpointState.items,
+      testResults: endpointState.testResults,
+      testingId: endpointState.testingId,
+      togglingId: endpointState.togglingId,
+    },
+    guard,
+    modelRoutes: {
+      items: modelRouteState.items,
+      testResults: modelRouteState.testResults,
+      testingId: modelRouteState.testingId,
+      togglingId: modelRouteState.togglingId,
+    },
+    reloadModelRouting,
+    reloadWorkspace,
+  })
 
-  async function removeEndpoint(endpointId: string): Promise<void> {
-    await deleteEndpointById(endpointId)
-    await reloadWorkspace()
-  }
-
-  async function runEndpointTest(
-    endpointId: string,
-  ): Promise<EndpointTestResponse> {
-    endpointState.testingId.value = endpointId
-    try {
-      const result = await requestEndpointTest(endpointId)
-      endpointState.testResults.value[endpointId] = result
-      return result
-    } finally {
-      endpointState.testingId.value = ''
-    }
-  }
-
-  async function toggleEndpointEnabled(
-    endpointId: string,
-    enabled: boolean,
-  ): Promise<ProviderEndpoint> {
-    endpointState.togglingId.value = endpointId
-    try {
-      const endpoint = endpointState.items.value.find(
-        (item) => item.endpoint_id === endpointId,
-      )
-      if (!endpoint) {
-        throw new Error(`Endpoint not found: ${endpointId}`)
-      }
-      const saved = await updateEndpointEnabled(endpoint, enabled)
-      endpointState.items.value = endpointState.items.value.map((endpoint) =>
-        endpoint.endpoint_id === endpointId ? saved : endpoint,
-      )
-      return saved
-    } finally {
-      endpointState.togglingId.value = ''
-    }
-  }
-
-  async function saveModelRoute(
-    ruleId: string | null,
-    body: ModelRouteRequest,
-  ): Promise<ModelEndpointRule> {
-    const saved = await persistModelRoute(ruleId, body)
-    await reloadModelRouting()
-    return saved
-  }
-
-  async function removeModelRoute(ruleId: string): Promise<void> {
-    await deleteModelRouteById(ruleId)
-    await reloadModelRouting()
-  }
-
-  async function runModelRouteTest(
-    ruleId: string,
-  ): Promise<ModelRouteTestResponse> {
-    modelRouteState.testingId.value = ruleId
-    try {
-      const result = await runModelRouteProbe(ruleId)
-      modelRouteState.testResults.value[ruleId] = result
-      return result
-    } finally {
-      modelRouteState.testingId.value = ''
-    }
-  }
-
-  async function toggleModelRouteEnabled(
-    ruleId: string,
-    enabled: boolean,
-  ): Promise<ModelEndpointRule> {
-    modelRouteState.togglingId.value = ruleId
-    try {
-      const route = modelRouteState.items.value.find(
-        (item) => item.rule_id === ruleId,
-      )
-      if (!route) {
-        throw new Error(`Model route not found: ${ruleId}`)
-      }
-      const saved = await updateModelRouteEnabled(route, enabled)
-      modelRouteState.items.value = modelRouteState.items.value.map((route) =>
-        route.rule_id === ruleId ? saved : route,
-      )
-      return saved
-    } finally {
-      modelRouteState.togglingId.value = ''
-    }
-  }
+  // Per-row view of the guard: which records are gated, and which action holds
+  // each one. `loading` stays the fetch-only busy flag, so a write never blanks
+  // the whole page.
+  const endpointPendingActions = computed(() =>
+    pendingRowsById(guard.pendingActions.value, ENDPOINT_KEY_PREFIX),
+  )
+  const modelRoutePendingActions = computed(() =>
+    pendingRowsById(guard.pendingActions.value, MODEL_ROUTE_KEY_PREFIX),
+  )
 
   function findEndpointById(endpointId: string): ProviderEndpoint | null {
     return (
@@ -279,34 +207,31 @@ export const useEndpointsStore = defineStore('endpoints', () => {
   }
 
   return {
+    ...actions,
     endpointFirst: endpointState.first,
     endpointOptions,
+    endpointPendingActions,
     endpointRows: endpointState.rows,
     endpointTestResults: endpointState.testResults,
     endpointTotal: endpointState.total,
     endpoints: endpointState.items,
     findEndpointById,
     findModelRouteById,
+    isPending: guard.isPending,
     loadEndpoints,
     loadModelRoutes,
     loading,
     modelRouteFirst: modelRouteState.first,
+    modelRoutePendingActions,
     modelRouteRows: modelRouteState.rows,
     modelRouteTestResults: modelRouteState.testResults,
     modelRouteTotal: modelRouteState.total,
     modelRoutes: modelRouteState.items,
+    pendingActions: guard.pendingActions,
     refresh,
-    removeEndpoint,
-    removeModelRoute,
-    runEndpointTest,
-    runModelRouteTest,
-    saveEndpoint,
-    saveModelRoute,
     selectedWorkspaceView,
     testingEndpointId: endpointState.testingId,
     testingModelRouteId: modelRouteState.testingId,
-    toggleEndpointEnabled,
-    toggleModelRouteEnabled,
     togglingEndpointId: endpointState.togglingId,
     togglingModelRouteId: modelRouteState.togglingId,
   }

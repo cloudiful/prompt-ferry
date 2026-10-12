@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useAsyncAction } from '../../composables/useAsyncAction'
+import type { AsyncActionOutcome } from '../../composables/useAsyncAction'
 import {
   applyConfigImportArchive,
   downloadConfigArchive,
@@ -35,7 +37,14 @@ export type ConfigArchiveExportSummary = Pick<
  * base64 archive body live only in these in-memory refs and are cleared when
  * an operation ends; nothing here is persisted.
  */
+const EXPORT_KEY = 'configArchive:export'
+const IMPORT_KEY = 'configArchive:import'
+
 export function createConfigArchiveStore() {
+  const guard = useAsyncAction()
+  const exportPending = computed(() => guard.isPending(EXPORT_KEY))
+  const importPending = computed(() => guard.isPending(IMPORT_KEY))
+  let importGeneration = 0
   const exportPassphrase = ref('')
   const exportSummary = ref<ConfigArchiveExportSummary | null>(null)
   const exporting = ref(false)
@@ -59,70 +68,117 @@ export function createConfigArchiveStore() {
   const auditLoading = ref(false)
 
   function clearImportFlow(): void {
+    importGeneration += 1
     importPassphrase.value = ''
     importArchiveBase64.value = ''
     importFile.value = null
     importPreview.value = null
   }
 
-  async function exportArchive(): Promise<void> {
-    exporting.value = true
-    try {
-      const result = await exportConfigArchive(exportPassphrase.value)
-      downloadConfigArchive(result.bytes)
-      exportSummary.value = {
-        backendKind: result.backendKind,
-        formatVersion: result.formatVersion,
-        payloadFingerprint: result.payloadFingerprint,
-        size: result.bytes.byteLength,
-      }
-      await refreshConfigAudit()
-    } finally {
-      exportPassphrase.value = ''
-      exporting.value = false
-    }
+  function exportArchive(): Promise<AsyncActionOutcome<void>> {
+    const passphrase = exportPassphrase.value
+    return guard.run(
+      EXPORT_KEY,
+      async () => {
+        exporting.value = true
+        try {
+          const result = await exportConfigArchive(passphrase)
+          downloadConfigArchive(result.bytes)
+          exportSummary.value = {
+            backendKind: result.backendKind,
+            formatVersion: result.formatVersion,
+            payloadFingerprint: result.payloadFingerprint,
+            size: result.bytes.byteLength,
+          }
+          await refreshConfigAudit()
+        } finally {
+          if (exportPassphrase.value === passphrase) {
+            exportPassphrase.value = ''
+          }
+          exporting.value = false
+        }
+      },
+      'export',
+    )
   }
 
   async function selectImportFile(file: File): Promise<void> {
+    if (importPending.value) return
+    const generation = ++importGeneration
     importApplied.value = null
     importPreview.value = null
     const bytes = await readArchiveFile(file)
+    if (generation !== importGeneration || importPending.value) return
     importArchiveBase64.value = encodeArchiveBase64(bytes)
     importFile.value = { name: file.name, size: file.size }
   }
 
-  async function previewImport(): Promise<void> {
-    previewing.value = true
-    try {
-      importPreview.value = await previewConfigImportArchive(
-        importArchiveBase64.value,
-        importPassphrase.value,
-      )
-    } catch (cause) {
-      // A rejected passphrase must not linger in memory.
-      importPreview.value = null
-      importPassphrase.value = ''
-      throw cause
-    } finally {
-      previewing.value = false
-    }
+  function previewImport(): Promise<AsyncActionOutcome<void>> {
+    const archive = importArchiveBase64.value
+    const passphrase = importPassphrase.value
+    const generation = importGeneration
+    return guard.run(
+      IMPORT_KEY,
+      async () => {
+        previewing.value = true
+        importPreview.value = null
+        try {
+          const preview = await previewConfigImportArchive(archive, passphrase)
+          if (
+            generation === importGeneration &&
+            archive === importArchiveBase64.value &&
+            passphrase === importPassphrase.value
+          ) {
+            importPreview.value = preview
+          }
+        } catch (cause) {
+          // A rejected passphrase must not linger, but keep the selected file for
+          // a corrected retry and leave the import wizard in place.
+          if (generation === importGeneration) {
+            importPreview.value = null
+            importPassphrase.value = ''
+          }
+          throw cause
+        } finally {
+          previewing.value = false
+        }
+      },
+      'preview',
+    )
   }
 
-  async function applyImport(): Promise<void> {
-    applying.value = true
-    try {
-      importApplied.value = await applyConfigImportArchive(
-        importArchiveBase64.value,
-        importPassphrase.value,
-      )
-      await refreshConfigAudit()
-    } finally {
-      applying.value = false
-      clearImportFlow()
-    }
+  function applyImport(): Promise<AsyncActionOutcome<ConfigImportApplied>> {
+    const archive = importArchiveBase64.value
+    const passphrase = importPassphrase.value
+    const preview = importPreview.value
+    const generation = importGeneration
+    if (!preview) return Promise.resolve({ executed: false })
+    return guard.run(
+      IMPORT_KEY,
+      async () => {
+        applying.value = true
+        try {
+          const applied = await applyConfigImportArchive(archive, passphrase)
+          await refreshConfigAudit()
+          if (
+            generation === importGeneration &&
+            archive === importArchiveBase64.value &&
+            preview === importPreview.value
+          ) {
+            importApplied.value = applied
+            clearImportFlow()
+          }
+          return applied
+        } finally {
+          applying.value = false
+        }
+      },
+      'apply',
+    )
   }
 
   function cancelImport(): void {
+    if (importPending.value) return
     clearImportFlow()
   }
 
@@ -159,6 +215,10 @@ export function createConfigArchiveStore() {
   return {
     applying,
     applyImport,
+    exportPending,
+    importPending,
+    isPending: guard.isPending,
+    pendingActions: guard.pendingActions,
     auditEntries,
     auditFirst,
     auditLoading,

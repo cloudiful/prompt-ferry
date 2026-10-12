@@ -1,88 +1,24 @@
-import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import {
-  STANDARD_PAGE_SIZE_OPTIONS,
-  useStoredPageSize,
-} from '../table-pagination'
-import {
-  getRedactionSetting,
-  listRedactionCustomStrings,
-  previewRedaction,
-  setRedactionSetting,
-} from '../generated/admin-api'
+import { defineStore } from 'pinia'
+import { getRedactionSetting } from '../generated/admin-api'
 import type {
   RedactionConfigSchema,
-  CustomStringRuleSchema,
-  RedactionCustomStringRuleRowSchema,
   RedactionInputKindSchema,
   RedactionPreviewSchema,
   RedactionScopeSchema,
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
 import { createRedactionDefaults } from '../admin-mappers'
-import { createRowRevealState } from '../redaction-reveal'
+import { useAsyncAction } from '../composables/useAsyncAction'
 import {
-  type CustomStringRuleWarning,
-  findRuleWarnings,
-  validateCustomStringRule,
-} from '../redaction-rules'
-
-function normalizeCustomStrings(
-  customStrings: RedactionConfigSchema['custom_strings'],
-): RedactionConfigSchema['custom_strings'] {
-  const seen = new Set<string>()
-  const normalized: RedactionConfigSchema['custom_strings'] = []
-  for (const rule of customStrings) {
-    const pattern = rule.pattern.trim()
-    if (!pattern) continue
-    const dedupeKey = `${pattern}::${rule.match_type}::${rule.scope}`
-    if (seen.has(dedupeKey)) continue
-    seen.add(dedupeKey)
-    normalized.push({ ...rule, pattern })
-  }
-  return normalized
-}
-
-function normalizeConfig(
-  nextConfig: RedactionConfigSchema,
-): RedactionConfigSchema {
-  return {
-    ...nextConfig,
-    custom_strings: normalizeCustomStrings(nextConfig.custom_strings),
-  }
-}
-
-type LocalCustomStringRow = RedactionCustomStringRuleRowSchema
-
-function paginateCustomStrings(
-  config: RedactionConfigSchema,
-  first: number,
-  rows: number,
-  search: string,
-): { items: LocalCustomStringRow[]; total: number } {
-  const query = search.trim().toLowerCase()
-  const all = config.custom_strings
-    .map((rule, array_index) => ({
-      array_index,
-      pattern: rule.pattern,
-      match_type: rule.match_type,
-      scope: rule.scope,
-      created_at: rule.created_at ?? null,
-      updated_at: rule.updated_at ?? null,
-    }))
-    .filter((rule) =>
-      !query ? true : rule.pattern.toLowerCase().includes(query),
-    )
-    .sort((left, right) => right.array_index - left.array_index)
-  return {
-    items: all.slice(first, first + rows),
-    total: all.length,
-  }
-}
+  createRedactionActions,
+  REDACTION_PREVIEW_KEY,
+  REDACTION_RULES_KEY,
+} from './redaction-actions'
+import { createRedactionEditor } from './redaction-editor'
 
 export type { CustomStringRuleWarning } from '../redaction-rules'
-
-export { findRuleWarnings, validateCustomStringRule }
+export { findRuleWarnings, validateCustomStringRule } from '../redaction-rules'
 
 export const useRedactionStore = defineStore('redaction', () => {
   const loading = ref(false)
@@ -92,19 +28,9 @@ export const useRedactionStore = defineStore('redaction', () => {
   const previewText = ref('')
   const previewInputKind = ref<RedactionInputKindSchema>('text')
   const previewResult = ref<RedactionPreviewSchema | null>(null)
-  const customStringRows = useStoredPageSize(
-    'redaction-custom-strings',
-    10,
-    STANDARD_PAGE_SIZE_OPTIONS,
-  )
-  const customStringFirst = ref(0)
-  const customStringTotal = ref(0)
-  const customStringSearch = ref('')
-  const customStringPage = ref<RedactionCustomStringRuleRowSchema[]>([])
-  const customStringDirty = ref(false)
-  const customStringReveal = createRowRevealState()
+  const targetGeneration = ref(0)
 
-  function query() {
+  function getQuery() {
     return {
       scope: scope.value,
       ...(scope.value === 'user' && targetUserId.value
@@ -113,259 +39,80 @@ export const useRedactionStore = defineStore('redaction', () => {
     }
   }
 
-  const visibleCustomStrings = computed(() => {
-    if (!customStringDirty.value) return customStringPage.value
-    return paginateCustomStrings(
-      config.value,
-      customStringFirst.value,
-      customStringRows.value,
-      customStringSearch.value,
-    ).items
-  })
-
-  const visibleCustomStringTotal = computed(() => {
-    if (!customStringDirty.value) return customStringTotal.value
-    return paginateCustomStrings(
-      config.value,
-      0,
-      Number.MAX_SAFE_INTEGER,
-      customStringSearch.value,
-    ).total
-  })
-
-  const isDirty = computed(() => customStringDirty.value)
-
-  const customStringWarnings = computed<CustomStringRuleWarning[]>(() =>
-    findRuleWarnings(config.value.custom_strings),
-  )
-
-  function hasInvalidCustomStringRule(): boolean {
-    return customStringWarnings.value.some((warning) => warning.invalidRegex)
+  function getTargetToken(): string {
+    return `${targetGeneration.value}:${scope.value}:${targetUserId.value ?? ''}`
   }
+
+  const editor = createRedactionEditor({
+    config,
+    getQuery,
+    getTargetToken,
+    loading,
+  })
+  const guard = useAsyncAction()
+  const actions = createRedactionActions({
+    config,
+    getQuery,
+    getTargetToken,
+    guard,
+    hasInvalidCustomStringRule: editor.hasInvalidCustomStringRule,
+    loadCustomStringPage: editor.loadCustomStringPage,
+    markSaved: editor.markSaved,
+    normalizeConfig: editor.normalizeConfig,
+    previewInputKind,
+    previewResult,
+    previewText,
+  })
+
+  const saving = computed(() => guard.isPending(REDACTION_RULES_KEY))
+  const previewing = computed(() => guard.isPending(REDACTION_PREVIEW_KEY))
 
   function setTarget(nextScope: RedactionScopeSchema, userId?: number | null) {
+    const nextUserId = userId ?? null
+    if (scope.value !== nextScope || targetUserId.value !== nextUserId) {
+      targetGeneration.value += 1
+      previewResult.value = null
+    }
     scope.value = nextScope
-    targetUserId.value = userId ?? null
-  }
-
-  async function loadCustomStringPage(): Promise<void> {
-    if (customStringDirty.value) {
-      customStringPage.value = visibleCustomStrings.value
-      customStringTotal.value = visibleCustomStringTotal.value
-      return
-    }
-    const response = expectData(
-      await listRedactionCustomStrings<true>(
-        withData({
-          query: {
-            ...query(),
-            first: customStringFirst.value,
-            rows: customStringRows.value,
-            search: customStringSearch.value || undefined,
-          },
-        }),
-      ),
-    )
-    customStringPage.value = response.items
-    customStringTotal.value = response.total
-    customStringFirst.value = response.first
-    customStringRows.value = response.rows
-    if (
-      response.items.length === 0 &&
-      response.total > 0 &&
-      response.first >= response.total
-    ) {
-      customStringFirst.value =
-        Math.floor((response.total - 1) / response.rows) * response.rows
-      await loadCustomStringPage()
-    }
+    targetUserId.value = nextUserId
   }
 
   async function refresh(): Promise<void> {
+    const targetToken = getTargetToken()
+    const query = getQuery()
     loading.value = true
     try {
       const response = expectData(
-        await getRedactionSetting<true>(withData({ query: query() })),
+        await getRedactionSetting<true>(withData({ query })),
       )
+      if (targetToken !== getTargetToken()) return
       scope.value = response.scope
       targetUserId.value = response.user_id ?? targetUserId.value
-      config.value = normalizeConfig(createRedactionDefaults(response.config))
-      customStringDirty.value = false
-      customStringReveal.clear()
-      await loadCustomStringPage()
-    } finally {
-      loading.value = false
-    }
-  }
-
-  async function save(): Promise<void> {
-    if (hasInvalidCustomStringRule()) {
-      throw new Error('invalid custom string regex')
-    }
-    loading.value = true
-    try {
-      config.value = normalizeConfig(config.value)
-      const response = expectData(
-        await setRedactionSetting<true>(
-          withData({ query: query(), body: config.value }),
-        ),
+      config.value = editor.normalizeConfig(
+        createRedactionDefaults(response.config),
       )
-      scope.value = response.scope
-      targetUserId.value = response.user_id ?? targetUserId.value
-      config.value = normalizeConfig(createRedactionDefaults(response.config))
-      customStringDirty.value = false
-      customStringReveal.clear()
-      await loadCustomStringPage()
-    } finally {
-      loading.value = false
-    }
-  }
-
-  async function runPreview(): Promise<void> {
-    loading.value = true
-    try {
-      config.value = normalizeConfig(config.value)
-      const response = expectData(
-        await previewRedaction<true>(
-          withData({
-            body: {
-              enabled: config.value.enabled,
-              custom_strings: config.value.custom_strings,
-              input_kind: previewInputKind.value,
-              rules: config.value.rules,
-              text: previewText.value,
-            },
-          }),
-        ),
-      )
-      previewResult.value = response.preview
-    } finally {
-      loading.value = false
-    }
-  }
-
-  function reflowCustomStringPage(): void {
-    const total = paginateCustomStrings(
-      config.value,
-      0,
-      Number.MAX_SAFE_INTEGER,
-      customStringSearch.value,
-    ).total
-    if (total === 0) {
-      customStringFirst.value = 0
-    } else if (customStringFirst.value >= total) {
-      customStringFirst.value =
-        Math.floor((total - 1) / customStringRows.value) *
-        customStringRows.value
-    }
-    customStringPage.value = paginateCustomStrings(
-      config.value,
-      customStringFirst.value,
-      customStringRows.value,
-      customStringSearch.value,
-    ).items
-    customStringTotal.value = total
-  }
-
-  function addCustomStringRule(): void {
-    config.value.custom_strings.push({
-      pattern: '',
-      match_type: 'contains',
-      scope: 'text',
-    })
-    customStringReveal.reveal(config.value.custom_strings.length - 1)
-    customStringDirty.value = true
-    customStringFirst.value = 0
-    reflowCustomStringPage()
-  }
-
-  function updateCustomStringRule(
-    arrayIndex: number,
-    patch: Partial<CustomStringRuleSchema>,
-  ): void {
-    if (!config.value.custom_strings[arrayIndex]) return
-    config.value.custom_strings[arrayIndex] = {
-      ...config.value.custom_strings[arrayIndex],
-      ...patch,
-    }
-    customStringDirty.value = true
-    reflowCustomStringPage()
-  }
-
-  function removeCustomStringRule(arrayIndex: number): void {
-    customStringReveal.remove(arrayIndex)
-    config.value.custom_strings.splice(arrayIndex, 1)
-    customStringDirty.value = true
-    reflowCustomStringPage()
-  }
-
-  function isCustomStringRevealed(arrayIndex: number): boolean {
-    return customStringReveal.isRevealed(arrayIndex)
-  }
-
-  function toggleCustomStringRevealed(arrayIndex: number): void {
-    customStringReveal.toggle(arrayIndex)
-  }
-
-  async function setCustomStringPage(
-    first: number,
-    rows: number,
-  ): Promise<void> {
-    customStringFirst.value = first
-    customStringRows.value = rows
-    if (customStringDirty.value) {
-      reflowCustomStringPage()
-      return
-    }
-    loading.value = true
-    try {
-      await loadCustomStringPage()
-    } finally {
-      loading.value = false
-    }
-  }
-
-  async function setCustomStringSearch(search: string): Promise<void> {
-    customStringSearch.value = search
-    customStringFirst.value = 0
-    if (customStringDirty.value) {
-      reflowCustomStringPage()
-      return
-    }
-    loading.value = true
-    try {
-      await loadCustomStringPage()
+      editor.markSaved()
+      await editor.loadCustomStringPage()
     } finally {
       loading.value = false
     }
   }
 
   return {
-    addCustomStringRule,
+    ...actions,
+    ...editor,
     config,
-    customStringFirst,
-    customStringRows,
-    customStringSearch,
-    customStringTotal: visibleCustomStringTotal,
-    customStringWarnings,
-    customStrings: visibleCustomStrings,
-    hasInvalidCustomStringRule,
-    isCustomStringRevealed,
-    isDirty,
+    isPending: guard.isPending,
     loading,
+    pendingActions: guard.pendingActions,
     previewInputKind,
     previewResult,
     previewText,
     refresh,
-    removeCustomStringRule,
-    runPreview,
-    save,
+    saving,
     scope,
-    setCustomStringPage,
-    setCustomStringSearch,
     setTarget,
     targetUserId,
-    toggleCustomStringRevealed,
-    updateCustomStringRule,
+    previewing,
   }
 })

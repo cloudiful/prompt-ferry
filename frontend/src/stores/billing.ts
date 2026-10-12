@@ -1,22 +1,16 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {
-  createPriceRule,
-  deletePriceRule,
   fetchBillingChargeDetail,
   fetchBillingCharges,
   fetchBillingCsv,
   fetchBillingEndpoints,
   fetchBillingPriceRules,
   fetchBillingSummary,
-  repriceUnpriced,
-  setPriceRuleEnabled,
-  updatePriceRule,
 } from '../api/billing'
 import type {
   BillingChargeDetailResponse,
   BillingChargeResponse,
-  BillingPriceRuleRequest,
   BillingPriceRuleResponse,
   BillingSummaryResponse,
 } from '../generated/admin-api'
@@ -30,6 +24,8 @@ import {
   STANDARD_PAGE_SIZE_OPTIONS,
   useStoredPageSize,
 } from '../table-pagination'
+import { useAsyncAction } from '@/composables/useAsyncAction'
+import { createBillingActions } from './billing-actions'
 
 export const useBillingStore = defineStore('billing', () => {
   const summary = ref<BillingSummaryResponse | null>(null)
@@ -54,6 +50,7 @@ export const useBillingStore = defineStore('billing', () => {
   const detailLoading = ref(false)
   const priceRulesLoading = ref(false)
   const detail = ref<BillingChargeDetailResponse | null>(null)
+  const actionGuard = useAsyncAction()
 
   async function refresh(includeAdmin: boolean): Promise<void> {
     loading.value = true
@@ -162,42 +159,26 @@ export const useBillingStore = defineStore('billing', () => {
     await Promise.all([refreshSummary(), refreshCharges(0, rows.value)])
   }
 
+  let detailLoadVersion = 0
+
   async function openDetail(chargeId: number): Promise<void> {
+    const loadVersion = ++detailLoadVersion
+    detail.value = null
     detailLoading.value = true
     try {
-      detail.value = await fetchBillingChargeDetail(chargeId)
+      const loaded = await fetchBillingChargeDetail(chargeId)
+      if (detailLoadVersion === loadVersion) detail.value = loaded
     } finally {
-      detailLoading.value = false
+      if (detailLoadVersion === loadVersion) detailLoading.value = false
     }
   }
 
-  async function savePriceRule(
-    body: BillingPriceRuleRequest,
-    priceRuleId?: string,
-  ): Promise<void> {
-    if (priceRuleId) await updatePriceRule(priceRuleId, body)
-    else await createPriceRule(body)
-    await refreshPriceRules()
-    await refreshSummary()
-  }
-
-  async function removePriceRule(priceRuleId: string): Promise<void> {
-    await deletePriceRule(priceRuleId)
-    await Promise.all([refreshPriceRules(), refreshSummary(), refreshCharges()])
-  }
-
-  async function togglePriceRule(
-    rule: BillingPriceRuleResponse,
-  ): Promise<void> {
-    await setPriceRuleEnabled(rule.price_rule_id, !rule.enabled)
-    await refreshPriceRules()
-  }
-
-  async function reprice(): Promise<number> {
-    const result = await repriceUnpriced()
-    await Promise.all([refreshSummary(), refreshCharges(), refreshPriceRules()])
-    return result.repriced
-  }
+  const billingActions = createBillingActions({
+    guard: actionGuard,
+    refreshCharges,
+    refreshPriceRules,
+    refreshSummary,
+  })
 
   async function downloadCsv(
     kind: 'details' | 'monthly',
@@ -215,6 +196,8 @@ export const useBillingStore = defineStore('billing', () => {
   }
 
   return {
+    ...billingActions,
+    actionPending: actionGuard.isPending,
     applyFilters,
     applyPeriod,
     charges,
@@ -236,11 +219,7 @@ export const useBillingStore = defineStore('billing', () => {
     priceRulesLoading,
     refresh,
     refreshCharges,
-    reprice,
-    removePriceRule,
-    savePriceRule,
     summary,
-    togglePriceRule,
     total,
     rows,
   }

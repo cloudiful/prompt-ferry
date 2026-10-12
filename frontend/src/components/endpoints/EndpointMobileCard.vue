@@ -8,11 +8,25 @@ import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
 import type { EndpointListItemView } from '@/models/endpoints'
 import { isQuotaEligible } from '@/models/endpoints/quota'
 
-const props = defineProps<{
-  busy: boolean
-  item: EndpointListItemView
-  t: TranslateFn
-}>()
+const props = withDefaults(
+  defineProps<{
+    busy: boolean
+    item: EndpointListItemView
+    pendingKeys?: Readonly<Record<string, string>>
+    t: TranslateFn
+  }>(),
+  { pendingKeys: () => ({}) },
+)
+
+// Same shared gate as the desktop table: save, delete, and toggle of one
+// endpoint hold one key, and only the action holding it spins.
+function isPending(): boolean {
+  return Object.hasOwn(props.pendingKeys, props.item.endpoint_id)
+}
+
+function pendingAction(): string {
+  return props.pendingKeys[props.item.endpoint_id] ?? ''
+}
 
 defineEmits<{
   deleteEndpoint: [endpointId: string]
@@ -131,7 +145,8 @@ const EndpointMobileUsageBadges = defineComponent({
         <USwitch
           :model-value="item.enabled"
           :aria-label="t('status')"
-          :disabled="busy || item.toggling"
+          :disabled="busy || item.toggling || isPending()"
+          :loading="pendingAction() === 'toggle'"
           @update:model-value="
             $emit('toggleEndpointEnabled', item.endpoint_id, $event)
           "
@@ -171,7 +186,8 @@ const EndpointMobileUsageBadges = defineComponent({
         size="sm"
         color="error"
         variant="outline"
-        :loading="busy"
+        :loading="pendingAction() === 'delete'"
+        :disabled="isPending()"
         @click="$emit('deleteEndpoint', item.endpoint_id)"
         >{{ t('delete') }}</UButton
       >

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use chrono::{Duration as ChronoDuration, Utc};
-use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 use crate::{
@@ -11,6 +10,14 @@ use crate::{
 
 use super::support::{cleanup_endpoint, create_endpoint, quota, seed_snapshot, service, test_pool};
 use super::{FakeFetcher, fake_fetcher};
+
+#[allow(dead_code)]
+mod db_harness {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/db_harness.rs"
+    ));
+}
 
 #[tokio::test]
 async fn routing_snapshot_reads_persisted_oauth_quota_without_fetching() {
@@ -135,9 +142,9 @@ async fn failed_error_wake_preserves_raw_snapshot_but_marks_routing_unknown() {
 
 #[tokio::test]
 async fn quota_error_wakes_are_reason_scoped_and_throttled_separately() {
-    let pool = PgPoolOptions::new()
-        .connect_lazy("postgresql://quota_test@127.0.0.1:55479/quota_759_test")
-        .expect("lazy isolated test pool");
+    // Wakes are asserted without a query, so this never-connects pool is enough
+    // and keeps the test away from any real database.
+    let pool = db_harness::test_db_url::lazy_test_pool();
     let fetcher = Arc::new(FakeFetcher::success(quota(Some(20.0))));
     let service = service(&pool, fetcher);
     let mut receiver = service

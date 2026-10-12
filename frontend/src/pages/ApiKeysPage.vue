@@ -19,9 +19,20 @@ const visibleKeySecrets = ref<Record<string, boolean>>({})
 const keyDialogVisible = ref(false)
 const keyLabel = ref('')
 const generatedSecret = ref('')
+const createDialogGeneration = ref(0)
+const createDialogOwnerId = ref(SELF_USER_ID)
 
 const busy = computed(
   () => apiKeysStore.loading || (session.isAdmin && apiKeysStore.usersLoading),
+)
+// The create dialog's own write, for whichever user is selected right now. The
+// key carries that user id, so a create for one account never freezes another's
+// dialog.
+const createKeyPending = computed(() =>
+  Object.hasOwn(
+    apiKeysStore.clientKeyPendingActions,
+    `create:${apiKeysStore.selectedUserId}`,
+  ),
 )
 const userOptions = computed(() => {
   const selfOption = {
@@ -71,6 +82,8 @@ async function onPage(event: TablePageChange): Promise<void> {
 }
 
 async function openCreateKey(): Promise<void> {
+  createDialogGeneration.value += 1
+  createDialogOwnerId.value = apiKeysStore.selectedUserId
   keyLabel.value = ''
   generatedSecret.value = ''
   keyDialogVisible.value = true
@@ -82,12 +95,25 @@ async function submitCreateKey(): Promise<void> {
     notifyError(t('keyLabelRequired'))
     return
   }
+
+  const generation = createDialogGeneration.value
+  const targetUserId = createDialogOwnerId.value
+  const isCurrentDialog = () =>
+    keyDialogVisible.value &&
+    generation === createDialogGeneration.value &&
+    targetUserId === createDialogOwnerId.value &&
+    targetUserId === apiKeysStore.selectedUserId
+  if (!isCurrentDialog()) return
+
   try {
-    const response = await apiKeysStore.createKey(label)
-    generatedSecret.value = response.secret
+    const result = await apiKeysStore.createKey(label, targetUserId)
+    // A refused call is the guard collapsing a duplicate trigger: the dialog
+    // stays put and nothing is reported twice.
+    if (!result.executed || !isCurrentDialog()) return
+    generatedSecret.value = result.value.secret
     notifySuccess(t('saved'))
   } catch (cause) {
-    notifyApiError(cause)
+    if (isCurrentDialog()) notifyApiError(cause)
   }
 }
 
@@ -117,8 +143,10 @@ async function toggleKey(keyId: string): Promise<void> {
 
 async function renameKey(keyId: string, label: string): Promise<void> {
   try {
-    await apiKeysStore.saveKey(keyId, { label })
-    notifySuccess(t('saved'))
+    // This is the Enter-key path: a held key and a blur can both fire, and only
+    // the one the store accepted may report.
+    const result = await apiKeysStore.saveKey(keyId, { label })
+    if (result.executed) notifySuccess(t('saved'))
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -182,6 +210,7 @@ onMounted(async () => {
 
     <ApiKeysList
       :t="t"
+      :pending-keys="apiKeysStore.clientKeyPendingActions"
       :workspace="workspace"
       :first="apiKeysStore.first"
       :rows="apiKeysStore.rows"
@@ -199,6 +228,7 @@ onMounted(async () => {
       v-model:key-label="keyLabel"
       :busy="busy"
       :generated-secret="generatedSecret"
+      :save-pending="createKeyPending"
       :t="t"
       @copy-secret="copyGeneratedSecret"
       @submit="submitCreateKey"

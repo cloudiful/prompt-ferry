@@ -1,13 +1,27 @@
 use anyhow::Result;
 use sqlx::PgPool;
-use std::collections::HashMap;
 
 use crate::{
     config::NativeApi,
     db::types::{
-        EndpointApiKey, EndpointCreate, EndpointPage, ProviderEndpoint, ProviderEndpointRow,
-        RouteConfig, normalize_service_tier,
+        EndpointPage, ProviderEndpoint, ProviderEndpointRow, RouteConfig, normalize_service_tier,
     },
+};
+
+mod keys;
+mod keys_diff;
+mod write;
+
+#[cfg(test)]
+mod keys_diff_tests;
+
+// Read paths outside this module hydrate endpoint key sets too.
+pub(crate) use keys::list_endpoint_api_keys_by_endpoint_id;
+use write::attach_endpoint_api_keys;
+
+pub use write::{
+    create_endpoint, create_endpoint_with_mcp, delete_endpoint, set_endpoint_mcp_enabled,
+    set_user_endpoint_setting, update_endpoint,
 };
 
 pub async fn list_endpoints(pool: &PgPool) -> Result<Vec<ProviderEndpoint>> {
@@ -101,222 +115,8 @@ pub async fn get_endpoint(
     }
 }
 
-pub async fn create_endpoint(pool: &PgPool, input: EndpointCreate) -> Result<ProviderEndpoint> {
-    // Issue #368 Phase A: normalize empty proxy to NULL (direct).
-    let proxy_url = input
-        .proxy_url
-        .clone()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
-    // Issue #392 Phase K: endpoint default windows already normalized by
-    // the admin layer (`None`/empty means all-day -> NULL).
-    let active_windows = match input.active_windows.as_deref() {
-        None | Some([]) => None,
-        Some(windows) => crate::db::routes::storage_value(windows),
-    };
-    // Issue #637: trim the free-form override; blank persists as inherit
-    // (NULL) so the provider/caller default is preserved.
-    let service_tier = normalize_service_tier(input.service_tier.as_deref());
-    let endpoint = sqlx::query_file_as!(
-        ProviderEndpointRow,
-        "src/sql/endpoints/create_endpoint.sql",
-        input.scope,
-        input.owner_user_id,
-        input.name,
-        input.provider.as_str(),
-        input.provider_region.map(|region| region.as_str()),
-        service_tier.as_deref(),
-        input.base_url,
-        input.native_api.as_str(),
-        input.native_api_source.as_str(),
-        input.api_key,
-        proxy_url,
-        active_windows,
-        input.key_lb_enabled,
-        input.enabled,
-    )
-    .fetch_one(pool)
-    .await
-    .map(ProviderEndpoint::from)?;
-    replace_endpoint_api_keys(pool, endpoint.endpoint_id, &input.api_keys).await?;
-    Ok(attach_endpoint_api_keys(pool, vec![endpoint])
-        .await?
-        .remove(0))
-}
-
-/// Insert a new endpoint with `mcp_enabled` set in the same statement so the
-/// first row returned by the create flow already reflects the requested MCP
-/// exposure. Generic `create_endpoint` keeps the existing default-false
-/// behaviour for callers that do not care about managed MCP.
-pub async fn create_endpoint_with_mcp(
-    pool: &PgPool,
-    input: EndpointCreate,
-    mcp_enabled: bool,
-) -> Result<ProviderEndpoint> {
-    let proxy_url = input
-        .proxy_url
-        .clone()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
-    let active_windows = match input.active_windows.as_deref() {
-        None | Some([]) => None,
-        Some(windows) => crate::db::routes::storage_value(windows),
-    };
-    // Issue #637: trim the free-form override; blank persists as inherit.
-    let service_tier = normalize_service_tier(input.service_tier.as_deref());
-    let endpoint = sqlx::query_file_as!(
-        ProviderEndpointRow,
-        "src/sql/endpoints/create_endpoint_with_mcp.sql",
-        input.scope,
-        input.owner_user_id,
-        input.name,
-        input.provider.as_str(),
-        input.provider_region.map(|region| region.as_str()),
-        service_tier.as_deref(),
-        input.base_url,
-        input.native_api.as_str(),
-        input.native_api_source.as_str(),
-        input.api_key,
-        proxy_url,
-        active_windows,
-        input.key_lb_enabled,
-        input.enabled,
-        mcp_enabled,
-    )
-    .fetch_one(pool)
-    .await
-    .map(ProviderEndpoint::from)?;
-    replace_endpoint_api_keys(pool, endpoint.endpoint_id, &input.api_keys).await?;
-    Ok(attach_endpoint_api_keys(pool, vec![endpoint])
-        .await?
-        .remove(0))
-}
-
-pub async fn update_endpoint(
-    pool: &PgPool,
-    endpoint_id: uuid::Uuid,
-    input: EndpointCreate,
-) -> Result<Option<ProviderEndpoint>> {
-    let proxy_url = input
-        .proxy_url
-        .clone()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
-    let active_windows = match input.active_windows.as_deref() {
-        None | Some([]) => None,
-        Some(windows) => crate::db::routes::storage_value(windows),
-    };
-    // Issue #637: trim the free-form override; blank persists as inherit.
-    let service_tier = normalize_service_tier(input.service_tier.as_deref());
-    let endpoint = sqlx::query_file_as!(
-        ProviderEndpointRow,
-        "src/sql/endpoints/update_endpoint.sql",
-        endpoint_id,
-        input.scope,
-        input.owner_user_id,
-        input.name,
-        input.provider.as_str(),
-        input.provider_region.map(|region| region.as_str()),
-        service_tier.as_deref(),
-        input.base_url,
-        input.native_api.as_str(),
-        input.native_api_source.as_str(),
-        input.api_key,
-        proxy_url,
-        active_windows,
-        input.key_lb_enabled,
-        input.enabled,
-    )
-    .fetch_optional(pool)
-    .await?
-    .map(ProviderEndpoint::from);
-    if let Some(endpoint) = endpoint {
-        replace_endpoint_api_keys(pool, endpoint.endpoint_id, &input.api_keys).await?;
-        Ok(Some(
-            attach_endpoint_api_keys(pool, vec![endpoint])
-                .await?
-                .remove(0),
-        ))
-    } else {
-        Ok(None)
-    }
-}
-
-pub async fn delete_endpoint(pool: &PgPool, endpoint_id: uuid::Uuid) -> Result<bool> {
-    let result = sqlx::query_file!("src/sql/endpoints/delete_endpoint.sql", endpoint_id)
-        .execute(pool)
-        .await?;
-    if result.rows_affected() > 0 {
-        super::routes::cleanup_orphan_model_routes(pool).await?;
-    }
-    Ok(result.rows_affected() > 0)
-}
-
-pub async fn set_endpoint_mcp_enabled(
-    pool: &PgPool,
-    endpoint_id: uuid::Uuid,
-    enabled: bool,
-) -> Result<()> {
-    sqlx::query_file!(
-        "src/sql/endpoints/set_mcp_enabled.sql",
-        endpoint_id,
-        enabled
-    )
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub async fn set_user_endpoint_setting(
-    pool: &PgPool,
-    user_id: i64,
-    endpoint_id: Option<uuid::Uuid>,
-) -> Result<()> {
-    sqlx::query_file!(
-        "src/sql/endpoints/set_user_endpoint_setting.sql",
-        user_id,
-        endpoint_id,
-    )
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
 fn parse_native_api(value: &str) -> NativeApi {
     serde_json::from_value(serde_json::Value::String(value.to_string())).unwrap_or(NativeApi::Chat)
-}
-
-async fn attach_endpoint_api_keys(
-    pool: &PgPool,
-    mut endpoints: Vec<ProviderEndpoint>,
-) -> Result<Vec<ProviderEndpoint>> {
-    let rows_by_endpoint = list_endpoint_api_keys_by_endpoint_id(
-        pool,
-        &endpoints
-            .iter()
-            .map(|endpoint| endpoint.endpoint_id)
-            .collect::<Vec<_>>(),
-    )
-    .await?;
-    for endpoint in &mut endpoints {
-        endpoint.api_keys = rows_by_endpoint
-            .get(&endpoint.endpoint_id)
-            .cloned()
-            .unwrap_or_default();
-        if endpoint.api_keys.is_empty() && !endpoint.api_key.trim().is_empty() {
-            endpoint.api_keys.push(EndpointApiKey {
-                key_id: uuid::Uuid::nil(),
-                endpoint_id: endpoint.endpoint_id,
-                key_label: endpoint.name.clone(),
-                api_key: endpoint.api_key.clone(),
-                position: 0,
-                enabled: true,
-                created_at: endpoint.created_at,
-                updated_at: endpoint.updated_at,
-            });
-        }
-    }
-    Ok(endpoints)
 }
 
 pub(crate) async fn attach_route_config_api_keys(
@@ -339,107 +139,3 @@ pub(crate) async fn attach_route_config_api_keys(
     }
     Ok(routes)
 }
-
-pub(crate) async fn list_endpoint_api_keys_by_endpoint_id(
-    pool: &PgPool,
-    endpoint_ids: &[uuid::Uuid],
-) -> Result<HashMap<uuid::Uuid, Vec<EndpointApiKey>>> {
-    let rows = if endpoint_ids.is_empty() {
-        Vec::new()
-    } else {
-        sqlx::query_file_as!(
-            EndpointApiKey,
-            "src/sql/endpoints/list_endpoint_api_keys.sql",
-            endpoint_ids,
-        )
-        .fetch_all(pool)
-        .await?
-    };
-    let mut rows_by_endpoint = HashMap::<uuid::Uuid, Vec<EndpointApiKey>>::new();
-    for row in rows {
-        rows_by_endpoint
-            .entry(row.endpoint_id)
-            .or_default()
-            .push(row);
-    }
-    Ok(rows_by_endpoint)
-}
-
-async fn replace_endpoint_api_keys(
-    pool: &PgPool,
-    endpoint_id: uuid::Uuid,
-    api_keys: &[crate::db::types::EndpointApiKeyCreate],
-) -> Result<()> {
-    let existing = list_endpoint_api_keys_by_endpoint_id(pool, &[endpoint_id])
-        .await?
-        .remove(&endpoint_id)
-        .unwrap_or_default();
-    let mut tx = pool.begin().await?;
-    if !existing.is_empty() {
-        sqlx::query_file!(
-            "src/sql/endpoints/renumber_endpoint_api_keys.sql",
-            endpoint_id,
-            RENUMBER_OFFSET,
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
-    let mut retained = Vec::<uuid::Uuid>::with_capacity(api_keys.len());
-    for api_key in api_keys {
-        let key_id = api_key.key_id.or_else(|| {
-            existing
-                .iter()
-                .find(|key| key.key_label == api_key.key_label)
-                .map(|key| key.key_id)
-        });
-        if let Some(key_id) = key_id {
-            retained.push(key_id);
-        }
-    }
-    sqlx::query_file!(
-        "src/sql/endpoints/delete_endpoint_api_keys_except.sql",
-        endpoint_id,
-        &retained,
-    )
-    .execute(&mut *tx)
-    .await?;
-    for api_key in api_keys {
-        let key_id = api_key.key_id.or_else(|| {
-            existing
-                .iter()
-                .find(|key| key.key_label == api_key.key_label)
-                .map(|key| key.key_id)
-        });
-        match key_id {
-            Some(key_id) => {
-                sqlx::query_file!(
-                    "src/sql/endpoints/update_endpoint_api_key.sql",
-                    endpoint_id,
-                    key_id,
-                    api_key.key_label.as_str(),
-                    api_key.api_key.as_str(),
-                    api_key.position,
-                    api_key.enabled,
-                )
-                .execute(&mut *tx)
-                .await?;
-            }
-            None => {
-                sqlx::query_file!(
-                    "src/sql/endpoints/insert_endpoint_api_key.sql",
-                    endpoint_id,
-                    api_key.key_label.as_str(),
-                    api_key.api_key.as_str(),
-                    api_key.position,
-                    api_key.enabled,
-                )
-                .fetch_one(&mut *tx)
-                .await?;
-            }
-        }
-    }
-    tx.commit().await?;
-    Ok(())
-}
-
-const RENUMBER_OFFSET: i32 = 1_000_000;

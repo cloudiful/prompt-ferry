@@ -11,14 +11,32 @@ import type { EndpointListItemView } from '@/models/endpoints'
 import { isQuotaEligible } from '@/models/endpoints/quota'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
-const props = defineProps<{
-  busy: boolean
-  first: number
-  items: EndpointListItemView[]
-  rows: number
-  t: TranslateFn
-  total: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    busy: boolean
+    first: number
+    items: EndpointListItemView[]
+    pendingKeys?: Readonly<Record<string, string>>
+    rows: number
+    t: TranslateFn
+    total: number
+  }>(),
+  // Optional so a surface that has no pending state to report still renders a
+  // usable table; nothing is gated when the map is absent.
+  { pendingKeys: () => ({}) },
+)
+
+// Save, delete, and toggle of one endpoint share a key, so a record being
+// written is gated as a whole — but only the action that actually holds it
+// spins, which is what the label is for. An endpoint with nothing running is
+// untouched, so one write never disables the rest of the page.
+function isPending(endpointId: string): boolean {
+  return Object.hasOwn(props.pendingKeys, endpointId)
+}
+
+function pendingAction(endpointId: string): string {
+  return props.pendingKeys[endpointId] ?? ''
+}
 
 // R2e.3: quota visibility comes from the shared eligibility helper (OpenAI
 // joins only with a stored subscription token). Non-quota rows collapse the
@@ -123,7 +141,12 @@ const EndpointUsageBadges = defineComponent({
             <USwitch
               :model-value="row.original.enabled"
               :aria-label="t('status')"
-              :disabled="busy || row.original.toggling"
+              :disabled="
+                busy ||
+                row.original.toggling ||
+                isPending(row.original.endpoint_id)
+              "
+              :loading="pendingAction(row.original.endpoint_id) === 'toggle'"
               @update:model-value="
                 $emit('toggleEndpointEnabled', row.original.endpoint_id, $event)
               "
@@ -190,7 +213,8 @@ const EndpointUsageBadges = defineComponent({
             color="error"
             variant="ghost"
             :aria-label="t('delete')"
-            :loading="busy"
+            :loading="pendingAction(row.original.endpoint_id) === 'delete'"
+            :disabled="isPending(row.original.endpoint_id)"
             @click="$emit('deleteEndpoint', row.original.endpoint_id)"
             ><UIcon name="i-lucide-trash-2" class="h-4 w-4"
           /></UButton>

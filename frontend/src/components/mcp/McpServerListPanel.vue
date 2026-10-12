@@ -7,15 +7,28 @@ import type { McpServer } from '@/generated/admin-api'
 import type { McpServerListItemView } from '@/models'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
-const props = defineProps<{
-  busy: boolean
-  listItems: McpServerListItemView[]
-  mcpFirst: number
-  mcpRows: number
-  mcpTotal: number
-  t: TranslateFn
-  testingMcpServerId: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    busy: boolean
+    listItems: McpServerListItemView[]
+    mcpFirst: number
+    mcpRows: number
+    mcpTotal: number
+    /** Which rows are gated, and by which action. Absent means nothing is. */
+    pendingKeys?: Readonly<Record<string, string>>
+    t: TranslateFn
+    testingMcpServerId: string
+  }>(),
+  { pendingKeys: () => ({}) },
+)
+
+/** One server's write is in flight: its row's controls are gated. */
+const isPending = (serverId: string) =>
+  Object.hasOwn(props.pendingKeys, serverId)
+
+/** Only the control that started the write spins; the rest are just disabled. */
+const pendingAction = (serverId: string, action: string) =>
+  isPending(serverId) && props.pendingKeys[serverId] === action
 
 defineEmits<{
   deleteMcpServer: [server: McpServer]
@@ -65,7 +78,7 @@ const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
           <USwitch
             :model-value="row.original.enabled"
             :aria-label="t('status')"
-            :disabled="busy"
+            :disabled="isPending(row.original.server.server_id)"
             @update:model-value="$emit('toggleMcpServer', row.original.server)"
           />
         </label>
@@ -101,6 +114,7 @@ const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
             color="neutral"
             variant="ghost"
             :aria-label="t('edit')"
+            :disabled="isPending(row.original.server.server_id)"
             @click="$emit('editMcpServer', row.original.server)"
           >
             <UIcon name="i-lucide-pencil" class="h-4 w-4" />
@@ -110,7 +124,8 @@ const columns = computed<TableColumn<McpServerListItemView>[]>(() => [
             color="error"
             variant="ghost"
             :aria-label="t('delete')"
-            :loading="busy"
+            :loading="pendingAction(row.original.server.server_id, 'delete')"
+            :disabled="isPending(row.original.server.server_id)"
             @click="$emit('deleteMcpServer', row.original.server)"
           >
             <UIcon name="i-lucide-trash-2" class="h-4 w-4" />

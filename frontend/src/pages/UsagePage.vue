@@ -5,9 +5,7 @@ import UsageCategoryPanel from '@/components/usage/UsageCategoryPanel.vue'
 import PageIntro from '../components/PageIntro.vue'
 import RequestOverviewModeSwitch from '../components/RequestOverviewModeSwitch.vue'
 import UsageRangePicker from '../components/usage/UsageRangePicker.vue'
-import { useNotifier } from '../composables/useNotifier'
 import { useUsagePage } from '../composables/useUsagePage'
-import type { RequestOverviewPerspective } from '../request-overview'
 import { useRequestRecordsStore } from '../stores/usage'
 
 type UsageSection = 'ai' | 'mcp'
@@ -45,22 +43,11 @@ const {
   saveConversationOverride,
   session,
   setActiveMode,
+  setAiPerspective,
   submitClearHistory,
   t,
   usersStore,
 } = useUsagePage()
-
-const { notifyApiError } = useNotifier()
-
-async function changeAiPerspective(
-  next: RequestOverviewPerspective,
-): Promise<void> {
-  try {
-    await usageStore.setAiPerspective(next)
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
 
 watch(activeSection, (next) => {
   if (usageStore.requestCategory !== next) {
@@ -106,10 +93,11 @@ watch(activeSection, (next) => {
       :is-admin="session.isAdmin"
       :overview="requestRecordsStore.overview"
       :overview-loading="requestRecordsStore.overviewLoading"
+      :perspective-pending="requestRecordsStore.perspectivePending"
       :perspective="requestRecordsStore.aiPerspective"
       :t="t"
       :workspace="requestRecordsStore.usageWorkspaceView"
-      @change-perspective="changeAiPerspective"
+      @change-perspective="setAiPerspective"
       @clear-conversation-override="clearConversationOverride"
       @drilldown="handleOverviewDrilldown"
       @filter="onFilter"
@@ -127,7 +115,8 @@ watch(activeSection, (next) => {
     <UsageClearDialog
       v-model:visible="clearDialogVisible"
       v-model:form="clearForm"
-      :busy="requestRecordsStore.loading"
+      :busy="requestRecordsStore.maintenancePending"
+      :clear-pending="requestRecordsStore.maintenanceAction === 'clear'"
       :current-user-label="session.displayName || session.loginName"
       :is-admin="session.isAdmin"
       :t="t"

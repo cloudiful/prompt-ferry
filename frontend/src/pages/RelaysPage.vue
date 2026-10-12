@@ -1,18 +1,12 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import { computed, onMounted, ref } from 'vue'
-import {
-  createEmptyRelayForm,
-  createRelayPatchRequest,
-  createRelayRequest,
-  relayToForm,
-  type RelayForm,
-  type RelaySecretAction,
-} from '@/admin-mappers/forms/relay'
+import { computed, onMounted } from 'vue'
+import type { RelaySecretAction } from '@/admin-mappers/forms/relay'
 import RelayDialog from '@/components/relays/RelayDialog.vue'
 import PageIntro from '../components/PageIntro.vue'
 import { useLocale } from '../composables/useLocale'
 import { useNotifier } from '../composables/useNotifier'
+import { useRelaysPageActions } from '../composables/useRelaysPageActions'
 import type {
   BridgeEncryptionMode,
   ManagedRelay,
@@ -24,11 +18,21 @@ import TablePagination from '@/components/shared/TablePagination.vue'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
 const { t } = useLocale()
-const { notifyApiError, notifySuccess } = useNotifier()
+const { notifyApiError } = useNotifier()
 const relayStore = useRelaysStore()
-
-const dialogVisible = ref(false)
-const dialogForm = ref<RelayForm>(createEmptyRelayForm())
+const {
+  createPending,
+  currentDialogRelay,
+  deleteRelay,
+  dialogForm,
+  dialogPending,
+  dialogSavePending,
+  dialogVisible,
+  openCreateDialog,
+  openEditDialog,
+  reconnectRelay,
+  saveRelay,
+} = useRelaysPageActions({ relayStore, t })
 
 const tlsOptions = computed(() => [
   { label: t('relayTlsOff'), value: 'off' satisfies TlsMode },
@@ -56,12 +60,6 @@ const secretActionOptions = computed<Option<RelaySecretAction>[]>(() => [
 const dialogHeader = computed(() =>
   dialogForm.value.relay_id ? t('relayEdit') : t('relayNew'),
 )
-const currentDialogRelay = computed(
-  () =>
-    relayStore.relays.find(
-      (item) => item.relay_id === dialogForm.value.relay_id,
-    ) ?? null,
-)
 const relaySummary = computed(
   () => `${relayStore.connectedCount}/${relayStore.enabledCount}`,
 )
@@ -75,16 +73,6 @@ const relayColumns = computed<TableColumn<ManagedRelay>[]>(() => [
   { id: 'lastError', header: t('relayLastError') },
   { id: 'actions' },
 ])
-function openCreateDialog(): void {
-  dialogForm.value = createEmptyRelayForm()
-  dialogVisible.value = true
-}
-
-function openEditDialog(relay: ManagedRelay): void {
-  dialogForm.value = relayToForm(relay)
-  dialogVisible.value = true
-}
-
 function secretStateLabel(exists: boolean): string {
   return exists ? t('relaySecretStored') : t('relaySecretMissing')
 }
@@ -105,41 +93,6 @@ async function onPage(event: TablePageChange): Promise<void> {
   }
 }
 
-async function saveRelay(): Promise<void> {
-  try {
-    const relayId = dialogForm.value.relay_id || null
-    const body = relayId
-      ? createRelayPatchRequest(dialogForm.value)
-      : createRelayRequest(dialogForm.value)
-    await relayStore.saveRelay(relayId, body)
-    dialogVisible.value = false
-    dialogForm.value = createEmptyRelayForm()
-    notifySuccess(t('saved'))
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
-async function deleteRelay(relay: ManagedRelay): Promise<void> {
-  if (!window.confirm(t('relayDeleteConfirm').replace('{name}', relay.name)))
-    return
-  try {
-    await relayStore.removeRelay(relay.relay_id)
-    notifySuccess(t('delete'))
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
-async function reconnectRelay(relay: ManagedRelay): Promise<void> {
-  try {
-    await relayStore.reconnectRelay(relay.relay_id)
-    notifySuccess(t('relayReconnectRequested'))
-  } catch (cause) {
-    notifyApiError(cause)
-  }
-}
-
 onMounted(refresh)
 </script>
 
@@ -148,9 +101,9 @@ onMounted(refresh)
     <PageIntro>
       <template #actions>
         <UBadge :label="relaySummary" />
-        <UButton size="sm" @click="openCreateDialog">{{
-          t('relayNew')
-        }}</UButton>
+        <UButton size="sm" :disabled="createPending" @click="openCreateDialog">
+          {{ t('relayNew') }}
+        </UButton>
         <UButton
           size="sm"
           color="neutral"
@@ -250,9 +203,13 @@ onMounted(refresh)
               size="sm"
               color="neutral"
               variant="ghost"
-              :disabled="!row.original.enabled"
+              :disabled="
+                relayStore.relayPendingActions[row.original.relay_id] !==
+                  undefined || !row.original.enabled
+              "
               :loading="
-                relayStore.reconnectingRelayId === row.original.relay_id
+                relayStore.relayPendingActions[row.original.relay_id] ===
+                'reconnect'
               "
               @click="reconnectRelay(row.original)"
             >
@@ -263,6 +220,10 @@ onMounted(refresh)
               size="sm"
               color="neutral"
               variant="ghost"
+              :disabled="
+                relayStore.relayPendingActions[row.original.relay_id] !==
+                undefined
+              "
               @click="openEditDialog(row.original)"
               >{{ t('edit') }}</UButton
             >
@@ -271,6 +232,14 @@ onMounted(refresh)
               size="sm"
               color="error"
               variant="ghost"
+              :disabled="
+                relayStore.relayPendingActions[row.original.relay_id] !==
+                undefined
+              "
+              :loading="
+                relayStore.relayPendingActions[row.original.relay_id] ===
+                'delete'
+              "
               @click="deleteRelay(row.original)"
               >{{ t('delete') }}</UButton
             >
@@ -290,8 +259,9 @@ onMounted(refresh)
       v-model:open="dialogVisible"
       v-model:form="dialogForm"
       :bridge-options="bridgeOptions"
-      :busy="relayStore.loading"
       :current-relay="currentDialogRelay"
+      :pending="dialogPending"
+      :save-pending="dialogSavePending"
       :header="dialogHeader"
       :secret-action-options="secretActionOptions"
       :t="t"

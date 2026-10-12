@@ -10,7 +10,10 @@ use super::{ChatGptQuotaError, ChatGptQuotaFetcher};
 
 mod concurrency;
 mod failure;
+mod manual_waiting_diagnostics;
+mod manual_waiting_failure;
 mod policy;
+mod refresh_cycle_tests;
 mod routing_snapshot;
 mod support;
 

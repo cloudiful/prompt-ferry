@@ -5,6 +5,7 @@ import { computed } from 'vue'
 import type { RequestRecordFilterModel, RequestRecordRowView } from '@/models'
 import type { RequestRecordFormatting } from '@/models/request-record-formatting'
 import type { UsageWorkspaceView } from '@/models/usage'
+import { useRequestRecordsStore } from '@/stores/usage'
 import { REQUEST_RECORD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 import { formatRequestStateBadges } from '@/composables/useUsageFormatting'
 import TablePagination from '@/components/shared/TablePagination.vue'
@@ -22,6 +23,11 @@ const filters = defineModel<RequestRecordFilterModel>('filters', {
   required: true,
 })
 const detailVisible = defineModel<boolean>('detailVisible', { required: true })
+const requestRecordsStore = useRequestRecordsStore()
+const conversationAction = computed(() => {
+  const conversationId = props.workspace.detail.record?.conversation_id
+  return requestRecordsStore.conversationAction(conversationId ?? null)
+})
 const emit = defineEmits<{
   clearConversationOverride: []
   filter: [event: TableFilterChange]
@@ -238,6 +244,7 @@ const sorting = computed<SortingState>({
     <UsageDetailDialog
       v-model:visible="detailVisible"
       :detail="workspace.detail"
+      :conversation-action="conversationAction"
       :t="t"
       @clear-conversation-override="$emit('clearConversationOverride')"
       @load-request-full="$emit('loadDetailRequestFull')"

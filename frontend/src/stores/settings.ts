@@ -8,36 +8,32 @@ import {
   getStreamDeltaBatching,
   getRelayIpWhitelist,
   getUsageRetention,
-  setLlmReviewSetting,
-  setModelRouteWhitelist,
   setRawObjectStore,
-  setRequestContentLogging,
-  setStreamDeltaBatching,
-  setRelayIpWhitelist,
-  setUsageRetention,
 } from '../generated/admin-api'
 import type {
   LlmReviewSettings,
-  LlmReviewWebhookSettings,
   ModelRouteWhitelistResponse,
   RawObjectStoreSettingsRequest,
   RawObjectStoreSettingsResponse,
   RequestContentLoggingResponse,
-  RelayIpPolicyResponse,
-  StreamDeltaBatchingSettings,
   UsageRetentionSettings,
 } from '../generated/admin-api'
 import {
   ensureLlmReviewDefaults,
-  relayFormToRequest,
   relayPolicyToForm,
-  streamDeltaBatchingFormToRequest,
   streamDeltaBatchingToForm,
-  webhookHeadersFromText,
   webhookHeadersToText,
 } from '../admin-mappers'
 import { expectData, withData } from '../api'
 import type { StreamDeltaBatchingForm } from '../models'
+import { computed } from 'vue'
+import { useAsyncAction } from '../composables/useAsyncAction'
+import {
+  SETTING_KEY_PREFIX,
+  createSettingsResourceActions,
+} from './settings-actions'
+import { createSettingsSectionActions } from './settings-section-actions'
+import { pendingRowsById } from './record-action-types'
 import { createCacheAlertStore } from './settings/cache-alert'
 
 const emptyLlmReview = ensureLlmReviewDefaults({
@@ -168,77 +164,7 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  async function saveRequestContentLogging(): Promise<void> {
-    const response = expectData(
-      await setRequestContentLogging<true>(
-        withData({ body: requestContentLogging.value }),
-      ),
-    )
-    requestContentLogging.value = response
-    usageRetention.value.raw_retention_days = response.raw_retention_days
-  }
-
-  async function saveUsageRetention(): Promise<void> {
-    usageRetention.value = expectData(
-      await setUsageRetention<true>(withData({ body: usageRetention.value })),
-    )
-    requestContentLogging.value.raw_retention_days =
-      usageRetention.value.raw_retention_days ??
-      requestContentLogging.value.raw_retention_days
-  }
-
-  async function saveStreamDeltaBatching(): Promise<void> {
-    const response: StreamDeltaBatchingSettings = expectData(
-      await setStreamDeltaBatching<true>(
-        withData({
-          body: streamDeltaBatchingFormToRequest(streamDeltaBatching.value),
-        }),
-      ),
-    )
-    streamDeltaBatching.value = streamDeltaBatchingToForm(response)
-  }
-
-  async function saveRelayIpWhitelist(): Promise<void> {
-    const response: RelayIpPolicyResponse = expectData(
-      await setRelayIpWhitelist<true>(
-        withData({ body: relayFormToRequest(relayIpWhitelist.value) }),
-      ),
-    )
-    relayIpWhitelist.value = relayPolicyToForm(response)
-  }
-
-  async function saveModelRouteWhitelist(): Promise<void> {
-    modelRouteWhitelist.value = expectData(
-      await setModelRouteWhitelist<true>(
-        withData({ body: modelRouteWhitelist.value }),
-      ),
-    )
-  }
-
-  async function saveLlmReview(): Promise<void> {
-    const webhook: LlmReviewWebhookSettings = {
-      enabled: llmReview.value.webhook?.enabled ?? false,
-      url: llmReview.value.webhook?.url ?? '',
-      bearer_token: llmReview.value.webhook?.bearer_token ?? '',
-      extra_headers: webhookHeadersFromText(llmReviewWebhookHeadersText.value),
-    }
-    llmReview.value = expectData(
-      await setLlmReviewSetting<true>(
-        withData({
-          body: {
-            ...llmReview.value,
-            webhook,
-          },
-        }),
-      ),
-    )
-    llmReview.value = ensureLlmReviewDefaults(llmReview.value)
-    llmReviewWebhookHeadersText.value = webhookHeadersToText(
-      llmReview.value.webhook?.extra_headers ?? {},
-    )
-  }
-
-  async function saveRawObjectStore(
+  async function writeRawObjectStore(
     payload: RawObjectStoreSettingsRequest,
   ): Promise<RawObjectStoreSettingsResponse> {
     const response = expectData(
@@ -262,7 +188,35 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  // One guard per settings store: every section's save claims through it, so a
+  // section is gated against every write that would touch it, not only against
+  // the button the operator happened to press.
+  const guard = useAsyncAction()
+  const sectionActions = createSettingsSectionActions({
+    guard,
+    llmReview,
+    llmReviewWebhookHeadersText,
+    modelRouteWhitelist,
+    relayIpWhitelist,
+    requestContentLogging,
+    streamDeltaBatching,
+    usageRetention,
+  })
+  const resourceActions = createSettingsResourceActions({
+    guard,
+    saveCacheAlert,
+    saveRawObjectStore: writeRawObjectStore,
+  })
+
+  // Per-section view of the guard, so a form can show only its own state
+  // instead of the whole page going busy.
+  const settingsPendingActions = computed(() =>
+    pendingRowsById(guard.pendingActions.value, SETTING_KEY_PREFIX),
+  )
+
   return {
+    ...sectionActions,
+    ...resourceActions,
     cacheAlert,
     cacheAlertError,
     llmReview,
@@ -271,20 +225,14 @@ export const useSettingsStore = defineStore('settings', () => {
     modelRouteWhitelist,
     rawObjectStore,
     rawObjectStoreError,
+    isPending: guard.isPending,
+    pendingActions: guard.pendingActions,
     refresh,
     refreshCacheAlert,
     refreshRawObjectStore,
     relayIpWhitelist,
-    saveCacheAlert,
-    saveLlmReview,
-    saveModelRouteWhitelist,
-    saveRawObjectStore,
-    saveRelayIpWhitelist,
     requestContentLogging,
-    saveRequestContentLogging,
-    saveStreamDeltaBatching,
     streamDeltaBatching,
     usageRetention,
-    saveUsageRetention,
   }
 })

@@ -153,11 +153,7 @@ async fn success_without_an_owned_lease_rolls_back_the_snapshot_insert() {
 pub(super) mod test_support {
     use chrono::{DateTime, Duration, Utc};
     use serde_json::{Value, json};
-    use sqlx::{
-        PgPool,
-        postgres::{PgConnectOptions, PgPoolOptions},
-    };
-    use std::str::FromStr;
+    use sqlx::PgPool;
     use uuid::Uuid;
 
     use crate::db::{
@@ -165,32 +161,30 @@ pub(super) mod test_support {
         quota_snapshots::{acquire_refresh_lease, complete_refresh_success, latest_snapshot},
     };
 
+    #[allow(dead_code)]
+    mod test_pg_target {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/test_pg_target.rs"
+        ));
+    }
+
+    // Only an absent pair of dedicated keys skips. A configured target that is
+    // malformed or disagrees with its confirmed identity fails here rather
+    // than degrading into a silent skip.
     pub(in crate::db::quota_snapshots) async fn test_pool() -> Option<PgPool> {
-        let url = match std::env::var("PROMPT_FERRY_QUOTA_TEST_DATABASE_URL") {
-            Ok(url) => url,
-            Err(_) => {
+        match test_pg_target::optional_pool(4).await {
+            Ok(Some(pool)) => Some(pool),
+            Ok(None) => {
                 eprintln!(
-                    "skipped quota snapshot database setup: PROMPT_FERRY_QUOTA_TEST_DATABASE_URL is unset"
+                    "skipped quota snapshot database setup: neither {} nor {} is configured",
+                    test_pg_target::DATABASE_URL_KEY,
+                    test_pg_target::CONFIRMED_TARGET_KEY
                 );
-                return None;
+                None
             }
-        };
-        let parsed = PgConnectOptions::from_str(&url)
-            .unwrap_or_else(|_| panic!("quota snapshot test database URL is invalid"));
-        assert_eq!(parsed.get_host(), "127.0.0.1");
-        assert_eq!(parsed.get_database(), Some("quota_759_test"));
-        let options = PgConnectOptions::new_without_pgpass()
-            .host("127.0.0.1")
-            .port(parsed.get_port())
-            .username(parsed.get_username())
-            .database("quota_759_test");
-        Some(
-            PgPoolOptions::new()
-                .max_connections(4)
-                .connect_with(options)
-                .await
-                .unwrap_or_else(|_| panic!("quota snapshot test database connection failed")),
-        )
+            Err(error) => panic!("quota snapshot test target is not usable: {error}"),
+        }
     }
 
     pub(in crate::db::quota_snapshots) async fn create_endpoint(

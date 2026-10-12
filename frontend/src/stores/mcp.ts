@@ -5,24 +5,22 @@ import {
   useStoredPageSize,
 } from '../table-pagination'
 import {
-  createMcpServer,
-  deleteMcpServer,
   getMcpCatalog,
   listMcpProviders,
   listMcpServers,
-  testMcpServer,
-  updateMcpServer,
 } from '../generated/admin-api'
 import type {
   McpCatalogResponse,
   McpProviderDescriptor,
   McpServer,
-  McpServerRequest,
   McpTestResponse,
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
 import { createMcpWorkspaceView } from '../models/mcp'
 import { useLocale } from '../composables/useLocale'
+import { useAsyncAction } from '../composables/useAsyncAction'
+import { MCP_KEY_PREFIX, createMcpActions } from './mcp-actions'
+import { pendingRowsById } from './record-action-types'
 
 export const useMcpStore = defineStore('mcp', () => {
   const { t } = useLocale()
@@ -109,31 +107,6 @@ export const useMcpStore = defineStore('mcp', () => {
     }
   }
 
-  async function saveServer(
-    serverId: string | null,
-    body: McpServerRequest,
-  ): Promise<McpServer> {
-    const saved = serverId
-      ? expectData(
-          await updateMcpServer<true>(
-            withData({ path: { server_id: serverId }, body }),
-          ),
-        )
-      : expectData(await createMcpServer<true>(withData({ body })))
-    if (serverId) {
-      delete catalogCache.value[serverId]
-    }
-    await refresh()
-    return saved
-  }
-
-  async function removeServer(serverId: string): Promise<void> {
-    await deleteMcpServer<true>(withData({ path: { server_id: serverId } }))
-    delete catalogCache.value[serverId]
-    delete testResults.value[serverId]
-    await refresh()
-  }
-
   function getCachedCatalog(serverId: string): McpCatalogResponse | null {
     return catalogCache.value[serverId] ?? null
   }
@@ -166,36 +139,35 @@ export const useMcpStore = defineStore('mcp', () => {
     }
   }
 
-  async function runTest(serverId: string): Promise<McpTestResponse> {
-    testingServerId.value = serverId
-    try {
-      const result = expectData(
-        await testMcpServer<true>(withData({ path: { server_id: serverId } })),
-      )
-      testResults.value[serverId] = result
-      primeCatalog(serverId, {
-        tools: result.tools,
-        resources: result.resources,
-        prompts: result.prompts,
-      })
-      return result
-    } finally {
-      testingServerId.value = ''
-    }
-  }
+  // The guard lives here rather than at each call site, so a server can be
+  // gated against every operation that would write it, not just the one the
+  // caller happened to remember.
+  const guard = useAsyncAction()
+  const actions = createMcpActions({
+    guard,
+    mcp: { servers, testResults, testingServerId, catalogCache },
+    refresh,
+  })
+
+  // Per-row view of the guard. `loading` stays the fetch-only busy flag, so a
+  // write never blanks the whole page.
+  const mcpPendingActions = computed(() =>
+    pendingRowsById(guard.pendingActions.value, MCP_KEY_PREFIX),
+  )
 
   return {
+    ...actions,
     catalogCache,
     getCachedCatalog,
+    isPending: guard.isPending,
     loadCatalog,
     loadProviders,
     loading,
+    mcpPendingActions,
+    pendingActions: guard.pendingActions,
     primeCatalog,
     providers,
     refresh,
-    removeServer,
-    runTest,
-    saveServer,
     selectedWorkspaceView,
     serverFirst,
     serverRows,

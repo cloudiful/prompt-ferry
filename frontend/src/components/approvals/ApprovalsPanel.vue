@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { ApprovalRequest } from '@/generated/admin-api'
 import type { ApprovalFilter } from '@/models'
 import { APPROVAL_PAGE_SIZE_OPTIONS } from '@/table-pagination'
+import ApprovalActionButtons from './ApprovalActionButtons.vue'
 import ApprovalDetailDialog from './ApprovalDetailDialog.vue'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import WorkspacePagerBar from '@/components/shared/WorkspacePagerBar.vue'
@@ -14,6 +15,8 @@ const props = defineProps<{
   approvalTotal: number
   busy: boolean
   formatTime: (value: string) => string
+  /** Which requests are gated, and by which answer. Absent means none are. */
+  pendingKeys?: Readonly<Record<string, string>>
   t: TranslateFn
 }>()
 const approvalFilter = defineModel<ApprovalFilter>('approvalFilter', {
@@ -53,7 +56,6 @@ const canPrev = computed(() => props.approvalFirst > 0)
 const canNext = computed(
   () => props.approvalFirst + props.approvalRows < props.approvalTotal,
 )
-
 const pageStart = computed(() =>
   props.approvalTotal === 0 ? 0 : props.approvalFirst + 1,
 )
@@ -66,19 +68,14 @@ const mobileMetaLabelClass =
 const mobileMetaValueClass =
   'break-words text-[0.76rem] leading-[1.38] text-default'
 
-function approvalStatusLabel(
-  status: ApprovalRequest['approval_status'],
-): string {
-  return status === 'pending'
-    ? props.t('approvalStatusPending')
-    : props.t('approvalStatusResolved')
-}
+const approvalStatusLabel = (status: ApprovalRequest['approval_status']) =>
+  props.t(
+    status === 'pending' ? 'approvalStatusPending' : 'approvalStatusResolved',
+  )
 
-function approvalStatusSeverity(
+const approvalStatusSeverity = (
   status: ApprovalRequest['approval_status'],
-): 'neutral' | 'warning' {
-  return status === 'pending' ? 'warning' : 'neutral'
-}
+): 'neutral' | 'warning' => (status === 'pending' ? 'warning' : 'neutral')
 
 function formatRemaining(approval: ApprovalRequest): string {
   if (approval.approval_status !== 'pending') return '-'
@@ -190,33 +187,15 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="grid gap-2 [&>button]:w-full [&>button]:justify-center">
-            <UButton
-              size="sm"
-              color="neutral"
-              variant="outline"
-              @click="$emit('openDetail', approval)"
-              >{{ t('viewDetails') }}</UButton
-            >
-            <UButton
-              v-if="approval.approval_status === 'pending'"
-              size="sm"
-              color="error"
-              variant="outline"
-              :loading="busy"
-              @click="$emit('rejectApproval', approval)"
-            >
-              {{ t('reject') }}
-            </UButton>
-            <UButton
-              v-if="approval.approval_status === 'pending'"
-              size="sm"
-              :loading="busy"
-              @click="$emit('approveApproval', approval)"
-            >
-              {{ t('approve') }}
-            </UButton>
-          </div>
+          <ApprovalActionButtons
+            layout="mobile"
+            :approval="approval"
+            :pending-keys="pendingKeys"
+            :t="t"
+            @approve="$emit('approveApproval', $event)"
+            @open-detail="$emit('openDetail', $event)"
+            @reject="$emit('rejectApproval', $event)"
+          />
         </article>
 
         <WorkspacePagerBar
@@ -285,31 +264,15 @@ onBeforeUnmount(() => {
             />
           </template>
           <template #actions-cell="{ row }">
-            <div class="flex gap-2">
-              <UButton
-                size="sm"
-                color="neutral"
-                variant="outline"
-                @click="$emit('openDetail', row.original)"
-                >{{ t('viewDetails') }}</UButton
-              >
-              <UButton
-                v-if="row.original.approval_status === 'pending'"
-                size="sm"
-                color="error"
-                variant="ghost"
-                :loading="busy"
-                @click="$emit('rejectApproval', row.original)"
-                ><UIcon name="i-lucide-x" class="h-4 w-4"
-              /></UButton>
-              <UButton
-                v-if="row.original.approval_status === 'pending'"
-                size="sm"
-                :loading="busy"
-                @click="$emit('approveApproval', row.original)"
-                ><UIcon name="i-lucide-check" class="h-4 w-4"
-              /></UButton>
-            </div>
+            <ApprovalActionButtons
+              layout="desktop"
+              :approval="row.original"
+              :pending-keys="pendingKeys"
+              :t="t"
+              @approve="$emit('approveApproval', $event)"
+              @open-detail="$emit('openDetail', $event)"
+              @reject="$emit('rejectApproval', $event)"
+            />
           </template>
         </UTable>
         <TablePagination

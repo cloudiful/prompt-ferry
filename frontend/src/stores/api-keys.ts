@@ -1,29 +1,25 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
-  createClientKey,
-  deleteClientKey,
   listClientKeys,
   listUserOptions,
-  meCreateClientKey,
-  meDeleteClientKey,
   meListClientKeys,
-  meUpdateClientKey,
-  updateClientKey,
 } from '../generated/admin-api'
-import type {
-  ClientKey,
-  CreateClientKeyResponse,
-  UpdateClientKeyRequest,
-  User,
-} from '../generated/admin-api'
+import type { ClientKey, User } from '../generated/admin-api'
 import { expectData, withData } from '../api'
 import {
   STANDARD_PAGE_SIZE_OPTIONS,
   useStoredPageSize,
 } from '../table-pagination'
+import { useAsyncAction } from '../composables/useAsyncAction'
+import {
+  CLIENT_KEY_PREFIX,
+  SELF_USER_ID,
+  createApiKeyActions,
+} from './api-keys-actions'
+import { pendingRowsById } from './record-action-types'
 
-export const SELF_USER_ID = 0
+export { SELF_USER_ID }
 
 export const useApiKeysStore = defineStore('api-keys', () => {
   const users = ref<User[]>([])
@@ -34,6 +30,16 @@ export const useApiKeysStore = defineStore('api-keys', () => {
   const first = ref(0)
   const rows = useStoredPageSize('api-keys', 10, STANDARD_PAGE_SIZE_OPTIONS)
   const total = ref(0)
+  let selectedContextGeneration = 0
+  let latestViewLoadId = 0
+
+  watch(
+    selectedUserId,
+    () => {
+      selectedContextGeneration += 1
+    },
+    { flush: 'sync' },
+  )
 
   const hasUsers = computed(() => users.value.length > 0)
   const selectedUser = computed(() =>
@@ -60,41 +66,67 @@ export const useApiKeysStore = defineStore('api-keys', () => {
     nextRows = rows.value,
   ): Promise<ClientKey[]> {
     const targetUserId = forceUserId ?? selectedUserId.value
-    first.value = nextFirst
-    rows.value = nextRows
-    loading.value = true
+    let requestedFirst = nextFirst
+    let requestedRows = nextRows
+    const contextGeneration = selectedContextGeneration
+    const updatesView = targetUserId === selectedUserId.value
+    const viewLoadId = updatesView ? ++latestViewLoadId : null
+    const ownsView = () =>
+      updatesView &&
+      contextGeneration === selectedContextGeneration &&
+      targetUserId === selectedUserId.value &&
+      viewLoadId === latestViewLoadId
+
+    if (ownsView()) {
+      first.value = requestedFirst
+      rows.value = requestedRows
+      loading.value = true
+    }
+
     try {
-      const page =
-        targetUserId === SELF_USER_ID
-          ? expectData(
-              await meListClientKeys<true>(
-                withData({ query: { first: first.value, rows: rows.value } }),
-              ),
-            )
-          : expectData(
-              await listClientKeys<true>(
-                withData({
-                  path: { user_id: targetUserId },
-                  query: { first: first.value, rows: rows.value },
-                }),
-              ),
-            )
-      keys.value = page.keys
-      total.value = page.total
-      first.value = page.first
-      rows.value = page.rows
-      if (
-        keys.value.length === 0 &&
-        total.value > 0 &&
-        first.value >= total.value
-      ) {
-        const previousFirst =
-          Math.floor((total.value - 1) / rows.value) * rows.value
-        return await loadKeys(targetUserId, previousFirst, rows.value)
+      while (true) {
+        const page =
+          targetUserId === SELF_USER_ID
+            ? expectData(
+                await meListClientKeys<true>(
+                  withData({
+                    query: { first: requestedFirst, rows: requestedRows },
+                  }),
+                ),
+              )
+            : expectData(
+                await listClientKeys<true>(
+                  withData({
+                    path: { user_id: targetUserId },
+                    query: { first: requestedFirst, rows: requestedRows },
+                  }),
+                ),
+              )
+
+        if (!ownsView()) return page.keys
+
+        keys.value = page.keys
+        total.value = page.total
+        first.value = page.first
+        rows.value = page.rows
+        if (
+          page.keys.length === 0 &&
+          page.total > 0 &&
+          page.first >= page.total
+        ) {
+          requestedFirst = Math.floor((page.total - 1) / page.rows) * page.rows
+          requestedRows = page.rows
+          first.value = requestedFirst
+          rows.value = requestedRows
+          continue
+        }
+        return page.keys
       }
-      return page.keys
+    } catch (error) {
+      if (!ownsView()) return []
+      throw error
     } finally {
-      loading.value = false
+      if (ownsView()) loading.value = false
     }
   }
 
@@ -103,79 +135,35 @@ export const useApiKeysStore = defineStore('api-keys', () => {
     await loadKeys(userId, 0, rows.value)
   }
 
-  async function createKey(
-    label?: string | null,
-    forceUserId?: number,
-  ): Promise<CreateClientKeyResponse> {
-    const targetUserId = forceUserId ?? selectedUserId.value
-    const created =
-      targetUserId === SELF_USER_ID
-        ? expectData(
-            await meCreateClientKey<true>(
-              withData({ body: { label: label ?? null } }),
-            ),
-          )
-        : expectData(
-            await createClientKey<true>(
-              withData({
-                path: { user_id: targetUserId },
-                body: { label: label ?? null },
-              }),
-            ),
-          )
-    await loadKeys(targetUserId)
-    return created
-  }
+  // The guard lives here rather than at each call site, so a key can be gated
+  // against every operation that would write it — including a label committed
+  // from the keyboard, which never goes through a dialog.
+  const guard = useAsyncAction()
+  const actions = createApiKeyActions({
+    guard,
+    loadKeys: (targetUserId) => loadKeys(targetUserId),
+    selectedUserId,
+  })
 
-  async function saveKey(
-    keyId: string,
-    input: UpdateClientKeyRequest,
-    forceUserId?: number,
-  ): Promise<ClientKey> {
-    const targetUserId = forceUserId ?? selectedUserId.value
-    const saved =
-      targetUserId === SELF_USER_ID
-        ? expectData(
-            await meUpdateClientKey<true>(
-              withData({ path: { key_id: keyId }, body: input }),
-            ),
-          )
-        : expectData(
-            await updateClientKey<true>(
-              withData({
-                path: { user_id: targetUserId, key_id: keyId },
-                body: input,
-              }),
-            ),
-          )
-    await loadKeys(targetUserId)
-    return saved
-  }
-
-  async function removeKey(keyId: string, forceUserId?: number): Promise<void> {
-    const targetUserId = forceUserId ?? selectedUserId.value
-    if (targetUserId === SELF_USER_ID) {
-      await meDeleteClientKey<true>(withData({ path: { key_id: keyId } }))
-    } else {
-      await deleteClientKey<true>(
-        withData({ path: { user_id: targetUserId, key_id: keyId } }),
-      )
-    }
-    await loadKeys(targetUserId)
-  }
+  // Per-row view of the guard. `loading` stays the fetch-only busy flag, so a
+  // write never blanks the whole page.
+  const clientKeyPendingActions = computed(() =>
+    pendingRowsById(guard.pendingActions.value, CLIENT_KEY_PREFIX),
+  )
 
   return {
+    ...actions,
     changeSelectedUser,
-    createKey,
+    clientKeyPendingActions,
     first,
     hasUsers,
+    isPending: guard.isPending,
     keys,
     loadKeys,
     loadUsers,
     loading,
-    removeKey,
+    pendingActions: guard.pendingActions,
     rows,
-    saveKey,
     selectedUser,
     selectedUserId,
     total,

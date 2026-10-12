@@ -1,9 +1,14 @@
 <script setup lang="ts">
-defineProps<{
-  busy: boolean
-  generatedSecret: string
-  t: TranslateFn
-}>()
+withDefaults(
+  defineProps<{
+    busy: boolean
+    generatedSecret: string
+    /** The create's own write, for the selected user. */
+    savePending?: boolean
+    t: TranslateFn
+  }>(),
+  { savePending: false },
+)
 
 const visible = defineModel<boolean>('visible', { required: true })
 const keyLabel = defineModel<string>('keyLabel', { required: true })
@@ -18,6 +23,8 @@ defineEmits<{
   <UModal
     v-model:open="visible"
     :title="t('generateKey')"
+    :dismissible="!savePending"
+    :close="!savePending"
     :ui="{ content: 'sm:max-w-2xl' }"
   >
     <template #body>
@@ -50,7 +57,8 @@ defineEmits<{
             v-if="!generatedSecret"
             type="submit"
             size="sm"
-            :loading="busy"
+            :disabled="savePending"
+            :loading="busy || savePending"
           >
             <UIcon name="i-lucide-check" class="h-4 w-4" />{{
               t('generateKey')

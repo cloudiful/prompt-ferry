@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE endpoint_api_keys\nSET position = $3\nWHERE endpoint_id = $1 AND key_id = $2\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "375654315ec6f17527d470144dc0ecfc03cbec9eb3801c984c7eb008a3c07a18"
+}

@@ -4,6 +4,8 @@ import { createDefaultRequestRecordClearForm } from '@/admin-mappers'
 import { createRequestRecordFormatting } from '@/composables/useUsageFormatting'
 import { useLocale } from '@/composables/useLocale'
 import { useNotifier } from '@/composables/useNotifier'
+import { useRequestRecordsPageActions } from '@/composables/useRequestRecordsPageActions'
+import { useSessionRoutingActions } from '@/composables/useSessionRoutingActions'
 import { useRequestOverviewMode } from '@/composables/useRequestOverviewMode'
 import type { RequestRecordClearForm, RequestRecordRowView } from '@/models'
 import type { RequestRecordOverviewRange } from '@/generated/admin-api'
@@ -27,6 +29,22 @@ export function useUsagePage() {
   const UsageClearDialog = defineAsyncComponent(
     () => import('@/components/usage/UsageClearDialog.vue'),
   )
+  const pageActions = useRequestRecordsPageActions({
+    store: requestRecordsStore,
+    clearDialogVisible,
+    clearForm,
+    notifyApiError,
+    notifySuccess,
+    t,
+  })
+  const routingActions = useSessionRoutingActions({
+    store: requestRecordsStore,
+    confirm: (message) => window.confirm(message),
+    notifyApiError,
+    notifyInfo,
+    notifySuccess,
+    t,
+  })
   const { activeMode, setActiveMode, syncMode } = useRequestOverviewMode(
     () => requestRecordsStore.requestCategory,
   )
@@ -81,23 +99,6 @@ export function useUsagePage() {
     }
   }
 
-  async function saveConversationOverride(selection: {
-    endpointId: string
-    endpointKeyId: string | null
-  }): Promise<void> {
-    if (!requestRecordsStore.sessionRouteOptions?.conversation_id) return
-    try {
-      await requestRecordsStore.saveConversationOverride(
-        requestRecordsStore.sessionRouteOptions.conversation_id,
-        selection.endpointId,
-        selection.endpointKeyId,
-      )
-      notifySuccess(t('overrideSaved'))
-    } catch (cause) {
-      notifyApiError(cause)
-    }
-  }
-
   async function loadDetailRequestFull(): Promise<void> {
     const recordId = requestRecordsStore.detailRecord?.record_id
     if (!recordId) return
@@ -113,45 +114,6 @@ export function useUsagePage() {
     if (!recordId) return
     try {
       await requestRecordsStore.loadMoreRequestFull(recordId)
-    } catch (cause) {
-      notifyApiError(cause)
-    }
-  }
-
-  async function clearConversationOverride(): Promise<void> {
-    if (!requestRecordsStore.sessionRouteOptions?.conversation_id) return
-    try {
-      await requestRecordsStore.clearConversationOverride(
-        requestRecordsStore.sessionRouteOptions.conversation_id,
-      )
-      notifySuccess(t('overrideCleared'))
-    } catch (cause) {
-      notifyApiError(cause)
-    }
-  }
-
-  async function resetSessionAffinity(): Promise<void> {
-    const recordId = requestRecordsStore.detailRecord?.record_id
-    if (!recordId) return
-    if (!window.confirm(t('resetAffinityConfirm'))) return
-    try {
-      const result = await requestRecordsStore.resetSessionAffinity(recordId)
-      if (result.cleared_count > 0) {
-        notifySuccess(t('affinityReset'))
-      } else {
-        notifyInfo(t('affinityNotBound'))
-      }
-    } catch (cause) {
-      notifyApiError(cause)
-    }
-  }
-
-  async function submitClearHistory(): Promise<void> {
-    try {
-      const result = await requestRecordsStore.clearHistory(clearForm.value)
-      notifySuccess(`${t('clearHistorySubmit')}: ${result.deleted}`)
-      clearDialogVisible.value = false
-      clearForm.value = createDefaultRequestRecordClearForm()
     } catch (cause) {
       notifyApiError(cause)
     }
@@ -198,12 +160,13 @@ export function useUsagePage() {
   })
 
   return {
+    ...pageActions,
+    ...routingActions,
     UsageClearDialog,
     activeMode,
     applyRange,
     clearDialogVisible,
     clearForm,
-    clearConversationOverride,
     detailVisible,
     formatting,
     handleOverviewDrilldown,
@@ -216,11 +179,8 @@ export function useUsagePage() {
     refresh,
     refreshRecords,
     requestRecordsStore,
-    resetSessionAffinity,
-    saveConversationOverride,
     session,
     setActiveMode,
-    submitClearHistory,
     t,
     usersStore,
   }

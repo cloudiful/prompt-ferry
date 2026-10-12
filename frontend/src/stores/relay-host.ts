@@ -3,9 +3,6 @@ import { defineStore } from 'pinia'
 import {
   relayGetSettings,
   relayHost,
-  relayRequestRestart,
-  relaySetHostRole,
-  relaySetSettings,
   relayStatus,
 } from '../generated/admin-api'
 import type {
@@ -15,6 +12,12 @@ import type {
   RelayStatusResponse,
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
+import { useAsyncAction } from '../composables/useAsyncAction'
+import {
+  RELAY_HOST_KEY_PREFIX,
+  createRelayHostActions,
+} from './relay-host-actions'
+import { pendingRowsById } from './record-action-types'
 
 // Host-local Relay controls. Everything here talks to the Relay management
 // listener (`/api/v1/relay/*`) and stays available when no Worker is
@@ -69,82 +72,39 @@ export const useRelayHostStore = defineStore('relay-host', () => {
     }
   }
 
-  async function saveRole(nextRole: HostRole): Promise<RelayHostResponse> {
-    savingRole.value = true
-    error.value = ''
-    try {
-      const saved = expectData(
-        await relaySetHostRole<true>(withData({ body: { role: nextRole } })),
-      )
-      host.value = saved
-      return saved
-    } catch (cause) {
-      error.value =
-        cause instanceof Error ? cause.message : 'Failed to save host role'
-      throw cause
-    } finally {
-      savingRole.value = false
-    }
-  }
-
-  async function saveSettings(
-    adminBind: string,
-  ): Promise<RelaySettingsResponse> {
-    savingSettings.value = true
-    error.value = ''
-    try {
-      const trimmed = adminBind.trim()
-      const saved = expectData(
-        await relaySetSettings<true>(
-          withData({
-            body: trimmed ? { admin_bind: trimmed } : {},
-          }),
-        ),
-      )
-      settings.value = saved
-      const [hostResponse, statusResponse] = await Promise.all([
-        relayHost<true>(withData()),
-        relayStatus<true>(withData()),
-      ])
-      host.value = expectData(hostResponse)
-      status.value = expectData(statusResponse)
-      return saved
-    } catch (cause) {
-      error.value =
-        cause instanceof Error ? cause.message : 'Failed to save relay settings'
-      throw cause
-    } finally {
-      savingSettings.value = false
-    }
-  }
-
-  async function requestRestart(): Promise<void> {
-    restarting.value = true
-    error.value = ''
-    try {
-      await relayRequestRestart<true>(withData())
-    } catch (cause) {
-      error.value =
-        cause instanceof Error ? cause.message : 'Failed to request restart'
-      throw cause
-    } finally {
-      restarting.value = false
-    }
-  }
+  // This host is one record, so it has one gate: a role change, a settings save
+  // and a restart all end in the same process restarting.
+  const guard = useAsyncAction()
+  const actions = createRelayHostActions({
+    guard,
+    host: {
+      error,
+      host,
+      restarting,
+      savingRole,
+      savingSettings,
+      settings,
+      status,
+    },
+  })
+  const relayHostPendingActions = computed(() =>
+    pendingRowsById(guard.pendingActions.value, RELAY_HOST_KEY_PREFIX),
+  )
 
   return {
+    ...actions,
     error,
     host,
+    isPending: guard.isPending,
     loading,
+    pendingActions: guard.pendingActions,
     pendingRole,
+    relayHostPendingActions,
     relayReady,
-    requestRestart,
     refresh,
     restartRequired,
     restarting,
     role,
-    saveRole,
-    saveSettings,
     savingRole,
     savingSettings,
     settings,

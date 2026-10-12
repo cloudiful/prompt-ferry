@@ -17,14 +17,18 @@ import type { ModelRouteForm } from '@/models'
 import type { ProviderEndpoint, User } from '@/generated/admin-api'
 import type { EndpointOption } from '@/models/endpoints'
 
-const props = defineProps<{
-  busy: boolean
-  endpoints: ProviderEndpoint[]
-  endpointOptions: EndpointOption[]
-  header: string
-  t: TranslateFn
-  users: User[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    busy: boolean
+    endpoints: ProviderEndpoint[]
+    endpointOptions: EndpointOption[]
+    header: string
+    savePending?: boolean
+    t: TranslateFn
+    users: User[]
+  }>(),
+  { savePending: false },
+)
 
 const visible = defineModel<boolean>('visible', { required: true })
 const form = defineModel<ModelRouteForm>('form', { required: true })
@@ -146,227 +150,234 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
     v-model:open="visible"
     :title="header"
     :ui="{ content: 'sm:max-w-4xl' }"
+    :dismissible="!savePending"
+    :close="!savePending"
   >
     <template #body>
-      <form class="grid gap-3 text-xs" @submit.prevent="$emit('save')">
-        <template v-if="view === 'main'">
-          <div class="flex flex-wrap items-end gap-3">
-            <USelect
-              v-model="form.scope"
-              class="w-28 shrink-0"
-              :items="['admin', 'user']"
-            />
-            <UInput
-              v-model="form.model_pattern"
-              class="min-w-40 flex-1"
-              :placeholder="t('modelPattern')"
-            />
-            <label
-              class="inline-flex min-h-8 shrink-0 items-center justify-end pb-1 text-[0.75rem] text-default"
-            >
-              <USwitch v-model="form.enabled" :aria-label="t('status')" />
-            </label>
-          </div>
-          <USelect
-            v-if="form.scope === 'user'"
-            :model-value="form.owner_user_id ?? undefined"
-            class="w-full xl:max-w-[16rem]"
-            :items="users"
-            label-key="login_name"
-            value-key="user_id"
-            :placeholder="t('ownerUser')"
-            @update:model-value="form.owner_user_id = $event ?? null"
-          />
-          <div class="grid gap-2">
-            <div class="flex items-center justify-between gap-3">
-              <div class="text-sm font-medium text-highlighted">
-                {{ t('target') }}
-              </div>
-              <UButton
-                type="button"
-                size="sm"
-                color="neutral"
-                @click="addTarget"
-                ><UIcon name="i-lucide-plus" class="h-4 w-4" />{{
-                  t('addTarget')
-                }}</UButton
+      <form class="text-xs" @submit.prevent="$emit('save')">
+        <fieldset :disabled="savePending" class="grid gap-3">
+          <template v-if="view === 'main'">
+            <div class="flex flex-wrap items-end gap-3">
+              <USelect
+                v-model="form.scope"
+                class="w-28 shrink-0"
+                :items="['admin', 'user']"
+              />
+              <UInput
+                v-model="form.model_pattern"
+                class="min-w-40 flex-1"
+                :placeholder="t('modelPattern')"
+              />
+              <label
+                class="inline-flex min-h-8 shrink-0 items-center justify-end pb-1 text-[0.75rem] text-default"
               >
+                <USwitch v-model="form.enabled" :aria-label="t('status')" />
+              </label>
             </div>
-            <UTable
-              :data="form?.targets ?? []"
-              :columns="targetColumns"
-              :meta="targetTableMeta"
-              class="min-w-0"
-              :ui="{ th: 'whitespace-nowrap' }"
-            >
-              <template #order-cell="{ row }">
-                <div
-                  class="flex items-center gap-1"
-                  draggable="true"
-                  @dragstart="onRowDragStart($event, row.index)"
-                  @dragover="onRowDragOver($event, row.index)"
-                  @drop="onDrop($event, row.index)"
-                  @dragend="onDragEnd"
-                >
-                  <div
-                    data-target-drag-handle
-                    tabindex="0"
-                    role="button"
-                    class="inline-flex cursor-grab items-center justify-center rounded p-1 text-muted focus-visible:outline-2 focus-visible:outline-primary active:cursor-grabbing"
-                    :aria-label="t('target')"
-                    @keydown="onGripKeydown($event, row.index)"
-                  >
-                    <UIcon name="i-lucide-grip-vertical" class="h-4 w-4" />
-                  </div>
+            <USelect
+              v-if="form.scope === 'user'"
+              :model-value="form.owner_user_id ?? undefined"
+              class="w-full xl:max-w-[16rem]"
+              :items="users"
+              label-key="login_name"
+              value-key="user_id"
+              :placeholder="t('ownerUser')"
+              @update:model-value="form.owner_user_id = $event ?? null"
+            />
+            <div class="grid gap-2">
+              <div class="flex items-center justify-between gap-3">
+                <div class="text-sm font-medium text-highlighted">
+                  {{ t('target') }}
                 </div>
-              </template>
-              <template #endpoint-cell="{ row }">
-                <div
-                  class="grid gap-2"
-                  draggable="true"
-                  @dragstart="onRowDragStart($event, row.index)"
-                  @dragover="onRowDragOver($event, row.index)"
-                  @drop="onDrop($event, row.index)"
-                  @dragend="onDragEnd"
+                <UButton
+                  type="button"
+                  size="sm"
+                  color="neutral"
+                  @click="addTarget"
+                  ><UIcon name="i-lucide-plus" class="h-4 w-4" />{{
+                    t('addTarget')
+                  }}</UButton
                 >
+              </div>
+              <UTable
+                :data="form?.targets ?? []"
+                :columns="targetColumns"
+                :meta="targetTableMeta"
+                class="min-w-0"
+                :ui="{ th: 'whitespace-nowrap' }"
+              >
+                <template #order-cell="{ row }">
                   <div
-                    class="grid gap-2 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_auto]"
+                    class="flex items-center gap-1"
+                    draggable="true"
+                    @dragstart="onRowDragStart($event, row.index)"
+                    @dragover="onRowDragOver($event, row.index)"
+                    @drop="onDrop($event, row.index)"
+                    @dragend="onDragEnd"
                   >
-                    <USelect
-                      v-model="row.original.endpoint_id"
-                      class="w-full"
-                      :items="endpointOptions"
-                      label-key="label"
-                      value-key="value"
-                      :placeholder="t('endpoint')"
+                    <div
+                      data-target-drag-handle
+                      tabindex="0"
+                      role="button"
+                      class="inline-flex cursor-grab items-center justify-center rounded p-1 text-muted focus-visible:outline-2 focus-visible:outline-primary active:cursor-grabbing"
+                      :aria-label="t('target')"
+                      @keydown="onGripKeydown($event, row.index)"
                     >
-                      <template #item-leading="{ item }">
-                        <ProviderIcon :provider="item.provider" size="sm" />
-                      </template>
-                    </USelect>
-                    <UInput
-                      v-model="row.original.upstream_model"
-                      class="w-full"
-                      :placeholder="t('upstreamModelOptional')"
-                    />
-                    <div class="flex items-center gap-1">
-                      <div
-                        class="hidden shrink-0 items-center gap-1 text-muted lg:flex"
-                      >
-                        <span>{{ targetProxySummary(row.original, t) }}</span>
-                        <template v-if="hasTargetSchedule(row.original)">
-                          <span aria-hidden="true">·</span>
-                          <UTooltip
-                            :text="targetScheduleTooltip(row.original, t)"
-                          >
-                            <span>{{
-                              targetScheduleSummary(row.original, t)
-                            }}</span>
-                          </UTooltip>
-                        </template>
-                      </div>
-                      <UButton
-                        type="button"
-                        size="sm"
-                        :color="
-                          hasTargetSettings(row.original)
-                            ? 'primary'
-                            : 'neutral'
-                        "
-                        variant="ghost"
-                        icon="i-lucide-settings-2"
-                        :aria-label="t('targetSettings')"
-                        :aria-pressed="hasTargetSettings(row.original)"
-                        :title="t('targetSettingsHint')"
-                        @click="openTargetSettings(row.index)"
-                      />
+                      <UIcon name="i-lucide-grip-vertical" class="h-4 w-4" />
                     </div>
                   </div>
-                  <div class="flex items-center gap-1 text-muted lg:hidden">
-                    <span>{{ targetProxySummary(row.original, t) }}</span>
-                    <template v-if="hasTargetSchedule(row.original)">
-                      <span aria-hidden="true">·</span>
-                      <span>{{ targetScheduleSummary(row.original, t) }}</span>
-                    </template>
+                </template>
+                <template #endpoint-cell="{ row }">
+                  <div
+                    class="grid gap-2"
+                    draggable="true"
+                    @dragstart="onRowDragStart($event, row.index)"
+                    @dragover="onRowDragOver($event, row.index)"
+                    @drop="onDrop($event, row.index)"
+                    @dragend="onDragEnd"
+                  >
+                    <div
+                      class="grid gap-2 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_auto]"
+                    >
+                      <USelect
+                        v-model="row.original.endpoint_id"
+                        class="w-full"
+                        :items="endpointOptions"
+                        label-key="label"
+                        value-key="value"
+                        :placeholder="t('endpoint')"
+                      >
+                        <template #item-leading="{ item }">
+                          <ProviderIcon :provider="item.provider" size="sm" />
+                        </template>
+                      </USelect>
+                      <UInput
+                        v-model="row.original.upstream_model"
+                        class="w-full"
+                        :placeholder="t('upstreamModelOptional')"
+                      />
+                      <div class="flex items-center gap-1">
+                        <div
+                          class="hidden shrink-0 items-center gap-1 text-muted lg:flex"
+                        >
+                          <span>{{ targetProxySummary(row.original, t) }}</span>
+                          <template v-if="hasTargetSchedule(row.original)">
+                            <span aria-hidden="true">·</span>
+                            <UTooltip
+                              :text="targetScheduleTooltip(row.original, t)"
+                            >
+                              <span>{{
+                                targetScheduleSummary(row.original, t)
+                              }}</span>
+                            </UTooltip>
+                          </template>
+                        </div>
+                        <UButton
+                          type="button"
+                          size="sm"
+                          :color="
+                            hasTargetSettings(row.original)
+                              ? 'primary'
+                              : 'neutral'
+                          "
+                          variant="ghost"
+                          icon="i-lucide-settings-2"
+                          :aria-label="t('targetSettings')"
+                          :aria-pressed="hasTargetSettings(row.original)"
+                          :title="t('targetSettingsHint')"
+                          @click="openTargetSettings(row.index)"
+                        />
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-1 text-muted lg:hidden">
+                      <span>{{ targetProxySummary(row.original, t) }}</span>
+                      <template v-if="hasTargetSchedule(row.original)">
+                        <span aria-hidden="true">·</span>
+                        <span>{{
+                          targetScheduleSummary(row.original, t)
+                        }}</span>
+                      </template>
+                    </div>
                   </div>
-                </div>
-              </template>
-              <template #status-cell="{ row }">
-                <div
-                  class="flex min-h-8 items-center justify-center"
-                  draggable="true"
-                  @dragstart="onRowDragStart($event, row.index)"
-                  @dragover="onRowDragOver($event, row.index)"
-                  @drop="onDrop($event, row.index)"
-                  @dragend="onDragEnd"
-                >
-                  <USwitch
-                    v-model="row.original.enabled"
-                    :aria-label="t('status')"
-                  />
-                </div>
-              </template>
-              <template #actions-cell="{ row }">
-                <div
-                  class="flex items-center"
-                  draggable="true"
-                  @dragstart="onRowDragStart($event, row.index)"
-                  @dragover="onRowDragOver($event, row.index)"
-                  @drop="onDrop($event, row.index)"
-                  @dragend="onDragEnd"
-                >
-                  <UButton
-                    type="button"
-                    size="sm"
-                    color="error"
-                    variant="ghost"
-                    :aria-label="t('delete')"
-                    @click="removeTarget(row.index)"
-                    ><UIcon name="i-lucide-trash-2" class="h-4 w-4"
-                  /></UButton>
-                </div>
-              </template>
-            </UTable>
-          </div>
-        </template>
-        <template v-else>
-          <div class="flex items-center gap-1">
-            <UButton
-              type="button"
-              size="xs"
-              color="neutral"
-              variant="ghost"
-              icon="i-lucide-arrow-left"
-              :aria-label="t('cancel')"
-              @click="backToMain"
+                </template>
+                <template #status-cell="{ row }">
+                  <div
+                    class="flex min-h-8 items-center justify-center"
+                    draggable="true"
+                    @dragstart="onRowDragStart($event, row.index)"
+                    @dragover="onRowDragOver($event, row.index)"
+                    @drop="onDrop($event, row.index)"
+                    @dragend="onDragEnd"
+                  >
+                    <USwitch
+                      v-model="row.original.enabled"
+                      :aria-label="t('status')"
+                    />
+                  </div>
+                </template>
+                <template #actions-cell="{ row }">
+                  <div
+                    class="flex items-center"
+                    draggable="true"
+                    @dragstart="onRowDragStart($event, row.index)"
+                    @dragover="onRowDragOver($event, row.index)"
+                    @drop="onDrop($event, row.index)"
+                    @dragend="onDragEnd"
+                  >
+                    <UButton
+                      type="button"
+                      size="sm"
+                      color="error"
+                      variant="ghost"
+                      :aria-label="t('delete')"
+                      @click="removeTarget(row.index)"
+                      ><UIcon name="i-lucide-trash-2" class="h-4 w-4"
+                    /></UButton>
+                  </div>
+                </template>
+              </UTable>
+            </div>
+          </template>
+          <template v-else>
+            <div class="flex items-center gap-1">
+              <UButton
+                type="button"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-arrow-left"
+                :aria-label="t('cancel')"
+                @click="backToMain"
+              />
+              <span class="text-sm font-medium text-default">{{
+                t('targetSettings')
+              }}</span>
+              <span v-if="selectedEndpointLabel" class="truncate text-muted">
+                · {{ selectedEndpointLabel }}
+              </span>
+            </div>
+            <ModelRouteTargetSettingsPage
+              v-if="selectedTargetModel"
+              v-model:target="selectedTargetModel"
+              :endpoint-provider="selectedEndpointProvider"
+              :t="t"
             />
-            <span class="text-sm font-medium text-default">{{
-              t('targetSettings')
-            }}</span>
-            <span v-if="selectedEndpointLabel" class="truncate text-muted">
-              · {{ selectedEndpointLabel }}
-            </span>
-          </div>
-          <ModelRouteTargetSettingsPage
-            v-if="selectedTargetModel"
-            v-model:target="selectedTargetModel"
-            :endpoint-provider="selectedEndpointProvider"
-            :t="t"
-          />
-        </template>
+          </template>
+        </fieldset>
         <div class="flex justify-end gap-2 pt-1">
           <UButton
             type="button"
             size="sm"
             color="neutral"
+            :disabled="savePending"
             @click="visible = false"
             >{{ t('cancel') }}</UButton
           >
           <UButton
             type="submit"
             size="sm"
-            :loading="busy"
-            :disabled="!canSaveOuter"
+            :loading="busy || savePending"
+            :disabled="!canSaveOuter || savePending"
             ><UIcon name="i-lucide-save" class="h-4 w-4" />{{
               t('save')
             }}</UButton

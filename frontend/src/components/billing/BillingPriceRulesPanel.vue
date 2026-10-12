@@ -2,13 +2,16 @@
 import type { TableColumn } from '@nuxt/ui'
 import { computed } from 'vue'
 import type { BillingPriceRuleResponse } from '@/generated/admin-api'
+import type { PendingRowActions } from '@/stores/record-action-types'
 import { formatBillingRate, formatBillingTime } from '@/models/billing'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
 const props = defineProps<{
+  createPending: boolean
   first: number
   loading: boolean
+  pendingActions: PendingRowActions
   rules: BillingPriceRuleResponse[]
   rows: number
   total: number
@@ -53,9 +56,15 @@ const columns = computed<TableColumn<BillingPriceRuleResponse>[]>(() => [
           />
         </UTooltip>
       </div>
-      <UButton size="sm" icon="i-lucide-plus" @click="emit('create')">{{
-        t('newPriceRule')
-      }}</UButton>
+      <UButton
+        size="sm"
+        icon="i-lucide-plus"
+        :loading="createPending"
+        :disabled="createPending"
+        @click="emit('create')"
+      >
+        {{ t('newPriceRule') }}
+      </UButton>
     </div>
     <div class="min-w-0 overflow-x-auto">
       <UTable
@@ -98,6 +107,7 @@ const columns = computed<TableColumn<BillingPriceRuleResponse>[]>(() => [
               variant="ghost"
               icon="i-lucide-pencil"
               :aria-label="t('editPriceRule')"
+              :disabled="Boolean(pendingActions[row.original.price_rule_id])"
               @click="emit('edit', row.original)"
             />
             <UButton
@@ -106,6 +116,8 @@ const columns = computed<TableColumn<BillingPriceRuleResponse>[]>(() => [
               variant="ghost"
               icon="i-lucide-trash-2"
               :aria-label="t('deletePriceRule')"
+              :loading="pendingActions[row.original.price_rule_id] === 'delete'"
+              :disabled="Boolean(pendingActions[row.original.price_rule_id])"
               @click="emit('delete', row.original)"
             />
             <UButton
@@ -122,6 +134,8 @@ const columns = computed<TableColumn<BillingPriceRuleResponse>[]>(() => [
                   ? t('disablePriceRule')
                   : t('enablePriceRule')
               "
+              :loading="pendingActions[row.original.price_rule_id] === 'toggle'"
+              :disabled="Boolean(pendingActions[row.original.price_rule_id])"
               @click="emit('toggle', row.original)"
             />
           </div>

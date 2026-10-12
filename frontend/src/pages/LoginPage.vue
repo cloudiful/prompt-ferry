@@ -55,10 +55,12 @@ async function submit(event: FormSubmitEvent<LoginForm>): Promise<void> {
   const loginName = event.data.login_name.trim()
   try {
     rememberLoginName(loginName)
-    await session.login({
+    const password = event.data.password
+    const result = await session.login({
       login_name: loginName,
-      password: event.data.password,
+      password,
     })
+    if (!result.executed) return
     const redirect =
       typeof route.query.redirect === 'string'
         ? route.query.redirect
@@ -91,6 +93,7 @@ async function submit(event: FormSubmitEvent<LoginForm>): Promise<void> {
             autocomplete="username"
             :placeholder="t('loginName')"
             autofocus
+            :disabled="busy"
             class="w-full"
           />
         </UFormField>
@@ -100,6 +103,7 @@ async function submit(event: FormSubmitEvent<LoginForm>): Promise<void> {
             v-model="state.password"
             :type="showPassword ? 'text' : 'password'"
             autocomplete="current-password"
+            :disabled="busy"
             :placeholder="t('password')"
             class="w-full"
           >
@@ -133,6 +137,7 @@ async function submit(event: FormSubmitEvent<LoginForm>): Promise<void> {
           icon="i-lucide-log-in"
           :label="t('login')"
           :loading="busy"
+          :disabled="busy"
           block
         />
       </UForm>

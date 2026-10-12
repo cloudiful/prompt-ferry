@@ -8,14 +8,9 @@ import type {
   RequestRecordCategory,
   RequestRecordFacets,
   RequestRecordOverviewRange,
-  RequestRecordsClearResponse,
 } from '../generated/admin-api'
 import { useLocale } from '../composables/useLocale'
-import type {
-  RequestRecordClearForm,
-  RequestRecordFilterModel,
-  RequestRecordRowView,
-} from '../models'
+import type { RequestRecordFilterModel, RequestRecordRowView } from '../models'
 import {
   createUsageFacetOptionsView,
   createUsageStateOptions,
@@ -31,12 +26,13 @@ import type { RequestRecordOverviewResponse } from '../generated/admin-api'
 import { createRequestRecordDetailState } from './request-record-detail'
 import { createDefaultRequestRecordFilters } from './request-records-query'
 import {
-  clearUsageHistory,
   fetchUsageFacets,
   fetchUsageOverview,
   fetchUsageRecords,
-  pruneUsageHistory,
 } from './usage-api'
+import { useAsyncAction } from '@/composables/useAsyncAction'
+import { createRequestRecordsActions } from './request-records-actions'
+import { createUsageActions, type UsageOverviewRequest } from './usage-actions'
 
 export const useRequestRecordsStore = defineStore('request-records', () => {
   const { t } = useLocale()
@@ -72,6 +68,7 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     rows: ref<RequestRecordRowView[]>([]),
   }
   const detailState = createRequestRecordDetailState()
+  const actionGuard = useAsyncAction()
 
   const requestStateOptions = computed(() =>
     createUsageStateOptions(
@@ -138,20 +135,34 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     }
   }
 
-  async function refreshOverview(): Promise<void> {
-    loadingState.overview.value = true
-    try {
-      overviewState.overview.value = await fetchUsageOverview({
-        requestCategory: queryState.requestCategory.value,
-        perspective: queryState.aiPerspective.value,
-        range: queryState.range.value,
-        start: queryState.start.value,
-        end: queryState.end.value,
-      })
-    } finally {
-      loadingState.overview.value = false
+  function createOverviewRequest(
+    perspective: RequestOverviewPerspective,
+  ): UsageOverviewRequest {
+    return {
+      requestCategory: queryState.requestCategory.value,
+      perspective,
+      range: queryState.range.value,
+      start: queryState.start.value,
+      end: queryState.end.value,
     }
   }
+
+  const usageActions = createUsageActions({
+    guard: actionGuard,
+    currentPerspective: () => queryState.aiPerspective.value,
+    createOverviewRequest,
+    fetchOverview: fetchUsageOverview,
+    setOverview: (overview) => {
+      overviewState.overview.value = overview
+    },
+    setOverviewLoading: (loading) => {
+      loadingState.overview.value = loading
+    },
+    setPerspective: (perspective) => {
+      queryState.aiPerspective.value = perspective
+    },
+  })
+  const { refreshOverview } = usageActions
 
   async function refreshRecords(
     nextFirst = queryState.first.value,
@@ -203,14 +214,6 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     )
   }
 
-  async function setAiPerspective(
-    nextPerspective: RequestOverviewPerspective,
-  ): Promise<void> {
-    if (queryState.aiPerspective.value === nextPerspective) return
-    queryState.aiPerspective.value = nextPerspective
-    await refreshOverview()
-  }
-
   function setRequestCategory(nextCategory: RequestRecordCategory): void {
     if (queryState.requestCategory.value === nextCategory) return
     queryState.requestCategory.value = nextCategory
@@ -229,29 +232,22 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     queryState.first.value = 0
   }
 
-  async function clearHistory(
-    form: RequestRecordClearForm,
-  ): Promise<RequestRecordsClearResponse> {
-    const result = await clearUsageHistory(form)
-    await refreshAll()
-    return result
-  }
-
-  async function pruneHistory(): Promise<number> {
-    const deleted = await pruneUsageHistory()
-    await refreshAll()
-    return deleted
-  }
-
+  const recordActions = createRequestRecordsActions({
+    guard: actionGuard,
+    refreshAll,
+  })
   return {
+    ...recordActions,
+    ...usageActions,
     aiPerspective: queryState.aiPerspective,
     affinityResetting: detailState.affinityResetting,
     clearConversationOverride: detailState.clearConversationOverride,
-    clearHistory,
+    conversationAction: detailState.conversationAction,
     conversationOverride: detailState.conversationOverride,
     detailLoading: detailState.detailLoading,
     detailRecord: detailState.detailRecord,
     end: queryState.end,
+    guardedResetSessionAffinity: detailState.guardedResetSessionAffinity,
     facetOptionsView,
     facets: recordState.facets,
     filters: queryState.filters,
@@ -264,7 +260,6 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     overview: overviewState.overview,
     overviewLoading: loadingState.overview,
     overrideSaving: detailState.overrideSaving,
-    pruneHistory,
     range: queryState.range,
     recordsLoading: loadingState.records,
     refreshAll,
@@ -285,7 +280,6 @@ export const useRequestRecordsStore = defineStore('request-records', () => {
     rowsPerPage: queryState.rowsPerPage,
     saveConversationOverride: detailState.saveConversationOverride,
     sessionRouteOptions: detailState.sessionRouteOptions,
-    setAiPerspective,
     setRequestCategory,
     sortField: queryState.sortField,
     sortOrder: queryState.sortOrder,

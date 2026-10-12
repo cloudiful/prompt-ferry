@@ -3,6 +3,8 @@ import SettingsCard from './SettingsCard.vue'
 
 defineProps<{
   busy: boolean
+  /** This section's own save is in flight, not merely a page refresh. */
+  pending?: boolean
   t: TranslateFn
 }>()
 
@@ -29,7 +31,8 @@ defineEmits<{
         <UButton
           size="sm"
           icon="i-lucide-save"
-          :loading="busy"
+          :loading="pending || busy"
+          :disabled="pending || busy"
           @click="$emit('saveRelayIpWhitelist')"
           >{{ t('save') }}</UButton
         >
@@ -61,6 +64,7 @@ defineEmits<{
             :rows="5"
             class="w-full font-mono text-xs"
             name="settings-allowed-cidrs"
+            :disabled="pending || busy"
             :placeholder="t('allowedCidrsPlaceholder')"
           />
           <p class="m-0 text-[11px] leading-relaxed text-muted">
@@ -94,6 +98,7 @@ defineEmits<{
             :rows="5"
             class="w-full font-mono text-xs"
             name="settings-trusted-proxy-cidrs"
+            :disabled="pending || busy"
             :placeholder="t('trustedProxyCidrsPlaceholder')"
           />
           <p class="m-0 text-[11px] leading-relaxed text-muted">

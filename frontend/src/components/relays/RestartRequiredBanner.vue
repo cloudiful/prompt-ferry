@@ -3,6 +3,7 @@ import { useLocale } from '@/composables/useLocale'
 
 defineProps<{
   busy: boolean
+  pending: boolean
 }>()
 
 defineEmits<{ restart: [] }>()
@@ -23,6 +24,7 @@ const { t } = useLocale()
         size="sm"
         color="warning"
         :loading="busy"
+        :disabled="pending"
         @click="$emit('restart')"
       >
         {{ t('relayRestartNow') }}

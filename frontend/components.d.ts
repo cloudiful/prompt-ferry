@@ -12,6 +12,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ApiKeysList: typeof import('./src/components/users/ApiKeysList.vue')['default']
+    ApprovalActionButtons: typeof import('./src/components/approvals/ApprovalActionButtons.vue')['default']
     ApprovalDetailDialog: typeof import('./src/components/approvals/ApprovalDetailDialog.vue')['default']
     ApprovalsPanel: typeof import('./src/components/approvals/ApprovalsPanel.vue')['default']
     BillingBreakdownPanel: typeof import('./src/components/billing/BillingBreakdownPanel.vue')['default']
@@ -34,6 +35,8 @@ declare module 'vue' {
     EndpointDialog: typeof import('./src/components/endpoints/EndpointDialog.vue')['default']
     EndpointMobileCard: typeof import('./src/components/endpoints/EndpointMobileCard.vue')['default']
     EndpointNameCell: typeof import('./src/components/endpoints/EndpointNameCell.vue')['default']
+    EndpointOAuthBrowserLogin: typeof import('./src/components/endpoints/EndpointOAuthBrowserLogin.vue')['default']
+    EndpointOAuthDeviceLogin: typeof import('./src/components/endpoints/EndpointOAuthDeviceLogin.vue')['default']
     EndpointOAuthSection: typeof import('./src/components/endpoints/EndpointOAuthSection.vue')['default']
     EndpointOrganizationUsage: typeof import('./src/components/endpoints/EndpointOrganizationUsage.vue')['default']
     EndpointProviderFields: typeof import('./src/components/endpoints/EndpointProviderFields.vue')['default']

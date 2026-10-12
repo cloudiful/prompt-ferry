@@ -5,10 +5,14 @@ import WorkspacePagerBar from '@/components/shared/WorkspacePagerBar.vue'
 import EndpointMobileCard from './EndpointMobileCard.vue'
 import EndpointsTable from './EndpointsTable.vue'
 
-const props = defineProps<{
-  t: TranslateFn
-  workspace: EndpointsWorkspaceView
-}>()
+const props = withDefaults(
+  defineProps<{
+    pendingKeys?: Readonly<Record<string, string>>
+    t: TranslateFn
+    workspace: EndpointsWorkspaceView
+  }>(),
+  { pendingKeys: () => ({}) },
+)
 
 const emit = defineEmits<{
   editEndpoint: [endpointId: string]
@@ -72,6 +76,7 @@ function forwardToggleEndpointEnabled(
         :key="item.endpoint_id"
         :busy="workspace.busy"
         :item="item"
+        :pending-keys="pendingKeys"
         :t="t"
         @delete-endpoint="$emit('deleteEndpoint', $event)"
         @edit-endpoint="$emit('editEndpoint', $event)"
@@ -96,6 +101,7 @@ function forwardToggleEndpointEnabled(
       :busy="workspace.busy"
       :first="workspace.endpoint_first"
       :items="workspace.endpoint_items"
+      :pending-keys="pendingKeys"
       :rows="workspace.endpoint_rows"
       :t="t"
       :total="workspace.endpoint_total"

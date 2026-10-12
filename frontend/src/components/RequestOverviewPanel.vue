@@ -24,6 +24,7 @@ const props = defineProps<{
   loading: boolean
   category: 'ai' | 'mcp'
   perspective: RequestOverviewPerspective
+  perspectivePending: boolean
   t: TranslateFn
   formatting: RequestRecordFormatting
 }>()
@@ -227,9 +228,17 @@ function providerBadge(row: RequestRecordOverviewBreakdownRow): string {
             class="w-32"
             size="sm"
             :aria-label="t('overviewPerspective')"
+            :aria-busy="perspectivePending"
+            :disabled="perspectivePending"
             :items="perspectiveOptions"
             label-key="label"
             value-key="value"
+          />
+          <UIcon
+            v-if="category === 'ai' && perspectivePending"
+            name="i-lucide-loader-circle"
+            class="h-4 w-4 animate-spin text-dimmed"
+            aria-hidden="true"
           />
         </div>
         <div class="overflow-x-auto">

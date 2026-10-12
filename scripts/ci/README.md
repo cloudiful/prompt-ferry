@@ -7,8 +7,13 @@ scripts are reproducible locally with Docker or any reachable Valkey.
 
 | Script | Purpose |
 | --- | --- |
-| `require-services.sh` | The no-silent-skip guarantee: fails when `PROMPT_FERRY_TEST_VALKEY_URL` is unset or unreachable (never prints credentials, only scheme/host/port). |
-| `run-tests.sh` | Runs `cargo test --workspace -- --test-threads=1`, then `check-test-summary.py`. |
+| `test-env.sh` | Sourced helper for the test-only dotenv settings: reads the project `.env` as data through `scripts/dev-env.sh` and exports only `PROMPT_FERRY_QUOTA_TEST_DATABASE_URL`, `PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET`, `PROMPT_FERRY_TEST_VALKEY_URL`, and an absolute `PROMPT_FERRY_TEST_TMPDIR`/`TMPDIR`. |
+| `with-test-env.sh` | Runs any command with those settings loaded (`bash scripts/ci/with-test-env.sh <command> [args...]`). The command is `exec`'d unchanged. |
+| `require-test-postgres.py` | Verifies the dedicated quota test database: the URL must address the operator-confirmed `host:port/database`, and that database must be reachable, authenticated, migrated, and report its own matching identity (never migrates or provisions). |
+| `test_pg_target.py` | Pure grammar for the dedicated target — parses and compares the URL against the confirmed `host:port/database` with no process, network, or SQL. Imported by `require-test-postgres.py`, which re-exports every name it defines. |
+| `require-services.sh` | The no-silent-skip guarantee: fails when either dedicated test service is unset, malformed, unreachable, or unready (never prints credentials, only scheme/host/port/database). |
+| `run-tests.sh` | Loads the test settings through `with-test-env.sh`, then runs `cargo test --workspace -- --test-threads=1`, then `check-test-summary.py`. |
+| `test-env.test.sh` | Sandbox checks for the entrypoint, the resolution rules, and the preflight (`test-env-test-lib.sh`, `test-env-test-assertions.sh`, `test-env-test-cases.sh`, `test-env-test-target-cases.sh`). |
 | `check-test-summary.py` | Rejects a run with failures, `#[ignore]`d tests, or no results at all. |
 | `coverage.sh` | Runs `cargo llvm-cov --workspace --lcov`, writes the workspace + redaction baseline report, then enforces the diff gate. |
 | `coverage_summary.py` | Renders workspace/redaction line coverage, the redaction baseline, and the zero-hit "blind spot" list from an lcov tracefile. |
@@ -16,12 +21,85 @@ scripts are reproducible locally with Docker or any reachable Valkey.
 | `redaction-scope.txt` | The redaction-chain globs the gate applies to; `!`-prefixed lines exclude a matched path. |
 | `bench_compare.py` | Saves/compares the Criterion redaction benchmarks against `benches/redaction_bench_baseline.json`; gates only the `quick` subset. |
 
+## Test-only settings
+
+`test-env.sh` loads the project `.env` as data — through the existing
+`scripts/dev-env.sh` parser, never by executing the file — and exports exactly
+four keys:
+
+| Setting | Purpose |
+| --- | --- |
+| `PROMPT_FERRY_QUOTA_TEST_DATABASE_URL` | The dedicated PostgreSQL database the quota integration tests use. |
+| `PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET` | The operator-confirmed `host:port/database` that URL is allowed to address. |
+| `PROMPT_FERRY_TEST_VALKEY_URL` | The Valkey instance the response-affinity regression tests use. |
+| `PROMPT_FERRY_TEST_TMPDIR` | Absolute project-local directory for the SQLite fixtures, exported as `TMPDIR`; defaults to `<repo>/target/test-tmp`. |
+
+A value already present in the process environment wins over the `.env` entry, and
+an explicitly blank process value stays unconfigured instead of silently falling
+back to the file. `PROMPT_FERRY_TEST_ENV_FILE` selects another dotenv file (absolute,
+or relative to the repository root); when it is set, the file must exist, while an
+absent default `<repo>/.env` is fine for an environment-only CI run. A relative
+`PROMPT_FERRY_TEST_TMPDIR` resolves against the repository root, never the
+invocation directory, and the ambient `TMPDIR` is ignored when choosing it. The
+directory is created when missing and never purged: SQLite fixtures keep their own
+UUID-suffixed files and WAL/SHM sidecars there, and a concurrent run may still own
+them. Nothing else is exported, so `DATABASE_URL`, provider keys, and other
+application settings never reach a test process.
+
+## The dedicated test target
+
+`PROMPT_FERRY_QUOTA_TEST_DATABASE_URL` and
+`PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET` are two halves of one authority. The
+confirmed target is the `host:port/database` an operator approved for this
+project; the URL supplies the credentials for it. Both keys are required, and
+the preflight refuses anything whose `host:port/database` does not match — so
+repointing only the URL, at a production database or any other service, fails
+before a connection is attempted instead of quietly becoming the test target.
+
+`test_pg_target.py` owns that grammar as a pure, side-effect-free module, and
+`tests/support/test_pg_target.rs` is the Rust side of it, so the shell preflight
+and the Rust helper accept and refuse exactly the same targets:
+
+- only the `postgres` and `postgresql` schemes;
+- the host is percent-decoded and lowercased, an absent port reads as `5432`,
+  and the database must be named explicitly;
+- a query string, an `options` segment, or a fragment is refused, so connection
+  options cannot repoint the search path away from the confirmed target;
+- only `postgres`/`postgresql` credentials count, `.pgpass` is disabled
+  (`PGPASSFILE=/dev/null`, `PgConnectOptions::new_without_pgpass`), and no test
+  reads `DATABASE_URL`;
+- a mismatch, a missing half, or a malformed value fails closed — never a
+  silent skip.
+
+After connecting, the preflight also compares `current_database()` with the
+confirmed database name, so a redirect or a wrong default database is caught
+rather than assumed away. Once connected, the Rust helper uses the password the
+dedicated URL carried; it is passed to the server through the connection, never
+through argv, a log line, or a parser message.
+
+Confirming a different target is an operator decision: provision and migrate
+that database yourself (the preflight never does), and keep it distinct from
+every application or production database.
+
 ## Local reproduction
 
-```bash
-export PROMPT_FERRY_TEST_VALKEY_URL=redis://<host>:6379
-scripts/ci/run-tests.sh
+The dedicated services are provisioned outside this repository; the preflight
+verifies them and never creates, migrates, or starts anything.
 
+```bash
+bash scripts/ci/run-tests.sh                            # full run: needs both services
+bash scripts/ci/with-test-env.sh cargo test -p prompt-ferry   # focused run
+bash scripts/ci/test-env.test.sh                         # entrypoint checks, no service needed
+```
+
+`run-tests.sh` re-enters itself through `with-test-env.sh` exactly once
+(`PROMPT_FERRY_TEST_ENV_LOADED` is the guard), runs both preflights before cargo
+starts, and preserves `SQLX_OFFLINE=true`, the `target/ci/test.log` summary, and
+cargo's exit status. A missing or unready service fails the run instead of
+degrading into a silent skip. A focused SQLite-only run through the wrapper needs
+no database service, but it cannot claim PostgreSQL coverage.
+
+```bash
 cargo install cargo-llvm-cov --locked
 rustup component add llvm-tools-preview
 scripts/ci/coverage.sh
@@ -57,15 +135,30 @@ test files never appear in LCOV in the first place.
 
 ## No-silent-skip guarantee
 
-The only service-backed test reads `PROMPT_FERRY_TEST_VALKEY_URL` (Valkey), so
-`require-services.sh` requiring and reachability-probing it is the primary
-guarantee: once it passes, the skip branch cannot trigger. PostgreSQL is not a
-test service: the suite reads no `.env` and needs no `DATABASE_URL`, and every
-database-shaped test helper is a lazy pool pinned to an isolated `pfy_test_*`
-schema that never connects. Migrations are exercised by `cargo run --bin
-db_init` in the development environment. `check-test-summary.py` is the
-complementary summary guard (no failures, no ignored tests, results present).
-The suite is never run with `--nocapture`, and no script logs a connection URL.
+Two dedicated services back the suite: the Valkey instance the response-affinity
+regression tests read, and the dedicated PostgreSQL database the quota
+integration tests read. A group backed by one of them either returns early and
+reports itself as skipped when its setting is absent, or fails outright — so
+`require-services.sh` checks both services before cargo starts: it requires the
+settings, then verifies that the database URL addresses the operator-confirmed
+`host:port/database`, that it accepts an authenticated connection, that the
+connected database reports a matching identity, and that its schema is
+migrated, plus the existing credential-free Valkey reachability probe. Once both
+pass, neither branch can trigger, and a green summary means the database-backed
+tests really ran. `check-test-summary.py` is the complementary summary guard (no
+failures, no ignored tests, results present). The suite is never run with
+`--nocapture`, and no script logs a connection URL, its userinfo, or a password.
+
+That per-test behavior is the fallback outside this gate, because a bare
+`cargo test` loads no `.env`: it sees only variables already exported in the
+environment. Unset, the Valkey and quota snapshot/service tests return early and
+report themselves as skipped, while `tests/support/sql_lookup_regression.rs`
+fails outright. Exported, the tests connect to whatever those variables name. A
+bare run therefore says nothing about service-backed coverage in either
+direction, which is why every documented entrypoint loads the settings first.
+Migrations are exercised by `cargo run --bin db_init` in the development
+environment — the preflight reports an unmigrated test database, it never
+migrates one.
 
 ## Mutation testing (#569 Phase 2)
 
@@ -79,7 +172,7 @@ cargo-mutants mutates only the root `prompt-ferry` package and silently drops
 with `cargo mutants --list-files --workspace`, which must list those six files.
 
 Mutation testing is manual-only because a batch is long-running. The run
-executes `require-services.sh` first, so the Valkey-backed tests cannot silently
+executes `require-services.sh` first, so the service-backed tests cannot silently
 skip, and sets `RUST_TEST_THREADS=1` to keep the global-redaction-lock suite
 serialized; `cargo-mutants` itself stays sequential. The report lands in
 `mutants.out/`. Target: survivors below 10%, with each surviving mutant either
@@ -88,9 +181,9 @@ splits one batch across bounded runs.
 
 ```bash
 cargo install cargo-mutants --locked
-export PROMPT_FERRY_TEST_VALKEY_URL=redis://<host>:6379
-scripts/ci/require-services.sh
-RUST_TEST_THREADS=1 cargo mutants --in-place --no-shuffle --workspace
+bash scripts/ci/with-test-env.sh scripts/ci/require-services.sh
+RUST_TEST_THREADS=1 bash scripts/ci/with-test-env.sh \
+  cargo mutants --in-place --no-shuffle --workspace
 ```
 
 The survivor report has not been produced yet; the first manual run is

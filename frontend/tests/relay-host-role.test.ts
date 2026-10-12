@@ -211,9 +211,14 @@ test('saving a role sends only the role and surfaces the pending restart', async
   expect('enabled' in options.body).toBe(false)
   expect('admin_bind' in options.body).toBe(false)
 
+  // The action reports through the guard, so the caller unwraps the value and
+  // checks `executed` before it treats the write as done.
+  expect(saved.executed).toBe(true)
+  if (!saved.executed) throw new Error('expected the role save to run')
+
   // The save response alone reports restart_required, so the page banner can
   // appear before status/settings agree.
-  expect(saved.restart_required).toBe(true)
+  expect(saved.value.restart_required).toBe(true)
   expect(store.restartRequired).toBe(true)
   expect(store.pendingRole).toBe('relay')
 })

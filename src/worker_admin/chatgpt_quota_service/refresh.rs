@@ -16,67 +16,21 @@ use super::{
 };
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
-const SERVICE_TIMEOUT: Duration = Duration::from_secs(43);
+
+pub(super) enum RefreshAttempt {
+    Completed(RefreshCompletion),
+    LeaseLost,
+}
 
 impl ChatGptQuotaService {
-    pub(super) async fn refresh_shared(
-        &self,
-        endpoint_id: Uuid,
-        trigger: RefreshTrigger,
-        arrival: DateTime<Utc>,
-        periodic_active: Option<bool>,
-    ) -> RefreshCompletion {
-        self.refresh_with_force(endpoint_id, trigger, arrival, periodic_active, false)
-            .await
-    }
-
-    pub(super) async fn refresh_shared_forced(
-        &self,
-        endpoint_id: Uuid,
-        trigger: RefreshTrigger,
-        arrival: DateTime<Utc>,
-        periodic_active: Option<bool>,
-    ) -> RefreshCompletion {
-        self.refresh_with_force(endpoint_id, trigger, arrival, periodic_active, true)
-            .await
-    }
-
-    async fn refresh_with_force(
+    pub(super) async fn refresh_serialized(
         &self,
         endpoint_id: Uuid,
         trigger: RefreshTrigger,
         arrival: DateTime<Utc>,
         periodic_active: Option<bool>,
         force: bool,
-    ) -> RefreshCompletion {
-        match timeout(
-            SERVICE_TIMEOUT,
-            self.refresh_serialized(endpoint_id, trigger, arrival, periodic_active, force),
-        )
-        .await
-        {
-            Ok(completion) => completion,
-            Err(_) => {
-                tracing::warn!(endpoint_id = %endpoint_id, "ChatGPT quota refresh exceeded its bounded service time");
-                match timeout(Duration::from_secs(1), self.load(endpoint_id)).await {
-                    Ok(Ok((snapshot, state))) => {
-                        completion(snapshot, state, Some(ChatGptQuotaError::InProgress))
-                    }
-                    Ok(Err(error)) => completion(None, None, Some(error)),
-                    Err(_) => completion(None, None, Some(ChatGptQuotaError::InProgress)),
-                }
-            }
-        }
-    }
-
-    async fn refresh_serialized(
-        &self,
-        endpoint_id: Uuid,
-        trigger: RefreshTrigger,
-        arrival: DateTime<Utc>,
-        periodic_active: Option<bool>,
-        force: bool,
-    ) -> RefreshCompletion {
+    ) -> RefreshAttempt {
         let endpoint_lock = {
             let mut locks = self.inner.endpoint_locks.lock().await;
             locks.retain(|_, lock| lock.strong_count() > 0);
@@ -91,10 +45,12 @@ impl ChatGptQuotaService {
         let endpoint_guard = endpoint_lock.lock().await;
         let (snapshot, state) = match self.load(endpoint_id).await {
             Ok(value) => value,
-            Err(error) => return completion(None, None, Some(error)),
+            Err(error) => {
+                return RefreshAttempt::Completed(completion(None, None, Some(error)));
+            }
         };
         if completed_after(trigger, arrival, snapshot.as_ref(), state.as_ref()) {
-            return completion(snapshot, state, None);
+            return RefreshAttempt::Completed(completion(snapshot, state, None));
         }
         if !trigger.is_manual() {
             let now = Utc::now();
@@ -116,20 +72,28 @@ impl ChatGptQuotaService {
                     .and_then(|state| state.next_retry_at)
                     .is_some_and(|retry_at| retry_at > now)
             {
-                return completion(
+                return RefreshAttempt::Completed(completion(
                     snapshot,
                     state.clone(),
                     state.as_ref().and_then(error_from_state),
-                );
+                ));
             }
         }
         let permit = match self.inner.quota_slots.clone().acquire_owned().await {
             Ok(permit) => permit,
-            Err(_) => return completion(snapshot, state, Some(ChatGptQuotaError::InProgress)),
+            Err(_) => {
+                return RefreshAttempt::Completed(completion(
+                    snapshot,
+                    state,
+                    Some(ChatGptQuotaError::InProgress),
+                ));
+            }
         };
         let (shared_snapshot, shared_state) = match self.load(endpoint_id).await {
             Ok(value) => value,
-            Err(error) => return completion(snapshot, None, Some(error)),
+            Err(error) => {
+                return RefreshAttempt::Completed(completion(snapshot, None, Some(error)));
+            }
         };
         if completed_after(
             trigger,
@@ -137,31 +101,35 @@ impl ChatGptQuotaService {
             shared_snapshot.as_ref(),
             shared_state.as_ref(),
         ) {
-            return completion(shared_snapshot, shared_state, None);
+            return RefreshAttempt::Completed(completion(shared_snapshot, shared_state, None));
         }
         let (snapshot, state) = (shared_snapshot, shared_state);
         let owner = Uuid::new_v4();
         let attempted_at = Utc::now();
-        let lease_expires_at =
+        let requested_expires_at =
             attempted_at + chrono::Duration::seconds(quota_snapshots::REFRESH_LEASE_MAX_SECONDS);
         let acquired = match quota_snapshots::acquire_refresh_lease(
             &self.inner.pool,
             endpoint_id,
             owner,
             attempted_at,
-            lease_expires_at,
+            requested_expires_at,
         )
         .await
         {
             Ok(acquired) => acquired,
-            Err(_) => return completion(snapshot, state, Some(ChatGptQuotaError::Storage)),
+            Err(_) => {
+                return RefreshAttempt::Completed(completion(
+                    snapshot,
+                    state,
+                    Some(ChatGptQuotaError::Storage),
+                ));
+            }
         };
         if !acquired {
             drop(permit);
             drop(endpoint_guard);
-            return self
-                .wait_for_replica(endpoint_id, trigger, arrival, periodic_active, force)
-                .await;
+            return RefreshAttempt::LeaseLost;
         }
         let previous_failures = state
             .as_ref()
@@ -176,21 +144,22 @@ impl ChatGptQuotaService {
         .await
         .unwrap_or(Err(ChatGptQuotaError::Timeout));
         let observed_at = Utc::now();
-        match fetched {
+        let completed = match fetched {
             Ok(quota) => {
                 let windows = match serde_json::to_value(
                     chatgpt_quota_normalize::subscription_windows(&quota),
                 ) {
                     Ok(windows) => windows,
                     Err(_) => {
-                        return self
-                            .finish_failure(
+                        return RefreshAttempt::Completed(
+                            self.finish_failure(
                                 endpoint_id,
                                 owner,
                                 previous_failures,
                                 ChatGptQuotaError::InvalidQuota,
                             )
-                            .await;
+                            .await,
+                        );
                     }
                 };
                 let snapshot = ChatgptQuotaSnapshotCreate {
@@ -228,7 +197,8 @@ impl ChatGptQuotaService {
                 self.finish_failure(endpoint_id, owner, previous_failures, error)
                     .await
             }
-        }
+        };
+        RefreshAttempt::Completed(completed)
     }
 
     async fn finish_failure(
@@ -243,7 +213,7 @@ impl ChatGptQuotaService {
         let delay =
             retry_delay(failures).max(chrono::Duration::seconds(FAILURE_BACKOFF_BASE_SECONDS));
         let next_retry_at = completed_at + delay;
-        match quota_snapshots::complete_refresh_failure(
+        let update = quota_snapshots::complete_refresh_failure(
             &self.inner.pool,
             endpoint_id,
             owner,
@@ -251,8 +221,8 @@ impl ChatGptQuotaService {
             Some(next_retry_at),
             Some(error.code()),
         )
-        .await
-        {
+        .await;
+        let result = match update {
             Ok(true) => match self.load(endpoint_id).await {
                 Ok((snapshot, state)) => completion(snapshot, state, Some(error)),
                 Err(_) => completion(None, None, Some(ChatGptQuotaError::Storage)),
@@ -265,6 +235,7 @@ impl ChatGptQuotaService {
                 let (snapshot, state) = self.load(endpoint_id).await.unwrap_or((None, None));
                 completion(snapshot, state, Some(ChatGptQuotaError::Storage))
             }
-        }
+        };
+        result
     }
 }

@@ -3,11 +3,25 @@ import { computed } from 'vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import type { ModelRouteListItemView } from '@/models/endpoints'
 
-const props = defineProps<{
-  busy: boolean
-  item: ModelRouteListItemView
-  t: TranslateFn
-}>()
+const props = withDefaults(
+  defineProps<{
+    busy: boolean
+    item: ModelRouteListItemView
+    pendingKeys?: Readonly<Record<string, string>>
+    t: TranslateFn
+  }>(),
+  { pendingKeys: () => ({}) },
+)
+
+// Same shared gate as the desktop table: save, delete, and toggle of one route
+// hold one key, and only the action holding it spins.
+function isPending(): boolean {
+  return Object.hasOwn(props.pendingKeys, props.item.rule_id)
+}
+
+function pendingAction(): string {
+  return props.pendingKeys[props.item.rule_id] ?? ''
+}
 
 defineEmits<{
   deleteModelRoute: [ruleId: string]
@@ -74,7 +88,8 @@ const targetsLabel = computed(
         <USwitch
           :model-value="item.enabled"
           :aria-label="t('status')"
-          :disabled="busy || item.toggling"
+          :disabled="busy || item.toggling || isPending()"
+          :loading="pendingAction() === 'toggle'"
           @update:model-value="
             $emit('toggleModelRouteEnabled', item.rule_id, $event)
           "
@@ -104,7 +119,8 @@ const targetsLabel = computed(
         size="sm"
         color="error"
         variant="outline"
-        :loading="busy"
+        :loading="pendingAction() === 'delete'"
+        :disabled="isPending()"
         @click="$emit('deleteModelRoute', item.rule_id)"
         >{{ t('delete') }}</UButton
       >

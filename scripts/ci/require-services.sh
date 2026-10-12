@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
-# Fail fast when the Valkey test service is absent or unreachable.
+# Fail fast when a dedicated test service is absent or unreachable.
 #
-# Valkey is the only service the Rust workspace test run needs: the
-# response-affinity regression tests run against a real instance, and they skip
-# silently without it, so this preflight is the no-silent-skip guarantee.
-# Database-shaped test helpers are lazy pools scoped to an isolated schema that
-# never connects, so no PostgreSQL URL is read or probed here. This script never
-# prints a connection URL or its userinfo; it reports only the scheme, host and
-# port.
+# Two services back the test-only settings this run loads: the quota integration
+# PostgreSQL database and the Valkey instance the response-affinity regression
+# tests use. Without them such a test group either returns early and reports
+# itself as skipped, or fails outright, so these preflights are the
+# no-silent-skip guarantee: they run before cargo starts, and a missing
+# prerequisite fails the run instead of reporting coverage the suite did not
+# perform.
+#
+# The settings themselves come from scripts/ci/test-env.sh, which the caller runs
+# first (scripts/ci/with-test-env.sh, or the self-wrapping scripts/ci/run-tests.sh).
+# This script only checks that the database is dedicated, reachable, and migrated.
+# It never prints a connection URL or its userinfo; it reports only the scheme,
+# host, port, and database name, and it never migrates or provisions anything.
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+: "${PROMPT_FERRY_QUOTA_TEST_DATABASE_URL:?PROMPT_FERRY_QUOTA_TEST_DATABASE_URL is required for the quota integration tests}"
+python3 "$SCRIPT_DIR/require-test-postgres.py"
 
 : "${PROMPT_FERRY_TEST_VALKEY_URL:?PROMPT_FERRY_TEST_VALKEY_URL is required for Valkey-backed tests}"
 

@@ -24,6 +24,10 @@ const usersStore = useUsersStore()
 
 const dialogVisible = ref(false)
 const dialogForm = ref<McpForm>(createEmptyMcpForm())
+// The dialog is identified by the generation it was opened in. Every open and
+// edit bumps it, so a save that settles late can tell that the surface it was
+// started from is no longer the one on screen and must not close it.
+let dialogGeneration = 0
 const dialogLearned = ref<{
   mode: string | null
   protocolVersion: string | null
@@ -37,6 +41,15 @@ const dialogCatalog = ref<McpCatalogResponse>({
 const dialogCatalogLoading = ref(false)
 
 const busy = computed(() => mcpStore.loading)
+// The dialog's own write. It follows the record the draft belongs to, so a
+// write against another server never freezes this dialog, and an unsaved draft
+// is keyed the same way the row map names a create.
+const mcpSavePending = computed(() =>
+  Object.hasOwn(
+    mcpStore.mcpPendingActions,
+    dialogForm.value.server_id || 'create',
+  ),
+)
 const dialogHeader = computed(() =>
   dialogForm.value.server_id ? t('edit') : t('newMcpServer'),
 )
@@ -54,6 +67,7 @@ async function refresh(): Promise<void> {
 }
 
 function openMcpDialog(): void {
+  dialogGeneration += 1
   dialogForm.value = createEmptyMcpForm()
   dialogLearned.value = null
   dialogCatalog.value = { tools: [], resources: [], prompts: [] }
@@ -62,6 +76,7 @@ function openMcpDialog(): void {
 }
 
 async function editMcpServer(server: McpServer): Promise<void> {
+  dialogGeneration += 1
   dialogForm.value = mcpServerToForm(server)
   dialogLearned.value = {
     mode: server.lifecycle_learned_mode ?? null,
@@ -90,24 +105,35 @@ async function editMcpServer(server: McpServer): Promise<void> {
 }
 
 async function saveMcpServer(): Promise<void> {
+  const generation = dialogGeneration
+  const serverId = dialogForm.value.server_id || null
+  // Built from the draft as it stands before the request is claimed, so a later
+  // edit cannot change what this save sends.
+  const body = mcpFormToRequest(dialogForm.value)
   try {
-    await mcpStore.saveServer(
-      dialogForm.value.server_id || null,
-      mcpFormToRequest(dialogForm.value),
-    )
-    dialogVisible.value = false
-    dialogForm.value = createEmptyMcpForm()
-    dialogCatalog.value = { tools: [], resources: [], prompts: [] }
-    dialogCatalogLoading.value = false
+    const result = await mcpStore.saveServer(serverId, body)
+    // A refused call is the guard collapsing a duplicate trigger: no close, no
+    // toast, no error.
+    if (!result.executed) return
+    if (dialogGeneration === generation) {
+      dialogVisible.value = false
+      dialogForm.value = createEmptyMcpForm()
+      dialogCatalog.value = { tools: [], resources: [], prompts: [] }
+      dialogCatalogLoading.value = false
+      dialogGeneration += 1
+    }
     notifySuccess(t('saved'))
   } catch (cause) {
+    // The dialog and its draft stay as they are so the save can be retried.
     notifyApiError(cause)
   }
 }
 
 async function testMcpServer(server: McpServer): Promise<void> {
   try {
-    const result = await mcpStore.runTest(server.server_id)
+    const outcome = await mcpStore.runTest(server.server_id)
+    if (!outcome.executed) return
+    const result = outcome.value
     if (dialogForm.value.server_id === server.server_id) {
       dialogCatalog.value = {
         tools: result.tools,
@@ -125,8 +151,11 @@ async function toggleMcpServer(server: McpServer): Promise<void> {
   try {
     const form = mcpServerToForm(server)
     form.enabled = !form.enabled
-    await mcpStore.saveServer(server.server_id, mcpFormToRequest(form))
-    notifySuccess(t('saved'))
+    const result = await mcpStore.saveServer(
+      server.server_id,
+      mcpFormToRequest(form),
+    )
+    if (result.executed) notifySuccess(t('saved'))
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -135,8 +164,8 @@ async function toggleMcpServer(server: McpServer): Promise<void> {
 async function deleteMcpServer(server: McpServer): Promise<void> {
   if (!window.confirm(`${t('delete')} ${server.name}?`)) return
   try {
-    await mcpStore.removeServer(server.server_id)
-    notifySuccess(t('delete'))
+    const result = await mcpStore.removeServer(server.server_id)
+    if (result.executed) notifySuccess(t('delete'))
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -186,6 +215,7 @@ onMounted(async () => {
       :busy="busy"
       :mcp-first="mcpStore.serverFirst"
       :mcp-rows="mcpStore.serverRows"
+      :pending-keys="mcpStore.mcpPendingActions"
       :testing-mcp-server-id="mcpStore.testingServerId"
       :t="t"
       :workspace-view="mcpStore.selectedWorkspaceView"
@@ -206,6 +236,7 @@ onMounted(async () => {
       :is-admin="session.isAdmin"
       :learned="dialogLearned"
       :providers="mcpStore.providers"
+      :save-pending="mcpSavePending"
       :t="t"
       :users="usersStore.users"
       @save="saveMcpServer"

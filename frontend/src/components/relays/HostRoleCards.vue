@@ -5,7 +5,9 @@ import { useLocale } from '@/composables/useLocale'
 defineProps<{
   currentRole: HostRole | null
   pendingRole?: HostRole | null
+  pendingRoleAction?: HostRole | null
   busy: boolean
+  writePending: boolean
 }>()
 
 defineEmits<{ select: [role: HostRole] }>()
@@ -67,8 +69,8 @@ const roles: Array<{
           size="sm"
           :color="currentRole === item.role ? 'neutral' : 'primary'"
           :variant="currentRole === item.role ? 'outline' : 'solid'"
-          :loading="busy"
-          :disabled="busy || currentRole === item.role"
+          :loading="busy && pendingRoleAction === item.role"
+          :disabled="writePending || currentRole === item.role"
           @click="$emit('select', item.role)"
         >
           {{

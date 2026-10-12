@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import type { ConfigAuditEntry } from '@/generated/admin-api'
 import { useNotifier } from '@/composables/useNotifier'
+import { useConfigArchiveActions } from '@/composables/useConfigArchiveActions'
 import { useConfigArchiveStore } from '@/stores/settings/config-archive'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 import TablePagination from '@/components/shared/TablePagination.vue'
@@ -12,7 +13,11 @@ import ConfigArchiveImportCard from './ConfigArchiveImportCard.vue'
 const props = defineProps<{ t: TranslateFn }>()
 
 const store = useConfigArchiveStore()
-const { notifyApiError, notifySuccess } = useNotifier()
+const { notifyApiError } = useNotifier()
+const { exportArchive: runExportArchive } = useConfigArchiveActions({
+  store,
+  t: props.t,
+})
 
 const columns = computed<TableColumn<ConfigAuditEntry>[]>(() => [
   { id: 'action', header: props.t('configArchiveAuditAction') },
@@ -67,12 +72,7 @@ async function onPageChange(event: TablePageChange): Promise<void> {
 }
 
 async function exportArchive(): Promise<void> {
-  try {
-    await store.exportArchive()
-    notifySuccess(props.t('configArchiveExportDone'))
-  } catch (cause) {
-    notifyApiError(cause)
-  }
+  await runExportArchive()
 }
 
 onMounted(() => {
@@ -110,6 +110,7 @@ onBeforeUnmount(() => {
             size="sm"
             type="password"
             autocomplete="new-password"
+            :disabled="store.exporting"
             :placeholder="t('configArchivePassphrasePlaceholder')"
           />
         </label>

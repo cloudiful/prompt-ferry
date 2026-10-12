@@ -5,6 +5,7 @@ import type { RequestRecordClearForm } from '@/models'
 
 const props = defineProps<{
   busy: boolean
+  clearPending: boolean
   currentUserLabel: string
   isAdmin: boolean
   t: TranslateFn
@@ -45,6 +46,8 @@ const userOptions = computed(() =>
   <UModal
     v-model:open="visible"
     :title="t('clearHistory')"
+    :dismissible="!busy"
+    :close="!busy"
     :ui="{ content: 'sm:max-w-xl' }"
   >
     <template #body>
@@ -71,6 +74,7 @@ const userOptions = computed(() =>
             label-key="label"
             value-key="value"
             size="sm"
+            :disabled="busy"
           />
         </div>
 
@@ -84,6 +88,7 @@ const userOptions = computed(() =>
             label-key="label"
             value-key="value"
             size="sm"
+            :disabled="busy"
             @update:model-value="form.user_id = $event ?? null"
           />
         </div>
@@ -98,7 +103,7 @@ const userOptions = computed(() =>
         <label
           class="inline-flex min-h-8 items-center gap-2 text-[0.75rem] text-default"
         >
-          <UCheckbox v-model="form.delete_all" />
+          <UCheckbox v-model="form.delete_all" :disabled="busy" />
           {{ t('clearAllRecords') }}
         </label>
 
@@ -111,7 +116,7 @@ const userOptions = computed(() =>
               v-model="form.start_at"
               type="datetime-local"
               size="sm"
-              :disabled="form.delete_all"
+              :disabled="busy || form.delete_all"
             />
           </div>
           <div class="grid gap-1">
@@ -122,7 +127,7 @@ const userOptions = computed(() =>
               v-model="form.end_at"
               type="datetime-local"
               size="sm"
-              :disabled="form.delete_all"
+              :disabled="busy || form.delete_all"
             />
           </div>
         </div>
@@ -138,6 +143,7 @@ const userOptions = computed(() =>
             type="button"
             size="sm"
             color="neutral"
+            :disabled="busy"
             @click="
               () => {
                 visible = false
@@ -145,7 +151,13 @@ const userOptions = computed(() =>
             "
             >{{ t('cancel') }}</UButton
           >
-          <UButton type="submit" size="sm" color="error" :loading="busy">
+          <UButton
+            type="submit"
+            size="sm"
+            color="error"
+            :loading="clearPending"
+            :disabled="busy"
+          >
             <UIcon name="i-lucide-trash-2" class="h-4 w-4" />
             {{ t('clearHistorySubmit') }}
           </UButton>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useNotifier } from '@/composables/useNotifier'
+import { useConfigArchiveActions } from '@/composables/useConfigArchiveActions'
 import { useConfigArchiveStore } from '@/stores/settings/config-archive'
 import SettingsCard from './SettingsCard.vue'
 import ConfigArchiveImportConfirmDialog from './ConfigArchiveImportConfirmDialog.vue'
@@ -9,19 +10,27 @@ import ConfigArchiveImportPreview from './ConfigArchiveImportPreview.vue'
 const props = defineProps<{ t: TranslateFn }>()
 
 const store = useConfigArchiveStore()
-const { notifyApiError, notifySuccess } = useNotifier()
-
+const { notifyApiError } = useNotifier()
 const fileInput = ref<HTMLInputElement | null>(null)
 const confirmOpen = ref(false)
+const { previewImport: runPreviewImport, confirmApply: runConfirmApply } =
+  useConfigArchiveActions({
+    store,
+    t: props.t,
+    onApplied: () => {
+      confirmOpen.value = false
+    },
+  })
 
 const canPreview = computed(
   () =>
     Boolean(store.importFile) &&
     Boolean(store.importPassphrase) &&
-    !store.previewing &&
-    !store.applying,
+    !store.importPending,
 )
-const canApply = computed(() => Boolean(store.importPreview) && !store.applying)
+const canApply = computed(
+  () => Boolean(store.importPreview) && !store.importPending,
+)
 const dialogOpen = computed(
   () => confirmOpen.value && Boolean(store.importPreview),
 )
@@ -52,11 +61,7 @@ function shortFingerprint(value: string | null | undefined): string {
 }
 
 async function previewImport(): Promise<void> {
-  try {
-    await store.previewImport()
-  } catch (cause) {
-    notifyApiError(cause)
-  }
+  await runPreviewImport()
 }
 
 function requestApply(): void {
@@ -65,17 +70,11 @@ function requestApply(): void {
 }
 
 async function confirmApply(): Promise<void> {
-  try {
-    await store.applyImport()
-    notifySuccess(props.t('configArchiveImportApplied'))
-  } catch (cause) {
-    notifyApiError(cause)
-  } finally {
-    confirmOpen.value = false
-  }
+  await runConfirmApply()
 }
 
 function cancelConfirm(): void {
+  if (store.importPending) return
   confirmOpen.value = false
   store.cancelImport()
 }
@@ -105,6 +104,7 @@ function cancelConfirm(): void {
           ref="fileInput"
           type="file"
           class="hidden"
+          :disabled="store.importPending"
           accept=".pfce,application/octet-stream"
           @change="onFileChange"
         />
@@ -115,6 +115,7 @@ function cancelConfirm(): void {
             color="neutral"
             variant="outline"
             icon="i-lucide-folder-open"
+            :disabled="store.importPending"
             @click="chooseFile"
           >
             {{ t('configArchiveChooseFile') }}
@@ -137,6 +138,7 @@ function cancelConfirm(): void {
               color="neutral"
               variant="ghost"
               icon="i-lucide-x"
+              :disabled="store.importPending"
               :aria-label="t('configArchiveRemoveFile')"
               @click="store.clearImportFlow()"
             />
@@ -153,6 +155,7 @@ function cancelConfirm(): void {
           size="sm"
           type="password"
           autocomplete="new-password"
+          :disabled="store.importPending"
           :placeholder="t('configArchivePassphrasePlaceholder')"
         />
       </label>
@@ -217,7 +220,7 @@ function cancelConfirm(): void {
     <ConfigArchiveImportConfirmDialog
       :open="dialogOpen"
       :preview="store.importPreview"
-      :busy="store.applying"
+      :busy="store.importPending"
       :t="t"
       @cancel="cancelConfirm"
       @confirm="confirmApply"

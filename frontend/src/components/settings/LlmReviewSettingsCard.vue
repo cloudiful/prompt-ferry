@@ -37,6 +37,7 @@ const translatedFailurePolicyOptions = computed(() =>
         <UInput
           v-model="llmReview.review_base_url"
           size="sm"
+          :disabled="busy"
           :placeholder="t('reviewBaseUrlPlaceholder')"
         />
       </label>
@@ -47,6 +48,7 @@ const translatedFailurePolicyOptions = computed(() =>
         <UInput
           v-model="llmReview.review_model"
           size="sm"
+          :disabled="busy"
           :placeholder="t('reviewModelPlaceholder')"
         />
       </label>
@@ -73,6 +75,7 @@ const translatedFailurePolicyOptions = computed(() =>
             <UInput
               v-model="llmReview.review_api_key"
               size="sm"
+              :disabled="busy"
               type="password"
             />
           </label>
@@ -83,6 +86,7 @@ const translatedFailurePolicyOptions = computed(() =>
             <USelect
               v-model="llmReview.failure_policy"
               size="sm"
+              :disabled="busy"
               :items="translatedFailurePolicyOptions"
               label-key="label"
               value-key="value"
@@ -95,6 +99,7 @@ const translatedFailurePolicyOptions = computed(() =>
             <UInputNumber
               v-model="llmReview.review_timeout_ms"
               size="sm"
+              :disabled="busy"
               :min="100"
             />
           </label>
@@ -105,6 +110,7 @@ const translatedFailurePolicyOptions = computed(() =>
             <UInputNumber
               v-model="llmReview.pending_ttl_seconds"
               size="sm"
+              :disabled="busy"
               :min="1"
             />
           </label>
@@ -131,6 +137,7 @@ const translatedFailurePolicyOptions = computed(() =>
           }}</span>
           <UTextarea
             v-model="llmReview.custom_policy_text"
+            :disabled="busy"
             autoresize
             :rows="3"
             size="sm"
@@ -151,7 +158,7 @@ const translatedFailurePolicyOptions = computed(() =>
             "
             class="flex-1"
           />
-          <USwitch v-model="llmReview.webhook.enabled" />
+          <USwitch v-model="llmReview.webhook.enabled" :disabled="busy" />
         </div>
       </template>
       <template #content>
@@ -159,7 +166,11 @@ const translatedFailurePolicyOptions = computed(() =>
           <div class="grid gap-3 md:grid-cols-2">
             <div class="grid gap-2">
               <label class="text-xs text-muted">{{ t('webhookUrl') }}</label>
-              <UInput v-model="llmReview.webhook.url" size="sm" />
+              <UInput
+                v-model="llmReview.webhook.url"
+                size="sm"
+                :disabled="busy"
+              />
             </div>
             <div class="grid gap-2">
               <label class="text-xs text-muted">{{
@@ -168,6 +179,7 @@ const translatedFailurePolicyOptions = computed(() =>
               <UInput
                 v-model="llmReview.webhook.bearer_token"
                 size="sm"
+                :disabled="busy"
                 type="password"
               />
             </div>
@@ -188,6 +200,7 @@ const translatedFailurePolicyOptions = computed(() =>
             </div>
             <UTextarea
               v-model="webhookHeadersText"
+              :disabled="busy"
               autoresize
               :rows="3"
               class="font-mono"

@@ -3,6 +3,7 @@ import type { BillingPriceRuleForm } from '@/models/billing'
 
 defineProps<{
   busy: boolean
+  savePending: boolean
   t: TranslateFn
 }>()
 
@@ -18,6 +19,8 @@ defineEmits<{
   <UModal
     v-model:open="visible"
     :title="form.price_rule_id ? t('editPriceRule') : t('newPriceRule')"
+    :dismissible="!busy"
+    :close="!busy"
     :ui="{ content: 'sm:max-w-3xl' }"
   >
     <template #body>
@@ -28,12 +31,18 @@ defineEmits<{
               v-model="form.effective_from"
               type="datetime-local"
               class="w-full"
+              :disabled="busy"
               required
             />
           </UFormField>
         </div>
         <UFormField :label="t('publicModel')">
-          <UInput v-model="form.public_model" class="w-full" required />
+          <UInput
+            v-model="form.public_model"
+            class="w-full"
+            :disabled="busy"
+            required
+          />
         </UFormField>
         <div class="grid gap-2 sm:grid-cols-2">
           <UFormField>
@@ -58,6 +67,7 @@ defineEmits<{
               v-model="form.input_rate"
               class="w-full"
               inputmode="decimal"
+              :disabled="busy"
               required
             />
           </UFormField>
@@ -83,6 +93,7 @@ defineEmits<{
               v-model="form.cache_read_rate"
               class="w-full"
               inputmode="decimal"
+              :disabled="busy"
               required
             />
           </UFormField>
@@ -108,6 +119,7 @@ defineEmits<{
               v-model="form.cache_write_rate"
               class="w-full"
               inputmode="decimal"
+              :disabled="busy"
               required
             />
           </UFormField>
@@ -133,6 +145,7 @@ defineEmits<{
               v-model="form.output_rate"
               class="w-full"
               inputmode="decimal"
+              :disabled="busy"
               required
             />
           </UFormField>
@@ -142,12 +155,17 @@ defineEmits<{
             type="button"
             color="neutral"
             variant="outline"
+            :disabled="busy"
             @click="visible = false"
             >{{ t('cancel') }}</UButton
           >
-          <UButton type="submit" :loading="busy" icon="i-lucide-save">{{
-            t('save')
-          }}</UButton>
+          <UButton
+            type="submit"
+            :loading="savePending"
+            :disabled="busy"
+            icon="i-lucide-save"
+            >{{ t('save') }}</UButton
+          >
         </div>
       </form>
     </template>

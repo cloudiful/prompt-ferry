@@ -1,7 +1,4 @@
-use std::time::Duration;
-
 use chrono::{DateTime, Utc};
-use tokio::time::Instant;
 use uuid::Uuid;
 
 use crate::{
@@ -14,9 +11,6 @@ use super::{
     ChatGptQuotaError, ChatGptQuotaService, RefreshCompletion,
     policy::{RefreshTrigger, stale},
 };
-
-const WAIT_FOR_REPLICA: Duration = Duration::from_secs(20);
-const REPLICA_POLL: Duration = Duration::from_millis(150);
 
 impl ChatGptQuotaService {
     pub(crate) async fn read(
@@ -71,57 +65,6 @@ impl ChatGptQuotaService {
             .await
             .map_err(|_| ChatGptQuotaError::Storage)?;
         Ok((snapshot, state))
-    }
-
-    pub(super) async fn wait_for_replica(
-        &self,
-        endpoint_id: Uuid,
-        trigger: RefreshTrigger,
-        arrival: DateTime<Utc>,
-        periodic_active: Option<bool>,
-        force: bool,
-    ) -> RefreshCompletion {
-        let deadline = Instant::now() + WAIT_FOR_REPLICA;
-        loop {
-            let (snapshot, state) = match self.load(endpoint_id).await {
-                Ok(value) => value,
-                Err(error) => return completion(None, None, Some(error)),
-            };
-            if completed_after(trigger, arrival, snapshot.as_ref(), state.as_ref()) {
-                return completion(snapshot, state, None);
-            }
-            let lease_active = state.as_ref().is_some_and(|state| {
-                state.lease_owner.is_some()
-                    && state
-                        .lease_expires_at
-                        .is_some_and(|expires_at| expires_at > Utc::now())
-            });
-            if !lease_active {
-                if force {
-                    return Box::pin(self.refresh_shared_forced(
-                        endpoint_id,
-                        trigger,
-                        arrival,
-                        periodic_active,
-                    ))
-                    .await;
-                }
-                return Box::pin(self.refresh_shared(
-                    endpoint_id,
-                    trigger,
-                    arrival,
-                    periodic_active,
-                ))
-                .await;
-            }
-            if Instant::now() >= deadline {
-                return completion(snapshot, state, Some(ChatGptQuotaError::InProgress));
-            }
-            tokio::time::sleep(
-                REPLICA_POLL.min(deadline.saturating_duration_since(Instant::now())),
-            )
-            .await;
-        }
     }
 
     fn response(

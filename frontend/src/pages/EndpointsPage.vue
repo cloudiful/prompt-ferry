@@ -20,16 +20,21 @@ const {
   endpointDialogHeader,
   endpointDialogVisible,
   endpointForm,
+  endpointPendingActions,
+  endpointSavePending,
   endpointsStore,
   modelRouteDialogHeader,
   modelRouteDialogVisible,
   modelRouteForm,
+  modelRoutePendingActions,
+  modelRouteSavePending,
   openTokenPlanUsage,
   onEndpointPage,
   onModelRoutePage,
   openEndpointDialog,
   openModelRouteDialog,
   refresh,
+  runEndpointOAuthAction,
   saveEndpoint,
   saveModelRoute,
   t,
@@ -43,6 +48,11 @@ const {
   tokenPlanUsageLoading,
   tokenPlanUsageVisible,
 } = useEndpointsPage()
+
+const endpointPendingAction = computed(() => {
+  const endpointId = endpointForm.value.endpoint_id
+  return endpointId ? endpointPendingActions.value[endpointId] : undefined
+})
 
 const route = useRoute()
 
@@ -99,6 +109,7 @@ const showNewModelRouteButton = computed(() => activeSection.value === 'routes')
 
     <EndpointsEndpointsTab
       v-if="activeSection === 'upstreams'"
+      :pending-keys="endpointPendingActions"
       :workspace="endpointsStore.selectedWorkspaceView"
       :t="t"
       @delete-endpoint="deleteEndpoint"
@@ -111,6 +122,7 @@ const showNewModelRouteButton = computed(() => activeSection.value === 'routes')
 
     <EndpointsRoutesTab
       v-else-if="activeSection === 'routes'"
+      :pending-keys="modelRoutePendingActions"
       :workspace="endpointsStore.selectedWorkspaceView"
       :t="t"
       @delete-model-route="deleteModelRoute"
@@ -125,6 +137,9 @@ const showNewModelRouteButton = computed(() => activeSection.value === 'routes')
       v-model:form="endpointForm"
       :busy="busy"
       :header="endpointDialogHeader"
+      :pending-action="endpointPendingAction"
+      :run-oauth-action="runEndpointOAuthAction"
+      :save-pending="endpointSavePending"
       :t="t"
       :users="usersStore.users"
       @save="saveEndpoint"
@@ -137,6 +152,7 @@ const showNewModelRouteButton = computed(() => activeSection.value === 'routes')
       :endpoint-options="endpointsStore.endpointOptions"
       :endpoints="endpointsStore.endpoints"
       :header="modelRouteDialogHeader"
+      :save-pending="modelRouteSavePending"
       :t="t"
       :users="usersStore.users"
       @save="saveModelRoute"

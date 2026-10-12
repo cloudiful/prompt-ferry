@@ -6,14 +6,28 @@ import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import type { ModelRouteListItemView } from '@/models/endpoints'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 
-const props = defineProps<{
-  busy: boolean
-  first: number
-  items: ModelRouteListItemView[]
-  rows: number
-  t: TranslateFn
-  total: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    busy: boolean
+    first: number
+    items: ModelRouteListItemView[]
+    pendingKeys?: Readonly<Record<string, string>>
+    rows: number
+    t: TranslateFn
+    total: number
+  }>(),
+  { pendingKeys: () => ({}) },
+)
+
+// Save, delete, and toggle of one route share a key, so a record being written
+// is gated as a whole while only the action holding it spins.
+function isPending(ruleId: string): boolean {
+  return Object.hasOwn(props.pendingKeys, ruleId)
+}
+
+function pendingAction(ruleId: string): string {
+  return props.pendingKeys[ruleId] ?? ''
+}
 
 const columns = computed<TableColumn<ModelRouteListItemView>[]>(() => [
   { accessorKey: 'model_pattern', header: props.t('modelPattern') },
@@ -90,7 +104,10 @@ defineEmits<{
             <USwitch
               :model-value="row.original.enabled"
               :aria-label="t('status')"
-              :disabled="busy || row.original.toggling"
+              :disabled="
+                busy || row.original.toggling || isPending(row.original.rule_id)
+              "
+              :loading="pendingAction(row.original.rule_id) === 'toggle'"
               @update:model-value="
                 $emit('toggleModelRouteEnabled', row.original.rule_id, $event)
               "
@@ -130,7 +147,8 @@ defineEmits<{
             color="error"
             variant="ghost"
             :aria-label="t('delete')"
-            :loading="busy"
+            :loading="pendingAction(row.original.rule_id) === 'delete'"
+            :disabled="isPending(row.original.rule_id)"
             @click="$emit('deleteModelRoute', row.original.rule_id)"
             ><UIcon name="i-lucide-trash-2" class="h-4 w-4"
           /></UButton>

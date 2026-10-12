@@ -5,10 +5,14 @@ import WorkspacePagerBar from '@/components/shared/WorkspacePagerBar.vue'
 import ModelRouteMobileCard from './ModelRouteMobileCard.vue'
 import ModelRoutesTable from './ModelRoutesTable.vue'
 
-const props = defineProps<{
-  t: TranslateFn
-  workspace: EndpointsWorkspaceView
-}>()
+const props = withDefaults(
+  defineProps<{
+    pendingKeys?: Readonly<Record<string, string>>
+    t: TranslateFn
+    workspace: EndpointsWorkspaceView
+  }>(),
+  { pendingKeys: () => ({}) },
+)
 
 const emit = defineEmits<{
   editModelRoute: [ruleId: string]
@@ -74,6 +78,7 @@ function forwardToggleModelRouteEnabled(
           :key="item.rule_id"
           :busy="workspace.busy"
           :item="item"
+          :pending-keys="pendingKeys"
           :t="t"
           @delete-model-route="$emit('deleteModelRoute', $event)"
           @edit-model-route="$emit('editModelRoute', $event)"
@@ -104,6 +109,7 @@ function forwardToggleModelRouteEnabled(
       :busy="workspace.busy"
       :first="workspace.model_route_first"
       :items="workspace.model_route_items"
+      :pending-keys="pendingKeys"
       :rows="workspace.model_route_rows"
       :t="t"
       :total="workspace.model_route_total"

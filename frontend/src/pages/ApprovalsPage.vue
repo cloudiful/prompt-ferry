@@ -38,8 +38,9 @@ async function openDetail(approval: ApprovalRequest): Promise<void> {
 
 async function approve(approval: ApprovalRequest): Promise<void> {
   try {
-    await approvalsStore.approve(approval.approval_id)
-    notifySuccess(t('approvalApproved'))
+    const result = await approvalsStore.approve(approval.approval_id)
+    // A refused call is the guard collapsing a duplicate trigger: no toast.
+    if (result.executed) notifySuccess(t('approvalApproved'))
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -47,8 +48,8 @@ async function approve(approval: ApprovalRequest): Promise<void> {
 
 async function reject(approval: ApprovalRequest): Promise<void> {
   try {
-    await approvalsStore.reject(approval.approval_id)
-    notifySuccess(t('approvalRejected'))
+    const result = await approvalsStore.reject(approval.approval_id)
+    if (result.executed) notifySuccess(t('approvalRejected'))
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -103,6 +104,7 @@ onMounted(async () => {
       :approval-rows="approvalsStore.rows"
       :approval-total="approvalsStore.total"
       :busy="approvalsStore.loading || approvalsStore.detailLoading"
+      :pending-keys="approvalsStore.approvalPendingActions"
       :format-time="formatTime"
       :t="t"
       @approval-page="onPage"

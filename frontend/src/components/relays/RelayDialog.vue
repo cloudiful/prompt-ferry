@@ -5,8 +5,9 @@ import type { RelayForm, RelaySecretAction } from '@/admin-mappers/forms/relay'
 
 defineProps<{
   bridgeOptions: Option[]
-  busy: boolean
   currentRelay: ManagedRelay | null
+  pending: boolean
+  savePending: boolean
   header: string
   secretActionOptions: Option<RelaySecretAction>[]
   t: TranslateFn
@@ -29,14 +30,17 @@ function formatTimestamp(value?: string | null): string {
   <UModal
     v-model:open="open"
     :title="header"
+    :dismissible="!pending"
+    :close="!pending"
     :ui="{ content: 'sm:max-w-5xl', body: 'max-h-[80vh] overflow-y-auto' }"
   >
     <template #body>
-      <div class="grid gap-4">
+      <fieldset :disabled="pending" class="grid gap-4">
         <div class="grid gap-2 md:grid-cols-2">
           <UFormField :label="t('name')">
             <UInput
               v-model="form.name"
+              :disabled="pending"
               :placeholder="t('relayNameHint')"
               class="w-full"
             />
@@ -44,6 +48,7 @@ function formatTimestamp(value?: string | null): string {
           <UFormField :label="t('relayUrl')">
             <UInput
               v-model="form.relay_url"
+              :disabled="pending"
               placeholder="wss://relay.example.com/ws/worker"
               class="w-full"
             />
@@ -51,6 +56,7 @@ function formatTimestamp(value?: string | null): string {
           <UFormField :label="t('relayTlsMode')">
             <USelect
               v-model="form.tls_mode"
+              :disabled="pending"
               :items="tlsOptions"
               class="w-full"
             />
@@ -58,13 +64,18 @@ function formatTimestamp(value?: string | null): string {
           <UFormField :label="t('relayBridgeMode')">
             <USelect
               v-model="form.bridge_encryption_mode"
+              :disabled="pending"
               :items="bridgeOptions"
               class="w-full"
             />
           </UFormField>
         </div>
 
-        <UCheckbox v-model="form.enabled" :label="t('relayEnabled')" />
+        <UCheckbox
+          v-model="form.enabled"
+          :disabled="pending"
+          :label="t('relayEnabled')"
+        />
 
         <div class="grid gap-4 md:grid-cols-2">
           <UCard>
@@ -74,6 +85,7 @@ function formatTimestamp(value?: string | null): string {
                 <USelect
                   v-if="form.relay_id"
                   v-model="form.relay_ca_action"
+                  :disabled="pending"
                   :items="secretActionOptions"
                   class="w-36"
                 />
@@ -81,6 +93,7 @@ function formatTimestamp(value?: string | null): string {
             </template>
             <UTextarea
               v-model="form.relay_ca_pem"
+              :disabled="pending"
               :rows="5"
               autoresize
               class="w-full"
@@ -96,6 +109,7 @@ function formatTimestamp(value?: string | null): string {
                 <USelect
                   v-if="form.relay_id"
                   v-model="form.bridge_key_action"
+                  :disabled="pending"
                   :items="secretActionOptions"
                   class="w-36"
                 />
@@ -103,6 +117,7 @@ function formatTimestamp(value?: string | null): string {
             </template>
             <UTextarea
               v-model="form.bridge_encryption_key"
+              :disabled="pending"
               :rows="5"
               autoresize
               class="w-full"
@@ -120,6 +135,7 @@ function formatTimestamp(value?: string | null): string {
                 <USelect
                   v-if="form.relay_id"
                   v-model="form.client_cert_action"
+                  :disabled="pending"
                   :items="secretActionOptions"
                   class="w-36"
                 />
@@ -127,6 +143,7 @@ function formatTimestamp(value?: string | null): string {
             </template>
             <UTextarea
               v-model="form.client_cert_pem"
+              :disabled="pending"
               :rows="6"
               autoresize
               class="w-full"
@@ -141,6 +158,7 @@ function formatTimestamp(value?: string | null): string {
                 <USelect
                   v-if="form.relay_id"
                   v-model="form.client_key_action"
+                  :disabled="pending"
                   :items="secretActionOptions"
                   class="w-36"
                 />
@@ -148,6 +166,7 @@ function formatTimestamp(value?: string | null): string {
             </template>
             <UTextarea
               v-model="form.client_key_pem"
+              :disabled="pending"
               :rows="6"
               autoresize
               class="w-full"
@@ -165,7 +184,7 @@ function formatTimestamp(value?: string | null): string {
             {{ formatTimestamp(currentRelay?.last_disconnected_at) }}</span
           >
         </div>
-      </div>
+      </fieldset>
     </template>
 
     <template #footer>
@@ -174,13 +193,19 @@ function formatTimestamp(value?: string | null): string {
           color="neutral"
           variant="ghost"
           :label="t('cancel')"
+          :disabled="pending"
           @click="
             () => {
               open = false
             }
           "
         />
-        <UButton :loading="busy" :label="t('save')" @click="$emit('save')" />
+        <UButton
+          :loading="savePending"
+          :disabled="pending"
+          :label="t('save')"
+          @click="$emit('save')"
+        />
       </div>
     </template>
   </UModal>

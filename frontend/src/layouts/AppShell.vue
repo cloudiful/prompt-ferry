@@ -52,8 +52,8 @@ watch(
 )
 
 async function logout(): Promise<void> {
-  await session.logout()
-  await router.replace('/login')
+  const result = await session.logout()
+  if (result.executed) await router.replace('/login')
 }
 
 async function relayLogout(): Promise<void> {
@@ -102,6 +102,8 @@ async function relayLogout(): Promise<void> {
             :label="isCollapsed ? undefined : t('logout')"
             :aria-label="t('logout')"
             :block="!isCollapsed"
+            :loading="session.busy"
+            :disabled="session.busy"
             @click="logout"
           />
           <UButton
@@ -112,6 +114,8 @@ async function relayLogout(): Promise<void> {
             :label="isCollapsed ? undefined : t('relayHost')"
             :aria-label="t('relayHost')"
             :block="!isCollapsed"
+            :loading="relaySession.busy"
+            :disabled="relaySession.busy"
             @click="relayLogout"
           />
         </div>

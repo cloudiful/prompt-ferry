@@ -1,7 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
 use chrono::{Duration as ChronoDuration, Utc};
-use sqlx::postgres::PgPoolOptions;
 use tokio::time::timeout;
 
 use crate::{
@@ -13,13 +12,21 @@ use super::support::{
     cleanup_endpoint, cleanup_orphan_fixtures, create_endpoint, endpoint, quota, seed_snapshot,
     service, test_pool,
 };
-use super::{ChatGptQuotaError, FakeFetcher, fake_fetcher};
+use super::{FakeFetcher, fake_fetcher};
+
+#[allow(dead_code)]
+mod db_harness {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/db_harness.rs"
+    ));
+}
 
 #[tokio::test]
 async fn selected_request_wakes_are_nonblocking_and_throttled_per_endpoint() {
-    let pool = PgPoolOptions::new()
-        .connect_lazy("postgresql://quota_test@127.0.0.1:55479/quota_759_test")
-        .expect("lazy isolated test pool");
+    // Wakes are asserted without a query, so this never-connects pool is enough
+    // and keeps the test away from any real database.
+    let pool = db_harness::test_db_url::lazy_test_pool();
     let service = ChatGptQuotaService::with_fetcher(
         pool.clone(),
         ConfigRepository::postgres(&pool),
@@ -185,92 +192,7 @@ async fn reviewer_manual_waiting_for_capacity_joins_completed_replica_refresh() 
 
 #[tokio::test]
 async fn manual_waiting_for_capacity_joins_completed_failure_with_last_good() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
-    let endpoint_id = create_endpoint(&pool).await;
-    seed_snapshot(
-        &pool,
-        endpoint_id,
-        Utc::now() - ChronoDuration::minutes(6),
-        Some(75.0),
-    )
-    .await;
-    let snapshot_id = db::quota_snapshots::latest_snapshot(&pool, endpoint_id)
-        .await
-        .unwrap()
-        .unwrap()
-        .snapshot_id;
-    let fetcher = Arc::new(FakeFetcher::failure(ChatGptQuotaError::Upstream));
-    let service_a = service(&pool, fetcher.clone());
-    let service_b = Arc::new(service(&pool, fetcher.clone()));
-    let permits = service_b
-        .inner
-        .quota_slots
-        .clone()
-        .acquire_many_owned(4)
-        .await
-        .unwrap();
-    let provider_endpoint = endpoint(&pool, endpoint_id).await;
-    let b = {
-        let service = service_b.clone();
-        let endpoint = provider_endpoint.clone();
-        tokio::spawn(async move { service.read(&endpoint, true).await })
-    };
-    timeout(Duration::from_secs(3), async {
-        loop {
-            if service_b
-                .inner
-                .endpoint_locks
-                .lock()
-                .await
-                .contains_key(&endpoint_id)
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(!b.is_finished());
-    let first = service_a
-        .read(&provider_endpoint, true)
-        .await
-        .expect("failed refresh keeps the last good observation");
-    assert_eq!(
-        first.keys[0].model_remains[0]
-            .observation
-            .as_ref()
-            .unwrap()
-            .last_error_code
-            .as_deref(),
-        Some("upstream")
-    );
-    drop(permits);
-    let joined = timeout(Duration::from_secs(3), b)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        joined.keys[0].model_remains[0]
-            .observation
-            .as_ref()
-            .unwrap()
-            .last_error_code
-            .as_deref(),
-        Some("upstream")
-    );
-    let latest = db::quota_snapshots::latest_snapshot(&pool, endpoint_id)
-        .await
-        .unwrap()
-        .unwrap();
-    let calls = fetcher.calls.load(std::sync::atomic::Ordering::SeqCst);
-    cleanup_endpoint(&pool, endpoint_id).await;
-    assert_eq!(latest.snapshot_id, snapshot_id);
-    assert_eq!(calls, 1);
+    super::manual_waiting_failure::failure_body().await;
 }
 
 #[tokio::test]

@@ -1,20 +1,18 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import {
   APPROVAL_PAGE_SIZE_OPTIONS,
   useStoredPageSize,
 } from '../table-pagination'
-import {
-  approveApproval,
-  getApproval,
-  listApprovals,
-  rejectApproval,
-} from '../generated/admin-api'
+import { getApproval, listApprovals } from '../generated/admin-api'
 import type {
   ApprovalRequest,
   ApprovalStatusFilter,
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
+import { useAsyncAction } from '../composables/useAsyncAction'
+import { APPROVAL_KEY_PREFIX, createApprovalActions } from './approvals-actions'
+import { pendingRowsById } from './record-action-types'
 
 export const useApprovalsStore = defineStore('approvals', () => {
   const approvals = ref<ApprovalRequest[]>([])
@@ -80,47 +78,35 @@ export const useApprovalsStore = defineStore('approvals', () => {
     }
   }
 
-  async function approve(approvalId: string): Promise<void> {
-    loading.value = true
-    try {
-      await approveApproval<true>(
-        withData({ path: { approval_id: approvalId } }),
-      )
-      await refresh()
-      if (detailApproval.value?.approval_id === approvalId) {
-        await loadDetail(approvalId)
-      }
-    } finally {
-      loading.value = false
-    }
-  }
+  // Approve and reject of one request share a gate, so the two answers to the
+  // same question cannot both be sent.
+  const guard = useAsyncAction()
+  const actions = createApprovalActions({
+    detailApproval,
+    guard,
+    loadDetail: (approvalId) => loadDetail(approvalId),
+    refresh: () => refresh(),
+  })
 
-  async function reject(approvalId: string): Promise<void> {
-    loading.value = true
-    try {
-      await rejectApproval<true>(
-        withData({ path: { approval_id: approvalId } }),
-      )
-      await refresh()
-      if (detailApproval.value?.approval_id === approvalId) {
-        await loadDetail(approvalId)
-      }
-    } finally {
-      loading.value = false
-    }
-  }
+  // Per-row view of the guard. `loading` stays the fetch-only busy flag, so
+  // answering one request no longer blanks the whole page.
+  const approvalPendingActions = computed(() =>
+    pendingRowsById(guard.pendingActions.value, APPROVAL_KEY_PREFIX),
+  )
 
   return {
+    ...actions,
     approvals,
-    approve,
+    approvalPendingActions,
     currentFilter,
     detailApproval,
     detailLoading,
     first,
+    isPending: guard.isPending,
     loadDetail,
     loading,
+    pendingActions: guard.pendingActions,
     refresh,
-    reject,
     rows,
     total,
   }

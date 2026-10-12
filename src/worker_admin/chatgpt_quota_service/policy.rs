@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
 use crate::db::ChatgptQuotaSnapshotSource;
@@ -7,6 +9,7 @@ pub(super) const IDLE_REFRESH_AFTER: ChronoDuration = ChronoDuration::hours(1);
 pub(super) const ACTIVITY_LOOKBACK: ChronoDuration = ChronoDuration::minutes(30);
 pub(super) const FAILURE_BACKOFF_BASE_SECONDS: i64 = 60;
 pub(super) const FAILURE_BACKOFF_MAX_SECONDS: i64 = 60 * 60;
+pub(super) const REPLICA_POLL: Duration = Duration::from_millis(150);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RefreshTrigger {

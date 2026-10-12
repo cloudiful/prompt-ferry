@@ -4,6 +4,7 @@ import { normalizeProviderPlan } from '@/admin-mappers'
 import { useEndpointDialogValidation } from '@/composables/useEndpointDialogValidation'
 import type { User } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
+import type { RunEndpointOAuthAction } from '@/stores/endpoint-oauth-action-types'
 import EndpointAdminApiKeyFields from '@/components/endpoints/EndpointAdminApiKeyFields.vue'
 import EndpointApiKeysEditor from '@/components/endpoints/EndpointApiKeysEditor.vue'
 import EndpointOAuthSection from '@/components/endpoints/EndpointOAuthSection.vue'
@@ -18,12 +19,18 @@ import {
   supportsServiceTierFor,
 } from '@/models/endpoints/service-tier'
 
-const props = defineProps<{
-  busy: boolean
-  header: string
-  t: TranslateFn
-  users: User[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    busy: boolean
+    header: string
+    savePending?: boolean
+    pendingAction?: string
+    runOAuthAction?: RunEndpointOAuthAction
+    t: TranslateFn
+    users: User[]
+  }>(),
+  { savePending: false, pendingAction: 'save', runOAuthAction: undefined },
+)
 
 const visible = defineModel<boolean>('visible', { required: true })
 const form = defineModel<EndpointForm>('form', { required: true })
@@ -107,153 +114,162 @@ function applyOAuthStatus(next: {
     v-model:open="visible"
     :title="header"
     :ui="{ content: 'sm:max-w-4xl' }"
+    :dismissible="!savePending"
+    :close="!savePending"
   >
     <template #body>
-      <form class="grid gap-3 text-xs" @submit.prevent="$emit('save')">
-        <template v-if="view === 'main'">
-          <EndpointProviderFields v-model:form="form" :t="t" />
-          <USelect
-            v-if="form.scope === 'user'"
-            :model-value="form.owner_user_id ?? undefined"
-            class="w-full"
-            :items="users"
-            label-key="login_name"
-            value-key="user_id"
-            :placeholder="t('ownerUser')"
-            @update:model-value="form.owner_user_id = $event ?? null"
-          />
-          <EndpointApiKeysEditor
-            v-if="!isChatgptSubscription"
-            v-model:form="form"
-            :t="t"
-          />
-          <div
-            v-if="form.provider === 'openai'"
-            class="grid gap-3 border-t border-default pt-3"
-          >
-            <EndpointAdminApiKeyFields v-model:form="form" :t="t" />
-            <EndpointOrganizationUsage
-              :endpoint-id="form.endpoint_id"
-              :provider="form.provider"
-              :has-admin-api-key="form.has_admin_api_key"
+      <form class="text-xs" @submit.prevent="$emit('save')">
+        <fieldset :disabled="savePending" class="grid gap-3">
+          <template v-if="view === 'main'">
+            <EndpointProviderFields v-model:form="form" :t="t" />
+            <USelect
+              v-if="form.scope === 'user'"
+              :model-value="form.owner_user_id ?? undefined"
+              class="w-full"
+              :items="users"
+              label-key="login_name"
+              value-key="user_id"
+              :placeholder="t('ownerUser')"
+              @update:model-value="form.owner_user_id = $event ?? null"
+            />
+            <EndpointApiKeysEditor
+              v-if="!isChatgptSubscription"
+              v-model:form="form"
               :t="t"
             />
-          </div>
-          <div
-            v-if="form.provider === 'openai'"
-            class="border-t border-default pt-3"
-          >
-            <EndpointOAuthSection
-              v-if="form.endpoint_id"
-              :endpoint-id="form.endpoint_id"
-              :t="t"
-              @status="applyOAuthStatus"
-            />
-            <p v-else class="text-xs text-dimmed">
-              {{ t('endpointOAuthSaveFirst') }}
-            </p>
-          </div>
-          <div class="grid gap-2 border-t border-default pt-3">
-            <div class="flex items-center justify-between gap-3">
+            <div
+              v-if="form.provider === 'openai'"
+              class="grid gap-3 border-t border-default pt-3"
+            >
+              <EndpointAdminApiKeyFields v-model:form="form" :t="t" />
+              <EndpointOrganizationUsage
+                :endpoint-id="form.endpoint_id"
+                :provider="form.provider"
+                :has-admin-api-key="form.has_admin_api_key"
+                :t="t"
+              />
+            </div>
+            <div
+              v-if="form.provider === 'openai'"
+              class="border-t border-default pt-3"
+            >
+              <EndpointOAuthSection
+                v-if="form.endpoint_id"
+                :endpoint-id="form.endpoint_id"
+                :run-action="runOAuthAction"
+                :t="t"
+                @status="applyOAuthStatus"
+              />
+              <p v-else class="text-xs text-dimmed">
+                {{ t('endpointOAuthSaveFirst') }}
+              </p>
+            </div>
+            <div class="grid gap-2 border-t border-default pt-3">
+              <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-1">
+                  <span class="text-xs font-medium text-default">
+                    {{ t('endpointSettings') }}
+                  </span>
+                  <UTooltip :text="t('endpointSettingsHint')">
+                    <UButton
+                      type="button"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-info"
+                      :aria-label="t('endpointSettingsHint')"
+                    />
+                  </UTooltip>
+                </div>
+                <UButton
+                  type="button"
+                  size="sm"
+                  :color="hasEndpointSettings() ? 'primary' : 'neutral'"
+                  variant="ghost"
+                  icon="i-lucide-settings-2"
+                  :aria-label="t('endpointSettings')"
+                  :aria-pressed="hasEndpointSettings()"
+                  :title="t('endpointSettingsHint')"
+                  @click="openSettings"
+                />
+              </div>
+            </div>
+            <div
+              v-if="form.provider === 'minimax'"
+              class="flex items-center justify-between gap-3 border-t border-default pt-3"
+            >
               <div class="flex items-center gap-1">
-                <span class="text-xs font-medium text-default">
-                  {{ t('endpointSettings') }}
-                </span>
-                <UTooltip :text="t('endpointSettingsHint')">
+                <label
+                  for="endpoint-minimax-mcp"
+                  class="text-xs font-medium text-default"
+                >
+                  {{ t('minimaxMcp') }}
+                </label>
+                <UTooltip :text="t('minimaxMcpHint')">
                   <UButton
                     type="button"
                     size="xs"
                     color="neutral"
                     variant="ghost"
                     icon="i-lucide-info"
-                    :aria-label="t('endpointSettingsHint')"
+                    :aria-label="t('minimaxMcpHint')"
                   />
                 </UTooltip>
               </div>
+              <USwitch id="endpoint-minimax-mcp" v-model="form.mcp_enabled" />
+            </div>
+          </template>
+          <template v-else>
+            <div class="flex items-center gap-1">
               <UButton
                 type="button"
-                size="sm"
-                :color="hasEndpointSettings() ? 'primary' : 'neutral'"
+                size="xs"
+                color="neutral"
                 variant="ghost"
-                icon="i-lucide-settings-2"
-                :aria-label="t('endpointSettings')"
-                :aria-pressed="hasEndpointSettings()"
-                :title="t('endpointSettingsHint')"
-                @click="openSettings"
+                icon="i-lucide-arrow-left"
+                :aria-label="t('cancel')"
+                @click="backToMain"
               />
+              <span class="text-sm font-medium text-default">{{
+                t('endpointSettings')
+              }}</span>
             </div>
-          </div>
-          <div
-            v-if="form.provider === 'minimax'"
-            class="flex items-center justify-between gap-3 border-t border-default pt-3"
-          >
-            <div class="flex items-center gap-1">
-              <label
-                for="endpoint-minimax-mcp"
-                class="text-xs font-medium text-default"
+            <div class="grid gap-3 rounded border border-default bg-muted p-3">
+              <SettingsFieldRow
+                :label="t('proxyUrl')"
+                :hint="t('proxyUrlHint')"
               >
-                {{ t('minimaxMcp') }}
-              </label>
-              <UTooltip :text="t('minimaxMcpHint')">
-                <UButton
-                  type="button"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-info"
-                  :aria-label="t('minimaxMcpHint')"
+                <ProxySettingsFields
+                  v-model:proxy-url="form.proxy_url"
+                  v-model:has-saved="form.has_saved_proxy_url"
+                  :t="t"
                 />
-              </UTooltip>
+              </SettingsFieldRow>
+              <SettingsFieldRow
+                :label="t('scheduleWindows')"
+                :hint="t('scheduleWindowsHint')"
+              >
+                <ScheduleWindowsFields
+                  v-model:windows="form.active_windows"
+                  v-model:touched="form.active_windows_touched"
+                  :t="t"
+                />
+              </SettingsFieldRow>
+              <ServiceTierOverrideField
+                v-if="serviceTierEligible"
+                v-model="form.service_tier"
+                :t="t"
+                input-id="endpoint-service-tier"
+              />
             </div>
-            <USwitch id="endpoint-minimax-mcp" v-model="form.mcp_enabled" />
-          </div>
-        </template>
-        <template v-else>
-          <div class="flex items-center gap-1">
-            <UButton
-              type="button"
-              size="xs"
-              color="neutral"
-              variant="ghost"
-              icon="i-lucide-arrow-left"
-              :aria-label="t('cancel')"
-              @click="backToMain"
-            />
-            <span class="text-sm font-medium text-default">{{
-              t('endpointSettings')
-            }}</span>
-          </div>
-          <div class="grid gap-3 rounded border border-default bg-muted p-3">
-            <SettingsFieldRow :label="t('proxyUrl')" :hint="t('proxyUrlHint')">
-              <ProxySettingsFields
-                v-model:proxy-url="form.proxy_url"
-                v-model:has-saved="form.has_saved_proxy_url"
-                :t="t"
-              />
-            </SettingsFieldRow>
-            <SettingsFieldRow
-              :label="t('scheduleWindows')"
-              :hint="t('scheduleWindowsHint')"
-            >
-              <ScheduleWindowsFields
-                v-model:windows="form.active_windows"
-                v-model:touched="form.active_windows_touched"
-                :t="t"
-              />
-            </SettingsFieldRow>
-            <ServiceTierOverrideField
-              v-if="serviceTierEligible"
-              v-model="form.service_tier"
-              :t="t"
-              input-id="endpoint-service-tier"
-            />
-          </div>
-        </template>
+          </template>
+        </fieldset>
         <div class="flex justify-end gap-2 pt-1">
           <UButton
             type="button"
             size="sm"
             color="neutral"
+            :disabled="savePending"
             @click="
               () => {
                 visible = false
@@ -264,8 +280,8 @@ function applyOAuthStatus(next: {
           <UButton
             type="submit"
             size="sm"
-            :loading="busy"
-            :disabled="!canSaveOuter"
+            :loading="busy || (savePending && pendingAction === 'save')"
+            :disabled="!canSaveOuter || savePending"
             ><UIcon name="i-lucide-save" class="h-4 w-4" />{{
               t('saveEndpoint')
             }}</UButton

@@ -1,14 +1,27 @@
 #!/usr/bin/env bash
-# Run the workspace suite with the Valkey test service enabled and verify the
-# result: the service preflight is the no-silent-skip guarantee, and the summary
-# check rejects any run with failures, ignored tests, or no results at all.
+# Run the workspace suite with the dedicated test services enabled and verify
+# the result: the service preflights are the no-silent-skip guarantee, and the
+# summary check rejects any run with failures, ignored tests, or no results at
+# all.
 #
-# The run reads no `.env` and requires no `DATABASE_URL`, so it is reproducible
-# with a reachable Valkey alone.
+# The run loads only the dedicated test settings from the project `.env` through
+# scripts/ci/with-test-env.sh — the quota PostgreSQL URL, the Valkey URL, and the
+# absolute SQLite temporary directory — and never reads the application
+# DATABASE_URL. It therefore needs both services reachable and the quota test
+# database migrated; provisioning either one is an operator step, and the
+# preflights run before cargo so an absent service fails the run instead of
+# leaving the service-backed tests skipped.
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
+
+# Self-wrapping guard: run-tests.sh re-enters itself through the wrapper exactly
+# once. The wrapper exports PROMPT_FERRY_TEST_ENV_LOADED, so the second pass
+# never reloads the dotenv file and never recurses.
+if [ "${PROMPT_FERRY_TEST_ENV_LOADED:-}" != "1" ]; then
+  exec bash "$ROOT/scripts/ci/with-test-env.sh" bash "$ROOT/scripts/ci/run-tests.sh" "$@"
+fi
 
 scripts/ci/require-services.sh
 

@@ -8,11 +8,23 @@ import type {
 } from '@/generated/admin-api'
 import StreamDeltaBatchingFields from '@/components/shared/StreamDeltaBatchingFields.vue'
 import type { StreamDeltaBatchingForm } from '@/models'
+import type { SettingForm } from '@/stores/settings-actions'
 import SettingsCard from './SettingsCard.vue'
 
 const props = defineProps<{
+  modelRouteWhitelistPending: boolean
+  pendingRetentionForm: SettingForm | null
+  streamDeltaBatchingPending: boolean
   t: TranslateFn
 }>()
+
+const retentionPending = computed(() => props.pendingRetentionForm !== null)
+const requestContentLoggingPending = computed(
+  () => props.pendingRetentionForm === 'requestContentLogging',
+)
+const usageRetentionPending = computed(
+  () => props.pendingRetentionForm === 'usageRetention',
+)
 
 const requestContentLogging = defineModel<RequestContentLoggingResponse>(
   'requestContentLogging',
@@ -57,13 +69,25 @@ const requestContentLoggingModeOptions = computed(() =>
           >
             <UIcon name="i-lucide-file-text" class="h-3.5 w-3.5 text-muted" />
             {{ t('contentLogging') }}
+            <span
+              v-if="requestContentLoggingPending"
+              role="status"
+              :aria-label="t('loading')"
+              class="inline-flex"
+            >
+              <UIcon
+                name="i-lucide-loader-circle"
+                class="h-3.5 w-3.5 animate-spin text-muted"
+                aria-hidden="true"
+              />
+            </span>
           </h3>
           <span class="text-[11px] leading-none text-muted">{{
             t('contentLoggingOff')
           }}</span>
         </template>
         <div class="grid gap-3">
-          <label class="grid gap-1">
+          <label class="grid gap-1" :aria-busy="retentionPending">
             <span class="text-xs text-muted">{{
               t('contentLoggingMode')
             }}</span>
@@ -74,10 +98,11 @@ const requestContentLoggingModeOptions = computed(() =>
               value-key="value"
               size="sm"
               class="w-full min-w-0"
+              :disabled="retentionPending"
             />
           </label>
           <div class="grid gap-3 sm:grid-cols-2">
-            <label class="grid gap-1">
+            <label class="grid gap-1" :aria-busy="retentionPending">
               <span class="text-xs text-muted">{{
                 t('rawRetentionDays')
               }}</span>
@@ -87,17 +112,31 @@ const requestContentLoggingModeOptions = computed(() =>
                 :min="1"
                 :max="30"
                 :use-grouping="false"
+                :disabled="retentionPending"
               />
             </label>
-            <label class="grid gap-1">
-              <span class="text-xs text-muted">{{
-                t('approvalRetentionDays')
-              }}</span>
+            <label class="grid gap-1" :aria-busy="retentionPending">
+              <span class="inline-flex items-center gap-1 text-xs text-muted">
+                {{ t('approvalRetentionDays') }}
+                <span
+                  v-if="usageRetentionPending"
+                  role="status"
+                  :aria-label="t('loading')"
+                  class="inline-flex"
+                >
+                  <UIcon
+                    name="i-lucide-loader-circle"
+                    class="h-3.5 w-3.5 animate-spin text-muted"
+                    aria-hidden="true"
+                  />
+                </span>
+              </span>
               <UInputNumber
                 v-model="usageRetention.approval_retention_days"
                 size="sm"
                 :min="1"
                 :use-grouping="false"
+                :disabled="retentionPending"
               />
             </label>
           </div>
@@ -114,11 +153,24 @@ const requestContentLoggingModeOptions = computed(() =>
               class="h-3.5 w-3.5 text-muted"
             />
             {{ t('modelRouteWhitelist') }}
+            <span
+              v-if="modelRouteWhitelistPending"
+              role="status"
+              :aria-label="t('loading')"
+              class="inline-flex"
+            >
+              <UIcon
+                name="i-lucide-loader-circle"
+                class="h-3.5 w-3.5 animate-spin text-muted"
+                aria-hidden="true"
+              />
+            </span>
           </h3>
           <USwitch
             v-model="modelRouteWhitelist.enabled"
             id="settings-model-route-whitelist-enabled"
             :aria-label="t('modelRouteWhitelist')"
+            :disabled="modelRouteWhitelistPending"
           />
         </template>
         <p class="m-0 text-xs leading-relaxed text-muted">
@@ -133,14 +185,36 @@ const requestContentLoggingModeOptions = computed(() =>
           >
             <UIcon name="i-lucide-zap" class="h-3.5 w-3.5 text-muted" />
             {{ t('streamDeltaBatching') }}
+            <span
+              v-if="streamDeltaBatchingPending"
+              role="status"
+              :aria-label="t('loading')"
+              class="inline-flex"
+            >
+              <UIcon
+                name="i-lucide-loader-circle"
+                class="h-3.5 w-3.5 animate-spin text-muted"
+                aria-hidden="true"
+              />
+            </span>
           </h3>
           <USwitch
             v-model="streamDeltaBatching.enabled"
             id="settings-stream-delta-batching-enabled"
             :aria-label="t('streamDeltaBatching')"
+            :disabled="streamDeltaBatchingPending"
           />
         </template>
-        <StreamDeltaBatchingFields v-model:form="streamDeltaBatching" :t="t" />
+        <fieldset
+          :disabled="streamDeltaBatchingPending"
+          :aria-busy="streamDeltaBatchingPending"
+          class="m-0 min-w-0 border-0 p-0"
+        >
+          <StreamDeltaBatchingFields
+            v-model:form="streamDeltaBatching"
+            :t="t"
+          />
+        </fieldset>
         <p class="m-0 text-[11px] leading-relaxed text-muted">
           {{ t('streamDeltaBatchingSummary') }}
         </p>

@@ -74,8 +74,8 @@ async function refresh(): Promise<void> {
 
 async function save(): Promise<void> {
   try {
-    await redactionStore.save()
-    notifySuccess(t('saved'))
+    const outcome = await redactionStore.save()
+    if (outcome.executed) notifySuccess(t('saved'))
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -115,7 +115,7 @@ onMounted(async () => {
             label-key="label"
             value-key="value"
             class="w-28"
-            :disabled="redactionStore.loading"
+            :disabled="redactionStore.loading || redactionStore.saving"
             :aria-label="t('redactionRuleScope')"
             @update:model-value="changeScope"
           />
@@ -134,19 +134,24 @@ onMounted(async () => {
             label-key="label"
             value-key="value"
             class="w-44"
-            :disabled="redactionStore.loading"
+            :disabled="redactionStore.loading || redactionStore.saving"
             :aria-label="t('redactionTargetUser')"
             @update:model-value="changeTargetUser($event ?? null)"
           />
         </div>
-        <UButton size="sm" :loading="redactionStore.loading" @click="save">{{
-          t('save')
-        }}</UButton>
+        <UButton
+          size="sm"
+          :loading="redactionStore.saving"
+          :disabled="redactionStore.loading"
+          @click="save"
+          >{{ t('save') }}</UButton
+        >
         <UButton
           size="sm"
           color="neutral"
           variant="outline"
           :loading="redactionStore.loading"
+          :disabled="redactionStore.saving"
           @click="refresh"
           >{{ t('refresh') }}</UButton
         >
@@ -172,7 +177,7 @@ onMounted(async () => {
       v-model:preview-text="redactionStore.previewText"
       v-model:preview-input-kind="redactionStore.previewInputKind"
       v-model:preview-result="redactionStore.previewResult"
-      :busy="redactionStore.loading"
+      :busy="redactionStore.previewing"
       :t="t"
       :workspace="redactionWorkspace"
       @run-preview="runPreview"

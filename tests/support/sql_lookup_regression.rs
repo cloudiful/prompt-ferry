@@ -1,28 +1,23 @@
-use std::str::FromStr;
-
 use chrono::Utc;
-use sqlx::{
-    PgConnection, PgPool,
-    postgres::{PgConnectOptions, PgPoolOptions},
-};
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
+#[allow(dead_code)]
+mod test_pg_target {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/test_pg_target.rs"
+    ));
+}
+
+/// The dedicated quota test database, reached only after
+/// `PROMPT_FERRY_QUOTA_TEST_DATABASE_URL` and its confirmed target agree.
+/// Unlike the skippable quota helpers this file fails outright when neither is
+/// configured, so a missing setting is never reported as passing coverage.
 pub(super) async fn isolated_pool() -> PgPool {
-    let url = std::env::var("PROMPT_FERRY_QUOTA_TEST_DATABASE_URL")
-        .expect("PROMPT_FERRY_QUOTA_TEST_DATABASE_URL must name the isolated test database");
-    let parsed = PgConnectOptions::from_str(&url).expect("valid isolated database URL");
-    assert_eq!(parsed.get_host(), "127.0.0.1");
-    assert_eq!(parsed.get_database(), Some("quota_759_test"));
-    let options = PgConnectOptions::new_without_pgpass()
-        .host("127.0.0.1")
-        .port(parsed.get_port())
-        .username(parsed.get_username())
-        .database("quota_759_test");
-    PgPoolOptions::new()
-        .max_connections(1)
-        .connect_with(options)
+    test_pg_target::required_pool(1)
         .await
-        .expect("connect to isolated test database")
+        .expect("connect to the confirmed quota test database")
 }
 
 pub(super) async fn insert_endpoint(connection: &mut PgConnection, endpoint_id: Uuid, name: &str) {

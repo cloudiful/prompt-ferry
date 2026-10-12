@@ -22,6 +22,7 @@ defineProps<{
   overview: RequestRecordOverviewResponse | null
   overviewLoading: boolean
   perspective: RequestOverviewPerspective
+  perspectivePending: boolean
   t: TranslateFn
   workspace: UsageWorkspaceView
 }>()
@@ -69,6 +70,7 @@ const McpUsagePanel = defineAsyncComponent(
     :loading="overviewLoading"
     :category="category"
     :perspective="perspective"
+    :perspective-pending="perspectivePending"
     :formatting="formatting"
     :t="t"
     @change-perspective="$emit('changePerspective', $event)"

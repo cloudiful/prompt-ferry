@@ -1,17 +1,13 @@
 import { ref } from 'vue'
 import {
-  deleteConversationEndpointOverride,
   requestRecordDetail,
   requestRecordFull,
-  requestRecordResetSessionAffinity,
   requestRecordSessionRouteOptions,
-  setConversationEndpointOverride,
 } from '../generated/admin-api'
 import type {
   ConversationEndpointOverride,
   RequestRecordDetail,
   RequestRecordFullResponse,
-  SessionAffinityResetResponse,
   SessionRouteOptionsResponse,
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
@@ -25,6 +21,8 @@ import type {
   RequestRecordDetailView,
   SessionRouteOptionsView,
 } from '../models'
+import { useAsyncAction } from '@/composables/useAsyncAction'
+import { createRequestRecordDetailActions } from './request-record-detail-actions'
 
 export const REQUEST_FULL_PAGE_SIZE = 10
 export const REQUEST_FULL_PAGE_ORDER = 'desc'
@@ -34,8 +32,6 @@ export function createRequestRecordDetailState() {
   const requestFullLoading = ref(false)
   const requestFullLoadingMore = ref(false)
   const routeOptionsLoading = ref(false)
-  const overrideSaving = ref(false)
-  const affinityResetting = ref(false)
   const requestFull = ref<RequestRecordFullResponse | null>(null)
   const detailRecord = ref<RequestRecordDetailView | null>(null)
   const sessionRouteOptions = ref<SessionRouteOptionsView | null>(null)
@@ -224,68 +220,13 @@ export function createRequestRecordDetailState() {
     }
   }
 
-  async function saveConversationOverride(
-    conversationId: string,
-    endpointId: string,
-    endpointKeyId: string | null,
-  ): Promise<void> {
-    overrideSaving.value = true
-    try {
-      const response: ConversationEndpointOverride = expectData(
-        await setConversationEndpointOverride<true>(
-          withData({
-            path: { conversation_id: conversationId },
-            body: { endpoint_id: endpointId, endpoint_key_id: endpointKeyId },
-          }),
-        ),
-      )
-      conversationOverride.value =
-        createConversationEndpointOverrideView(response)
-      if (detailRecord.value) {
-        await loadSessionRouteOptions(detailRecord.value.record_id)
-      }
-    } finally {
-      overrideSaving.value = false
-    }
-  }
-
-  async function clearConversationOverride(
-    conversationId: string,
-  ): Promise<void> {
-    overrideSaving.value = true
-    try {
-      await deleteConversationEndpointOverride<true>(
-        withData({
-          path: { conversation_id: conversationId },
-        }),
-      )
-      conversationOverride.value = null
-      if (detailRecord.value) {
-        await loadSessionRouteOptions(detailRecord.value.record_id)
-      }
-    } finally {
-      overrideSaving.value = false
-    }
-  }
-
-  async function resetSessionAffinity(
-    recordId: number,
-  ): Promise<SessionAffinityResetResponse> {
-    affinityResetting.value = true
-    try {
-      const response: SessionAffinityResetResponse = expectData(
-        await requestRecordResetSessionAffinity<true>(
-          withData({ path: { record_id: recordId } }),
-        ),
-      )
-      if (detailRecord.value) {
-        await loadSessionRouteOptions(detailRecord.value.record_id)
-      }
-      return response
-    } finally {
-      affinityResetting.value = false
-    }
-  }
+  const actions = createRequestRecordDetailActions({
+    guard: useAsyncAction(),
+    detailRecord,
+    conversationOverride,
+    loadSessionRouteOptions: (recordId) => loadSessionRouteOptions(recordId),
+    sessionRouteOptions,
+  })
 
   function resetDetail(): void {
     detailLoadVersion += 1
@@ -297,12 +238,10 @@ export function createRequestRecordDetailState() {
     sessionRouteOptions.value = null
     routeOptionsLoading.value = false
     conversationOverride.value = null
-    affinityResetting.value = false
   }
 
   return {
-    affinityResetting,
-    clearConversationOverride,
+    ...actions,
     conversationOverride,
     detailLoading,
     detailRecord,
@@ -310,14 +249,11 @@ export function createRequestRecordDetailState() {
     loadMoreRequestFull,
     loadRequestFull,
     loadSessionRouteOptions,
-    overrideSaving,
     requestFull,
     requestFullLoading,
     requestFullLoadingMore,
     resetDetail,
-    resetSessionAffinity,
     routeOptionsLoading,
-    saveConversationOverride,
     sessionRouteOptions,
   }
 }

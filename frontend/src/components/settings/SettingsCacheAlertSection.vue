@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useNotifier } from '@/composables/useNotifier'
 import { useSettingsStore } from '@/stores/settings'
 import SettingsCacheAlertTab from './SettingsCacheAlertTab.vue'
@@ -10,10 +11,16 @@ const props = defineProps<{
 const settingsStore = useSettingsStore()
 const { notifyApiError, notifySuccess } = useNotifier()
 
+const cacheAlertPending = computed(
+  () => settingsStore.settingsPendingActions.cacheAlert !== undefined,
+)
+
 async function saveCacheAlert(): Promise<void> {
   try {
-    await settingsStore.saveCacheAlert()
-    notifySuccess(props.t('cacheAlertSaved'))
+    const outcome = await settingsStore.saveCacheAlert()
+    if (outcome.executed) {
+      notifySuccess(props.t('cacheAlertSaved'))
+    }
   } catch (cause) {
     notifyApiError(cause)
   }
@@ -31,7 +38,7 @@ async function retryCacheAlert(): Promise<void> {
 <template>
   <SettingsCacheAlertTab
     v-model:cache-alert="settingsStore.cacheAlert"
-    :busy="settingsStore.loading"
+    :busy="settingsStore.loading || cacheAlertPending"
     :error="settingsStore.cacheAlertError"
     :t="t"
     @save-cache-alert="saveCacheAlert"

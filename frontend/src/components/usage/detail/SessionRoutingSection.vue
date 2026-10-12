@@ -13,6 +13,7 @@ const AUTOMATIC_KEY_VALUE = '__automatic__'
 
 const props = defineProps<{
   event: RequestRecordDetailView
+  conversationAction?: string
   conversationOverride: ConversationEndpointOverrideView | null
   overrideSaving: boolean
   affinityResetting: boolean
@@ -170,6 +171,7 @@ function displayKey(
             :items="options"
             label-key="label"
             value-key="value"
+            :disabled="sessionRouteActionsBusy"
             :placeholder="t('selectUpstream')"
             @update:model-value="resetEndpointKey"
           />
@@ -180,12 +182,13 @@ function displayKey(
             :items="selectedEndpointKeys"
             label-key="label"
             value-key="value"
+            :disabled="sessionRouteActionsBusy"
             :placeholder="t('selectUpstreamKey')"
           />
           <UButton
             size="sm"
             class="lg:shrink-0"
-            :loading="overrideSaving"
+            :loading="conversationAction === 'save'"
             :disabled="!selectedOverrideEndpointId || sessionRouteActionsBusy"
             @click="emit('saveOverride')"
           >
@@ -196,7 +199,7 @@ function displayKey(
             class="lg:shrink-0"
             color="neutral"
             variant="outline"
-            :loading="overrideSaving"
+            :loading="conversationAction === 'clear'"
             :disabled="!conversationOverride || sessionRouteActionsBusy"
             @click="emit('clearOverride')"
           >
@@ -207,7 +210,7 @@ function displayKey(
             class="lg:shrink-0"
             color="error"
             variant="outline"
-            :loading="affinityResetting"
+            :loading="conversationAction === 'reset'"
             :disabled="sessionRouteActionsBusy"
             @click="emit('resetAffinity')"
           >
