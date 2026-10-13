@@ -25,6 +25,7 @@ fail() {
 assert_status() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "expected exit $2, got $3"; fi; }
 assert_nonzero() { if [ "$2" != "0" ]; then pass "$1"; else fail "$1" 'expected a non-zero exit'; fi; }
 assert_same() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "expected '$3', got '$2'"; fi; }
+assert_different() { if [ "$2" != "$3" ]; then pass "$1"; else fail "$1" "expected different values, both were '$2'"; fi; }
 assert_has() { if printf '%s' "$2" | grep -qF -- "$3"; then pass "$1"; else fail "$1" "output is missing: $3"; fi; }
 assert_exists() { if [ -e "$2" ]; then pass "$1"; else fail "$1" "$2 was not created"; fi; }
 assert_missing() { if [ ! -e "$2" ]; then pass "$1"; else fail "$1" "$2 was created"; fi; }
@@ -63,6 +64,20 @@ assert_env_absent() {
   local label="$1" key="$2" hits
   hits="$(grep -c "^$key=" "$CAPTURE/child-env" 2> /dev/null)"
   if [ "$hits" = "0" ]; then pass "$label"; else fail "$label" "$key leaked into the child environment"; fi
+}
+
+# The owned run directories under a root are all gone: no helper-created
+# directory survives its command. Anything else under the root (legacy
+# fixtures, stray files) is none of this check's business.
+assert_no_run_dirs() {
+  local label="$1" root="$2" leftovers=() kept=() entry
+  shopt -s nullglob
+  leftovers=( "$root"/run-* )
+  shopt -u nullglob
+  for entry in "${leftovers[@]}"; do
+    if [ -d "$entry" ] && [ ! -L "$entry" ]; then kept+=("$entry"); fi
+  done
+  if [ "${#kept[@]}" -eq 0 ]; then pass "$label"; else fail "$label" "leftover run directories: ${kept[*]}"; fi
 }
 
 # Proves the wrapped command never produced output, so it never started.

@@ -40,12 +40,19 @@ SCENARIOS=(
   test_process_environment_wins
   test_explicit_blank_process_value_is_not_replaced
   test_only_test_keys_are_forwarded
+  test_s3_test_keys_are_exported
+  test_s3_keys_are_unset_when_missing
   test_quoted_value_with_spaces_survives
   test_command_substitution_stays_inert
   test_explicit_env_file_override
   test_missing_env_file_override_fails
   test_missing_default_env_file_runs_from_environment
-  test_tmpdir_default_is_reused
+  test_run_directories_are_fresh_but_the_root_is_reused
+  test_run_directory_holds_sidecars_then_is_removed
+  test_failing_command_keeps_its_exit_and_cleans_up
+  test_sccache_env_wrapper_is_emptied_not_removed
+  test_global_config_sccache_is_overridden_empty
+  test_ordinary_compiler_wrapper_is_preserved
   test_relative_tmpdir_resolves_against_repo_root
   test_wrapper_needs_no_postgres_for_sqlite_only
   test_confirmed_target_is_required_before_any_connection
@@ -59,6 +66,11 @@ SCENARIOS=(
   test_preflight_rejects_unusable_postgres_databases
   test_the_connected_database_is_checked_against_the_confirmed_one
   test_preflight_requires_both_services
+  test_full_runner_requires_the_s3_target
+  test_partial_s3_target_fails_before_any_io
+  test_mismatched_s3_confirmed_target_is_refused
+  test_unsafe_http_s3_target_is_refused
+  test_missing_s3_parser_module_fails_closed
   test_full_runner_succeeds_with_stub_services
   test_full_runner_propagates_cargo_failure
   test_preflight_keeps_credentials_out_of_argv_and_output
@@ -67,7 +79,8 @@ SCENARIOS=(
 test_main() {
   local script
   for script in "$WITH_TEST_ENV_SH" "$TEST_ENV_SH" "$RUN_TESTS_SH" \
-    "$REQUIRE_SERVICES_SH" "$REQUIRE_TEST_POSTGRES_PY" "$TEST_PG_TARGET_PY"; do
+    "$REQUIRE_SERVICES_SH" "$REQUIRE_TEST_POSTGRES_PY" "$TEST_PG_TARGET_PY" \
+    "$TEST_S3_TARGET_PY"; do
     if [ ! -f "$script" ]; then
       printf 'FAIL missing %s\n' "$script"
       exit 1

@@ -775,3 +775,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+/// Real S3 integration tests over the production store builder. The module
+/// only exists in test builds; see `s3_tests.rs` for the guard, fixtures,
+/// and per-run prefix discipline.
+#[cfg(test)]
+mod s3_tests;

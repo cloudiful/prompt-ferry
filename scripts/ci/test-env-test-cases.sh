@@ -33,9 +33,12 @@ test_dotenv_test_keys_are_exported() {
     "$(child_env PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET)" "$SECRET_PG_TARGET"
   assert_same 'the valkey URL comes from .env' \
     "$(child_env PROMPT_FERRY_TEST_VALKEY_URL)" "$SECRET_VK_URL"
-  assert_same 'TMPDIR defaults to the project test directory' \
-    "$(child_env TMPDIR)" "$SANDBOX/target/test-tmp"
-  assert_exists 'the test directory is created' "$SANDBOX/target/test-tmp"
+  assert_has 'TMPDIR is a fresh run directory under the test root' \
+    "$(child_env TMPDIR)" "$SANDBOX/target/test-tmp/run-"
+  assert_same 'the fixture directory setting names the same run directory' \
+    "$(child_env PROMPT_FERRY_TEST_TMPDIR)" "$(child_env TMPDIR)"
+  assert_exists 'the test root is created' "$SANDBOX/target/test-tmp"
+  assert_missing 'the run directory is removed afterwards' "$(child_env TMPDIR)"
 }
 
 test_process_environment_wins() {
@@ -69,6 +72,44 @@ test_only_test_keys_are_forwarded() {
     "$(cat "$CAPTURE/child-env")" 'prompt_ferry'
 }
 
+test_s3_test_keys_are_exported() {
+  fresh
+  run_wrapper
+  assert_status 'the wrapper exits zero' 0 "$STATUS"
+  assert_same 'the S3 endpoint comes from .env' \
+    "$(child_env PROMPT_FERRY_TEST_S3_ENDPOINT)" "$SECRET_S3_ENDPOINT"
+  assert_same 'the S3 bucket comes from .env' \
+    "$(child_env PROMPT_FERRY_TEST_S3_BUCKET)" "$SECRET_S3_BUCKET"
+  assert_same 'the S3 region comes from .env' \
+    "$(child_env PROMPT_FERRY_TEST_S3_REGION)" "$SECRET_S3_REGION"
+  assert_same 'the S3 HTTP opt-in comes from .env' \
+    "$(child_env PROMPT_FERRY_TEST_S3_ALLOW_HTTP)" "$SECRET_S3_ALLOW_HTTP"
+  assert_same 'the S3 path-style flag comes from .env' \
+    "$(child_env PROMPT_FERRY_TEST_S3_PATH_STYLE)" "$SECRET_S3_PATH_STYLE"
+  assert_same 'the S3 confirmed target comes from .env' \
+    "$(child_env PROMPT_FERRY_TEST_S3_CONFIRMED_TARGET)" "$SECRET_S3_CONFIRMED_TARGET"
+  assert_secret_same 'the S3 access key comes from .env' \
+    "$(child_env PROMPT_FERRY_TEST_S3_ACCESS_KEY)" "$SECRET_S3_ACCESS" 'wrong value'
+  assert_secret_same 'the S3 secret key comes from .env' \
+    "$(child_env PROMPT_FERRY_TEST_S3_SECRET_KEY)" "$SECRET_S3_SECRET" 'wrong value'
+}
+
+test_s3_keys_are_unset_when_missing() {
+  fresh
+  write_env <<EOF
+PROMPT_FERRY_TEST_VALKEY_URL=$SECRET_VK_URL
+EOF
+  run_wrapper
+  assert_status 'the wrapper still succeeds without S3' 0 "$STATUS"
+  local key
+  for key in PROMPT_FERRY_TEST_S3_ENDPOINT PROMPT_FERRY_TEST_S3_BUCKET \
+    PROMPT_FERRY_TEST_S3_REGION PROMPT_FERRY_TEST_S3_ACCESS_KEY \
+    PROMPT_FERRY_TEST_S3_SECRET_KEY PROMPT_FERRY_TEST_S3_ALLOW_HTTP \
+    PROMPT_FERRY_TEST_S3_PATH_STYLE PROMPT_FERRY_TEST_S3_CONFIRMED_TARGET; do
+    assert_env_absent "an unconfigured S3 setting stays unconfigured: $key" "$key"
+  done
+}
+
 test_quoted_value_with_spaces_survives() {
   fresh
   mkdir -p "$SANDBOX/dir with space"
@@ -76,9 +117,11 @@ test_quoted_value_with_spaces_survives() {
 PROMPT_FERRY_TEST_TMPDIR="$SANDBOX/dir with space"
 EOF
   run_wrapper
-  assert_same 'a quoted value keeps its spaces' "$(child_env TMPDIR)" "$SANDBOX/dir with space"
-  assert_same 'the test directory setting matches' \
-    "$(child_env PROMPT_FERRY_TEST_TMPDIR)" "$SANDBOX/dir with space"
+  assert_has 'a quoted value keeps its spaces' "$(child_env TMPDIR)" "$SANDBOX/dir with space/run-"
+  assert_same 'the test directory setting matches the run directory' \
+    "$(child_env PROMPT_FERRY_TEST_TMPDIR)" "$(child_env TMPDIR)"
+  assert_missing 'the run directory is removed afterwards' "$(child_env TMPDIR)"
+  assert_exists 'the spaced root itself remains' "$SANDBOX/dir with space"
 }
 
 test_command_substitution_stays_inert() {
@@ -90,8 +133,8 @@ EOF
   run_wrapper
   assert_status 'a hostile value does not fail the wrapper' 0 "$STATUS"
   assert_missing 'a dotenv value cannot run a command' "$SANDBOX/canary"
-  assert_same 'the substitution stays literal' \
-    "$(child_env PROMPT_FERRY_TEST_TMPDIR)" "$SANDBOX/\$(touch canary)"
+  assert_has 'the substitution stays literal' \
+    "$(child_env PROMPT_FERRY_TEST_TMPDIR)" "$SANDBOX/\$(touch canary)/run-"
   assert_same 'backticks stay literal too' \
     "$(child_env PROMPT_FERRY_TEST_VALKEY_URL)" '`touch canary`'
 }
@@ -102,8 +145,8 @@ test_explicit_env_file_override() {
   printf 'PROMPT_FERRY_TEST_TMPDIR=%s/ci-env-tmp\n' "$SANDBOX" > "$SANDBOX/ci.env"
   AMBIENT='PROMPT_FERRY_TEST_ENV_FILE=ci.env'
   run_wrapper
-  assert_same 'the override file supplies the setting' \
-    "$(child_env TMPDIR)" "$SANDBOX/ci-env-tmp"
+  assert_has 'the override file supplies the test root' \
+    "$(child_env TMPDIR)" "$SANDBOX/ci-env-tmp/run-"
   assert_missing 'the root .env is not consulted as well' "$SANDBOX/root-env-tmp"
 }
 
@@ -124,21 +167,77 @@ test_missing_default_env_file_runs_from_environment() {
   assert_status 'an absent .env is allowed for CI' 0 "$STATUS"
   assert_same 'the process environment alone is enough' \
     "$(child_env PROMPT_FERRY_TEST_VALKEY_URL)" "$SECRET_VK_URL"
-  assert_same 'the default test directory still applies' \
-    "$(child_env TMPDIR)" "$SANDBOX/target/test-tmp"
+  assert_has 'the default test root still applies' \
+    "$(child_env TMPDIR)" "$SANDBOX/target/test-tmp/run-"
 }
 
-# --- shared SQLite directory --------------------------------------------------
+# --- per-run test directory -------------------------------------------------
 
-test_tmpdir_default_is_reused() {
+test_run_directories_are_fresh_but_the_root_is_reused() {
   fresh
   run_wrapper
-  local first
+  local first second
   first="$(child_env TMPDIR)"
-  touch "$first/keep-me.sqlite"
+  assert_has 'the first run owns a directory under the root' "$first" "$SANDBOX/target/test-tmp/run-"
+  assert_missing 'the first run directory is removed' "$first"
+  touch "$SANDBOX/target/test-tmp/keep-me.sqlite"
   run_wrapper
-  assert_same 'a repeated run resolves the same directory' "$(child_env TMPDIR)" "$first"
-  assert_exists 'an existing fixture is never purged' "$first/keep-me.sqlite"
+  second="$(child_env TMPDIR)"
+  assert_different 'a repeated run gets a fresh directory' "$first" "$second"
+  assert_has 'the second run directory is under the same root' "$second" "$SANDBOX/target/test-tmp/run-"
+  assert_missing 'the second run directory is removed' "$second"
+  assert_exists 'an existing fixture is never purged' "$SANDBOX/target/test-tmp/keep-me.sqlite"
+  assert_exists 'the shared root itself remains' "$SANDBOX/target/test-tmp"
+}
+
+test_run_directory_holds_sidecars_then_is_removed() {
+  fresh
+  CHILD_CMD='write-sidecars'
+  run_wrapper
+  assert_status 'the sidecar writer succeeds' 0 "$STATUS"
+  assert_no_run_dirs 'the run directory is removed with its sidecars' "$SANDBOX/target/test-tmp"
+  assert_exists 'the shared root itself remains' "$SANDBOX/target/test-tmp"
+}
+
+test_failing_command_keeps_its_exit_and_cleans_up() {
+  fresh
+  CHILD_CMD='exit-seven'
+  run_wrapper
+  assert_status 'the command exit status survives' 7 "$STATUS"
+  assert_no_run_dirs 'the run directory is removed after failure' "$SANDBOX/target/test-tmp"
+  assert_exists 'the shared root itself remains' "$SANDBOX/target/test-tmp"
+}
+
+test_sccache_env_wrapper_is_emptied_not_removed() {
+  fresh
+  AMBIENT='RUSTC_WRAPPER=/usr/bin/sccache RUSTC_WORKSPACE_WRAPPER=sccache'
+  run_wrapper
+  assert_status 'the wrapper still succeeds' 0 "$STATUS"
+  # Emptied, not removed: deleting the key would fall back to a
+  # file-configured wrapper, while empty overrides Cargo config.
+  assert_same 'an sccache RUSTC_WRAPPER is emptied in the owned child' \
+    "$(child_env RUSTC_WRAPPER)" ''
+  assert_same 'an sccache workspace wrapper is emptied in the owned child' \
+    "$(child_env RUSTC_WORKSPACE_WRAPPER)" ''
+  assert_has 'the emptied key is present, not removed' \
+    "$(cat "$CAPTURE/child-env")" 'RUSTC_WRAPPER='
+}
+
+test_global_config_sccache_is_overridden_empty() {
+  fresh
+  printf '[build]\nrustc-wrapper = "sccache"\n' > "$SANDBOX/cargo-home/config.toml"
+  run_wrapper
+  assert_status 'the wrapper still succeeds' 0 "$STATUS"
+  assert_same 'a global-config sccache is overridden empty in the owned child' \
+    "$(child_env RUSTC_WRAPPER)" ''
+}
+
+test_ordinary_compiler_wrapper_is_preserved() {
+  fresh
+  AMBIENT='RUSTC_WRAPPER=/opt/custom-wrapper'
+  run_wrapper
+  assert_status 'the wrapper still succeeds' 0 "$STATUS"
+  assert_same 'a non-sccache wrapper is preserved' "$(child_env RUSTC_WRAPPER)" '/opt/custom-wrapper'
 }
 
 test_relative_tmpdir_resolves_against_repo_root() {
@@ -146,8 +245,8 @@ test_relative_tmpdir_resolves_against_repo_root() {
   printf 'PROMPT_FERRY_TEST_TMPDIR=target/rel-tmp\n' > "$SANDBOX/.env"
   RUN_CWD="$SANDBOX/capture"
   run_wrapper
-  assert_same 'a relative setting resolves against the repository root' \
-    "$(child_env TMPDIR)" "$SANDBOX/target/rel-tmp"
+  assert_has 'a relative setting resolves against the repository root' \
+    "$(child_env TMPDIR)" "$SANDBOX/target/rel-tmp/run-"
   assert_missing 'it does not resolve against the invocation directory' \
     "$SANDBOX/capture/target/rel-tmp"
 }
@@ -163,20 +262,22 @@ EOF
     PROMPT_FERRY_QUOTA_TEST_DATABASE_URL
   assert_env_absent 'no confirmed target is invented' \
     PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET
-  assert_same 'the shared directory is still exported' \
-    "$(child_env TMPDIR)" "$SANDBOX/target/test-tmp"
+  assert_has 'a run directory is still exported' \
+    "$(child_env TMPDIR)" "$SANDBOX/target/test-tmp/run-"
 }
 
 # --- full-runner preflight ----------------------------------------------------
 
-# Writes a .env holding only the Valkey key, so both dedicated PostgreSQL
-# settings under test arrive through the process environment, where a blank
-# stays meaningful.
+# Writes a .env holding the Valkey key plus the dedicated S3 settings, so both
+# dedicated PostgreSQL settings under test arrive through the process
+# environment, where a blank stays meaningful, while the S3 target stays
+# valid so PG accept/refuse cases keep testing only PostgreSQL.
 only_valkey_env() {
   start_fake_valkey
   write_env <<EOF
 PROMPT_FERRY_TEST_VALKEY_URL=$(valkey_url)
 EOF
+  s3_env
 }
 
 # Runs the full runner against an explicit dedicated URL and confirmed target.
@@ -215,14 +316,17 @@ test_full_runner_succeeds_with_stub_services() {
   assert_status 'the full runner succeeds' 0 "$STATUS"
   assert_has 'the confirmed quota database is reported' "$OUT" 'quota test schema verified'
   assert_has 'valkey is reported' "$OUT" 'service ready: valkey'
+  assert_has 'the S3 target is reported' "$OUT" 's3 test target verified'
   assert_has 'the summary check runs' "$OUT" 'workspace tests: 1 suites, 3 passed'
   assert_ran_once 'cargo runs exactly once' 'cargo test'
   assert_same 'the offline sqlx mode is preserved' \
     "$(sed -n 's/^SQLX_OFFLINE=//p' "$CAPTURE/cargo-env")" 'true'
-  assert_same 'cargo inherits the shared test directory' \
-    "$(sed -n 's/^TMPDIR=//p' "$CAPTURE/cargo-env")" "$SANDBOX/target/test-tmp"
+  assert_has 'cargo inherits a run directory under the shared test root' \
+    "$(sed -n 's/^TMPDIR=//p' "$CAPTURE/cargo-env")" "$SANDBOX/target/test-tmp/run-"
   assert_same 'the dotenv is loaded exactly once through the wrapper' \
     "$(sed -n 's/^PROMPT_FERRY_TEST_ENV_LOADED=//p' "$CAPTURE/cargo-env")" '1'
+  assert_missing 'the full-run directory is removed afterwards' \
+    "$(sed -n 's/^TMPDIR=//p' "$CAPTURE/cargo-env")"
 }
 
 test_full_runner_propagates_cargo_failure() {
@@ -232,6 +336,8 @@ test_full_runner_propagates_cargo_failure() {
   run_tests
   assert_status 'the cargo exit status survives' 101 "$STATUS"
   assert_ran 'the run still executed' 'cargo test'
+  assert_missing 'the run directory is removed after failure' \
+    "$(sed -n 's/^TMPDIR=//p' "$CAPTURE/cargo-env")"
 }
 
 test_preflight_keeps_credentials_out_of_argv_and_output() {
@@ -258,8 +364,9 @@ test_preflight_keeps_credentials_out_of_argv_and_output() {
   assert_has 'the redaction is visible' "$OUT" '[redacted]'
 }
 
-# Both dedicated services, addressed at the stub client and the loopback
-# listener, so the preflights pass and the run reaches cargo.
+# All dedicated services, addressed at the stub client and the loopback
+# listener, plus the dedicated S3 target, so the preflights pass and the run
+# reaches cargo.
 service_env() {
   start_fake_valkey
   write_env <<EOF
@@ -267,4 +374,5 @@ PROMPT_FERRY_QUOTA_TEST_DATABASE_URL=$SECRET_PG_URL
 PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET=$SECRET_PG_TARGET
 PROMPT_FERRY_TEST_VALKEY_URL=$(valkey_url)
 EOF
+  s3_env
 }

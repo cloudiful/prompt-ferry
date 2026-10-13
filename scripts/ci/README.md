@@ -7,10 +7,14 @@ scripts are reproducible locally with Docker or any reachable Valkey.
 
 | Script | Purpose |
 | --- | --- |
-| `test-env.sh` | Sourced helper for the test-only dotenv settings: reads the project `.env` as data through `scripts/dev-env.sh` and exports only `PROMPT_FERRY_QUOTA_TEST_DATABASE_URL`, `PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET`, `PROMPT_FERRY_TEST_VALKEY_URL`, and an absolute `PROMPT_FERRY_TEST_TMPDIR`/`TMPDIR`. |
-| `with-test-env.sh` | Runs any command with those settings loaded (`bash scripts/ci/with-test-env.sh <command> [args...]`). The command is `exec`'d unchanged. |
+| `test-env.sh` | Sourced helper for the test-only dotenv settings: reads the project `.env` as data through `scripts/dev-env.sh` and exports only the quota PostgreSQL pair, `PROMPT_FERRY_TEST_VALKEY_URL`, the eight `PROMPT_FERRY_TEST_S3_*` settings, and an absolute `PROMPT_FERRY_TEST_TMPDIR`/`TMPDIR`. |
+| `with-test-env.sh` | Runs any command with those settings loaded (`bash scripts/ci/with-test-env.sh <command> [args...]`). The command runs inside one fresh run directory owned by `test_run_tmp.py` (see below), with the original arguments, exit status, and signals. |
+| `test_run_tmp.py` | Owns one `run-<uuid>` directory under the exported test root per invocation, points `TMPDIR`/`PROMPT_FERRY_TEST_TMPDIR` at it, forwards signals to the owned process group, preserves the exit status, and removes exactly that directory afterwards. Reports (never deletes) leftovers from SIGKILLed runs. When the effective Cargo compiler wrapper (`RUSTC_WRAPPER`/`RUSTC_WORKSPACE_WRAPPER`, resolved from env — bare name beats `CARGO_BUILD_*` — then Cargo config files, nearest `.cargo` first with legacy `config` shadowing `config.toml`, global `CARGO_HOME` config last) names the sccache executable, the key is set empty in the owned child environment only: per the Cargo Book, empty overrides the config and disables the wrapper, while deleting the key would fall back to a file wrapper. Parent env, config files, the shared cache daemon, and ordinary wrappers are untouched, so test builds compile directly instead of binding a daemon to the disposable directory. Requires Python ≥ 3.11 (stdlib `tomllib`). Cargo `--config` CLI overrides and config `include` directives are not inspected. |
+| `test_test_run_tmp.py` | Unit checks for that lifecycle (`uv run --no-project python scripts/ci/test_test_run_tmp.py`): stdlib only, synthetic roots, no services. |
 | `require-test-postgres.py` | Verifies the dedicated quota test database: the URL must address the operator-confirmed `host:port/database`, and that database must be reachable, authenticated, migrated, and report its own matching identity (never migrates or provisions). |
 | `test_pg_target.py` | Pure grammar for the dedicated target — parses and compares the URL against the confirmed `host:port/database` with no process, network, or SQL. Imported by `require-test-postgres.py`, which re-exports every name it defines. |
+| `test_s3_target.py` | Pure grammar for the dedicated S3 test target — all eight settings must be present and agree on one confirmed endpoint-root/bucket, with no process, network, or object-store I/O. Executed by `require-services.sh`; mirrored independently by the Rust S3 test guard. |
+| `test_test_s3_target.py` | Unit checks for that grammar (`uv run --no-project python scripts/ci/test_test_s3_target.py`): pure fixtures, no credentials, no I/O. |
 | `require-services.sh` | The no-silent-skip guarantee: fails when either dedicated test service is unset, malformed, unreachable, or unready (never prints credentials, only scheme/host/port/database). |
 | `run-tests.sh` | Loads the test settings through `with-test-env.sh`, then runs `cargo test --workspace -- --test-threads=1`, then `check-test-summary.py`. |
 | `test-env.test.sh` | Sandbox checks for the entrypoint, the resolution rules, and the preflight (`test-env-test-lib.sh`, `test-env-test-assertions.sh`, `test-env-test-cases.sh`, `test-env-test-target-cases.sh`). |
@@ -25,16 +29,26 @@ scripts are reproducible locally with Docker or any reachable Valkey.
 
 `test-env.sh` loads the project `.env` as data — through the existing
 `scripts/dev-env.sh` parser, never by executing the file — and exports exactly
-four keys:
+twelve keys:
 
 | Setting | Purpose |
 | --- | --- |
 | `PROMPT_FERRY_QUOTA_TEST_DATABASE_URL` | The dedicated PostgreSQL database the quota integration tests use. |
 | `PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET` | The operator-confirmed `host:port/database` that URL is allowed to address. |
 | `PROMPT_FERRY_TEST_VALKEY_URL` | The Valkey instance the response-affinity regression tests use. |
+| `PROMPT_FERRY_TEST_S3_ENDPOINT` | The S3-compatible service root the raw-payload integration tests use. |
+| `PROMPT_FERRY_TEST_S3_BUCKET` | The dedicated test bucket (always `prompt-ferry-test`). |
+| `PROMPT_FERRY_TEST_S3_REGION` | The region the S3 client signs for. |
+| `PROMPT_FERRY_TEST_S3_ACCESS_KEY` | The test-only S3 access key (presence asserted, never printed). |
+| `PROMPT_FERRY_TEST_S3_SECRET_KEY` | The test-only S3 secret key (presence asserted, never printed). |
+| `PROMPT_FERRY_TEST_S3_ALLOW_HTTP` | Strict `true`/`false`; plain HTTP is refused without an explicit `true`. |
+| `PROMPT_FERRY_TEST_S3_PATH_STYLE` | Strict `true`/`false`; must always be set explicitly. |
+| `PROMPT_FERRY_TEST_S3_CONFIRMED_TARGET` | The operator-confirmed endpoint-root/bucket the other seven must agree on. |
 | `PROMPT_FERRY_TEST_TMPDIR` | Absolute project-local directory for the SQLite fixtures, exported as `TMPDIR`; defaults to `<repo>/target/test-tmp`. |
 
-A value already present in the process environment wins over the `.env` entry, and
+An absent S3 setting stays unset rather than invented, so a focused run
+without S3 exports nothing S3-shaped and the Rust guard reports an explicit
+skip. A value already present in the process environment wins over the `.env` entry, and
 an explicitly blank process value stays unconfigured instead of silently falling
 back to the file. `PROMPT_FERRY_TEST_ENV_FILE` selects another dotenv file (absolute,
 or relative to the repository root); when it is set, the file must exist, while an
@@ -81,15 +95,35 @@ Confirming a different target is an operator decision: provision and migrate
 that database yourself (the preflight never does), and keep it distinct from
 every application or production database.
 
+The S3 side follows the same two-halves shape with eight settings instead of
+two: the endpoint, bucket, region, credentials, and flags supply the target,
+and `PROMPT_FERRY_TEST_S3_CONFIRMED_TARGET` must read exactly the confirmed
+endpoint-root/bucket. `test_s3_target.py` owns that grammar as a pure,
+side-effect-free module — http/https endpoints only, no userinfo, query,
+fragment, or non-root path, the bucket must be the dedicated
+`prompt-ferry-test`, booleans are strict `true`/`false`, plain HTTP needs the
+explicit opt-in, and the path-style flag must always be set. A missing half, a
+partial set, or a mismatch fails closed before any object-store I/O, and a run
+with no S3 settings at all is an explicit skip, never silent coverage. The
+Rust S3 tests (`src/raw_payload_store/s3_tests.rs`) enforce the same rules
+independently before building the production store, and each test writes only
+under its own `run-<uuid>` prefix, registering every key before its first PUT
+and deleting exactly those keys afterwards — so a green run leaves zero owned
+objects. A SIGKILLed run cannot clean up; its prefix is reported for the
+operator, never auto-deleted, and no run ever lists a whole bucket or touches
+unknown keys.
+
 ## Local reproduction
 
 The dedicated services are provisioned outside this repository; the preflight
 verifies them and never creates, migrates, or starts anything.
 
 ```bash
-bash scripts/ci/run-tests.sh                            # full run: needs both services
+bash scripts/ci/run-tests.sh                            # full run: needs all services
 bash scripts/ci/with-test-env.sh cargo test -p prompt-ferry   # focused run
 bash scripts/ci/test-env.test.sh                         # entrypoint checks, no service needed
+uv run --no-project python scripts/ci/test_test_s3_target.py  # S3 grammar checks, no service needed
+bash scripts/ci/with-test-env.sh cargo test -p prompt-ferry raw_payload_store -- --test-threads=1  # raw store incl. real S3
 ```
 
 `run-tests.sh` re-enters itself through `with-test-env.sh` exactly once
@@ -97,7 +131,9 @@ bash scripts/ci/test-env.test.sh                         # entrypoint checks, no
 starts, and preserves `SQLX_OFFLINE=true`, the `target/ci/test.log` summary, and
 cargo's exit status. A missing or unready service fails the run instead of
 degrading into a silent skip. A focused SQLite-only run through the wrapper needs
-no database service, but it cannot claim PostgreSQL coverage.
+no database service, but it cannot claim PostgreSQL coverage; likewise a focused
+run without the eight S3 settings skips the real S3 tests explicitly and cannot
+claim S3 coverage.
 
 ```bash
 cargo install cargo-llvm-cov --locked
@@ -135,19 +171,21 @@ test files never appear in LCOV in the first place.
 
 ## No-silent-skip guarantee
 
-Two dedicated services back the suite: the Valkey instance the response-affinity
-regression tests read, and the dedicated PostgreSQL database the quota
+Three dedicated services back the suite: the Valkey instance the response-affinity
+regression tests read, the dedicated PostgreSQL database the quota
+integration tests read, and the dedicated S3 bucket the raw-payload
 integration tests read. A group backed by one of them either returns early and
 reports itself as skipped when its setting is absent, or fails outright — so
-`require-services.sh` checks both services before cargo starts: it requires the
+`require-services.sh` checks all three before cargo starts: it requires the
 settings, then verifies that the database URL addresses the operator-confirmed
 `host:port/database`, that it accepts an authenticated connection, that the
 connected database reports a matching identity, and that its schema is
-migrated, plus the existing credential-free Valkey reachability probe. Once both
-pass, neither branch can trigger, and a green summary means the database-backed
+migrated, plus the existing credential-free Valkey reachability probe, plus the
+eight-setting S3 target confirmation. Once all pass, no branch can trigger, and a green summary means the service-backed
 tests really ran. `check-test-summary.py` is the complementary summary guard (no
 failures, no ignored tests, results present). The suite is never run with
-`--nocapture`, and no script logs a connection URL, its userinfo, or a password.
+`--nocapture`, and no script logs a connection URL, its userinfo, a password,
+or an S3 secret key.
 
 That per-test behavior is the fallback outside this gate, because a bare
 `cargo test` loads no `.env`: it sees only variables already exported in the

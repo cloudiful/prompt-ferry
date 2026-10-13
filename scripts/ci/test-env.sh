@@ -33,6 +33,20 @@ TEST_ENV_DB_KEYS=(
   PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET
   PROMPT_FERRY_TEST_VALKEY_URL
 )
+# The dedicated S3 test target: eight settings that travel together, validated
+# as one confirmed endpoint-root/bucket by the preflight and the Rust guard. An
+# absent setting stays absent (see test_env_export), so a focused run without
+# S3 reports an explicit skip instead of inventing a target.
+TEST_ENV_S3_KEYS=(
+  PROMPT_FERRY_TEST_S3_ENDPOINT
+  PROMPT_FERRY_TEST_S3_BUCKET
+  PROMPT_FERRY_TEST_S3_REGION
+  PROMPT_FERRY_TEST_S3_ACCESS_KEY
+  PROMPT_FERRY_TEST_S3_SECRET_KEY
+  PROMPT_FERRY_TEST_S3_ALLOW_HTTP
+  PROMPT_FERRY_TEST_S3_PATH_STYLE
+  PROMPT_FERRY_TEST_S3_CONFIRMED_TARGET
+)
 TEST_ENV_TMPDIR_KEY=PROMPT_FERRY_TEST_TMPDIR
 
 test_env_die() {
@@ -137,7 +151,7 @@ test_env_load() {
   load_dotenv "$TEST_ENV_DOTENV_FILE"
 
   local key
-  for key in "${TEST_ENV_DB_KEYS[@]}"; do
+  for key in "${TEST_ENV_DB_KEYS[@]}" "${TEST_ENV_S3_KEYS[@]}"; do
     test_env_export "$key"
   done
   test_env_export_tmpdir

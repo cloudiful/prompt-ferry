@@ -7,8 +7,8 @@ import {
   mock,
   test,
 } from 'bun:test'
-import type { TokenPlanUsageResponse } from '../src/generated/admin-api'
 import { minimaxQuotaKey, usage } from './helpers/token-plan-quota-fixtures'
+import { createFetchTokenPlanUsageMock } from './helpers/token-plan-test-setup'
 
 const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
 if (typeof window === 'undefined') {
@@ -18,13 +18,7 @@ if (typeof window === 'undefined') {
   })
 }
 
-const fetchTokenPlanUsage = mock(
-  async (_endpointId: string): Promise<TokenPlanUsageResponse> => ({
-    keys: [],
-    provider: 'minimax',
-    provider_region: null,
-  }),
-)
+const fetchTokenPlanUsage = createFetchTokenPlanUsageMock()
 
 mock.module('../src/stores/endpoints-api', () => ({ fetchTokenPlanUsage }))
 

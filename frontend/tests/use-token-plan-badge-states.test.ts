@@ -4,78 +4,25 @@ import type {
   TokenPlanQuotaState,
   TokenPlanUsageResponse,
 } from '../src/generated/admin-api'
+import {
+  createEndpointsApiStub,
+  createFetchTokenPlanUsageMock,
+  createStorageStub,
+  createTranslateStub,
+  resetFetchTokenPlanUsageMock,
+} from './helpers/token-plan-test-setup'
 
-const storage = new Map<string, string>()
+const { localStorage } = createStorageStub()
 Object.defineProperty(globalThis, 'localStorage', {
-  value: {
-    getItem: (key: string) => storage.get(key) ?? null,
-    setItem: (key: string, value: string) => storage.set(key, value),
-  },
+  value: localStorage,
   configurable: true,
 })
 
-const fetchTokenPlanUsage = mock(
-  async (_endpointId: string): Promise<TokenPlanUsageResponse> => ({
-    keys: [],
-    provider: 'minimax',
-    provider_region: null,
-  }),
-)
+const fetchTokenPlanUsage = createFetchTokenPlanUsageMock()
 
-mock.module('../src/stores/endpoints-api', () => ({
-  createEndpoint: mock(async () => ({})),
-  createModelRoute: mock(async () => ({})),
-  deleteEndpoint: mock(async () => undefined),
-  deleteEndpointById: mock(async () => undefined),
-  deleteModelRoute: mock(async () => undefined),
-  deleteModelRouteById: mock(async () => undefined),
-  endpointFormToRequest: mock((form: unknown) => form),
-  endpointToForm: mock((endpoint: unknown) => endpoint),
-  expectData: mock((value: unknown) => value),
-  fetchEndpointsPage: mock(async () => ({
-    endpoints: [],
-    first: 0,
-    rows: 10,
-    total: 0,
-  })),
-  fetchModelRoutesPage: mock(async () => ({
-    first: 0,
-    routes: [],
-    rows: 10,
-    total: 0,
-  })),
-  fetchOrganizationUsage: mock(async () => undefined),
-  fetchTokenPlanUsage,
-  listEndpoints: mock(async () => undefined),
-  listModelRoutes: mock(async () => undefined),
-  modelRouteFormToRequest: mock((route: unknown) => route),
-  modelRouteToForm: mock((route: unknown) => route),
-  persistEndpoint: mock(async () => ({})),
-  persistModelRoute: mock(async () => ({})),
-  runEndpointTest: mock(async () => ({
-    duration_ms: 0,
-    message: '',
-    ok: true,
-    status: 200,
-  })),
-  runModelRouteProbe: mock(async () => ({
-    duration_ms: 0,
-    endpoint_name: '',
-    message: '',
-    model: null,
-    model_pattern: '',
-    ok: true,
-    status: 200,
-  })),
-  testEndpoint: mock(async () => undefined),
-  testModelRoute: mock(async () => undefined),
-  tokenPlanUsage: mock(async () => undefined),
-  updateEndpoint: mock(async () => ({})),
-  updateEndpointEnabled: mock(async () => ({})),
-  updateModelRoute: mock(async () => ({})),
-  updateModelRouteEnabled: mock(async () => ({})),
-  withData: mock((value: unknown) => value),
-}))
+mock.module('../src/stores/endpoints-api', () =>
+  createEndpointsApiStub(fetchTokenPlanUsage),
+)
 
 const {
   __resetTokenPlanCacheForTests,
@@ -88,18 +35,11 @@ const { tokenPlanBadgePills, useTokenPlanBadges } =
 const { useEndpointTokenPlanUsage } =
   await import('../src/composables/useEndpointTokenPlanUsage')
 
-const t = ((key: string) => key) as unknown as TranslateFn
+const t = createTranslateStub()
 
 beforeEach(() => {
   __resetTokenPlanCacheForTests()
-  fetchTokenPlanUsage.mockReset()
-  fetchTokenPlanUsage.mockImplementation(
-    async (_endpointId: string): Promise<TokenPlanUsageResponse> => ({
-      keys: [],
-      provider: 'minimax',
-      provider_region: null,
-    }),
-  )
+  resetFetchTokenPlanUsageMock(fetchTokenPlanUsage)
 })
 
 afterEach(() => {

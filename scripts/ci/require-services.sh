@@ -14,6 +14,12 @@
 # This script only checks that the database is dedicated, reachable, and migrated.
 # It never prints a connection URL or its userinfo; it reports only the scheme,
 # host, port, and database name, and it never migrates or provisions anything.
+#
+# The dedicated S3 test target is checked last, with the same no-secret output
+# rule: all eight settings must be present and agree on one confirmed
+# endpoint-root/bucket before the full runner may claim S3 coverage. Focused
+# runs never reach this script, so a focused run without S3 settings reports an
+# explicit skip in the Rust guard instead of failing here.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -83,3 +89,9 @@ PY
 }
 
 probe "valkey" "$PROMPT_FERRY_TEST_VALKEY_URL"
+
+# The full runner claims real S3 coverage, so the dedicated S3 target must be
+# fully configured and confirmed here; a partial or mismatched setting fails
+# before cargo starts. The validator reads only the eight dedicated keys and
+# reports only the endpoint root and bucket, never credentials.
+python3 "$SCRIPT_DIR/test_s3_target.py"

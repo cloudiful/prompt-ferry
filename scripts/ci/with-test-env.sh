@@ -5,11 +5,18 @@
 #
 # This is the documented entrypoint for focused test commands: it loads only
 # PROMPT_FERRY_QUOTA_TEST_DATABASE_URL, PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET,
-# PROMPT_FERRY_TEST_VALKEY_URL, and PROMPT_FERRY_TEST_TMPDIR (plus an absolute
-# TMPDIR for the SQLite fixtures) and then execs the command with the original
+# PROMPT_FERRY_TEST_VALKEY_URL, the eight PROMPT_FERRY_TEST_S3_* settings, and
+# PROMPT_FERRY_TEST_TMPDIR (plus an absolute TMPDIR for the SQLite fixtures)
+# and then execs the command with the original
 # arguments, exit status, and signals. The command is never evaluated, so a test
 # invocation cannot be reinterpreted as shell input, and no application setting
 # or secret from the `.env` reaches the child.
+#
+# The final exec goes through scripts/ci/test_run_tmp.py, which owns one fresh
+# run directory under the exported test root for this invocation, points
+# TMPDIR/PROMPT_FERRY_TEST_TMPDIR at it, forwards signals to the owned process
+# group, preserves the exit status, and removes exactly that directory
+# afterwards — so both full and focused runs are covered exactly once.
 #
 # The confirmed target travels with the quota URL because neither is usable
 # alone: the preflight and the Rust test helper refuse any database the two do
@@ -52,4 +59,4 @@ source "$HELPER"
 cd "$ROOT"
 test_env_load
 
-exec "$@"
+exec python3 "$SCRIPT_DIR/test_run_tmp.py" -- "$@"

@@ -21,6 +21,7 @@ RUN_TESTS_SH="$REPO_ROOT/scripts/ci/run-tests.sh"
 REQUIRE_SERVICES_SH="$REPO_ROOT/scripts/ci/require-services.sh"
 REQUIRE_TEST_POSTGRES_PY="$REPO_ROOT/scripts/ci/require-test-postgres.py"
 TEST_PG_TARGET_PY="$REPO_ROOT/scripts/ci/test_pg_target.py"
+TEST_S3_TARGET_PY="$REPO_ROOT/scripts/ci/test_s3_target.py"
 
 # Synthetic fixtures. SECRET_PG_PASSWORD is a literal string, not a credential.
 # The URL deliberately addresses a remote host and the default `postgres`
@@ -33,6 +34,17 @@ PRODUCTION_PG_URL="postgres://app_user:app-fixture-secret@pg-test.example.test:5
 PRODUCTION_PG_TARGET='pg-test.example.test:5436/prompt_ferry'
 SECRET_VK_URL='redis://127.0.0.1:6379/0'
 QUOTA_DB_NAME='postgres'
+# Synthetic dedicated S3 target. The bucket is the exact dedicated name the
+# guard requires; the endpoint is a fixture host, and both credential values
+# are literal strings, not credentials.
+SECRET_S3_ENDPOINT='http://s3-test.example.test:9002'
+SECRET_S3_BUCKET='prompt-ferry-test'
+SECRET_S3_REGION='us-east-1'
+SECRET_S3_ACCESS='s3-fixture-access'
+SECRET_S3_SECRET='s3-fixture-secret'
+SECRET_S3_ALLOW_HTTP='true'
+SECRET_S3_PATH_STYLE='true'
+SECRET_S3_CONFIRMED_TARGET='http://s3-test.example.test:9002/prompt-ferry-test'
 
 SANDBOX=""
 CAPTURE=""
@@ -65,6 +77,21 @@ PROMPT_FERRY_QUOTA_TEST_DATABASE_URL=$SECRET_PG_URL
 PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET=$SECRET_PG_TARGET
 PROMPT_FERRY_TEST_VALKEY_URL=$SECRET_VK_URL
 EOF
+  s3_env
+}
+
+# The eight dedicated S3 settings, appended to the synthetic .env under test.
+s3_env() {
+  cat >> "$SANDBOX/.env" <<EOF
+PROMPT_FERRY_TEST_S3_ENDPOINT=$SECRET_S3_ENDPOINT
+PROMPT_FERRY_TEST_S3_BUCKET=$SECRET_S3_BUCKET
+PROMPT_FERRY_TEST_S3_REGION=$SECRET_S3_REGION
+PROMPT_FERRY_TEST_S3_ACCESS_KEY=$SECRET_S3_ACCESS
+PROMPT_FERRY_TEST_S3_SECRET_KEY=$SECRET_S3_SECRET
+PROMPT_FERRY_TEST_S3_ALLOW_HTTP=$SECRET_S3_ALLOW_HTTP
+PROMPT_FERRY_TEST_S3_PATH_STYLE=$SECRET_S3_PATH_STYLE
+PROMPT_FERRY_TEST_S3_CONFIRMED_TARGET=$SECRET_S3_CONFIRMED_TARGET
+EOF
 }
 
 new_sandbox() {
@@ -73,11 +100,13 @@ new_sandbox() {
   AMBIENT=""
   RUN_CWD="/"
   CHILD_CMD="env"
-  mkdir -p "$CAPTURE" "$SANDBOX/path" "$SANDBOX/scripts/ci"
+  mkdir -p "$CAPTURE" "$SANDBOX/path" "$SANDBOX/scripts/ci" "$SANDBOX/cargo-home"
 
   cp "$REPO_ROOT/scripts/dev-env.sh" "$SANDBOX/scripts/"
   cp "$TEST_ENV_SH" "$WITH_TEST_ENV_SH" "$RUN_TESTS_SH" "$REQUIRE_SERVICES_SH" \
     "$REQUIRE_TEST_POSTGRES_PY" "$TEST_PG_TARGET_PY" \
+    "$REPO_ROOT/scripts/ci/test_s3_target.py" \
+    "$REPO_ROOT/scripts/ci/test_run_tmp.py" \
     "$REPO_ROOT/scripts/ci/check-test-summary.py" "$SANDBOX/scripts/ci/"
 
   # Minimal PATH: the coreutils the entrypoints and stubs need, never a real
@@ -149,6 +178,19 @@ env | sort > "$sandbox/capture/cargo-env"
 printf 'test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; 0 finished\n'
 exit "$(cat "$sandbox/cargo-status" 2> /dev/null || printf '0')"
 STUB
+
+  # Writes SQLite-shaped sidecars into the run directory the wrapper owns, so
+  # a case can prove they are removed with it.
+  add_stub write-sidecars <<'STUB'
+#!/usr/bin/env bash
+touch "$TMPDIR/probe.sqlite" "$TMPDIR/probe.sqlite-wal" "$TMPDIR/probe.sqlite-shm"
+STUB
+
+  # Fails with a fixed status so a case can prove the wrapper preserves it.
+  add_stub exit-seven <<'STUB'
+#!/usr/bin/env bash
+exit 7
+STUB
 }
 
 set_psql_mode() { printf '%s\n' "$1" > "$SANDBOX/psql-mode"; }
@@ -158,9 +200,11 @@ psql_argv() { cat "$CAPTURE/calls" 2> /dev/null | sed -n 's/^psql //p'; }
 fresh() { new_sandbox && install_stubs && full_env; }
 
 # Runs the wrapper from RUN_CWD with AMBIENT ("KEY=VALUE" pairs, one string) and
-# captures the child's environment in $CAPTURE/child-env.
+# captures the child's environment in $CAPTURE/child-env. CARGO_HOME points at
+# an empty synthetic directory so the suite never depends on the operator's
+# ambient Cargo config (the helper's config walk would otherwise read it).
 run_wrapper() {
-  local -a prefix=("PATH=$SANDBOX/path")
+  local -a prefix=("PATH=$SANDBOX/path" "CARGO_HOME=$SANDBOX/cargo-home")
   if [ -n "$AMBIENT" ]; then
     # shellcheck disable=SC2086
     prefix+=($AMBIENT)
@@ -178,6 +222,7 @@ run_wrapper() {
 run_tests() {
   local -a prefix=(
     "PATH=$SANDBOX/path"
+    "CARGO_HOME=$SANDBOX/cargo-home"
     "SERVICE_PROBE_ATTEMPTS=1"
     "SERVICE_PROBE_INTERVAL=0"
   )

@@ -212,3 +212,58 @@ test_the_connected_database_is_checked_against_the_confirmed_one() {
   assert_ran_once 'the identity is verified once' 'SELECT current_database()'
   assert_absent 'the username never reaches the log' "$OUT" 'quota_tester'
 }
+
+# --- the dedicated S3 target is required -------------------------------------
+
+test_full_runner_requires_the_s3_target() {
+  fresh
+  start_fake_valkey
+  write_env <<EOF
+PROMPT_FERRY_QUOTA_TEST_DATABASE_URL=$SECRET_PG_URL
+PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET=$SECRET_PG_TARGET
+PROMPT_FERRY_TEST_VALKEY_URL=$(valkey_url)
+EOF
+  run_tests
+  assert_nonzero 'a missing S3 target fails the full runner' "$STATUS"
+  assert_has 'the failure names the missing S3 settings' "$OUT" 'every dedicated setting'
+  assert_not_run 'nothing runs without the S3 target' 'cargo test'
+}
+
+test_partial_s3_target_fails_before_any_io() {
+  fresh
+  service_env
+  AMBIENT='PROMPT_FERRY_TEST_S3_SECRET_KEY='
+  run_tests
+  assert_nonzero 'a partial S3 target fails' "$STATUS"
+  assert_has 'the failure names the missing key' "$OUT" 'PROMPT_FERRY_TEST_S3_SECRET_KEY'
+  assert_not_run 'nothing runs with a partial S3 target' 'cargo test'
+}
+
+test_mismatched_s3_confirmed_target_is_refused() {
+  fresh
+  service_env
+  AMBIENT='PROMPT_FERRY_TEST_S3_CONFIRMED_TARGET=http://s3-test.example.test:9002/other-bucket'
+  run_tests
+  assert_nonzero 'a rewritten S3 target is refused' "$STATUS"
+  assert_has 'the refusal names the confirmed key' "$OUT" 'PROMPT_FERRY_TEST_S3_CONFIRMED_TARGET'
+  assert_not_run 'nothing runs with a rewritten S3 target' 'cargo test'
+}
+
+test_unsafe_http_s3_target_is_refused() {
+  fresh
+  service_env
+  AMBIENT='PROMPT_FERRY_TEST_S3_ALLOW_HTTP=false'
+  run_tests
+  assert_nonzero 'plain HTTP without the opt-in is refused' "$STATUS"
+  assert_has 'the refusal names the opt-in key' "$OUT" 'PROMPT_FERRY_TEST_S3_ALLOW_HTTP'
+  assert_not_run 'nothing runs with an unsafe S3 target' 'cargo test'
+}
+
+test_missing_s3_parser_module_fails_closed() {
+  fresh
+  service_env
+  rm -f "$SANDBOX/scripts/ci/test_s3_target.py"
+  run_tests
+  assert_nonzero 'a missing S3 parser module fails the preflight' "$STATUS"
+  assert_not_run 'nothing runs without the S3 parser' 'cargo test'
+}
