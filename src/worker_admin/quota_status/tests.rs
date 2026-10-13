@@ -380,3 +380,26 @@ fn missing_fresh_quota_signal_never_claims_available() {
         Unknown
     );
 }
+
+#[test]
+fn glm_mixed_weekly_exhausted_with_fresh_five_hour_is_exhausted() {
+    // A fully consumed weekly window dominates a fresh 5h window while its
+    // deadline has not passed: the key is exhausted, not available.
+    let now = Utc::now();
+    let mut glm = key(Uuid::new_v4());
+    glm.glm_five_hour = Some(GlmWindowUsage {
+        limit: 100.0,
+        current_value: 0.0,
+        remaining: 100.0,
+        percentage: Some(0.0),
+        next_reset_at: Some(now + ChronoDuration::hours(5)),
+    });
+    glm.glm_weekly = Some(GlmWindowUsage {
+        limit: 100.0,
+        current_value: 100.0,
+        remaining: 0.0,
+        percentage: Some(100.0),
+        next_reset_at: Some(now + ChronoDuration::days(6)),
+    });
+    assert_state(EndpointProvider::Glm, &glm, now, Exhausted);
+}

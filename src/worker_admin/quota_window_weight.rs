@@ -102,9 +102,59 @@ pub(crate) fn effective_weight_percent(usage: &TokenPlanModelUsage) -> Option<f6
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worker_admin_types::{OpencodeGoWindowUsage, TokenPlanWindowUsage};
+    use crate::worker_admin_types::{GlmWindowUsage, OpencodeGoWindowUsage, TokenPlanWindowUsage};
     use chrono::Duration;
     use uuid::Uuid;
+
+    fn glm_key(
+        five_hour: Option<GlmWindowUsage>,
+        weekly: Option<GlmWindowUsage>,
+    ) -> TokenPlanKeyUsage {
+        TokenPlanKeyUsage {
+            key_id: Uuid::nil(),
+            key_label: "k".into(),
+            ok: true,
+            status: Some(200),
+            error_code: None,
+            error_message: None,
+            quota_status: None,
+            model_remains: Vec::new(),
+            balances: None,
+            five_hour: None,
+            weekly: None,
+            opencodego_rolling: None,
+            opencodego_weekly: None,
+            opencodego_monthly: None,
+            openrouter_balance: None,
+            openrouter_spend: None,
+            glm_five_hour: five_hour,
+            glm_weekly: weekly,
+            deepseek_balance: None,
+        }
+    }
+
+    fn glm_window(used: f64, reset: chrono::DateTime<chrono::Utc>) -> GlmWindowUsage {
+        GlmWindowUsage {
+            limit: 100.0,
+            current_value: used,
+            remaining: 100.0 - used,
+            percentage: Some(used),
+            next_reset_at: Some(reset),
+        }
+    }
+
+    #[test]
+    fn glm_mixed_weekly_exhausted_with_fresh_five_hour_weighs_zero() {
+        // A fully consumed weekly window pins the weight at zero however
+        // fresh the 5h window is: exhaustion is never resurrected by the
+        // urgency lift.
+        let now = chrono::Utc::now();
+        let key = glm_key(
+            Some(glm_window(0.0, now + Duration::hours(5))),
+            Some(glm_window(100.0, now + Duration::days(6))),
+        );
+        assert_eq!(glm_weight_percent(&key), Some(0.0));
+    }
 
     fn opencode_go_key(
         rolling_used: f64,

@@ -6,6 +6,7 @@ import { renderToString } from 'vue/server-renderer'
 import type {
   DeepSeekBalance,
   EndpointProvider,
+  GlmWindowUsage,
   TokenPlanKeyUsage,
   TokenPlanUsageResponse,
 } from '../src/generated/admin-api'
@@ -172,6 +173,31 @@ function usagePayload(balance: DeepSeekBalance): TokenPlanUsageResponse {
   return {
     keys: [deepseekKey(balance)],
     provider: 'deepseek',
+    provider_region: null,
+  } as TokenPlanUsageResponse
+}
+
+function glmKey(
+  fiveHour: GlmWindowUsage | null,
+  weekly: GlmWindowUsage | null,
+): TokenPlanKeyUsage {
+  return {
+    key_id: 'k-glm',
+    key_label: 'glm key',
+    ok: true,
+    model_remains: [],
+    glm_five_hour: fiveHour,
+    glm_weekly: weekly,
+  } as TokenPlanKeyUsage
+}
+
+function glmUsage(
+  fiveHour: GlmWindowUsage | null,
+  weekly: GlmWindowUsage | null,
+): TokenPlanUsageResponse {
+  return {
+    keys: [glmKey(fiveHour, weekly)],
+    provider: 'glm',
     provider_region: null,
   } as TokenPlanUsageResponse
 }
@@ -425,4 +451,57 @@ test('a DeepSeek key without a balance payload renders no balance block', async 
   } as TokenPlanUsageResponse
   const html = await render(usage)
   expect(html).not.toContain('tokenPlanDeepSeekBalance')
+})
+
+test('a GLM window with unknown quantity shows no 0.00 / 0.00 subline', async () => {
+  const html = await render(
+    glmUsage(
+      { current_value: 0, limit: 0, remaining: 0, percentage: null },
+      null,
+    ),
+  )
+  expect(html).toContain('tokenPlanInterval')
+  // The quantity is unknown, so no used/total caption may be manufactured;
+  // the window itself stays visible.
+  expect(html).not.toContain('0.00 / 0.00')
+})
+
+test('a GLM window with reported zero usage keeps its remaining percent', async () => {
+  const html = await render(
+    glmUsage(
+      { current_value: 0, limit: 0, remaining: 100, percentage: 0 },
+      null,
+    ),
+  )
+  expect(html).toContain('100.0%')
+  expect(html).not.toContain('0.00 / 0.00')
+})
+
+test('a GLM window with legitimate zero usage keeps its 0 / total subline', async () => {
+  const html = await render(
+    glmUsage(
+      { current_value: 0, limit: 2000, remaining: 2000, percentage: 0 },
+      null,
+    ),
+  )
+  expect(html).toContain('0.00 / 2000.00')
+})
+
+test('an exhausted GLM weekly window keeps both labels and zero remaining', async () => {
+  const html = await render(
+    glmUsage(
+      { current_value: 0, limit: 2000, remaining: 2000, percentage: 0 },
+      {
+        current_value: 10000,
+        limit: 10000,
+        remaining: 0,
+        percentage: 100,
+      },
+    ),
+  )
+  expect(html).toContain('tokenPlanInterval')
+  expect(html).toContain('tokenPlanWeekly')
+  expect(html).toContain('0.00 / 2000.00')
+  expect(html).toContain('10000.00 / 10000.00')
+  expect(html).toContain('0.0%')
 })

@@ -314,3 +314,67 @@ test('a ready exhausted observation keeps the existing zero summary', () => {
   ])
   expect(summary.allExhausted).toBe(true)
 })
+
+function glmKey(
+  id: string,
+  fiveHour: {
+    current_value: number
+    limit: number
+    remaining: number
+    percentage?: number | null
+  } | null,
+  weekly: {
+    current_value: number
+    limit: number
+    remaining: number
+    percentage?: number | null
+  } | null,
+): TokenPlanKeyUsage {
+  return {
+    key_id: id,
+    key_label: id,
+    ok: true,
+    model_remains: [],
+    glm_five_hour: fiveHour,
+    glm_weekly: weekly,
+  } as TokenPlanKeyUsage
+}
+
+test('GLM weekly exhaustion and fresh 5h window keep honest percentages', () => {
+  const summary = summarizeTokenPlanQuota(
+    'glm',
+    [
+      glmKey(
+        'glm-exhausted-weekly',
+        { current_value: 0, limit: 10000, remaining: 10000, percentage: 0 },
+        { current_value: 10000, limit: 10000, remaining: 0, percentage: 100 },
+      ),
+    ],
+    'ready',
+  )
+  // Legacy key without quota_status: numeric evidence stays visible without
+  // claiming availability; no weekly exhaustion is invented or hidden.
+  expect(summary.state).toBe('unknown')
+  expect([summary.short, summary.long]).toEqual([100, 0])
+})
+
+test('GLM missing weekly window leaves long null', () => {
+  const summary = summarizeTokenPlanQuota(
+    'glm',
+    [
+      glmKey(
+        'glm-no-weekly',
+        {
+          current_value: 500,
+          limit: 2000,
+          remaining: 1500,
+          percentage: 25,
+        },
+        null,
+      ),
+    ],
+    'ready',
+  )
+  expect(summary.state).toBe('unknown')
+  expect([summary.short, summary.long]).toEqual([75, null])
+})

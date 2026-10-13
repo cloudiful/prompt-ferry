@@ -67,8 +67,9 @@ export type GlmEntry = {
 
 // Unified progress-window row: opencodeGo + GLM share the same 3-column
 // rendering template. `subline` is the optional `used / total` caption
-// shown below the row (null for opencodeGo, `${current} / ${limit}` for
-// GLM). Exposed at module scope so dialog callers can type the v-for
+// shown below the row (null for opencodeGo, `${current} / ${limit}` for GLM
+// windows with a known quantity, null when the GLM quantity is unknown).
+// Exposed at module scope so dialog callers can type the v-for
 // iterator without re-declaring the shape.
 export type ProgressWindowEntry = {
   adapted: TokenPlanWindowUsage
@@ -105,9 +106,14 @@ export function formatMoney(
 
 // Pure adapt helpers shared by the dialog and badges without instantiating
 // the dialog's ticker.
-export function knownRemainingPercent(window: TokenPlanWindowUsage): number | null {
+export function knownRemainingPercent(
+  window: TokenPlanWindowUsage,
+): number | null {
   const value = window.remaining_percent
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
+  return typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 100
     ? value
     : null
 }
@@ -147,6 +153,24 @@ export function opencodeGoAsWindow(
     remaining_percent:
       used == null ? null : Math.max(0, Math.min(100, 100 - used)),
   }
+}
+
+// GLM (Zhipu Coding Plan) quantity subline: amounts render only for a
+// positive finite limit with a finite current. Otherwise the quantity is
+// unknown and no `0 / 0` may be manufactured — the window itself stays
+// visible with its honestly reported percentage.
+export function glmQuantitySubline(window: GlmWindowUsage): string | null {
+  const { current_value, limit } = window
+  if (
+    typeof limit !== 'number' ||
+    !Number.isFinite(limit) ||
+    limit <= 0 ||
+    typeof current_value !== 'number' ||
+    !Number.isFinite(current_value)
+  ) {
+    return null
+  }
+  return `${current_value.toFixed(2)} / ${limit.toFixed(2)}`
 }
 
 // GLM (Zhipu Coding Plan) windows report the *used* share as
@@ -199,7 +223,9 @@ export function formatResetDuration(ms: number | null, t: TranslateFn): string {
 }
 
 function minimumKnownRemaining(windows: TokenPlanWindowUsage[]): number | null {
-  const known = windows.map(knownRemainingPercent).filter((value): value is number => value !== null)
+  const known = windows
+    .map(knownRemainingPercent)
+    .filter((value): value is number => value !== null)
   return known.length ? Math.min(...known) : null
 }
 
@@ -338,7 +364,7 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
       entries.push({
         adapted: raw.adapted,
         labelKey: raw.labelKey,
-        subline: `${raw.raw.current_value.toFixed(2)} / ${raw.raw.limit.toFixed(2)}`,
+        subline: glmQuantitySubline(raw.raw),
       })
     }
     return entries
