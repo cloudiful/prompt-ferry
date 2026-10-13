@@ -5,9 +5,10 @@ mod tests;
 
 use crate::{
     db::{EndpointProvider, RouteConfig},
+    upstream_error::UpstreamFailureCause,
     worker::runtime::{context::RuntimeServices, routing::QuotaProbePermit},
     worker_admin::{
-        quota_feedback::{QuotaFeedbackScope, QuotaFeedbackStore},
+        quota_feedback::{QuotaFeedbackCause, QuotaFeedbackScope, QuotaFeedbackStore},
         token_plan_cache::TokenPlanQuotaCache,
     },
 };
@@ -73,10 +74,31 @@ impl std::fmt::Debug for AttemptFeedback {
 }
 
 impl AttemptFeedback {
+    /// A 429 whose body could not be read: the block is still recorded, as a
+    /// generic rate limit rather than a lost protection.
     pub(in crate::worker::runtime) fn record_429(&self, retry_after: Option<Duration>) {
         if !self.settled.swap(true, Ordering::AcqRel) {
             if let Some(store) = &self.store {
                 store.record_429(self.scope, retry_after, Instant::now(), self.attempt_start);
+            }
+            self.release_probe();
+        }
+    }
+
+    pub(in crate::worker::runtime) fn record_failure(
+        &self,
+        retry_after: Option<Duration>,
+        cause: UpstreamFailureCause,
+    ) {
+        if !self.settled.swap(true, Ordering::AcqRel) {
+            if let Some(store) = &self.store {
+                store.record_failure(
+                    self.scope,
+                    feedback_cause(cause),
+                    retry_after,
+                    Instant::now(),
+                    self.attempt_start,
+                );
             }
             self.release_probe();
         }
@@ -100,6 +122,14 @@ impl AttemptFeedback {
 
 pub(in crate::worker::runtime) fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
     retry_after::parse(headers, chrono::Utc::now())
+}
+
+fn feedback_cause(cause: UpstreamFailureCause) -> QuotaFeedbackCause {
+    match cause {
+        UpstreamFailureCause::RateLimited => QuotaFeedbackCause::RateLimited,
+        UpstreamFailureCause::UpstreamUnavailable => QuotaFeedbackCause::UpstreamUnavailable,
+        UpstreamFailureCause::Exhausted => QuotaFeedbackCause::Exhausted,
+    }
 }
 
 pub(in crate::worker::runtime) fn schedule_quota_refresh(

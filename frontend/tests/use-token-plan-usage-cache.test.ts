@@ -96,9 +96,9 @@ beforeEach(() => {
   fetchTokenPlanUsage.mockReset()
   fetchTokenPlanUsage.mockImplementation(
     async (
-    _endpointId: string,
-    _force?: boolean,
-  ): Promise<TokenPlanUsageResponse> => ({
+      _endpointId: string,
+      _force?: boolean,
+    ): Promise<TokenPlanUsageResponse> => ({
       keys: [],
       provider: 'minimax',
       provider_region: null,
@@ -156,7 +156,8 @@ test('prefetchTokenPlanUsage coalesces concurrent callers onto one in-flight pro
 test('manual refresh forwards force and coalesces concurrent force requests', async () => {
   let release!: () => void
   const pending = new Promise<TokenPlanUsageResponse>((resolve) => {
-    release = () => resolve({ keys: [], provider: 'openai', provider_region: null })
+    release = () =>
+      resolve({ keys: [], provider: 'openai', provider_region: null })
   })
   fetchTokenPlanUsage.mockImplementationOnce(async (_endpointId, force) => {
     expect(force).toBe(true)
@@ -410,5 +411,49 @@ test('refresh failure preserves the prior snapshot and backs off (no null overwr
   await new Promise<void>((resolve) => setTimeout(resolve, 0))
   expect(getCachedTokenPlanUsage('ep-backoff')).toEqual(recovered)
 
+  jest.setSystemTime()
+})
+
+test('a stale batch bounds actual network concurrency at 4 while serving stale instantly', async () => {
+  const start = new Date('2026-09-10T00:00:00.000Z')
+  jest.setSystemTime(start)
+  const ids = Array.from({ length: 8 }, (_, i) => `ep-stale-batch-${i}`)
+  for (const id of ids) {
+    fetchTokenPlanUsage.mockResolvedValueOnce({
+      keys: [],
+      provider: 'minimax',
+      provider_region: null,
+    })
+    await prefetchTokenPlanUsage(id)
+  }
+  expect(fetchTokenPlanUsage).toHaveBeenCalledTimes(8)
+  fetchTokenPlanUsage.mockClear()
+
+  jest.setSystemTime(new Date(start.getTime() + TOKEN_PLAN_CACHE_TTL_MS + 1))
+
+  let active = 0
+  let maxActive = 0
+  const gates: Array<() => void> = []
+  fetchTokenPlanUsage.mockImplementation(async () => {
+    active += 1
+    maxActive = Math.max(maxActive, active)
+    await new Promise<void>((resolve) => gates.push(resolve))
+    active -= 1
+    return { keys: [], provider: 'minimax', provider_region: null }
+  })
+
+  const batch = prefetchTokenPlanBatch(ids, 4)
+  // Let workers pick up ids and block on the deferred network gates.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  expect(maxActive).toBeLessThanOrEqual(4)
+  while (gates.length > 0) {
+    gates.splice(0, 4).forEach((release) => release())
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+  await batch
+
+  expect(maxActive).toBeLessThanOrEqual(4)
+  expect(fetchTokenPlanUsage).toHaveBeenCalledTimes(8)
   jest.setSystemTime()
 })

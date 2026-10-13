@@ -16,6 +16,10 @@ const label = computed(() => {
       return props.t('tokenPlanUnavailable')
     case 'cooling':
       return props.t('tokenPlanQuotaCooling')
+    case 'rate_limited':
+      return props.t('tokenPlanRateLimited')
+    case 'upstream_unavailable':
+      return props.t('tokenPlanUpstreamUnavailable')
     default:
       return props.t('tokenPlanQuotaUnknown')
   }

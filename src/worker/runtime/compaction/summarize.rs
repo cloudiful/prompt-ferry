@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use crate::{
     config::NativeApi,
     db::RouteConfig,
-    upstream_error::is_quota_exhaustion,
+    upstream_error::{UpstreamFailureCause, classify_upstream_failure},
     worker::runtime::{
         ai::quota_feedback::{
             AttemptFeedback, AttemptFeedbackFactory, parse_retry_after, schedule_quota_refresh,
@@ -203,28 +203,30 @@ pub(super) async fn self_compact_via_upstream(
     };
     let status = response.status();
     let status_is_429 = status == http::StatusCode::TOO_MANY_REQUESTS;
-    if status_is_429 {
-        attempt_feedback.record_429(parse_retry_after(response.headers()));
-    }
+    // Retained before the body is consumed for classification.
+    let retry_after = parse_retry_after(response.headers());
     let bytes = match response.bytes().await {
         Ok(bytes) => bytes,
         Err(err) => {
             if status_is_429 {
                 schedule_quota_refresh(services, route);
+                // A 429 whose body could not be read still backs the route off,
+                // as a generic rate limit rather than a lost protection.
+                attempt_feedback.record_429(retry_after);
+            } else {
+                attempt_feedback.release_probe();
             }
-            attempt_feedback.release_probe();
             return Err(anyhow::anyhow!("summarize upstream body failed: {err}"));
         }
     };
-    let quota_exhausted =
-        !status.is_success() && is_quota_exhaustion(&String::from_utf8_lossy(&bytes));
-    if quota_exhausted {
-        if !status_is_429 {
-            attempt_feedback.record_429(None);
-        }
-        if let Some(state) = services.admin_state() {
-            state.token_plan_quota.invalidate(route.route_id).await;
-        }
+    let cause = classify_upstream_failure(status.as_u16(), &String::from_utf8_lossy(&bytes));
+    let quota_exhausted = cause == Some(UpstreamFailureCause::Exhausted);
+    if status_is_429 || quota_exhausted {
+        let cause = cause.unwrap_or(UpstreamFailureCause::RateLimited);
+        attempt_feedback.record_failure(if status_is_429 { retry_after } else { None }, cause);
+    }
+    if quota_exhausted && let Some(state) = services.admin_state() {
+        state.token_plan_quota.invalidate(route.route_id).await;
     }
     if status_is_429 || quota_exhausted {
         schedule_quota_refresh(services, route);

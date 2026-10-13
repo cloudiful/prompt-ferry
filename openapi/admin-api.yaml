@@ -8312,6 +8312,8 @@ components:
       - exhausted
       - unknown
       - cooling
+      - rate_limited
+      - upstream_unavailable
     TokenPlanQuotaStatus:
       type: object
       required:

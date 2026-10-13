@@ -42,7 +42,26 @@ const cache = reactive<Record<string, CachedUsage>>({})
 // the same pending promise — no duplicate `/api/v1/endpoints/{id}/usage`
 // request.
 const inflight = new Map<string, Promise<TokenPlanFetchOutcome>>()
-const cacheExpiry = createTokenPlanCacheExpiry()
+
+// Expiry subscribers (foreground sweep). Owned here so the cache never
+// imports the foreground module: the foreground subscribes while consumers
+// are active, the cache only notifies.
+const expiryListeners = new Set<(expiredIds: readonly string[]) => void>()
+
+export function subscribeTokenPlanUsageExpiry(
+  listener: (expiredIds: readonly string[]) => void,
+): () => void {
+  expiryListeners.add(listener)
+  return () => {
+    expiryListeners.delete(listener)
+  }
+}
+
+const cacheExpiry = createTokenPlanCacheExpiry({
+  onExpiry: (expiredIds) => {
+    for (const listener of [...expiryListeners]) listener(expiredIds)
+  },
+})
 
 // A cache read paired with its fetch state: stale snapshots remain visible as
 // detail but cannot claim that their quota is current.
@@ -64,7 +83,8 @@ export function getTokenPlanUsageSnapshot(
     return { state: entry.refreshing ? 'loading' : 'error', usage: null }
   }
   const stale =
-    entry.refreshFailed || Date.now() - entry.fetchedAt >= TOKEN_PLAN_CACHE_TTL_MS
+    entry.refreshFailed ||
+    Date.now() - entry.fetchedAt >= TOKEN_PLAN_CACHE_TTL_MS
   return { state: stale ? 'stale' : 'ready', usage: entry.usage }
 }
 
@@ -84,8 +104,9 @@ export function isTokenPlanUsageFresh(endpointId: string): boolean {
   if (!entry) return false
   const checkedAt = entry.usage === null ? entry.lastAttemptAt : entry.fetchedAt
   return (
-    !entry.refreshFailed || entry.usage === null
-  ) && Date.now() - checkedAt < TOKEN_PLAN_CACHE_TTL_MS
+    (!entry.refreshFailed || entry.usage === null) &&
+    Date.now() - checkedAt < TOKEN_PLAN_CACHE_TTL_MS
+  )
 }
 
 // Shared fetch path: cold fetch, background refresh and a caller's deliberate
@@ -130,7 +151,10 @@ function fetchTokenPlanUsageOnce(
       if (current && current.usage !== null) {
         current.lastAttemptAt = now
         current.refreshFailed = true
-        cacheExpiry.remove(endpointId)
+        // Notify-only single-shot retry at the existing retry TTL: the
+        // foreground sweep re-gates through retryDue plus visible/active
+        // checks, so no immediate loop or hidden-tab fetch results.
+        cacheExpiry.schedule(endpointId, now + TOKEN_PLAN_CACHE_TTL_MS)
         return { ok: false, cause }
       }
       cache[endpointId] = {
@@ -140,7 +164,7 @@ function fetchTokenPlanUsageOnce(
         refreshFailed: true,
         refreshing: false,
       }
-      cacheExpiry.remove(endpointId)
+      cacheExpiry.schedule(endpointId, now + TOKEN_PLAN_CACHE_TTL_MS)
       return { ok: false, cause }
     } finally {
       if (cache[endpointId]) cache[endpointId]!.refreshing = false
@@ -250,9 +274,22 @@ export async function prefetchTokenPlanUsage(
 //
 // `concurrency=4` mirrors the spec's "并发限4"; input ids are
 // de-duplicated so re-renders that re-emit the same list don't double up.
+//
+// Stale entries serve immediately (SWR) and revalidate in the background:
+// after the SWR call each worker joins the actual automatic inflight for
+// that id so the pool of 4 bounds real network concurrency as well as
+// cold fetches. Force flights are never joined, preserving automatic/force
+// isolation.
+//
+// The optional per-id eligibility predicate is evaluated immediately before
+// starting each id (default always eligible, preserving existing callers).
+// A foreground sweep passes a live predicate (visible plus still
+// registered) so remaining queue entries are skipped once the last consumer
+// unregisters or the tab hides; already-started requests still finish.
 export async function prefetchTokenPlanBatch(
   endpointIds: Iterable<string>,
   concurrency = 4,
+  isEligible: (endpointId: string) => boolean = () => true,
 ): Promise<void> {
   const ids = Array.from(new Set(endpointIds)).filter(Boolean)
   if (ids.length === 0) return
@@ -262,7 +299,13 @@ export async function prefetchTokenPlanBatch(
     while (index < ids.length) {
       const id = ids[index++]
       if (id === undefined) break
+      if (!isEligible(id)) continue
       await prefetchTokenPlanUsage(id)
+      // Join the automatic flight this SWR kicked off (cold reads already
+      // settled inside the prefetch above; the lookup is then absent).
+      // Never join `force:` — a deliberate refresh stays isolated.
+      const flight = inflight.get(`automatic:${id}`)
+      if (flight) await flight.catch(() => undefined)
     }
   })
   await Promise.all(workers)

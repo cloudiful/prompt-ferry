@@ -24,7 +24,9 @@ use crate::{
     db,
     openai_compat::normalize_response_error,
     upstream_adapter::ResponseAdapter,
-    upstream_error::{is_quota_exhaustion, map_upstream_invalid_request},
+    upstream_error::{
+        UpstreamFailureCause, classify_upstream_failure, map_upstream_invalid_request,
+    },
 };
 use http::header;
 use invalid_continuation::apply_hint;
@@ -148,9 +150,9 @@ pub(super) async fn forward_upstream_response(
         .map(str::to_string);
     let upstream_response_headers = forwarded_response_headers(response.headers());
     let status_is_429 = status == http::StatusCode::TOO_MANY_REQUESTS;
-    if status_is_429 && let Some(feedback) = &context.attempt_feedback {
-        feedback.record_429(parse_retry_after(response.headers()));
-    }
+    // Retained before the response is consumed for classification: Retry-After
+    // is the only header that survives the read.
+    let retry_after = parse_retry_after(response.headers());
     // Issue #599 R2f.3: the header is authoritative when it names an event
     // stream; every other response is classified from its actual body prefix
     // after the success check below.
@@ -161,11 +163,19 @@ pub(super) async fn forward_upstream_response(
     if !status.is_success() {
         let body = read_response_sample(response, ERROR_BODY_SAMPLE_BYTES).await;
         let body_text = String::from_utf8_lossy(&body).to_string();
-        let quota_exhausted = is_quota_exhaustion(&body_text);
+        let cause = classify_upstream_failure(status.as_u16(), &body_text);
+        let quota_exhausted = cause == Some(UpstreamFailureCause::Exhausted);
+        // Every 429 backs the route off, whatever its cause, and a 429 whose
+        // body could not be read degrades to a generic rate limit. An
+        // unrelated non-429 failure keeps its existing handling and starts no
+        // backoff.
+        if (status_is_429 || quota_exhausted)
+            && let Some(feedback) = &context.attempt_feedback
+        {
+            let cause = cause.unwrap_or(UpstreamFailureCause::RateLimited);
+            feedback.record_failure(if status_is_429 { retry_after } else { None }, cause);
+        }
         if quota_exhausted {
-            if !status_is_429 && let Some(feedback) = &context.attempt_feedback {
-                feedback.record_429(None);
-            }
             if let Some(state) = services.admin_state() {
                 state.token_plan_quota.invalidate(route.route_id).await;
             }
@@ -474,7 +484,12 @@ fn client_status_for_upstream_error(
     upstream_status: http::StatusCode,
     body: &str,
 ) -> http::StatusCode {
-    if !upstream_status.is_success() && is_quota_exhaustion(body) {
+    // Only a confirmed exhaustion is rewritten for the client; throttling and
+    // an unavailable upstream keep the status the upstream actually sent.
+    if !upstream_status.is_success()
+        && classify_upstream_failure(upstream_status.as_u16(), body)
+            == Some(UpstreamFailureCause::Exhausted)
+    {
         http::StatusCode::TOO_MANY_REQUESTS
     } else {
         upstream_status
@@ -549,6 +564,39 @@ mod status_tests {
         );
 
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn never_rewrites_a_status_for_a_bare_quota_word() {
+        // Only a confirmed exhaustion is reported as a quota to the client; a
+        // body that merely mentions quota, credits or billing keeps the
+        // upstream's own status, whatever it is.
+        for body in [
+            r#"{"error":{"message":"quota information unavailable"}}"#,
+            r#"{"error":{"message":"billing details changed"}}"#,
+            r#"{"error":{"message":"Token Plan request rate limit"}}"#,
+            r#"{"error":{"message":"Service Unavailable"}}"#,
+            // A longer provider code is a different code, not 2056.
+            r#"{"error":{"code":20560,"message":"unrelated failure"}}"#,
+            r#"{"error":{"code":20670,"message":"unrelated failure"}}"#,
+            // A key that merely ends in "code" is a different key.
+            r#"{"zipcode":2056,"message":"unrelated failure"}"#,
+            r#"{"error":{"discount_code":2067}}"#,
+            "code: 2056abc",
+        ] {
+            assert_eq!(
+                client_status_for_upstream_error(StatusCode::BAD_REQUEST, body),
+                StatusCode::BAD_REQUEST,
+                "{body}"
+            );
+        }
+        assert_eq!(
+            client_status_for_upstream_error(
+                StatusCode::BAD_REQUEST,
+                r#"{"error":{"message":"Insufficient Balance"}}"#
+            ),
+            StatusCode::TOO_MANY_REQUESTS
+        );
     }
 
     #[test]

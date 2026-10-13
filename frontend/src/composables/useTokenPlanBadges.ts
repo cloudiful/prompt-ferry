@@ -77,6 +77,9 @@ export type TokenPlanPillSource = {
   // then omit those keys and a no-quota pill replaces the percentages, so the
   // badge never advertises usable 5h/weekly quota that routing will not use.
   commandCodeExhausted: boolean
+  // Latest retry deadline of the active feedback block, shown in the tooltip
+  // of a transient badge. Optional so a source without it still renders.
+  cooldownUntil?: string | null
 }
 
 export type TokenPlanBadges = TokenPlanPillSource & {
@@ -116,6 +119,7 @@ const EMPTY_SOURCE: TokenPlanPillSource = {
   deepseekState: 'loading',
   localTodayTokens: null,
   commandCodeExhausted: false,
+  cooldownUntil: null,
 }
 
 function finiteNumber(value: number | null | undefined): number | null {
@@ -199,10 +203,14 @@ function computeBadges(snapshot: TokenPlanUsageSnapshot): TokenPlanBadges {
   const usage = snapshot.usage
   const summary = summarizeTokenPlanQuota(usage.provider, usage.keys, status)
   const mode = badgeMode(usage.provider)
+  // Stale keeps last-known balances from capacity evidence (usable is empty
+  // by definition); fresh keeps the usable-only behavior unchanged.
+  const balanceKeys =
+    status === 'stale' ? summary.capacityKeys : summary.usableKeys
   let openrouter: KeyBadges | null = null
   let deepseek: KeyBadges | null = null
   let deepseekUnknown: KeyBadges | null = null
-  for (const key of summary.usableKeys.map(computeKeyBadges)) {
+  for (const key of balanceKeys.map(computeKeyBadges)) {
     if (!key.ok) continue
     if (
       openrouter === null &&
@@ -247,6 +255,7 @@ function computeBadges(snapshot: TokenPlanUsageSnapshot): TokenPlanBadges {
     commandCodeExhausted:
       usage.provider === 'command_code' &&
       (summary.allExhausted || summary.legacyCommandCodeNoQuota),
+    cooldownUntil: summary.cooldownUntil,
     usage,
   }
 }
@@ -306,7 +315,7 @@ export function tokenPlanBadgePills(
     const hasBalance =
       source.openrouterBalance !== null || source.openrouterRemaining !== null
     if (state === 'cooling' || state === 'exhausted') {
-      pills.push(quotaStatePill(state, t))
+      pills.push(quotaStatePill(state, t, source.cooldownUntil))
     } else if (state === 'unknown' && !hasBalance) {
       pills.push(quotaStatePill('unknown', t))
     } else if (state === 'available' && !hasBalance) {
@@ -330,6 +339,9 @@ export function tokenPlanBadgePills(
         pills.push(quotaStatePill('unknown', t))
       }
     }
+    if (isTransientState(state)) {
+      pills.push(quotaStatePill(state, t, source.cooldownUntil))
+    }
     if (source.openrouterDailySpend !== null) {
       pills.push({
         label: `${t('tokenPlanSpendDaily')} ${formatMoney('USD', source.openrouterDailySpend)}`,
@@ -344,9 +356,18 @@ export function tokenPlanBadgePills(
   }
   if (source.mode === 'deepseek') {
     const pills: TokenPlanBadgePill[] = []
+    // Stale with known amounts shows both: the last-known balance plus an
+    // explicit unknown/stale hint, never the amount as fresh capacity.
+    const hasKnownDeepseek = source.deepseekBalances.some(
+      (amount) => amount.total !== null,
+    )
     if (state === 'cooling' || state === 'exhausted') {
-      pills.push(quotaStatePill(state, t))
-    } else if (state === 'unknown' && (source.quotaMetadataPresent || source.status === 'stale')) {
+      pills.push(quotaStatePill(state, t, source.cooldownUntil))
+    } else if (
+      state === 'unknown' &&
+      (source.quotaMetadataPresent || source.status === 'stale') &&
+      !(source.status === 'stale' && hasKnownDeepseek)
+    ) {
       pills.push(quotaStatePill('unknown', t))
     } else {
       const legacyUnavailable =
@@ -368,7 +389,9 @@ export function tokenPlanBadgePills(
         })
       }
       if (known === 0 && legacyUnavailable) {
-        pills.push(namedPill(t('tokenPlanUnavailable'), badgeColorForPercent(0)))
+        pills.push(
+          namedPill(t('tokenPlanUnavailable'), badgeColorForPercent(0)),
+        )
       } else if (known === 0 || known < source.deepseekBalances.length) {
         pills.push(namedPill(t('tokenPlanBalanceUnknown')))
       }
@@ -376,13 +399,22 @@ export function tokenPlanBadgePills(
         pills.push(quotaStatePill('available', t))
       }
       if (state === 'partial') pills.push(quotaStatePill('partial', t))
+      if (isTransientState(state)) {
+        pills.push(quotaStatePill(state, t, source.cooldownUntil))
+      }
+      // Nonexclusive stale adjunct: retained amounts stay visible alongside
+      // the explicit unknown hint, never as fresh capacity.
+      if (source.status === 'stale' && state === 'unknown') {
+        pills.push(quotaStatePill('unknown', t))
+      }
     }
     if (source.localTodayTokens !== null) {
       pills.push(localTodayPill(source.localTodayTokens, t))
     }
     return pills
   }
-  if (state === 'cooling') return [quotaStatePill('cooling', t)]
+  if (state === 'cooling')
+    return [quotaStatePill('cooling', t, source.cooldownUntil)]
   if (state === 'available' && source.short === null && source.long === null) {
     return [quotaStatePill('available', t)]
   }
@@ -401,7 +433,9 @@ export function tokenPlanBadgePills(
       label: `${t('tokenPlanShortBadge')} ${source.short.toFixed(0)}%`,
       color: badgeColorForPercent(source.short),
       title:
-        state === 'unknown' ? t('tokenPlanQuotaUnknown') : t('tokenPlanShortBadgeHint'),
+        state === 'unknown'
+          ? t('tokenPlanQuotaUnknown')
+          : t('tokenPlanShortBadgeHint'),
     })
   }
   if (source.long !== null) {
@@ -409,7 +443,9 @@ export function tokenPlanBadgePills(
       label: `${t('tokenPlanLongBadge')} ${source.long.toFixed(0)}%`,
       color: badgeColorForPercent(source.long),
       title:
-        state === 'unknown' ? t('tokenPlanQuotaUnknown') : t('tokenPlanLongBadgeHint'),
+        state === 'unknown'
+          ? t('tokenPlanQuotaUnknown')
+          : t('tokenPlanLongBadgeHint'),
     })
   }
   if (
@@ -418,12 +454,33 @@ export function tokenPlanBadgePills(
     (source.quotaMetadataPresent || source.status === 'stale')
   ) {
     pills.push(quotaStatePill('unknown', t))
+  } else if (
+    state === 'unknown' &&
+    source.status === 'stale' &&
+    pills.length > 0
+  ) {
+    // Stale historical numbers stay visible but never as current capacity:
+    // name the unknown observation alongside the retained percentages.
+    pills.push(quotaStatePill('unknown', t))
   } else if (state === 'partial') {
     pills.push(quotaStatePill('partial', t))
+  } else if (isTransientState(state)) {
+    // Throttling and an unavailable upstream never hide the provider
+    // percentages: the pill names the block, the windows still describe the
+    // account's actual capacity.
+    pills.push(quotaStatePill(state, t, source.cooldownUntil))
   } else if (state === 'exhausted' && pills.length === 0) {
     pills.push(quotaStatePill('exhausted', t))
   }
   return pills
+}
+
+// A transient feedback state: the key is blocked right now without its quota
+// being spent.
+function isTransientState(
+  state: TokenPlanQuotaSummaryState,
+): state is 'rate_limited' | 'upstream_unavailable' {
+  return state === 'rate_limited' || state === 'upstream_unavailable'
 }
 
 function localTodayPill(tokens: number, t: TranslateFn): TokenPlanBadgePill {
@@ -437,18 +494,23 @@ function localTodayPill(tokens: number, t: TranslateFn): TokenPlanBadgePill {
 function quotaStatePill(
   state: TokenPlanQuotaSummaryState,
   t: TranslateFn,
+  cooldownUntil?: string | null,
 ): TokenPlanBadgePill {
   const label =
     state === 'available'
       ? t('tokenPlanAvailable')
       : state === 'cooling'
         ? t('tokenPlanQuotaCooling')
-        : state === 'exhausted'
-          ? t('tokenPlanUnavailable')
-          : state === 'partial'
-            ? t('tokenPlanQuotaPartial')
-            : t('tokenPlanQuotaUnknown')
-  return namedPill(
+        : state === 'rate_limited'
+          ? t('tokenPlanRateLimited')
+          : state === 'upstream_unavailable'
+            ? t('tokenPlanUpstreamUnavailable')
+            : state === 'exhausted'
+              ? t('tokenPlanUnavailable')
+              : state === 'partial'
+                ? t('tokenPlanQuotaPartial')
+                : t('tokenPlanQuotaUnknown')
+  const pill = namedPill(
     label,
     state === 'exhausted'
       ? badgeColorForPercent(0)
@@ -456,6 +518,16 @@ function quotaStatePill(
         ? badgeColorForPercent(100)
         : '',
   )
+  // A blocked key says when routing will try again, using the same deadline
+  // template the detail view uses.
+  return cooldownUntil
+    ? {
+        ...pill,
+        title: `${pill.title} · ${t('quotaRetryAt', {
+          time: new Date(cooldownUntil).toLocaleString(),
+        })}`,
+      }
+    : pill
 }
 
 // State pill whose own label is also the tooltip: the balance surface says

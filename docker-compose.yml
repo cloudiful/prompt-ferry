@@ -1,131 +1,168 @@
-# Recreate procedure:
-# 1. Stop the worker first so in-flight requests drain and the worker
-#    breaks its relay WebSocket before the relay closes its listener.
-# 2. Stop the relay once the worker is gone (no more inbound traffic).
-# 3. `docker compose up -d --timeout 25 worker relay` brings them back in
-#    the order they should be re-healthy.
+# Fresh-stack example: PostgreSQL 18, Valkey, RustFS (S3) and one integrated
+# prompt-ferry that serves the relay and the worker from a single process.
+# Copy .env.example to .env, replace the secret placeholders, then follow the
+# README quickstart.
 #
-# stop_grace_period lines up with PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS
-# plus a small headroom; raise them together if you raise the drain budget.
-#
-# Readiness: GET /ready returns 200 only while a worker is connected and client
-# routes are loaded; 503 + Retry-After: 5 means the relay is still rolling, so
-# clients retry. Liveness stays /healthz. Never gate `worker.depends_on.relay`
-# on /ready: the relay waits for a worker, so gating on readiness deadlocks the
-# first start. The relay healthcheck below therefore keeps probing /healthz.
-#
-# Upgrade order: stop worker (--timeout 30) -> stop relay (--timeout 20) ->
-# pull -> up. A worker-only roll may keep the relay pinned ONLY while
-# BRIDGE_WIRE_VERSION / FRAME_VERSION are unchanged; bumping either requires a
-# joint rollout of relay and worker.
-#
-# Split topology: `relay` is the relay-only host role and `worker` is the
-# worker-only one, so no local relay/worker bridge is shared between the two
-# containers beyond the worker's own dial of relay:8788. The relay also owns a
-# loopback management listener (relay.admin_bind, default 127.0.0.1:8790) that
-# serves the relay's own page, settings, host role, and restart action without a
-# worker. It is loopback-only by design, so it stays inside the relay container
-# and is deliberately not published here; it is reached from inside that
-# container (for example `docker compose exec relay`), or by adding a local-only
-# `ports` mapping plus a loopback `relay.admin_bind` in a deployment that needs a
-# browser on the host. The worker admin console on 8789 keeps serving the worker
-# business API. Set PROMPT_FERRY_RELAY__ADMIN_TOKEN in .env to keep the relay
-# management token stable across recreations: it is passed through to the relay
-# container below, and when it is left unset the relay generates one into the
-# container filesystem (under the config root, e.g.
-# /root/.config/prompt-ferry-host/config.toml), which does not survive `down`.
+# This example creates a NEW postgres18-data volume. It is not an upgrade path:
+# a PostgreSQL 17 cluster reaches 18 only through pg_dump/pg_restore or
+# pg_upgrade, never by moving the data directory.
 
 services:
   postgres:
-    image: postgres:17
+    image: postgres:18-bookworm
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-prompt_ferry}
-      POSTGRES_USER: ${POSTGRES_USER:-prompt_ferry}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    # PostgreSQL 18 keeps its cluster under /var/lib/postgresql/<major>/docker,
+    # so the named volume mounts the version parent and survives container
+    # rebuilds.
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres18-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 20
+    ports:
+      # Loopback only: the database is never published on a routable address.
+      - "127.0.0.1:${PROMPT_FERRY_POSTGRES_PORT:-5432}:5432"
 
-  relay:
-    image: ${PROMPT_FERRY_IMAGE:?set PROMPT_FERRY_IMAGE in .env}
+  valkey:
+    image: valkey/valkey:8-alpine
     restart: unless-stopped
-    stop_signal: SIGTERM
-    stop_grace_period: 20s
-    command: ["relay"]
-    environment:
-      PROMPT_FERRY_LOGGING__LEVEL: ${PROMPT_FERRY_LOGGING__LEVEL:-info}
-      PROMPT_FERRY_RELAY__BIND: 0.0.0.0:8787
-      PROMPT_FERRY_RELAY__WORKER_BIND: 0.0.0.0:8788
-      PROMPT_FERRY_RELAY__CLIENT_TOKEN: ${PROMPT_FERRY_RELAY__CLIENT_TOKEN:?set PROMPT_FERRY_RELAY__CLIENT_TOKEN in .env}
-      PROMPT_FERRY_RELAY__WORKER_TOKEN: ${PROMPT_FERRY_WORKER_TOKEN:?set PROMPT_FERRY_WORKER_TOKEN in .env}
-      PROMPT_FERRY_RELAY__ADMIN_TOKEN: ${PROMPT_FERRY_RELAY__ADMIN_TOKEN:-}
-      PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS: ${PROMPT_FERRY_RELAY__REQUEST_TIMEOUT_SECONDS:-300}
+    # appendonly keeps the coordination and response-affinity keys across restarts.
+    command: ["valkey-server", "--appendonly", "yes", "--dir", "/data"]
+    volumes:
+      - valkey-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8787/healthz || exit 1"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 10
-      start_period: 5s
+      retries: 20
     ports:
-      - "127.0.0.1:${PROMPT_FERRY_RELAY_PORT:-8787}:8787"
+      - "127.0.0.1:${PROMPT_FERRY_VALKEY_PORT:-6379}:6379"
 
-  worker:
+  rustfs:
+    image: rustfs/rustfs:1.0.1
+    restart: unless-stopped
+    environment:
+      # Reuses the application credentials, so there is exactly one S3 account
+      # to configure and no default rustfsadmin login to forget to change.
+      RUSTFS_ACCESS_KEY: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY:?set PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY in .env}
+      RUSTFS_SECRET_KEY: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY:?set PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY in .env}
+      RUSTFS_CONSOLE_ENABLE: "true"
+    volumes:
+      - rustfs-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/health/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      # S3 API and web console, loopback only; the console creates the bucket.
+      - "127.0.0.1:${PROMPT_FERRY_RUSTFS_PORT:-9000}:9000"
+      - "127.0.0.1:${PROMPT_FERRY_RUSTFS_CONSOLE_PORT:-9001}:9001"
+
+  prompt-ferry:
     image: ${PROMPT_FERRY_IMAGE:?set PROMPT_FERRY_IMAGE in .env}
     restart: unless-stopped
     stop_signal: SIGTERM
+    # Must stay above the drain budget below so in-flight requests finish first.
     stop_grace_period: 30s
-    command: ["worker"]
+    # The image ships `relay` as its default command; an empty command starts
+    # the integrated relay + worker default of the binary.
+    command: []
     depends_on:
       postgres:
         condition: service_healthy
-      relay:
+      valkey:
+        condition: service_healthy
+      rustfs:
         condition: service_healthy
     environment:
       PROMPT_FERRY_LOGGING__LEVEL: ${PROMPT_FERRY_LOGGING__LEVEL:-info}
-      PROMPT_FERRY_WORKER__RELAY_URLS: '["ws://relay:8788/ws/worker"]'
-      PROMPT_FERRY_WORKER__WORKER_TOKEN: ${PROMPT_FERRY_WORKER_TOKEN:?set PROMPT_FERRY_WORKER_TOKEN in .env}
-      DATABASE_URL: ${DATABASE_URL-postgres://${POSTGRES_USER:-prompt_ferry}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-prompt_ferry}}
+      PROMPT_FERRY_RELAY__BIND: 0.0.0.0:8787
+      PROMPT_FERRY_RELAY__CLIENT_TOKEN: ${PROMPT_FERRY_RELAY__CLIENT_TOKEN:?set PROMPT_FERRY_RELAY__CLIENT_TOKEN in .env}
+      # Optional: empty keeps the worker bridge unauthenticated, which is only
+      # safe because the bridge stays on an internal loopback bind. The worker
+      # token is authoritative for both halves in integrated mode.
+      PROMPT_FERRY_WORKER__WORKER_TOKEN: ${PROMPT_FERRY_WORKER__WORKER_TOKEN:-}
       PROMPT_FERRY_WORKER__ADMIN_BIND: 0.0.0.0:80
-      PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN: ${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN:-admin}
-      PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD: ${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD:?set PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD in .env}
-      PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY: ${PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY:?set PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY in .env}
-      PROMPT_FERRY_WORKER__VALKEY_URL: ${PROMPT_FERRY_WORKER__VALKEY_URL:-}
       PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS: ${PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS:-6}
       PROMPT_FERRY_WORKER__MCP_WARMUP: ${PROMPT_FERRY_WORKER__MCP_WARMUP:-all}
+      PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN: ${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN:-admin}
+      # Optional: empty generates a strong password once and writes it to
+      # <data-root>/prompt-ferry/bootstrap-admin.txt, which the data volume keeps.
+      PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD: ${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD:-}
+      # Optional: empty generates a key once and persists it to
+      # <data-root>/prompt-ferry/worker-config.key; back it up or stored secrets
+      # become unreadable.
+      PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY: ${PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY:-}
+      PROMPT_FERRY_WORKER__UPSTREAM_API_KEY: ${PROMPT_FERRY_WORKER__UPSTREAM_API_KEY:-}
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ENDPOINT: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ENDPOINT:-}
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_BUCKET: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_BUCKET:-}
+      # Storage endpoints are service names on the Compose network. The
+      # host-loopback URLs in .env apply to a host-run binary, not here.
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      PROMPT_FERRY_WORKER__VALKEY_URL: "redis://valkey:6379"
+      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ENDPOINT: "http://rustfs:9000"
+      # Credentials and bucket come from .env so the host and container setups
+      # store payloads in the same place.
+      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_BUCKET: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_BUCKET:-prompt-ferry-raw}
       PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_REGION: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_REGION:-auto}
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY:-}
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY:-}
+      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY:?set PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ACCESS_KEY in .env}
+      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY:?set PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_SECRET_KEY in .env}
       PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PREFIX: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PREFIX:-prompt-ferry/raw}
-      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ALLOW_HTTP: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ALLOW_HTTP:-false}
+      # allow_http is required for a plain-HTTP local endpoint.
+      PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ALLOW_HTTP: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_ALLOW_HTTP:-true}
       PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PATH_STYLE: ${PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_PATH_STYLE:-true}
-    # `/api/v1/ready` runs a `SELECT 1` against the database; once that returns
-    # the admin state has been built and the worker can answer relay traffic.
+      # The bootstrap password and encryption key are generated under the data
+      # root, so both roots must be persistent volumes.
+      XDG_DATA_HOME: /var/lib/prompt-ferry
+      XDG_CONFIG_HOME: /etc/prompt-ferry
+    volumes:
+      - prompt-ferry-data:/var/lib/prompt-ferry
+      - prompt-ferry-config:/etc/prompt-ferry
+      # uv caches for the uvx-based stdio MCP servers; a recreate without them
+      # re-downloads the Python runtime and its dependencies.
+      - prompt-ferry-uv-cache:/root/.cache/uv
+      - prompt-ferry-uv-data:/root/.local/share/uv
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/api/v1/ready >/dev/null 2>&1 || exit 1"]
+      # /healthz is relay liveness; /api/v1/ready additionally proves the
+      # worker reached the database. Both must hold for traffic to flow.
+      # Runtime image ships bash but no wget/curl, so probe via bash
+      # /dev/tcp and require exact HTTP/1.0-or-1.1 200 status field;
+      # reason/body digits never determine health.
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8787 || exit 1;
+          printf 'GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n' >&3;
+          IFS= read -r -t 2 line <&3 || { exec 3<&-; exec 3>&-; exit 1; };
+          exec 3<&-; exec 3>&-;
+          line=$${line%$$'\r'}; case "$$line" in "HTTP/1.0 200"|"HTTP/1.0 200 "*|"HTTP/1.1 200"|"HTTP/1.1 200 "*) ;; *) exit 1;; esac;
+          exec 3<>/dev/tcp/127.0.0.1/80 || exit 1;
+          printf 'GET /api/v1/ready HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n' >&3;
+          IFS= read -r -t 2 line <&3 || { exec 3<&-; exec 3>&-; exit 1; };
+          exec 3<&-; exec 3>&-;
+          line=$${line%$$'\r'}; case "$$line" in "HTTP/1.0 200"|"HTTP/1.0 200 "*|"HTTP/1.1 200"|"HTTP/1.1 200 "*) ;; *) exit 1;; esac
       interval: 5s
       timeout: 3s
       retries: 20
       start_period: 15s
     ports:
+      # Client traffic and the admin console, loopback only.
+      - "127.0.0.1:${PROMPT_FERRY_RELAY_PORT:-8787}:8787"
       - "127.0.0.1:${PROMPT_FERRY_WORKER_ADMIN_PORT:-8789}:80"
-    # Persist uv caches for the remaining uvx-based third-party stdio MCP
-    # servers so a container recreate does not re-download the Python runtime
-    # and dependencies. The built-in MiniMax MCP needs no uv. A plain
-    # `restart` keeps the container filesystem; `down`/recreate without these
-    # volumes would lose the caches.
-    volumes:
-      - prompt-ferry-uv-cache:/root/.cache/uv
-      - prompt-ferry-uv-data:/root/.local/share/uv
 
 volumes:
-  postgres-data:
+  postgres18-data:
+  valkey-data:
+  rustfs-data:
+  prompt-ferry-data:
+  prompt-ferry-config:
   prompt-ferry-uv-cache:
   prompt-ferry-uv-data:

@@ -72,15 +72,53 @@ test('per-key labels distinguish available, exhausted, unknown and cooling', asy
   }
 })
 
+test('throttling and an unavailable upstream get their own label, not a quota one', async () => {
+  const cases = [
+    ['rate_limited', 'tokenPlanRateLimited'],
+    ['upstream_unavailable', 'tokenPlanUpstreamUnavailable'],
+  ] as const
+  for (const [state, label] of cases) {
+    const html = await render({ state, scope: 'text_inference' })
+    expect(html).toContain(label)
+    expect(html).toContain('data-color="neutral"')
+    // Neither transient state borrows the cooling or unavailable-quota label.
+    expect(html).not.toContain('tokenPlanQuotaCooling')
+    expect(html).not.toContain('tokenPlanUnavailable')
+    expect(html).not.toContain('tokenPlanAvailable')
+  }
+})
+
+test('a transient per-key status shows its retry deadline in the tooltip', async () => {
+  for (const state of ['rate_limited', 'upstream_unavailable'] as const) {
+    const html = await render({
+      state,
+      scope: 'text_inference',
+      cooldown_until: '2026-10-11T10:01:00Z',
+    })
+    expect(html).toContain('quotaRetryAt:')
+  }
+})
+
 test('status tooltip includes observation time, refresh failure and cooldown', async () => {
-  const html = await render({
-    state: 'cooling',
-    scope: 'text_inference',
-    observed_at: '2026-10-11T10:00:00Z',
-    cooldown_until: '2026-10-11T10:01:00Z',
-    refresh_failed: true,
-  })
-  expect(html).toContain('quotaObservedAt:')
-  expect(html).toContain('quotaRefreshFailedCached')
-  expect(html).toContain('quotaRetryAt:')
+  // A frozen clock keeps every fixture deadline active, so this asserts the
+  // live-block tooltip rather than an already elapsed one.
+  const now = new Date('2026-10-11T10:00:30Z')
+  const at = (iso: string) => new Date(iso).toLocaleString()
+  const previousNow = Date.now
+  Date.now = () => now.getTime()
+  try {
+    const html = await render({
+      state: 'cooling',
+      scope: 'text_inference',
+      observed_at: '2026-10-11T10:00:00Z',
+      cooldown_until: '2026-10-11T10:01:00Z',
+      refresh_failed: true,
+    })
+    expect(html).toContain('quotaObservedAt:')
+    expect(html).toContain('quotaRefreshFailedCached')
+    expect(html).toContain('quotaRetryAt:')
+    expect(html).toContain(at('2026-10-11T10:01:00Z'))
+  } finally {
+    Date.now = previousNow
+  }
 })

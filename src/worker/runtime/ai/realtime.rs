@@ -17,6 +17,7 @@ use crate::{
         ResponseError,
     },
     realtime::{event_json, parse_client_event, parse_server_event},
+    upstream_error::{UpstreamFailureCause, classify_upstream_failure},
     worker::runtime::{RealtimeInboundMessage, context::RuntimeServices},
 };
 
@@ -218,7 +219,19 @@ fn settle_handshake<T>(
             if let tokio_tungstenite::tungstenite::Error::Http(response) = &err
                 && response.status() == StatusCode::TOO_MANY_REQUESTS
             {
-                feedback.record_429(parse_retry_after(response.headers()));
+                // The handshake rejection carries the same classification as a
+                // normal response: retry-after is read before the body is
+                // sampled, and an unreadable body stays a generic rate limit.
+                let retry_after = parse_retry_after(response.headers());
+                let body = response
+                    .body()
+                    .as_deref()
+                    .map(String::from_utf8_lossy)
+                    .unwrap_or_default();
+                let cause =
+                    classify_upstream_failure(StatusCode::TOO_MANY_REQUESTS.as_u16(), &body)
+                        .unwrap_or(UpstreamFailureCause::RateLimited);
+                feedback.record_failure(retry_after, cause);
                 schedule_quota_refresh(services, route);
             } else {
                 feedback.release_probe();

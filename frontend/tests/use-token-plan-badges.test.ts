@@ -114,6 +114,7 @@ test('empty usage renders empty badges', () => {
     deepseekState: 'loading',
     localTodayTokens: null,
     commandCodeExhausted: false,
+    cooldownUntil: null,
     usage: null,
   })
 })

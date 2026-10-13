@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::{
     db::EndpointProvider,
     worker_admin::{
-        quota_feedback::QuotaFeedbackScope,
+        quota_feedback::{QuotaFeedbackCause, QuotaFeedbackScope},
         quota_reset::{self, ResetState},
     },
     worker_admin_types::{
@@ -70,10 +70,10 @@ fn status_for_key(
         endpoint_id,
         (provider != EndpointProvider::OpenAi).then_some(key.key_id),
     );
-    let cooldown = cache.feedback.remaining_cooldown(scope, instant);
-    let (state, cooldown_until) = if let Some(remaining) = cooldown {
+    let cooldown = cache.feedback.active_cooldown(scope, instant);
+    let (state, cooldown_until) = if let Some((cause, remaining)) = cooldown {
         (
-            TokenPlanQuotaState::Cooling,
+            feedback_state(cause),
             ChronoDuration::from_std(remaining)
                 .ok()
                 .and_then(|remaining| now.checked_add_signed(remaining)),
@@ -98,6 +98,18 @@ fn status_for_key(
         cooldown_until,
         refresh_failed,
         scope: "text_inference".into(),
+    }
+}
+
+/// How an active feedback block is presented. A confirmed exhaustion keeps the
+/// `cooling` state it always had; throttling and an explicit outage get their
+/// own state so neither is read as a spent quota. The deadline, the routing
+/// effect and the probe lifecycle are identical for all three.
+fn feedback_state(cause: QuotaFeedbackCause) -> TokenPlanQuotaState {
+    match cause {
+        QuotaFeedbackCause::Exhausted => TokenPlanQuotaState::Cooling,
+        QuotaFeedbackCause::RateLimited => TokenPlanQuotaState::RateLimited,
+        QuotaFeedbackCause::UpstreamUnavailable => TokenPlanQuotaState::UpstreamUnavailable,
     }
 }
 

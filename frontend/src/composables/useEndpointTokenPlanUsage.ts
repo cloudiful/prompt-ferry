@@ -4,6 +4,7 @@ import type {
   TokenPlanUsageResponse,
 } from '@/generated/admin-api'
 import { isQuotaEligible } from '@/models/endpoints/quota'
+import { effectiveQuotaStatus, isFeedbackState } from './tokenPlanEffectiveKeys'
 import {
   getTokenPlanUsageSnapshot,
   requestTokenPlanUsage,
@@ -13,25 +14,28 @@ function usageForFetchState(
   usage: TokenPlanUsageResponse | null,
   state: ReturnType<typeof getTokenPlanUsageSnapshot>['state'],
 ): TokenPlanUsageResponse | null {
-  if (usage === null || state !== 'stale') return usage
+  if (usage === null) return usage
   return {
     ...usage,
     keys: usage.keys.map((key) => {
-      const status = key.quota_status
-      if (
-        status?.state === 'cooling' &&
-        status.cooldown_until != null &&
-        Date.parse(status.cooldown_until) > Date.now()
-      ) {
-        return key
-      }
+      // An elapsed retry deadline is demoted in every fetch state, so opening a
+      // ready cached entry never still reads as a live block. The helper hands
+      // back the very same object when nothing expired, which keeps an
+      // unexpired feedback state exactly as the upstream reported it.
+      const status = effectiveQuotaStatus(key)
+      if (status !== key.quota_status) return { ...key, quota_status: status }
+      // A live feedback block is feedback, not a provider observation, so a
+      // stale payload keeps its cause and deadline. Only the observations a
+      // stale payload may no longer vouch for are demoted below.
+      if (isFeedbackState(status?.state)) return key
+      if (state !== 'stale') return key
       return {
         ...key,
         quota_status: {
           state: 'unknown',
-          observed_at: status?.observed_at ?? null,
+          observed_at: key.quota_status?.observed_at ?? null,
           cooldown_until: null,
-          refresh_failed: status?.refresh_failed ?? false,
+          refresh_failed: key.quota_status?.refresh_failed ?? false,
           scope: 'text_inference',
         },
       }

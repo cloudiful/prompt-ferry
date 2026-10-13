@@ -3,12 +3,17 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum TokenPlanQuotaState {
     Available,
     Exhausted,
     Unknown,
+    /// Blocked because the quota or balance is confirmed spent.
     Cooling,
+    /// Blocked by throttling; the account's capacity is not reduced.
+    RateLimited,
+    /// Blocked because the upstream explicitly reported it is unavailable.
+    UpstreamUnavailable,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

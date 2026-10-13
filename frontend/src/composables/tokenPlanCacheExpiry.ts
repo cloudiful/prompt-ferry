@@ -7,6 +7,7 @@ type TokenPlanCacheExpiryOptions = {
   setTimeout?: (callback: () => void, delay: number) => TimerHandle
   clearTimeout?: (handle: TimerHandle) => void
   canSchedule?: () => boolean
+  onExpiry?: (expiredIds: string[]) => void
 }
 
 export function createTokenPlanCacheExpiry(
@@ -22,6 +23,7 @@ export function createTokenPlanCacheExpiry(
     ((handle: TimerHandle) => globalThis.clearTimeout(handle))
   const canSchedule =
     options.canSchedule ?? (() => typeof window !== 'undefined')
+  const onExpiry = options.onExpiry
   const revision = ref(0)
   const deadlines = new Map<string, number>()
   let timer: TimerHandle | undefined
@@ -48,15 +50,17 @@ export function createTokenPlanCacheExpiry(
         if (scheduledGeneration !== generation) return
         timer = undefined
         const currentTime = now()
-        let expired = false
+        const expiredIds: string[] = []
         for (const [key, expiresAt] of deadlines) {
           if (expiresAt <= currentTime) {
             deadlines.delete(key)
-            expired = true
+            expiredIds.push(key)
           }
         }
+        const expired = expiredIds.length > 0
         if (expired) revision.value += 1
         scheduleNext()
+        if (expired) onExpiry?.(expiredIds)
       },
       Math.max(0, deadline - now()),
     )

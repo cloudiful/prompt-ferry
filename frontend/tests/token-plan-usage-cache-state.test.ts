@@ -75,11 +75,14 @@ test('mounted desktop and mobile badge computeds become stale at cache expiry', 
 
   expect(desktopBadges.value.status).toBe('stale')
   expect(desktopBadges.value.quotaState).toBe('unknown')
-  expect(desktopBadges.value.short).toBeNull()
-  expect(desktopBadges.value.long).toBeNull()
+  // Stale retains last-known numbers with an explicit stale marker; the
+  // usage payload stays available without claiming current capacity.
+  expect(desktopBadges.value.short).toBe(50)
+  expect(desktopBadges.value.long).toBe(35)
   expect(desktopBadges.value.usage).toEqual(snapshot)
   expect(mobileBadges.value.status).toBe('stale')
   expect(mobileBadges.value.quotaState).toBe('unknown')
+  expect(mobileBadges.value.short).toBe(50)
   expect(fetchTokenPlanUsage).toHaveBeenCalledTimes(1)
 })
 

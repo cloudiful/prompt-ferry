@@ -1,4 +1,4 @@
-use super::{PROBE_TTL, QuotaFeedbackEligibility};
+use super::{PROBE_TTL, QuotaFeedbackCause, QuotaFeedbackEligibility};
 use std::time::{Duration, Instant};
 
 pub(super) struct Feedback {
@@ -6,16 +6,20 @@ pub(super) struct Feedback {
     pub failed_at: Instant,
     until: Instant,
     strikes: u32,
+    /// Why the last failure happened. The backoff clock is identical for
+    /// every cause; the cause only decides how the block is presented.
+    pub cause: QuotaFeedbackCause,
     pub probe: Option<Instant>,
 }
 
 impl Feedback {
-    pub fn new(now: Instant) -> Self {
+    pub fn new(now: Instant, cause: QuotaFeedbackCause) -> Self {
         Self {
             touched: now,
             failed_at: now,
             until: now,
             strikes: 0,
+            cause,
             probe: None,
         }
     }
@@ -44,8 +48,15 @@ impl Feedback {
         }
     }
 
-    pub fn fail(&mut self, retry_after: Option<Duration>, now: Instant, attempt_start: Instant) {
+    pub fn fail(
+        &mut self,
+        cause: QuotaFeedbackCause,
+        retry_after: Option<Duration>,
+        now: Instant,
+        attempt_start: Instant,
+    ) {
         self.strikes = self.strikes.saturating_add(1);
+        self.cause = cause;
         let delay = retry_after
             .map(|delay| delay.min(Duration::from_secs(3600)))
             .unwrap_or_else(|| {

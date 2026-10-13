@@ -6,6 +6,7 @@ import { renderTokenPlanBadges } from '@/components/endpoints/tokenPlanBadgeRend
 import TablePagination from '@/components/shared/TablePagination.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import { useTokenPlanBadges } from '@/composables/useTokenPlanBadges'
+import { useTokenPlanForegroundRefresh } from '@/composables/tokenPlanForegroundRefresh'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
 import type { EndpointListItemView } from '@/models/endpoints'
 import { isQuotaEligible } from '@/models/endpoints/quota'
@@ -92,6 +93,16 @@ watch(
     void prefetchVisible()
   },
   { immediate: true },
+)
+
+// Shared foreground revalidation for visible resume and TTL expiry: the
+// engine refcounts ids across the simultaneously mounted desktop/mobile
+// surfaces, so duplicate table/card consumers add no extra requests. The
+// mount prefetch above stays the initial-fetch owner.
+useTokenPlanForegroundRefresh(() =>
+  props.items
+    .filter((item) => isQuotaEligible(item))
+    .map((item) => item.endpoint_id),
 )
 
 // Inline usage-badge subcomponent. The pill markup itself is not owned here:

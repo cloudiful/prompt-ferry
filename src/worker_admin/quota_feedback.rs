@@ -37,6 +37,17 @@ pub(crate) enum QuotaFeedbackEligibility {
     ProbeBusy,
 }
 
+/// Why a scope is blocked. Every cause shares one backoff clock, one probe
+/// lifecycle and one routing effect; the cause only separates "the account is
+/// spent" from "this was throttling" and "the upstream is unavailable" so the
+/// badge and the API stop claiming an exhausted quota for a transient blip.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum QuotaFeedbackCause {
+    RateLimited,
+    UpstreamUnavailable,
+    Exhausted,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum QuotaProbeReservation {
     NotRequired,
@@ -71,17 +82,22 @@ impl QuotaFeedbackStore {
         })
     }
 
-    pub(crate) fn remaining_cooldown(
+    /// The active block with its cause, for the API projection. Read once so a
+    /// state cannot change between the cause and the deadline the caller
+    /// reports.
+    pub(crate) fn active_cooldown(
         &self,
         scope: QuotaFeedbackScope,
         now: Instant,
-    ) -> Option<Duration> {
+    ) -> Option<(QuotaFeedbackCause, Duration)> {
         let entries = self.0.lock().ok()?;
         let state = entries.get(&scope)?;
         if now.saturating_duration_since(state.touched) >= RETENTION {
             return None;
         }
-        state.remaining_until(now)
+        state
+            .remaining_until(now)
+            .map(|remaining| (state.cause, remaining))
     }
 
     pub(crate) fn reserve_probe_if_required(
@@ -136,9 +152,28 @@ impl QuotaFeedbackStore {
         now: Instant,
         attempt_start: Instant,
     ) {
+        self.record_failure(
+            scope,
+            QuotaFeedbackCause::RateLimited,
+            retry_after,
+            now,
+            attempt_start,
+        );
+    }
+
+    pub(crate) fn record_failure(
+        &self,
+        scope: QuotaFeedbackScope,
+        cause: QuotaFeedbackCause,
+        retry_after: Option<Duration>,
+        now: Instant,
+        attempt_start: Instant,
+    ) {
         self.with(now, |entries| {
-            let state = entries.entry(scope).or_insert_with(|| Feedback::new(now));
-            state.fail(retry_after, now, attempt_start);
+            let state = entries
+                .entry(scope)
+                .or_insert_with(|| Feedback::new(now, cause));
+            state.fail(cause, retry_after, now, attempt_start);
         });
     }
 

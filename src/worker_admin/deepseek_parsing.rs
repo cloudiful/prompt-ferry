@@ -344,19 +344,28 @@ mod tests {
         });
         let (code, message) = deepseek_http_business_error(402, &insufficient).expect("402");
         assert_eq!(code.as_deref(), Some("quota"));
-        // The 402 message self-contains a quota marker so quota-family
-        // logging matches without touching the shared whitelist.
-        assert!(crate::upstream_error::is_quota_exhaustion(&message));
-        assert!(crate::upstream_error::is_quota_exhaustion(&format!(
-            "{} {}",
-            code.unwrap_or_default(),
-            message
-        )));
+        // The 402 message self-contains an exhaustion statement so the shared
+        // narrow classifier resolves it without a DeepSeek-specific rule.
+        assert_eq!(
+            crate::upstream_error::classify_upstream_failure(402, &message),
+            Some(crate::upstream_error::UpstreamFailureCause::Exhausted)
+        );
+        assert_eq!(
+            crate::upstream_error::classify_upstream_failure(
+                402,
+                &format!("{} {}", code.unwrap_or_default(), message)
+            ),
+            Some(crate::upstream_error::UpstreamFailureCause::Exhausted)
+        );
         // 429 passes the server message through (retry semantics preserved).
         let limited = json!({"error": {"message": "Rate limit reached"}});
         let (code, message) = deepseek_http_business_error(429, &limited).expect("429");
         assert_eq!(code.as_deref(), Some("429"));
         assert_eq!(message, "Rate limit reached");
+        assert_eq!(
+            crate::upstream_error::classify_upstream_failure(429, &message),
+            Some(crate::upstream_error::UpstreamFailureCause::RateLimited)
+        );
         let (code, message) = deepseek_http_business_error(429, &json!({})).expect("429 default");
         assert_eq!(code.as_deref(), Some("429"));
         assert!(message.contains("retry"));

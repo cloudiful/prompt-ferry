@@ -137,6 +137,9 @@ const tableStub = defineComponent({
 
 const MODULE_STUBS: Record<string, unknown> = {
   '@/components/endpoints/tokenPlanBadgeRender': badgeRenderStubs,
+  '@/composables/tokenPlanForegroundRefresh': {
+    useTokenPlanForegroundRefresh: () => {},
+  },
   '@/composables/useTokenPlanBadges': badgeStubs,
   '@/composables/useTokenPlanUsageCache': { prefetchTokenPlanBatch },
   '@/models/endpoints/quota': { isQuotaEligible },

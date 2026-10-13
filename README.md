@@ -7,551 +7,99 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-`prompt-ferry` is an OpenAI-compatible AI API relay for Codex and other API
-clients. It can redact sensitive content before forwarding requests through a
-relay-worker bridge to one or more OpenAI-compatible or Anthropic-compatible
-upstreams.
+`prompt-ferry` is an OpenAI-compatible AI API relay for Codex and other clients.
+It forwards requests to OpenAI-compatible or Anthropic-compatible upstreams over
+a relay-worker bridge, redacting sensitive content on the way. A single binary
+runs the relay and the worker together by default.
 
 ```text
 Client -> relay /v1/* <-> worker WebSocket -> upstream API
 ```
 
-## Features
+## Capabilities
 
-- OpenAI Chat Completions and Responses compatibility, plus native Anthropic Messages and Models endpoints.
-- Anthropic SDK clients can use `POST /v1/messages` and `GET /v1/models` with `x-api-key`; native Messages
-  requests are transparently forwarded only to endpoints configured as `AnthropicMessages`.
-- Per-request reasoning controls: Chat `reasoning_effort` and Responses `reasoning.effort`, including DeepSeek `max`; Chat compatibility maps unsupported `developer` roles to `system`.
-- Configurable redaction for forwarded content, logs, and usage details.
-- Users, client API keys, upstream endpoints, model routes, and multiple relays.
-- A host-local service role: one binary can start as relay + embedded worker
-  (the default), worker only, or relay only, and the relay serves the management
-  page and its own settings without a worker.
-- First-class upstream presets for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM, DeepSeek, and OpenAI
-  Platform; preset base URLs (`https://api.openai.com` for OpenAI) are derived server-side, so only the
-  inference API key is configured. Other OpenAI-compatible hosts keep using the Generic provider with an
-  explicit base URL.
-- The admin console shows effective default-text quota summaries with raw per-key detail. OpenAI ChatGPT subscription quotas also include persisted snapshots and 30-day history with PostgreSQL; see [quota feedback](docs/quota-feedback.md) and [quota snapshots](docs/quota-snapshots.md).
-- MCP aggregation for HTTP and stdio servers, with SQLite support for configuration, catalog, and runtime execution; MCP quota and usage ledgers require PostgreSQL.
-- MCP credential quota: per-credential and shared quota-group budgets (requests or credits) with
-  atomic reservation, usage-ratio balancing across API keys, cooldown on auth/throttle failures,
-  and provider credit reconciliation (`creditsUsed`) for Firecrawl-style meters.
-- TLS, mutual TLS, and application-layer encryption for relay-worker traffic.
-- Native Responses passthrough, including DeepSeek v4 Flash; Responses requests
-  require Responses-native targets and are forwarded without cross-protocol conversion.
-- Bounded relay response buffering with configurable queue and byte limits.
-- Relay readiness: `GET /ready` returns `200` only while a worker is connected and client routes are
-  loaded; otherwise it fails fast with `503` and `Retry-After: 5` so SDKs retry during a rolling
-  upgrade, while `/healthz` stays liveness-only.
+- OpenAI Chat Completions and Responses, plus native Anthropic Messages and Models.
+- Upstream presets for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM, DeepSeek and OpenAI Platform; other OpenAI-compatible hosts use the Generic provider with an explicit base URL.
+- Per-request reasoning controls, including Chat `reasoning_effort` and Responses `reasoning.effort`.
+- Users, client API keys, upstream endpoints, model routes, key balancing, and multiple relays.
+- Configurable redaction for forwarded content, logs and usage details.
+- Admin console with effective default-text quota summaries, per-key detail, and 30-day OpenAI subscription history on PostgreSQL.
+- MCP aggregation for HTTP and stdio servers, with per-credential and shared quota budgets.
+- TLS, mutual TLS and application-layer encryption for relay-worker traffic.
 
-## Deploy
+Dependencies: PostgreSQL for business data, and optionally Valkey for
+coordination and response affinity. Raw request and response payloads are
+written to an S3-compatible bucket when one is configured.
 
-### Docker Compose
-
-The Compose example starts PostgreSQL, a relay, a worker, and the admin console
-with a prebuilt image from GHCR.
+## Quick start with Docker Compose (recommended)
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`, set `PROMPT_FERRY_IMAGE` to
-`ghcr.io/cloudiful/prompt-ferry:latest`, and replace the remaining secret
-placeholders. The worker token, encryption key, upstream API key, and
-bootstrap admin password are optional; unset secrets are generated or
-deferred to Admin setup as described under [Worker storage](#worker-storage).
-Then start the stack:
+In `.env`, replace every `REPLACE...` placeholder: the database password (in
+both `POSTGRES_PASSWORD` and `DATABASE_URL`), `PROMPT_FERRY_RELAY__CLIENT_TOKEN`,
+and the two S3 credentials. The file is read as data and never expanded, so the
+two database password entries have to be edited together.
+
+Start the dependencies first, because the S3 bucket has to exist before the
+application starts:
 
 ```bash
-docker compose pull
-docker compose up -d
+docker compose up -d postgres valkey rustfs
 ```
 
-For MiniMax Coding Plan, prefer the MiniMax endpoint's `Expose MiniMax MCP tools`
-switch (recommended). It creates a managed `builtin_minimax` server exposing
-`web_search` and `understand_image` without spawning a `uvx` subprocess. The
-managed server reuses the endpoint's token-plan API keys (multi-key rotation
-when endpoint key load-balancing is on) and needs no Basic Auth; the endpoint
-region selects `https://api.minimaxi.com` (CN) or `https://api.minimax.io`
-(Global). Existing custom `minimax-coding-plan-mcp` stdio rows are left
-untouched and keep their current behavior.
-
-The worker image also includes `uv`/`uvx` for generic third-party stdio MCP
-servers. For example, enter `["uvx", "example-mcp-server", "-y"]` as the
-command. Environment variables not configured in the MCP form are inherited
-from the worker. Sensitive variables should be placed in `.env`, such as
-`MINIMAX_API_KEY`; Compose passes it to the worker. Values can also be entered
-directly in the MCP form.
-
-Compose persists the worker uv caches (`/root/.cache/uv` and
-`/root/.local/share/uv`) in named volumes so recreating the container does not
-re-download the Python runtime and dependencies. A plain container `restart`
-keeps the filesystem; `down`/recreate without these volumes would lose the
-caches.
-
-Open the admin console at <http://127.0.0.1:8789>. This is the worker's own
-admin listener, and it keeps serving the worker business API — upstreams,
-providers, routes, quotas, usage. The `relay` container additionally runs a
-loopback management listener on `127.0.0.1:8790` inside that container, serving
-the relay's own page, settings, host service role, and restart action. The
-Compose file deliberately does not publish it: a management surface stays on
-loopback, so reach it from inside the container (for example
-`docker compose exec relay`) unless you add a local-only `ports` mapping for it.
-After signing in to the worker console, configure an upstream endpoint, model
-route, user, and client API key. Point an OpenAI-compatible client at the relay:
-
-```dotenv
-OPENAI_BASE_URL=http://127.0.0.1:8787/v1
-OPENAI_API_KEY=<generated-client-key>
-```
-
-Anthropic SDK clients can use the same relay URL and generated client key:
-
-```dotenv
-ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-ANTHROPIC_API_KEY=<generated-client-key>
-```
-
-For OpenCode or other `@ai-sdk/anthropic` clients, use the relay `/v1` prefix
-as the provider base URL so the SDK requests `/v1/messages`. Configure a
-MiniMax Anthropic endpoint with `https://api.minimaxi.com/anthropic` or
-`https://api.minimax.io/anthropic` as its upstream base URL and use the
-`AnthropicMessages` protocol.
-
-The first Anthropic-compatible release supports Messages and Models only. It does not translate
-Anthropic Messages requests to OpenAI Chat or Responses endpoints, and does not expose Anthropic
-Files, Batches, or Token Counting APIs.
-
-For deployments that keep raw payloads outside PostgreSQL, set the
-`PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_*` variables in `.env` and select
-`object_store` in the usage-retention settings. Configure the bucket with a
-3-day lifecycle, server-side encryption, and private access. Object storage
-credentials remain deployment configuration and are not exposed through the
-admin API.
-
-For slow downstream clients, tune the bounded relay response buffer with
-`PROMPT_FERRY_RELAY__RESPONSE_STREAM_BUFFER` and
-`PROMPT_FERRY_RELAY__RESPONSE_STREAM_MAX_BYTES`. The optional
-`PROMPT_FERRY_RELAY__RESPONSE_STREAM_BACKPRESSURE_TIMEOUT_MS` controls how long
-each response forwarding pump waits for a slow client before aborting; it
-defaults to 5000 ms. The defaults are 256 queued chunks and 16 MiB per response;
-all three values must be greater than zero.
-
-Keep port `8789` private. See [.env.example](.env.example) for the available
-Compose settings.
-
-### Worker storage
-
-The worker uses one Admin API and one configuration model with either backend.
-A non-empty `DATABASE_URL` selects PostgreSQL for shared, durable storage. An
-empty value selects SQLite for local durable configuration; a configured but
-unavailable PostgreSQL database does not fall back to SQLite. The
-`worker.database_url` config file field and an explicit `--database-url`
-argument remain supported.
-Both backends support users, encrypted secrets, endpoints, routes, relays,
-settings, client keys, and MCP configuration/catalog/runtime. SQLite also
-serves the Admin API, including authentication, but does not provide durable
-request records, raw-payload retention, approvals, billing, replay history, or
-MCP quota/usage ledgers.
-
-SQLite is intended for a single worker. PostgreSQL remains the choice for
-shared workers and the complete advanced persistence surface. Valkey is
-optional and can provide shared coordination/cache acceleration; without it,
-SQLite uses SQLite coordination and PostgreSQL uses its existing backend or
-bounded local fallbacks according to the state semantics.
-
-The worker and relay may run on separate machines with `prompt-ferry relay` and
-`prompt-ferry worker`, or on one host by setting the role to `worker` or `relay`
-and starting the binary with no subcommand. The relay-worker bridge protocol is
-unchanged: the worker needs network access to the relay's worker bind, and
-clients need access to the relay's public bind. Configure relay URLs with
-repeatable `--relay-url` options or the `relay_urls` configuration list (for
-environment overrides, `PROMPT_FERRY_WORKER__RELAY_URLS` is a JSON array).
-
-On first startup, an empty SQLite database is bootstrapped from the static
-worker settings, including relay URLs, upstream base URL and API key, TLS, and
-bridge-encryption settings; an upstream endpoint can also be created later
-through the Admin setup flow. After bootstrap, the SQLite configuration is
-authoritative. Reload polling applies supported direct SQLite changes without
-restarting the worker. Secrets at rest are encrypted with a base64-encoded
-32-byte worker configuration encryption key
-(`PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY`; the legacy
-`PROMPT_FERRY_WORKER__RELAY_SECRET_MASTER_KEY` name is still accepted). When
-unset, a random key is generated and persisted to
-`<data-root>/prompt-ferry/worker-config.key` (`0600` on Unix). SQLite never
-stores provider API keys in plaintext, and there is no plaintext fallback.
-
-The default data root follows the SQLite database location below; generated
-files live next to it under `prompt-ferry/`. When no active admin user exists
-and no bootstrap password is configured, a strong random password is generated
-and written once to `<data-root>/prompt-ferry/bootstrap-admin.txt`
-(`0600` on Unix); only the file path and login are logged. Existing configured
-bootstrap credentials take precedence, and existing users are never modified.
-
-The relay `/ws/worker` endpoint requires `Authorization: Bearer <token>` when
-a non-empty `WORKER_TOKEN` is configured. An empty token disables worker
-authentication entirely — any client that can reach the worker bind can
-connect as a worker — so use TLS and network isolation in that mode; the
-relay logs a warning at startup.
-
-The default SQLite database path is `$XDG_DATA_HOME/prompt-ferry/worker.sqlite3` or
-`$HOME/.local/share/prompt-ferry/worker.sqlite3` on Linux,
-`$HOME/Library/Application Support/prompt-ferry/worker.sqlite3` on macOS, and
-`%LOCALAPPDATA%\\prompt-ferry\\worker.sqlite3` on Windows. Override it with
-`PROMPT_FERRY_WORKER__STANDALONE_DATABASE_PATH` or
-`--standalone-database-path`. Back up or restore the SQLite file while the
-worker is stopped, and retain the worker configuration encryption key
-(`worker-config.key`) with the backup.
-
-SQLite request and usage summaries remain a bounded in-memory ring of 256
-entries and are cleared on restart. Redaction rules persist, while
-conversation-specific redaction sessions reset on restart. Direct SQLite edits
-are picked up by reload polling only for supported schema/configuration changes
-and must satisfy the normal secret-encryption constraints.
-
-For a separate-host deployment, use placeholders like these and keep the
-bridge port reachable from the worker host:
-
-```dotenv
-# Relay host
-PROMPT_FERRY_RELAY__BIND=0.0.0.0:8787
-PROMPT_FERRY_RELAY__WORKER_BIND=0.0.0.0:8788
-PROMPT_FERRY_RELAY__CLIENT_TOKEN=<client-token>
-PROMPT_FERRY_RELAY__WORKER_TOKEN=<worker-token>
-# Loopback only; the relay's own management page. Publish it through a port
-# forward or an SSH tunnel, never on a routable address.
-PROMPT_FERRY_RELAY__ADMIN_BIND=127.0.0.1:8790
-# Optional; generated and persisted to the host-local configuration when unset.
-PROMPT_FERRY_RELAY__ADMIN_TOKEN=<relay-management-token>
-```
+Open the RustFS console at <http://127.0.0.1:9001>, sign in with the S3 access
+key and secret key from `.env`, and create a bucket named exactly as
+`PROMPT_FERRY_WORKER__RAW_OBJECT_STORE_BUCKET` (`prompt-ferry-raw` by default).
+RustFS serves S3 and does not create buckets for you. Then start the
+application:
 
 ```bash
-prompt-ferry relay
+docker compose up -d prompt-ferry
 ```
 
-```dotenv
-# Worker host
-DATABASE_URL=
-PROMPT_FERRY_WORKER__RELAY_URLS=["wss://relay.example.invalid:8788/ws/worker"]
-PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://upstream.example.invalid
-PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<upstream-api-key>
-PROMPT_FERRY_WORKER__WORKER_TOKEN=<worker-token>
-# Optional; auto-generated at <data-root>/prompt-ferry/worker-config.key when unset.
-PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY=<base64-32-byte-key>
-PROMPT_FERRY_WORKER__TLS_MODE=<configured-tls-mode>
-PROMPT_FERRY_WORKER__BRIDGE_ENCRYPTION_MODE=<configured-bridge-mode>
-```
+- Admin console: <http://127.0.0.1:8789> — log in as `admin`.
+- OpenAI-compatible base URL: `http://127.0.0.1:8787/v1`.
+
+If you left `PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD` empty and no admin
+exists yet, a strong password was generated once and written to the data volume:
 
 ```bash
-prompt-ferry worker
+docker compose exec prompt-ferry cat /var/lib/prompt-ferry/prompt-ferry/bootstrap-admin.txt
 ```
 
-### Outbound proxy
+## Running the binary directly
 
-LLM upstreams use the endpoint `proxy_url` with per-route `proxy_url_override`
-(`http/https/socks5/socks5h`); unset means direct. Model listing, token-plan
-usage, the endpoint protocol check, and `me` available-models reuse the same
-endpoint proxy via a pooled client; invalid proxy fails closed without
-falling back to direct.
-
-MCP HTTP servers resolve `mcp_servers.proxy_url` first, then the worker
-process env (`HTTPS_PROXY`/`HTTP_PROXY`, lowercase accepted, `ALL_PROXY`
-fallback) with `NO_PROXY` bypass, then direct. The built-in MiniMax MCP
-inherits its source endpoint proxy (`endpoint → env → direct`); its row
-proxy is ignored and image-URL fetches stay direct with pinned DNS. MCP
-`stdio` inherits the worker env for the subprocess. An invalid proxy fails
-the request without falling back to direct; credentials are never logged.
-
-Stay direct by design: approval webhooks (user intranet facility), upstream
-Realtime websockets (needs a hand-written CONNECT tunnel, deferred), and the
-relay-worker bridge (internal control plane).
-
-```dotenv
-HTTPS_PROXY=http://proxy.example.invalid:8080
-NO_PROXY=127.0.0.1,localhost
-```
-
-### Route target schedules
-
-Each model-route target has optional active windows (`[{start,end,days?}]`
-`HH:MM`, `days` 1=Mon..7=Sun omitted/empty means every day); empty means unrestricted. A target outside its windows never participates
-in routing. Windows are evaluated in worker-local time: `end` before `start`
-wraps overnight (e.g. `22:00–06:00`, weekday decided by start day), the start minute is
-inclusive and the end minute is exclusive, and matching any window activates
-the target. `enabled=false` targets never participate, even inside a window.
-
-Run every worker in the same timezone when schedules matter; multi-worker
-deployments with mixed local timezones evaluate the same windows differently.
-Filtering is fail-closed: when no target is active the request fails instead
-of falling back to an out-of-window target, and an invalid stored schedule
-never silently becomes unrestricted.
-
-```text
-no route target is active for route 'summarizer' at 03:12 (worker-local time; windows: primary(enabled): 06:30–14:00, 18:00–20:00; night(disabled): unrestricted)
-```
-
-### Endpoint default schedules and target normalize
-
-Each endpoint has optional default windows (`[{start,end,days?}]` `HH:MM`);
-empty means unrestricted. A target with empty windows inherits its endpoint
-default; a non-empty target overrides it; empty on both means unrestricted.
-The same `HH:MM` validation applies to both levels.
-
-Target normalize (`dev_system_normalize`, default off) controls Chat
-passthrough: when off (default) `developer` is forwarded unchanged; when on
-`developer` is rewritten to `system`. This is a behavior change from the
-previous unconditional rewrite: strict upstreams that reject `developer`
-need the switch turned on explicitly per target. The toggle lives in the
-target-row gear popover alongside proxy and schedule, and is always sent as
-`true`/`false`.
-
-### Continuous-session cache alerts
-
-PostgreSQL deployments can alert on conversations that keep rereading their
-prompt context. (Standalone SQLite does not aggregate or alert; use
-PostgreSQL.)
-
-The monitor aggregates completed AI turns per `conversation_id` over the last
-`window_minutes`: a conversation whose distinct-turn count reaches `min_turns`
-and whose fold-aware cache read rate stays below `threshold` triggers one
-DingTalk robot message. The rate is the usage overview rate
-(`SUM(cache_read) / SUM(fold-aware full input)`, clamped to `0..1`), failed
-and in-flight rows are ignored, and each conversation has its own
-`cooldown_minutes` clock before it can alert again.
-
-Configure it in the admin console (`GET`/`PUT /api/v1/settings/cache-alert`)
-with `enabled`, `window_minutes` (5–1440, default 30), `min_turns` (2–100,
-default 5), `threshold` (0–1, default 0.2), `cooldown_minutes` (5–1440,
-default 60), plus the DingTalk robot `dingtalk_webhook_url` and optional
-`dingtalk_secret` (signed robots). The secret is stored write-only and never
-echoed back; leave it blank to keep the stored value. The monitor runs one
-alerting pass per `min(window_minutes, 60)` minutes and only one worker
-evaluates each pass.
-
-Messages carry conversation metadata only — `conversation_id`, `model`,
-`window`, `turns`, `cache_rate`, `threshold` — never request or user content.
-
-### Responses compact
-
-- `POST /v1/responses/compact` forwards to Responses-native upstreams
-  byte-for-byte; feed the returned `output` back as the next
-  `POST /v1/responses` `input` to continue the conversation.
-- Targets without native compact support fall back to ferry-side
-  summarization when `compact_mode=self_summarize` is set on the target
-  (drops `encrypted_content`, trims old tool outputs, returns a plaintext
-  handoff). The default `passthrough` rejects non-Responses targets with
-  `400`; `off` disables compact for the target.
-
-### Responses stateless fallback
-
-When a Chat-compatible request carries a `tool_calls` turn whose `tool` output
-was pruned or truncated, ferry inserts a `function_call_output` placeholder
-(`[Missing tool output: pruned or truncated, call_id=<id>]`) right after the
-call, so the upstream Responses API no longer rejects the request with
-`No tool output found for function call`.
-
-If the upstream still rejects a continuation (`No tool output found ...` or
-`Referenced reasoning item ... was not found or has expired`), ferry answers
-with `code=retryable_invalid_continuation` and a retry hint: drop
-`previous_response_id`, truncate history before the orphan `call_*`, then
-resend once. Both fallbacks emit structured warnings
-(`event=chat_to_responses_missing_tool_output`,
-`event=upstream_invalid_continuation`).
-
-### Thinking downgrade
-
-Thinking-mode upstreams reject a tool-bearing turn when the parent assistant
-tool-call message has no reasoning to pass back (`reasoning_content` /
-`reasoning_text` in the thinking mode must be passed back). Ferry keeps those
-turns working:
-
-- Pre-flight (only upstreams that require the echo, currently DeepSeek): when
-  the stored parent artifact proves the parent turn produced no reasoning, the
-  turn requests thinking, carries tools, and nothing restorable is present,
-  ferry disables thinking for that single turn. Chat bodies get
-  `thinking: {"type":"disabled"}` with `reasoning_effort` dropped (overriding a
-  per-target thinking effort override); Responses bodies get
-  `reasoning.effort: "none"`. Every other upstream (for example opencode go)
-  keeps the requested thinking — including a per-target effort override — and
-  its outbound body is never rewritten to `reasoning.effort: "none"`.
-- Retry: an upstream `400` whose body contains `must be passed back` resends the
-  same turn once with thinking off; if that resend is rejected too, the original
-  upstream error is returned. This path is provider-independent and stays active
-  for every upstream.
-
-Neither path fabricates reasoning, stores anything new, or edits target config,
-and a turn that can pass its reasoning back is forwarded byte-for-byte.
-Observability events: `event=thinking_downgrade`, `event=thinking_echo_retry`,
-`event=thinking_echo_retry_sent`, and `event=thinking_echo_retry_rejected`, each
-carrying `conversation_id`, `provider`, `native_api`, `disposition`, and
-`attempt`. Set `PROMPT_FERRY_DISABLE_THINKING_DOWNGRADE=1` to bypass both paths.
-
-### ChatGPT Plus/Pro subscription (OAuth)
-
-OpenAI endpoints support two "upstream plans" (Admin → Endpoints → OpenAI):
-
-- Platform API key: keeps using `https://api.openai.com` and Platform API usage accounting.
-- ChatGPT Plus/Pro subscription: log in with a ChatGPT account over OAuth, and inference goes
-  to the Codex backend at `https://chatgpt.com/backend-api/codex/responses` with the
-  subscription's 5-hour/weekly windows.
-
-Setup:
-
-1. Create or edit the OpenAI endpoint and save it first (the subscription plan needs an
-   existing endpoint).
-2. Complete the login under "ChatGPT login": headless uses a device code (the panel shows the
-   code and the verification address to open in a browser), or browser login (open the
-   authorize link, then paste the full `http://localhost:1455/auth/callback` redirect address
-   back into the panel).
-3. Once logged in, switch "Upstream plan" to ChatGPT Plus/Pro subscription and save. Tokens
-   refresh on expiry, the first 401 triggers one refresh-and-retry, and a revoked refresh
-   token clears the credential and asks for a new login.
-4. The endpoint native API must be `responses`. Caller model names are normalized onto Codex
-   backend models: Codex ids (`gpt-6-sol`, `gpt-6-astra`, `gpt-6-luna`, `gpt-5.6-sol`,
-   `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.2-codex`, `gpt-5.1-codex`, …) are
-   kept (reasoning-effort suffixes folded in); unknown models pass through unchanged so the
-   upstream backend returns the true model error, and an empty model falls back to
-   `gpt-6-sol`. The subscription backend accepts only the Codex request shape, so a
-   caller-supplied `max_output_tokens` is dropped instead of forwarded (the backend rejects
-   it as an unsupported parameter).
-
-The subscription quota is display-only in the endpoint dialog (5-hour/weekly windows): it never
-affects routing weight and stays separate from Platform API usage. The two credential sets are
-independent — switching to the Platform API key plan clears the stored OAuth credential, and a
-provider move away from OpenAI does the same. For fronting or tests,
-`PROMPT_FERRY_CHATGPT_OAUTH_ISSUER` and `PROMPT_FERRY_CHATGPT_BACKEND_URL` override the ChatGPT
-auth and backend hosts.
-
-### OpenAI Platform organization usage (Admin API Key)
-
-An OpenAI endpoint can store an optional Admin API Key, separate from its inference API keys, to
-read the OpenAI Platform organization's own API usage and spend. It is server-side only: the
-operator types it in the endpoint dialog, responses report just `has_admin_api_key`, and the
-secret is never echoed, logged, or returned.
-
-- Only OpenAI endpoints accept the Admin API Key; moving an endpoint to another provider clears
-  any stored value.
-- Saving keeps the stored key when the field is left blank, replaces it with a non-empty value,
-  and clears it only through Clear + Save.
-- "Platform organization usage" in the endpoint dialog reads
-  `GET /v1/organization/usage/completions` and `GET /v1/organization/costs` through that key for
-  the current UTC month to date, showing input/output/total tokens and USD spend with the period
-  and cache state.
-- It is organization-level and display-only. It is not the ChatGPT subscription quota, not a
-  per-endpoint or per-key figure, and it never feeds routing weights or remaining-credit math. A
-  missing Admin API Key or an upstream rejection shows an actionable message instead of
-  placeholder numbers.
-
-### Single-host binary
-
-Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases)
-and start it with no subcommand:
+Download a release binary from [GitHub Releases](https://github.com/cloudiful/prompt-ferry/releases).
+It needs the same PostgreSQL, Valkey and bucket, and it reads the same `.env`:
 
 ```bash
-./prompt-ferry
+PROMPT_FERRY_DOTENV=.env prompt-ferry
 ```
 
-With no subcommand the binary reads the host role and starts only the services
-that role names, then logs the local management URL for the role it started. In
-the `integrated` and `worker` roles that URL is also opened in the default
-browser on Windows (loopback only), because the user double-clicked an
-executable; the console window stays open showing logs, and Ctrl+C or closing
-the console stops the service. If no browser can be opened the URL is still
-logged and the service runs normally. The `relay` role logs its management URL
-only and never opens a browser.
+With no subcommand the binary starts the integrated relay and worker. It keeps
+its own state under `$XDG_DATA_HOME/prompt-ferry` and configuration under
+`$XDG_CONFIG_HOME/prompt-ferry`. Stop the Compose application first, or the two
+will fight over the published ports.
 
-The role is host-local configuration that selects this machine's listeners and
-running components. It has exactly three values, and an installation that never
-configures one starts in the default `integrated` role, so an existing single-host
-deployment upgrades without any change:
+Fresh install and existing database differ. A fresh start with an empty
+`PROMPT_FERRY_WORKER__WORKER_CONFIG_ENCRYPTION_KEY` generates a key once under
+`<data-root>/prompt-ferry/worker-config.key`. To reuse a populated Compose
+database, copy `/var/lib/prompt-ferry/prompt-ferry/worker-config.key` from the
+Compose volume to the host `<data-root>/prompt-ferry/worker-config.key`
+(default `~/.local/share/prompt-ferry/worker-config.key`) with owner-only
+(`0600`) permissions before starting, and never replace/rotate it afterwards; or
+set the same explicit base64 32-byte key in both environments before first
+bootstrap. The existing database keeps its existing admin account — the
+bootstrap password file is written only on initial creation when no admin exists.
 
-| Role | Local relay | Local worker | Management entry point |
-| --- | --- | --- | --- |
-| `integrated` (default) | yes | embedded, bridged in-process | relay management page (worker admin listener also serves the worker) |
-| `worker` | no | yes, dialing the enabled remote relays | the worker's own admin listener |
-| `relay` | yes | no | relay management page only |
+## Before you expose it
 
-The role is independent of the remote relay list. The managed relays are the
-worker's connection targets; enabling, disabling, or deleting one of them never
-changes what this host runs, and a worker-only host with an empty remote list
-keeps running instead of falling back to `integrated`.
+- Back up PostgreSQL and `<data-root>/prompt-ferry/worker-config.key`; without that key, stored secrets cannot be decrypted.
+- PostgreSQL 17 reaches 18 only through `pg_dump`/`pg_restore` or `pg_upgrade`. The example creates a fresh PostgreSQL 18 volume and migrates nothing.
+- Everything publishes on loopback. Reaching it from another machine means a deliberate port binding, TLS and a reverse proxy.
 
-A role names listeners and running components, so it is resolved once at startup
-rather than applied to a serving process. Saving a role or the management bind
-from the management page records it and reports that a restart is required;
-"Restart now" stops the process so a supervisor brings it back with the saved
-settings. A configuration file or environment variable is read the same way at
-the next start:
+## Documentation
 
-```dotenv
-PROMPT_FERRY_HOST__ROLE=relay
-```
-
-The relay serves the same management page in `integrated` and `relay` roles, so
-the page, the relay settings, the role, and the restart action work with no
-worker attached. Worker business requests — upstreams, providers, routes,
-quotas, usage — keep flowing through the relay to the connected worker over the
-existing bridge, with their original `/api/v1/...` path and query string; with no
-worker connected the page stays open and reports that worker features are
-unavailable. The relay owns only its own configuration, state, and lifecycle
-API; it never duplicates worker persistence or routing.
-
-The relay management listener is loopback-only (default `127.0.0.1:8790`,
-`relay.admin_bind` / `PROMPT_FERRY_RELAY__ADMIN_BIND`), and every non-static
-route on it requires the host-local management token, either as a
-`Authorization: Bearer` header or as a session exchanged through
-`POST /api/v1/relay/auth/login`. The token is resolved before anything is
-served: set `relay.admin_token` yourself, or let the relay generate one and
-persist it to the host-local configuration file (`0600` on Unix) on first start.
-A host that cannot store a generated token refuses to start rather than
-exposing an open control API. This token is separate from every other
-credential in the deployment: it is not the relay client token, not the
-`/ws/worker` worker token, and not a worker admin login.
-
-The relay management token and the host role live in a small host-local overlay
-next to the main configuration, in their own `prompt-ferry-host` application
-directory:
-
-```text
-$XDG_CONFIG_HOME/prompt-ferry-host/config.toml   (Linux; ~/.config/... otherwise)
-~/Library/Application Support/prompt-ferry-host/config.toml   (macOS)
-%APPDATA%\prompt-ferry-host\config.toml   (Windows)
-```
-
-The overlay wins over the main configuration for the keys it defines and is
-silent about everything else, and a save rewrites only that file — the main
-`config.toml` an operator maintains by hand is never rewritten, and the role
-never enters the shared managed-relay configuration or the business database.
-`/healthz`, the login/logout/session routes, and the static assets are the only
-unauthenticated paths on the management listener; the SPA fallback is last, so
-`/api/v1` cannot be used to reach the page without authenticating.
-
-The integrated role binds the internal worker bridge to loopback and starts with
-no required secrets: an empty `PROMPT_FERRY_WORKER_TOKEN` keeps the bridge open
-only on that loopback bind, the encryption key is generated on first start, and
-the initial admin password (if needed) is written to
-`<data-root>/prompt-ferry/bootstrap-admin.txt`. Configure a client token and
-upstream endpoint through the worker admin console (default
-<http://127.0.0.1:8789>):
-
-```dotenv
-PROMPT_FERRY_RELAY__CLIENT_TOKEN=<client-token>
-PROMPT_FERRY_WORKER__UPSTREAM_BASE_URL=https://api.example.com
-PROMPT_FERRY_WORKER__UPSTREAM_API_KEY=<upstream-api-key>
-```
-
-The `relay`, `worker`, and `serve` subcommands remain the compatibility and
-headless entry points: `prompt-ferry relay` starts a relay-only host,
-`prompt-ferry worker` starts a worker, and `prompt-ferry serve` always starts
-the integrated pair even when a different role is configured (it logs a warning
-instead of silently honoring the stored role). To run a configured `worker` or
-`relay` role, start the binary with no subcommand.
-
-Release binaries embed the built frontend, so the release workflow builds the
-frontend before compiling the binary and the container image carries one
-artifact with no separate frontend directory. Building from source produces the
-same result after `cd frontend && bun install && bun run build`; compiling
-without a frontend build still succeeds and serves a notice page pointing at
-the Admin API instead of the UI. During frontend development,
-`PROMPT_FERRY_FRONTEND_DIST=/path/to/dist` serves a filesystem directory
-without recompiling.
+[Quota feedback](docs/quota-feedback.md) · [Quota snapshots](docs/quota-snapshots.md) · [Endpoint key persistence](docs/endpoint-key-persistence.md) · [Frontend async actions](docs/frontend-async-actions.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE)

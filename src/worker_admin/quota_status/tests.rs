@@ -6,12 +6,17 @@ use uuid::Uuid;
 use super::*;
 use crate::{
     db::{EndpointProvider, EndpointRegion},
-    worker_admin::{quota_feedback::QuotaFeedbackScope, quota_reset::subscription_windows_state},
+    worker_admin::{
+        quota_feedback::{QuotaFeedbackCause, QuotaFeedbackScope},
+        quota_reset::subscription_windows_state,
+    },
     worker_admin_types::{
         CommandCodeBalances, CommandCodeWindowUsage, DeepSeekBalance, GlmWindowUsage,
         OpenRouterBalance, OpencodeGoWindowUsage, SubscriptionQuotaObservation,
         SubscriptionWindowAvailability, SubscriptionWindowUsage, TokenPlanModelUsage,
-        TokenPlanQuotaState::{Available, Cooling, Exhausted, Unknown},
+        TokenPlanQuotaState::{
+            Available, Cooling, Exhausted, RateLimited, Unknown, UpstreamUnavailable,
+        },
         TokenPlanWindowUsage,
     },
 };
@@ -273,9 +278,13 @@ fn active_feedback_is_reported_as_cooling_with_a_bounded_deadline() {
     let key_id = Uuid::new_v4();
     let now = Instant::now();
     let scope = QuotaFeedbackScope::new(endpoint_id, Some(key_id));
-    cache
-        .feedback
-        .record_429(scope, Some(Duration::from_secs(45)), now, now);
+    cache.feedback.record_failure(
+        scope,
+        QuotaFeedbackCause::Exhausted,
+        Some(Duration::from_secs(45)),
+        now,
+        now,
+    );
 
     let decorated = decorate_usage(
         &cache,
@@ -285,6 +294,82 @@ fn active_feedback_is_reported_as_cooling_with_a_bounded_deadline() {
     let status = decorated.keys[0].quota_status.as_ref().unwrap();
     assert_eq!(status.state, Cooling);
     assert!(status.cooldown_until.is_some());
+}
+
+#[test]
+fn transient_feedback_cause_projects_its_own_state_with_the_same_deadline() {
+    // The default 429 caller is throttling, not exhaustion: it must not be
+    // reported as a spent quota.
+    let default_rate_limit = TokenPlanQuotaCache::default();
+    let endpoint_id = Uuid::new_v4();
+    let key_id = Uuid::new_v4();
+    let now = Instant::now();
+    let scope = QuotaFeedbackScope::new(endpoint_id, Some(key_id));
+    default_rate_limit
+        .feedback
+        .record_429(scope, Some(Duration::from_secs(45)), now, now);
+
+    let status = decorate_usage(
+        &default_rate_limit,
+        endpoint_id,
+        usage(EndpointProvider::CommandCode, key(key_id)),
+    )
+    .keys[0]
+        .quota_status
+        .clone()
+        .unwrap();
+    assert_eq!(status.state, RateLimited);
+    assert!(status.cooldown_until.is_some());
+
+    let unavailable = TokenPlanQuotaCache::default();
+    unavailable.feedback.record_failure(
+        scope,
+        QuotaFeedbackCause::UpstreamUnavailable,
+        Some(Duration::from_secs(45)),
+        now,
+        now,
+    );
+    let status = decorate_usage(
+        &unavailable,
+        endpoint_id,
+        usage(EndpointProvider::CommandCode, key(key_id)),
+    )
+    .keys[0]
+        .quota_status
+        .clone()
+        .unwrap();
+    assert_eq!(status.state, UpstreamUnavailable);
+    assert!(status.cooldown_until.is_some());
+}
+
+#[test]
+fn an_expired_feedback_deadline_stops_blocking_the_key() {
+    let cache = TokenPlanQuotaCache::default();
+    let endpoint_id = Uuid::new_v4();
+    let key_id = Uuid::new_v4();
+    let now = Instant::now();
+    let scope = QuotaFeedbackScope::new(endpoint_id, Some(key_id));
+    cache.feedback.record_failure(
+        scope,
+        QuotaFeedbackCause::Exhausted,
+        Some(Duration::from_secs(30)),
+        now,
+        now,
+    );
+
+    let (_, remaining) = cache
+        .feedback
+        .active_cooldown(scope, now)
+        .expect("active block");
+    assert!(remaining <= Duration::from_secs(30));
+    // Past the deadline the projection reads no active block, so the provider
+    // signal is used again instead of a fabricated healthy or spent state.
+    assert!(
+        cache
+            .feedback
+            .active_cooldown(scope, now + Duration::from_secs(31))
+            .is_none()
+    );
 }
 
 #[test]

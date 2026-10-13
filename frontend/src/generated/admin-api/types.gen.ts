@@ -2098,7 +2098,7 @@ export type TokenPlanModelUsage = {
     windows?: Array<SubscriptionWindowUsage> | null;
 };
 
-export type TokenPlanQuotaState = 'available' | 'exhausted' | 'unknown' | 'cooling';
+export type TokenPlanQuotaState = 'available' | 'exhausted' | 'unknown' | 'cooling' | 'rate_limited' | 'upstream_unavailable';
 
 export type TokenPlanQuotaStatus = {
     cooldown_until?: string | null;

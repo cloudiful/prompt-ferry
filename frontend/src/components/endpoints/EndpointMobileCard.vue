@@ -4,6 +4,7 @@ import { renderTokenPlanBadges } from '@/components/endpoints/tokenPlanBadgeRend
 import ProviderIcon from '@/components/providers/ProviderIcon.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import { useTokenPlanBadges } from '@/composables/useTokenPlanBadges'
+import { useTokenPlanForegroundRefresh } from '@/composables/tokenPlanForegroundRefresh'
 import { prefetchTokenPlanBatch } from '@/composables/useTokenPlanUsageCache'
 import type { EndpointListItemView } from '@/models/endpoints'
 import { isQuotaEligible } from '@/models/endpoints/quota'
@@ -51,6 +52,12 @@ watch(
     if (eligible) void prefetchTokenPlanBatch([props.item.endpoint_id], 4)
   },
   { immediate: true },
+)
+
+// Same shared foreground set as the desktop table: refcounted, so the
+// CSS-hidden twin surface adds no extra endpoint request.
+useTokenPlanForegroundRefresh(() =>
+  quotaEligible.value ? [props.item.endpoint_id] : [],
 )
 
 // Inline usage-badge subcomponent for the mobile card. The wrapping pill row

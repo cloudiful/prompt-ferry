@@ -119,3 +119,48 @@ test('nonbrowser ownership does not create autonomous timers', () => {
   clock.advance(2_000)
   expect(expiry.readRevision()).toBe(0)
 })
+
+test('expiry callback receives the expired id set after revision', () => {
+  const clock = fakeClock()
+  const notified: string[][] = []
+  const expiry = createTokenPlanCacheExpiry({
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    canSchedule: () => true,
+    onExpiry: (ids) => notified.push([...ids]),
+  })
+
+  expiry.schedule('a', 1_000)
+  expiry.schedule('b', 1_000)
+  expiry.schedule('c', 5_000)
+  clock.advance(1_000)
+
+  expect(expiry.readRevision()).toBe(1)
+  expect(notified).toEqual([['a', 'b']])
+
+  clock.advance(4_000)
+  expect(expiry.readRevision()).toBe(2)
+  expect(notified).toEqual([['a', 'b'], ['c']])
+})
+
+test('remove and clear never emit the expiry callback', () => {
+  const clock = fakeClock()
+  const notified: string[][] = []
+  const expiry = createTokenPlanCacheExpiry({
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    canSchedule: () => true,
+    onExpiry: (ids) => notified.push([...ids]),
+  })
+
+  expiry.schedule('gone', 1_000)
+  expiry.remove('gone')
+  expiry.schedule('kept', 5_000)
+  expiry.clear()
+  clock.advance(10_000)
+
+  expect(expiry.readRevision()).toBe(0)
+  expect(notified).toEqual([])
+})
