@@ -102,6 +102,7 @@ pub(crate) async fn fetch_deepseek_key_usage(
         glm_five_hour: None,
         glm_weekly: None,
         deepseek_balance: Some(parsed.balance),
+        quota_windows: None,
     }
 }
 

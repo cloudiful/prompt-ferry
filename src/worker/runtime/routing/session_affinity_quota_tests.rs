@@ -164,6 +164,7 @@ fn usage_with_keys(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUsageResponse {
                 glm_five_hour: None,
                 glm_weekly: None,
                 deepseek_balance: None,
+                quota_windows: None,
             })
             .collect(),
     }
@@ -226,6 +227,7 @@ fn command_code_key(
         glm_five_hour: None,
         glm_weekly: None,
         deepseek_balance: None,
+        quota_windows: None,
     }
 }
 
@@ -751,6 +753,7 @@ fn model_key(
         glm_five_hour: None,
         glm_weekly: None,
         deepseek_balance: None,
+        quota_windows: None,
     }
 }
 

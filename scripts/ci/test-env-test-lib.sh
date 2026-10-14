@@ -136,8 +136,12 @@ install_stubs() {
 printf '%s\n' "$(cd "$(dirname "$0")/.." && pwd)"
 STUB
 
-  # Answers the three read-only statements the preflight runs, from the PGDATABASE
-  # it was actually given, so an identity check cannot pass by accident.
+  # Answers the read-only statements the preflight runs, from the PGDATABASE
+  # it was actually given, so an identity check cannot pass by accident. The
+  # partition-guard answers use a fixed stub UTC day (2026-10-14) with exact
+  # day-edge bounds; `missing_tomorrow` withholds the last child until the
+  # guarded backfill script runs, so the opt-in creation path is observable
+  # without any real database.
   add_stub psql <<'STUB'
 #!/usr/bin/env bash
 sandbox="$(cd "$(dirname "$0")/.." && pwd)"
@@ -157,7 +161,21 @@ case "$mode" in
     printf 'psql: error: password %s rejected for user\n' "$PGPASSWORD" >&2
     exit 2 ;;
 esac
-if printf '%s' "$*" | grep -q to_regclass; then
+if printf '%s' "$*" | grep -q 'pg-partition-guard: db-day'; then
+  printf '2026-10-14\n'
+elif printf '%s' "$*" | grep -q 'pg-partition-guard: parent'; then
+  printf 'p|r|RANGE (created_at)|timestamp with time zone\n'
+elif printf '%s' "$*" | grep -q 'pg-partition-guard: children'; then
+  printf 'request_records_20261013|t|FOR VALUES FROM ('"'"'2026-10-13 00:00:00+00'"'"') TO ('"'"'2026-10-14 00:00:00+00'"'"')\n'
+  printf 'request_records_20261014|t|FOR VALUES FROM ('"'"'2026-10-14 00:00:00+00'"'"') TO ('"'"'2026-10-15 00:00:00+00'"'"')\n'
+  if [ "$mode" != "missing_tomorrow" ] || [ -f "$sandbox/capture/partition-created" ]; then
+    printf 'request_records_20261015|t|FOR VALUES FROM ('"'"'2026-10-15 00:00:00+00'"'"') TO ('"'"'2026-10-16 00:00:00+00'"'"')\n'
+  fi
+elif printf '%s' "$*" | grep -q 'PARTITION OF public.request_records'; then
+  # The bounded opt-in backfill: record that the guarded script ran. The next
+  # children query then reports the created child, mirroring a converged DDL.
+  touch "$sandbox/capture/partition-created"
+elif printf '%s' "$*" | grep -q to_regclass; then
   if [ "$mode" = "no_tables" ]; then
     exit 0
   fi

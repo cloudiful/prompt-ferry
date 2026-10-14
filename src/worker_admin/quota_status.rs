@@ -15,6 +15,7 @@ use crate::{
     },
 };
 
+use super::quota_canonical::populate_key_observations;
 use super::{token_plan_cache::TokenPlanQuotaCache, token_plan_weight};
 
 const SUBSCRIPTION_FRESHNESS: ChronoDuration = ChronoDuration::minutes(5);
@@ -32,6 +33,11 @@ pub(crate) fn decorate_usage(
     let now = Utc::now();
     let instant = Instant::now();
     for key in &mut usage.keys {
+        // Central observation projection before the existing status
+        // classification (algorithm unchanged): successful keys without a
+        // parser-captured vector get additive observations, so the
+        // subscription/cache/direct paths share one projection.
+        populate_key_observations(usage.provider, key);
         key.quota_status = Some(status_for_key(
             cache,
             endpoint_id,

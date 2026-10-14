@@ -3658,6 +3658,81 @@ components:
         window_minutes:
           type: integer
           format: int32
+    CanonicalQuotaWindow:
+      type: object
+      description: |-
+        One additive canonical quota observation (issue #844 P1). `source_id`
+        is the stable provider slot/model/currency identity (never a secret);
+        amounts preserve presence (`Some(0.0)` is a real zero, `None` is
+        absent/non-finite); `remaining_percent` is a valid finite reported or
+        derived share only (unknown never `0`/`100`); `balance`/`unlimited`
+        rows never carry a synthetic percentage.
+      required:
+      - source_id
+      - kind
+      - is_default_scope
+      - availability
+      properties:
+        availability:
+          $ref: '#/components/schemas/SubscriptionWindowAvailability'
+        current:
+          type:
+          - number
+          - 'null'
+          format: double
+        duration_seconds:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        is_default_scope:
+          type: boolean
+        kind:
+          $ref: '#/components/schemas/CanonicalQuotaWindowKind'
+        limit:
+          type:
+          - number
+          - 'null'
+          format: double
+        remaining:
+          type:
+          - number
+          - 'null'
+          format: double
+        remaining_percent:
+          type:
+          - number
+          - 'null'
+          format: double
+        reset_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        source_id:
+          type: string
+        source_model:
+          type:
+          - string
+          - 'null'
+        unit:
+          type:
+          - string
+          - 'null'
+    CanonicalQuotaWindowKind:
+      type: string
+      description: |-
+        Stable kind for one canonical quota observation (issue #844 P1).
+        Time windows carry a usable percentage; `balance`/`unlimited` carry
+        amounts only and never a synthetic percentage.
+      enum:
+      - five_hour
+      - rolling
+      - weekly
+      - monthly
+      - balance
+      - unlimited
+      - custom
     ClientKey:
       type: object
       required:
@@ -8263,6 +8338,18 @@ components:
           - type: 'null'
           - $ref: '#/components/schemas/TokenPlanQuotaStatus'
             description: Effective default-text quota state; raw provider detail remains unchanged.
+        quota_windows:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/CanonicalQuotaWindow'
+          description: |-
+            Additive canonical quota observations (issue #844 P1). `None` means
+            legacy fallback (populated only by newer backends); `Some([])` is an
+            explicit assessed empty (successful fetch with no rows); otherwise one
+            row per provider slot/model/currency. Failed keys stay `None` so an
+            unknown failure never falls through into available capacity.
         status:
           type:
           - integer

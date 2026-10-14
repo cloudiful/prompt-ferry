@@ -9,7 +9,7 @@ use chrono::{Duration, Utc};
 use serde_json::Value;
 
 use super::command_code_parsing::normalize_reset_at;
-use super::json_scalars::{truncate_message, value_as_f64, value_as_i64, value_as_string};
+use super::json_scalars::{finite_value_as_f64, truncate_message, value_as_i64, value_as_string};
 use crate::worker_admin_types::{OpencodeGoWindowUsage, TokenPlanKeyUsage};
 
 #[derive(Debug, Default, Clone)]
@@ -56,14 +56,16 @@ fn windows_object(body: &Value) -> Option<&serde_json::Map<String, Value>> {
 }
 
 // A window is usable if it exposes a percent/status/reset; otherwise it is
-// dropped (never padded). percent is the used share clamped to 0..=100.
+// dropped (never padded). Percent is the used share: finite values clamp to
+// 0..=100, while a non-finite percent stays unknown (never clamped `inf`
+// into `100`). A real `0` stays known and distinct from missing.
 fn parse_window(value: Option<&Value>) -> Option<OpencodeGoWindowUsage> {
     let window = value?.as_object()?;
     let percent = window
         .get("percent")
         .or_else(|| window.get("usage_percent"))
         .or_else(|| window.get("usagePercent"))
-        .and_then(value_as_f64)
+        .and_then(finite_value_as_f64)
         .map(|value| value.clamp(0.0, 100.0));
     let status = window
         .get("status")
@@ -167,6 +169,7 @@ mod tests {
             glm_five_hour: None,
             glm_weekly: None,
             deepseek_balance: None,
+            quota_windows: None,
         }
     }
 

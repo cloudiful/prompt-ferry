@@ -503,6 +503,7 @@ fn exhausted_key_usage(key_id: uuid::Uuid) -> TokenPlanUsageResponse {
             glm_five_hour: None,
             glm_weekly: None,
             deepseek_balance: None,
+            quota_windows: None,
         }],
     }
 }

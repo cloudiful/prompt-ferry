@@ -4,10 +4,13 @@ import type { EndpointOAuthStatusResponse } from '@/generated/admin-api'
 import EndpointOAuthBrowserLogin from '@/components/endpoints/EndpointOAuthBrowserLogin.vue'
 import EndpointOAuthDeviceLogin from '@/components/endpoints/EndpointOAuthDeviceLogin.vue'
 import { useEndpointOAuthActions } from '@/composables/useEndpointOAuthActions'
+import TokenPlanQuotaWindowRow from '@/components/endpoints/TokenPlanQuotaWindowRow.vue'
 import {
-  useTokenPlanTicker,
-  useTokenPlanWindowEntries,
-} from '@/composables/useTokenPlanWindowEntries'
+  toCanonicalQuotaRows,
+  type CanonicalQuotaRow,
+} from '@/composables/useCanonicalQuotaWindows'
+import { useTokenPlanTicker } from '@/composables/useTokenPlanWindowEntries'
+import { subscriptionWindowLabel } from '@/composables/subscriptionQuotaWindows'
 import type { RunEndpointOAuthAction } from '@/stores/endpoint-oauth-action-types'
 
 const props = defineProps<{
@@ -57,8 +60,6 @@ const {
 } = deviceFlow
 const tickerVisible = computed(() => quota.value !== null)
 const nowMs = useTokenPlanTicker(tickerVisible)
-const { usedPercent, progressColor, formatRemaining } =
-  useTokenPlanWindowEntries(props.t, nowMs)
 
 const hasToken = computed(() => status.value?.has_oauth_token ?? false)
 const plan = computed(() => status.value?.plan ?? 'platform_api_key')
@@ -68,34 +69,70 @@ const expiresAt = computed(() => {
 })
 const needsLogin = computed(() => !hasToken.value)
 const quotaEntry = computed(() => quota.value?.keys[0] ?? null)
-const fiveHourWindow = computed(
-  () => quotaEntry.value?.model_remains[0]?.interval ?? null,
-)
-const weeklyWindow = computed(
-  () => quotaEntry.value?.model_remains[0]?.weekly ?? null,
-)
-const quotaRows = computed(() => {
-  const rows: Array<{
-    key: string
-    labelKey: string
-    window: NonNullable<typeof fiveHourWindow.value>
-  }> = []
-  if (fiveHourWindow.value) {
-    rows.push({
-      key: 'primary',
-      labelKey: 'endpointOAuthQuotaPrimary',
-      window: fiveHourWindow.value,
-    })
-  }
-  if (weeklyWindow.value) {
-    rows.push({
-      key: 'secondary',
-      labelKey: 'endpointOAuthQuotaSecondary',
-      window: weeklyWindow.value,
-    })
-  }
-  return rows
+// Canonical time windows for the OAuth key: the same adapter rows the
+// dialog renders, so subscription `model.windows` data shows the same
+// correct values on both surfaces instead of the old hardcoded
+// `model_remains[0].interval/weekly` pair. Balance/unlimited rows stay in
+// their dedicated panels and never become progress bars here.
+const quotaRows = computed<CanonicalQuotaRow[]>(() => {
+  const entry = quotaEntry.value
+  if (!entry) return []
+  return toCanonicalQuotaRows(entry, nowMs.value).filter(
+    (row) =>
+      row.kind === 'five_hour' ||
+      row.kind === 'rolling' ||
+      row.kind === 'weekly' ||
+      row.kind === 'monthly' ||
+      row.kind === 'custom',
+  )
 })
+
+// Label for one OAuth row: custom subscription windows use their actual
+// duration, provider slots reuse the dialog copy. The component only
+// receives the translated string, never a provider format.
+function oauthRowLabel(row: CanonicalQuotaRow): string {
+  if (row.kind === 'custom') {
+    return subscriptionWindowLabel(
+      {
+        source_window: row.sourceId,
+        window_seconds: row.durationSeconds,
+        availability: row.availability,
+        remaining_percent: row.remainingPercent,
+        reset_at: row.resetAt,
+      },
+      props.t,
+    )
+  }
+  if (row.sourceId.startsWith('command_code:')) {
+    return props.t(
+      row.kind === 'weekly' ? 'tokenPlanWeeklyUsd' : 'tokenPlanFiveHour',
+    )
+  }
+  if (row.sourceId.startsWith('glm:')) {
+    return props.t(
+      row.kind === 'weekly' ? 'tokenPlanWeekly' : 'tokenPlanInterval',
+    )
+  }
+  if (row.sourceId.startsWith('opencode_go:')) {
+    if (row.kind === 'rolling') return props.t('tokenPlanRolling')
+    if (row.kind === 'weekly') return props.t('tokenPlanWeekly')
+    return props.t('tokenPlanMonthly')
+  }
+  if (row.sourceId.startsWith('minimax:')) {
+    return props.t(
+      row.kind === 'weekly' ? 'tokenPlanWeekly' : 'tokenPlanInterval',
+    )
+  }
+  return props.t(
+    row.kind === 'weekly' || row.kind === 'monthly'
+      ? 'tokenPlanWeekly'
+      : 'tokenPlanInterval',
+  )
+}
+
+function oauthRowQuantitySuffix(row: CanonicalQuotaRow): string {
+  return row.unit === 'currency' ? ' USD' : ''
+}
 const actionsEnabled = computed(() => props.runAction !== undefined)
 
 function statusLabel(token: boolean, expired: boolean): string {
@@ -183,26 +220,16 @@ async function copy(value: string): Promise<void> {
       }}</span>
       <p class="text-xs text-dimmed">{{ t('endpointOAuthQuotaHint') }}</p>
       <template v-if="quotaRows.length">
-        <div
+        <TokenPlanQuotaWindowRow
           v-for="row in quotaRows"
-          :key="row.key"
-          class="grid gap-1.5 sm:grid-cols-[7rem_minmax(0,1fr)_9rem] sm:items-center sm:gap-3"
-        >
-          <span class="text-dimmed">{{ t(row.labelKey) }}</span>
-          <UProgress
-            class="token-plan-progress h-1.5"
-            :model-value="usedPercent(row.window)"
-            :style="{
-              '--token-plan-progress-color': progressColor(row.window),
-            }"
-          />
-          <div class="flex items-center justify-between gap-2 text-xs">
-            <span class="text-dimmed">{{ formatRemaining(row.window) }}</span>
-            <span class="shrink-0 font-semibold"
-              >{{ usedPercent(row.window).toFixed(1) }}%</span
-            >
-          </div>
-        </div>
+          :key="row.sourceId"
+          :row="row"
+          :label="oauthRowLabel(row)"
+          :t="t"
+          :now-ms="nowMs"
+          density="compact"
+          :quantity-suffix="oauthRowQuantitySuffix(row)"
+        />
       </template>
       <p v-else class="text-dimmed">
         {{ quotaError || t('endpointOAuthQuotaUnavailable') }}
@@ -235,9 +262,3 @@ async function copy(value: string): Promise<void> {
     </div>
   </div>
 </template>
-
-<style scoped>
-.token-plan-progress :deep([data-slot='indicator']) {
-  background-color: var(--token-plan-progress-color);
-}
-</style>

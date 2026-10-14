@@ -17,8 +17,6 @@ import {
   remainingPercent,
 } from './useTokenPlanWindowEntries'
 import {
-  keyLongPercent,
-  keyShortPercent,
   summarizeTokenPlanQuota,
   type TokenPlanQuotaSummaryState,
 } from './tokenPlanQuotaSummary'

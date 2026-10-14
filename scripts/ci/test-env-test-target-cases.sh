@@ -267,3 +267,47 @@ test_missing_s3_parser_module_fails_closed() {
   assert_nonzero 'a missing S3 parser module fails the preflight' "$STATUS"
   assert_not_run 'nothing runs without the S3 parser' 'cargo test'
 }
+
+# --- request_records partition coverage ---------------------------------------
+# The stub reports the fixed UTC day 2026-10-14. `missing_tomorrow` withholds
+# the last child until the guarded backfill script runs, so the default
+# read-only refusal and the bounded opt-in creation are observable with no
+# real database.
+
+test_missing_partition_coverage_fails_before_cargo() {
+  fresh
+  service_env
+  set_psql_mode missing_tomorrow
+  run_tests
+  assert_nonzero 'missing coverage fails' "$STATUS"
+  assert_has 'the failure names the missing UTC date' "$OUT" '2026-10-15'
+  assert_has 'the failure names the opt-in flag' "$OUT" 'PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS'
+  assert_not_run 'nothing runs without coverage' 'cargo test'
+  assert_absent 'no DDL runs without the opt-in' \
+    "$(cat "$CAPTURE/calls")" 'PARTITION OF public.request_records'
+}
+
+test_partition_opt_in_creates_only_the_missing_child() {
+  fresh
+  service_env
+  set_psql_mode missing_tomorrow
+  AMBIENT='PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS=true'
+  run_tests
+  assert_status 'the opt-in run succeeds' 0 "$STATUS"
+  assert_ran_once 'exactly one bounded child is created' 'PARTITION OF public.request_records'
+  assert_has 'the missing child is created' "$(cat "$CAPTURE/calls")" 'request_records_20261015'
+  assert_absent 'no already-covered child is recreated' \
+    "$(cat "$CAPTURE/calls")" 'request_records_20261013'
+  assert_absent 'no partition is dropped' "$(cat "$CAPTURE/calls")" 'DROP'
+  assert_ran 'cargo runs after the backfill' 'cargo test'
+}
+
+test_partition_opt_in_flag_must_be_strict() {
+  fresh
+  service_env
+  AMBIENT='PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS=yes'
+  run_tests
+  assert_nonzero 'a non-boolean flag fails' "$STATUS"
+  assert_has 'the failure names the flag' "$OUT" 'PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS'
+  assert_not_run 'nothing runs with an invalid flag' 'cargo test'
+}

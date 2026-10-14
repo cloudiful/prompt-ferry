@@ -11,7 +11,10 @@ use super::command_code_parsing::{
     parse_summary_present, parse_whoami_org_id, parse_window_entry,
 };
 use super::json_scalars::{failed_key, truncate_message, value_as_string};
-use crate::worker_admin_types::{CommandCodeBalances, TokenPlanKeyUsage};
+use crate::worker_admin_types::{
+    CanonicalQuotaWindow, CanonicalQuotaWindowKind, CommandCodeBalances,
+    SubscriptionWindowAvailability, TokenPlanKeyUsage,
+};
 
 // Keep the cache call path stable after the P3 split.
 pub(crate) use super::command_code_parsing::command_code_remaining_percent;
@@ -190,6 +193,76 @@ pub(crate) async fn fetch_command_code_key_usage(
             )
         })
         .unwrap_or((None, None));
+    // Canonical rows from the valid tuples above (not the defaulted DTO):
+    // windows keep finite used/cap presence, balances only when at least one
+    // raw credit amount was observed (never invented from plan fallback alone).
+    let mut quota_rows: Vec<CanonicalQuotaWindow> = Vec::new();
+    if let Some(parsed) = parsed_credits.as_ref() {
+        for (slot, kind, key) in [
+            (
+                "command_code:five_hour",
+                CanonicalQuotaWindowKind::FiveHour,
+                "fiveHour",
+            ),
+            (
+                "command_code:weekly",
+                CanonicalQuotaWindowKind::Weekly,
+                "weekly",
+            ),
+        ] {
+            if let Some((used, cap, reset_at)) = parse_window_entry(&parsed.windows, key) {
+                let remaining_percent = if cap > 0.0 {
+                    Some((100.0 - (used / cap * 100.0)).clamp(0.0, 100.0))
+                } else {
+                    None
+                };
+                quota_rows.push(CanonicalQuotaWindow {
+                    source_id: slot.to_string(),
+                    kind,
+                    source_model: None,
+                    unit: Some("currency".to_string()),
+                    duration_seconds: None,
+                    is_default_scope: true,
+                    availability: if remaining_percent.is_some()
+                        || used.is_finite() && cap.is_finite()
+                    {
+                        SubscriptionWindowAvailability::Known
+                    } else {
+                        SubscriptionWindowAvailability::Unknown
+                    },
+                    remaining_percent,
+                    current: Some(used),
+                    limit: Some(cap),
+                    remaining: Some(cap - used),
+                    reset_at,
+                });
+            }
+        }
+        let raw_seen = [parsed.monthly, parsed.purchased, parsed.free]
+            .into_iter()
+            .any(|v| v.is_some_and(|amount| amount.is_finite()));
+        if raw_seen
+            && let Some(balances) = balances.as_ref()
+            && balances.remaining_credits.is_finite()
+        {
+            let limit =
+                balances.monthly_credits + balances.purchased_credits + balances.free_credits;
+            quota_rows.push(CanonicalQuotaWindow {
+                source_id: "command_code:balances".to_string(),
+                kind: CanonicalQuotaWindowKind::Balance,
+                source_model: None,
+                unit: Some("credits".to_string()),
+                duration_seconds: None,
+                is_default_scope: true,
+                availability: SubscriptionWindowAvailability::Known,
+                remaining_percent: None,
+                current: Some(balances.remaining_credits),
+                limit: finite_limit(limit),
+                remaining: Some(balances.remaining_credits),
+                reset_at: None,
+            });
+        }
+    }
     TokenPlanKeyUsage {
         key_id,
         key_label,
@@ -210,5 +283,10 @@ pub(crate) async fn fetch_command_code_key_usage(
         glm_five_hour: None,
         glm_weekly: None,
         deepseek_balance: None,
+        quota_windows: Some(quota_rows),
     }
+}
+
+fn finite_limit(value: f64) -> Option<f64> {
+    value.is_finite().then_some(value)
 }

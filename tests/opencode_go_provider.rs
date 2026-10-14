@@ -96,6 +96,7 @@ fn key_usage_serde_omits_absent_opencode_go_sections() {
             glm_five_hour: None,
             glm_weekly: None,
             deepseek_balance: None,
+            quota_windows: None,
         }
     }
     // A key carrying no opencode_go windows must not serialize them.

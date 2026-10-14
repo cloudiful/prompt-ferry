@@ -18,7 +18,10 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
 
 use super::json_scalars::{truncate_message, value_as_f64, value_as_i64, value_as_string};
-use crate::worker_admin_types::{GlmWindowUsage, TokenPlanKeyUsage};
+use super::quota_canonical::glm_observation;
+use crate::worker_admin_types::{
+    CanonicalQuotaWindow, CanonicalQuotaWindowKind, GlmWindowUsage, TokenPlanKeyUsage,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GlmWindowKind {
@@ -30,6 +33,9 @@ pub(crate) enum GlmWindowKind {
 pub(crate) struct GlmQuotaUsage {
     pub(crate) five_hour: Option<GlmWindowUsage>,
     pub(crate) weekly: Option<GlmWindowUsage>,
+    /// Presence-aware canonical rows for the winning typed windows, built
+    /// from raw `Option` amounts before `0.0` defaults erase absence.
+    pub(crate) observations: Vec<CanonicalQuotaWindow>,
 }
 
 /// JSON envelope business error. Zhipu returns `{code, msg, success}`
@@ -133,28 +139,44 @@ fn classify_window(row: &Value) -> Option<GlmWindowKind> {
     }
 }
 
-fn parse_window_row(row: &Value) -> Option<(GlmWindowKind, GlmWindowUsage)> {
+fn parse_window_row(row: &Value) -> Option<(GlmWindowKind, GlmWindowUsage, CanonicalQuotaWindow)> {
     let kind = classify_window(row)?;
-    let limit = row.get("limit").and_then(value_as_f64).unwrap_or(0.0);
-    let current = row.get("currentValue").and_then(value_as_f64);
+    let raw_limit = row.get("limit").and_then(value_as_f64);
+    let raw_current = row.get("currentValue").and_then(value_as_f64);
+    let raw_remaining = row.get("remaining").and_then(value_as_f64);
+    let limit = raw_limit.unwrap_or(0.0);
+    let current = raw_current;
     let current_value = current.unwrap_or(0.0);
-    let remaining = row.get("remaining").and_then(value_as_f64).unwrap_or(0.0);
+    let remaining = raw_remaining.unwrap_or(0.0);
     let percentage = derive_percentage(
         row.get("percentage").and_then(value_as_f64),
         current,
-        row.get("limit").and_then(value_as_f64),
+        raw_limit,
     );
     let next_reset_at = row.get("nextResetTime").and_then(glm_next_reset);
-    Some((
-        kind,
-        GlmWindowUsage {
-            limit,
-            current_value,
-            remaining,
-            percentage,
-            next_reset_at,
-        },
-    ))
+    let window = GlmWindowUsage {
+        limit,
+        current_value,
+        remaining,
+        percentage,
+        next_reset_at,
+    };
+    let row_type = row.get("type").and_then(value_as_string);
+    let (slot, canonical_kind) = match kind {
+        GlmWindowKind::FiveHour => ("glm:five_hour", CanonicalQuotaWindowKind::FiveHour),
+        GlmWindowKind::Weekly => ("glm:weekly", CanonicalQuotaWindowKind::Weekly),
+    };
+    let observation = glm_observation(
+        slot,
+        canonical_kind,
+        row_type.as_deref(),
+        raw_current,
+        raw_limit,
+        raw_remaining,
+        percentage,
+        next_reset_at,
+    );
+    Some((kind, window, observation))
 }
 
 fn derive_percentage(
@@ -241,6 +263,10 @@ pub(crate) fn parse_glm_quota(body: &Value, _now: DateTime<Utc>) -> Option<GlmQu
         return None;
     }
     let mut usage = GlmQuotaUsage::default();
+    // Whole winning rows: the typed window and its presence-aware
+    // canonical observation move together through duplicate selection.
+    let mut five_hour: Option<(GlmWindowUsage, CanonicalQuotaWindow)> = None;
+    let mut weekly: Option<(GlmWindowUsage, CanonicalQuotaWindow)> = None;
     for row in limits {
         let Some(object) = row.as_object() else {
             continue;
@@ -248,19 +274,28 @@ pub(crate) fn parse_glm_quota(body: &Value, _now: DateTime<Utc>) -> Option<GlmQu
         if !is_quota_row_kind(object) {
             continue;
         }
-        if let Some((kind, window)) = parse_window_row(&Value::Object(object.clone())) {
+        if let Some((kind, window, observation)) = parse_window_row(&Value::Object(object.clone()))
+        {
             let slot = match kind {
-                GlmWindowKind::FiveHour => &mut usage.five_hour,
-                GlmWindowKind::Weekly => &mut usage.weekly,
+                GlmWindowKind::FiveHour => &mut five_hour,
+                GlmWindowKind::Weekly => &mut weekly,
             };
             let replace = match slot {
                 None => true,
-                Some(current) => is_tighter_window(&window, current),
+                Some((current, _)) => is_tighter_window(&window, current),
             };
             if replace {
-                *slot = Some(window);
+                *slot = Some((window, observation));
             }
         }
+    }
+    if let Some((window, observation)) = five_hour {
+        usage.five_hour = Some(window);
+        usage.observations.push(observation);
+    }
+    if let Some((window, observation)) = weekly {
+        usage.weekly = Some(window);
+        usage.observations.push(observation);
     }
     if usage.five_hour.is_none() && usage.weekly.is_none() {
         return None;

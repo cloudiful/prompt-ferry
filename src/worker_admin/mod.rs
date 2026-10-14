@@ -16,6 +16,7 @@ pub(crate) mod opencode_go_parsing;
 pub(crate) mod opencode_go_usage;
 pub(crate) mod openrouter_parsing;
 pub(crate) mod openrouter_usage;
+pub(crate) mod quota_canonical;
 pub(crate) mod quota_feedback;
 pub(crate) mod quota_reset;
 pub(crate) mod quota_status;

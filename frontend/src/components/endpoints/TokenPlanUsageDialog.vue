@@ -3,17 +3,25 @@ import { computed } from 'vue'
 import type {
   EndpointProvider,
   TokenPlanKeyUsage,
+  TokenPlanModelUsage,
   TokenPlanUsageResponse,
 } from '@/generated/admin-api'
 import SubscriptionQuotaHistory from '@/components/endpoints/SubscriptionQuotaHistory.vue'
-import SubscriptionQuotaWindows from '@/components/endpoints/SubscriptionQuotaWindows.vue'
 import TokenPlanKeyQuotaStatus from '@/components/endpoints/TokenPlanKeyQuotaStatus.vue'
+import TokenPlanQuotaWindowRow from '@/components/endpoints/TokenPlanQuotaWindowRow.vue'
 import { deepseekBalanceRows } from '@/components/endpoints/tokenPlanBadgeRender'
 import {
-  knownRemainingPercent,
+  toCanonicalQuotaRows,
+  type CanonicalQuotaRow,
+} from '@/composables/useCanonicalQuotaWindows'
+import {
   useTokenPlanTicker,
   useTokenPlanWindowEntries,
 } from '@/composables/useTokenPlanWindowEntries'
+import {
+  formatSubscriptionQuotaDateTime,
+  subscriptionWindowLabel,
+} from '@/composables/subscriptionQuotaWindows'
 
 const props = defineProps<{
   endpointId: string
@@ -29,28 +37,147 @@ const visible = defineModel<boolean>('visible', { required: true })
 const nowMs = useTokenPlanTicker(visible)
 
 const {
-  remainingPercent,
-  usedPercent,
   keyWindowCount,
   minimumRemainingPercent,
-  progressColor,
-  formatRemaining,
-  ccEntries,
-  ccMinRemaining,
-  progressWindowEntries,
-  progressWindowMinRemaining,
   openrouterEntries,
   formatOpenRouterCredits,
 } = useTokenPlanWindowEntries(props.t, nowMs)
 
+function isQuotaRow(row: CanonicalQuotaRow): boolean {
+  return (
+    row.kind === 'five_hour' ||
+    row.kind === 'rolling' ||
+    row.kind === 'weekly' ||
+    row.kind === 'monthly' ||
+    row.kind === 'custom'
+  )
+}
+
+// Provider slots (no source model): CommandCode USD, opencodeGo, GLM.
+function quotaRows(key: TokenPlanKeyUsage): CanonicalQuotaRow[] {
+  return toCanonicalQuotaRows(key, nowMs.value).filter(
+    (row) => row.sourceModel === null && isQuotaRow(row),
+  )
+}
+
+type ModelQuotaGroup = {
+  modelName: string
+  rows: CanonicalQuotaRow[]
+  observation: TokenPlanModelUsage['observation']
+}
+
+// Canonical model/detail rows grouped by source model, preserving payload
+// order. Detail rows (is_default_scope false) stay visible here but never
+// bind the pool minimum, which comes from default-scope rows only.
+// Observation-only models (assessed empty with stale metadata) keep their
+// metadata group even when they contribute no rows.
+function modelGroups(key: TokenPlanKeyUsage): ModelQuotaGroup[] {
+  const rowsByModel = new Map<string, CanonicalQuotaRow[]>()
+  for (const row of toCanonicalQuotaRows(key, nowMs.value)) {
+    if (row.sourceModel === null || !isQuotaRow(row)) continue
+    const list = rowsByModel.get(row.sourceModel)
+    if (list) list.push(row)
+    else rowsByModel.set(row.sourceModel, [row])
+  }
+  const groups: ModelQuotaGroup[] = []
+  for (const model of key.model_remains) {
+    const rows = rowsByModel.get(model.model_name) ?? []
+    rowsByModel.delete(model.model_name)
+    if (rows.length === 0 && model.observation == null) continue
+    groups.push({
+      modelName: model.model_name,
+      rows,
+      observation: model.observation ?? null,
+    })
+  }
+  for (const [modelName, rows] of rowsByModel) {
+    groups.push({
+      modelName,
+      rows,
+      observation: null,
+    })
+  }
+  return groups
+}
+
+function quotaRowLabelKey(row: CanonicalQuotaRow): string {
+  if (row.sourceId.startsWith('command_code:')) {
+    return row.kind === 'weekly' ? 'tokenPlanWeeklyUsd' : 'tokenPlanFiveHour'
+  }
+  if (row.sourceId.startsWith('glm:')) {
+    return row.kind === 'weekly' ? 'tokenPlanWeekly' : 'tokenPlanInterval'
+  }
+  if (row.sourceId.startsWith('opencode_go:')) {
+    if (row.kind === 'rolling') return 'tokenPlanRolling'
+    if (row.kind === 'weekly') return 'tokenPlanWeekly'
+    return 'tokenPlanMonthly'
+  }
+  return row.kind === 'weekly' || row.kind === 'monthly'
+    ? 'tokenPlanWeekly'
+    : 'tokenPlanInterval'
+}
+
+// Model/detail rows use their actual duration: subscription custom windows
+// go through the existing duration helper, MiniMax count slots reuse the
+// interval/weekly copy. The row only receives the translated string.
+function modelRowLabel(row: CanonicalQuotaRow): string {
+  if (row.kind === 'custom') {
+    return subscriptionWindowLabel(
+      {
+        source_window: row.sourceId,
+        window_seconds: row.durationSeconds,
+        availability: row.availability,
+        remaining_percent: row.remainingPercent,
+        reset_at: row.resetAt,
+      },
+      props.t,
+    )
+  }
+  return props.t(quotaRowLabelKey(row))
+}
+
+function quotaRowQuantitySuffix(row: CanonicalQuotaRow): string {
+  // The USD caption the CommandCode section has always shown; every other
+  // slot renders the bare `used / total` caption.
+  return row.unit === 'currency' ? ' USD' : ''
+}
+
 function minimumRemainingLabel(key: TokenPlanKeyUsage): string {
-  const minimum =
-    minimumRemainingPercent(key) ??
-    ccMinRemaining(key) ??
-    progressWindowMinRemaining(key)
+  // Canonical-only pool minimum: default-scope rows decide, detail rows
+  // never leak in (an authoritative empty or all-expired stays unknown).
+  const minimum = minimumRemainingPercent(key)
   return minimum === null
     ? props.t('tokenPlanMinRemainingUnknown')
     : props.t('tokenPlanMinRemaining', { percent: minimum.toFixed(1) })
+}
+
+function observationTime(
+  observation: TokenPlanModelUsage['observation'],
+): string | null {
+  const value = observation?.observed_at
+  return value ? formatSubscriptionQuotaDateTime(value) : null
+}
+
+function observationSourceLabel(
+  observation: TokenPlanModelUsage['observation'],
+): string | null {
+  switch (observation?.source) {
+    case 'manual':
+      return props.t('quotaSourceManual')
+    case 'request':
+      return props.t('quotaSourceRequest')
+    case 'periodic':
+      return props.t('quotaSourcePeriodic')
+    default:
+      return null
+  }
+}
+
+function observationRetryTime(
+  observation: TokenPlanModelUsage['observation'],
+): string | null {
+  const value = observation?.next_retry_at
+  return value ? formatSubscriptionQuotaDateTime(value) : null
 }
 
 const historyRefreshKey = computed(() => {
@@ -117,23 +244,14 @@ const historyRefreshKey = computed(() => {
                       />
                     </span>
                     <span
-                      v-if="
-                        key.ok &&
-                        keyWindowCount(key) +
-                          ccEntries(key).length +
-                          progressWindowEntries(key).length >
-                          0
-                      "
+                      v-if="key.ok && keyWindowCount(key) > 0"
                       class="shrink-0 text-xs text-dimmed"
                     >
                       {{ minimumRemainingLabel(key) }}
                       ·
                       {{
                         t('tokenPlanWindowCount', {
-                          count:
-                            keyWindowCount(key) +
-                            ccEntries(key).length +
-                            progressWindowEntries(key).length,
+                          count: keyWindowCount(key),
                         })
                       }}
                     </span>
@@ -280,77 +398,16 @@ const historyRefreshKey = computed(() => {
                         >
                       </div>
                     </div>
-                    <div
-                      v-for="entry in ccEntries(key)"
-                      :key="entry.labelKey"
-                      class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
-                    >
-                      <span class="text-dimmed">{{ t(entry.labelKey) }}</span>
-                      <UProgress
-                        v-if="knownRemainingPercent(entry.adapted) !== null"
-                        class="token-plan-progress h-1.5"
-                        :model-value="usedPercent(entry.adapted)"
-                        :style="{
-                          '--token-plan-progress-color': progressColor(
-                            entry.adapted,
-                          ),
-                        }"
-                      />
-                      <div
-                        class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
-                      >
-                        <span class="text-dimmed">{{
-                          formatRemaining(entry.adapted)
-                        }}</span>
-                        <span class="shrink-0 font-semibold">
-                          {{
-                            knownRemainingPercent(entry.adapted) === null
-                              ? '—'
-                              : `${remainingPercent(entry.adapted).toFixed(1)}%`
-                          }}
-                        </span>
-                      </div>
-                      <span class="text-dimmed sm:col-span-2 sm:col-start-2"
-                        >{{ entry.raw.used.toFixed(2) }} /
-                        {{ entry.raw.cap.toFixed(2) }} USD</span
-                      >
-                    </div>
-                    <div
-                      v-for="entry in progressWindowEntries(key)"
-                      :key="entry.labelKey"
-                      class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
-                    >
-                      <span class="text-dimmed">{{ t(entry.labelKey) }}</span>
-                      <UProgress
-                        v-if="knownRemainingPercent(entry.adapted) !== null"
-                        class="token-plan-progress h-1.5"
-                        :model-value="usedPercent(entry.adapted)"
-                        :style="{
-                          '--token-plan-progress-color': progressColor(
-                            entry.adapted,
-                          ),
-                        }"
-                      />
-                      <div
-                        class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
-                      >
-                        <span class="text-dimmed">{{
-                          formatRemaining(entry.adapted)
-                        }}</span>
-                        <span class="shrink-0 font-semibold">
-                          {{
-                            knownRemainingPercent(entry.adapted) === null
-                              ? '—'
-                              : `${remainingPercent(entry.adapted).toFixed(1)}%`
-                          }}
-                        </span>
-                      </div>
-                      <span
-                        v-if="entry.subline"
-                        class="text-dimmed sm:col-span-2 sm:col-start-2"
-                        >{{ entry.subline }}</span
-                      >
-                    </div>
+                    <TokenPlanQuotaWindowRow
+                      v-for="row in quotaRows(key)"
+                      :key="row.sourceId"
+                      :row="row"
+                      :label="t(quotaRowLabelKey(row))"
+                      :t="t"
+                      :now-ms="nowMs"
+                      density="full"
+                      :quantity-suffix="quotaRowQuantitySuffix(row)"
+                    />
                     <p
                       v-if="key.balances && !key.five_hour && !key.weekly"
                       class="text-dimmed"
@@ -358,90 +415,77 @@ const historyRefreshKey = computed(() => {
                       {{ t('tokenPlanPaygNoWindow') }}
                     </p>
                     <div
-                      v-if="key.model_remains.length > 0"
+                      v-if="modelGroups(key).length > 0"
                       class="grid gap-3 sm:grid-cols-2"
                     >
                       <div
-                        v-for="model in key.model_remains"
-                        :key="model.model_name"
+                        v-for="group in modelGroups(key)"
+                        :key="group.modelName"
                         class="grid gap-2 rounded-md border border-default p-3"
                       >
                         <div class="break-words font-medium text-highlighted">
-                          {{ model.model_name }}
+                          {{ group.modelName }}
                         </div>
-                        <SubscriptionQuotaWindows
-                          v-if="model.windows != null"
-                          :now-ms="nowMs"
-                          :observation="model.observation ?? null"
+                        <div
+                          v-if="group.observation"
+                          class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
+                        >
+                          <span
+                            v-if="observationTime(group.observation)"
+                            class="text-dimmed"
+                          >
+                            {{
+                              t('quotaObservedAt', {
+                                time: observationTime(group.observation),
+                              })
+                            }}
+                          </span>
+                          <span
+                            v-if="observationSourceLabel(group.observation)"
+                            class="text-dimmed"
+                            >{{
+                              observationSourceLabel(group.observation)
+                            }}</span
+                          >
+                          <UBadge
+                            v-if="group.observation.refreshing"
+                            :label="t('quotaRefreshing')"
+                            color="neutral"
+                            variant="subtle"
+                          />
+                          <UBadge
+                            v-if="group.observation.stale"
+                            :label="t('quotaCachedObservation')"
+                            color="warning"
+                            variant="subtle"
+                          />
+                          <span
+                            v-if="group.observation.last_error_code"
+                            class="text-warning"
+                          >
+                            {{ t('quotaRefreshFailedCached') }}
+                          </span>
+                          <span
+                            v-if="observationRetryTime(group.observation)"
+                            class="text-dimmed"
+                          >
+                            {{
+                              t('quotaRetryAt', {
+                                time: observationRetryTime(group.observation),
+                              })
+                            }}
+                          </span>
+                        </div>
+                        <TokenPlanQuotaWindowRow
+                          v-for="row in group.rows"
+                          :key="row.sourceId"
+                          :row="row"
+                          :label="modelRowLabel(row)"
                           :t="t"
-                          :windows="model.windows"
+                          :now-ms="nowMs"
+                          density="full"
+                          :quantity-suffix="quotaRowQuantitySuffix(row)"
                         />
-                        <template v-else>
-                          <div
-                            v-if="model.interval"
-                            class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
-                          >
-                            <span class="text-dimmed">{{
-                              t('tokenPlanInterval')
-                            }}</span>
-                            <UProgress
-                              v-if="knownRemainingPercent(model.interval) !== null"
-                              class="token-plan-progress h-1.5"
-                              :model-value="usedPercent(model.interval)"
-                              :style="{
-                                '--token-plan-progress-color': progressColor(
-                                  model.interval,
-                                ),
-                              }"
-                            />
-                            <div
-                              class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
-                            >
-                              <span class="text-dimmed">{{
-                                formatRemaining(model.interval)
-                              }}</span>
-                              <span class="shrink-0 font-semibold">
-                                {{
-                                  knownRemainingPercent(model.interval) === null
-                                    ? '—'
-                                    : `${remainingPercent(model.interval).toFixed(1)}%`
-                                }}
-                              </span>
-                            </div>
-                          </div>
-                          <div
-                            v-if="model.weekly"
-                            class="grid gap-1.5 sm:grid-cols-[minmax(7rem,auto)_minmax(0,1fr)_minmax(8.5rem,auto)] sm:items-center sm:gap-3"
-                          >
-                            <span class="text-dimmed">{{
-                              t('tokenPlanWeekly')
-                            }}</span>
-                            <UProgress
-                              v-if="knownRemainingPercent(model.weekly) !== null"
-                              class="token-plan-progress h-1.5"
-                              :model-value="usedPercent(model.weekly)"
-                              :style="{
-                                '--token-plan-progress-color': progressColor(
-                                  model.weekly,
-                                ),
-                              }"
-                            />
-                            <div
-                              class="flex items-center justify-between gap-2 text-xs sm:min-w-[8.5rem] sm:justify-end"
-                            >
-                              <span class="text-dimmed">{{
-                                formatRemaining(model.weekly)
-                              }}</span>
-                              <span class="shrink-0 font-semibold">
-                                {{
-                                  knownRemainingPercent(model.weekly) === null
-                                    ? '—'
-                                    : `${remainingPercent(model.weekly).toFixed(1)}%`
-                                }}
-                              </span>
-                            </div>
-                          </div>
-                        </template>
                       </div>
                     </div>
                   </template>
@@ -467,9 +511,3 @@ const historyRefreshKey = computed(() => {
     </template>
   </UModal>
 </template>
-
-<style scoped>
-.token-plan-progress :deep([data-slot='indicator']) {
-  background-color: var(--token-plan-progress-color);
-}
-</style>

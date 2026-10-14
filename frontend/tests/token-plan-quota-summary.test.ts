@@ -378,3 +378,153 @@ test('GLM missing weekly window leaves long null', () => {
   expect(summary.state).toBe('unknown')
   expect([summary.short, summary.long]).toEqual([75, null])
 })
+
+test('canonical observations drive the bands when present', () => {
+  const summary = summarizeTokenPlanQuota(
+    'glm',
+    [
+      {
+        ...glmKey(
+          'glm-canonical',
+          { current_value: 0, limit: 2000, remaining: 2000, percentage: 0 },
+          null,
+        ),
+        quota_windows: [
+          {
+            source_id: 'glm:five_hour',
+            kind: 'five_hour',
+            source_model: null,
+            unit: 'tokens',
+            duration_seconds: null,
+            is_default_scope: true,
+            availability: 'known',
+            remaining_percent: 60,
+            current: 40,
+            limit: 100,
+            remaining: 60,
+            reset_at: null,
+          },
+        ],
+      } as TokenPlanKeyUsage,
+    ],
+    'ready',
+  )
+  // The canonical 60 wins over the legacy 100: observations are preferred,
+  // never merged with the fields they replace.
+  expect([summary.short, summary.long]).toEqual([60, null])
+})
+
+test('an explicit canonical empty leaves both bands null', () => {
+  const summary = summarizeTokenPlanQuota(
+    'glm',
+    [
+      {
+        ...glmKey(
+          'glm-empty',
+          { current_value: 0, limit: 2000, remaining: 2000, percentage: 0 },
+          null,
+        ),
+        quota_windows: [],
+      } as TokenPlanKeyUsage,
+    ],
+    'ready',
+  )
+  // Authoritative empty: assessed, not missing — no legacy fallback fills it.
+  expect([summary.short, summary.long]).toEqual([null, null])
+})
+
+test('canonical subscription wins over raw windows in the summary', () => {
+  const summary = summarizeTokenPlanQuota(
+    'openai',
+    [
+      {
+        key_id: 'conflict',
+        key_label: 'conflict',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'plus',
+            interval: null,
+            weekly: null,
+            windows: [
+              {
+                source_window: 'primary',
+                window_seconds: 18_000,
+                used_percent: 20,
+                remaining_percent: 80,
+                reset_at: null,
+                reset_after_seconds: null,
+                availability: 'known',
+              },
+            ],
+            observation: null,
+          },
+        ],
+        quota_windows: [
+          {
+            source_id: 'subscription:primary',
+            kind: 'custom',
+            source_model: 'plus',
+            unit: null,
+            duration_seconds: 18_000,
+            is_default_scope: true,
+            availability: 'known',
+            remaining_percent: 25,
+            current: null,
+            limit: null,
+            remaining: null,
+            reset_at: null,
+          },
+        ],
+      } as unknown as TokenPlanKeyUsage,
+    ],
+    'ready',
+  )
+  expect([summary.short, summary.long]).toEqual([25, null])
+})
+
+test('detail custom exhaustion never binds the summary pool', () => {
+  const summary = summarizeTokenPlanQuota(
+    'openai',
+    [
+      {
+        key_id: 'scope',
+        key_label: 'scope',
+        ok: true,
+        model_remains: [],
+        quota_windows: [
+          {
+            source_id: 'subscription:primary',
+            kind: 'custom',
+            source_model: 'chatgpt',
+            unit: null,
+            duration_seconds: 18_000,
+            is_default_scope: true,
+            availability: 'known',
+            remaining_percent: 80,
+            current: null,
+            limit: null,
+            remaining: null,
+            reset_at: null,
+          },
+          {
+            source_id: 'subscription:detail',
+            kind: 'custom',
+            source_model: 'detail-model',
+            unit: null,
+            duration_seconds: 18_000,
+            is_default_scope: false,
+            availability: 'known',
+            remaining_percent: 0,
+            current: null,
+            limit: null,
+            remaining: null,
+            reset_at: null,
+          },
+        ],
+      } as unknown as TokenPlanKeyUsage,
+    ],
+    'ready',
+  )
+  expect([summary.short, summary.long]).toEqual([80, null])
+})

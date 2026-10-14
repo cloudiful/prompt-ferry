@@ -11,7 +11,7 @@ scripts are reproducible locally with Docker or any reachable Valkey.
 | `with-test-env.sh` | Runs any command with those settings loaded (`bash scripts/ci/with-test-env.sh <command> [args...]`). The command runs inside one fresh run directory owned by `test_run_tmp.py` (see below), with the original arguments, exit status, and signals. |
 | `test_run_tmp.py` | Owns one `run-<uuid>` directory under the exported test root per invocation, points `TMPDIR`/`PROMPT_FERRY_TEST_TMPDIR` at it, forwards signals to the owned process group, preserves the exit status, and removes exactly that directory afterwards. Reports (never deletes) leftovers from SIGKILLed runs. When the effective Cargo compiler wrapper (`RUSTC_WRAPPER`/`RUSTC_WORKSPACE_WRAPPER`, resolved from env — bare name beats `CARGO_BUILD_*` — then Cargo config files, nearest `.cargo` first with legacy `config` shadowing `config.toml`, global `CARGO_HOME` config last) names the sccache executable, the key is set empty in the owned child environment only: per the Cargo Book, empty overrides the config and disables the wrapper, while deleting the key would fall back to a file wrapper. Parent env, config files, the shared cache daemon, and ordinary wrappers are untouched, so test builds compile directly instead of binding a daemon to the disposable directory. Requires Python ≥ 3.11 (stdlib `tomllib`). Cargo `--config` CLI overrides and config `include` directives are not inspected. |
 | `test_test_run_tmp.py` | Unit checks for that lifecycle (`uv run --no-project python scripts/ci/test_test_run_tmp.py`): stdlib only, synthetic roots, no services. |
-| `require-test-postgres.py` | Verifies the dedicated quota test database: the URL must address the operator-confirmed `host:port/database`, and that database must be reachable, authenticated, migrated, and report its own matching identity (never migrates or provisions). |
+| `require-test-postgres.py` | Verifies the dedicated quota test database: the URL must address the operator-confirmed `host:port/database`, and that database must be reachable, authenticated, migrated, and report its own matching identity (never migrates or provisions), plus `public.request_records` must cover UTC yesterday/today/tomorrow — missing coverage fails read-only by default, or is created bounded when the partition opt-in is explicitly `true`. |
 | `test_pg_target.py` | Pure grammar for the dedicated target — parses and compares the URL against the confirmed `host:port/database` with no process, network, or SQL. Imported by `require-test-postgres.py`, which re-exports every name it defines. |
 | `test_s3_target.py` | Pure grammar for the dedicated S3 test target — all eight settings must be present and agree on one confirmed endpoint-root/bucket, with no process, network, or object-store I/O. Executed by `require-services.sh`; mirrored independently by the Rust S3 test guard. |
 | `test_test_s3_target.py` | Unit checks for that grammar (`uv run --no-project python scripts/ci/test_test_s3_target.py`): pure fixtures, no credentials, no I/O. |
@@ -95,6 +95,19 @@ Confirming a different target is an operator decision: provision and migrate
 that database yourself (the preflight never does), and keep it distinct from
 every application or production database.
 
+`request_records` is a daily `RANGE (created_at)` parent, so the preflight also
+requires UTC yesterday/today/tomorrow children (`request_records_YYYYMMDD`
+with exact day-edge bounds, attached to the parent) before cargo starts. A
+missing day fails read-only with the safe date diagnostic — never DDL — unless
+`PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS` reads exactly `true`, in
+which case one bounded transaction creates only the missing days under an
+advisory lock, verifies exact bounds and attachment, and commits; anything else
+(a missing, blank, or `false` flag, a foreign same-named relation, or
+unexpected bounds) refuses without modification and never drops or recreates.
+The flag is strict `true`/`false`, travels with the other dedicated test keys
+(process environment wins, an explicit blank stays unconfigured), and the
+confirmed target alone never authorizes the creation.
+
 The S3 side follows the same two-halves shape with eight settings instead of
 two: the endpoint, bucket, region, credentials, and flags supply the target,
 and `PROMPT_FERRY_TEST_S3_CONFIRMED_TARGET` must read exactly the confirmed
@@ -122,6 +135,7 @@ verifies them and never creates, migrates, or starts anything.
 bash scripts/ci/run-tests.sh                            # full run: needs all services
 bash scripts/ci/with-test-env.sh cargo test -p prompt-ferry   # focused run
 bash scripts/ci/test-env.test.sh                         # entrypoint checks, no service needed
+uv run --no-project python scripts/ci/test_test_postgres_partitions.py  # partition-guard checks, no service needed
 uv run --no-project python scripts/ci/test_test_s3_target.py  # S3 grammar checks, no service needed
 bash scripts/ci/with-test-env.sh cargo test -p prompt-ferry raw_payload_store -- --test-threads=1  # raw store incl. real S3
 ```

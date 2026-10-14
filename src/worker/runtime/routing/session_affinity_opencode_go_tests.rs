@@ -52,6 +52,7 @@ fn opencode_go_key(
         glm_five_hour: None,
         glm_weekly: None,
         deepseek_balance: None,
+        quota_windows: None,
     }
 }
 

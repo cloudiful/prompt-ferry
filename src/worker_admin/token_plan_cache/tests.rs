@@ -39,6 +39,7 @@ pub(super) fn opencode_go_usage(key_id: Uuid, remaining: f64) -> TokenPlanUsageR
             glm_five_hour: None,
             glm_weekly: None,
             deepseek_balance: None,
+            quota_windows: None,
         }],
     }
 }

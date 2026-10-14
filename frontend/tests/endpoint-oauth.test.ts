@@ -138,7 +138,7 @@ function rewriteSfcImports(code: string): string {
       }
       for (const part of named?.[1].split(',') ?? []) {
         const entry = part.trim()
-        if (!entry) continue
+        if (!entry || entry.startsWith('type ')) continue
         const [source, local = source] = entry.split(/\s+as\s+/)
         statements.push(
           `const ${local.trim()} = __resolve(${JSON.stringify(spec)})[${JSON.stringify(source.trim())}];`,
@@ -331,4 +331,390 @@ test('ChatGPT OAuth copy exists in both locales', () => {
       expect(merged[key]).toBe(localized[key])
     }
   }
+})
+
+// P3: the OAuth quota section renders the same canonical rows as the dialog
+// through the shared row component, so subscription `model.windows` data no
+// longer depends on the old hardcoded `model_remains[0].interval/weekly` pair.
+import { ref } from 'vue'
+import type {
+  CanonicalQuotaWindow,
+  TokenPlanKeyUsage,
+  TokenPlanUsageResponse,
+} from '../src/generated/admin-api'
+import * as canonicalQuota from '../src/composables/useCanonicalQuotaWindows'
+import * as tokenPlanFormatting from '../src/composables/useTokenPlanWindowEntries'
+import * as subscriptionQuota from '../src/composables/subscriptionQuotaWindows'
+
+const FIXED_NOW = Date.parse('2026-10-11T00:00:00.000Z')
+const FUTURE_ISO = new Date(FIXED_NOW + 3_600_000).toISOString()
+const PAST_ISO = new Date(FIXED_NOW - 3_600_000).toISOString()
+
+const oauthSource = await Bun.file(
+  new URL(
+    '../src/components/endpoints/EndpointOAuthSection.vue',
+    import.meta.url,
+  ),
+).text()
+
+const oauthRowSource = await Bun.file(
+  new URL(
+    '../src/components/endpoints/TokenPlanQuotaWindowRow.vue',
+    import.meta.url,
+  ),
+).text()
+
+// Controllable OAuth state: each test sets `status`/`quota` before render,
+// so the section reads canonical rows without any network or store.
+const mockStatus = ref<unknown>(null)
+const mockQuota = ref<TokenPlanUsageResponse | null>(null)
+const mockQuotaError = ref('')
+const mockStatusError = ref('')
+
+const mockOAuthActions = {
+  useEndpointOAuthActions: () => ({
+    browserFlow: {
+      browser: ref(null),
+      busy: ref(false),
+      completeBrowser: async () => {},
+      message: ref(''),
+      redirectUrl: ref(''),
+      startBrowser: async () => {},
+    },
+    clearToken: async () => {},
+    clearing: ref(false),
+    deviceFlow: {
+      device: ref(null),
+      message: ref(''),
+      polling: ref(false),
+      startDevice: async () => {},
+      starting: ref(false),
+    },
+    quota: mockQuota,
+    quotaError: mockQuotaError,
+    refreshToken: async () => {},
+    refreshing: ref(false),
+    status: mockStatus,
+    statusError: mockStatusError,
+  }),
+}
+
+// The ticker is time, not quota logic: freeze it so reset freshness is
+// deterministic while every other formatting helper stays real.
+const mockWindowEntries = {
+  ...tokenPlanFormatting,
+  useTokenPlanTicker: () => ref(FIXED_NOW),
+}
+
+function compileSfc(source: string, filename: string, id: string) {
+  const { descriptor } = parse(source, { filename })
+  const script = compileScript(descriptor, { id, inlineTemplate: true })
+  return rewriteSfcImports(script.content).replace(/export default/, 'return')
+}
+
+const oauthRowComponent = ((): unknown => {
+  const js = new Bun.Transpiler({ loader: 'ts' }).transformSync(
+    compileSfc(
+      oauthRowSource,
+      'TokenPlanQuotaWindowRow.vue',
+      'oauth-quota-row',
+    ),
+  )
+  const resolve = (spec: string): unknown => {
+    if (spec === 'vue') return vue
+    if (spec === '@/composables/useCanonicalQuotaWindows') return canonicalQuota
+    if (spec === '@/composables/useTokenPlanWindowEntries') {
+      return tokenPlanFormatting
+    }
+    return slotStub(spec.split('/').pop() ?? spec)
+  }
+  return new Function('__resolve', `"use strict";\n${js}`)(resolve)
+})()
+
+const oauthComponent = ((): Parameters<typeof h>[0] => {
+  const js = new Bun.Transpiler({ loader: 'ts' }).transformSync(
+    compileSfc(
+      oauthSource,
+      'EndpointOAuthSection.vue',
+      'endpoint-oauth-section',
+    ),
+  )
+  const resolve = (spec: string): unknown => {
+    if (spec === 'vue') return vue
+    if (spec === '@/composables/useEndpointOAuthActions')
+      return mockOAuthActions
+    if (spec === '@/composables/useCanonicalQuotaWindows') return canonicalQuota
+    if (spec === '@/composables/useTokenPlanWindowEntries') {
+      return mockWindowEntries
+    }
+    if (spec === '@/composables/subscriptionQuotaWindows') {
+      return subscriptionQuota
+    }
+    if (spec === '@/components/endpoints/TokenPlanQuotaWindowRow.vue') {
+      return oauthRowComponent
+    }
+    return slotStub(spec.split('/').pop() ?? spec)
+  }
+  return new Function('__resolve', `"use strict";\n${js}`)(
+    resolve,
+  ) as Parameters<typeof h>[0]
+})()
+
+async function renderOAuth(): Promise<string> {
+  const app = createSSRApp({
+    render: () =>
+      h(oauthComponent, {
+        endpointId: 'endpoint-1',
+        t: (key: string, args?: Record<string, unknown>) => {
+          if (key === 'tokenPlanDurationWindow') {
+            return `Window (${String((args as Record<string, unknown>)?.duration ?? '')})`
+          }
+          return key
+        },
+      }),
+  })
+  app.component('UModal', slotStub('UModal', 'body'))
+  app.component('UProgress', slotStub('UProgress') as never)
+  app.component('UButton', slotStub('UButton') as never)
+  app.component('UBadge', slotStub('UBadge') as never)
+  return renderToString(app)
+}
+
+function oauthKey(
+  overrides: Partial<TokenPlanKeyUsage> = {},
+): TokenPlanKeyUsage {
+  return {
+    key_id: 'k-oauth',
+    key_label: 'oauth key',
+    ok: true,
+    model_remains: [],
+    ...overrides,
+  } as TokenPlanKeyUsage
+}
+
+function loggedInWithQuota(quota: TokenPlanUsageResponse | null): void {
+  mockStatus.value = {
+    has_oauth_token: true,
+    plan: 'chatgpt_subscription',
+    expired: false,
+    expires_at: null,
+  }
+  mockQuota.value = quota
+  mockQuotaError.value = ''
+  mockStatusError.value = ''
+}
+
+test('OAuth renders actual subscription windows with the same values as the dialog', async () => {
+  loggedInWithQuota({
+    keys: [
+      oauthKey({
+        model_remains: [
+          {
+            model_name: 'plus',
+            interval: null,
+            weekly: null,
+            windows: [
+              {
+                source_window: 'primary',
+                window_seconds: 18_000,
+                used_percent: 2,
+                remaining_percent: 98,
+                reset_at: FUTURE_ISO,
+                reset_after_seconds: null,
+                availability: 'known',
+              },
+              {
+                source_window: 'secondary',
+                window_seconds: 604_800,
+                used_percent: null,
+                remaining_percent: null,
+                reset_at: FUTURE_ISO,
+                reset_after_seconds: null,
+                availability: 'unknown',
+              },
+            ],
+          },
+        ],
+      }),
+    ],
+    provider: 'openai',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  const html = await renderOAuth()
+  // The 5h window keeps its honest percent; the unknown secondary degrades
+  // to the same dash the dialog shows instead of a fabricated bar.
+  expect(html).toContain('98.0%')
+  expect(html).toContain('—')
+  expect(html).not.toContain(' endpointOAuthQuotaPrimary')
+})
+
+test('OAuth prefers canonical observations over legacy fields', async () => {
+  loggedInWithQuota({
+    keys: [
+      {
+        ...oauthKey({
+          model_remains: [
+            {
+              model_name: 'plus',
+              interval: null,
+              weekly: null,
+              windows: [
+                {
+                  source_window: 'primary',
+                  window_seconds: 18_000,
+                  used_percent: 2,
+                  remaining_percent: 98,
+                  reset_at: FUTURE_ISO,
+                  reset_after_seconds: null,
+                  availability: 'known',
+                },
+              ],
+            },
+          ],
+        }),
+        quota_windows: [
+          {
+            source_id: 'subscription:primary',
+            kind: 'custom',
+            source_model: 'plus',
+            unit: null,
+            duration_seconds: 18_000,
+            is_default_scope: false,
+            availability: 'known',
+            remaining_percent: 60,
+            current: null,
+            limit: null,
+            remaining: null,
+            reset_at: FUTURE_ISO,
+          },
+        ],
+      } as unknown as TokenPlanKeyUsage,
+    ],
+    provider: 'openai',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  const html = await renderOAuth()
+  // Canonical 60 wins over legacy 98: observations are preferred, never merged.
+  expect(html).toContain('60.0%')
+  expect(html).not.toContain('98.0%')
+})
+
+test('OAuth shows the actual custom duration instead of a hardcoded slot', async () => {
+  loggedInWithQuota({
+    keys: [
+      oauthKey({
+        model_remains: [
+          {
+            model_name: 'plus',
+            interval: null,
+            weekly: null,
+            windows: [
+              {
+                source_window: 'extra',
+                window_seconds: 3_600,
+                used_percent: 10,
+                remaining_percent: 90,
+                reset_at: FUTURE_ISO,
+                reset_after_seconds: null,
+                availability: 'known',
+              },
+            ],
+          },
+        ],
+      }),
+    ],
+    provider: 'openai',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  const html = await renderOAuth()
+  expect(html).toContain('90.0%')
+  expect(html).toContain('Window (1h)')
+})
+
+test('OAuth renders an expired window as unknown without keeping its percent', async () => {
+  loggedInWithQuota({
+    keys: [
+      oauthKey({
+        quota_windows: [
+          {
+            source_id: 'subscription:primary',
+            kind: 'custom',
+            source_model: 'plus',
+            unit: null,
+            duration_seconds: 18_000,
+            is_default_scope: false,
+            availability: 'known',
+            remaining_percent: 75,
+            current: null,
+            limit: null,
+            remaining: null,
+            reset_at: PAST_ISO,
+          },
+        ] as CanonicalQuotaWindow[],
+      }),
+    ],
+    provider: 'openai',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  const html = await renderOAuth()
+  expect(html).toContain('—')
+  expect(html).not.toContain('75.0%')
+})
+
+test('OAuth renders a genuine zero as an exhausted 0% bar', async () => {
+  loggedInWithQuota({
+    keys: [
+      oauthKey({
+        quota_windows: [
+          {
+            source_id: 'subscription:primary',
+            kind: 'custom',
+            source_model: 'plus',
+            unit: null,
+            duration_seconds: 18_000,
+            is_default_scope: false,
+            availability: 'known',
+            remaining_percent: 0,
+            current: null,
+            limit: null,
+            remaining: null,
+            reset_at: FUTURE_ISO,
+          },
+        ] as CanonicalQuotaWindow[],
+      }),
+    ],
+    provider: 'openai',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  const html = await renderOAuth()
+  expect(html).toContain('0.0%')
+  expect(html).not.toContain('—')
+})
+
+test('OAuth keeps quota errors and the login surface untouched', async () => {
+  mockStatus.value = {
+    has_oauth_token: true,
+    plan: 'chatgpt_subscription',
+    expired: false,
+    expires_at: null,
+  }
+  mockQuota.value = {
+    keys: [],
+    provider: 'openai',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse
+  mockQuotaError.value = 'quota boom'
+  mockStatusError.value = ''
+  const html = await renderOAuth()
+  expect(html).toContain('quota boom')
+  // Logging out still shows the device/browser login, not quota rows.
+  mockStatus.value = {
+    has_oauth_token: false,
+    plan: 'platform_api_key',
+    expired: false,
+    expires_at: null,
+  }
+  mockQuota.value = null
+  const loggedOut = await renderOAuth()
+  expect(loggedOut).toContain('data-stub="EndpointOAuthDeviceLogin.vue"')
 })

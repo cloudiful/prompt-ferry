@@ -40,6 +40,10 @@ SCENARIOS=(
   test_process_environment_wins
   test_explicit_blank_process_value_is_not_replaced
   test_only_test_keys_are_forwarded
+  test_partition_opt_in_flag_is_exported
+  test_partition_opt_in_process_wins
+  test_partition_opt_in_blank_stays_unconfigured
+  test_partition_opt_in_defaults_to_absent
   test_s3_test_keys_are_exported
   test_s3_keys_are_unset_when_missing
   test_quoted_value_with_spaces_survives
@@ -62,6 +66,9 @@ SCENARIOS=(
   test_malformed_urls_and_targets_are_refused
   test_a_refusal_never_echoes_the_url_or_password
   test_the_target_parser_is_a_pure_importable_module
+  test_missing_partition_coverage_fails_before_cargo
+  test_partition_opt_in_creates_only_the_missing_child
+  test_partition_opt_in_flag_must_be_strict
   test_a_missing_parser_module_fails_closed
   test_preflight_rejects_unusable_postgres_databases
   test_the_connected_database_is_checked_against_the_confirmed_one

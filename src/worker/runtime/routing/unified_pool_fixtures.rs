@@ -67,6 +67,7 @@ pub(super) fn opencode_go_usage(keys: &[(uuid::Uuid, &str, f64)]) -> TokenPlanUs
                 glm_five_hour: None,
                 glm_weekly: None,
                 deepseek_balance: None,
+                quota_windows: None,
             })
             .collect(),
     }
@@ -108,6 +109,7 @@ pub(super) fn opencode_go_urgent_key(
         glm_five_hour: None,
         glm_weekly: None,
         deepseek_balance: None,
+        quota_windows: None,
     }
 }
 

@@ -16,6 +16,7 @@ use super::json_scalars::{
 };
 use super::opencode_go_usage::{OPENCODE_GO_BASE, fetch_opencode_go_key_usage};
 use super::openrouter_usage::fetch_openrouter_key_usage;
+use super::quota_canonical::populate_response_observations;
 use crate::{
     db::{self, EndpointProvider, EndpointRegion, ProviderEndpoint},
     worker_admin_types::{
@@ -155,12 +156,17 @@ fn provider_usage_response(
     provider_region: Option<EndpointRegion>,
     keys: Vec<TokenPlanKeyUsage>,
 ) -> TokenPlanUsageResponse {
-    TokenPlanUsageResponse {
+    let mut response = TokenPlanUsageResponse {
         local_today_tokens: None,
         provider,
         provider_region,
         keys,
-    }
+    };
+    // Same central projection as the cache/decorate path: successful keys
+    // without a parser-captured vector get additive observations here, so
+    // fetch, cache, and direct entry points stay consistent.
+    populate_response_observations(provider, &mut response);
+    response
 }
 
 async fn fetch_minimax_endpoint_usage(
@@ -385,6 +391,7 @@ async fn fetch_minimax_key_usage(
             glm_five_hour: None,
             glm_weekly: None,
             deepseek_balance: None,
+            quota_windows: None,
         },
         Err((error_code, error_message)) => {
             failed_key(key_id, key_label, Some(status), error_code, error_message)

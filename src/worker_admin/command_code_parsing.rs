@@ -221,6 +221,11 @@ pub(crate) fn parse_window_entry(
     let entry = windows.as_object()?.get(key)?.as_object()?;
     let used = entry.get("used").and_then(value_as_f64)?;
     let cap = entry.get("cap").and_then(value_as_f64)?;
+    // Finite values only: a non-finite amount is unknown (never clamped
+    // `inf` into `100`), and a double-zero row carries no signal.
+    if !used.is_finite() || !cap.is_finite() {
+        return None;
+    }
     if used == 0.0 && cap == 0.0 {
         return None;
     }
@@ -347,6 +352,7 @@ mod tests {
                 glm_five_hour: None,
                 glm_weekly: None,
                 deepseek_balance: None,
+                quota_windows: None,
             }
         }
         fn pct(five: Option<f64>, weekly: Option<f64>) -> Option<f64> {
@@ -488,6 +494,7 @@ mod tests {
             glm_five_hour: None,
             glm_weekly: None,
             deepseek_balance: None,
+            quota_windows: None,
         }
     }
 

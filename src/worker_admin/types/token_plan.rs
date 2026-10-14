@@ -6,7 +6,9 @@ use uuid::Uuid;
 use crate::db::{EndpointProvider, EndpointRegion};
 
 use super::{
-    endpoints::{SubscriptionQuotaObservation, SubscriptionWindowUsage},
+    endpoints::{
+        SubscriptionQuotaObservation, SubscriptionWindowAvailability, SubscriptionWindowUsage,
+    },
     quota_status::TokenPlanQuotaStatus,
 };
 
@@ -83,6 +85,13 @@ pub struct TokenPlanKeyUsage {
     /// None when missing — degraded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deepseek_balance: Option<DeepSeekBalance>,
+    /// Additive canonical quota observations (issue #844 P1). `None` means
+    /// legacy fallback (populated only by newer backends); `Some([])` is an
+    /// explicit assessed empty (successful fetch with no rows); otherwise one
+    /// row per provider slot/model/currency. Failed keys stay `None` so an
+    /// unknown failure never falls through into available capacity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_windows: Option<Vec<CanonicalQuotaWindow>>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -194,4 +203,49 @@ pub struct GlmWindowUsage {
     /// clamped to the closed interval.
     pub percentage: Option<f64>,
     pub next_reset_at: Option<DateTime<Utc>>,
+}
+
+/// Stable kind for one canonical quota observation (issue #844 P1).
+/// Time windows carry a usable percentage; `balance`/`unlimited` carry
+/// amounts only and never a synthetic percentage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CanonicalQuotaWindowKind {
+    FiveHour,
+    Rolling,
+    Weekly,
+    Monthly,
+    Balance,
+    Unlimited,
+    Custom,
+}
+
+/// One additive canonical quota observation (issue #844 P1). `source_id`
+/// is the stable provider slot/model/currency identity (never a secret);
+/// amounts preserve presence (`Some(0.0)` is a real zero, `None` is
+/// absent/non-finite); `remaining_percent` is a valid finite reported or
+/// derived share only (unknown never `0`/`100`); `balance`/`unlimited`
+/// rows never carry a synthetic percentage.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, ToSchema)]
+pub struct CanonicalQuotaWindow {
+    pub source_id: String,
+    pub kind: CanonicalQuotaWindowKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<i64>,
+    pub is_default_scope: bool,
+    pub availability: SubscriptionWindowAvailability,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining_percent: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_at: Option<DateTime<Utc>>,
 }

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use uuid::Uuid;
 
+use super::quota_canonical::populate_response_observations;
 use crate::{
     db::{ChatgptQuotaSnapshot, ProviderEndpoint},
     worker_admin::handlers::chatgpt_backend::{ChatgptQuota, ChatgptQuotaWindow},
@@ -93,7 +94,7 @@ fn response(
         .clone()
         .map(|plan_type| format!("ChatGPT {plan_type}"))
         .unwrap_or_else(|| "ChatGPT subscription".to_string());
-    TokenPlanUsageResponse {
+    let mut response = TokenPlanUsageResponse {
         provider: endpoint.provider,
         provider_region: endpoint.provider_region,
         keys: vec![TokenPlanKeyUsage {
@@ -120,7 +121,12 @@ fn response(
             glm_five_hour: None,
             glm_weekly: None,
             deepseek_balance: None,
+            quota_windows: None,
         }],
         local_today_tokens: None,
-    }
+    };
+    // Direct normalizer path (no decorate_usage call here): same central
+    // projection so subscription rows carry real durations/availability.
+    populate_response_observations(endpoint.provider, &mut response);
+    response
 }

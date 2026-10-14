@@ -7,9 +7,10 @@ import type {
   TokenPlanWindowUsage,
 } from '@/generated/admin-api'
 import {
-  subscriptionQuotaMinimumRemainingPercent,
-  subscriptionQuotaWindowCount,
-} from './subscriptionQuotaWindows'
+  canonicalQuantityCaption,
+  toCanonicalQuotaRows,
+  type CanonicalQuotaRow,
+} from './useCanonicalQuotaWindows'
 
 // Window entries shared by the token-plan dialog (issues #184 P4, #193 P2,
 // #203 P2, #230 P3). MiniMax windows reuse percent/countdown rendering
@@ -230,26 +231,59 @@ function minimumKnownRemaining(windows: TokenPlanWindowUsage[]): number | null {
 }
 
 export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
-  function keyWindows(key: TokenPlanKeyUsage): TokenPlanWindowUsage[] {
-    return key.model_remains.flatMap((model) =>
-      model.windows == null
-        ? [model.interval, model.weekly].filter(
-            (window): window is TokenPlanWindowUsage => window != null,
-          )
-        : [],
+  // Canonical time-window kinds rendered as quota rows. Balance/unlimited
+  // stay in their dedicated panels and never count as windows.
+  function isQuotaRow(row: CanonicalQuotaRow): boolean {
+    return (
+      row.kind === 'five_hour' ||
+      row.kind === 'rolling' ||
+      row.kind === 'weekly' ||
+      row.kind === 'monthly' ||
+      row.kind === 'custom'
     )
+  }
+
+  function keyWindows(_key: TokenPlanKeyUsage): TokenPlanWindowUsage[] {
+    // Retained for API compatibility only: header counts and minima now
+    // come from the canonical adapter below, never raw model windows.
+    return []
   }
 
   function keyWindowCount(key: TokenPlanKeyUsage): number {
-    return subscriptionQuotaWindowCount(key, keyWindows(key).length)
+    // Count all visible quota observations (known, unknown and expired all
+    // render a row); an authoritative empty stays empty via the adapter.
+    return toCanonicalQuotaRows(key, nowMs.value).filter(isQuotaRow).length
   }
 
   function minimumRemainingPercent(key: TokenPlanKeyUsage): number | null {
-    const known = minimumKnownRemaining(keyWindows(key))
-    return subscriptionQuotaMinimumRemainingPercent(
-      key,
-      known === null ? [] : [known],
-    )
+    // Overall pool minimum from default-scope rows only: detail rows stay
+    // visible in their model group but never bind the pool.
+    const values = toCanonicalQuotaRows(key, nowMs.value)
+      .filter(
+        (row) =>
+          isQuotaRow(row) &&
+          row.remainingPercent != null &&
+          (row.sourceModel == null || row.isDefaultScope),
+      )
+      .map((row) => row.remainingPercent as number)
+    return values.length === 0 ? null : Math.min(...values)
+  }
+
+  // Minimum for one model group, scoped to that model only (default and
+  // detail rows of the same model both count here, unlike the pool min).
+  function modelMinimumRemainingPercent(
+    key: TokenPlanKeyUsage,
+    modelName: string,
+  ): number | null {
+    const values = toCanonicalQuotaRows(key, nowMs.value)
+      .filter(
+        (row) =>
+          isQuotaRow(row) &&
+          row.remainingPercent != null &&
+          row.sourceModel === modelName,
+      )
+      .map((row) => row.remainingPercent as number)
+    return values.length === 0 ? null : Math.min(...values)
   }
 
   function endTimeMs(window: TokenPlanWindowUsage): number | null {
@@ -348,34 +382,54 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
   }
 
   // OpencodeGo and GLM share one row template; only GLM has a used/total
-  // subline.
+  // subline. Rows come from the canonical adapter (observations when the
+  // backend reports them, otherwise the conservative legacy projection):
+  // the dialog keeps its 3-column template while quantities hide their
+  // ambiguity (legacy GLM amounts stay unknown, percents stay honest).
   function progressWindowEntries(
     key: TokenPlanKeyUsage,
   ): ProgressWindowEntry[] {
+    const now = nowMs.value
     const entries: ProgressWindowEntry[] = []
-    for (const raw of opencodeGoEntries(key)) {
+    for (const row of toCanonicalQuotaRows(key, now)) {
+      const labelKey = progressRowLabelKey(row)
+      if (labelKey === null) continue
       entries.push({
-        adapted: raw.adapted,
-        labelKey: raw.labelKey,
-        subline: null,
-      })
-    }
-    for (const raw of glmEntries(key)) {
-      entries.push({
-        adapted: raw.adapted,
-        labelKey: raw.labelKey,
-        subline: glmQuantitySubline(raw.raw),
+        adapted: {
+          end_at: row.resetAt,
+          remaining_percent: row.remainingPercent,
+        },
+        labelKey,
+        subline: canonicalQuantityCaption(row),
       })
     }
     return entries
   }
 
+  // Label for an adapter row inside the shared progress template. Only the
+  // opencodeGo/GLM slots render here (other providers keep their dedicated
+  // dialog sections until P3 unifies them); anything else is skipped so the
+  // frozen template never gains a duplicated or mislabeled row.
+  function progressRowLabelKey(row: CanonicalQuotaRow): string | null {
+    if (row.sourceId.startsWith('opencode_go:')) {
+      if (row.kind === 'rolling') return 'tokenPlanRolling'
+      if (row.kind === 'weekly' || row.kind === 'monthly') {
+        return row.kind === 'weekly' ? 'tokenPlanWeekly' : 'tokenPlanMonthly'
+      }
+      return null
+    }
+    if (row.sourceId.startsWith('glm:')) {
+      if (row.kind === 'five_hour') return 'tokenPlanInterval'
+      if (row.kind === 'weekly') return 'tokenPlanWeekly'
+      return null
+    }
+    return null
+  }
+
   function progressWindowMinRemaining(key: TokenPlanKeyUsage): number | null {
-    const values: number[] = []
-    const oc = opencodeGoMinRemaining(key)
-    if (oc !== null) values.push(oc)
-    const glm = glmMinRemaining(key)
-    if (glm !== null) values.push(glm)
+    const values = progressWindowEntries(key)
+      .map((entry) => knownRemainingPercent(entry.adapted))
+      .filter((value): value is number => value !== null)
     if (values.length === 0) return null
     return Math.min(...values)
   }
@@ -405,6 +459,7 @@ export function useTokenPlanWindowEntries(t: TranslateFn, nowMs: Ref<number>) {
     keyWindows,
     keyWindowCount,
     minimumRemainingPercent,
+    modelMinimumRemainingPercent,
     progressColor,
     formatRemaining,
     ccEntries,

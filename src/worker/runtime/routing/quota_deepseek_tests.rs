@@ -55,6 +55,7 @@ fn deepseek_key(key_id: Uuid, label: &str, is_available: bool) -> TokenPlanKeyUs
                 topped_up_balance: Some(110.0),
             }],
         }),
+        quota_windows: None,
     }
 }
 

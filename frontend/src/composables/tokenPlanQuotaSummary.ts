@@ -2,16 +2,12 @@ import type {
   EndpointProvider,
   TokenPlanKeyUsage,
   TokenPlanQuotaState,
-  TokenPlanWindowUsage,
 } from '@/generated/admin-api'
 import type { TokenPlanFetchState } from '@/models/endpoints/quota'
 import {
-  ccAsWindow,
-  glmAsWindow,
-  opencodeGoAsWindow,
-  knownRemainingPercent,
-} from './useTokenPlanWindowEntries'
-import { subscriptionQuotaMinimumForBand } from './subscriptionQuotaWindows'
+  canonicalBandPercent,
+  toCanonicalQuotaRows,
+} from './useCanonicalQuotaWindows'
 import {
   isFeedbackState,
   tokenPlanEffectiveKeys,
@@ -61,76 +57,18 @@ const BLOCKED_PRIORITY: readonly TokenPlanQuotaState[] = [
   'rate_limited',
 ]
 
-function defaultTextModels(key: TokenPlanKeyUsage, provider: EndpointProvider) {
-  return provider === 'minimax'
-    ? key.model_remains.filter(
-        (model) => model.model_name.trim().toLowerCase() === 'general',
-      )
-    : []
-}
-
-function modelPercent(
-  key: TokenPlanKeyUsage,
-  provider: EndpointProvider,
-  band: 'short' | 'long',
-): number | null {
-  const candidates: number[] = []
-  for (const model of defaultTextModels(key, provider)) {
-    if (model.windows != null) continue
-    const window = (band === 'short' ? model.interval : model.weekly) as
-      TokenPlanWindowUsage | null | undefined
-    const remaining = window ? knownRemainingPercent(window) : null
-    if (remaining !== null) candidates.push(remaining)
-  }
-  return candidates.length === 0 ? null : Math.min(...candidates)
-}
-
 export function keyShortPercent(
   key: TokenPlanKeyUsage,
-  provider: EndpointProvider,
+  _provider: EndpointProvider,
 ): number | null {
-  const candidates: number[] = []
-  const model = modelPercent(key, provider, 'short')
-  if (model !== null) candidates.push(model)
-  const subscription = subscriptionQuotaMinimumForBand(key, 'short')
-  if (subscription !== null) candidates.push(subscription)
-  const commandCode = ccAsWindow(key.five_hour)
-  const commandRemaining = commandCode
-    ? knownRemainingPercent(commandCode)
-    : null
-  if (commandRemaining !== null) candidates.push(commandRemaining)
-  const opencodeGo = opencodeGoAsWindow(key.opencodego_rolling)
-  const goRemaining = opencodeGo ? knownRemainingPercent(opencodeGo) : null
-  if (goRemaining !== null) candidates.push(goRemaining)
-  const glm = glmAsWindow(key.glm_five_hour)
-  const glmRemaining = glm ? knownRemainingPercent(glm) : null
-  if (glmRemaining !== null) candidates.push(glmRemaining)
-  return candidates.length === 0 ? null : Math.min(...candidates)
+  return canonicalBandPercent(toCanonicalQuotaRows(key, Date.now()), 'short')
 }
 
 export function keyLongPercent(
   key: TokenPlanKeyUsage,
-  provider: EndpointProvider,
+  _provider: EndpointProvider,
 ): number | null {
-  const candidates: number[] = []
-  const model = modelPercent(key, provider, 'long')
-  if (model !== null) candidates.push(model)
-  const subscription = subscriptionQuotaMinimumForBand(key, 'long')
-  if (subscription !== null) candidates.push(subscription)
-  const commandCode = ccAsWindow(key.weekly)
-  const commandRemaining = commandCode
-    ? knownRemainingPercent(commandCode)
-    : null
-  if (commandRemaining !== null) candidates.push(commandRemaining)
-  for (const window of [
-    opencodeGoAsWindow(key.opencodego_weekly),
-    opencodeGoAsWindow(key.opencodego_monthly),
-    glmAsWindow(key.glm_weekly),
-  ]) {
-    const remaining = window ? knownRemainingPercent(window) : null
-    if (remaining !== null) candidates.push(remaining)
-  }
-  return candidates.length === 0 ? null : Math.min(...candidates)
+  return canonicalBandPercent(toCanonicalQuotaRows(key, Date.now()), 'long')
 }
 
 function mean(values: number[]): number | null {

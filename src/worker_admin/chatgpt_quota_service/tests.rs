@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use futures::future::BoxFuture;
 use tokio::sync::Notify;
@@ -23,6 +23,7 @@ pub(crate) fn fake_fetcher(quota: ChatgptQuota) -> FakeFetcher {
 
 pub(crate) struct FakeFetcher {
     pub calls: Arc<std::sync::atomic::AtomicUsize>,
+    per_endpoint: Arc<std::sync::Mutex<HashMap<Uuid, usize>>>,
     result: Result<ChatgptQuota, ChatGptQuotaError>,
     started: Option<Arc<Notify>>,
     release: Option<Arc<FetchRelease>>,
@@ -78,21 +79,54 @@ impl FakeFetcher {
     fn new(result: Result<ChatgptQuota, ChatGptQuotaError>) -> Self {
         Self {
             calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            per_endpoint: Arc::new(std::sync::Mutex::new(HashMap::new())),
             result,
             started: None,
             release: None,
         }
+    }
+
+    /// Exact fetch count for one endpoint. Foreign fixtures share the same
+    /// global collector, so cadence assertions scope to owned ids through here
+    /// instead of the global counter.
+    pub(crate) fn calls_for(&self, endpoint_id: Uuid) -> usize {
+        self.per_endpoint
+            .lock()
+            .expect("per-endpoint fetch counts stay lockable")
+            .get(&endpoint_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Total fetches for endpoints outside `owned`: independent foreign calls
+    /// are reported, never failed, so historical orphans stay visible.
+    pub(crate) fn foreign_calls_excluding(&self, owned: &[Uuid]) -> usize {
+        self.per_endpoint
+            .lock()
+            .expect("per-endpoint fetch counts stay lockable")
+            .iter()
+            .filter(|(endpoint_id, _)| !owned.contains(endpoint_id))
+            .map(|(_, count)| count)
+            .sum()
     }
 }
 
 impl ChatGptQuotaFetcher for FakeFetcher {
     fn fetch<'a>(
         &'a self,
-        _endpoint_id: Uuid,
+        endpoint_id: Uuid,
         _repository: &'a ConfigRepository,
     ) -> BoxFuture<'a, Result<ChatgptQuota, ChatGptQuotaError>> {
         Box::pin(async move {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // Recorded before any await so gated fetches count the endpoint
+            // even while the release is still closed.
+            *self
+                .per_endpoint
+                .lock()
+                .expect("per-endpoint fetch counts stay lockable")
+                .entry(endpoint_id)
+                .or_insert(0) += 1;
             if let Some(started) = &self.started {
                 started.notify_one();
             }

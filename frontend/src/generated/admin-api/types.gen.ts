@@ -223,6 +223,36 @@ export type CacheAlertSettingsResponse = {
     window_minutes: number;
 };
 
+/**
+ * One additive canonical quota observation (issue #844 P1). `source_id`
+ * is the stable provider slot/model/currency identity (never a secret);
+ * amounts preserve presence (`Some(0.0)` is a real zero, `None` is
+ * absent/non-finite); `remaining_percent` is a valid finite reported or
+ * derived share only (unknown never `0`/`100`); `balance`/`unlimited`
+ * rows never carry a synthetic percentage.
+ */
+export type CanonicalQuotaWindow = {
+    availability: SubscriptionWindowAvailability;
+    current?: number | null;
+    duration_seconds?: number | null;
+    is_default_scope: boolean;
+    kind: CanonicalQuotaWindowKind;
+    limit?: number | null;
+    remaining?: number | null;
+    remaining_percent?: number | null;
+    reset_at?: string | null;
+    source_id: string;
+    source_model?: string | null;
+    unit?: string | null;
+};
+
+/**
+ * Stable kind for one canonical quota observation (issue #844 P1).
+ * Time windows carry a usable percentage; `balance`/`unlimited` carry
+ * amounts only and never a synthetic percentage.
+ */
+export type CanonicalQuotaWindowKind = 'five_hour' | 'rolling' | 'weekly' | 'monthly' | 'balance' | 'unlimited' | 'custom';
+
 export type ClientKey = {
     created_at: string;
     enabled: boolean;
@@ -2080,6 +2110,14 @@ export type TokenPlanKeyUsage = {
     openrouter_balance?: null | OpenRouterBalance;
     openrouter_spend?: null | OpenRouterSpend;
     quota_status?: null | TokenPlanQuotaStatus;
+    /**
+     * Additive canonical quota observations (issue #844 P1). `None` means
+     * legacy fallback (populated only by newer backends); `Some([])` is an
+     * explicit assessed empty (successful fetch with no rows); otherwise one
+     * row per provider slot/model/currency. Failed keys stay `None` so an
+     * unknown failure never falls through into available capacity.
+     */
+    quota_windows?: Array<CanonicalQuotaWindow> | null;
     status?: number | null;
     weekly?: null | CommandCodeWindowUsage;
 };

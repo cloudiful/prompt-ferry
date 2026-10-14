@@ -234,3 +234,37 @@ fn live_code_200_envelope_is_treated_as_success() {
     assert_eq!(weekly.limit, 100.0);
     assert_eq!(weekly.percentage, Some(5.0));
 }
+
+#[test]
+fn winning_row_carries_its_own_observation_presence() {
+    // Duplicate same-kind rows (token + credit): the conservative winner's
+    // typed window and its presence-aware canonical observation move
+    // together — unit and amounts come from the winner only, in either row
+    // order.
+    let now = pinned_now();
+    let light = json!({
+        "type": "TOKENS_LIMIT", "unit": 3, "number": 5,
+        "currentValue": 20.0, "limit": 100.0, "remaining": 80.0,
+        "percentage": 20.0, "nextResetTime": now.timestamp() + 5 * 3600
+    });
+    let heavy = json!({
+        "type": "CREDIT_LIMIT", "unit": 3, "number": 5,
+        "currentValue": 100.0, "limit": 200.0, "remaining": 100.0,
+        "percentage": 50.0, "nextResetTime": now.timestamp() + 5 * 3600
+    });
+    for rows in [vec![light.clone(), heavy.clone()], vec![heavy, light]] {
+        let parsed = parse_glm_quota(&quota(rows), now).expect("quota");
+        let five = parsed.five_hour.expect("5h window");
+        assert_eq!(five.percentage, Some(50.0));
+        assert_eq!(five.limit, 200.0);
+        assert_eq!(parsed.observations.len(), 1);
+        let observation = &parsed.observations[0];
+        assert_eq!(observation.source_id, "glm:five_hour");
+        // Winner-only presence: credit unit and winner amounts, not mixed
+        // with the lighter token row.
+        assert_eq!(observation.unit.as_deref(), Some("credits"));
+        assert_eq!(observation.current, Some(100.0));
+        assert_eq!(observation.limit, Some(200.0));
+        assert_eq!(observation.remaining_percent, Some(50.0));
+    }
+}

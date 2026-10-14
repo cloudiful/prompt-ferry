@@ -152,6 +152,7 @@ pub(crate) async fn fetch_glm_key_usage(
             glm_five_hour: parsed.five_hour,
             glm_weekly: parsed.weekly,
             deepseek_balance: None,
+            quota_windows: Some(parsed.observations),
         },
         None => failed_key(
             key_id,

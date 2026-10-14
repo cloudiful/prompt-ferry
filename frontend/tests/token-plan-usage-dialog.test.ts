@@ -4,6 +4,7 @@ import { createSSRApp, h } from 'vue'
 import { compileScript, parse } from 'vue/compiler-sfc'
 import { renderToString } from 'vue/server-renderer'
 import type {
+  CanonicalQuotaWindow,
   DeepSeekBalance,
   EndpointProvider,
   GlmWindowUsage,
@@ -12,6 +13,8 @@ import type {
 } from '../src/generated/admin-api'
 import * as quota from '../src/models/endpoints/quota'
 import * as tokenPlanFormatting from '../src/composables/useTokenPlanWindowEntries'
+import * as canonicalQuota from '../src/composables/useCanonicalQuotaWindows'
+import * as subscriptionQuota from '../src/composables/subscriptionQuotaWindows'
 import * as tokenPlanBadgeRender from '../src/components/endpoints/tokenPlanBadgeRender'
 
 // P3: the detail dialog renders the multi-currency `balances[]` contract. The
@@ -21,6 +24,13 @@ import * as tokenPlanBadgeRender from '../src/components/endpoints/tokenPlanBadg
 const componentSource = await Bun.file(
   new URL(
     '../src/components/endpoints/TokenPlanUsageDialog.vue',
+    import.meta.url,
+  ),
+).text()
+
+const rowSource = await Bun.file(
+  new URL(
+    '../src/components/endpoints/TokenPlanQuotaWindowRow.vue',
     import.meta.url,
   ),
 ).text()
@@ -90,6 +100,35 @@ const instrumentedVue = {
   },
 }
 
+// P3: the shared quota row is compiled for real so dialog assertions read
+// actual percent/caption/reset output, not a stubbed placeholder. Its own
+// imports resolve to the real adapter and formatting helpers.
+const rowComponent = (() => {
+  const { descriptor } = parse(rowSource, {
+    filename: 'TokenPlanQuotaWindowRow.vue',
+  })
+  const script = compileScript(descriptor, {
+    id: 'token-plan-quota-window-row',
+    inlineTemplate: true,
+  })
+  const source = rewriteSfcImports(script.content).replace(
+    /export default/,
+    'return',
+  )
+  const js = new Bun.Transpiler({ loader: 'ts' }).transformSync(source)
+  const resolve = (spec: string): unknown => {
+    if (spec === 'vue') return instrumentedVue
+    if (spec === '@/composables/useCanonicalQuotaWindows') {
+      return canonicalQuota
+    }
+    if (spec === '@/composables/useTokenPlanWindowEntries') {
+      return tokenPlanFormatting
+    }
+    return slotStub(spec.split('/').pop() ?? spec)
+  }
+  return new Function('__resolve', `"use strict";\n${js}`)(resolve)
+})()
+
 const component = (() => {
   const { descriptor } = parse(componentSource, {
     filename: 'TokenPlanUsageDialog.vue',
@@ -108,18 +147,14 @@ const component = (() => {
     if (spec === '@/composables/useTokenPlanWindowEntries') {
       return tokenPlanFormatting
     }
-    if (spec === '@/components/endpoints/SubscriptionQuotaWindows.vue') {
-      return {
-        name: 'SubscriptionQuotaWindows',
-        props: ['windows'],
-        render(this: { windows: Array<{ source_window: string }> }) {
-          return h(
-            'div',
-            { 'data-subscription-windows': true },
-            this.windows.map((window) => window.source_window).join(','),
-          )
-        },
-      }
+    if (spec === '@/composables/useCanonicalQuotaWindows') {
+      return canonicalQuota
+    }
+    if (spec === '@/composables/subscriptionQuotaWindows') {
+      return subscriptionQuota
+    }
+    if (spec === '@/components/endpoints/TokenPlanQuotaWindowRow.vue') {
+      return rowComponent
     }
     if (spec === '@/components/endpoints/tokenPlanBadgeRender') {
       return tokenPlanBadgeRender
@@ -202,6 +237,49 @@ function glmUsage(
   } as TokenPlanUsageResponse
 }
 
+// Canonical observation mirroring the P1 backend projection: amounts are
+// only present when actually observed, so the caption is honest.
+function glmObservation(
+  sourceId: string,
+  kind: CanonicalQuotaWindow['kind'],
+  unit: string | null,
+  current: number | null,
+  limit: number | null,
+  usedPercent: number | null,
+): CanonicalQuotaWindow {
+  return {
+    source_id: sourceId,
+    kind,
+    source_model: null,
+    unit,
+    duration_seconds: null,
+    is_default_scope: true,
+    availability: usedPercent === null ? 'unknown' : 'known',
+    remaining_percent: usedPercent === null ? null : 100 - usedPercent,
+    current,
+    limit,
+    remaining: current,
+    reset_at: null,
+  }
+}
+
+function glmCanonicalUsage(
+  fiveHour: GlmWindowUsage | null,
+  weekly: GlmWindowUsage | null,
+  observations: CanonicalQuotaWindow[],
+): TokenPlanUsageResponse {
+  return {
+    keys: [
+      {
+        ...glmKey(fiveHour, weekly),
+        quota_windows: observations,
+      } as TokenPlanKeyUsage,
+    ],
+    provider: 'glm',
+    provider_region: null,
+  } as TokenPlanUsageResponse
+}
+
 async function render(
   usage: TokenPlanUsageResponse | null,
   options: { loading?: boolean; visible?: boolean } = {},
@@ -239,7 +317,7 @@ test('reviewer: current quota refresh keeps the expanded history component mount
   expect(during).toContain('data-stub="SubscriptionQuotaHistory.vue"')
 })
 
-test('the dialog renders canonical windows instead of positional slots', async () => {
+test('the dialog renders canonical model rows with actual durations', async () => {
   const html = await render({
     keys: [
       {
@@ -274,10 +352,14 @@ test('the dialog renders canonical windows instead of positional slots', async (
     provider: 'openai',
     provider_region: null,
   })
-  expect(html).toContain('data-subscription-windows')
-  expect(html).toContain('primary,secondary')
-  expect(html).not.toContain('5-hour window')
-  expect(html).not.toContain('Weekly window')
+  // No raw positional interval/weekly branch and no stubbed window list:
+  // the account model renders its actual durations through the shared row.
+  expect(html).not.toContain('data-subscription-windows')
+  expect(html).toContain('plus')
+  expect(html).toContain('tokenPlanInterval')
+  expect(html).toContain('tokenPlanWeekly')
+  expect(html).toContain('98.0%')
+  expect(html).toContain('—')
 })
 
 test('a stale last-good ChatGPT snapshot is not labeled as currently available', async () => {
@@ -310,8 +392,11 @@ test('a stale last-good ChatGPT snapshot is not labeled as currently available',
   } as TokenPlanUsageResponse
 
   const html = await render(usage)
-  expect(html).toContain('data-subscription-windows')
+  // Observation metadata stays visible even with no rows; no quota percent
+  // is invented and no availability is claimed.
+  expect(html).toContain('plus')
   expect(html).not.toContain('tokenPlanAvailable')
+  expect(html).not.toContain('98.0%')
 })
 
 test('every reported currency is listed in payload order, never combined', async () => {
@@ -477,13 +562,31 @@ test('a GLM window with reported zero usage keeps its remaining percent', async 
   expect(html).not.toContain('0.00 / 0.00')
 })
 
-test('a GLM window with legitimate zero usage keeps its 0 / total subline', async () => {
+test('a legacy GLM window hides its ambiguous quantity caption', async () => {
+  // Old backends default missing amounts to `0`, so a legacy `0 / 2000`
+  // cannot be told apart from a true zero: the caption hides while the
+  // window and its honestly reported percent stay visible.
   const html = await render(
     glmUsage(
       { current_value: 0, limit: 2000, remaining: 2000, percentage: 0 },
       null,
     ),
   )
+  expect(html).toContain('tokenPlanInterval')
+  expect(html).toContain('100.0%')
+  expect(html).not.toContain('0.00 / 2000.00')
+})
+
+test('a canonical GLM window with observed amounts keeps its caption', async () => {
+  const html = await render(
+    glmCanonicalUsage(
+      { current_value: 0, limit: 2000, remaining: 2000, percentage: 0 },
+      null,
+      [glmObservation('glm:five_hour', 'five_hour', 'tokens', 0, 2000, 0)],
+    ),
+  )
+  expect(html).toContain('tokenPlanInterval')
+  expect(html).toContain('100.0%')
   expect(html).toContain('0.00 / 2000.00')
 })
 
@@ -501,7 +604,459 @@ test('an exhausted GLM weekly window keeps both labels and zero remaining', asyn
   )
   expect(html).toContain('tokenPlanInterval')
   expect(html).toContain('tokenPlanWeekly')
+  expect(html).toContain('0.0%')
+  // Legacy quantities are ambiguous: no caption is manufactured for either
+  // window, while both windows and the exhausted percent stay visible.
+  expect(html).not.toContain('0.00 / 2000.00')
+  expect(html).not.toContain('10000.00 / 10000.00')
+})
+
+test('a canonical exhausted GLM weekly window keeps both quantity captions', async () => {
+  const html = await render(
+    glmCanonicalUsage(
+      { current_value: 0, limit: 2000, remaining: 2000, percentage: 0 },
+      {
+        current_value: 10000,
+        limit: 10000,
+        remaining: 0,
+        percentage: 100,
+      },
+      [
+        glmObservation('glm:five_hour', 'five_hour', 'tokens', 0, 2000, 0),
+        glmObservation('glm:weekly', 'weekly', 'credits', 10000, 10000, 100),
+      ],
+    ),
+  )
+  expect(html).toContain('tokenPlanInterval')
+  expect(html).toContain('tokenPlanWeekly')
   expect(html).toContain('0.00 / 2000.00')
   expect(html).toContain('10000.00 / 10000.00')
   expect(html).toContain('0.0%')
+})
+
+function commandCodeKey(
+  fiveHour: {
+    used: number
+    cap: number
+    remaining_percent?: number | null
+    reset_at?: string | null
+  } | null,
+  weekly: {
+    used: number
+    cap: number
+    remaining_percent?: number | null
+    reset_at?: string | null
+  } | null,
+): TokenPlanKeyUsage {
+  return {
+    key_id: 'k-cc',
+    key_label: 'cc key',
+    ok: true,
+    model_remains: [],
+    five_hour: fiveHour,
+    weekly,
+  } as unknown as TokenPlanKeyUsage
+}
+
+function commandCodeUsage(
+  fiveHour: {
+    used: number
+    cap: number
+    remaining_percent?: number | null
+    reset_at?: string | null
+  } | null,
+  weekly: {
+    used: number
+    cap: number
+    remaining_percent?: number | null
+    reset_at?: string | null
+  } | null,
+): TokenPlanUsageResponse {
+  return {
+    keys: [commandCodeKey(fiveHour, weekly)],
+    provider: 'command_code',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse
+}
+
+test('a known CommandCode 5h and weekly pair renders both USD rows', async () => {
+  const html = await render(
+    commandCodeUsage(
+      { used: 20, cap: 100, remaining_percent: 80, reset_at: null },
+      { used: 30, cap: 100, remaining_percent: 70, reset_at: null },
+    ),
+  )
+  expect(html).toContain('tokenPlanFiveHour')
+  expect(html).toContain('tokenPlanWeeklyUsd')
+  expect(html).toContain('80.0%')
+  expect(html).toContain('70.0%')
+  // The USD caption the CommandCode section has always shown.
+  expect(html).toContain('20.00 / 100.00 USD')
+  expect(html).toContain('30.00 / 100.00 USD')
+})
+
+test('an unknown CommandCode window shows a dash, never a fabricated bar', async () => {
+  const html = await render(
+    commandCodeUsage(
+      {
+        used: Number.NaN,
+        cap: Number.NaN,
+        remaining_percent: null,
+        reset_at: null,
+      } as unknown as {
+        used: number
+        cap: number
+        remaining_percent?: number | null
+        reset_at?: string | null
+      },
+      null,
+    ),
+  )
+  expect(html).toContain('tokenPlanFiveHour')
+  expect(html).toContain('—')
+  expect(html).not.toContain('100.0%')
+  expect(html).not.toContain('0.0%')
+})
+
+test('an expired reset hides the percent but keeps the amounts honest', async () => {
+  const past = new Date(Date.now() - 3_600_000).toISOString()
+  const html = await render({
+    keys: [
+      {
+        key_id: 'k-expired',
+        key_label: 'expired key',
+        ok: true,
+        model_remains: [],
+        quota_windows: [
+          {
+            source_id: 'command_code:five_hour',
+            kind: 'five_hour',
+            source_model: null,
+            unit: 'currency',
+            duration_seconds: null,
+            is_default_scope: true,
+            availability: 'known',
+            remaining_percent: 75,
+            current: 25,
+            limit: 100,
+            remaining: 75,
+            reset_at: past,
+          },
+        ],
+      } as unknown as TokenPlanKeyUsage,
+    ],
+    provider: 'command_code',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  // Expired: the bar degrades to the same dash as unknown, while the
+  // observed amounts stay in the caption.
+  expect(html).toContain('—')
+  expect(html).not.toContain('75.0%')
+  expect(html).toContain('25.00 / 100.00 USD')
+})
+
+test('a failed key renders its error and no quota rows', async () => {
+  const html = await render({
+    keys: [
+      {
+        key_id: 'k-failed',
+        key_label: 'failed key',
+        ok: false,
+        error_message: 'upstream boom',
+        model_remains: [],
+        quota_windows: [
+          glmObservation('glm:five_hour', 'five_hour', 'tokens', 0, 2000, 0),
+        ],
+      } as unknown as TokenPlanKeyUsage,
+    ],
+    provider: 'glm',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  expect(html).toContain('upstream boom')
+  // Failed keys carry no rows: neither the window nor its percent renders.
+  expect(html).not.toContain('tokenPlanInterval')
+  expect(html).not.toContain('100.0%')
+})
+
+async function renderRow(
+  row: Parameters<typeof canonicalQuota.toCanonicalQuotaRows>[0] extends never
+    ? never
+    : import('../src/composables/useCanonicalQuotaWindows').CanonicalQuotaRow,
+  label = 'row label',
+): Promise<string> {
+  const app = createSSRApp({
+    render: () =>
+      h(rowComponent as never, {
+        row,
+        label,
+        t: (key: string) => key,
+        nowMs: Date.now(),
+        density: 'full' as const,
+      }),
+  })
+  app.component('UProgress', slotStub('UProgress') as never)
+  return renderToString(app)
+}
+
+test('balance and unlimited rows are text-only with no progress percent', async () => {
+  const balanceHtml = await renderRow({
+    sourceId: 'openrouter:balance',
+    kind: 'balance',
+    sourceModel: null,
+    unit: 'credits',
+    durationSeconds: null,
+    isDefaultScope: true,
+    availability: 'known',
+    observedRemainingPercent: null,
+    remainingPercent: null,
+    current: 5,
+    limit: 10,
+    remaining: 5,
+    resetAt: null,
+    expired: false,
+  })
+  expect(balanceHtml).toContain('5.00 / 10.00')
+  expect(balanceHtml).not.toContain('%')
+  const unlimitedHtml = await renderRow({
+    sourceId: 'openrouter:unlimited',
+    kind: 'unlimited',
+    sourceModel: null,
+    unit: 'credits',
+    durationSeconds: null,
+    isDefaultScope: true,
+    availability: 'known',
+    observedRemainingPercent: null,
+    remainingPercent: null,
+    current: null,
+    limit: null,
+    remaining: null,
+    resetAt: null,
+    expired: false,
+  })
+  // No amounts and no synthetic percent: the same dash as unknown windows.
+  expect(unlimitedHtml).toContain('—')
+  expect(unlimitedHtml).not.toContain('%')
+})
+
+function minimaxKey(
+  modelName: string,
+  remainingPercent: number | null,
+): TokenPlanKeyUsage {
+  return {
+    key_id: `k-${modelName}`,
+    key_label: `${modelName} key`,
+    ok: true,
+    model_remains: [
+      {
+        model_name: modelName,
+        interval: { remaining_percent: remainingPercent },
+        weekly: null,
+        windows: null,
+        observation: null,
+      },
+    ],
+  } as unknown as TokenPlanKeyUsage
+}
+
+test('a valid MiniMax general model renders through the shared row', async () => {
+  const html = await render({
+    keys: [minimaxKey('general', 80)],
+    provider: 'minimax',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  // Previously crashed on an undefined raw helper; now the canonical model
+  // row renders its honest percent with no stub involved.
+  expect(html).toContain('general')
+  expect(html).toContain('tokenPlanInterval')
+  expect(html).toContain('80.0%')
+})
+
+test('canonical subscription wins over raw windows in dialog and header', async () => {
+  const html = await render({
+    keys: [
+      {
+        key_id: 'k-conflict',
+        key_label: 'conflict key',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'plus',
+            interval: null,
+            weekly: null,
+            windows: [
+              {
+                source_window: 'primary',
+                window_seconds: 18_000,
+                used_percent: 20,
+                remaining_percent: 80,
+                reset_at: null,
+                reset_after_seconds: null,
+                availability: 'known',
+              },
+            ],
+            observation: null,
+          },
+        ],
+        quota_windows: [
+          {
+            source_id: 'subscription:primary',
+            kind: 'custom',
+            source_model: 'plus',
+            unit: null,
+            duration_seconds: 18_000,
+            is_default_scope: true,
+            availability: 'known',
+            remaining_percent: 25,
+            current: null,
+            limit: null,
+            remaining: null,
+            reset_at: null,
+          },
+        ],
+      } as unknown as TokenPlanKeyUsage,
+    ],
+    provider: 'openai',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  expect(html).toContain('25.0%')
+  expect(html).not.toContain('80.0%')
+})
+
+test('an authoritative empty shows no quota rows or header windows', async () => {
+  const html = await render({
+    keys: [
+      {
+        key_id: 'k-empty',
+        key_label: 'empty key',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'plus',
+            interval: null,
+            weekly: null,
+            windows: [
+              {
+                source_window: 'primary',
+                window_seconds: 18_000,
+                used_percent: 20,
+                remaining_percent: 80,
+                reset_at: null,
+                reset_after_seconds: null,
+                availability: 'known',
+              },
+            ],
+            observation: null,
+          },
+        ],
+        quota_windows: [],
+      } as unknown as TokenPlanKeyUsage,
+    ],
+    provider: 'openai',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  // Authoritative empty: assessed, not missing — no legacy fallback fills it.
+  expect(html).toContain('empty key')
+  expect(html).not.toContain('80.0%')
+  expect(html).not.toContain('tokenPlanInterval')
+})
+
+test('an expired canonical window shows no raw fallback percent', async () => {
+  const html = await render({
+    keys: [
+      {
+        key_id: 'k-expired',
+        key_label: 'expired key',
+        ok: true,
+        model_remains: [
+          {
+            model_name: 'plus',
+            interval: null,
+            weekly: null,
+            windows: [
+              {
+                source_window: 'primary',
+                window_seconds: 18_000,
+                used_percent: 20,
+                remaining_percent: 80,
+                reset_at: null,
+                reset_after_seconds: null,
+                availability: 'known',
+              },
+            ],
+            observation: null,
+          },
+        ],
+        quota_windows: [
+          {
+            source_id: 'subscription:primary',
+            kind: 'custom',
+            source_model: 'plus',
+            unit: null,
+            duration_seconds: 18_000,
+            is_default_scope: true,
+            availability: 'known',
+            remaining_percent: 75,
+            current: null,
+            limit: null,
+            remaining: null,
+            reset_at: '2000-01-01T00:00:00.000Z',
+          },
+        ],
+      } as unknown as TokenPlanKeyUsage,
+    ],
+    provider: 'openai',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  expect(html).toContain('—')
+  expect(html).not.toContain('75.0%')
+  expect(html).not.toContain('80.0%')
+})
+
+test('detail exhaustion never binds the dialog pool minimum', async () => {
+  const html = await render({
+    keys: [
+      {
+        key_id: 'k-scope',
+        key_label: 'scope key',
+        ok: true,
+        model_remains: [],
+        quota_windows: [
+          {
+            source_id: 'subscription:primary',
+            kind: 'custom',
+            source_model: 'chatgpt',
+            unit: null,
+            duration_seconds: 18_000,
+            is_default_scope: true,
+            availability: 'known',
+            remaining_percent: 80,
+            current: null,
+            limit: null,
+            remaining: null,
+            reset_at: null,
+          },
+          {
+            source_id: 'subscription:detail',
+            kind: 'custom',
+            source_model: 'detail-model',
+            unit: null,
+            duration_seconds: 18_000,
+            is_default_scope: false,
+            availability: 'known',
+            remaining_percent: 0,
+            current: null,
+            limit: null,
+            remaining: null,
+            reset_at: null,
+          },
+        ],
+      } as unknown as TokenPlanKeyUsage,
+    ],
+    provider: 'openai',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+  // Both rows stay visible, but the header pool minimum keeps the default 80.
+  expect(html).toContain('80.0%')
+  expect(html).toContain('0.0%')
+  expect(html).toContain('tokenPlanMinRemaining')
 })

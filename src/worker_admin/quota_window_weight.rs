@@ -130,6 +130,7 @@ mod tests {
             glm_five_hour: five_hour,
             glm_weekly: weekly,
             deepseek_balance: None,
+            quota_windows: None,
         }
     }
 
@@ -187,6 +188,7 @@ mod tests {
             glm_five_hour: None,
             glm_weekly: None,
             deepseek_balance: None,
+            quota_windows: None,
         }
     }
 

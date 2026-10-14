@@ -91,6 +91,7 @@ fn key_usage_serde_omits_absent_deepseek_balance() {
             glm_five_hour: None,
             glm_weekly: None,
             deepseek_balance: balance,
+            quota_windows: None,
         }
     }
     // A key carrying no DeepSeek section must not serialize it.

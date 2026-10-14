@@ -72,6 +72,54 @@ test_only_test_keys_are_forwarded() {
     "$(cat "$CAPTURE/child-env")" 'prompt_ferry'
 }
 
+# --- partition backfill opt-in plumbing ---------------------------------------
+# The opt-in travels with the other dedicated test keys: a dotenv entry is
+# exported, the process environment wins, and a blank stays unconfigured so
+# the preflight default stays read-only.
+
+test_partition_opt_in_flag_is_exported() {
+  fresh
+  printf 'PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS=true\n' >> "$SANDBOX/.env"
+  run_wrapper
+  assert_status 'the wrapper exits zero' 0 "$STATUS"
+  assert_same 'the partition opt-in comes from .env' \
+    "$(child_env PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS)" 'true'
+}
+
+test_partition_opt_in_process_wins() {
+  fresh
+  printf 'PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS=true\n' >> "$SANDBOX/.env"
+  AMBIENT='PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS=false'
+  run_wrapper
+  assert_same 'the process value wins for the opt-in' \
+    "$(child_env PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS)" 'false'
+
+  fresh
+  AMBIENT='PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS=true'
+  run_wrapper
+  assert_same 'an explicit opt-in travels without a dotenv entry' \
+    "$(child_env PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS)" 'true'
+}
+
+test_partition_opt_in_blank_stays_unconfigured() {
+  fresh
+  printf 'PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS=true\n' >> "$SANDBOX/.env"
+  AMBIENT='PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS='
+  run_wrapper
+  assert_status 'the wrapper still succeeds' 0 "$STATUS"
+  assert_env_absent 'an explicitly blank opt-in stays unconfigured' \
+    PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS
+  assert_absent 'the dotenv opt-in is not silently taken' \
+    "$(cat "$CAPTURE/child-env")" 'AUTO_CREATE_PARTITIONS=true'
+}
+
+test_partition_opt_in_defaults_to_absent() {
+  fresh
+  run_wrapper
+  assert_env_absent 'the opt-in is absent unless configured' \
+    PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS
+}
+
 test_s3_test_keys_are_exported() {
   fresh
   run_wrapper

@@ -27,11 +27,15 @@ TEST_ENV_ROOT="$(cd "$TEST_ENV_DIR/../.." && pwd)"
 
 # The only keys this helper is allowed to export. The confirmed target travels
 # with the quota URL because neither is usable alone: the preflight and the Rust
-# test helper refuse any database the two do not agree on.
+# test helper refuse any database the two do not agree on. The partition
+# backfill opt-in travels with them so a caller can enable the bounded
+# yesterday/today/tomorrow creation without editing any file: process
+# environment wins, an explicit blank stays unconfigured (read-only default).
 TEST_ENV_DB_KEYS=(
   PROMPT_FERRY_QUOTA_TEST_DATABASE_URL
   PROMPT_FERRY_QUOTA_TEST_CONFIRMED_TARGET
   PROMPT_FERRY_TEST_VALKEY_URL
+  PROMPT_FERRY_QUOTA_TEST_AUTO_CREATE_PARTITIONS
 )
 # The dedicated S3 test target: eight settings that travel together, validated
 # as one confirmed endpoint-root/bucket by the preflight and the Rust guard. An

@@ -137,6 +137,7 @@ fn token_plan_key_usage(
         glm_five_hour: None,
         glm_weekly: None,
         deepseek_balance: None,
+        quota_windows: None,
     }
 }
 
@@ -197,6 +198,7 @@ fn command_code_key_usage(
         glm_five_hour: None,
         glm_weekly: None,
         deepseek_balance: None,
+        quota_windows: None,
     }
 }
 
