@@ -140,6 +140,7 @@ fn platform_builder_keeps_the_platform_model_and_store_field() {
         &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-4o","store":true}"#.to_vec()),
         &[("session-id".to_string(), "session-1".to_string())],
         None,
+        uuid::Uuid::new_v4(),
     )
     .build()
     .unwrap();
@@ -353,6 +354,7 @@ fn platform_builder_ignores_all_session_aliases() {
             ("session-id".to_string(), "ses_legacy".to_string()),
         ],
         None,
+        uuid::Uuid::new_v4(),
     )
     .build()
     .unwrap();

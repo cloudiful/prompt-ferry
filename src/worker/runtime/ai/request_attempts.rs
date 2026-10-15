@@ -321,6 +321,9 @@ pub(super) async fn forward_route_request_with_probe(
                 body,
                 &request.headers,
                 request_ctx.request_prompt_log.conversation_id,
+                // Issue #884: one request id for every attempt, so a stateless
+                // OpenCode caller keeps the same synthesized session on retry.
+                request_ctx.request_id,
             ),
         };
         if route.provider == db::EndpointProvider::OpenAi && chatgpt_auth.is_some() {

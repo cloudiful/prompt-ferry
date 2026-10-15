@@ -23,6 +23,7 @@ fn forwarded_body(route: &RouteConfig, path: &str, body: &[u8]) -> Value {
         &PreparedRequestBody::BufferedBytes(body.to_vec()),
         &[],
         None,
+        uuid::Uuid::new_v4(),
     )
     .build()
     .unwrap();
@@ -56,6 +57,7 @@ fn the_prepared_path_decides_whether_the_builder_injects() {
                 &prepared,
                 &[],
                 None,
+                uuid::Uuid::new_v4(),
             )
             .build()
             .unwrap();

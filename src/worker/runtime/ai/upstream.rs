@@ -1,3 +1,4 @@
+use crate::session_affinity::resolve_session_affinity;
 use crate::{db, upstream_adapter::PreparedRequestBody};
 use bytes::Bytes;
 use futures::StreamExt;
@@ -16,9 +17,19 @@ pub(super) async fn send_upstream_request(
     route: &db::RouteConfig,
     body: &PreparedRequestBody,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    build_upstream_request(client, method, url, route, path, body, &[], None)
-        .send()
-        .await
+    build_upstream_request(
+        client,
+        method,
+        url,
+        route,
+        path,
+        body,
+        &[],
+        None,
+        uuid::Uuid::new_v4(),
+    )
+    .send()
+    .await
 }
 
 pub(super) fn build_upstream_request(
@@ -30,6 +41,7 @@ pub(super) fn build_upstream_request(
     body: &PreparedRequestBody,
     request_headers: &[(String, String)],
     conversation_id: Option<uuid::Uuid>,
+    request_id: uuid::Uuid,
 ) -> reqwest::RequestBuilder {
     let request_builder = client
         .request(method.clone(), url)
@@ -42,7 +54,12 @@ pub(super) fn build_upstream_request(
         _ => request_builder.bearer_auth(&route.api_key),
     };
     let request_builder = if is_opencode_host(&route.base_url) || is_opencode_host(url) {
-        with_opencode_headers(request_builder, request_headers, conversation_id)
+        with_opencode_headers(
+            request_builder,
+            request_headers,
+            conversation_id,
+            request_id,
+        )
     } else {
         request_builder
     };
@@ -376,22 +393,29 @@ fn with_opencode_headers(
     builder: reqwest::RequestBuilder,
     request_headers: &[(String, String)],
     conversation_id: Option<uuid::Uuid>,
+    request_id: uuid::Uuid,
 ) -> reqwest::RequestBuilder {
-    // Preserve caller-supplied non-empty x-opencode-session, else synthesize deterministically.
+    // Issue #884: OpenCode needs a nonblank session on every request, so a
+    // stateless caller (git-ai-commit) that sends no session headers and has no
+    // stored conversation still gets a deterministic routing session. Precedence:
+    // caller-supplied canonical header, then the shared session alias, then the
+    // conversation-derived session, then the request's own id. Blank values are
+    // absent; no global fallback and no per-attempt UUID is minted here.
     let session_value = request_headers
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case("x-opencode-session"))
         .map(|(_, value)| value.trim())
         .filter(|value| !value.is_empty())
-        .map(|value| value.to_string());
+        .map(|value| value.to_string())
+        .or_else(|| resolve_session_affinity(request_headers))
+        .or_else(|| {
+            conversation_id
+                .filter(|id| !id.is_nil())
+                .map(|id| format!("ses_{id}"))
+        })
+        .unwrap_or_else(|| format!("ses_{request_id}"));
 
-    let builder = if let Some(value) = session_value {
-        builder.header("x-opencode-session", value)
-    } else if let Some(id) = conversation_id.filter(|id| !id.is_nil()) {
-        builder.header("x-opencode-session", format!("ses_{id}"))
-    } else {
-        builder
-    };
+    let builder = builder.header("x-opencode-session", session_value);
 
     // Preserve caller User-Agent, else synthesize prompt-ferry/<version>.
     let user_agent_value = request_headers
@@ -614,6 +638,7 @@ mod tests {
                 ("x-api-key".to_string(), "client-key".to_string()),
             ],
             None,
+            uuid::Uuid::new_v4(),
         )
         .build()
         .unwrap();
@@ -700,6 +725,7 @@ mod tests {
                 ("x-opencode-project".to_string(), "proj_123".to_string()),
             ],
             Some(conversation_id),
+            uuid::Uuid::new_v4(),
         )
         .build()
         .unwrap();
@@ -753,6 +779,7 @@ mod tests {
             &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
             &[],
             Some(conversation_id),
+            uuid::Uuid::new_v4(),
         )
         .build()
         .unwrap();
@@ -814,6 +841,7 @@ mod tests {
                 ("user-agent".to_string(), "".to_string()),
             ],
             Some(conversation_id),
+            uuid::Uuid::new_v4(),
         )
         .build()
         .unwrap();
@@ -838,52 +866,212 @@ mod tests {
         );
     }
 
-    #[test]
-    fn opencode_no_identity_omits_session_but_sets_user_agent() {
+    // Issue #884: a stateless caller (git-ai-commit) sends Responses requests to
+    // an OpenCode upstream without any session header and without a stored
+    // conversation. OpenCode still requires a nonblank session, so the request's
+    // own id supplies the deterministic fallback.
+
+    fn opencode_request(
+        base_url: &str,
+        native_api: NativeApi,
+        path: &str,
+        request_headers: &[(String, String)],
+        conversation_id: Option<uuid::Uuid>,
+        request_id: uuid::Uuid,
+    ) -> reqwest::Request {
         let route = RouteConfig {
-            route_id: uuid::Uuid::new_v4(),
-            user_id: 1,
-            model_route_rule_id: None,
-            base_url: "https://sub.opencode.ai".to_string(),
-            api_key: "upstream-key".to_string(),
-            endpoint_key_id: None,
-            endpoint_key_label: None,
-            api_keys: Vec::new(),
-            key_lb_enabled: false,
-            native_api: NativeApi::Chat,
-            upstream_model: None,
-            route_selection_reason: RouteSelectionReason::Default,
-            provider: crate::db::EndpointProvider::Generic,
-            service_tier: None,
-            proxy_url: None,
-            dev_system_normalize: false,
-            thinking_effort_override: None,
-            compact_mode: crate::db::CompactMode::Passthrough,
-            thinking_downgrade_enabled: false,
+            base_url: base_url.to_string(),
+            native_api,
+            ..generic_route()
         };
-        let request = build_upstream_request(
+        build_upstream_request(
             &Client::new(),
             &Method::POST,
-            "https://sub.opencode.ai/v1/chat/completions",
+            &format!("{base_url}{path}"),
             &route,
-            "/v1/chat/completions",
-            &PreparedRequestBody::BufferedBytes(b"{}".to_vec()),
-            &[],
-            None,
+            path,
+            &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            request_headers,
+            conversation_id,
+            request_id,
         )
         .build()
-        .unwrap();
+        .unwrap()
+    }
 
-        assert!(request.headers().get("x-opencode-session").is_none());
+    fn opencode_session(request: &reqwest::Request) -> Option<String> {
+        request
+            .headers()
+            .get("x-opencode-session")
+            .map(|value| value.to_str().unwrap().to_string())
+    }
+
+    #[test]
+    fn opencode_stateless_request_falls_back_to_the_request_session() {
+        let request_id = uuid::Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
+        let expected = format!("ses_{request_id}");
+        for headers in [
+            Vec::new(),
+            vec![("x-opencode-session".to_string(), "   ".to_string())],
+            vec![
+                ("x-opencode-session".to_string(), String::new()),
+                ("x-opencode-session-id".to_string(), "  ".to_string()),
+            ],
+        ] {
+            let request = opencode_request(
+                "https://opencode.ai",
+                NativeApi::Responses,
+                "/v1/responses",
+                &headers,
+                None,
+                request_id,
+            );
+            assert_eq!(
+                opencode_session(&request).as_deref(),
+                Some(expected.as_str()),
+                "a stateless Responses request must still carry a session: {headers:?}"
+            );
+            assert_eq!(
+                request
+                    .headers()
+                    .get(header::USER_AGENT)
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+                format!("prompt-ferry/{}", env!("CARGO_PKG_VERSION"))
+            );
+        }
+    }
+
+    #[test]
+    fn opencode_request_session_fallback_is_stable_per_request() {
+        let request_id = uuid::Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+        let other_request_id =
+            uuid::Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap();
+        let session_of = |request_id| {
+            let request = opencode_request(
+                "https://api.opencode.ai",
+                NativeApi::Responses,
+                "/v1/responses",
+                &[],
+                None,
+                request_id,
+            );
+            opencode_session(&request)
+        };
+
+        // Every attempt of one request rebuilds the request; its session must not move.
+        let first = session_of(request_id);
+        let retried = session_of(request_id);
+        let other = session_of(other_request_id);
         assert_eq!(
-            request
-                .headers()
-                .get(header::USER_AGENT)
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            format!("prompt-ferry/{}", env!("CARGO_PKG_VERSION"))
+            first, retried,
+            "one request keeps one session across attempts"
         );
+        assert_eq!(first.as_deref(), Some(format!("ses_{request_id}").as_str()));
+        assert_ne!(
+            first, other,
+            "distinct request ids must not share a fallback session"
+        );
+    }
+
+    #[test]
+    fn opencode_session_precedence_prefers_caller_then_alias_then_conversation() {
+        let request_id = uuid::Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+        let conversation_id =
+            uuid::Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let session_of = |headers: &[(String, String)], conversation_id| {
+            let request = opencode_request(
+                "https://opencode.ai",
+                NativeApi::Responses,
+                "/v1/responses",
+                headers,
+                conversation_id,
+                request_id,
+            );
+            opencode_session(&request)
+        };
+
+        let explicit = [
+            (
+                "x-opencode-session".to_string(),
+                "ses_canonical".to_string(),
+            ),
+            ("x-session-affinity".to_string(), "ses_affinity".to_string()),
+            ("x-session-id".to_string(), "ses_explicit".to_string()),
+        ];
+        assert_eq!(
+            session_of(&explicit, Some(conversation_id)).as_deref(),
+            Some("ses_canonical"),
+            "a supplied canonical session wins over aliases and the conversation"
+        );
+
+        for (alias, value) in [
+            ("x-opencode-session-id", "ses_child"),
+            ("x-session-id", "ses_explicit"),
+            ("x-session-affinity", "ses_affinity"),
+            ("Session-Id", "ses_legacy"),
+        ] {
+            let headers = vec![(alias.to_string(), value.to_string())];
+            assert_eq!(
+                session_of(&headers, None).as_deref(),
+                Some(value),
+                "alias {alias} must forward without a stored conversation"
+            );
+            assert_eq!(
+                resolve_session_affinity(&headers).as_deref(),
+                Some(value),
+                "the upstream session must match the shared resolver for {alias}"
+            );
+        }
+
+        let blank_aliases_with_parent_metadata = [
+            ("x-opencode-session".to_string(), "   ".to_string()),
+            ("x-opencode-session-id".to_string(), String::new()),
+            ("x-session-affinity".to_string(), " ".to_string()),
+            (
+                "x-opencode-parent-session-id".to_string(),
+                "ses_parent".to_string(),
+            ),
+            ("x-parent-session-id".to_string(), "ses_parent".to_string()),
+        ];
+        assert_eq!(
+            session_of(&blank_aliases_with_parent_metadata, None).as_deref(),
+            Some(format!("ses_{request_id}").as_str()),
+            "blank aliases and parent-only metadata are not the current identity"
+        );
+
+        assert_eq!(
+            session_of(&[], Some(conversation_id)).as_deref(),
+            Some(format!("ses_{conversation_id}").as_str()),
+            "a conversation mapping is preserved when no caller identity exists"
+        );
+    }
+
+    #[test]
+    fn opencode_lookalike_hosts_receive_no_session_fallback() {
+        let request_id = uuid::Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+        for base_url in [
+            "https://opencode.ai.evil.com",
+            "https://notopencode.ai",
+            "https://attacker-opencode.ai",
+            "https://api.example.com",
+        ] {
+            let request = opencode_request(
+                base_url,
+                NativeApi::Responses,
+                "/v1/responses",
+                &[],
+                None,
+                request_id,
+            );
+            assert_eq!(
+                opencode_session(&request),
+                None,
+                "{base_url} is not an OpenCode upstream"
+            );
+            assert!(request.headers().get(header::USER_AGENT).is_none());
+        }
     }
 
     #[test]
@@ -930,6 +1118,7 @@ mod tests {
                 ),
             ],
             Some(conversation_id),
+            uuid::Uuid::new_v4(),
         )
         .build()
         .unwrap();
@@ -979,6 +1168,7 @@ mod tests {
             &PreparedRequestBody::BufferedBytes(br#"{"model":"opencode"}"#.to_vec()),
             &[],
             Some(conversation_id),
+            uuid::Uuid::new_v4(),
         )
         .build()
         .unwrap();
@@ -1024,6 +1214,7 @@ mod tests {
                 ("UsEr-AgEnT".to_string(), "  custom-ua/2.0  ".to_string()),
             ],
             None,
+            uuid::Uuid::new_v4(),
         )
         .build()
         .unwrap();
@@ -1273,6 +1464,7 @@ mod tests {
                 &body,
                 &[],
                 None,
+                uuid::Uuid::new_v4(),
             )
             .build()
             .unwrap();
@@ -1304,6 +1496,7 @@ mod tests {
                 &body,
                 &[],
                 None,
+                uuid::Uuid::new_v4(),
             )
             .build()
             .unwrap();
@@ -1377,6 +1570,7 @@ mod tests {
                     &prepared,
                     &[],
                     None,
+                    uuid::Uuid::new_v4(),
                 )
                 .build()
                 .unwrap();
@@ -1413,6 +1607,7 @@ mod tests {
                 &body,
                 &[],
                 None,
+                uuid::Uuid::new_v4(),
             )
             .build()
             .unwrap();
@@ -1444,6 +1639,7 @@ mod tests {
                     &body,
                     &[],
                     None,
+                    uuid::Uuid::new_v4(),
                 )
                 .build()
                 .unwrap();
@@ -1466,6 +1662,7 @@ mod tests {
             &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
             &[],
             None,
+            uuid::Uuid::new_v4(),
         )
         .build()
         .unwrap();
@@ -1485,6 +1682,7 @@ mod tests {
             &PreparedRequestBody::BufferedBytes(b"not-json".to_vec()),
             &[],
             None,
+            uuid::Uuid::new_v4(),
         )
         .build()
         .unwrap();

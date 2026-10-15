@@ -117,6 +117,7 @@ fn build_upstream_request_applies_tier_for_chat_and_responses() {
                 &body,
                 &[],
                 None,
+                uuid::Uuid::new_v4(),
             )
             .build()
             .unwrap();
@@ -139,6 +140,7 @@ fn build_upstream_request_applies_tier_for_chat_and_responses() {
         &PreparedRequestBody::BufferedBytes(br#"{"model":"gpt-5","service_tier":"auto"}"#.to_vec()),
         &[],
         None,
+        uuid::Uuid::new_v4(),
     )
     .build()
     .unwrap();
