@@ -1,0 +1,195 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO quota_key_observations (\n    endpoint_id,\n    key_id,\n    provider,\n    key_label,\n    source,\n    observed_at,\n    ok,\n    status,\n    error_code,\n    plan_type,\n    limit_reached,\n    windows\n)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\nRETURNING\n    observation_id,\n    endpoint_id,\n    key_id,\n    provider,\n    key_label,\n    source,\n    observed_at,\n    ok,\n    status,\n    error_code,\n    plan_type,\n    limit_reached,\n    windows,\n    created_at;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "observation_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "observation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "key_label",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "key_label"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "source"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "observed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "observed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "ok",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "ok"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "error_code",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "error_code"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "plan_type",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "plan_type"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "limit_reached",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "limit_reached"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "windows",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "windows"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Varchar",
+        "Text",
+        "Timestamptz",
+        "Bool",
+        "Text",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "f5daede39ea3a19396d2dd37ea013e0d42658c6117da4dd47210e916cab6cfd3"
+}

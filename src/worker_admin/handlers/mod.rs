@@ -25,6 +25,7 @@ pub mod oauth;
 mod oauth_client;
 mod oauth_session;
 mod quota_history;
+mod quota_key_observations;
 mod relay_input;
 mod relay_secrets;
 mod relay_validation;
@@ -82,8 +83,9 @@ use tower_http::cors::CorsLayer;
 
 use self::{
     approvals::*, auth::*, billing::*, config_audit::*, config_export::*, config_import::*,
-    endpoint_usage::*, endpoints::*, mcp::*, model_routes::*, quota_history::*, relays::*,
-    session_routing::*, settings::*, settings_cache_alert::*, usage::*, users::*,
+    endpoint_usage::*, endpoints::*, mcp::*, model_routes::*, quota_history::*,
+    quota_key_observations::*, relays::*, session_routing::*, settings::*, settings_cache_alert::*,
+    usage::*, users::*,
 };
 
 pub(super) use self::support::*;

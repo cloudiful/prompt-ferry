@@ -1076,6 +1076,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/quota-observations:
+    get:
+      tags:
+      - endpoints
+      operationId: quota_key_observation_history
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: key_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+          maximum: 200
+          minimum: 1
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Per-key quota observation history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaKeyObservationHistoryResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/admin/endpoints/{endpoint_id}/test:
     post:
       tags:
@@ -6073,6 +6137,72 @@ components:
         updated_at:
           type: string
           format: date-time
+    QuotaKeyObservationHistoryItem:
+      type: object
+      required:
+      - observation_id
+      - key_id
+      - key_label
+      - provider
+      - observed_at
+      - ok
+      - windows
+      - source
+      properties:
+        error_code:
+          type:
+          - string
+          - 'null'
+        key_id:
+          type: string
+          format: uuid
+        key_label:
+          type: string
+        limit_reached:
+          type:
+          - boolean
+          - 'null'
+        observation_id:
+          type: string
+        observed_at:
+          type: string
+          format: date-time
+        ok:
+          type: boolean
+        plan_type:
+          type:
+          - string
+          - 'null'
+        provider:
+          type: string
+        source:
+          type: string
+        status:
+          type:
+          - string
+          - 'null'
+        windows:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalQuotaWindow'
+    QuotaKeyObservationHistoryResponse:
+      type: object
+      required:
+      - items
+      - retention_days
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaKeyObservationHistoryItem'
+        next_cursor:
+          type:
+          - string
+          - 'null'
+        retention_days:
+          type: integer
+          format: int32
+          minimum: 0
     QuotaSnapshotHistoryItem:
       type: object
       required:

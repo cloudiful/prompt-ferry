@@ -6,6 +6,7 @@ import {
   listEndpoints,
   listModelRoutes,
   organizationUsage,
+  quotaKeyObservationHistory,
   quotaSnapshotHistory,
   testEndpoint,
   tokenPlanUsage,
@@ -23,6 +24,7 @@ import type {
   ModelRouteTestResponse,
   OpenAiOrganizationUsageResponse,
   ProviderEndpoint,
+  QuotaKeyObservationHistoryResponse,
   QuotaSnapshotHistoryResponse,
   TokenPlanUsageResponse,
 } from '../generated/admin-api'
@@ -110,6 +112,28 @@ export async function fetchQuotaSnapshotHistory(
       withData({
         path: { endpoint_id: endpointId },
         query: { limit, ...(beforeId ? { before_id: beforeId } : {}) },
+      }),
+    ),
+  )
+}
+
+// Issue #863 P4: generic per-key quota observation history for every
+// capable provider. Display-only; never part of routing or quota math.
+export async function fetchKeyQuotaObservationHistory(
+  endpointId: string,
+  keyId: string | null,
+  limit = 50,
+  beforeId?: string,
+): Promise<QuotaKeyObservationHistoryResponse> {
+  return expectData(
+    await quotaKeyObservationHistory<true>(
+      withData({
+        path: { endpoint_id: endpointId },
+        query: {
+          limit,
+          ...(keyId ? { key_id: keyId } : {}),
+          ...(beforeId ? { before_id: beforeId } : {}),
+        },
       }),
     ),
   )

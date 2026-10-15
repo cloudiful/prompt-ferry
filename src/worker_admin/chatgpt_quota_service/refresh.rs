@@ -5,8 +5,11 @@ use tokio::time::timeout;
 use uuid::Uuid;
 
 use crate::{
-    db::{ChatgptQuotaSnapshotCreate, quota_snapshots},
-    worker_admin::chatgpt_quota_normalize,
+    db::{
+        ChatgptQuotaSnapshotCreate, ChatgptQuotaSnapshotSource, QuotaObservationSource,
+        quota_snapshots,
+    },
+    worker_admin::{chatgpt_quota_normalize, quota_observation_service},
 };
 
 use super::{
@@ -165,7 +168,7 @@ impl ChatGptQuotaService {
                 let snapshot = ChatgptQuotaSnapshotCreate {
                     endpoint_id,
                     observed_at,
-                    plan_type: quota.plan_type,
+                    plan_type: quota.plan_type.clone(),
                     limit_reached: quota.limit_reached,
                     windows,
                     source: trigger.source(),
@@ -173,10 +176,19 @@ impl ChatGptQuotaService {
                 match quota_snapshots::complete_refresh_success(&self.inner.pool, owner, snapshot)
                     .await
                 {
-                    Ok(true) => match self.load(endpoint_id).await {
-                        Ok((snapshot, state)) => completion(snapshot, state, None),
-                        Err(error) => completion(None, None, Some(error)),
-                    },
+                    Ok(true) => {
+                        self.mirror_quota_observation(
+                            endpoint_id,
+                            trigger.source(),
+                            &quota,
+                            observed_at,
+                        )
+                        .await;
+                        match self.load(endpoint_id).await {
+                            Ok((snapshot, state)) => completion(snapshot, state, None),
+                            Err(error) => completion(None, None, Some(error)),
+                        }
+                    }
                     Ok(false) => {
                         let (snapshot, state) =
                             self.load(endpoint_id).await.unwrap_or((None, None));
@@ -199,6 +211,40 @@ impl ChatGptQuotaService {
             }
         };
         RefreshAttempt::Completed(completed)
+    }
+
+    async fn mirror_quota_observation(
+        &self,
+        endpoint_id: Uuid,
+        source: ChatgptQuotaSnapshotSource,
+        quota: &crate::worker_admin::handlers::chatgpt_backend::ChatgptQuota,
+        observed_at: DateTime<Utc>,
+    ) {
+        // Best-effort mirror of a successful fetch into the generic
+        // per-key observation table. The legacy snapshot above stays
+        // authoritative; a missing endpoint or a failed write only skips the
+        // mirror, and no second provider fetch ever runs here.
+        let endpoint = match crate::db::get_endpoint(&self.inner.pool, endpoint_id).await {
+            Ok(Some(endpoint)) => endpoint,
+            _ => return,
+        };
+        let response = chatgpt_quota_normalize::response_from_quota(&endpoint, quota.clone());
+        let source = match source {
+            ChatgptQuotaSnapshotSource::Manual => QuotaObservationSource::Manual,
+            ChatgptQuotaSnapshotSource::Request => QuotaObservationSource::Request,
+            ChatgptQuotaSnapshotSource::Periodic => QuotaObservationSource::Periodic,
+        };
+        quota_observation_service::persist_response(
+            &self.inner.pool,
+            endpoint_id,
+            crate::db::EndpointProvider::OpenAi,
+            &response,
+            source,
+            observed_at,
+            quota.plan_type.clone(),
+            quota.limit_reached,
+        )
+        .await;
     }
 
     async fn finish_failure(

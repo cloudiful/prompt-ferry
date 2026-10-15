@@ -692,3 +692,60 @@ async fn body_panic_with_deleter_failure_resumes_original_panic_and_closes_pool(
     recovery.close().await;
     assert_pool_fixture_gone(endpoint_id).await;
 }
+
+#[tokio::test]
+async fn concurrent_manual_refreshes_fetch_once_and_mirror_once() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let endpoint_id = create_endpoint(&pool).await;
+    let (fetcher, started, release) = FakeFetcher::gated(quota(Some(20.0)));
+    let fetcher = Arc::new(fetcher);
+    let service = Arc::new(service(&pool, fetcher.clone()));
+    let provider_endpoint = endpoint(&pool, endpoint_id).await;
+    let a = {
+        let service = service.clone();
+        let endpoint = provider_endpoint.clone();
+        tokio::spawn(async move { service.read(&endpoint, true).await })
+    };
+    let b = {
+        let service = service.clone();
+        let endpoint = provider_endpoint.clone();
+        tokio::spawn(async move { service.read(&endpoint, true).await })
+    };
+
+    timeout(Duration::from_secs(3), started.notified())
+        .await
+        .expect("fake provider started");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    release.open();
+    let (a, b) = timeout(Duration::from_secs(5), async { tokio::join!(a, b) })
+        .await
+        .expect("manual callers share the leased result");
+    let a = a.expect("first task").expect("first quota read");
+    let b = b.expect("second task").expect("second quota read");
+    assert_eq!(fetcher.calls_for(endpoint_id), 1);
+    assert_eq!(
+        db::quota_snapshots::list_snapshots(&pool, endpoint_id, None, 10)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    // The single shared fetch mirrors exactly one observation row.
+    assert_eq!(a.keys[0].key_id, b.keys[0].key_id);
+    assert_eq!(
+        db::quota_key_observations::list_observations(
+            &pool,
+            endpoint_id,
+            a.keys[0].key_id,
+            None,
+            200
+        )
+        .await
+        .unwrap()
+        .len(),
+        1
+    );
+    cleanup_endpoint(&pool, endpoint_id).await;
+}

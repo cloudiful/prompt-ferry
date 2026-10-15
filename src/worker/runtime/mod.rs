@@ -21,6 +21,7 @@ mod lifecycle_standalone;
 mod lifecycle_standalone_tests;
 mod mcp_support;
 mod prompt_log;
+mod quota_observation_collector;
 mod raw_maintenance;
 mod request_assembly;
 mod routing;

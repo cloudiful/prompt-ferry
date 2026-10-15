@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS (\n    SELECT observation_id\n    FROM quota_key_observations\n    WHERE observed_at < $1\n    ORDER BY observed_at, observation_id\n    LIMIT $2\n    FOR UPDATE SKIP LOCKED\n)\nDELETE FROM quota_key_observations AS observations\nUSING expired\nWHERE observations.observation_id = expired.observation_id;\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d8fb018dae4b083235b7158958394cfcdd041f82510266481a75951f3d6e4a85"
+}

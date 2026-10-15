@@ -7,6 +7,7 @@ import type {
   TokenPlanUsageResponse,
 } from '@/generated/admin-api'
 import SubscriptionQuotaHistory from '@/components/endpoints/SubscriptionQuotaHistory.vue'
+import KeyQuotaObservationHistory from '@/components/endpoints/KeyQuotaObservationHistory.vue'
 import TokenPlanKeyQuotaStatus from '@/components/endpoints/TokenPlanKeyQuotaStatus.vue'
 import TokenPlanQuotaWindowRow from '@/components/endpoints/TokenPlanQuotaWindowRow.vue'
 import { deepseekBalanceRows } from '@/components/endpoints/tokenPlanBadgeRender'
@@ -505,6 +506,14 @@ const historyRefreshKey = computed(() => {
           :endpoint-id="endpointId"
           :now-ms="nowMs"
           :refresh-key="historyRefreshKey"
+          :t="t"
+        />
+        <KeyQuotaObservationHistory
+          v-if="
+            visible && endpointId && provider !== null && provider !== 'generic'
+          "
+          :key="`observations-${endpointId}`"
+          :endpoint-id="endpointId"
           :t="t"
         />
       </div>

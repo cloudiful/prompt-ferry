@@ -179,7 +179,7 @@ elif printf '%s' "$*" | grep -q to_regclass; then
   if [ "$mode" = "no_tables" ]; then
     exit 0
   fi
-  printf 'chatgpt_quota_snapshots\nendpoint_oauth_tokens\nprovider_endpoints\nrequest_records\nusage_charges\n'
+  printf 'chatgpt_quota_snapshots\nendpoint_oauth_tokens\nprovider_endpoints\nquota_key_observations\nrequest_records\nusage_charges\n'
 elif printf '%s' "$*" | grep -q current_database; then
   printf '%s\n' "$PGDATABASE"
 else

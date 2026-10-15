@@ -151,6 +151,14 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
             super::chatgpt_quota_collector::spawn(&config, service, runtime_state.control.clone())
         })
     });
+    let quota_observation_task = runtime_admin_state.as_ref().map(|state| {
+        super::quota_observation_collector::spawn(
+            &config,
+            state.pool.clone(),
+            state.token_plan_quota.clone(),
+            runtime_state.control.clone(),
+        )
+    });
     let shutdown_state = runtime_state.clone();
     let admin_shutdown = worker_shutdown.clone();
     tokio::spawn(async move {
@@ -234,6 +242,19 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
                 Err(_) => warn!(
                     budget_seconds = drain_budget.as_secs(),
                     "ChatGPT quota collector task did not stop within drain budget; exiting anyway",
+                ),
+            }
+        }
+        if let Some(task) = quota_observation_task {
+            match tokio::time::timeout(drain_budget, task).await {
+                Ok(Ok(())) => {}
+                Ok(Err(join_error)) => warn!(
+                    error = %join_error,
+                    "quota observation collector task join failed during shutdown",
+                ),
+                Err(_) => warn!(
+                    budget_seconds = drain_budget.as_secs(),
+                    "quota observation collector task did not stop within drain budget; exiting anyway",
                 ),
             }
         }

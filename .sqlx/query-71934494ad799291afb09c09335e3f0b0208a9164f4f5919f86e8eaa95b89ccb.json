@@ -1,0 +1,187 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    observation_id,\n    endpoint_id,\n    key_id,\n    provider,\n    key_label,\n    source,\n    observed_at,\n    ok,\n    status,\n    error_code,\n    plan_type,\n    limit_reached,\n    windows,\n    created_at\nFROM quota_key_observations\nWHERE endpoint_id = $1\n  AND ($2::UUID IS NULL OR key_id = $2)\n  AND ($3::BIGINT IS NULL OR observation_id < $3)\nORDER BY observation_id DESC\nLIMIT $4;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "observation_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "observation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "key_label",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "key_label"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "source"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "observed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "observed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "ok",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "ok"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "error_code",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "error_code"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "plan_type",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "plan_type"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "limit_reached",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "limit_reached"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "windows",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "windows"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "71934494ad799291afb09c09335e3f0b0208a9164f4f5919f86e8eaa95b89ccb"
+}

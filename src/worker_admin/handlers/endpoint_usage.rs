@@ -89,7 +89,7 @@ pub(super) async fn token_plan_usage(
 
     match state
         .token_plan_quota
-        .refresh(&state.pool, endpoint_id, query.force.unwrap_or(false))
+        .refresh_manual(&state.pool, endpoint_id, query.force.unwrap_or(false))
         .await
     {
         Ok(Some(mut usage)) => {

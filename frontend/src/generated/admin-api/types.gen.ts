@@ -1275,6 +1275,27 @@ export type ProviderEndpoint = {
     updated_at: string;
 };
 
+export type QuotaKeyObservationHistoryItem = {
+    error_code?: string | null;
+    key_id: string;
+    key_label: string;
+    limit_reached?: boolean | null;
+    observation_id: string;
+    observed_at: string;
+    ok: boolean;
+    plan_type?: string | null;
+    provider: string;
+    source: string;
+    status?: string | null;
+    windows: Array<CanonicalQuotaWindow>;
+};
+
+export type QuotaKeyObservationHistoryResponse = {
+    items: Array<QuotaKeyObservationHistoryItem>;
+    next_cursor?: string | null;
+    retention_days: number;
+};
+
 export type QuotaSnapshotHistoryItem = {
     limit_reached?: boolean | null;
     observed_at: string;
@@ -3125,6 +3146,40 @@ export type QuotaSnapshotHistoryResponses = {
 };
 
 export type QuotaSnapshotHistoryResponse2 = QuotaSnapshotHistoryResponses[keyof QuotaSnapshotHistoryResponses];
+
+export type QuotaKeyObservationHistoryData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: {
+        key_id?: string;
+        limit?: number;
+        before_id?: string;
+    };
+    url: '/api/v1/admin/endpoints/{endpoint_id}/quota-observations';
+};
+
+export type QuotaKeyObservationHistoryErrors = {
+    400: ErrorEnvelope;
+    404: ErrorEnvelope;
+    500: ErrorEnvelope;
+    503: ErrorEnvelope;
+};
+
+export type QuotaKeyObservationHistoryError = QuotaKeyObservationHistoryErrors[keyof QuotaKeyObservationHistoryErrors];
+
+export type QuotaKeyObservationHistoryResponses = {
+    /**
+     * Per-key quota observation history
+     */
+    200: QuotaKeyObservationHistoryResponse;
+};
+
+export type QuotaKeyObservationHistoryResponse2 = QuotaKeyObservationHistoryResponses[keyof QuotaKeyObservationHistoryResponses];
 
 export type TestEndpointData = {
     body?: never;

@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    endpoint.endpoint_id,\n    api_key.key_id\nFROM provider_endpoints AS endpoint\nJOIN endpoint_api_keys AS api_key ON api_key.endpoint_id = endpoint.endpoint_id\nWHERE endpoint.enabled = TRUE\n  AND api_key.enabled = TRUE\n  AND endpoint.provider IN ('minimax', 'command_code', 'opencode_go', 'openrouter', 'glm', 'deepseek')\n  AND NULLIF(BTRIM(api_key.api_key), '') IS NOT NULL\nORDER BY endpoint.endpoint_id, api_key.key_id;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "endpoint_api_keys",
+            "name": "key_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "b63e69bb5975b26554e1a27c8ecbf49a2a4bdf9cce457bfe275e98797fca08fb"
+}

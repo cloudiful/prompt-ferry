@@ -1,5 +1,7 @@
 use super::*;
 use crate::db;
+use crate::db::QuotaObservationSource;
+use chrono::Utc;
 use std::future::Future;
 
 #[derive(Default)]
@@ -9,6 +11,29 @@ pub(super) struct RefreshState {
     background_pending: bool,
 }
 
+async fn fetch_live(
+    pool: &PgPool,
+    endpoint_id: Uuid,
+) -> anyhow::Result<Option<TokenPlanUsageResponse>> {
+    let Some(endpoint) = db::get_endpoint(pool, endpoint_id).await? else {
+        return Ok(None);
+    };
+    if !matches!(
+        endpoint.provider,
+        db::EndpointProvider::Minimax
+            | db::EndpointProvider::CommandCode
+            | db::EndpointProvider::OpencodeGo
+            | db::EndpointProvider::OpenRouter
+            | db::EndpointProvider::Glm
+            | db::EndpointProvider::DeepSeek
+    ) {
+        return Ok(None);
+    }
+    super::super::token_plan::fetch_endpoint_usage(&endpoint)
+        .await
+        .map(Some)
+}
+
 impl TokenPlanQuotaCache {
     pub(crate) async fn refresh(
         &self,
@@ -16,24 +41,112 @@ impl TokenPlanQuotaCache {
         endpoint_id: Uuid,
         force: bool,
     ) -> anyhow::Result<Option<TokenPlanUsageResponse>> {
+        self.refresh_with_source(
+            pool,
+            endpoint_id,
+            force,
+            QuotaObservationSource::Request,
+            || fetch_live(pool, endpoint_id),
+        )
+        .await
+    }
+
+    /// Admin manual reads persist with the manual source; the fetch and the
+    /// lock/reservation/error semantics match [`refresh`].
+    pub(crate) async fn refresh_manual(
+        &self,
+        pool: &PgPool,
+        endpoint_id: Uuid,
+        force: bool,
+    ) -> anyhow::Result<Option<TokenPlanUsageResponse>> {
+        self.refresh_with_source(
+            pool,
+            endpoint_id,
+            force,
+            QuotaObservationSource::Manual,
+            || fetch_live(pool, endpoint_id),
+        )
+        .await
+    }
+
+    /// Periodic sampler entry: the collector decides due-ness from the last
+    /// persisted observation, so a due endpoint always forces a fresh fetch
+    /// (which also retries a previously failed persist).
+    pub(crate) async fn refresh_periodic(
+        &self,
+        pool: &PgPool,
+        endpoint_id: Uuid,
+    ) -> anyhow::Result<Option<TokenPlanUsageResponse>> {
+        self.refresh_with_source(
+            pool,
+            endpoint_id,
+            true,
+            QuotaObservationSource::Periodic,
+            || fetch_live(pool, endpoint_id),
+        )
+        .await
+    }
+
+    /// Fetch wrapper that persists every new result with its source and the
+    /// timestamp captured at fetch completion. Cache hits and singleflight
+    /// reuse return before the fetch closure runs, so they write no row.
+    /// Persist failures log a constant message and never change the result.
+    pub(crate) async fn refresh_with_source<F, Fut>(
+        &self,
+        pool: &PgPool,
+        endpoint_id: Uuid,
+        force: bool,
+        source: QuotaObservationSource,
+        fetch: F,
+    ) -> anyhow::Result<Option<TokenPlanUsageResponse>>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = anyhow::Result<Option<TokenPlanUsageResponse>>>,
+    {
         self.refresh_with(endpoint_id, force, Instant::now(), || async {
-            let Some(endpoint) = db::get_endpoint(pool, endpoint_id).await? else {
-                return Ok(None);
-            };
-            if !matches!(
-                endpoint.provider,
-                db::EndpointProvider::Minimax
-                    | db::EndpointProvider::CommandCode
-                    | db::EndpointProvider::OpencodeGo
-                    | db::EndpointProvider::OpenRouter
-                    | db::EndpointProvider::Glm
-                    | db::EndpointProvider::DeepSeek
-            ) {
-                return Ok(None);
+            match fetch().await {
+                Ok(Some(mut response)) => {
+                    let observed_at = Utc::now();
+                    crate::worker_admin::quota_canonical::populate_response_observations(
+                        response.provider,
+                        &mut response,
+                    );
+                    crate::worker_admin::quota_observation_service::persist_response(
+                        pool,
+                        endpoint_id,
+                        response.provider,
+                        &response,
+                        source,
+                        observed_at,
+                        None,
+                        None,
+                    )
+                    .await;
+                    Ok(Some(response))
+                }
+                Ok(None) => Ok(None),
+                Err(error) => {
+                    let observed_at = Utc::now();
+                    if let Ok(Some(endpoint)) = db::get_endpoint(pool, endpoint_id).await {
+                        let keys =
+                            crate::worker_admin::quota_observation_service::enabled_key_identities(
+                                &endpoint,
+                            );
+                        if !keys.is_empty() {
+                            crate::worker_admin::quota_observation_service::persist_endpoint_failure(
+                                pool,
+                                endpoint_id,
+                                endpoint.provider,
+                                &keys,
+                                source,
+                                observed_at,
+                            )
+                            .await;
+                        }
+                    }
+                    Err(error)
+                }
             }
-            super::super::token_plan::fetch_endpoint_usage(&endpoint)
-                .await
-                .map(Some)
         })
         .await
     }

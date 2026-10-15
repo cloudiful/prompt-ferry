@@ -59,6 +59,7 @@ REQUIRED_TABLES = (
     "chatgpt_quota_snapshots",
     "endpoint_oauth_tokens",
     "provider_endpoints",
+    "quota_key_observations",
     "request_records",
     "usage_charges",
 )

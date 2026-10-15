@@ -5,7 +5,8 @@ use crate::{
     worker_admin_types::{
         EndpointOAuthStatusResponse, EndpointPageResponse, EndpointRequest, EndpointTestResponse,
         OAuthBrowserCompleteRequest, OAuthBrowserStartResponse, OAuthDeviceStartResponse,
-        OAuthFlowRequest, OAuthLoginResponse, QuotaSnapshotHistoryQuery,
+        OAuthFlowRequest, OAuthLoginResponse, QuotaKeyObservationHistoryQuery,
+        QuotaKeyObservationHistoryResponse, QuotaSnapshotHistoryQuery,
         QuotaSnapshotHistoryResponse, TablePageQuery, TokenPlanUsageQuery, TokenPlanUsageResponse,
     },
 };
@@ -96,6 +97,24 @@ pub(super) fn token_plan_usage() {}
     tag = "endpoints"
 )]
 pub(super) fn quota_snapshot_history() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/quota-observations",
+    params(
+        ("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID"),
+        QuotaKeyObservationHistoryQuery
+    ),
+    responses(
+        (status = 200, body = QuotaKeyObservationHistoryResponse, description = "Per-key quota observation history"),
+        (status = 400, body = ErrorEnvelope),
+        (status = 404, body = ErrorEnvelope),
+        (status = 500, body = ErrorEnvelope),
+        (status = 503, body = ErrorEnvelope)
+    ),
+    tag = "endpoints"
+)]
+pub(super) fn quota_key_observation_history() {}
 
 #[utoipa::path(
     get,

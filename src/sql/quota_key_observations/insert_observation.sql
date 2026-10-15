@@ -1,0 +1,30 @@
+INSERT INTO quota_key_observations (
+    endpoint_id,
+    key_id,
+    provider,
+    key_label,
+    source,
+    observed_at,
+    ok,
+    status,
+    error_code,
+    plan_type,
+    limit_reached,
+    windows
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING
+    observation_id,
+    endpoint_id,
+    key_id,
+    provider,
+    key_label,
+    source,
+    observed_at,
+    ok,
+    status,
+    error_code,
+    plan_type,
+    limit_reached,
+    windows,
+    created_at;

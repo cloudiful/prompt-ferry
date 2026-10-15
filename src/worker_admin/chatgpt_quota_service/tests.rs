@@ -137,3 +137,98 @@ impl ChatGptQuotaFetcher for FakeFetcher {
         })
     }
 }
+
+#[cfg(test)]
+mod mirror_tests {
+    use std::sync::Arc;
+
+    use chrono::{Duration, Utc};
+
+    use crate::db;
+
+    use super::support::{
+        cleanup_endpoint, create_endpoint, endpoint, quota, seed_snapshot, service,
+    };
+    use super::{FakeFetcher, fake_fetcher};
+
+    #[tokio::test]
+    async fn successful_refresh_mirrors_canonical_observation_without_extra_fetch() {
+        let Some(pool) = super::support::test_pool().await else {
+            return;
+        };
+        let endpoint_id = create_endpoint(&pool).await;
+        let seeded_at = Utc::now() - Duration::minutes(8);
+        seed_snapshot(&pool, endpoint_id, seeded_at, Some(30.0)).await;
+        let fetcher = Arc::new(fake_fetcher(quota(Some(20.0))));
+        let service = service(&pool, fetcher.clone());
+        let provider_endpoint = endpoint(&pool, endpoint_id).await;
+
+        let response = service
+            .read(&provider_endpoint, true)
+            .await
+            .expect("manual refresh succeeds");
+        assert!(response.keys[0].ok);
+        // The mirror reuses the fetched quota: no second provider call.
+        assert_eq!(fetcher.calls_for(endpoint_id), 1);
+        // The legacy history stays authoritative and keeps both snapshots.
+        let snapshots = db::quota_snapshots::list_snapshots(&pool, endpoint_id, None, 10)
+            .await
+            .unwrap();
+        assert_eq!(snapshots.len(), 2);
+        // The mirror row carries the stable key id, the saved stamp, and the
+        // manual source with canonical windows and plan metadata.
+        let key_id = response.keys[0].key_id;
+        let row = db::quota_key_observations::latest_observation(&pool, endpoint_id, key_id)
+            .await
+            .unwrap()
+            .expect("mirror row persists");
+        assert!(row.ok);
+        assert_eq!(row.provider, db::QuotaObservationProvider::Openai);
+        assert_eq!(row.source, db::QuotaObservationSource::Manual);
+        assert_eq!(
+            row.observed_at.timestamp_micros(),
+            snapshots[0].observed_at.timestamp_micros()
+        );
+        assert!(!row.windows.is_empty());
+        assert_eq!(row.plan_type.as_deref(), Some("plus"));
+        assert_eq!(row.limit_reached, Some(false));
+        cleanup_endpoint(&pool, endpoint_id).await;
+    }
+
+    #[tokio::test]
+    async fn failed_refresh_writes_no_mirror_row_and_keeps_old_history() {
+        let Some(pool) = super::support::test_pool().await else {
+            return;
+        };
+        let endpoint_id = create_endpoint(&pool).await;
+        let seeded_at = Utc::now() - Duration::minutes(8);
+        seed_snapshot(&pool, endpoint_id, seeded_at, Some(30.0)).await;
+        let fetcher = Arc::new(FakeFetcher::failure(super::ChatGptQuotaError::Upstream));
+        let service = service(&pool, fetcher.clone());
+        let provider_endpoint = endpoint(&pool, endpoint_id).await;
+
+        let response = service
+            .read(&provider_endpoint, true)
+            .await
+            .expect("failed refresh still serves last-good");
+        assert_eq!(fetcher.calls_for(endpoint_id), 1);
+        assert_eq!(
+            db::quota_snapshots::list_snapshots(&pool, endpoint_id, None, 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            db::quota_key_observations::latest_observation(
+                &pool,
+                endpoint_id,
+                response.keys[0].key_id
+            )
+            .await
+            .unwrap()
+            .is_none()
+        );
+        cleanup_endpoint(&pool, endpoint_id).await;
+    }
+}

@@ -1060,3 +1060,38 @@ test('detail exhaustion never binds the dialog pool minimum', async () => {
   expect(html).toContain('0.0%')
   expect(html).toContain('tokenPlanMinRemaining')
 })
+
+test('capable providers mount the per-key observation history instead of the legacy panel', async () => {
+  const usage = {
+    provider: 'minimax',
+    provider_region: null,
+    keys: [],
+  } as TokenPlanUsageResponse
+  const html = await render(usage, { visible: true })
+  expect(html).toContain('data-stub="KeyQuotaObservationHistory.vue"')
+  expect(html).not.toContain('data-stub="SubscriptionQuotaHistory.vue"')
+})
+
+test('openai keeps the legacy history panel alongside the per-key history', async () => {
+  const usage = {
+    provider: 'openai',
+    provider_region: null,
+    keys: [],
+  } as TokenPlanUsageResponse
+  const html = await render(usage, { visible: true })
+  expect(html).toContain('data-stub="SubscriptionQuotaHistory.vue"')
+  expect(html).toContain('data-stub="KeyQuotaObservationHistory.vue"')
+})
+
+test('generic endpoints mount no history panel', async () => {
+  const html = await render(
+    {
+      provider: 'generic',
+      provider_region: null,
+      keys: [],
+    } as TokenPlanUsageResponse,
+    { visible: true },
+  )
+  expect(html).not.toContain('data-stub="KeyQuotaObservationHistory.vue"')
+  expect(html).not.toContain('data-stub="SubscriptionQuotaHistory.vue"')
+})

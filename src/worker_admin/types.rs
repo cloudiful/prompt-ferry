@@ -16,6 +16,8 @@ mod mcp;
 mod mcp_provider;
 #[path = "types/model_routes.rs"]
 mod model_routes;
+#[path = "types/quota_key_observations.rs"]
+mod quota_key_observations;
 #[path = "types/quota_snapshots.rs"]
 mod quota_snapshots;
 #[path = "types/quota_status.rs"]
@@ -43,6 +45,7 @@ pub use endpoints::*;
 pub use mcp::*;
 pub use mcp_provider::*;
 pub use model_routes::*;
+pub use quota_key_observations::*;
 pub use quota_snapshots::*;
 pub use quota_status::*;
 pub use relays::*;

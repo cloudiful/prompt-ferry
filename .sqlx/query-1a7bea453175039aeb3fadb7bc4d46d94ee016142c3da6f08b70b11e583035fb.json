@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n    endpoint.endpoint_id,\n    api_key.key_id,\n    endpoint.provider\nFROM provider_endpoints AS endpoint\nJOIN endpoint_api_keys AS api_key ON api_key.endpoint_id = endpoint.endpoint_id\nWHERE endpoint.endpoint_id = $1\n  AND api_key.key_id = $2;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "endpoint_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "endpoint_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "endpoint_api_keys",
+            "name": "key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provider_endpoints",
+            "name": "provider"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1a7bea453175039aeb3fadb7bc4d46d94ee016142c3da6f08b70b11e583035fb"
+}
