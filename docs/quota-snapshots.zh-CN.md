@@ -38,6 +38,22 @@ GET /api/v1/admin/endpoints/{endpoint_id}/quota-observations?key_id=&limit=50
 
 历史不支持回填：没有获取器的渠道（generic）永远不会产生记录，历史从采样开始时起算。该表由部署 `db_init` 迁移流程创建；生产库仅通过操作员授权的迁移获得空表。记录仅携带 Key 标签、渠道代码、计划元数据和 canonical 窗口，绝不包含 API Key、令牌或原始上游报文。
 
+## 额度趋势图
+
+展开的逐 Key 历史默认显示趋势图；可见的视图切换可返回同一个数据库游标分页列表。趋势图不会下载全部列表页：它按所选 Key 与时间范围读取一组有界、由服务端分桶的序列，而列表在模式切换间保留自己的 `before_id` 游标和已加载行。
+
+管理员可为单个端点请求一个固定范围：
+
+```text
+GET /api/v1/admin/endpoints/{endpoint_id}/quota-observations/trend?key_id=&range=24h
+```
+
+`range` 取值 `24h`、`7d` 或 `30d`（默认 `24h`），其他值返回 `400`。服务端只快照一次 `now`，推导 `from = to - duration`，并将每条采样放入固定的半开区间 `[from, to)` 桶（`24h` = 900 秒/96 桶，`7d` = 7200 秒/84 桶，`30d` = 28800 秒/90 桶）。桶时间戳为 `from + index * step`，不会越过 `to`；`from` 与 `to` 均为 UTC 时间。
+
+响应包含 `bucket_seconds`、`bucket_count`、`keys_truncated`、`series_truncated`、`sampled_observations`、`failed_observations` 和 `series`。每个序列是一个身份 `(key_id, source_id, kind, unit, metric)`，其 `points` 为固定长度且升序；没有可用观测、失败快照或所选行缺少该窗口的桶为 `null`，绝不沿用或伪造数值。余额使用原生单位的 `amount` 指标（真实的 0 与负值都保留）；已知百分比窗口使用 `0..100` 的 `remaining_percent`；无限制窗口没有数值序列。最多返回 24 个 Key 与 96 个序列，超限时给出截断标记而非静默丢弃。
+
+趋势图按 `(metric, unit)` 分组，因此 CNY、USD、credits 与百分比各自独占坐标轴，绝不合并、填充面积或跨缺口插值；空桶保持为缺口，阶梯线承载观测到的水平而非暗示斜率。图例与提示名称组合 Key 标签与窗口槽位，两个 Key 标签相同时追加短 Key ID。头部显示范围、桶大小、采样与失败快照数量以及 Key/序列截断。全为 null 或没有序列时显示明确的空状态，而不是伪造的零线。这是余额与剩余额度历史，不是消耗或支出：趋势图不求和、不取差、不做换算，也不让不同货币共享坐标轴。
+
 ## 如何理解观测
 
 已知的 0% 剩余与未知用量保持区分。窗口标签使用上游报告的实际时长，不会推断默认五小时或周窗口。观测时间是成功上游响应到达的时间，不是打开对话框的时间。后续刷新失败时，界面保留最近一次成功数据，并标记缓存/过期状态和通用刷新警告。

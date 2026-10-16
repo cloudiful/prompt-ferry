@@ -1,6 +1,7 @@
 use super::{
-    delete_expired_observations, eligible_endpoints, insert_observation, latest_observation,
-    list_observations, observation_endpoint,
+    TREND_SERIES_MAX, TrendMetric, TrendRange, TrendSnapshot, delete_expired_observations,
+    eligible_endpoints, insert_observation, latest_observation, list_observations,
+    load_trend_buckets, load_trend_keys, observation_endpoint, project_trend,
 };
 use crate::db::types::{QuotaObservationCreate, QuotaObservationProvider, QuotaObservationSource};
 use crate::worker_admin_types::{
@@ -477,6 +478,439 @@ async fn only_owned_fixtures_are_removed() {
             "historical orphan {orphan} must keep its exact name"
         );
     }
+}
+
+fn at(timestamp: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(timestamp)
+        .expect("fixed test timestamp parses")
+        .with_timezone(&Utc)
+}
+
+fn trend_percent_window(
+    source_id: &str,
+    kind: CanonicalQuotaWindowKind,
+    remaining_percent: Option<f64>,
+    availability: SubscriptionWindowAvailability,
+) -> CanonicalQuotaWindow {
+    CanonicalQuotaWindow {
+        source_id: source_id.to_string(),
+        kind,
+        source_model: None,
+        unit: Some("tokens".to_string()),
+        duration_seconds: Some(300),
+        is_default_scope: true,
+        availability,
+        remaining_percent,
+        current: None,
+        limit: None,
+        remaining: None,
+        reset_at: None,
+    }
+}
+
+fn trend_balance_window(
+    source_id: &str,
+    unit: Option<&str>,
+    current: Option<f64>,
+    availability: SubscriptionWindowAvailability,
+) -> CanonicalQuotaWindow {
+    CanonicalQuotaWindow {
+        source_id: source_id.to_string(),
+        kind: CanonicalQuotaWindowKind::Balance,
+        source_model: None,
+        unit: unit.map(str::to_string),
+        duration_seconds: None,
+        is_default_scope: false,
+        availability,
+        remaining_percent: None,
+        current,
+        limit: None,
+        remaining: None,
+        reset_at: None,
+    }
+}
+
+fn trend_unlimited_window(source_id: &str) -> CanonicalQuotaWindow {
+    CanonicalQuotaWindow {
+        source_id: source_id.to_string(),
+        kind: CanonicalQuotaWindowKind::Unlimited,
+        source_model: None,
+        unit: Some("credits".to_string()),
+        duration_seconds: None,
+        is_default_scope: false,
+        availability: SubscriptionWindowAvailability::Known,
+        remaining_percent: None,
+        current: Some(1.0),
+        limit: None,
+        remaining: None,
+        reset_at: None,
+    }
+}
+
+fn trend_snapshot(
+    key_id: Uuid,
+    key_label: &str,
+    bucket_index: usize,
+    observed_at: DateTime<Utc>,
+    ok: bool,
+    windows: Vec<CanonicalQuotaWindow>,
+) -> TrendSnapshot {
+    TrendSnapshot {
+        key_id,
+        key_label: key_label.to_string(),
+        observed_at,
+        ok,
+        bucket_index,
+        windows,
+    }
+}
+
+fn failed_create(
+    endpoint_id: Uuid,
+    key_id: Uuid,
+    observed_at: DateTime<Utc>,
+) -> QuotaObservationCreate {
+    QuotaObservationCreate::new(
+        endpoint_id,
+        key_id,
+        QuotaObservationProvider::Minimax,
+        "test-key".to_string(),
+        QuotaObservationSource::Periodic,
+        observed_at,
+        false,
+        Some("error".to_string()),
+        Some("upstream".to_string()),
+        None,
+        None,
+        vec![],
+    )
+    .expect("valid failure observation builds")
+}
+
+#[test]
+fn trend_range_maps_to_fixed_buckets() {
+    assert_eq!(TrendRange::parse(None), Some(TrendRange::Last24h));
+    assert_eq!(TrendRange::parse(Some("24h")), Some(TrendRange::Last24h));
+    assert_eq!(TrendRange::parse(Some("7d")), Some(TrendRange::Last7d));
+    assert_eq!(TrendRange::parse(Some("30d")), Some(TrendRange::Last30d));
+    for unknown in ["1h", "24H", "", " 24h", "week"] {
+        assert_eq!(TrendRange::parse(Some(unknown)), None, "range={unknown}");
+    }
+    for (range, seconds, count) in [
+        (TrendRange::Last24h, 900, 96),
+        (TrendRange::Last7d, 7_200, 84),
+        (TrendRange::Last30d, 28_800, 90),
+    ] {
+        assert_eq!(range.bucket_seconds(), seconds);
+        assert_eq!(range.bucket_count(), count);
+        assert_eq!(
+            range.duration_seconds() / range.bucket_seconds(),
+            count as i64
+        );
+    }
+}
+
+#[test]
+fn trend_projection_separates_identities_and_blanks_gaps() {
+    let key = Uuid::new_v4();
+    let snapshots = vec![trend_snapshot(
+        key,
+        "first",
+        0,
+        observed_at(10),
+        true,
+        vec![
+            trend_percent_window(
+                "usage",
+                CanonicalQuotaWindowKind::Rolling,
+                Some(75.0),
+                SubscriptionWindowAvailability::Known,
+            ),
+            trend_balance_window(
+                "credits",
+                Some("credits"),
+                Some(50.0),
+                SubscriptionWindowAvailability::Known,
+            ),
+            trend_balance_window(
+                "fiat",
+                Some("usd"),
+                Some(-5.0),
+                SubscriptionWindowAvailability::Known,
+            ),
+            trend_balance_window(
+                "unitless",
+                None,
+                Some(1.0),
+                SubscriptionWindowAvailability::Known,
+            ),
+            trend_unlimited_window("unlimited"),
+        ],
+    )];
+    let projection = project_trend(3, snapshots);
+    assert_eq!(projection.sampled_observations, 1);
+    assert_eq!(projection.failed_observations, 0);
+    assert!(!projection.series_truncated);
+    // Rolling percent + two distinct balance units; an unknown-kind limited
+    // window, a unitless balance, and `unlimited` are not plotted.
+    assert_eq!(projection.series.len(), 3);
+
+    let usage = projection
+        .series
+        .iter()
+        .find(|series| series.source_id == "usage")
+        .expect("rolling series present");
+    assert_eq!(usage.metric, TrendMetric::RemainingPercent);
+    assert_eq!(usage.unit, "percent");
+    assert_eq!(usage.points.len(), 3);
+    assert_eq!(usage.points[0].value, Some(75.0));
+    assert!(usage.points[1].value.is_none());
+    assert!(usage.points[1].observed_at.is_none());
+
+    let credits = projection
+        .series
+        .iter()
+        .find(|series| series.source_id == "credits")
+        .expect("credits series present");
+    assert_eq!(credits.metric, TrendMetric::Amount);
+    assert_eq!(credits.unit, "credits");
+    assert_eq!(credits.points[0].value, Some(50.0));
+
+    let fiat = projection
+        .series
+        .iter()
+        .find(|series| series.source_id == "fiat")
+        .expect("fiat series present");
+    assert_eq!(fiat.unit, "usd");
+    assert_eq!(
+        fiat.points[0].value,
+        Some(-5.0),
+        "negative balances are preserved"
+    );
+}
+
+#[test]
+fn trend_projection_blanks_failed_and_absent_windows() {
+    let key = Uuid::new_v4();
+    let snapshots = vec![
+        trend_snapshot(
+            key,
+            "oldest",
+            0,
+            observed_at(9),
+            true,
+            vec![trend_percent_window(
+                "usage",
+                CanonicalQuotaWindowKind::Rolling,
+                Some(80.0),
+                SubscriptionWindowAvailability::Known,
+            )],
+        ),
+        // The latest selected row in bucket 1 is a failure carrying no windows.
+        trend_snapshot(key, "middle", 1, observed_at(10), false, vec![]),
+        // A later success selects a different source window only.
+        trend_snapshot(
+            key,
+            "latest",
+            2,
+            observed_at(11),
+            true,
+            vec![trend_percent_window(
+                "other",
+                CanonicalQuotaWindowKind::Rolling,
+                Some(10.0),
+                SubscriptionWindowAvailability::Known,
+            )],
+        ),
+    ];
+    let projection = project_trend(4, snapshots);
+    assert_eq!(projection.sampled_observations, 3);
+    assert_eq!(projection.failed_observations, 1);
+
+    let usage = projection
+        .series
+        .iter()
+        .find(|series| series.source_id == "usage")
+        .expect("usage series survives a bucket failure");
+    assert_eq!(usage.key_label, "latest", "latest selected snapshot label");
+    assert_eq!(usage.points[0].value, Some(80.0));
+    // A failed selected row blanks the bucket and keeps its observed_at.
+    assert!(usage.points[1].value.is_none());
+    assert_eq!(usage.points[1].observed_at, Some(observed_at(10)));
+    // The chosen success lacks the usage window, so the value stays null
+    // without falling back to an older success.
+    assert!(usage.points[2].value.is_none());
+    assert_eq!(usage.points[2].observed_at, Some(observed_at(11)));
+    // A bucket with no selected row has no value and no observed_at.
+    assert!(usage.points[3].value.is_none());
+    assert!(usage.points[3].observed_at.is_none());
+
+    let other = projection
+        .series
+        .iter()
+        .find(|series| series.source_id == "other")
+        .expect("second series present");
+    assert!(other.points[0].value.is_none());
+    assert_eq!(other.points[2].value, Some(10.0));
+}
+
+#[test]
+fn trend_projection_establishes_unknown_series_as_null() {
+    let key = Uuid::new_v4();
+    let snapshots = vec![trend_snapshot(
+        key,
+        "key",
+        0,
+        observed_at(10),
+        true,
+        vec![
+            trend_percent_window(
+                "usage",
+                CanonicalQuotaWindowKind::Weekly,
+                None,
+                SubscriptionWindowAvailability::Unknown,
+            ),
+            trend_balance_window(
+                "credits",
+                Some("credits"),
+                Some(50.0),
+                SubscriptionWindowAvailability::Unknown,
+            ),
+        ],
+    )];
+    let projection = project_trend(2, snapshots);
+    assert_eq!(
+        projection.series.len(),
+        2,
+        "an unknown-availability window still establishes its identity"
+    );
+    for series in &projection.series {
+        assert!(
+            series.points[0].value.is_none(),
+            "{} must stay null while unavailable",
+            series.source_id
+        );
+        assert_eq!(series.points[0].observed_at, Some(observed_at(10)));
+    }
+}
+
+#[test]
+fn trend_projection_caps_series_and_reports_truncation() {
+    let key = Uuid::new_v4();
+    let windows = (0..TREND_SERIES_MAX + 1)
+        .map(|index| {
+            trend_balance_window(
+                &format!("wallet-{index:03}"),
+                Some("credits"),
+                Some(1.0),
+                SubscriptionWindowAvailability::Known,
+            )
+        })
+        .collect();
+    let projection = project_trend(
+        1,
+        vec![trend_snapshot(
+            key,
+            "key",
+            0,
+            observed_at(10),
+            true,
+            windows,
+        )],
+    );
+    assert_eq!(projection.series.len(), TREND_SERIES_MAX);
+    assert!(projection.series_truncated);
+}
+
+#[test]
+fn trend_projection_ignores_snapshots_outside_the_grid() {
+    let key = Uuid::new_v4();
+    let projection = project_trend(
+        2,
+        vec![trend_snapshot(
+            key,
+            "key",
+            5,
+            observed_at(10),
+            true,
+            vec![trend_percent_window(
+                "ghost",
+                CanonicalQuotaWindowKind::Rolling,
+                Some(1.0),
+                SubscriptionWindowAvailability::Known,
+            )],
+        )],
+    );
+    assert_eq!(projection.sampled_observations, 0);
+    assert!(projection.series.is_empty());
+}
+
+#[tokio::test]
+async fn trend_keys_and_buckets_select_latest_per_bucket_and_bound_keys() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let endpoint_id = create_endpoint(&pool, "openai", true).await;
+    let first_key = create_key(&pool, endpoint_id, "first-key", true).await;
+    let second_key = create_key(&pool, endpoint_id, "second-key", true).await;
+    let from = at("2026-10-10T00:00:00Z");
+    let to = at("2026-10-10T03:00:00Z");
+
+    // First key: two rows in bucket 0 (latest wins), a success and a later
+    // failure in bucket 1 (the failure wins), and one row in bucket 2.
+    for create in [
+        success_create(endpoint_id, first_key, at("2026-10-10T00:10:00Z")),
+        success_create(endpoint_id, first_key, at("2026-10-10T00:40:00Z")),
+        success_create(endpoint_id, first_key, at("2026-10-10T01:20:00Z")),
+        failed_create(endpoint_id, first_key, at("2026-10-10T01:50:00Z")),
+        success_create(endpoint_id, first_key, at("2026-10-10T02:05:00Z")),
+        success_create(endpoint_id, second_key, at("2026-10-10T01:15:00Z")),
+    ] {
+        insert_observation(&pool, &create).await.unwrap();
+    }
+
+    let keys = load_trend_keys(&pool, endpoint_id, from, to, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        keys,
+        vec![first_key, second_key],
+        "latest observed first with a stable tie-break"
+    );
+
+    let snapshots = load_trend_buckets(&pool, endpoint_id, from, to, 3_600, &keys)
+        .await
+        .unwrap();
+    let selected: Vec<(Uuid, usize, DateTime<Utc>, bool)> = snapshots
+        .iter()
+        .map(|snapshot| {
+            (
+                snapshot.key_id,
+                snapshot.bucket_index,
+                snapshot.observed_at,
+                snapshot.ok,
+            )
+        })
+        .collect();
+    assert_eq!(
+        selected.len(),
+        4,
+        "exactly one latest snapshot per selected key and bucket"
+    );
+    for expected in [
+        (first_key, 0, at("2026-10-10T00:40:00Z"), true),
+        (first_key, 1, at("2026-10-10T01:50:00Z"), false),
+        (first_key, 2, at("2026-10-10T02:05:00Z"), true),
+        (second_key, 1, at("2026-10-10T01:15:00Z"), true),
+    ] {
+        assert!(selected.contains(&expected), "missing {expected:?}");
+    }
+
+    let filtered = load_trend_keys(&pool, endpoint_id, from, to, Some(second_key))
+        .await
+        .unwrap();
+    assert_eq!(filtered, vec![second_key]);
+    cleanup_fixtures(&pool, endpoint_id).await;
 }
 
 pub(super) mod test_support {

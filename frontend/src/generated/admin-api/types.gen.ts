@@ -1296,6 +1296,48 @@ export type QuotaKeyObservationHistoryResponse = {
     retention_days: number;
 };
 
+/**
+ * The numeric meaning of one trend series.
+ */
+export type QuotaKeyObservationTrendMetric = 'amount' | 'remaining_percent';
+
+/**
+ * One fixed-grid point; `value`/`observed_at` are `null` for a missing bucket,
+ * a failed snapshot, or an unavailable window.
+ */
+export type QuotaKeyObservationTrendPoint = {
+    at: string;
+    observed_at?: string | null;
+    value?: number | null;
+};
+
+export type QuotaKeyObservationTrendResponse = {
+    bucket_count: number;
+    bucket_seconds: number;
+    failed_observations: number;
+    from: string;
+    keys_truncated: boolean;
+    range: string;
+    sampled_observations: number;
+    series: Array<QuotaKeyObservationTrendSeries>;
+    series_truncated: boolean;
+    to: string;
+};
+
+/**
+ * One identity-separated series; points are ascending and exactly
+ * `bucket_count` long.
+ */
+export type QuotaKeyObservationTrendSeries = {
+    key_id: string;
+    key_label: string;
+    kind: CanonicalQuotaWindowKind;
+    metric: QuotaKeyObservationTrendMetric;
+    points: Array<QuotaKeyObservationTrendPoint>;
+    source_id: string;
+    unit: string;
+};
+
 export type QuotaSnapshotHistoryItem = {
     limit_reached?: boolean | null;
     observed_at: string;
@@ -3180,6 +3222,39 @@ export type QuotaKeyObservationHistoryResponses = {
 };
 
 export type QuotaKeyObservationHistoryResponse2 = QuotaKeyObservationHistoryResponses[keyof QuotaKeyObservationHistoryResponses];
+
+export type QuotaKeyObservationTrendData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: {
+        key_id?: string;
+        range?: string;
+    };
+    url: '/api/v1/admin/endpoints/{endpoint_id}/quota-observations/trend';
+};
+
+export type QuotaKeyObservationTrendErrors = {
+    400: ErrorEnvelope;
+    404: ErrorEnvelope;
+    500: ErrorEnvelope;
+    503: ErrorEnvelope;
+};
+
+export type QuotaKeyObservationTrendError = QuotaKeyObservationTrendErrors[keyof QuotaKeyObservationTrendErrors];
+
+export type QuotaKeyObservationTrendResponses = {
+    /**
+     * Bounded per-key quota observation trend
+     */
+    200: QuotaKeyObservationTrendResponse;
+};
+
+export type QuotaKeyObservationTrendResponse2 = QuotaKeyObservationTrendResponses[keyof QuotaKeyObservationTrendResponses];
 
 export type TestEndpointData = {
     body?: never;

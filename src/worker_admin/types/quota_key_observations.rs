@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use super::token_plan::CanonicalQuotaWindow;
+use super::token_plan::{CanonicalQuotaWindow, CanonicalQuotaWindowKind};
 
 #[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -39,4 +39,61 @@ pub struct QuotaKeyObservationHistoryResponse {
     pub items: Vec<QuotaKeyObservationHistoryItem>,
     pub next_cursor: Option<String>,
     pub retention_days: u16,
+}
+
+/// Fixed-window query for the bounded quota observation trend. There is no
+/// client-chosen interval, limit, or absolute date.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct QuotaKeyObservationTrendQuery {
+    #[serde(default)]
+    #[param(value_type = String, format = "uuid")]
+    pub key_id: Option<String>,
+    #[serde(default)]
+    #[param(default = "24h")]
+    pub range: Option<String>,
+}
+
+/// The numeric meaning of one trend series.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QuotaKeyObservationTrendMetric {
+    Amount,
+    RemainingPercent,
+}
+
+/// One fixed-grid point; `value`/`observed_at` are `null` for a missing bucket,
+/// a failed snapshot, or an unavailable window.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct QuotaKeyObservationTrendPoint {
+    pub at: DateTime<Utc>,
+    pub observed_at: Option<DateTime<Utc>>,
+    pub value: Option<f64>,
+}
+
+/// One identity-separated series; points are ascending and exactly
+/// `bucket_count` long.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct QuotaKeyObservationTrendSeries {
+    pub key_id: Uuid,
+    pub key_label: String,
+    pub source_id: String,
+    pub kind: CanonicalQuotaWindowKind,
+    pub unit: String,
+    pub metric: QuotaKeyObservationTrendMetric,
+    pub points: Vec<QuotaKeyObservationTrendPoint>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct QuotaKeyObservationTrendResponse {
+    pub from: DateTime<Utc>,
+    pub to: DateTime<Utc>,
+    pub range: String,
+    pub bucket_seconds: i64,
+    pub bucket_count: u32,
+    pub keys_truncated: bool,
+    pub series_truncated: bool,
+    pub sampled_observations: u32,
+    pub failed_observations: u32,
+    pub series: Vec<QuotaKeyObservationTrendSeries>,
 }

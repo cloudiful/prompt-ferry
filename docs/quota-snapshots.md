@@ -38,6 +38,22 @@ GET /api/v1/admin/endpoints/{endpoint_id}/quota-observations?key_id=&limit=50
 
 There is no backfill: providers without a fetcher (generic) never produce rows, and history begins when sampling starts. The table is created by the same deployment `db_init` migration procedure; production databases gain the empty table only through the operator's authorized migration run. Rows carry key labels, provider codes, plan metadata, and canonical windows only — never API keys, tokens, or raw upstream bodies.
 
+## Quota trend chart
+
+The expanded per-key history opens on a chart by default; a visible switch returns to the same database-keyset list. The chart never downloads every list page: it reads one bounded, server-bucketed series per selected key and range, while the list keeps its own `before_id` cursor and loaded rows across mode switches.
+
+Administrators request one fixed range for one endpoint:
+
+```text
+GET /api/v1/admin/endpoints/{endpoint_id}/quota-observations/trend?key_id=&range=24h
+```
+
+`range` is one of `24h`, `7d`, or `30d` (default `24h`); any other value is rejected with `400`. The server snapshots `now` once, derives `from = to - duration`, and places each sample in a fixed half-open `[from, to)` bucket (`24h` = 900s/96 buckets, `7d` = 7200s/84, `30d` = 28800s/90). Bucket timestamps are `from + index * step` and never reach past `to`; `from` and `to` are UTC datetimes.
+
+The response carries `bucket_seconds`, `bucket_count`, `keys_truncated`, `series_truncated`, `sampled_observations`, `failed_observations`, and `series`. Each series is one identity — `(key_id, source_id, kind, unit, metric)` — with a fixed-length, ascending `points` array; a bucket with no usable observation, a failed snapshot, or a window absent from the chosen row is `null`, never a carried-forward or fabricated value. Balances use the `amount` metric in their native unit (a real zero and a negative balance are both kept); known percent windows use `remaining_percent` in `0..100`; unlimited windows have no numeric series. At most 24 keys and 96 series are returned, with truncation flagged rather than silently dropped.
+
+The chart groups series by `(metric, unit)`, so CNY, USD, credits, and percentages each keep their own axis and are never merged, area-filled, or interpolated across gaps; a null bucket stays a gap and a step line carries the observed level rather than an implied slope. Legend and tooltip names combine the key label and window slot, adding a short key id when two keys share a label. The header reports the range, bucket size, sampled and failed snapshot counts, and any key/series truncation. An all-null or empty series set shows a purposeful empty state instead of a fake zero line. This is balance and remaining-quota history, not consumption or spend: the chart never sums, differences, converts, or shares a scale between currencies.
+
 ## Interpreting observations
 
 Window percentages preserve known zero separately from unknown usage. Window labels use the reported duration; no default five-hour or weekly window is inferred. The observation timestamp is the time the successful upstream response was received, not the time the dialog was opened. If a later refresh fails, the UI keeps the last successful values and marks them as cached/stale with a generic refresh warning.

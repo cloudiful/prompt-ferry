@@ -7,6 +7,7 @@ import {
   listModelRoutes,
   organizationUsage,
   quotaKeyObservationHistory,
+  quotaKeyObservationTrend,
   quotaSnapshotHistory,
   testEndpoint,
   tokenPlanUsage,
@@ -25,6 +26,7 @@ import type {
   OpenAiOrganizationUsageResponse,
   ProviderEndpoint,
   QuotaKeyObservationHistoryResponse,
+  QuotaKeyObservationTrendResponse,
   QuotaSnapshotHistoryResponse,
   TokenPlanUsageResponse,
 } from '../generated/admin-api'
@@ -134,6 +136,23 @@ export async function fetchKeyQuotaObservationHistory(
           ...(keyId ? { key_id: keyId } : {}),
           ...(beforeId ? { before_id: beforeId } : {}),
         },
+      }),
+    ),
+  )
+}
+
+// Issue #911 P2: bounded server-bucketed trend for the history chart. Read-only
+// and range-fixed; the caller never chooses a bucket size or fetches every page.
+export async function fetchKeyQuotaObservationTrend(
+  endpointId: string,
+  keyId: string | null,
+  range: '24h' | '7d' | '30d',
+): Promise<QuotaKeyObservationTrendResponse> {
+  return expectData(
+    await quotaKeyObservationTrend<true>(
+      withData({
+        path: { endpoint_id: endpointId },
+        query: { range, ...(keyId ? { key_id: keyId } : {}) },
       }),
     ),
   )

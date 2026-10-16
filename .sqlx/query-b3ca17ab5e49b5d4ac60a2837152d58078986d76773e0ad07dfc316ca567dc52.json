@@ -1,0 +1,87 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- One latest observation per (selected key, relative bucket) inside the\n-- half-open request window. `bucket_index` is the relative index from `from`\n-- with `bucket_seconds` steps; the row_number tie-break keeps the newest\n-- observed row (observation_id further breaks an exact timestamp tie) so a\n-- failed/unknown latest row blanks that bucket instead of falling back to an\n-- older success.\nWITH selected_keys AS (\n    SELECT unnest($4::UUID[]) AS key_id\n),\nranked AS (\n    SELECT\n        observation.observation_id,\n        observation.key_id,\n        observation.key_label,\n        observation.observed_at,\n        observation.ok,\n        observation.windows,\n        FLOOR(\n            EXTRACT(EPOCH FROM (observation.observed_at - $2::TIMESTAMPTZ))\n                / $5::BIGINT\n        )::BIGINT AS bucket_index,\n        ROW_NUMBER() OVER (\n            PARTITION BY\n                observation.key_id,\n                FLOOR(\n                    EXTRACT(EPOCH FROM (observation.observed_at - $2::TIMESTAMPTZ))\n                        / $5::BIGINT\n                )\n            ORDER BY observation.observed_at DESC, observation.observation_id DESC\n        ) AS bucket_rank\n    FROM quota_key_observations AS observation\n    JOIN selected_keys ON selected_keys.key_id = observation.key_id\n    WHERE observation.endpoint_id = $1\n      AND observation.observed_at >= $2\n      AND observation.observed_at < $3\n)\nSELECT\n    key_id,\n    key_label,\n    observed_at,\n    ok,\n    windows,\n    bucket_index AS \"bucket_index!\"\nFROM ranked\nWHERE bucket_rank = 1\nORDER BY observed_at DESC, observation_id DESC;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key_label",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "key_label"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "observed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "observed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ok",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "ok"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "windows",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "windows"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "bucket_index!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "UuidArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "b3ca17ab5e49b5d4ac60a2837152d58078986d76773e0ad07dfc316ca567dc52"
+}

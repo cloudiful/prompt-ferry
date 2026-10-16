@@ -6,8 +6,9 @@ use crate::{
         EndpointOAuthStatusResponse, EndpointPageResponse, EndpointRequest, EndpointTestResponse,
         OAuthBrowserCompleteRequest, OAuthBrowserStartResponse, OAuthDeviceStartResponse,
         OAuthFlowRequest, OAuthLoginResponse, QuotaKeyObservationHistoryQuery,
-        QuotaKeyObservationHistoryResponse, QuotaSnapshotHistoryQuery,
-        QuotaSnapshotHistoryResponse, TablePageQuery, TokenPlanUsageQuery, TokenPlanUsageResponse,
+        QuotaKeyObservationHistoryResponse, QuotaKeyObservationTrendQuery,
+        QuotaKeyObservationTrendResponse, QuotaSnapshotHistoryQuery, QuotaSnapshotHistoryResponse,
+        TablePageQuery, TokenPlanUsageQuery, TokenPlanUsageResponse,
     },
 };
 
@@ -115,6 +116,24 @@ pub(super) fn quota_snapshot_history() {}
     tag = "endpoints"
 )]
 pub(super) fn quota_key_observation_history() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/quota-observations/trend",
+    params(
+        ("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID"),
+        QuotaKeyObservationTrendQuery
+    ),
+    responses(
+        (status = 200, body = QuotaKeyObservationTrendResponse, description = "Bounded per-key quota observation trend"),
+        (status = 400, body = ErrorEnvelope),
+        (status = 404, body = ErrorEnvelope),
+        (status = 500, body = ErrorEnvelope),
+        (status = 503, body = ErrorEnvelope)
+    ),
+    tag = "endpoints"
+)]
+pub(super) fn quota_key_observation_trend() {}
 
 #[utoipa::path(
     get,

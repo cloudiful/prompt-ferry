@@ -1,4 +1,7 @@
-use super::{ObservationQueryError, parse_observation_query, quota_key_observation_history};
+use super::{
+    ObservationQueryError, parse_observation_query, quota_key_observation_history,
+    quota_key_observation_trend,
+};
 use crate::{
     db,
     llm_review::LlmReviewSettings,
@@ -7,12 +10,12 @@ use crate::{
     worker_admin_state::{AdminState, AdminStateInit},
     worker_admin_types::{
         CanonicalQuotaWindow, CanonicalQuotaWindowKind, QuotaKeyObservationHistoryQuery,
-        RequestContentLoggingMode, RequestContentLoggingResponse, SessionUser,
-        SubscriptionWindowAvailability, UsageRetentionSettings,
+        QuotaKeyObservationTrendQuery, RequestContentLoggingMode, RequestContentLoggingResponse,
+        SessionUser, SubscriptionWindowAvailability, UsageRetentionSettings,
     },
 };
 use axum::http::header;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -88,6 +91,21 @@ async fn get_history(
     query: QuotaKeyObservationHistoryQuery,
 ) -> axum::response::Response {
     quota_key_observation_history(
+        axum::extract::State(state.clone()),
+        headers,
+        axum::extract::Path(endpoint_id),
+        axum::extract::Query(query),
+    )
+    .await
+}
+
+async fn get_trend(
+    state: &AdminState,
+    headers: axum::http::HeaderMap,
+    endpoint_id: Uuid,
+    query: QuotaKeyObservationTrendQuery,
+) -> axum::response::Response {
+    quota_key_observation_trend(
         axum::extract::State(state.clone()),
         headers,
         axum::extract::Path(endpoint_id),
@@ -572,5 +590,228 @@ async fn removed_key_rows_stay_queryable_without_current_config_membership() {
     let filtered_items = filtered["items"].as_array().expect("items array");
     assert_eq!(filtered_items.len(), 1);
     assert_eq!(filtered_items[0]["key_id"], removed_key.to_string());
+    cleanup(&pool, endpoint_id).await;
+}
+
+async fn body_json_large(response: axum::response::Response) -> Value {
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+        .await
+        .expect("large body reads");
+    serde_json::from_slice(&bytes).expect("large body is JSON")
+}
+
+fn parse_point_at(point: &Value) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(point["at"].as_str().expect("point has an at timestamp"))
+        .expect("point at parses")
+        .with_timezone(&Utc)
+}
+
+#[tokio::test]
+async fn trend_requires_an_admin_session_before_storage() {
+    let endpoint_id = Uuid::new_v4();
+    let unauthenticated = get_trend(
+        &lazy_test_state(),
+        axum::http::HeaderMap::new(),
+        endpoint_id,
+        QuotaKeyObservationTrendQuery::default(),
+    )
+    .await;
+    assert_eq!(
+        unauthenticated.status(),
+        axum::http::StatusCode::UNAUTHORIZED
+    );
+
+    let state = lazy_test_state();
+    attach_session(&state, "quota-trend-non-admin", false).await;
+    let forbidden = get_trend(
+        &state,
+        admin_headers("quota-trend-non-admin"),
+        endpoint_id,
+        QuotaKeyObservationTrendQuery::default(),
+    )
+    .await;
+    assert_eq!(forbidden.status(), axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn trend_rejects_unknown_range_and_bad_key_before_storage() {
+    let state = lazy_test_state();
+    attach_session(&state, "quota-trend-admin", true).await;
+    let headers = admin_headers("quota-trend-admin");
+    for query in [
+        QuotaKeyObservationTrendQuery {
+            key_id: None,
+            range: Some("1h".to_string()),
+        },
+        QuotaKeyObservationTrendQuery {
+            key_id: None,
+            range: Some("".to_string()),
+        },
+        QuotaKeyObservationTrendQuery {
+            key_id: Some("not-a-uuid".to_string()),
+            range: None,
+        },
+    ] {
+        let response = get_trend(&state, headers.clone(), Uuid::new_v4(), query).await;
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+}
+
+#[tokio::test]
+async fn trend_rejects_missing_and_plain_provider_endpoints() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let state = test_state_with_pool(pool.clone());
+    attach_session(&state, "quota-trend-guard", true).await;
+    let headers = admin_headers("quota-trend-guard");
+    let generic_id = create_endpoint(&pool, "generic").await;
+
+    let missing = get_trend(
+        &state,
+        headers.clone(),
+        Uuid::new_v4(),
+        QuotaKeyObservationTrendQuery::default(),
+    )
+    .await;
+    assert_eq!(missing.status(), axum::http::StatusCode::NOT_FOUND);
+    let plain = get_trend(
+        &state,
+        headers,
+        generic_id,
+        QuotaKeyObservationTrendQuery::default(),
+    )
+    .await;
+    assert_eq!(plain.status(), axum::http::StatusCode::NOT_FOUND);
+    cleanup(&pool, generic_id).await;
+}
+
+#[tokio::test]
+async fn trend_returns_bounded_series_with_failed_bucket() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let state = test_state_with_pool(pool.clone());
+    attach_session(&state, "quota-trend-reader", true).await;
+    let headers = admin_headers("quota-trend-reader");
+    let endpoint_id = create_endpoint(&pool, "opencode_go").await;
+    let key_id = create_key(&pool, endpoint_id, "trend-key").await;
+    let now = Utc::now();
+    // Far enough apart to land in different 15-minute buckets.
+    record_observation(
+        &pool,
+        endpoint_id,
+        key_id,
+        now - Duration::minutes(25),
+        true,
+    )
+    .await;
+    record_observation(
+        &pool,
+        endpoint_id,
+        key_id,
+        now - Duration::minutes(2),
+        false,
+    )
+    .await;
+
+    let body = body_json(
+        get_trend(
+            &state,
+            headers,
+            endpoint_id,
+            QuotaKeyObservationTrendQuery::default(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(body["range"], "24h");
+    assert_eq!(body["bucket_seconds"], 900);
+    assert_eq!(body["bucket_count"], 96);
+    assert_eq!(body["keys_truncated"], false);
+    assert_eq!(body["series_truncated"], false);
+    assert_eq!(body["sampled_observations"], 2);
+    assert_eq!(body["failed_observations"], 1);
+
+    let series = body["series"].as_array().expect("series array");
+    assert_eq!(series.len(), 1);
+    let rolling = &series[0];
+    assert_eq!(rolling["source_id"], "opencode_go:rolling");
+    assert_eq!(rolling["kind"], "rolling");
+    assert_eq!(rolling["metric"], "remaining_percent");
+    assert_eq!(rolling["unit"], "percent");
+    let points = rolling["points"].as_array().expect("points array");
+    assert_eq!(points.len(), 96);
+    let from = DateTime::parse_from_rfc3339(body["from"].as_str().unwrap())
+        .unwrap()
+        .with_timezone(&Utc);
+    assert_eq!(parse_point_at(&points[0]), from);
+    let mut previous = None;
+    let mut numeric = 0;
+    let mut observed = 0;
+    for point in points {
+        let at = parse_point_at(point);
+        if let Some(previous) = previous {
+            assert!(at > previous, "points ascend strictly");
+        }
+        previous = Some(at);
+        if point["value"].is_number() {
+            numeric += 1;
+            assert_eq!(point["value"], 80.0);
+        }
+        if point["observed_at"].is_string() {
+            observed += 1;
+        }
+    }
+    assert_eq!(numeric, 1, "only the successful snapshot has a value");
+    assert_eq!(
+        observed, 2,
+        "both the successful and the failed snapshot are sampled"
+    );
+    // The failed latest snapshot blanks its bucket without carrying a value.
+    let failed = points
+        .iter()
+        .find(|point| point["observed_at"].is_string() && point["value"].is_null())
+        .expect("failed bucket keeps an observed_at with a null value");
+    assert!(failed["value"].is_null());
+    cleanup(&pool, endpoint_id).await;
+}
+
+#[tokio::test]
+async fn trend_reports_key_truncation() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let state = test_state_with_pool(pool.clone());
+    attach_session(&state, "quota-trend-cap", true).await;
+    let headers = admin_headers("quota-trend-cap");
+    let endpoint_id = create_endpoint(&pool, "opencode_go").await;
+    let now = Utc::now();
+    for index in 0..25 {
+        let key_id = create_key(&pool, endpoint_id, &format!("key-{index}")).await;
+        record_observation(
+            &pool,
+            endpoint_id,
+            key_id,
+            now - Duration::minutes(5 + index),
+            true,
+        )
+        .await;
+    }
+
+    let body = body_json_large(
+        get_trend(
+            &state,
+            headers,
+            endpoint_id,
+            QuotaKeyObservationTrendQuery::default(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(body["keys_truncated"], true);
+    assert_eq!(body["series_truncated"], false);
+    assert_eq!(body["sampled_observations"], 24);
+    assert_eq!(body["series"].as_array().unwrap().len(), 24);
     cleanup(&pool, endpoint_id).await;
 }

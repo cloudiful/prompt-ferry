@@ -260,6 +260,10 @@ fn api_router(state: AdminState) -> Router<AdminState> {
             get(quota_key_observation_history),
         )
         .route(
+            "/admin/endpoints/{endpoint_id}/quota-observations/trend",
+            get(quota_key_observation_trend),
+        )
+        .route(
             "/admin/endpoints/{endpoint_id}/organization-usage",
             get(organization_usage),
         )

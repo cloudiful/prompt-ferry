@@ -129,6 +129,143 @@ fn parse_observation_query(
     Ok((limit, before_id, key_id))
 }
 
+/// Bounded, fixed-range trend for the per-key quota observation history. The
+/// range and bucket grid are server-owned; only an optional key filter and the
+/// named range cross the boundary.
+pub(super) async fn quota_key_observation_trend(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Path(endpoint_id): Path<Uuid>,
+    Query(query): Query<QuotaKeyObservationTrendQuery>,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response.into_response();
+    }
+    let key_id = match query.key_id.as_deref() {
+        Some(raw) => match raw.parse::<Uuid>() {
+            Ok(key_id) => Some(key_id),
+            Err(_) => {
+                return error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_key_id",
+                    "key_id must be a UUID",
+                );
+            }
+        },
+        None => None,
+    };
+    let range = match db::quota_key_observations::TrendRange::parse(query.range.as_deref()) {
+        Some(range) => range,
+        None => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_range",
+                "range must be one of 24h, 7d, 30d",
+            );
+        }
+    };
+    if state.config_repository.is_sqlite() {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "quota_history_unavailable",
+            "quota history requires PostgreSQL",
+        );
+    }
+    // Generic endpoints have no quota normalizer and therefore no per-key
+    // observation identity; they read as no trend endpoint.
+    match db::get_endpoint(&state.pool, endpoint_id).await {
+        Ok(Some(endpoint)) if endpoint.provider != db::EndpointProvider::Generic => {}
+        Ok(_) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
+        Err(_) => return observation_storage_error(endpoint_id),
+    }
+
+    // One snapshot of "now" builds the whole half-open window.
+    let to = Utc::now();
+    let from = to - range.duration();
+
+    let keys = match db::quota_key_observations::load_trend_keys(
+        &state.pool,
+        endpoint_id,
+        from,
+        to,
+        key_id,
+    )
+    .await
+    {
+        Ok(keys) => keys,
+        Err(_) => return observation_storage_error(endpoint_id),
+    };
+    let keys_truncated = keys.len() > db::quota_key_observations::TREND_KEY_LIMIT;
+    let selected_keys: Vec<Uuid> = keys
+        .into_iter()
+        .take(db::quota_key_observations::TREND_KEY_LIMIT)
+        .collect();
+
+    let snapshots = if selected_keys.is_empty() {
+        Vec::new()
+    } else {
+        match db::quota_key_observations::load_trend_buckets(
+            &state.pool,
+            endpoint_id,
+            from,
+            to,
+            range.bucket_seconds(),
+            &selected_keys,
+        )
+        .await
+        {
+            Ok(snapshots) => snapshots,
+            Err(_) => return observation_storage_error(endpoint_id),
+        }
+    };
+
+    let projection = db::quota_key_observations::project_trend(range.bucket_count(), snapshots);
+    let bucket_seconds = range.bucket_seconds();
+    let series = projection
+        .series
+        .into_iter()
+        .map(|series| QuotaKeyObservationTrendSeries {
+            key_id: series.key_id,
+            key_label: series.key_label,
+            source_id: series.source_id,
+            kind: series.kind,
+            unit: series.unit,
+            metric: match series.metric {
+                db::quota_key_observations::TrendMetric::Amount => {
+                    QuotaKeyObservationTrendMetric::Amount
+                }
+                db::quota_key_observations::TrendMetric::RemainingPercent => {
+                    QuotaKeyObservationTrendMetric::RemainingPercent
+                }
+            },
+            points: series
+                .points
+                .into_iter()
+                .enumerate()
+                .map(|(index, point)| QuotaKeyObservationTrendPoint {
+                    at: from + chrono::Duration::seconds(bucket_seconds * index as i64),
+                    observed_at: point.observed_at,
+                    value: point.value,
+                })
+                .collect(),
+        })
+        .collect();
+
+    Json(QuotaKeyObservationTrendResponse {
+        from,
+        to,
+        range: range.as_str().to_string(),
+        bucket_seconds,
+        bucket_count: range.bucket_count() as u32,
+        keys_truncated,
+        series_truncated: projection.series_truncated,
+        sampled_observations: projection.sampled_observations as u32,
+        failed_observations: projection.failed_observations as u32,
+        series,
+    })
+    .into_response()
+}
+
 fn observation_storage_error(endpoint_id: Uuid) -> Response {
     tracing::warn!(endpoint_id = %endpoint_id, "quota observation history query failed");
     error(

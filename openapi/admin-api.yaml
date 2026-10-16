@@ -1140,6 +1140,62 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/quota-observations/trend:
+    get:
+      tags:
+      - endpoints
+      operationId: quota_key_observation_trend
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: key_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: range
+        in: query
+        required: false
+        schema:
+          type: string
+          default: 24h
+      responses:
+        '200':
+          description: Bounded per-key quota observation trend
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaKeyObservationTrendResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/admin/endpoints/{endpoint_id}/test:
     post:
       tags:
@@ -6203,6 +6259,109 @@ components:
           type: integer
           format: int32
           minimum: 0
+    QuotaKeyObservationTrendMetric:
+      type: string
+      description: The numeric meaning of one trend series.
+      enum:
+      - amount
+      - remaining_percent
+    QuotaKeyObservationTrendPoint:
+      type: object
+      description: |-
+        One fixed-grid point; `value`/`observed_at` are `null` for a missing bucket,
+        a failed snapshot, or an unavailable window.
+      required:
+      - at
+      properties:
+        at:
+          type: string
+          format: date-time
+        observed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        value:
+          type:
+          - number
+          - 'null'
+          format: double
+    QuotaKeyObservationTrendResponse:
+      type: object
+      required:
+      - from
+      - to
+      - range
+      - bucket_seconds
+      - bucket_count
+      - keys_truncated
+      - series_truncated
+      - sampled_observations
+      - failed_observations
+      - series
+      properties:
+        bucket_count:
+          type: integer
+          format: int32
+          minimum: 0
+        bucket_seconds:
+          type: integer
+          format: int64
+        failed_observations:
+          type: integer
+          format: int32
+          minimum: 0
+        from:
+          type: string
+          format: date-time
+        keys_truncated:
+          type: boolean
+        range:
+          type: string
+        sampled_observations:
+          type: integer
+          format: int32
+          minimum: 0
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaKeyObservationTrendSeries'
+        series_truncated:
+          type: boolean
+        to:
+          type: string
+          format: date-time
+    QuotaKeyObservationTrendSeries:
+      type: object
+      description: |-
+        One identity-separated series; points are ascending and exactly
+        `bucket_count` long.
+      required:
+      - key_id
+      - key_label
+      - source_id
+      - kind
+      - unit
+      - metric
+      - points
+      properties:
+        key_id:
+          type: string
+          format: uuid
+        key_label:
+          type: string
+        kind:
+          $ref: '#/components/schemas/CanonicalQuotaWindowKind'
+        metric:
+          $ref: '#/components/schemas/QuotaKeyObservationTrendMetric'
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaKeyObservationTrendPoint'
+        source_id:
+          type: string
+        unit:
+          type: string
     QuotaSnapshotHistoryItem:
       type: object
       required:

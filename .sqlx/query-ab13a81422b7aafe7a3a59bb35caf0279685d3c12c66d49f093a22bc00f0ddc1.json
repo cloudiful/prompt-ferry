@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Bounded key selection for the quota observation trend: only keys with rows\n-- inside the half-open request window, latest observed first with a stable\n-- key_id tie-break. The caller requests one row past the display cap so it can\n-- report truncation honestly.\nSELECT key_id\nFROM quota_key_observations\nWHERE endpoint_id = $1\n  AND observed_at >= $2\n  AND observed_at < $3\n  AND ($4::UUID IS NULL OR key_id = $4)\nGROUP BY key_id\nORDER BY MAX(observed_at) DESC, key_id ASC\nLIMIT 25;\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "quota_key_observations",
+            "name": "key_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ab13a81422b7aafe7a3a59bb35caf0279685d3c12c66d49f093a22bc00f0ddc1"
+}
