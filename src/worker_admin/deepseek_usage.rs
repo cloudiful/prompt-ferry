@@ -5,13 +5,13 @@
 //! this endpoint).
 
 use reqwest::Client;
-use serde_json::Value;
 use uuid::Uuid;
 
+use super::balance_json::get_balance_json;
 use super::deepseek_parsing::{
     deepseek_error_message, deepseek_http_business_error, parse_deepseek_balance,
 };
-use super::json_scalars::{failed_key, truncate_message};
+use super::json_scalars::failed_key;
 use crate::worker_admin_types::TokenPlanKeyUsage;
 
 // The endpoint stores the official root (no `/v1` suffix). A stale `/v1` suffix
@@ -25,26 +25,6 @@ fn balance_url(base: &str) -> String {
     format!("{base}/user/balance")
 }
 
-async fn get_json(
-    client: &Client,
-    url: String,
-    secret: &str,
-) -> std::result::Result<(u16, Value), (Option<u16>, String)> {
-    let response = client
-        .get(&url)
-        .bearer_auth(secret)
-        .header("Content-Type", "application/json")
-        .send()
-        .await
-        .map_err(|error| (None, truncate_message(error.to_string())))?;
-    let status = response.status().as_u16();
-    let body: Value = response
-        .json()
-        .await
-        .map_err(|error| (Some(status), truncate_message(error.to_string())))?;
-    Ok((status, body))
-}
-
 // One key through `/user/balance`. `base` is owned because it comes from the
 // per-endpoint normalized value, unlike the fixed CommandCode/OpencodeGo
 // hosts. No balance arithmetic here: `is_available` weighting lives in the
@@ -56,7 +36,7 @@ pub(crate) async fn fetch_deepseek_key_usage(
     key_label: String,
     secret: String,
 ) -> TokenPlanKeyUsage {
-    let (status, body) = match get_json(&client, balance_url(&base), &secret).await {
+    let (status, body) = match get_balance_json(&client, balance_url(&base), &secret).await {
         Ok(ok) => ok,
         Err((status, message)) => {
             return failed_key(key_id, key_label, status, None, message);

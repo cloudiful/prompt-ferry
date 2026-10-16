@@ -838,6 +838,48 @@ test('balance and unlimited rows are text-only with no progress percent', async 
   expect(unlimitedHtml).not.toContain('%')
 })
 
+test('a capless balance row shows its observed total instead of a dash', async () => {
+  const caplessHtml = await renderRow({
+    sourceId: 'deepseek:CNY',
+    kind: 'balance',
+    sourceModel: null,
+    unit: 'CNY',
+    durationSeconds: null,
+    isDefaultScope: true,
+    availability: 'known',
+    observedRemainingPercent: null,
+    remainingPercent: null,
+    current: 9.91,
+    limit: null,
+    remaining: null,
+    resetAt: null,
+    expired: false,
+  })
+  // The persisted DeepSeek total renders rather than degrading to `—`.
+  expect(caplessHtml).toContain('9.91')
+  expect(caplessHtml).not.toContain('—')
+  expect(caplessHtml).not.toContain('%')
+
+  const zeroHtml = await renderRow({
+    sourceId: 'deepseek:USD',
+    kind: 'balance',
+    sourceModel: null,
+    unit: 'USD',
+    durationSeconds: null,
+    isDefaultScope: true,
+    availability: 'known',
+    observedRemainingPercent: null,
+    remainingPercent: null,
+    current: 0,
+    limit: null,
+    remaining: null,
+    resetAt: null,
+    expired: false,
+  })
+  expect(zeroHtml).toContain('0.00')
+  expect(zeroHtml).not.toContain('—')
+})
+
 function minimaxKey(
   modelName: string,
   remainingPercent: number | null,

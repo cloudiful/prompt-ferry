@@ -39,7 +39,8 @@ const title = computed(() => {
       }),
     )
   }
-  if (props.status?.refresh_failed) hints.push(props.t('quotaRefreshFailedCached'))
+  if (props.status?.refresh_failed)
+    hints.push(props.t('quotaRefreshFailedCached'))
   const cooldownUntil = props.status?.cooldown_until
   if (cooldownUntil) {
     hints.push(

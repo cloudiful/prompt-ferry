@@ -83,16 +83,21 @@ function validateRow(
   }
 }
 
-// Quantity caption for one row: only an actual amount unit with a finite
-// current and a positive finite cap renders `used / total`. Partial balance
-// amounts (no cap) never fake one, and unknown values are never formatted
-// with `toFixed`/`Infinity`.
+// Quantity caption for one row. An actual amount unit with a finite current
+// and a positive finite cap renders `used / total`; a `balance` observed
+// without a positive cap is an amount in its own right and renders its total
+// alone, including a real zero or a negative value. Nothing else fakes a cap,
+// a capless window keeps its amount hidden, and unknown values are never
+// formatted with `toFixed`/`Infinity`.
 export function canonicalQuantityCaption(
   row: CanonicalQuotaRow,
 ): string | null {
   if (row.unit == null) return null
-  if (row.current == null || row.limit == null || row.limit <= 0) return null
-  return `${row.current.toFixed(2)} / ${row.limit.toFixed(2)}`
+  if (row.current == null) return null
+  if (row.limit != null && row.limit > 0) {
+    return `${row.current.toFixed(2)} / ${row.limit.toFixed(2)}`
+  }
+  return row.kind === 'balance' ? row.current.toFixed(2) : null
 }
 
 function isDefaultMinimaxModel(modelName: string): boolean {

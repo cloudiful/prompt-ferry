@@ -5,10 +5,10 @@
 //! silently degrades to `None` totals instead of failing the key.
 
 use reqwest::Client;
-use serde_json::Value;
 use uuid::Uuid;
 
-use super::json_scalars::{failed_key, truncate_message};
+use super::balance_json::get_balance_json;
+use super::json_scalars::failed_key;
 use super::openrouter_parsing::{
     openrouter_error_message, openrouter_http_business_error, parse_openrouter_credits,
     parse_openrouter_key,
@@ -36,26 +36,6 @@ fn credits_url(base: &str) -> String {
     format!("{base}/v1/credits")
 }
 
-async fn get_json(
-    client: &Client,
-    url: String,
-    secret: &str,
-) -> std::result::Result<(u16, Value), (Option<u16>, String)> {
-    let response = client
-        .get(&url)
-        .bearer_auth(secret)
-        .header("Content-Type", "application/json")
-        .send()
-        .await
-        .map_err(|error| (None, truncate_message(error.to_string())))?;
-    let status = response.status().as_u16();
-    let body: Value = response
-        .json()
-        .await
-        .map_err(|error| (Some(status), truncate_message(error.to_string())))?;
-    Ok((status, body))
-}
-
 // One key through `/key` then `/credits`. Only `/key` is fatal; `/credits`
 // degrades to `None` totals on any failure (403 included). No balance
 // arithmetic here: remaining-percent weighting lives in the quota cache.
@@ -68,7 +48,7 @@ pub(crate) async fn fetch_openrouter_key_usage(
     key_label: String,
     secret: String,
 ) -> TokenPlanKeyUsage {
-    let (status, body) = match get_json(&client, key_url(&base), &secret).await {
+    let (status, body) = match get_balance_json(&client, key_url(&base), &secret).await {
         Ok(ok) => ok,
         Err((status, message)) => {
             return failed_key(key_id, key_label, status, None, message);
@@ -93,7 +73,8 @@ pub(crate) async fn fetch_openrouter_key_usage(
             return failed_key(key_id, key_label, Some(status), None, message);
         }
     };
-    if let Ok((credits_status, credits_body)) = get_json(&client, credits_url(&base), &secret).await
+    if let Ok((credits_status, credits_body)) =
+        get_balance_json(&client, credits_url(&base), &secret).await
         && (200..300).contains(&credits_status)
         && let Some((total_credits, total_usage)) = parse_openrouter_credits(&credits_body)
     {

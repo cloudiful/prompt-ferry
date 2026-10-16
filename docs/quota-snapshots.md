@@ -41,3 +41,5 @@ There is no backfill: providers without a fetcher (generic) never produce rows, 
 ## Interpreting observations
 
 Window percentages preserve known zero separately from unknown usage. Window labels use the reported duration; no default five-hour or weekly window is inferred. The observation timestamp is the time the successful upstream response was received, not the time the dialog was opened. If a later refresh fails, the UI keeps the last successful values and marks them as cached/stale with a generic refresh warning.
+
+Balance observations show the total balance only — there is no gifted or top-up breakdown. A balance with a positive cap renders `remaining / cap`; a capless or nonpositive-cap balance renders its observed total alone, to two decimals, including a real zero or a negative amount. The row label carries the currency, and an absent amount stays unknown and renders as a dash rather than a fabricated zero.

@@ -3,6 +3,7 @@ import type {
   CanonicalQuotaWindow,
   TokenPlanKeyUsage,
 } from '../src/generated/admin-api'
+import type { CanonicalQuotaRow } from '../src/composables/useCanonicalQuotaWindows'
 import {
   canonicalBandPercent,
   canonicalQuantityCaption,
@@ -221,6 +222,61 @@ test('canonical GLM captions only observed positive-cap amounts', () => {
   expect(canonicalQuantityCaption(rows[0]!)).toBe('0.00 / 2000.00')
   // Zero cap: known amount, but no caption may fake a total.
   expect(canonicalQuantityCaption(rows[1]!)).toBe(null)
+})
+
+function balanceRow(
+  overrides: Partial<CanonicalQuotaRow> = {},
+): CanonicalQuotaRow {
+  return {
+    sourceId: 'deepseek:CNY',
+    kind: 'balance',
+    sourceModel: null,
+    unit: 'CNY',
+    durationSeconds: null,
+    isDefaultScope: true,
+    availability: 'known',
+    observedRemainingPercent: null,
+    remainingPercent: null,
+    current: null,
+    limit: null,
+    remaining: null,
+    resetAt: null,
+    expired: false,
+    ...overrides,
+  }
+}
+
+test('balance captions render an observed total even without a cap', () => {
+  // Capless observed amount (DeepSeek CNY 9.91 / null limit): the total alone.
+  expect(canonicalQuantityCaption(balanceRow({ current: 9.91 }))).toBe('9.91')
+  // A real zero is a real amount, not a dash.
+  expect(
+    canonicalQuantityCaption(
+      balanceRow({ sourceId: 'deepseek:USD', unit: 'USD', current: 0 }),
+    ),
+  ).toBe('0.00')
+  // A negative balance is neither clamped nor hidden.
+  expect(canonicalQuantityCaption(balanceRow({ current: -3.5 }))).toBe('-3.50')
+  // A positive cap keeps the existing remaining / cap shape.
+  expect(canonicalQuantityCaption(balanceRow({ current: 5, limit: 10 }))).toBe(
+    '5.00 / 10.00',
+  )
+  // A nonpositive cap is capless in effect, so the amount stays visible.
+  expect(canonicalQuantityCaption(balanceRow({ current: 2, limit: 0 }))).toBe(
+    '2.00',
+  )
+  // An absent amount stays unknown; no zero is inferred.
+  expect(canonicalQuantityCaption(balanceRow())).toBe(null)
+  // An unlimited row never invents an amount.
+  expect(
+    canonicalQuantityCaption(
+      balanceRow({
+        sourceId: 'openrouter:unlimited',
+        kind: 'unlimited',
+        unit: 'credits',
+      }),
+    ),
+  ).toBe(null)
 })
 
 test('subscription rows band by their real duration', () => {
