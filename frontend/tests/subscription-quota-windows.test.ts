@@ -200,9 +200,12 @@ const subscriptionWindowComponent = (() => {
   return new Function('__resolve', `"use strict";\n${js}`)(resolve)
 })()
 
+const progressValues: Array<number | null> = []
 const progressStub = {
   name: 'UProgress',
-  render(this: { $attrs: Record<string, unknown> }) {
+  props: { modelValue: { type: Number, default: null } },
+  render(this: { $attrs: Record<string, unknown>; modelValue: number | null }) {
+    progressValues.push(this.modelValue)
     return h('progress', { ...this.$attrs, 'data-stub': 'UProgress' })
   },
 }
@@ -291,4 +294,47 @@ test('observation metadata identifies cached values and refresh failures', async
   expect(html).toContain('quotaRefreshFailedCached')
   expect(html).toContain('quotaRetryAt')
   expect(html).toContain('0.0%')
+})
+
+async function renderValues(
+  windows: SubscriptionWindowUsage[],
+): Promise<string> {
+  progressValues.length = 0
+  const app = createSSRApp({
+    render: () =>
+      h(subscriptionWindowComponent as never, {
+        nowMs: Date.parse('2026-10-10T12:00:30Z'),
+        t: translate,
+        windows,
+      }),
+  })
+  app.component('UProgress', progressStub as never)
+  app.component('UBadge', badgeStub as never)
+  return renderToString(app)
+}
+
+test('the snapshot bar fills with remaining quota, not one hundred minus remaining', async () => {
+  const html = await renderValues([windowUsage('primary', 18_000, 80)])
+  expect(progressValues).toEqual([80])
+  expect(html).toContain('quotaRemainingPercent')
+  expect(html).toContain('80.0%')
+})
+
+test('snapshot remaining 0 and 100 stay honest in both bar and text', async () => {
+  const empty = await renderValues([windowUsage('primary', 18_000, 0)])
+  expect(progressValues).toEqual([0])
+  expect(empty).toContain('0.0%')
+  expect(empty).toContain('quotaRemainingPercent')
+
+  const full = await renderValues([windowUsage('primary', 18_000, 100)])
+  expect(progressValues).toEqual([100])
+  expect(full).toContain('100.0%')
+})
+
+test('an unknown snapshot keeps the dash and no progress bar', async () => {
+  const html = await renderValues([
+    windowUsage('primary', 18_000, null, 'unknown'),
+  ])
+  expect(progressValues).toEqual([])
+  expect(html).toContain('tokenPlanUsageUnknown')
 })

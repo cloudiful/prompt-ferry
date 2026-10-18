@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import PageIntro from '../components/PageIntro.vue'
 import { useLocale } from '../composables/useLocale'
 import { useNotifier } from '../composables/useNotifier'
+import { formatAppDateTime } from '../format/datetime'
 import ApprovalsPanel from '../components/approvals/ApprovalsPanel.vue'
 import type {
   ApprovalRequest,
@@ -16,7 +17,7 @@ const approvalsStore = useApprovalsStore()
 
 const detailVisible = ref(false)
 function formatTime(value: string): string {
-  return new Date(value).toLocaleString()
+  return formatAppDateTime(value)
 }
 
 async function refresh(): Promise<void> {

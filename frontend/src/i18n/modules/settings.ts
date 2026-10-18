@@ -47,8 +47,6 @@ export const settingsMessages = {
     configArchiveExportFingerprint: '指纹',
     configArchiveExportFootnote: '口令仅用于本次导出，导出后立即清除。',
     configArchiveExportFormatVersion: '格式版本',
-    configArchiveExportHelp:
-      '使用口令加密导出现有可恢复配置，生成可离线保存的 .pfce 归档。',
     configArchiveExportSize: '字节数',
     configArchiveExportTitle: '导出配置归档',
     configArchiveImportApplied: '配置已导入',
@@ -56,8 +54,6 @@ export const settingsMessages = {
       '导入会原子性替换可恢复的配置域，且无法撤销。',
     configArchiveImportConfirmSubmit: '确认导入',
     configArchiveImportConfirmTitle: '确认替换导入',
-    configArchiveImportHelp:
-      '选择 .pfce 归档并输入口令，先预览变更，再确认替换导入。',
     configArchiveImportTitle: '导入配置归档',
     configArchivePassphrase: '口令',
     configArchivePassphrasePlaceholder: '输入归档口令',
@@ -212,8 +208,6 @@ export const settingsMessages = {
     configArchiveExportFootnote:
       'The passphrase is used for this export only and cleared immediately afterwards.',
     configArchiveExportFormatVersion: 'Format version',
-    configArchiveExportHelp:
-      'Export the restorable configuration sealed with a passphrase as an offline .pfce archive.',
     configArchiveExportSize: 'Size (bytes)',
     configArchiveExportTitle: 'Export configuration archive',
     configArchiveImportApplied: 'Configuration imported',
@@ -221,8 +215,6 @@ export const settingsMessages = {
       'The import atomically replaces the restorable configuration domains and cannot be undone.',
     configArchiveImportConfirmSubmit: 'Confirm import',
     configArchiveImportConfirmTitle: 'Confirm replace import',
-    configArchiveImportHelp:
-      'Choose a .pfce archive and passphrase, preview the changes, then confirm the replace import.',
     configArchiveImportTitle: 'Import configuration archive',
     configArchivePassphrase: 'Passphrase',
     configArchivePassphrasePlaceholder: 'Enter the archive passphrase',

@@ -913,6 +913,25 @@ test('a valid MiniMax general model renders through the shared row', async () =>
   expect(html).toContain('80.0%')
 })
 
+test('the quota summary trigger wraps and cannot force the dialog grid wide', async () => {
+  const html = await render({
+    keys: [minimaxKey('general', 80)],
+    provider: 'minimax',
+    provider_region: null,
+  } as unknown as TokenPlanUsageResponse)
+
+  // The key summary row is flexible and wraps its label/status/minimum instead
+  // of holding a shrink-0 block that widens the auto grid track.
+  expect(html).toContain('flex-wrap items-center justify-between')
+  expect(html).toContain('tokenPlanMinRemaining')
+  expect(html).toContain('tokenPlanWindowCount')
+  expect(html).not.toContain('shrink-0 text-xs text-dimmed')
+
+  // The dialog body pins a shrinkable grid track and its wrappers to min-w-0.
+  expect(html).toContain('grid-cols-[minmax(0,1fr)]')
+  expect(html.match(/min-w-0/g)?.length ?? 0).toBeGreaterThanOrEqual(3)
+})
+
 test('canonical subscription wins over raw windows in dialog and header', async () => {
   const html = await render({
     keys: [

@@ -151,7 +151,7 @@ const EndpointMobileUsageBadges = defineComponent({
       <label class="inline-flex flex-none items-center whitespace-nowrap">
         <USwitch
           :model-value="item.enabled"
-          :aria-label="t('status')"
+          :aria-label="t('endpointEnabledToggle', { name: item.name })"
           :disabled="busy || item.toggling || isPending()"
           :loading="pendingAction() === 'toggle'"
           @update:model-value="

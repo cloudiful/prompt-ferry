@@ -55,5 +55,5 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="chartEl" class="h-[20rem] min-h-[16rem] w-full" />
+  <div ref="chartEl" class="h-[20rem] min-h-[16rem] w-full min-w-0" />
 </template>

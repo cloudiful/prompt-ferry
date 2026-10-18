@@ -1,10 +1,51 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { watch } from 'vue'
+import {
+  createMemoryHistory,
+  createRouter,
+  createWebHistory,
+  type RouteLocationNormalizedLoaded,
+} from 'vue-router'
+import { messages, type Locale, type MessageKey } from './i18n'
+import { i18n } from './i18n/plugin'
 import { pinia } from './pinia'
 import { useRelaySessionStore } from './stores/relay-session'
 import { useSessionStore } from './stores/session'
 import { defaultNavSection, isRelayHostPath, navItems } from './nav'
 
 export { isRelayHostPath }
+
+declare module 'vue-router' {
+  interface RouteMeta {
+    adminOnly?: boolean
+    public?: boolean
+    titleKey?: MessageKey
+  }
+}
+
+const APP_NAME = 'Prompt Ferry'
+
+export function formatPageTitle(
+  localeValue: Locale,
+  titleKey: MessageKey,
+): string {
+  return `${messages[localeValue][titleKey]} · ${APP_NAME}`
+}
+
+export function routeTitleKey(
+  route: Pick<RouteLocationNormalizedLoaded, 'meta'>,
+): MessageKey {
+  return route.meta.titleKey ?? 'workspaceTitle'
+}
+
+function applyDocumentTitle(
+  route: Pick<RouteLocationNormalizedLoaded, 'meta'>,
+): void {
+  if (typeof document === 'undefined') return
+  document.title = formatPageTitle(
+    i18n.global.locale.value as Locale,
+    routeTitleKey(route),
+  )
+}
 
 const appRoutes = navItems.flatMap((item) => {
   if (!item.children?.length) {
@@ -13,7 +54,10 @@ const appRoutes = navItems.flatMap((item) => {
         path: item.section,
         name: item.section,
         component: item.loader,
-        meta: { adminOnly: item.adminOnly ?? false },
+        meta: {
+          adminOnly: item.adminOnly ?? false,
+          titleKey: item.labelKey,
+        },
       },
     ]
   }
@@ -22,7 +66,10 @@ const appRoutes = navItems.flatMap((item) => {
     {
       path: item.section,
       redirect: item.children[0]!.path,
-      meta: { adminOnly: item.adminOnly ?? false },
+      meta: {
+        adminOnly: item.adminOnly ?? false,
+        titleKey: item.labelKey,
+      },
     },
     ...item.children.map((child) => ({
       path: child.path.slice(1),
@@ -30,19 +77,21 @@ const appRoutes = navItems.flatMap((item) => {
       component: item.loader,
       meta: {
         adminOnly: Boolean(item.adminOnly || child.adminOnly),
+        titleKey: child.labelKey,
       },
     })),
   ]
 })
 
 export const router = createRouter({
-  history: createWebHistory(),
+  history:
+    typeof window === 'undefined' ? createMemoryHistory() : createWebHistory(),
   routes: [
     {
       path: '/login',
       name: 'login',
       component: () => import('./pages/LoginPage.vue'),
-      meta: { public: true },
+      meta: { public: true, titleKey: 'login' },
     },
     {
       path: '/',
@@ -52,8 +101,18 @@ export const router = createRouter({
     {
       path: '/:pathMatch(.*)*',
       redirect: '/api-keys',
+      meta: { titleKey: 'workspaceTitle' },
     },
   ],
+})
+
+let titleLocaleWatchStarted = false
+
+router.afterEach((to) => {
+  applyDocumentTitle(to)
+  if (titleLocaleWatchStarted || typeof document === 'undefined') return
+  titleLocaleWatchStarted = true
+  watch(i18n.global.locale, () => applyDocumentTitle(router.currentRoute.value))
 })
 
 router.beforeEach(async (to) => {

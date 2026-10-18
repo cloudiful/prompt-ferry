@@ -10,6 +10,7 @@ import {
   type DeepSeekBalanceState,
   type TokenPlanFetchState,
 } from '@/models/endpoints/quota'
+import { formatAppDateTime } from '@/format/datetime'
 import { formatTokenQuantity } from './useUsageFormatting'
 import {
   formatMoney,
@@ -522,7 +523,7 @@ function quotaStatePill(
     ? {
         ...pill,
         title: `${pill.title} · ${t('quotaRetryAt', {
-          time: new Date(cooldownUntil).toLocaleString(),
+          time: formatAppDateTime(cooldownUntil),
         })}`,
       }
     : pill

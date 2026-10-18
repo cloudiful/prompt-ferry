@@ -8,6 +8,7 @@ import type {
 import TablePagination from '@/components/shared/TablePagination.vue'
 import DeleteRuleConfirmDialog from '@/components/settings/redaction/DeleteRuleConfirmDialog.vue'
 import RuleWarningBadge from '@/components/settings/redaction/RuleWarningBadge.vue'
+import { formatAppDateTime } from '@/format/datetime'
 import type { MessageKey } from '@/i18n'
 import type { RedactionWorkspaceView } from '@/models/redaction'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
@@ -136,9 +137,7 @@ function onCustomStringPage(event: TablePageChange): void {
 }
 
 function formatDateTime(value: string | null | undefined): string {
-  if (!value) return '-'
-  const date = new Date(value)
-  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString()
+  return formatAppDateTime(value)
 }
 </script>
 

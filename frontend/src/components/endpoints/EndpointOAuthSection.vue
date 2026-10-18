@@ -4,6 +4,7 @@ import type { EndpointOAuthStatusResponse } from '@/generated/admin-api'
 import EndpointOAuthBrowserLogin from '@/components/endpoints/EndpointOAuthBrowserLogin.vue'
 import EndpointOAuthDeviceLogin from '@/components/endpoints/EndpointOAuthDeviceLogin.vue'
 import { useEndpointOAuthActions } from '@/composables/useEndpointOAuthActions'
+import { formatAppDateTime } from '@/format/datetime'
 import TokenPlanQuotaWindowRow from '@/components/endpoints/TokenPlanQuotaWindowRow.vue'
 import {
   toCanonicalQuotaRows,
@@ -65,7 +66,7 @@ const hasToken = computed(() => status.value?.has_oauth_token ?? false)
 const plan = computed(() => status.value?.plan ?? 'platform_api_key')
 const expiresAt = computed(() => {
   const value = status.value?.expires_at
-  return value ? new Date(value).toLocaleString() : ''
+  return value ? formatAppDateTime(value) : ''
 })
 const needsLogin = computed(() => !hasToken.value)
 const quotaEntry = computed(() => quota.value?.keys[0] ?? null)

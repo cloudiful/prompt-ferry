@@ -112,7 +112,7 @@ const rows = computed(() =>
       <UProgress
         v-if="row.remaining !== null"
         class="token-plan-progress h-1.5"
-        :model-value="100 - row.remaining"
+        :model-value="row.remaining"
         :style="{ '--token-plan-progress-color': row.color }"
       />
       <span v-else class="text-dimmed">{{ t('tokenPlanUsageUnknown') }}</span>
@@ -121,6 +121,7 @@ const rows = computed(() =>
       >
         <span class="text-dimmed">{{ row.reset }}</span>
         <span v-if="row.remaining !== null" class="shrink-0 font-semibold">
+          {{ t('quotaRemainingPercent') }}
           {{ row.remaining.toFixed(1) }}%
         </span>
         <span v-else class="shrink-0 font-semibold">-</span>

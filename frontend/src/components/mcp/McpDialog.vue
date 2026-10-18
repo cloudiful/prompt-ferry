@@ -49,7 +49,13 @@ const authModeItems = computed(() => [
 const httpProviderItems = computed(() =>
   props.providers
     .filter((provider) => provider.id === 'generic' || provider.default_url)
-    .map((provider) => ({ label: provider.display_name, value: provider.id })),
+    .map((provider) => ({
+      label:
+        provider.id === 'generic'
+          ? props.t('providerGeneric')
+          : provider.display_name,
+      value: provider.id,
+    })),
 )
 
 const selectedProvider = computed<McpProviderDescriptor | undefined>(() =>
@@ -85,8 +91,16 @@ watch(
   { immediate: true },
 )
 
+// Issue #950 P8: Reka UI rejects a SelectItem with an empty value, so the
+// "automatic" choice needs a non-empty sentinel. The persisted form value stays
+// null for automatic and the version string otherwise.
+const PROTOCOL_VERSION_AUTO = 'auto'
+
 const protocolVersionItems = computed(() => [
-  { label: props.t('lifecycleManualProtocolVersionAuto'), value: '' },
+  {
+    label: props.t('lifecycleManualProtocolVersionAuto'),
+    value: PROTOCOL_VERSION_AUTO,
+  },
   { label: '2026-07-28', value: '2026-07-28' },
   { label: '2025-11-25', value: '2025-11-25' },
   { label: '2025-06-18', value: '2025-06-18' },
@@ -95,9 +109,11 @@ const protocolVersionItems = computed(() => [
 ])
 
 const protocolVersionModel = computed<string>({
-  get: () => form.value.lifecycle_manual_protocol_version ?? '',
+  get: () =>
+    form.value.lifecycle_manual_protocol_version ?? PROTOCOL_VERSION_AUTO,
   set: (value) => {
-    form.value.lifecycle_manual_protocol_version = value ? value : null
+    form.value.lifecycle_manual_protocol_version =
+      value && value !== PROTOCOL_VERSION_AUTO ? value : null
   },
 })
 
@@ -272,16 +288,20 @@ const isProxyValid = computed(() => {
                   :disabled="Boolean(form.source_endpoint_id)"
                 />
               </div>
-              <USelect
+              <UFormField
                 v-if="isAdmin && form.scope === 'user'"
-                :model-value="form.owner_user_id ?? undefined"
-                class="w-full"
-                :items="users"
-                label-key="login_name"
-                value-key="user_id"
-                :placeholder="t('ownerUser')"
-                @update:model-value="form.owner_user_id = $event ?? null"
-              />
+                :label="t('owner')"
+              >
+                <USelect
+                  :model-value="form.owner_user_id ?? undefined"
+                  class="w-full"
+                  :items="users"
+                  label-key="login_name"
+                  value-key="user_id"
+                  :placeholder="t('ownerUser')"
+                  @update:model-value="form.owner_user_id = $event ?? null"
+                />
+              </UFormField>
               <div v-else-if="!isAdmin" class="grid gap-3 md:grid-cols-2">
                 <UInput
                   v-model="form.name"

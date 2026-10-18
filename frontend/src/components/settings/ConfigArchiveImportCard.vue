@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useNotifier } from '@/composables/useNotifier'
 import { useConfigArchiveActions } from '@/composables/useConfigArchiveActions'
 import { useConfigArchiveStore } from '@/stores/settings/config-archive'
+import { formatAppNumber } from '@/format/datetime'
 import SettingsCard from './SettingsCard.vue'
 import ConfigArchiveImportConfirmDialog from './ConfigArchiveImportConfirmDialog.vue'
 import ConfigArchiveImportPreview from './ConfigArchiveImportPreview.vue'
@@ -53,7 +54,7 @@ async function onFileChange(event: Event): Promise<void> {
 }
 
 function formatNumber(value: number): string {
-  return value.toLocaleString()
+  return formatAppNumber(value)
 }
 
 function shortFingerprint(value: string | null | undefined): string {
@@ -90,10 +91,6 @@ function cancelConfirm(): void {
         {{ t('configArchiveImportTitle') }}
       </h3>
     </template>
-
-    <p class="m-0 text-[11px] leading-relaxed text-muted">
-      {{ t('configArchiveImportHelp') }}
-    </p>
 
     <div class="grid gap-3 md:grid-cols-2">
       <div class="grid gap-1.5">

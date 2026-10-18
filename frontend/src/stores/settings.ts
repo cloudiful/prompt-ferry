@@ -232,6 +232,7 @@ export const useSettingsStore = defineStore('settings', () => {
     refreshRawObjectStore,
     relayIpWhitelist,
     requestContentLogging,
+    settingsPendingActions,
     streamDeltaBatching,
     usageRetention,
   }

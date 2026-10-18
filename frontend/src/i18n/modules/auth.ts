@@ -1,18 +1,26 @@
 export const authMessages = {
   'zh-CN': {
+    hidePassword: '隐藏密码',
+    invalidCredentials: '登录名或密码错误',
     login: '登录',
     loginName: '登录名',
     loginNameRequired: '请输入登录名',
     logout: '退出登录',
     password: '密码',
     passwordRequired: '请输入密码',
+    sessionLoadFailed: '无法加载会话，请重试',
+    showPassword: '显示密码',
   },
   'en-US': {
+    hidePassword: 'Hide password',
+    invalidCredentials: 'Invalid login name or password',
     login: 'Login',
     loginName: 'Login name',
     loginNameRequired: 'Please enter login name',
     logout: 'Logout',
     password: 'Password',
     passwordRequired: 'Please enter password',
+    sessionLoadFailed: 'Could not load session. Please try again.',
+    showPassword: 'Show password',
   },
 } as const

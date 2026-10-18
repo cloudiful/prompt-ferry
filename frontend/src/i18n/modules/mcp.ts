@@ -25,7 +25,7 @@ export const mcpMessages = {
     environmentWorkerNamePlaceholder: 'Worker 中的变量名',
     editMcpServer: '编辑 MCP',
     bearerToken: 'Bearer 令牌',
-    bearerTokenHint: '启用的令牌会按会话稳定分流；无会话标识时按最少使用分配。',
+    bearerTokenHint: '启用的令牌分摊请求；同一会话固定使用同一令牌。',
     bearerTokenPlaceholder: 'token',
     stdioEnv: '进程环境变量',
     stdioEnvHint:
@@ -57,7 +57,7 @@ export const mcpMessages = {
     lifecyclePolicyAuto: '自动',
     lifecyclePolicyLegacy: '仅旧版初始化',
     lifecyclePolicyHint:
-      '服务端拒绝 server/discover 时自动回退旧版 initialize 并记住结果；选“仅旧版初始化”可强制跳过发现流程。',
+      '服务端不支持新版发现时自动回退；旧版服务端可选“仅旧版初始化”。',
     lifecycleManualProtocolVersion: '固定协议版本（可选）',
     lifecycleManualProtocolVersionHint:
       '留空则使用服务端声明的最高兼容版本；例如 2025-06-18。',
@@ -99,7 +99,7 @@ export const mcpMessages = {
     editMcpServer: 'Edit MCP',
     bearerToken: 'Bearer tokens',
     bearerTokenHint:
-      'Enabled tokens are sticky per session; requests without a session identity use least-used balancing.',
+      'Enabled tokens share requests; one session stays on one token.',
     bearerTokenPlaceholder: 'token',
     stdioEnv: 'Process env',
     stdioEnvHint:
@@ -132,7 +132,7 @@ export const mcpMessages = {
     lifecyclePolicyAuto: 'Auto',
     lifecyclePolicyLegacy: 'Legacy initialize only',
     lifecyclePolicyHint:
-      'Falls back to the legacy initialize flow and remembers the result when the server rejects server/discover. Choose "Legacy initialize only" to skip discovery.',
+      'Falls back automatically when the server lacks the newer discovery; use Legacy initialize only for older servers.',
     lifecycleManualProtocolVersion: 'Pinned protocol version (optional)',
     lifecycleManualProtocolVersionHint:
       'Leave empty to use the highest version the server declares; e.g. 2025-06-18.',

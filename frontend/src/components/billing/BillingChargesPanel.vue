@@ -53,17 +53,19 @@ function statusColor(
 </script>
 
 <template>
-  <section class="grid gap-3 rounded-lg bg-default p-3">
+  <section class="grid min-w-0 max-w-full gap-3 rounded-lg bg-default p-3">
     <h2 class="text-sm font-semibold text-highlighted">
       {{ t('billingCharges') }}
     </h2>
-    <div class="min-w-0 overflow-x-auto">
+    <div class="min-w-0 max-w-full">
       <UTable
         :data="charges"
         :columns="columns"
         :loading="loading"
-        class="min-w-[60rem]"
-        :ui="{ th: 'whitespace-nowrap' }"
+        :ui="{
+          root: 'max-w-full overscroll-x-contain',
+          base: 'min-w-[60rem]',
+        }"
       >
         <template #empty>{{ t('noBillingCharges') }}</template>
         <template #details-cell="{ row }">

@@ -113,7 +113,9 @@ async function submit(event: FormSubmitEvent<LoginForm>): Promise<void> {
                 variant="ghost"
                 size="xs"
                 :icon="showPassword ? 'i-lucide-eye-off' : 'i-lucide-eye'"
-                :aria-label="showPassword ? t('hideSecret') : t('showSecret')"
+                :aria-label="
+                  showPassword ? t('hidePassword') : t('showPassword')
+                "
                 @click="
                   () => {
                     showPassword = !showPassword

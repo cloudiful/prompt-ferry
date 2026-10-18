@@ -202,9 +202,9 @@ const historyRefreshKey = computed(() => {
   >
     <template #body>
       <div
-        class="grid max-h-[min(70vh,42rem)] gap-4 overflow-y-auto pr-1 text-xs"
+        class="grid max-h-[min(70vh,42rem)] min-w-0 grid-cols-[minmax(0,1fr)] gap-4 overflow-y-auto pr-1 text-xs"
       >
-        <div v-if="loading" class="grid gap-2">
+        <div v-if="loading" class="grid min-w-0 gap-2">
           <UProgress animation="carousel" />
           <span class="text-muted">{{ t('loading') }}</span>
         </div>
@@ -213,7 +213,7 @@ const historyRefreshKey = computed(() => {
           <div
             v-for="key in usage.keys"
             :key="key.key_id"
-            class="border-b border-default last:border-b-0"
+            class="min-w-0 border-b border-default last:border-b-0"
           >
             <UCollapsible :default-open="true">
               <template #default="{ open }">
@@ -227,12 +227,13 @@ const historyRefreshKey = computed(() => {
                   "
                 >
                   <span
-                    class="flex min-w-0 flex-1 items-center justify-between gap-3"
+                    class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-1"
                   >
-                    <span class="flex min-w-0 items-center gap-2">
-                      <span class="truncate font-semibold text-highlighted">{{
-                        key.key_label
-                      }}</span>
+                    <span class="flex min-w-0 flex-wrap items-center gap-2">
+                      <span
+                        class="min-w-0 truncate font-semibold text-highlighted"
+                        >{{ key.key_label }}</span
+                      >
                       <TokenPlanKeyQuotaStatus
                         :status="key.quota_status ?? null"
                         :t="t"
@@ -246,7 +247,7 @@ const historyRefreshKey = computed(() => {
                     </span>
                     <span
                       v-if="key.ok && keyWindowCount(key) > 0"
-                      class="shrink-0 text-xs text-dimmed"
+                      class="min-w-0 text-xs text-dimmed"
                     >
                       {{ minimumRemainingLabel(key) }}
                       ·
@@ -260,7 +261,7 @@ const historyRefreshKey = computed(() => {
                 </UButton>
               </template>
               <template #content>
-                <div class="grid gap-2 px-1 pb-3">
+                <div class="grid min-w-0 gap-2 px-1 pb-3">
                   <p v-if="!key.ok" class="break-words text-error">
                     {{ key.error_message ?? t('tokenPlanUsageFailed') }}
                   </p>

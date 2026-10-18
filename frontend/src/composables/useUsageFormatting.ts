@@ -2,6 +2,7 @@ import type {
   RequestRecordFormatting,
   RequestRecordTiming,
 } from '../models/request-record-formatting'
+import { formatAppDateTime, formatAppNumber } from '../format/datetime'
 import {
   type RequestRecordStateBadge,
   requestRecordStateTagSeverity,
@@ -42,24 +43,24 @@ export function formatCompressionRatio(value?: number | null): string {
 }
 
 export function formatRequestRecordTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return formatAppDateTime(value, {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
-  }).format(new Date(value))
+  })
 }
 
 export function formatRequestRecordCount(value?: number | null): string {
   if (value == null) return '-'
-  return new Intl.NumberFormat().format(value)
+  return formatAppNumber(value)
 }
 
 export function formatTokenQuantity(value?: number | null): string {
   if (value == null || !Number.isFinite(value)) return '-'
   const abs = Math.abs(value)
   if (abs < 1000) {
-    return new Intl.NumberFormat(undefined).format(Math.round(value))
+    return formatAppNumber(Math.round(value))
   }
   let scaled = value
   let unit = ''
@@ -79,10 +80,10 @@ export function formatTokenQuantity(value?: number | null): string {
   const rounded = Math.round(scaled * 10) / 10
   const fixed = rounded.toFixed(1)
   const trimmed = fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed
-  const localized = new Intl.NumberFormat(undefined, {
+  const localized = formatAppNumber(Number(trimmed), {
     minimumFractionDigits: 0,
     maximumFractionDigits: 1,
-  }).format(Number(trimmed))
+  })
   return `${localized}${unit}`
 }
 

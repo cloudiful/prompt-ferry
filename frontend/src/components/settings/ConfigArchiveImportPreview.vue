@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ConfigImportPreview } from '@/generated/admin-api'
+import { formatAppNumber } from '@/format/datetime'
 
 defineProps<{
   preview: ConfigImportPreview
@@ -7,7 +8,7 @@ defineProps<{
 }>()
 
 function formatNumber(value: number): string {
-  return value.toLocaleString()
+  return formatAppNumber(value)
 }
 
 function shortFingerprint(value: string): string {

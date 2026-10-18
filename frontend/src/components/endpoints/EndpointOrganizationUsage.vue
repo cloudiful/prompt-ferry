@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import type { EndpointProvider } from '@/generated/admin-api'
+import { formatAppDateTime, formatAppNumber } from '@/format/datetime'
 import { formatMoney } from '@/composables/useTokenPlanWindowEntries'
 import { useEndpointOrganizationUsage } from '@/composables/useEndpointOrganizationUsage'
 import { isOrganizationUsageEligible } from '@/models/endpoints/quota'
@@ -46,7 +47,11 @@ watch(
 // Issue #589 P2c: the window is UTC month-to-date, so render the instants in
 // UTC too instead of the operator's local timezone.
 function formatUtc(value: string): string {
-  return new Date(value).toLocaleString(undefined, { timeZone: 'UTC' })
+  return formatAppDateTime(value, { timeZone: 'UTC' })
+}
+
+function formatCount(value: number): string {
+  return formatAppNumber(value)
 }
 </script>
 
@@ -103,15 +108,15 @@ function formatUtc(value: string): string {
       <div class="flex flex-wrap gap-x-4 gap-y-1">
         <span
           >{{ t('endpointOrganizationUsageInputTokens') }}:
-          {{ organizationUsage.input_tokens.toLocaleString() }}</span
+          {{ formatCount(organizationUsage.input_tokens) }}</span
         >
         <span
           >{{ t('endpointOrganizationUsageOutputTokens') }}:
-          {{ organizationUsage.output_tokens.toLocaleString() }}</span
+          {{ formatCount(organizationUsage.output_tokens) }}</span
         >
         <span class="font-semibold"
           >{{ t('endpointOrganizationUsageTotalTokens') }}:
-          {{ organizationUsage.total_tokens.toLocaleString() }}</span
+          {{ formatCount(organizationUsage.total_tokens) }}</span
         >
         <span
           >{{ t('endpointOrganizationUsageCost') }}:

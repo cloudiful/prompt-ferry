@@ -126,7 +126,6 @@ onMounted(bootstrap)
           t('relayHostLogin')
         }}</span>
       </template>
-      <p class="text-sm text-muted">{{ t('relayHostLoginDesc') }}</p>
       <div class="mt-3 flex gap-2">
         <UInput
           v-model="tokenInput"

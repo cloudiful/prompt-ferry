@@ -255,3 +255,17 @@ test('a storage save submits the payload it was given', async () => {
     body: { backend: 'local', local_dir: '/srv/raw' },
   })
 })
+
+test('the settings store exposes per-section pending state to its page', async () => {
+  await freshHarness()
+
+  const { createPinia, setActivePinia } = await import('pinia')
+  const { useSettingsStore } = await import('../src/stores/settings')
+  setActivePinia(createPinia())
+
+  const store = useSettingsStore()
+
+  expect(store.settingsPendingActions).toBeDefined()
+  expect(store.settingsPendingActions.relayIpWhitelist).toBeUndefined()
+  expect(store.settingsPendingActions.llmReview).toBeUndefined()
+})

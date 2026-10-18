@@ -39,7 +39,6 @@ export const relayMessages = {
     relaySnapshotVersion: '快照',
     relayHost: '本机服务',
     relayHostLogin: '本机管理登录',
-    relayHostLoginDesc: '输入本机管理 token 以管理本机服务角色与 Relay 设置。',
     relayHostTokenPlaceholder: '输入管理 token',
     relayHostRoleTitle: '本机承担的服务',
     relayRoleIntegrated: '一体模式',
@@ -110,8 +109,6 @@ export const relayMessages = {
     relaySnapshotVersion: 'Snapshot',
     relayHost: 'Host services',
     relayHostLogin: 'Host management login',
-    relayHostLoginDesc:
-      'Enter the host management token to manage host roles and relay settings.',
     relayHostTokenPlaceholder: 'Enter management token',
     relayHostRoleTitle: 'Services on this host',
     relayRoleIntegrated: 'Integrated',

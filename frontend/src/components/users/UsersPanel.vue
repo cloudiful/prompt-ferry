@@ -41,8 +41,6 @@ const columns = computed<TableColumn<UserListItemView>[]>(() => [
 
 const mobileToggleLabelClass =
   'inline-flex min-h-5 items-center gap-1 text-[0.68rem] text-default'
-const tableToggleLabelClass =
-  'inline-flex min-h-8 items-center gap-2 whitespace-nowrap text-[0.75rem] text-default'
 </script>
 
 <template>
@@ -129,12 +127,16 @@ const tableToggleLabelClass =
 
         <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
           <label :class="mobileToggleLabelClass"
-            ><UCheckbox v-model="item.user.is_admin" />{{
-              t('adminShort')
-            }}</label
+            ><UCheckbox
+              v-model="item.user.is_admin"
+              :aria-label="t('userAdminToggle', { name: item.login_name })"
+            />{{ t('adminShort') }}</label
           >
           <label :class="mobileToggleLabelClass"
-            ><UCheckbox v-model="item.user.is_active" />{{ t('active') }}</label
+            ><UCheckbox
+              v-model="item.user.is_active"
+              :aria-label="t('userActiveToggle', { name: item.login_name })"
+            />{{ t('active') }}</label
           >
         </div>
       </div>
@@ -166,18 +168,16 @@ const tableToggleLabelClass =
         />
       </template>
       <template #admin-cell="{ row }">
-        <label :class="tableToggleLabelClass"
-          ><UCheckbox v-model="row.original.user.is_admin" />{{
-            t('adminShort')
-          }}</label
-        >
+        <UCheckbox
+          v-model="row.original.user.is_admin"
+          :aria-label="t('userAdminToggle', { name: row.original.login_name })"
+        />
       </template>
       <template #active-cell="{ row }">
-        <label :class="tableToggleLabelClass"
-          ><UCheckbox v-model="row.original.user.is_active" />{{
-            t('active')
-          }}</label
-        >
+        <UCheckbox
+          v-model="row.original.user.is_active"
+          :aria-label="t('userActiveToggle', { name: row.original.login_name })"
+        />
       </template>
       <template #actions-cell="{ row }">
         <div class="flex flex-nowrap items-center justify-end gap-1">

@@ -23,6 +23,7 @@ Object.defineProperty(globalThis, 'localStorage', {
 
 const {
   createQuotaTrendPanelOption,
+  duplicateKeyLabels,
   escapeHtml,
   groupQuotaTrendSeries,
   quotaTrendSeriesName,
@@ -30,6 +31,16 @@ const {
 } = await import('../src/quota-observation-charts')
 const { getChartTheme } = await import('../src/theme/chartTheme')
 const { themeMode } = await import('../src/theme/appTheme')
+
+const KINDS = {
+  five_hour: 'Five hour',
+  rolling: 'Rolling',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+  balance: 'Balance',
+  unlimited: 'Unlimited',
+  custom: 'Custom window',
+} as const
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyOption = Record<string, any>
@@ -56,11 +67,33 @@ function series(
   }
 }
 
-function optionInput() {
+function optionInput(
+  overrides: Partial<ReturnType<typeof baseOptionInput>> = {},
+) {
+  return { ...baseOptionInput(), ...overrides }
+}
+
+function baseOptionInput() {
   return {
-    formatTime: (value: string) => value,
+    range: '24h' as '24h' | '7d' | '30d',
+    formatAxisDate: (value: string) => `date:${value}`,
+    formatAxisTime: (value: string) => `time:${value}`,
+    formatTooltipTime: (value: string) => value,
     formatAmount: (value: number, unit: string) => `${value} ${unit}`,
-    labels: { percentSuffix: '%', unavailable: 'n/a' },
+    labels: {
+      percentSuffix: '%',
+      unavailable: 'n/a',
+      kinds: { ...KINDS },
+    },
+  }
+}
+
+function nameContext(overrides: Record<string, unknown> = {}) {
+  return {
+    duplicateLabels: new Set<string>(),
+    singleKey: false,
+    kinds: { ...KINDS },
+    ...overrides,
   }
 }
 
@@ -119,11 +152,20 @@ test('the tooltip escapes a malicious key label and unit, keeping br structure',
   const option = createQuotaTrendPanelOption(
     groupQuotaTrendSeries([
       series({
+        key_id: 'key-a',
         key_label: maliciousLabel,
         kind: 'balance',
         unit: '</script>USD',
         metric: 'amount',
         points: [point('2026-10-16T00:00:00Z', 5)],
+      }),
+      series({
+        key_id: 'key-b',
+        key_label: 'Other',
+        kind: 'balance',
+        unit: '</script>USD',
+        metric: 'amount',
+        points: [point('2026-10-16T00:00:00Z', 6)],
       }),
     ])[0],
     optionInput(),
@@ -175,13 +217,67 @@ test('duplicate key labels gain a short key id, unique labels stay clean', () =>
   const second = series({ key_id: 'bbbbbbbb-2222', key_label: 'Same label' })
   const unique = series({ key_id: 'cccccccc-3333', key_label: 'Other' })
 
-  expect(quotaTrendSeriesName(first, duplicate)).toBe(
-    `Same label #${shortKeyId('aaaaaaaa-1111')} · five_hour`,
-  )
-  expect(quotaTrendSeriesName(second, duplicate)).toContain(
-    shortKeyId('bbbbbbbb-2222'),
-  )
-  expect(quotaTrendSeriesName(unique, duplicate)).toBe('Other · five_hour')
+  expect(
+    quotaTrendSeriesName(first, nameContext({ duplicateLabels: duplicate })),
+  ).toBe(`Same label #${shortKeyId('aaaaaaaa-1111')} · Five hour`)
+  expect(
+    quotaTrendSeriesName(second, nameContext({ duplicateLabels: duplicate })),
+  ).toContain(shortKeyId('bbbbbbbb-2222'))
+  expect(
+    quotaTrendSeriesName(unique, nameContext({ duplicateLabels: duplicate })),
+  ).toBe('Other · Five hour')
+})
+
+test('duplicate detection counts distinct keys, not series', () => {
+  const sameKey = [
+    series({ key_id: 'key-a', key_label: 'One key', kind: 'five_hour' }),
+    series({ key_id: 'key-a', key_label: 'One key', kind: 'weekly' }),
+  ]
+  expect(duplicateKeyLabels(sameKey).size).toBe(0)
+
+  const differentKeys = [
+    ...sameKey,
+    series({ key_id: 'key-b', key_label: 'One key', kind: 'five_hour' }),
+  ]
+  expect(duplicateKeyLabels(differentKeys)).toEqual(new Set(['One key']))
+})
+
+test('a single-key group uses localized window slots without a key id', () => {
+  const group = groupQuotaTrendSeries([
+    series({ key_id: 'k1', key_label: 'Only key', kind: 'rolling' }),
+    series({ key_id: 'k1', key_label: 'Only key', kind: 'weekly' }),
+    series({ key_id: 'k1', key_label: 'Only key', kind: 'monthly' }),
+  ])[0]
+  const option = createQuotaTrendPanelOption(group, optionInput()) as AnyOption
+
+  expect(option.series.map((entry: { name: string }) => entry.name)).toEqual([
+    'Monthly',
+    'Rolling',
+    'Weekly',
+  ])
+})
+
+test('custom windows keep their source identity in a single-key legend', () => {
+  const group = groupQuotaTrendSeries([
+    series({
+      key_id: 'k1',
+      key_label: 'Only key',
+      kind: 'custom',
+      source_id: 'subscription:primary',
+    }),
+    series({
+      key_id: 'k1',
+      key_label: 'Only key',
+      kind: 'custom',
+      source_id: 'subscription:secondary',
+    }),
+  ])[0]
+  const option = createQuotaTrendPanelOption(group, optionInput()) as AnyOption
+
+  expect(option.series.map((entry: { name: string }) => entry.name)).toEqual([
+    'Custom window (primary)',
+    'Custom window (secondary)',
+  ])
 })
 
 test('a panel has exactly one y-axis, explicitly positioned on the left', () => {
@@ -206,7 +302,7 @@ test('a panel has exactly one y-axis, explicitly positioned on the left', () => 
   expect(option.yAxis.min).toBeUndefined()
 })
 
-test('the percent panel is bounded 0..100 and labelled with the suffix', () => {
+test('the percent panel is bounded 0..100 with percent tick labels only', () => {
   const option = createQuotaTrendPanelOption(
     groupQuotaTrendSeries([series()])[0],
     optionInput(),
@@ -214,14 +310,16 @@ test('the percent panel is bounded 0..100 and labelled with the suffix', () => {
 
   expect(option.yAxis.min).toBe(0)
   expect(option.yAxis.max).toBe(100)
-  expect(option.yAxis.name).toBe('%')
+  // The axis no longer carries a bare `%` title; only its ticks keep the unit.
+  expect(option.yAxis.name).toBeUndefined()
+  expect(option.yAxis.axisLabel.formatter).toContain('%')
 })
 
-test('the legend scrolls so many long names cannot wrap over the plot', () => {
+test('the built-in canvas legend is disabled so no clipped pager is drawn', () => {
   const many = Array.from({ length: 96 }, (_, index) =>
     series({
       key_id: `key-${String(index).padStart(3, '0')}`,
-      key_label: `A very long key label number ${index} that must not wrap the legend`,
+      key_label: `A very long key label number ${index} that must not wrap the canvas legend`,
       source_id: `source-${index}`,
       points: [point('2026-10-16T00:00:00Z', index)],
     }),
@@ -231,9 +329,42 @@ test('the legend scrolls so many long names cannot wrap over the plot', () => {
     optionInput(),
   ) as AnyOption
 
-  expect(option.legend.type).toBe('scroll')
-  expect(typeof option.legend.width).toBe('string')
+  expect(option.legend.show).toBe(false)
+  expect(option.legend.type).toBeUndefined()
   expect(option.series).toHaveLength(96)
+})
+
+test('hidden series are filtered out while names and colors stay stable', () => {
+  const group = groupQuotaTrendSeries([
+    series({ key_id: 'a', key_label: 'Key A', kind: 'weekly' }),
+    series({ key_id: 'b', key_label: 'Key B', kind: 'weekly' }),
+  ])[0]
+  const all = createQuotaTrendPanelOption(group, optionInput()) as AnyOption
+  const firstColor = all.series[0].itemStyle.color
+
+  const hidden = createQuotaTrendPanelOption(group, {
+    ...optionInput(),
+    hiddenSeries: new Set([all.series[0].name]),
+  }) as AnyOption
+
+  expect(hidden.series.map((entry: { name: string }) => entry.name)).toEqual([
+    'Key B · Weekly',
+  ])
+  // The surviving series keeps the color it had when both were drawn.
+  expect(hidden.series[0].itemStyle.color).toBe(all.series[1].itemStyle.color)
+  expect(hidden.series[0].itemStyle.color).not.toBe(firstColor)
+})
+
+test('hiding every series leaves axes and grid without fabricated data', () => {
+  const group = groupQuotaTrendSeries([series()])[0]
+  const option = createQuotaTrendPanelOption(group, {
+    ...optionInput(),
+    hiddenSeries: new Set(['Five hour']),
+  }) as AnyOption
+
+  expect(option.series).toEqual([])
+  expect(option.xAxis.data.length).toBeGreaterThan(0)
+  expect(option.yAxis.type).toBe('value')
 })
 
 test('lines are step, gap-honest, and never area-filled', () => {
@@ -281,18 +412,74 @@ test('points are sorted ascending even when the payload is unordered', () => {
   ])
 })
 
-test('series colors come from the active theme palette, not hardcoded light values', () => {
+test('24h axis labels stay compact and add a date only across a day boundary', () => {
+  const option = createQuotaTrendPanelOption(
+    groupQuotaTrendSeries([
+      series({
+        points: [
+          point('2026-10-15T12:00:00Z', 10),
+          point('2026-10-16T12:00:00Z', 20),
+        ],
+      }),
+    ])[0],
+    optionInput({ range: '24h' }),
+  ) as AnyOption
+
+  const formatter = option.xAxis.axisLabel.formatter as (
+    value: string,
+  ) => string
+  expect(formatter('2026-10-15T12:00:00Z')).toBe('time:2026-10-15T12:00:00Z')
+  expect(formatter('2026-10-16T12:00:00Z')).toBe(
+    'date:2026-10-16T12:00:00Z time:2026-10-16T12:00:00Z',
+  )
+})
+
+test('7d and 30d axis labels use compact dates only', () => {
+  for (const range of ['7d', '30d'] as const) {
+    const option = createQuotaTrendPanelOption(
+      groupQuotaTrendSeries([series()])[0],
+      optionInput({ range }),
+    ) as AnyOption
+    const formatter = option.xAxis.axisLabel.formatter as (
+      value: string,
+    ) => string
+    expect(formatter('2026-10-16T00:00:00Z')).toBe('date:2026-10-16T00:00:00Z')
+  }
+})
+
+test('the tooltip shows the full localized timestamp, not the compact axis label', () => {
+  const option = createQuotaTrendPanelOption(
+    groupQuotaTrendSeries([series()])[0],
+    optionInput({
+      formatTooltipTime: (value) => `full:${value}`,
+    }),
+  ) as AnyOption
+
+  const html = tooltipHtml(option, [
+    {
+      axisValue: '2026-10-16T00:00:00Z',
+      marker: '',
+      seriesName: option.series[0].name,
+      value: 5,
+    },
+  ])
+  expect(html).toContain('full:2026-10-16T00:00:00Z')
+  expect(html).not.toContain('time:2026-10-16T00:00:00Z')
+})
+
+test('series colors come from the quota categorical palette, not semantic tokens', () => {
   const group = groupQuotaTrendSeries([series()])[0]
   themeMode.value = 'dark'
   const dark = createQuotaTrendPanelOption(group, optionInput()) as AnyOption
   const darkTheme = getChartTheme()
-  expect(dark.series[0].itemStyle.color).toBe(darkTheme.accent)
+  expect(dark.series[0].itemStyle.color).toBe(darkTheme.categorical[0])
+  expect(darkTheme.categorical).not.toContain(darkTheme.accent)
 
   themeMode.value = 'light'
   const light = createQuotaTrendPanelOption(group, optionInput()) as AnyOption
   const lightTheme = getChartTheme()
-  expect(light.series[0].itemStyle.color).toBe(lightTheme.accent)
-  expect(light.series[0].itemStyle.color).not.toBe(darkTheme.accent)
+  expect(light.series[0].itemStyle.color).toBe(lightTheme.categorical[0])
+  expect(light.series[0].itemStyle.color).not.toBe(darkTheme.categorical[0])
   themeMode.value = 'dark'
 })
 

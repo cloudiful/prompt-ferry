@@ -8,6 +8,7 @@ import { useRelaySessionStore } from '@/stores/relay-session'
 import { useSessionStore } from '@/stores/session'
 
 const collapsed = ref(false)
+const mobileNavOpen = ref(false)
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
@@ -66,6 +67,7 @@ async function relayLogout(): Promise<void> {
   <UDashboardGroup storage-key="prompt-ferry:dashboard" class="min-h-screen">
     <UDashboardSidebar
       v-model:collapsed="collapsed"
+      v-model:open="mobileNavOpen"
       collapsible
       resizable
       :min-size="16"
@@ -124,6 +126,11 @@ async function relayLogout(): Promise<void> {
 
     <UDashboardPanel>
       <template #header>
+        <UDashboardNavbar class="lg:hidden" :toggle="false">
+          <template #leading>
+            <UDashboardSidebarToggle :aria-label="t('expandNav')" />
+          </template>
+        </UDashboardNavbar>
         <UDashboardNavbar
           v-if="collapsed"
           :toggle="false"

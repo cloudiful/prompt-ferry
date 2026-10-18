@@ -14,6 +14,7 @@ export type AppChartTheme = {
   output: string
   cached: string
   error: string
+  categorical: string[]
 }
 
 /**
@@ -39,6 +40,9 @@ const darkTheme: AppChartTheme = {
   output: '#1fbf9c',
   cached: '#3fb35f',
   error: '#f87171',
+  // Quota-only categorical series palette: blue, violet, teal, orange, pink.
+  // These stay distinct from the semantic request/chart tokens above.
+  categorical: ['#60a5fa', '#c084fc', '#2dd4bf', '#fb923c', '#f472b6'],
 }
 
 const lightTheme: AppChartTheme = {
@@ -55,6 +59,7 @@ const lightTheme: AppChartTheme = {
   output: '#0e7490',
   cached: '#15803d',
   error: '#b91c1c',
+  categorical: ['#1d4ed8', '#7c3aed', '#0f766e', '#c2410c', '#be185d'],
 }
 
 export function getChartTheme(): AppChartTheme {

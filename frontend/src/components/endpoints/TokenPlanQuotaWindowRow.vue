@@ -7,7 +7,6 @@ import {
   knownRemainingPercent,
   progressColor,
   remainingPercent,
-  usedPercent,
 } from '@/composables/useTokenPlanWindowEntries'
 
 const props = defineProps<{
@@ -58,7 +57,7 @@ const isTimeWindow = computed(
       <UProgress
         v-if="knownRemainingPercent(adapted) !== null"
         class="token-plan-progress h-1.5"
-        :model-value="usedPercent(adapted)"
+        :model-value="remainingPercent(adapted)"
         :style="{
           '--token-plan-progress-color': progressColor(adapted),
         }"
@@ -72,7 +71,7 @@ const isTimeWindow = computed(
           {{
             knownRemainingPercent(adapted) === null
               ? '—'
-              : `${remainingPercent(adapted).toFixed(1)}%`
+              : `${t('quotaRemainingPercent')} ${remainingPercent(adapted).toFixed(1)}%`
           }}
         </span>
       </div>

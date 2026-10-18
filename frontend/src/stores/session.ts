@@ -7,9 +7,10 @@ import {
   bridgeStatus,
 } from '../generated/admin-api'
 import type { BridgeStatus, MeResponse } from '../generated/admin-api'
-import { expectData, withData } from '../api'
+import { expectData, formatApiError, withData } from '../api'
 import { useAsyncAction } from '../composables/useAsyncAction'
 import type { AsyncActionOutcome } from '../composables/useAsyncAction'
+import { i18n } from '../i18n/plugin'
 
 type LoginPayload = {
   login_name: string
@@ -17,6 +18,20 @@ type LoginPayload = {
 }
 
 const AUTH_ACTION_KEY = 'session:authentication'
+
+function errorCode(cause: unknown): string | null {
+  if (!cause || typeof cause !== 'object') return null
+  const envelope = (cause as { error?: unknown }).error
+  if (!envelope || typeof envelope !== 'object') return null
+  const code = (envelope as { code?: unknown }).code
+  return typeof code === 'string' ? code : null
+}
+
+function isUnauthorized(cause: unknown): boolean {
+  return errorCode(cause) === 'unauthorized'
+}
+
+const translate = (i18n.global as unknown as { t: (key: string) => string }).t
 
 export const useSessionStore = defineStore('session', () => {
   const me = ref<MeResponse | null>(null)
@@ -50,8 +65,9 @@ export const useSessionStore = defineStore('session', () => {
     } catch (cause) {
       if (generation !== bootstrapGeneration) return false
       me.value = null
-      error.value =
-        cause instanceof Error ? cause.message : 'Failed to load session'
+      // A 401 on the session probe is the anonymous state, not a failure to
+      // render the login page; real network and server errors stay visible.
+      error.value = isUnauthorized(cause) ? '' : formatApiError(cause)
       bootstrapped.value = true
       return false
     } finally {
@@ -86,11 +102,16 @@ export const useSessionStore = defineStore('session', () => {
           await authLogin<true>(withData({ body: captured }))
           const loaded = await bootstrapAuth(true)
           if (!loaded) {
-            throw new Error(error.value || 'Failed to load session')
+            if (!error.value) {
+              error.value = translate('sessionLoadFailed')
+            }
+            throw new Error(error.value)
           }
           await refreshBridgeStatus()
         } catch (cause) {
-          error.value = cause instanceof Error ? cause.message : 'Login failed'
+          error.value = isUnauthorized(cause)
+            ? translate('invalidCredentials')
+            : formatApiError(cause)
           throw cause
         }
       },

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { TokenPlanQuotaStatus } from '@/generated/admin-api'
+import { formatAppDateTime } from '@/format/datetime'
 
 const props = defineProps<{
   status: TokenPlanQuotaStatus | null
@@ -35,7 +36,7 @@ const title = computed(() => {
   if (observedAt) {
     hints.push(
       props.t('quotaObservedAt', {
-        time: new Date(observedAt).toLocaleString(),
+        time: formatAppDateTime(observedAt),
       }),
     )
   }
@@ -45,7 +46,7 @@ const title = computed(() => {
   if (cooldownUntil) {
     hints.push(
       props.t('quotaRetryAt', {
-        time: new Date(cooldownUntil).toLocaleString(),
+        time: formatAppDateTime(cooldownUntil),
       }),
     )
   }

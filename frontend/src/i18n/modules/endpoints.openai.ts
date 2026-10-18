@@ -51,7 +51,7 @@ export const endpointOpenAiMessages = {
       '已保存的 Admin API Key 不会回显：直接保存保留原值；点击清除并保存后才会移除。',
     endpointOrganizationUsage: 'Platform 组织用量',
     endpointOrganizationUsageHint:
-      '用 Admin API Key 读取其 OpenAI Platform 组织的用量与费用，统计 UTC 月初至今；这是组织级展示，不是 ChatGPT 订阅额度，也不参与路由权重、额度或推理 API Key 校验。',
+      '用 Admin API Key 读取该 OpenAI Platform 组织的用量与费用，统计 UTC 月初至今；这是组织级展示，不是 ChatGPT 订阅额度。',
     endpointOrganizationUsageSaveFirst: '保存端点后即可查询组织用量。',
     endpointOrganizationUsageRequiredKey:
       '先配置上方 Admin API Key 才能查询组织用量。',
@@ -116,7 +116,7 @@ export const endpointOpenAiMessages = {
       'The saved Admin API key is never echoed: saving keeps it, and it is removed only after Clear + Save.',
     endpointOrganizationUsage: 'Platform organization usage',
     endpointOrganizationUsageHint:
-      'Uses the Admin API key to read its OpenAI Platform organization usage and spend for the UTC month to date. Organization-level display only: not the ChatGPT subscription quota, and never part of routing weight, quota, or inference API key checks.',
+      "Reads this OpenAI Platform organization's usage and spend with the Admin API key, for the UTC month to date. Organization-level display, separate from the ChatGPT subscription quota.",
     endpointOrganizationUsageSaveFirst:
       'Save the endpoint to query organization usage.',
     endpointOrganizationUsageRequiredKey:

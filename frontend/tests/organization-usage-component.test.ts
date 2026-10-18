@@ -9,6 +9,8 @@ import type {
   OpenAiOrganizationUsageResponse,
 } from '../src/generated/admin-api'
 import * as quota from '../src/models/endpoints/quota'
+import * as datetime from '../src/format/datetime'
+import { locale } from '../src/composables/useLocale'
 import * as tokenPlanFormatting from '../src/composables/useTokenPlanWindowEntries'
 import type { OrganizationUsageSource } from '../src/composables/useEndpointOrganizationUsage'
 
@@ -96,6 +98,7 @@ const component = (() => {
       return composableStub
     }
     if (spec === '@/models/endpoints/quota') return quota
+    if (spec === '@/format/datetime') return datetime
     return slotStub(spec.split('/').pop() ?? spec)
   }
   return new Function('__resolve', `"use strict";\n${js}`)(resolve)
@@ -112,12 +115,26 @@ async function render(props: {
         endpointId: props.endpointId ?? 'endpoint-1',
         provider: props.provider ?? 'openai',
         hasAdminApiKey: props.hasAdminApiKey ?? true,
-        t: (key: string) => key,
+        t: (key: string, values?: Record<string, string>) =>
+          values ? `${key}:${Object.values(values).join(',')}` : key,
       }),
   })
   app.component('UButton', slotStub('UButton'))
   app.component('UBadge', slotStub('UBadge'))
   return renderToString(app)
+}
+
+// Independent expectation of the app-locale UTC timestamp the operator sees.
+function utcTime(iso: string): string {
+  return new Intl.DateTimeFormat(locale.value, {
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    month: 'numeric',
+    second: 'numeric',
+    timeZone: 'UTC',
+    year: 'numeric',
+  }).format(new Date(iso))
 }
 
 const usageFixture: OpenAiOrganizationUsageResponse = {
@@ -171,6 +188,16 @@ test('loaded organization usage renders tokens, spend, period and flags', async 
   expect(html).toContain('endpointOrganizationUsageCached')
   expect(html).toContain('endpointOrganizationUsageTruncated')
   expect(html).toContain('endpointOrganizationUsageReload')
+  usage.value = null
+})
+
+test('the month-to-date window stays rendered in UTC', async () => {
+  // The provider window is UTC month-to-date, so the instants must not be
+  // shifted into the operator's local timezone.
+  usage.value = usageFixture
+  const html = await render({})
+  expect(html).toContain(utcTime('2026-09-01T00:00:00Z'))
+  expect(html).toContain(utcTime('2026-09-27T10:00:00Z'))
   usage.value = null
 })
 

@@ -2,6 +2,7 @@ import type {
   SubscriptionWindowUsage,
   TokenPlanKeyUsage,
 } from '@/generated/admin-api'
+import { formatAppDateTime } from '@/format/datetime'
 
 const FIVE_HOURS_SECONDS = 5 * 60 * 60
 const DAY_SECONDS = 24 * 60 * 60
@@ -130,12 +131,7 @@ export function subscriptionWindowResetMs(
 }
 
 export function formatSubscriptionQuotaDateTime(value: string): string {
-  const timestamp = Date.parse(value)
-  if (!Number.isFinite(timestamp)) return value
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(timestamp)
+  return formatAppDateTime(value, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 export function subscriptionWindowProgressColor(

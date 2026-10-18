@@ -122,16 +122,17 @@ function applyOAuthStatus(next: {
         <fieldset :disabled="savePending" class="grid gap-3">
           <template v-if="view === 'main'">
             <EndpointProviderFields v-model:form="form" :t="t" />
-            <USelect
-              v-if="form.scope === 'user'"
-              :model-value="form.owner_user_id ?? undefined"
-              class="w-full"
-              :items="users"
-              label-key="login_name"
-              value-key="user_id"
-              :placeholder="t('ownerUser')"
-              @update:model-value="form.owner_user_id = $event ?? null"
-            />
+            <UFormField v-if="form.scope === 'user'" :label="t('owner')">
+              <USelect
+                :model-value="form.owner_user_id ?? undefined"
+                class="w-full"
+                :items="users"
+                label-key="login_name"
+                value-key="user_id"
+                :placeholder="t('ownerUser')"
+                @update:model-value="form.owner_user_id = $event ?? null"
+              />
+            </UFormField>
             <EndpointApiKeysEditor
               v-if="!isChatgptSubscription"
               v-model:form="form"

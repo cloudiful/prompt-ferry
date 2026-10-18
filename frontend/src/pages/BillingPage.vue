@@ -128,43 +128,45 @@ onMounted(async () => {
   <div class="grid min-w-0 max-w-full gap-3">
     <PageIntro>
       <template #actions>
-        <UButton
-          size="sm"
-          color="neutral"
-          variant="outline"
-          icon="i-lucide-refresh-cw"
-          :loading="billing.loading"
-          :aria-label="t('billingRefresh')"
-          @click="refresh"
-          >{{ t('billingRefresh') }}</UButton
-        >
-        <UButton
-          size="sm"
-          color="neutral"
-          variant="outline"
-          icon="i-lucide-download"
-          @click="download('details')"
-          >{{ t('billingExportDetails') }}</UButton
-        >
-        <UButton
-          size="sm"
-          color="neutral"
-          variant="outline"
-          icon="i-lucide-calendar-arrow-down"
-          @click="download('monthly')"
-          >{{ t('billingExportMonthly') }}</UButton
-        >
-        <UButton
-          v-if="session.isAdmin"
-          size="sm"
-          color="warning"
-          variant="outline"
-          icon="i-lucide-calculator"
-          :loading="billing.repricePending"
-          :disabled="billing.repricePending"
-          @click="reprice"
-          >{{ t('reprice') }}</UButton
-        >
+        <div class="flex min-w-0 flex-1 flex-wrap justify-end gap-1.5">
+          <UButton
+            size="sm"
+            color="neutral"
+            variant="outline"
+            icon="i-lucide-refresh-cw"
+            :loading="billing.loading"
+            :aria-label="t('billingRefresh')"
+            @click="refresh"
+            >{{ t('billingRefresh') }}</UButton
+          >
+          <UButton
+            size="sm"
+            color="neutral"
+            variant="outline"
+            icon="i-lucide-download"
+            @click="download('details')"
+            >{{ t('billingExportDetails') }}</UButton
+          >
+          <UButton
+            size="sm"
+            color="neutral"
+            variant="outline"
+            icon="i-lucide-calendar-arrow-down"
+            @click="download('monthly')"
+            >{{ t('billingExportMonthly') }}</UButton
+          >
+          <UButton
+            v-if="session.isAdmin"
+            size="sm"
+            color="warning"
+            variant="outline"
+            icon="i-lucide-calculator"
+            :loading="billing.repricePending"
+            :disabled="billing.repricePending"
+            @click="reprice"
+            >{{ t('reprice') }}</UButton
+          >
+        </div>
       </template>
     </PageIntro>
 

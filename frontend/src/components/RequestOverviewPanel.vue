@@ -6,6 +6,7 @@ import type {
   RequestRecordOverviewBreakdownRow,
 } from '@/generated/admin-api'
 import { useLocale } from '@/composables/useLocale'
+import { formatAppDateTime } from '../format/datetime'
 import type { RequestRecordFormatting } from '../models/request-record-formatting'
 import {
   breakdownDrilldownForPerspective,
@@ -127,12 +128,12 @@ function formatMetricValue(
 }
 
 function formatBucket(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return formatAppDateTime(value, {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     month: '2-digit',
-  }).format(new Date(value))
+  })
 }
 
 function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {

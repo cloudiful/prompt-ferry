@@ -90,7 +90,6 @@ const { messages } = await import('../src/i18n')
 const HOST_PAGE_KEYS = [
   'relayHost',
   'relayHostLogin',
-  'relayHostLoginDesc',
   'relayHostTokenPlaceholder',
   'relayHostRoleTitle',
   'relayHostSettingsTitle',

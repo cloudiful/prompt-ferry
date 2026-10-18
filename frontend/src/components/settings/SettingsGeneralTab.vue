@@ -36,20 +36,20 @@ defineEmits<{
             {{ t('language') }}
           </h3>
         </template>
-        <label class="grid gap-1" for="settings-locale">
-          <span class="text-xs text-muted">{{ t('language') }}</span>
+        <div class="grid gap-1">
           <USelect
             v-model="locale"
             id="settings-locale"
             class="w-full"
             name="settings-locale"
             size="sm"
+            :aria-label="t('language')"
             :items="localeOptions"
             label-key="label"
             value-key="value"
             @update:model-value="$emit('setLocale', $event)"
           />
-        </label>
+        </div>
       </SettingsCard>
 
       <SettingsCard>
@@ -61,20 +61,20 @@ defineEmits<{
             {{ t('theme') }}
           </h3>
         </template>
-        <label class="grid gap-1" for="settings-theme-mode">
-          <span class="text-xs text-muted">{{ t('theme') }}</span>
+        <div class="grid gap-1">
           <USelect
             v-model="themeMode"
             id="settings-theme-mode"
             class="w-full"
             name="settings-theme-mode"
             size="sm"
+            :aria-label="t('theme')"
             :items="themeModeOptions"
             label-key="label"
             value-key="value"
             @update:model-value="$emit('setThemeMode', $event)"
           />
-        </label>
+        </div>
       </SettingsCard>
     </div>
   </section>

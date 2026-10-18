@@ -2,6 +2,7 @@
 import type { ManagedRelay } from '@/generated/admin-api'
 import type { Option } from '@/models'
 import type { RelayForm, RelaySecretAction } from '@/admin-mappers/forms/relay'
+import { formatAppDateTime } from '@/format/datetime'
 
 defineProps<{
   bridgeOptions: Option[]
@@ -20,9 +21,7 @@ const form = defineModel<RelayForm>('form', { required: true })
 defineEmits<{ save: [] }>()
 
 function formatTimestamp(value?: string | null): string {
-  if (!value) return '-'
-  const date = new Date(value)
-  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString()
+  return formatAppDateTime(value)
 }
 </script>
 

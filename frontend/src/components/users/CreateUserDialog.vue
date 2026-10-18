@@ -29,22 +29,19 @@ defineEmits<{
     <template #body>
       <form class="grid gap-3 text-xs" @submit.prevent="$emit('submit')">
         <fieldset :disabled="savePending" class="grid gap-3">
-          <UInput
-            v-model="form.login_name"
-            class="w-full"
-            placeholder="login_name"
-          />
-          <UInput
-            v-model="form.display_name"
-            class="w-full"
-            :placeholder="t('displayName')"
-          />
-          <UInput
-            v-model="form.password"
-            type="password"
-            class="w-full"
-            :placeholder="t('userInitialPassword')"
-          />
+          <UFormField :label="t('loginName')">
+            <UInput
+              v-model="form.login_name"
+              class="w-full"
+              :placeholder="t('userLoginPlaceholder')"
+            />
+          </UFormField>
+          <UFormField :label="t('displayName')">
+            <UInput v-model="form.display_name" class="w-full" />
+          </UFormField>
+          <UFormField :label="t('userInitialPassword')">
+            <UInput v-model="form.password" type="password" class="w-full" />
+          </UFormField>
           <label
             class="inline-flex min-h-8 items-center gap-2 text-[0.75rem] text-default"
             ><UCheckbox v-model="form.is_admin" />{{ t('admin') }}</label

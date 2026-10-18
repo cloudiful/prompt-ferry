@@ -27,8 +27,7 @@ Object.defineProperty(globalThis, 'localStorage', {
 })
 
 const charts = await import('../src/quota-observation-charts')
-const subscriptionQuota =
-  await import('../src/composables/subscriptionQuotaWindows')
+const datetime = await import('../src/format/datetime')
 const appTheme = await import('../src/theme/appTheme')
 
 const componentSource = await Bun.file(
@@ -114,9 +113,7 @@ const component = (() => {
   const resolve = (spec: string): unknown => {
     if (spec === 'vue') return instrumentedVue
     if (spec === '@/quota-observation-charts') return charts
-    if (spec === '@/composables/subscriptionQuotaWindows') {
-      return subscriptionQuota
-    }
+    if (spec === '@/format/datetime') return datetime
     if (spec === '@/theme/appTheme') return appTheme
     return slotStub(spec.split('/').pop() ?? spec)
   }
@@ -179,7 +176,8 @@ async function render(props: {
         loading: props.loading ?? false,
         failed: props.failed ?? false,
         range: '24h',
-        t: (key: string) => key,
+        t: (key: string, params?: { unit?: string }) =>
+          key === 'quotaTrendBalance' ? `Balance · ${params?.unit ?? ''}` : key,
       }),
   })
   app.component('UProgress', slotStub('UProgress') as never)
@@ -190,7 +188,7 @@ async function render(props: {
 test('loading shows the trend placeholder, never a chart', async () => {
   const html = await render({ loading: true, trend: null })
   expect(html).toContain('quotaTrendLoading')
-  expect(html).toContain('quotaTrendTitle')
+  expect(html).not.toContain('quotaTrendTitle')
   expect(html).not.toContain('data-stub="UsageChart"')
 })
 
@@ -215,16 +213,20 @@ test('an all-null or empty trend shows the empty state instead of a flat line', 
   expect(allNull).not.toContain('data-stub="UsageChart"')
 })
 
-test('a plottable trend renders the chart with the themed option', async () => {
+test('a plottable trend renders the chart without repeated range or unit copy', async () => {
   const html = await render({ trend: trend() })
   expect(html).toContain('data-stub="UsageChart"')
-  expect(html).toContain('quotaTrendTitle')
-  expect(html).toContain('quotaTrendBucketHint')
-  expect(html).toContain('quotaTrendUnitHint')
+  // One history section owns the title and range control; the chart adds only
+  // its panel heading and any real collection warning.
+  expect(html).not.toContain('quotaTrendTitle')
+  expect(html).not.toContain('quotaTrendBucketHint')
+  expect(html).not.toContain('quotaTrendUnitHint')
+  expect(html).not.toContain('quotaTrendSampled')
+  expect(html).not.toContain('quotaObservationRange24h')
   expect(renderedOptions).toHaveLength(1)
 })
 
-test('each (metric, unit) group renders its own single-axis scroll-legend panel', async () => {
+test('each (metric, unit) group renders its own single-axis panel with a native legend', async () => {
   const html = await render({
     trend: trend({
       series: [
@@ -262,19 +264,24 @@ test('each (metric, unit) group renders its own single-axis scroll-legend panel'
   expect(renderedOptions).toHaveLength(4)
   for (const option of renderedOptions) {
     expect(option.yAxis.type).toBe('value')
-    expect(option.legend.type).toBe('scroll')
+    // The canvas legend is gone; the panel renders native buttons instead.
+    expect(option.legend.show).toBe(false)
   }
+  // Every panel exposes its own accessible, pressed-by-default legend group.
+  expect((html.match(/role="group"/g) ?? []).length).toBe(4)
+  expect((html.match(/aria-pressed="true"/g) ?? []).length).toBe(4)
+  expect(html).toContain('aria-label="quotaTrendLegendLabel"')
   // Units and the percent metric each get a distinct axis; none is merged.
-  expect(renderedOptions.map((option) => option.yAxis.name)).toEqual([
-    'CNY',
-    'USD',
-    'credits',
-    '%',
-  ])
-  expect(html).toContain('>CNY<')
-  expect(html).toContain('>USD<')
-  expect(html).toContain('>credits<')
-  expect(html).toContain('>%<')
+  expect(
+    renderedOptions.map((option) =>
+      option.yAxis.type === 'value' ? option.yAxis.name : undefined,
+    ),
+  ).toEqual(['CNY', 'USD', 'credits', undefined])
+  expect(html).toContain('Balance · CNY')
+  expect(html).toContain('Balance · USD')
+  expect(html).toContain('Balance · credits')
+  expect(html).toContain('quotaTrendRemainingQuota')
+  expect(html).not.toContain('>%<')
 })
 
 test('a panel heading escapes an untrusted unit through Vue interpolation', async () => {
@@ -292,7 +299,7 @@ test('a panel heading escapes an untrusted unit through Vue interpolation', asyn
   expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
 })
 
-test('key and series truncation, failures and sampling are surfaced honestly', async () => {
+test('key and series truncation and quota collection failures are surfaced honestly', async () => {
   const html = await render({
     trend: trend({
       failed_observations: 2,
@@ -304,7 +311,7 @@ test('key and series truncation, failures and sampling are surfaced honestly', a
   expect(html).toContain('quotaTrendFailed')
   expect(html).toContain('quotaTrendKeysTruncated')
   expect(html).toContain('quotaTrendSeriesTruncated')
-  expect(html).toContain('quotaTrendSampled')
+  expect(html).not.toContain('quotaTrendSampled')
 })
 
 test('no failure or truncation indicator appears when everything is complete', async () => {

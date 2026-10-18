@@ -4,6 +4,8 @@ import { createSSRApp, h } from 'vue'
 import { compileScript, parse } from 'vue/compiler-sfc'
 import { renderToString } from 'vue/server-renderer'
 import type { TokenPlanQuotaStatus } from '../src/generated/admin-api'
+import * as datetime from '../src/format/datetime'
+import { locale } from '../src/composables/useLocale'
 
 const source = await Bun.file(
   new URL(
@@ -46,6 +48,7 @@ const js = new Bun.Transpiler({ loader: 'ts' }).transformSync(
 )
 const component = new Function('__resolve', js)((specifier: string) => {
   if (specifier === 'vue') return vue
+  if (specifier === '@/format/datetime') return datetime
   throw new Error(`Unexpected import ${specifier}`)
 }) as object
 const badge = {
@@ -70,6 +73,19 @@ async function render(status: TokenPlanQuotaStatus | null): Promise<string> {
   })
   app.component('UBadge', badge as never)
   return renderToString(app)
+}
+
+// Independent expectation of the visible app-locale timestamp: same instant,
+// explicit locale, so a host-locale or date-only regression still fails.
+function localizedTime(iso: string, appLocale: 'zh-CN' | 'en-US'): string {
+  return new Intl.DateTimeFormat(appLocale, {
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    month: 'numeric',
+    second: 'numeric',
+    year: 'numeric',
+  }).format(new Date(iso))
 }
 
 test('per-key labels distinguish available, exhausted, unknown and cooling', async () => {
@@ -118,7 +134,6 @@ test('status tooltip includes observation time, refresh failure and cooldown', a
   // A frozen clock keeps every fixture deadline active, so this asserts the
   // live-block tooltip rather than an already elapsed one.
   const now = new Date('2026-10-11T10:00:30Z')
-  const at = (iso: string) => new Date(iso).toLocaleString()
   const previousNow = Date.now
   Date.now = () => now.getTime()
   try {
@@ -132,8 +147,34 @@ test('status tooltip includes observation time, refresh failure and cooldown', a
     expect(html).toContain('quotaObservedAt:')
     expect(html).toContain('quotaRefreshFailedCached')
     expect(html).toContain('quotaRetryAt:')
-    expect(html).toContain(at('2026-10-11T10:01:00Z'))
+    expect(html).toContain(localizedTime('2026-10-11T10:01:00Z', 'zh-CN'))
   } finally {
     Date.now = previousNow
+  }
+})
+
+test('status tooltip times follow the app locale, not the host locale', async () => {
+  const previous = locale.value
+  try {
+    locale.value = 'zh-CN'
+    const zh = await render({
+      state: 'cooling',
+      scope: 'text_inference',
+      observed_at: '2026-10-11T10:00:00Z',
+    })
+    locale.value = 'en-US'
+    const en = await render({
+      state: 'cooling',
+      scope: 'text_inference',
+      observed_at: '2026-10-11T10:00:00Z',
+    })
+
+    const zhTime = localizedTime('2026-10-11T10:00:00Z', 'zh-CN')
+    const enTime = localizedTime('2026-10-11T10:00:00Z', 'en-US')
+    expect(zhTime).not.toBe(enTime)
+    expect(zh).toContain(zhTime)
+    expect(en).toContain(enTime)
+  } finally {
+    locale.value = previous
   }
 })

@@ -5,6 +5,7 @@ import type { ConfigAuditEntry } from '@/generated/admin-api'
 import { useNotifier } from '@/composables/useNotifier'
 import { useConfigArchiveActions } from '@/composables/useConfigArchiveActions'
 import { useConfigArchiveStore } from '@/stores/settings/config-archive'
+import { formatAppDateTime, formatAppNumber } from '@/format/datetime'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import SettingsCard from './SettingsCard.vue'
@@ -41,11 +42,11 @@ const columns = computed<TableColumn<ConfigAuditEntry>[]>(() => [
 ])
 
 function formatTime(value: string): string {
-  return new Date(value).toLocaleString()
+  return formatAppDateTime(value)
 }
 
 function formatNumber(value: number | null | undefined): string {
-  return value == null ? '-' : value.toLocaleString()
+  return value == null ? '-' : formatAppNumber(value)
 }
 
 function shortFingerprint(value: string | null | undefined): string {
@@ -95,10 +96,6 @@ onBeforeUnmount(() => {
           {{ t('configArchiveExportTitle') }}
         </h3>
       </template>
-
-      <p class="m-0 text-[11px] leading-relaxed text-muted">
-        {{ t('configArchiveExportHelp') }}
-      </p>
 
       <div class="grid items-end gap-3 md:grid-cols-2">
         <label class="grid gap-1.5">

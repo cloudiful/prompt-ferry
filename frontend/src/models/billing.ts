@@ -1,4 +1,5 @@
 import type { BillingPriceRuleResponse } from '../generated/admin-api'
+import { formatAppDateTime, formatAppNumber } from '../format/datetime'
 
 export type BillingChargeFilters = {
   user_id?: number
@@ -89,9 +90,9 @@ export function formatBillingRate(value: string, currency = 'CNY'): string {
 }
 
 export function formatBillingTime(value: string): string {
-  return new Date(value).toLocaleString()
+  return formatAppDateTime(value)
 }
 
 export function formatTokenCount(value: number): string {
-  return new Intl.NumberFormat().format(value)
+  return formatAppNumber(value)
 }
