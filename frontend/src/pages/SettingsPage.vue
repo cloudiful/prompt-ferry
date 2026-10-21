@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import PageIntro from '../components/PageIntro.vue'
 import { setLocale, useLocale } from '../composables/useLocale'
 import { useNotifier } from '../composables/useNotifier'
+import { setDisplayTimeZone, useDisplayTimeZone } from '../format/timezone'
 import { useSettingsPageActions } from '../composables/useSettingsPageActions'
 import SettingsGeneralTab from '../components/settings/SettingsGeneralTab.vue'
 import SettingsCacheAlertSection from '../components/settings/SettingsCacheAlertSection.vue'
@@ -23,6 +24,7 @@ const settingsStore = useSettingsStore()
 const route = useRoute()
 const { locale, t } = useLocale()
 const themeMode = useThemeMode()
+const displayTimeZone = useDisplayTimeZone()
 const { notifyApiError } = useNotifier()
 
 const activeSection = computed(() =>
@@ -89,9 +91,11 @@ onMounted(async () => {
       v-if="activeSection === 'general'"
       v-model:locale="locale"
       v-model:theme-mode="themeMode"
+      v-model:display-time-zone="displayTimeZone"
       :t="t"
       @set-locale="setLocale"
       @set-theme-mode="setThemeMode"
+      @set-display-time-zone="setDisplayTimeZone"
     />
 
     <SettingsRequestsTab

@@ -6,7 +6,8 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 
 use crate::db::{
-    RequestRecordCategory, RequestRecordOverviewPerspective, RequestRecordOverviewResponse,
+    RequestRecordCategory, RequestRecordMcpScope, RequestRecordOverviewPerspective,
+    RequestRecordOverviewResponse,
 };
 
 mod presentation;
@@ -39,6 +40,7 @@ struct OverviewCacheKey {
     visible_user_id: Option<i64>,
     request_category: &'static str,
     perspective: &'static str,
+    mcp_scope: &'static str,
     bucket: OverviewBucket,
     start_bucket: Option<i64>,
     end_bucket: Option<i64>,
@@ -78,11 +80,13 @@ pub async fn request_records_overview(
     window: OverviewWindow,
     user: Option<&str>,
     perspective: RequestRecordOverviewPerspective,
+    mcp_scope: RequestRecordMcpScope,
 ) -> Result<RequestRecordOverviewResponse> {
     let key = OverviewCacheKey {
         visible_user_id,
         request_category: request_category.as_str(),
         perspective: perspective.as_str(),
+        mcp_scope: mcp_scope.as_str(),
         bucket: window.bucket,
         start_bucket: window_bucket(window.start),
         end_bucket: window_bucket(window.end),
@@ -94,8 +98,22 @@ pub async fn request_records_overview(
     }
 
     let (summary, trend, breakdown) = tokio::try_join!(
-        queries::query_summary(pool, visible_user_id, request_category, window, user),
-        queries::query_trend(pool, visible_user_id, request_category, window, user),
+        queries::query_summary(
+            pool,
+            visible_user_id,
+            request_category,
+            window,
+            user,
+            mcp_scope
+        ),
+        queries::query_trend(
+            pool,
+            visible_user_id,
+            request_category,
+            window,
+            user,
+            mcp_scope
+        ),
         queries::query_breakdown(
             pool,
             visible_user_id,
@@ -103,6 +121,7 @@ pub async fn request_records_overview(
             window,
             user,
             perspective,
+            mcp_scope,
         ),
     )?;
 
@@ -110,6 +129,7 @@ pub async fn request_records_overview(
         summary,
         trend,
         breakdown,
+        trend_granularity: window.bucket.as_str().to_string(),
     };
     store_response(key, now, &response);
     Ok(response)
@@ -143,6 +163,7 @@ mod tests {
             },
             trend: Vec::new(),
             breakdown: Vec::new(),
+            trend_granularity: "hour".to_string(),
         }
     }
 
@@ -151,6 +172,7 @@ mod tests {
             visible_user_id: Some(visible_user_id),
             request_category: "ai",
             perspective: "model",
+            mcp_scope: "all",
             bucket: OverviewBucket::Hour,
             start_bucket: Some(0),
             end_bucket: Some(1),
@@ -183,6 +205,14 @@ mod tests {
         upstream.perspective = "upstream";
 
         assert_ne!(test_key(1, None), upstream);
+    }
+
+    #[test]
+    fn cache_key_separates_mcp_scopes() {
+        let mut gateway = test_key(1, None);
+        gateway.mcp_scope = "gateway";
+
+        assert_ne!(test_key(1, None), gateway);
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use super::RequestRecordMcpScope;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -131,6 +132,12 @@ pub struct RequestRecordOverviewBreakdownRow {
     /// the clicked upstream. `None` for model rows, MCP rows, and `(direct)`.
     pub endpoint_id: Option<Uuid>,
     pub mcp_server_id: Option<Uuid>,
+    /// Which MCP scope the row belongs to, taken from the record identity the
+    /// server grouped by: `service` for a record that reached an MCP server and
+    /// `gateway` for gateway chatter. `None` for AI rows. The client uses it
+    /// to open the matching records, so a name-only service row never looks
+    /// like gateway chatter.
+    pub mcp_scope: Option<RequestRecordMcpScope>,
     /// Canonical MCP provider preset id (`context7`/`firecrawl`/`minimax`)
     /// resolved from `mcp_servers.provider_kind`. `None` for AI rows and for
     /// generic/legacy MCP servers.
@@ -151,4 +158,8 @@ pub struct RequestRecordOverviewResponse {
     pub summary: RequestRecordOverviewSummary,
     pub trend: Vec<RequestRecordOverviewTrendBucket>,
     pub breakdown: Vec<RequestRecordOverviewBreakdownRow>,
+    /// Trend bucket granularity the server selected for this window: `hour`
+    /// for short windows and `day` for longer ones. The client uses it to
+    /// label the buckets without re-deriving the server's window logic.
+    pub trend_granularity: String,
 }

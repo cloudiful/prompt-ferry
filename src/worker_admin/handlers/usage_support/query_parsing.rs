@@ -259,6 +259,7 @@ pub(in crate::worker_admin::handlers) fn build_request_record_query(
         request_category: query
             .request_category
             .unwrap_or(db::RequestRecordCategory::Ai),
+        mcp_scope: query.mcp_scope.unwrap_or_default(),
         first: query.first.unwrap_or(0),
         rows: query.rows.unwrap_or(10),
         sort_field: query.sort_field.unwrap_or_else(|| "created_at".to_string()),
@@ -519,6 +520,7 @@ mod tests {
             .with_timezone(&Utc);
         let query = UsageEventsQuery {
             request_category: None,
+            mcp_scope: None,
             range: Some(RequestRecordOverviewRange::Custom),
             first: Some(0),
             rows: Some(25),
@@ -547,6 +549,85 @@ mod tests {
         assert_eq!(request_query.search.as_deref(), Some("needle"));
         assert_eq!(request_query.user.as_deref(), Some("owner"));
         assert_eq!(request_query.model.as_deref(), Some("gpt"));
+    }
+
+    #[test]
+    fn build_request_record_query_defaults_an_omitted_scope_to_all() {
+        use super::build_request_record_query;
+        use crate::worker_admin::types::UsageEventsQuery;
+
+        let user = SessionUser {
+            user_id: 42,
+            login_name: "owner".to_string(),
+            display_name: "owner".to_string(),
+            is_admin: false,
+        };
+        let query = UsageEventsQuery {
+            request_category: Some(crate::db::RequestRecordCategory::Mcp),
+            mcp_scope: None,
+            range: None,
+            first: None,
+            rows: None,
+            sort_field: None,
+            sort_order: None,
+            search: None,
+            date: None,
+            start: None,
+            end: None,
+            client_key_id: None,
+            user: None,
+            model: None,
+            endpoint_id: None,
+            mcp_server_id: None,
+            mcp_bearer_token_slot: None,
+            request_state: None,
+            redaction_applied: None,
+        };
+
+        let request_query = build_request_record_query(&user, query, None, None);
+        assert_eq!(
+            request_query.mcp_scope,
+            crate::db::RequestRecordMcpScope::All,
+            "an omitted scope keeps the historical all-records behaviour"
+        );
+    }
+
+    #[test]
+    fn build_request_record_query_keeps_the_requested_scope() {
+        use super::build_request_record_query;
+        use crate::db::RequestRecordMcpScope;
+        use crate::worker_admin::types::UsageEventsQuery;
+
+        let user = SessionUser {
+            user_id: 42,
+            login_name: "owner".to_string(),
+            display_name: "owner".to_string(),
+            is_admin: false,
+        };
+        let query = UsageEventsQuery {
+            request_category: Some(crate::db::RequestRecordCategory::Mcp),
+            mcp_scope: Some(RequestRecordMcpScope::Service),
+            range: None,
+            first: None,
+            rows: None,
+            sort_field: None,
+            sort_order: None,
+            search: None,
+            date: None,
+            start: None,
+            end: None,
+            client_key_id: None,
+            user: None,
+            model: None,
+            endpoint_id: None,
+            mcp_server_id: None,
+            mcp_bearer_token_slot: None,
+            request_state: None,
+            redaction_applied: None,
+        };
+
+        let request_query = build_request_record_query(&user, query, None, None);
+        assert_eq!(request_query.mcp_scope, RequestRecordMcpScope::Service);
     }
 
     #[test]

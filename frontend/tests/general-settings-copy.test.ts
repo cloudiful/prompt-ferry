@@ -28,6 +28,8 @@ const settingsCardStub = {
   },
 }
 
+const timezone = await import('../src/format/timezone')
+
 function rewriteSfcImports(code: string): string {
   return code.replace(
     /import\s+([^;'"]+?)\s+from\s+(['"])([^'"]+)\2;?/g,
@@ -72,6 +74,7 @@ const component = (() => {
   const resolve = (spec: string): unknown => {
     if (spec === 'vue') return vue
     if (spec === '@/i18n') return { localeOptions: [] }
+    if (spec === '@/format/timezone') return timezone
     if (spec === './SettingsCard.vue') return settingsCardStub
     return slotStub(spec.split('/').pop() ?? spec)
   }
@@ -84,10 +87,12 @@ async function render(): Promise<string> {
       h(component as never, {
         locale: 'zh-CN',
         themeMode: 'dark',
+        displayTimeZone: 'auto',
         t: (key: string) => (messages['zh-CN'] as Record<string, string>)[key],
       }),
   })
   app.component('USelect', slotStub('USelect'))
+  app.component('USelectMenu', slotStub('USelectMenu'))
   app.component('UIcon', slotStub('UIcon'))
   return renderToString(app)
 }

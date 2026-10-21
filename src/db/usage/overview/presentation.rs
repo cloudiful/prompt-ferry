@@ -1,4 +1,6 @@
-use crate::db::{RequestRecordOverviewSummary, RequestRecordOverviewTokenUsage};
+use crate::db::{
+    RequestRecordMcpScope, RequestRecordOverviewSummary, RequestRecordOverviewTokenUsage,
+};
 
 use super::queries::MetricsRow;
 
@@ -79,6 +81,18 @@ pub(super) fn opt_error_rate(error_count: Option<i64>, request_count: i64) -> Op
     error_count.map(|count| error_rate(count, request_count))
 }
 
+/// The MCP scope a breakdown row carries, taken from the record identity the
+/// server grouped by. A row that reached an MCP server is `service`, gateway
+/// chatter is `gateway`, and an AI row carries no scope. An unrecognized value
+/// stays `None` instead of guessing a scope from a display label.
+pub(super) fn breakdown_mcp_scope(raw: Option<&str>) -> Option<RequestRecordMcpScope> {
+    match raw {
+        Some("service") => Some(RequestRecordMcpScope::Service),
+        Some("gateway") => Some(RequestRecordMcpScope::Gateway),
+        _ => None,
+    }
+}
+
 /// Compute the overview cache-read rate from the per-row `full_input` sum.
 ///
 /// P1 (issue #226): the aggregate denominator must be `SUM(normalized_full_input_tokens)`,
@@ -101,9 +115,25 @@ pub(crate) fn overview_cache_rate(full_input_tokens: i64, cache_read_tokens: i64
 #[cfg(test)]
 mod tests {
     use super::{
-        error_rate, opt_error_rate, overview_cache_rate, summary_from_metrics, token_usage,
+        breakdown_mcp_scope, error_rate, opt_error_rate, overview_cache_rate, summary_from_metrics,
+        token_usage,
     };
+    use crate::db::RequestRecordMcpScope;
     use crate::db::usage::overview::queries::MetricsRow;
+
+    #[test]
+    fn breakdown_mcp_scope_keeps_the_record_identity() {
+        assert_eq!(
+            breakdown_mcp_scope(Some("service")),
+            Some(RequestRecordMcpScope::Service)
+        );
+        assert_eq!(
+            breakdown_mcp_scope(Some("gateway")),
+            Some(RequestRecordMcpScope::Gateway)
+        );
+        assert_eq!(breakdown_mcp_scope(None), None);
+        assert_eq!(breakdown_mcp_scope(Some("(unknown)")), None);
+    }
 
     #[test]
     fn cache_rate_uses_normalized_input_and_stays_bounded() {

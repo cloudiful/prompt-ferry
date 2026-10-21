@@ -1,7 +1,7 @@
 //! Unified key-pool routing failover and exhausted-capacity rejection.
 //! Shared fixtures live in `unified_pool_fixtures`.
 
-use super::super::tests::session_affinity_services;
+use super::super::tests::querying_test_services;
 use super::unified_pool_fixtures::{
     candidate, endpoint_key, opencode_go_usage, route_selected_endpoint, target,
 };
@@ -11,7 +11,7 @@ use crate::replay_cache::ReplayCache;
 async fn pool_falls_over_to_another_endpoint_only_when_all_its_units_are_dead() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state, replay_cache);
+    let services = querying_test_services(runtime_state, replay_cache).await;
     let endpoint_a = uuid::Uuid::new_v4();
     let endpoint_b = uuid::Uuid::new_v4();
     let dead_a1 = uuid::Uuid::new_v4();
@@ -64,7 +64,7 @@ async fn pool_falls_over_to_another_endpoint_only_when_all_its_units_are_dead() 
 async fn pool_with_every_unit_dead_returns_typed_quota_unavailable() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state, replay_cache);
+    let services = querying_test_services(runtime_state, replay_cache).await;
     let endpoint_a = uuid::Uuid::new_v4();
     let endpoint_b = uuid::Uuid::new_v4();
     let dead_a = uuid::Uuid::new_v4();

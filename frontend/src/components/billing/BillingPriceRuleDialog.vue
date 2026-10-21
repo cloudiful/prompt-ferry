@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { BillingPriceRuleForm } from '@/models/billing'
+import { browserTimeZone } from '@/format/timezone'
 
 defineProps<{
   busy: boolean
@@ -35,6 +36,9 @@ defineEmits<{
               required
             />
           </UFormField>
+          <p class="m-0 text-dimmed">
+            {{ t('browserTimeZone') }}: {{ browserTimeZone() }}
+          </p>
         </div>
         <UFormField :label="t('publicModel')">
           <UInput

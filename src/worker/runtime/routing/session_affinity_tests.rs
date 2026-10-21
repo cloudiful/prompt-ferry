@@ -6,7 +6,10 @@ use super::super::{
     RequestExecutionContext, WorkerRuntimeState,
     context::RequestExecutionContextParams,
     prompt_log::RequestPromptLog,
-    tests::{sample_request, session_affinity_candidate, session_affinity_services},
+    tests::{
+        querying_test_services, sample_request, session_affinity_candidate,
+        session_affinity_services,
+    },
 };
 use super::{RouteAffinityError, select_route_for_candidate};
 use crate::{db, replay_cache::ReplayCache};
@@ -30,6 +33,8 @@ pub(super) fn request_context(
 #[tokio::test]
 async fn rejects_unavailable_shared_backend() {
     let runtime_state = WorkerRuntimeState::default();
+    // The affinity store is unavailable here, so selection fails before any
+    // quota refresh: this test issues no query and keeps the lazy fixture.
     let services = session_affinity_services(runtime_state.clone(), ReplayCache::default());
     let candidate = session_affinity_candidate();
     let request_ctx = request_context(
@@ -67,8 +72,8 @@ async fn concurrent_first_requests_share_binding_and_follow_key_rotation() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state_a = WorkerRuntimeState::default();
     let runtime_state_b = WorkerRuntimeState::default();
-    let services_a = session_affinity_services(runtime_state_a.clone(), replay_cache.clone());
-    let services_b = session_affinity_services(runtime_state_b.clone(), replay_cache);
+    let services_a = querying_test_services(runtime_state_a.clone(), replay_cache.clone()).await;
+    let services_b = querying_test_services(runtime_state_b.clone(), replay_cache).await;
     let candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
     let request_a = sample_request();
@@ -175,7 +180,7 @@ async fn concurrent_first_requests_share_binding_and_follow_key_rotation() {
 async fn rejects_endpoint_override_conflicts() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache);
+    let services = querying_test_services(runtime_state.clone(), replay_cache).await;
     let candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
     let first_context = request_context(
@@ -250,7 +255,7 @@ async fn rejects_endpoint_override_conflicts() {
 async fn rejects_key_override_conflicts() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache);
+    let services = querying_test_services(runtime_state.clone(), replay_cache).await;
     let mut candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
     let first_context = request_context(
@@ -323,7 +328,7 @@ async fn rejects_key_override_conflicts() {
 async fn rejects_endpoint_and_key_override_conflicts() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache);
+    let services = querying_test_services(runtime_state.clone(), replay_cache).await;
     let mut candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
     let first_context = request_context(
@@ -432,7 +437,7 @@ async fn heals_stale_key_id_when_secret_fingerprint_matches() {
 
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let mut candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
     let bound_target = candidate.targets.first_mut().expect("bound target exists");

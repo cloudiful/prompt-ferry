@@ -1,5 +1,7 @@
 WITH normalized AS (
-    SELECT date_trunc('day', rr.created_at) AS bucket_at,
+    -- The day bucket is a logical UTC calendar date: truncating in UTC keeps
+    -- the label on that date whatever the session time zone is.
+    SELECT date_trunc('day', rr.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS bucket_at,
            rr.ok,
            rr.request_state,
            rr.duration_ms,
@@ -56,6 +58,19 @@ WITH normalized AS (
       AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)
       AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)
       AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)
+      AND (
+          $6::TEXT = 'all'
+          OR $2 <> 'mcp'
+          OR (
+              $6::TEXT = 'service'
+              AND (rr.mcp_server_name IS NOT NULL OR rr.mcp_server_id IS NOT NULL)
+          )
+          OR (
+              $6::TEXT = 'gateway'
+              AND rr.mcp_server_name IS NULL
+              AND rr.mcp_server_id IS NULL
+          )
+      )
 )
 SELECT bucket_at AS "bucket_at!",
        COUNT(*)::BIGINT AS "request_count!",

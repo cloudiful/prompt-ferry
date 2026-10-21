@@ -1,7 +1,7 @@
 use super::super::{
     prompt_log::RequestPromptLog,
     request_assembly::BufferedBridgeRequest,
-    tests::{session_affinity_candidate, session_affinity_services},
+    tests::{querying_test_services, session_affinity_candidate},
 };
 use super::{
     select_route_for_candidate, session_affinity_quota::quota_failover_selection,
@@ -23,7 +23,7 @@ use chrono::Utc;
 async fn exhausted_bound_key_migrates_to_alternate_key_on_same_endpoint() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let mut candidate = session_affinity_candidate();
     let target = candidate.targets.first_mut().expect("target exists");
     target.key_lb_enabled = true;
@@ -275,7 +275,7 @@ pub(super) async fn bind_key(
 async fn exhausted_command_code_bound_key_migrates_to_alternate_key() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let mut candidate = session_affinity_candidate();
     let target = candidate.targets.first_mut().expect("target exists");
     target.key_lb_enabled = true;
@@ -355,7 +355,7 @@ async fn exhausted_monthly_pool_command_code_bound_key_migrates_to_alternate_key
     // the alternate key with positive monthly pools.
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let mut candidate = session_affinity_candidate();
     let target = candidate.targets.first_mut().expect("target exists");
     target.key_lb_enabled = true;
@@ -444,7 +444,7 @@ async fn exhausted_monthly_pool_command_code_bound_key_migrates_to_alternate_key
 async fn payg_command_code_bound_key_without_windows_is_still_honored() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let mut candidate = session_affinity_candidate();
     let target = candidate.targets.first_mut().expect("target exists");
     target.key_lb_enabled = true;
@@ -525,7 +525,7 @@ async fn bind_previous_response_key(
 async fn exhausted_bound_key_migrates_to_another_candidate_target_when_no_alternate_key() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let candidate = session_affinity_candidate();
     let bound_target = candidate.targets.first().expect("bound target exists");
     let endpoint_id = bound_target.endpoint_id;
@@ -603,7 +603,7 @@ async fn exhausted_bound_key_migrates_to_another_candidate_target_when_no_altern
 async fn previous_response_chain_does_not_leave_the_bound_endpoint() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let candidate = session_affinity_candidate();
     let bound_target = candidate.targets.first().expect("bound target exists");
     let endpoint_id = bound_target.endpoint_id;
@@ -661,7 +661,7 @@ async fn previous_response_chain_does_not_leave_the_bound_endpoint() {
 async fn previous_response_chain_rotates_key_on_the_same_endpoint() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let mut candidate = session_affinity_candidate();
     let target = candidate.targets.first_mut().expect("target exists");
     let endpoint_id = target.endpoint_id;

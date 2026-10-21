@@ -24,6 +24,19 @@ WITH bounded AS (
       AND rr.request_category = $2
       AND rr.created_at >= COALESCE($3::TIMESTAMPTZ, now() - interval '24 hours')
       AND rr.created_at < COALESCE($4::TIMESTAMPTZ, now())
+      AND (
+          $6::TEXT = 'all'
+          OR $2 <> 'mcp'
+          OR (
+              $6::TEXT = 'service'
+              AND (rr.mcp_server_name IS NOT NULL OR rr.mcp_server_id IS NOT NULL)
+          )
+          OR (
+              $6::TEXT = 'gateway'
+              AND rr.mcp_server_name IS NULL
+              AND rr.mcp_server_id IS NULL
+          )
+      )
 )
 SELECT
     facet AS "facet!",

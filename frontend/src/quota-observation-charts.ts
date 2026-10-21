@@ -6,6 +6,7 @@ import type {
 } from '@/generated/admin-api'
 import type { LegendComponentOption } from 'echarts/components'
 import type { KeyQuotaTrendRange } from '@/composables/useKeyQuotaObservationTrend'
+import { formatAppDateOnly } from '@/format/datetime'
 import { getChartTheme } from '@/theme/chartTheme'
 
 // Issue #911 P3: pure trend-option builder. The backend already emitted one
@@ -274,9 +275,10 @@ export function createQuotaTrendPanelOption(
   let previousDay: string | null = null
   for (const at of categories) {
     const date = new Date(at)
-    const day = Number.isNaN(date.getTime())
-      ? at
-      : `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+    // The day boundary is the calendar day in the display time zone, not the
+    // browser's own day, so the axis does not jump a day when the preference
+    // differs from the browser zone.
+    const day = Number.isNaN(date.getTime()) ? at : formatAppDateOnly(date)
     let label: string
     if (input.range === '24h') {
       label =

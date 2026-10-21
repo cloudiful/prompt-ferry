@@ -32,6 +32,10 @@ pub struct RequestRecordOverviewQuery {
     /// the MCP category, whose distribution is always by MCP server.
     #[param(inline)]
     pub perspective: Option<db::RequestRecordOverviewPerspective>,
+    /// Which MCP records the overview covers: `service`, `gateway`, or `all`.
+    /// Omitted means `all`, which keeps the historical behaviour.
+    #[param(inline)]
+    pub mcp_scope: Option<db::RequestRecordMcpScope>,
     pub range: Option<RequestRecordOverviewRange>,
     pub start: Option<chrono::DateTime<chrono::Utc>>,
     pub end: Option<chrono::DateTime<chrono::Utc>>,
@@ -42,6 +46,10 @@ pub struct RequestRecordOverviewQuery {
 #[into_params(parameter_in = Query)]
 pub struct RequestRecordsQuery {
     pub request_category: Option<db::RequestRecordCategory>,
+    /// Which MCP records the page covers: `service`, `gateway`, or `all`.
+    /// Omitted means `all`, which keeps the historical behaviour.
+    #[param(inline)]
+    pub mcp_scope: Option<db::RequestRecordMcpScope>,
     pub range: Option<RequestRecordOverviewRange>,
     pub first: Option<i64>,
     pub rows: Option<i64>,
@@ -65,6 +73,10 @@ pub struct RequestRecordsQuery {
 #[into_params(parameter_in = Query)]
 pub struct RequestRecordFacetsQuery {
     pub request_category: Option<db::RequestRecordCategory>,
+    /// Which MCP records the facets cover: `service`, `gateway`, or `all`.
+    /// Omitted means `all`, which keeps the historical behaviour.
+    #[param(inline)]
+    pub mcp_scope: Option<db::RequestRecordMcpScope>,
     pub range: Option<RequestRecordOverviewRange>,
     pub start: Option<chrono::DateTime<chrono::Utc>>,
     pub end: Option<chrono::DateTime<chrono::Utc>>,

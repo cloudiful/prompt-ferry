@@ -242,7 +242,7 @@ mod tests {
         worker::runtime::{
             WorkerRuntimeState, context::RequestExecutionContextParams,
             prompt_log::RequestPromptLog, request_assembly::BufferedBridgeRequest,
-            standalone::StandaloneRuntimeState, tests::session_affinity_services,
+            standalone::StandaloneRuntimeState, tests::querying_test_services,
         },
     };
     use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -334,10 +334,11 @@ mod tests {
             RelaySecretManager::from_base64(&STANDARD.encode([7_u8; 32])).expect("manager");
         let standalone = StandaloneRuntimeState::new(store.clone(), manager, snapshot);
         let runtime_state = WorkerRuntimeState::default();
-        let services = session_affinity_services(
+        let services = querying_test_services(
             runtime_state.clone(),
             crate::replay_cache::ReplayCache::default(),
         )
+        .await
         .with_standalone_state(standalone);
         let request = request();
         let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {

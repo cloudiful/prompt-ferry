@@ -1705,6 +1705,26 @@ paths:
         required: false
         schema:
           $ref: '#/components/schemas/RequestRecordCategory'
+      - name: mcp_scope
+        in: query
+        description: |-
+          Which MCP records the page covers: `service`, `gateway`, or `all`.
+          Omitted means `all`, which keeps the historical behaviour.
+        required: false
+        schema:
+          type: string
+          description: |-
+            Which MCP records a query covers.
+
+            The split is by record identity, never by path or display label: a record
+            belongs to a *service* when it carries an MCP server id or a stored server
+            name, and to the *gateway* when it carries neither. A name-only failed
+            attempt and a historical id-only record for a deleted server therefore stay
+            on the service side, and the gateway keeps its own history.
+          enum:
+          - service
+          - gateway
+          - all
       - name: range
         in: query
         required: false
@@ -1835,6 +1855,26 @@ paths:
         required: false
         schema:
           $ref: '#/components/schemas/RequestRecordCategory'
+      - name: mcp_scope
+        in: query
+        description: |-
+          Which MCP records the facets cover: `service`, `gateway`, or `all`.
+          Omitted means `all`, which keeps the historical behaviour.
+        required: false
+        schema:
+          type: string
+          description: |-
+            Which MCP records a query covers.
+
+            The split is by record identity, never by path or display label: a record
+            belongs to a *service* when it carries an MCP server id or a stored server
+            name, and to the *gateway* when it carries neither. A name-only failed
+            attempt and a historical id-only record for a deleted server therefore stay
+            on the service side, and the gateway keeps its own history.
+          enum:
+          - service
+          - gateway
+          - all
       - name: range
         in: query
         required: false
@@ -1885,6 +1925,26 @@ paths:
           enum:
           - model
           - upstream
+      - name: mcp_scope
+        in: query
+        description: |-
+          Which MCP records the overview covers: `service`, `gateway`, or `all`.
+          Omitted means `all`, which keeps the historical behaviour.
+        required: false
+        schema:
+          type: string
+          description: |-
+            Which MCP records a query covers.
+
+            The split is by record identity, never by path or display label: a record
+            belongs to a *service* when it carries an MCP server id or a stored server
+            name, and to the *gateway* when it carries neither. A name-only failed
+            attempt and a historical id-only record for a deleted server therefore stay
+            on the service side, and the gateway keeps its own history.
+          enum:
+          - service
+          - gateway
+          - all
       - name: range
         in: query
         required: false
@@ -7836,6 +7896,20 @@ components:
           type:
           - string
           - 'null'
+    RequestRecordMcpScope:
+      type: string
+      description: |-
+        Which MCP records a query covers.
+
+        The split is by record identity, never by path or display label: a record
+        belongs to a *service* when it carries an MCP server id or a stored server
+        name, and to the *gateway* when it carries neither. A name-only failed
+        attempt and a historical id-only record for a deleted server therefore stay
+        on the service side, and the gateway keeps its own history.
+      enum:
+      - service
+      - gateway
+      - all
     RequestRecordOverviewBreakdownRow:
       type: object
       required:
@@ -7880,6 +7954,16 @@ components:
           description: '`error_count / request_count`, `None` when the row does not report errors.'
         label:
           type: string
+        mcp_scope:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RequestRecordMcpScope'
+            description: |-
+              Which MCP scope the row belongs to, taken from the record identity the
+              server grouped by: `service` for a record that reached an MCP server and
+              `gateway` for gateway chatter. `None` for AI rows. The client uses it
+              to open the matching records, so a name-only service row never looks
+              like gateway chatter.
         mcp_server_id:
           type:
           - string
@@ -8014,6 +8098,7 @@ components:
       - summary
       - trend
       - breakdown
+      - trend_granularity
       properties:
         breakdown:
           type: array
@@ -8025,6 +8110,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RequestRecordOverviewTrendBucket'
+        trend_granularity:
+          type: string
+          description: |-
+            Trend bucket granularity the server selected for this window: `hour`
+            for short windows and `day` for longer ones. The client uses it to
+            label the buckets without re-deriving the server's window logic.
     RequestRecordOverviewSummary:
       type: object
       required:

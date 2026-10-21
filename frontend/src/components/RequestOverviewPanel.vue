@@ -6,13 +6,17 @@ import type {
   RequestRecordOverviewBreakdownRow,
 } from '@/generated/admin-api'
 import { useLocale } from '@/composables/useLocale'
-import { formatAppDateTime } from '../format/datetime'
+import { useNotifier } from '@/composables/useNotifier'
+import { formatAppDateOnly, formatAppDateTime } from '../format/datetime'
 import type { RequestRecordFormatting } from '../models/request-record-formatting'
+import type { RequestRecordMcpScope } from '@/models/usage'
 import {
   breakdownDrilldownForPerspective,
+  formatTrendBucketLabel,
   type RequestOverviewDrilldown,
   type RequestOverviewPerspective,
 } from '../request-overview'
+import { useRequestRecordsStore } from '@/stores/usage'
 import { createTrendOption } from '../request-overview-charts'
 
 const UsageChart = defineAsyncComponent(() => import('./usage/UsageChart.vue'))
@@ -36,6 +40,8 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useLocale()
+const requestRecordsStore = useRequestRecordsStore()
+const { notifyApiError } = useNotifier()
 const hasTraffic = computed(
   () => (props.overview?.summary.request_count ?? 0) > 0,
 )
@@ -45,10 +51,24 @@ const perspectiveOptions = computed(() => [
   { label: t('overviewPerspectiveModel'), value: 'model' },
   { label: t('overviewPerspectiveUpstream'), value: 'upstream' },
 ])
+const scopeOptions = computed(() => [
+  { label: t('mcpScopeService'), value: 'service' },
+  { label: t('mcpScopeGateway'), value: 'gateway' },
+  { label: t('mcpScopeAll'), value: 'all' },
+])
+const activeScope = computed(() => requestRecordsStore.mcpScope)
 const activePerspective = computed({
   get: (): RequestOverviewPerspective => props.perspective,
   set: (value: RequestOverviewPerspective) => emit('changePerspective', value),
 })
+
+async function onScopeChange(scope: RequestRecordMcpScope): Promise<void> {
+  try {
+    await requestRecordsStore.setMcpScope(scope)
+  } catch (cause) {
+    notifyApiError(cause)
+  }
+}
 const distributionTitle = computed(() => {
   if (props.category === 'mcp') return t('overviewMcpServerDistribution')
   return props.perspective === 'upstream'
@@ -128,12 +148,18 @@ function formatMetricValue(
 }
 
 function formatBucket(value: string): string {
-  return formatAppDateTime(value, {
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    month: '2-digit',
-  })
+  return formatTrendBucketLabel(
+    props.overview?.trend_granularity,
+    value,
+    (instant) =>
+      formatAppDateTime(instant, {
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        month: '2-digit',
+      }),
+    (utcDate) => formatAppDateOnly(utcDate, { timeZone: 'UTC' }),
+  )
 }
 
 function emitBreakdownDrilldown(row: RequestRecordOverviewBreakdownRow): void {
@@ -191,6 +217,21 @@ function providerBadge(row: RequestRecordOverviewBreakdownRow): string {
 
 <template>
   <div class="grid gap-3">
+    <!-- The scope decides which MCP dataset the overview reads, so it must
+         stay reachable when the selected scope has no traffic at all. -->
+    <div v-if="category === 'mcp'" class="flex items-center justify-end gap-2">
+      <USelect
+        :model-value="activeScope"
+        class="w-36"
+        size="sm"
+        :aria-label="t('mcpScope')"
+        :items="scopeOptions"
+        label-key="label"
+        value-key="value"
+        @update:model-value="onScopeChange($event as RequestRecordMcpScope)"
+      />
+    </div>
+
     <div v-if="overview && hasTraffic" class="grid gap-3">
       <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
         <article

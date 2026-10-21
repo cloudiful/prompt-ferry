@@ -66,20 +66,93 @@ test('an MCP row keeps the MCP server filter under the upstream perspective', ()
   const filter = breakdownDrilldownForPerspective(
     'upstream',
     'mcp',
-    breakdownRow({ endpoint_id: null, mcp_server_id: 'mcp-uuid-1' }),
+    breakdownRow({
+      endpoint_id: null,
+      mcp_server_id: 'mcp-uuid-1',
+      mcp_scope: 'service',
+    }),
   )
 
-  expect(filter).toEqual({ model: null, mcp_server_id: 'mcp-uuid-1' })
+  expect(filter).toEqual({
+    model: null,
+    mcp_server_id: 'mcp-uuid-1',
+    mcp_scope: 'service',
+  })
 })
 
 test('an MCP row keeps the MCP server filter under the model perspective', () => {
   const filter = breakdownDrilldownForPerspective(
     'model',
     'mcp',
-    breakdownRow({ endpoint_id: null, mcp_server_id: 'mcp-uuid-1' }),
+    breakdownRow({
+      endpoint_id: null,
+      mcp_server_id: 'mcp-uuid-1',
+      mcp_scope: 'service',
+    }),
   )
 
-  expect(filter).toEqual({ model: null, mcp_server_id: 'mcp-uuid-1' })
+  expect(filter).toEqual({
+    model: null,
+    mcp_server_id: 'mcp-uuid-1',
+    mcp_scope: 'service',
+  })
+})
+
+test('a gateway MCP row drills down to the gateway scope', () => {
+  const filter = breakdownDrilldownForPerspective(
+    'model',
+    'mcp',
+    breakdownRow({
+      endpoint_id: null,
+      label: '(unknown)',
+      mcp_server_id: null,
+      mcp_scope: 'gateway',
+    }),
+  )
+
+  expect(filter).toEqual({
+    model: null,
+    mcp_server_id: null,
+    mcp_scope: 'gateway',
+  })
+})
+
+test('a name-only MCP service row drills down to the service scope by its stored name', () => {
+  const filter = breakdownDrilldownForPerspective(
+    'model',
+    'mcp',
+    breakdownRow({
+      endpoint_id: null,
+      label: 'scope-fixture-server',
+      mcp_server_id: null,
+      mcp_scope: 'service',
+    }),
+  )
+
+  expect(filter).toEqual({
+    model: 'scope-fixture-server',
+    mcp_server_id: null,
+    mcp_scope: 'service',
+  })
+})
+
+test('a service named like the gateway fallback never opens the gateway scope', () => {
+  const filter = breakdownDrilldownForPerspective(
+    'model',
+    'mcp',
+    breakdownRow({
+      endpoint_id: null,
+      label: '(unknown)',
+      mcp_server_id: null,
+      mcp_scope: 'service',
+    }),
+  )
+
+  expect(filter).toEqual({
+    model: '(unknown)',
+    mcp_server_id: null,
+    mcp_scope: 'service',
+  })
 })
 
 test('only a fully failed zero-token detail row is failed-only', () => {

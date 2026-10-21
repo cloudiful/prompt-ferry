@@ -2,6 +2,11 @@ WITH normalized AS (
     SELECT COALESCE(rr.mcp_server_name, ms.name, '(unknown)') AS label,
            rr.mcp_server_id,
            ms.provider_kind AS server_provider_kind,
+           CASE
+               WHEN rr.mcp_server_name IS NOT NULL OR rr.mcp_server_id IS NOT NULL
+               THEN 'service'
+               ELSE 'gateway'
+           END AS mcp_scope,
            rr.ok,
            COALESCE(rr.cache_read_tokens, rr.cached_tokens, 0)::BIGINT AS normalized_cache_read_tokens,
            COALESCE(rr.cache_write_tokens, 0)::BIGINT AS normalized_cache_write_tokens,
@@ -56,10 +61,24 @@ WITH normalized AS (
       AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)
       AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)
       AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)
+      AND (
+          $6::TEXT = 'all'
+          OR $2 <> 'mcp'
+          OR (
+              $6::TEXT = 'service'
+              AND (rr.mcp_server_name IS NOT NULL OR rr.mcp_server_id IS NOT NULL)
+          )
+          OR (
+              $6::TEXT = 'gateway'
+              AND rr.mcp_server_name IS NULL
+              AND rr.mcp_server_id IS NULL
+          )
+      )
 ), grouped AS (
     SELECT label,
            mcp_server_id,
            server_provider_kind,
+           mcp_scope,
            COUNT(*)::BIGINT AS request_count,
            COUNT(*) FILTER (WHERE ok IS TRUE)::BIGINT AS success_count,
            COUNT(*) FILTER (
@@ -77,7 +96,7 @@ WITH normalized AS (
            -- not re-derive the guard on the raw input SUM (issue #338).
            COALESCE(SUM(normalized_full_input_tokens), 0)::BIGINT AS full_input_tokens
     FROM normalized
-    GROUP BY label, mcp_server_id, server_provider_kind
+    GROUP BY label, mcp_server_id, server_provider_kind, mcp_scope
 ), totals AS (
     SELECT SUM(request_count)::DOUBLE PRECISION AS request_count
     FROM grouped
@@ -86,6 +105,7 @@ SELECT label AS "label!",
        NULL::TEXT AS model,
        mcp_server_id,
        grouped.server_provider_kind AS "server_provider_kind",
+       grouped.mcp_scope AS "mcp_scope?",
        grouped.request_count AS "request_count!",
        COALESCE(grouped.request_count::DOUBLE PRECISION / NULLIF(totals.request_count, 0), 0) AS "request_share!",
        success_count AS "success_count!",

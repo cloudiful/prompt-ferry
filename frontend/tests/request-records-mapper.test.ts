@@ -1,5 +1,9 @@
 import { expect, test } from 'bun:test'
-import { upstreamLabel } from '../src/admin-mappers/request-records'
+import {
+  createRequestRecordRowView,
+  upstreamLabel,
+} from '../src/admin-mappers/request-records'
+import { displayTimeZone, setDisplayTimeZone } from '../src/format/timezone'
 
 test('upstreamLabel returns endpoint name when upstream_model is empty', () => {
   expect(
@@ -33,4 +37,23 @@ test('upstreamLabel keeps MCP rows untouched', () => {
       upstream_model: 'muse-spark-1.3-contri',
     }),
   ).toBe('filesystem')
+})
+
+test('the mapped record date follows the display time zone', () => {
+  const previous = displayTimeZone.value
+  try {
+    setDisplayTimeZone('UTC')
+    const utc = createRequestRecordRowView({
+      created_at: '2026-03-04T23:30:00Z',
+    } as never)
+    expect(utc.request_date).toBe('2026-03-04')
+
+    setDisplayTimeZone('Asia/Shanghai')
+    const shanghai = createRequestRecordRowView({
+      created_at: '2026-03-04T23:30:00Z',
+    } as never)
+    expect(shanghai.request_date).toBe('2026-03-05')
+  } finally {
+    setDisplayTimeZone(previous)
+  }
 })

@@ -1,7 +1,7 @@
 use super::*;
 use crate::db::{
     ClientKeyFacet, RequestAbortReason, RequestFailureFamily, RequestRecordCategory,
-    RequestRecordRedactionSummary, RequestRecordState, RouteSelectionReason,
+    RequestRecordMcpScope, RequestRecordRedactionSummary, RequestRecordState, RouteSelectionReason,
 };
 
 mod sort;
@@ -162,6 +162,7 @@ pub async fn list_request_records(
     let model = query.model.as_deref().filter(|value| !value.is_empty());
     let date_start = query.date_start;
     let date_end = query.date_end;
+    let mcp_scope = query.mcp_scope.as_str();
     let page_sql = REQUEST_RECORDS_PAGE_SQL.replace("/*__ORDER_BY__*/", order_by);
 
     let total = sqlx::query_file_scalar!(
@@ -179,6 +180,7 @@ pub async fn list_request_records(
         query.request_state.map(RequestRecordState::as_str),
         query.redaction_applied,
         query.client_key_id,
+        mcp_scope,
     )
     .fetch_one(pool)
     .await?;
@@ -196,6 +198,7 @@ pub async fn list_request_records(
         .bind(query.request_state.map(RequestRecordState::as_str))
         .bind(query.redaction_applied)
         .bind(query.client_key_id)
+        .bind(mcp_scope)
         .bind(rows)
         .bind(first)
         .fetch_all(pool)
@@ -218,6 +221,7 @@ pub async fn list_request_record_facets(
     is_admin: bool,
     start: Option<chrono::DateTime<chrono::Utc>>,
     end: Option<chrono::DateTime<chrono::Utc>>,
+    mcp_scope: RequestRecordMcpScope,
 ) -> Result<RequestRecordFacets> {
     let facets = sqlx::query_file_as!(
         crate::db::types::UsageFacet,
@@ -227,6 +231,7 @@ pub async fn list_request_record_facets(
         start,
         end,
         FACET_LIMIT,
+        mcp_scope.as_str(),
     )
     .fetch_all(pool)
     .await?;

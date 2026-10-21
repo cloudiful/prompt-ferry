@@ -142,5 +142,18 @@ AND ($10::SMALLINT IS NULL OR rr.mcp_bearer_token_slot = $10)
 AND ($11::TEXT IS NULL OR rr.request_state = $11)
 AND ($12::BOOLEAN IS NULL OR rr.redaction_applied = $12)
 AND ($13::BIGINT IS NULL OR rr.client_key_id = $13)
+AND (
+    $14::TEXT = 'all'
+    OR $2 <> 'mcp'
+    OR (
+        $14::TEXT = 'service'
+        AND (rr.mcp_server_name IS NOT NULL OR rr.mcp_server_id IS NOT NULL)
+    )
+    OR (
+        $14::TEXT = 'gateway'
+        AND rr.mcp_server_name IS NULL
+        AND rr.mcp_server_id IS NULL
+    )
+)
 ORDER BY /*__ORDER_BY__*/
-LIMIT $14 OFFSET $15
+LIMIT $15 OFFSET $16

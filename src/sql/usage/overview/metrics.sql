@@ -64,6 +64,19 @@ WITH normalized AS (
       AND ($3::TIMESTAMPTZ IS NULL OR rr.created_at >= $3)
       AND ($4::TIMESTAMPTZ IS NULL OR rr.created_at < $4)
       AND ($5::TEXT IS NULL OR COALESCE(u.login_name, '#' || rr.user_id::TEXT, '-') = $5)
+      AND (
+          $6::TEXT = 'all'
+          OR $2 <> 'mcp'
+          OR (
+              $6::TEXT = 'service'
+              AND (rr.mcp_server_name IS NOT NULL OR rr.mcp_server_id IS NOT NULL)
+          )
+          OR (
+              $6::TEXT = 'gateway'
+              AND rr.mcp_server_name IS NULL
+              AND rr.mcp_server_id IS NULL
+          )
+      )
 )
 SELECT COUNT(*)::BIGINT AS "request_count!",
        COUNT(*) FILTER (WHERE ok IS TRUE)::BIGINT AS "success_count!",
