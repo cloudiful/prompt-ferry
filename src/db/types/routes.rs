@@ -135,7 +135,8 @@ pub struct RouteConfig {
     pub thinking_downgrade_enabled: bool,
     // Issue #464: resolved per-target thinking effort override; None means
     // inherit (follow the caller). `Some(effort)` force-replaces
-    // `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
+    // `reasoning_effort` (Chat), `reasoning.effort` (Responses), and
+    // `output_config.effort` (Anthropic Messages).
     pub thinking_effort_override: Option<String>,
     // Issue #502 Task 5: resolved per-target compact mode; defaults to
     // `passthrough` (no new default semantics). `self_summarize` triggers
@@ -200,7 +201,8 @@ pub struct ModelRouteTarget {
     pub thinking_downgrade_enabled: bool,
     /// Issue #464: per-target thinking effort override. `None` (null/empty)
     /// means inherit (follow the caller); `Some(effort)` force-replaces
-    /// `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
+    /// `reasoning_effort` (Chat), `reasoning.effort` (Responses), and
+    /// `output_config.effort` (Anthropic Messages).
     /// Validated against `none/minimal/low/medium/high/xhigh/max`.
     #[serde(default)]
     pub thinking_effort_override: Option<String>,
@@ -275,7 +277,8 @@ pub struct ModelRouteTargetCreate {
     pub thinking_downgrade_enabled: bool,
     /// Issue #464: per-target thinking effort override. `None` (null/empty)
     /// means inherit (follow the caller); `Some(effort)` force-replaces
-    /// `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
+    /// `reasoning_effort` (Chat), `reasoning.effort` (Responses), and
+    /// `output_config.effort` (Anthropic Messages).
     /// Validated against `none/minimal/low/medium/high/xhigh/max`.
     #[serde(default)]
     pub thinking_effort_override: Option<String>,
@@ -355,7 +358,8 @@ pub struct ModelRouteCandidateTarget {
     pub thinking_downgrade_enabled: bool,
     /// Issue #464: per-target thinking effort override. `None` (null/empty)
     /// means inherit (follow the caller); `Some(effort)` force-replaces
-    /// `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
+    /// `reasoning_effort` (Chat), `reasoning.effort` (Responses), and
+    /// `output_config.effort` (Anthropic Messages).
     /// Validated against `none/minimal/low/medium/high/xhigh/max`.
     pub thinking_effort_override: Option<String>,
     /// Issue #502 Task 5: resolved per-target compact mode; defaults to

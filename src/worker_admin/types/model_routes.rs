@@ -340,8 +340,9 @@ pub struct ModelRouteTargetRequest {
     /// (omitted/null/empty) means inherit (follow the caller);
     /// `Some(effort)` must be one of
     /// `none/minimal/low/medium/high/xhigh/max` and force-replaces the
-    /// caller value on Chat (`reasoning_effort`) and Responses
-    /// (`reasoning.effort`). Always sent (no omit/carry); `None` clears
+    /// caller value on Chat (`reasoning_effort`), Responses
+    /// (`reasoning.effort`), and Anthropic Messages
+    /// (`output_config.effort`). Always sent (no omit/carry); `None` clears
     /// to inherit.
     #[serde(default)]
     pub thinking_effort_override: Option<String>,

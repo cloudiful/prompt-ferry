@@ -138,11 +138,8 @@ pub fn prepare_upstream_request_for_provider(
     // inherit (follow the caller, zero-copy); an explicit value
     // force-replaces the caller value. Applied to the final (possibly
     // translated) body keyed on the final upstream path: Chat bodies gain
-    // `reasoning_effort`, Responses bodies gain `reasoning.effort`.
-    // Anthropic `/v1/messages` is untouched.
-    if prepared.path == "/v1/messages" {
-        return Ok(prepared);
-    }
+    // `reasoning_effort`, Responses bodies gain `reasoning.effort`, and
+    // Anthropic bodies gain `output_config.effort`.
     let Some(effort) = thinking_effort_override
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -175,8 +172,9 @@ pub fn prepare_upstream_request_for_provider(
 
 // Issue #464: force-replace the caller thinking effort for one upstream
 // body. Chat paths write `reasoning_effort`; the Responses path writes
-// `reasoning.effort`. `None`/empty/invalid effort or non-JSON/non-object
-// bodies return the input unchanged.
+// `reasoning.effort`; the Anthropic path writes `output_config.effort`.
+// `None`/empty/invalid effort, non-JSON/non-object bodies, and an Anthropic
+// `output_config` that exists but is not an object return the input unchanged.
 const THINKING_EFFORTS: [&str; 7] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 fn apply_thinking_effort_override_for_path(
@@ -196,7 +194,23 @@ fn apply_thinking_effort_override_for_path(
     let Some(object) = value.as_object_mut() else {
         return body;
     };
-    if request_path == "/v1/responses" || request_path == "/v1/responses/compact" {
+    if request_path == "/v1/messages" {
+        let effort_value = serde_json::Value::String(effort.to_string());
+        match object.get_mut("output_config") {
+            Some(output_config) => {
+                let Some(output_config_object) = output_config.as_object_mut() else {
+                    return body;
+                };
+                output_config_object.insert("effort".to_string(), effort_value);
+            }
+            None => {
+                object.insert(
+                    "output_config".to_string(),
+                    serde_json::json!({ "effort": effort_value }),
+                );
+            }
+        }
+    } else if request_path == "/v1/responses" || request_path == "/v1/responses/compact" {
         let reasoning = object
             .entry("reasoning")
             .or_insert_with(|| serde_json::json!({}));
@@ -520,6 +534,132 @@ mod tests {
             panic!("Anthropic Messages requests should be forwarded unchanged");
         };
         assert_eq!(forwarded, body);
+    }
+
+    #[test]
+    fn anthropic_effort_override_inserts_output_config() {
+        let body = br#"{
+            "model":"MiniMax-M3",
+            "max_tokens":32,
+            "thinking":{"type":"adaptive"},
+            "messages":[{"role":"user","content":"hi"}]
+        }"#;
+        let prepared = prepare_upstream_request(
+            "/v1/messages",
+            body,
+            NativeApi::AnthropicMessages,
+            false,
+            Some("high"),
+        )
+        .unwrap();
+        assert_eq!(prepared.path, "/v1/messages");
+        assert_eq!(prepared.response_adapter, ResponseAdapter::Passthrough);
+        let PreparedRequestBody::PassthroughStream(bytes) = prepared.body else {
+            panic!("Anthropic Messages requests should stay passthrough");
+        };
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["output_config"]["effort"].as_str(), Some("high"));
+        assert_eq!(body["thinking"]["type"].as_str(), Some("adaptive"));
+        assert_eq!(body["max_tokens"].as_u64(), Some(32));
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn anthropic_effort_override_replaces_effort_and_keeps_siblings() {
+        let body = br#"{
+            "model":"MiniMax-M3",
+            "max_tokens":32,
+            "thinking":{"type":"adaptive","budget_tokens":1024},
+            "output_config":{"effort":"low","format":{"type":"json"}},
+            "messages":[{"role":"user","content":"hi"}]
+        }"#;
+        let prepared = super::prepare_upstream_request_for_provider(
+            "/v1/messages",
+            body,
+            NativeApi::AnthropicMessages,
+            Some(crate::db::EndpointProvider::Minimax),
+            false,
+            Some(" max "),
+            crate::db::CompactMode::Passthrough,
+        )
+        .unwrap();
+        assert_eq!(prepared.path, "/v1/messages");
+        assert_eq!(prepared.response_adapter, ResponseAdapter::Passthrough);
+        let PreparedRequestBody::PassthroughStream(bytes) = prepared.body else {
+            panic!("Anthropic Messages requests should stay passthrough");
+        };
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["output_config"]["effort"].as_str(), Some("max"));
+        assert_eq!(
+            body["output_config"]["format"]["type"].as_str(),
+            Some("json")
+        );
+        assert_eq!(body["thinking"]["type"].as_str(), Some("adaptive"));
+        assert_eq!(body["thinking"]["budget_tokens"].as_u64(), Some(1024));
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn anthropic_effort_override_preserves_non_object_output_config() {
+        for body in [
+            br#"{"model":"m","max_tokens":32,"messages":[{"role":"user","content":"hi"}],"output_config":"compact"}"#.as_slice(),
+            br#"{"model":"m","max_tokens":32,"messages":[{"role":"user","content":"hi"}],"output_config":["effort"]}"#.as_slice(),
+            br#"{"model":"m","max_tokens":32,"messages":[{"role":"user","content":"hi"}],"output_config":null}"#.as_slice(),
+        ] {
+            let prepared = prepare_upstream_request(
+                "/v1/messages",
+                body,
+                NativeApi::AnthropicMessages,
+                false,
+                Some("high"),
+            )
+            .unwrap();
+            let PreparedRequestBody::PassthroughStream(bytes) = prepared.body else {
+                panic!("Anthropic Messages requests should stay passthrough");
+            };
+            assert_eq!(bytes, body);
+        }
+    }
+
+    #[test]
+    fn anthropic_effort_override_ignores_inherit_blank_and_invalid() {
+        let body = br#"{"model":"m","max_tokens":32,"thinking":{"type":"adaptive"},"messages":[{"role":"user","content":"hi"}]}"#;
+        for effort in [None, Some(""), Some("   "), Some("ultra")] {
+            let prepared = prepare_upstream_request(
+                "/v1/messages",
+                body,
+                NativeApi::AnthropicMessages,
+                false,
+                effort,
+            )
+            .unwrap();
+            let PreparedRequestBody::PassthroughStream(bytes) = prepared.body else {
+                panic!("Anthropic Messages requests should stay passthrough");
+            };
+            assert_eq!(
+                bytes, body,
+                "effort {effort:?} must preserve the input bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn anthropic_effort_override_preserves_malformed_and_non_object_bodies() {
+        // The public Anthropic path validates JSON before the override, so the
+        // helper guards are exercised directly for these byte-identity cases.
+        for body in [
+            br#"{"model":"m","#.as_slice(),
+            br#"[{"model":"m"}]"#.as_slice(),
+            br#"null"#.as_slice(),
+        ] {
+            let result = super::apply_thinking_effort_override_for_path(
+                "/v1/messages",
+                body.to_vec(),
+                Some("high"),
+            );
+            assert_eq!(result, body);
+        }
     }
 
     #[test]

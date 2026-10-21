@@ -20,7 +20,7 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 
 - OpenAI Chat Completions and Responses, plus native Anthropic Messages and Models.
 - Upstream presets for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM, DeepSeek and OpenAI Platform; other OpenAI-compatible hosts use the Generic provider with an explicit base URL.
-- Per-request reasoning controls, including Chat `reasoning_effort` and Responses `reasoning.effort`.
+- Per-request reasoning controls, including Chat `reasoning_effort`, Responses `reasoning.effort`, and Anthropic `output_config.effort`.
 - Users, client API keys, upstream endpoints, model routes, key balancing, and multiple relays.
 - Configurable redaction for forwarded content, logs and usage details.
 - Admin console with effective default-text quota summaries, per-key detail, and 30-day OpenAI subscription history on PostgreSQL.

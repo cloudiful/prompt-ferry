@@ -1038,7 +1038,8 @@ export type ModelRouteTarget = {
     /**
      * Issue #464: per-target thinking effort override. `None` (null/empty)
      * means inherit (follow the caller); `Some(effort)` force-replaces
-     * `reasoning_effort` (Chat) and `reasoning.effort` (Responses).
+     * `reasoning_effort` (Chat), `reasoning.effort` (Responses), and
+     * `output_config.effort` (Anthropic Messages).
      * Validated against `none/minimal/low/medium/high/xhigh/max`.
      */
     thinking_effort_override?: string | null;
@@ -1101,8 +1102,9 @@ export type ModelRouteTargetRequest = {
      * (omitted/null/empty) means inherit (follow the caller);
      * `Some(effort)` must be one of
      * `none/minimal/low/medium/high/xhigh/max` and force-replaces the
-     * caller value on Chat (`reasoning_effort`) and Responses
-     * (`reasoning.effort`). Always sent (no omit/carry); `None` clears
+     * caller value on Chat (`reasoning_effort`), Responses
+     * (`reasoning.effort`), and Anthropic Messages
+     * (`output_config.effort`). Always sent (no omit/carry); `None` clears
      * to inherit.
      */
     thinking_effort_override?: string | null;
