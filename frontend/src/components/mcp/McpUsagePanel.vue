@@ -4,9 +4,12 @@ import type { SortingState } from '@tanstack/vue-table'
 import { computed } from 'vue'
 import type { RequestRecordFilterModel, RequestRecordRowView } from '@/models'
 import type { RequestRecordFormatting } from '@/models/request-record-formatting'
-import type { UsageWorkspaceView } from '@/models/usage'
+import type { RequestRecordMcpScope, UsageWorkspaceView } from '@/models/usage'
+import { formatAppDateOnly } from '@/format/datetime'
 import { REQUEST_RECORD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 import { formatRequestStateBadges } from '@/composables/useUsageFormatting'
+import { useNotifier } from '@/composables/useNotifier'
+import { useRequestRecordsStore } from '@/stores/usage'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import UsageRecordsToolbar from '@/components/usage/UsageRecordsToolbar.vue'
 import McpUsageDetailDialog from './McpUsageDetailDialog.vue'
@@ -22,6 +25,8 @@ const filters = defineModel<RequestRecordFilterModel>('filters', {
   required: true,
 })
 const detailVisible = defineModel<boolean>('detailVisible', { required: true })
+const requestRecordsStore = useRequestRecordsStore()
+const { notifyApiError } = useNotifier()
 const emit = defineEmits<{
   filter: [event: TableFilterChange]
   openClearDialog: []
@@ -30,6 +35,14 @@ const emit = defineEmits<{
   search: []
   sort: [event: TableSortChange]
 }>()
+
+async function onScopeChange(scope: RequestRecordMcpScope): Promise<void> {
+  try {
+    await requestRecordsStore.setMcpScope(scope)
+  } catch (cause) {
+    notifyApiError(cause)
+  }
+}
 
 const columns = computed<TableColumn<RequestRecordRowView>[]>(() => [
   { id: 'details' },
@@ -105,9 +118,11 @@ const sorting = computed<SortingState>({
       category="mcp"
       :facets="workspace.facets"
       :is-admin="isAdmin"
+      :mcp-scope="workspace.mcp_scope"
       :t="t"
       @filter="$emit('filter', {})"
       @open-clear-dialog="$emit('openClearDialog')"
+      @scope-change="onScopeChange"
       @search="$emit('search')"
     >
       <template #headerActions><slot name="headerActions" /></template>
@@ -134,6 +149,9 @@ const sorting = computed<SortingState>({
         </template>
         <template #created_at-cell="{ row }">{{
           formatting.formatTime(row.original.created_at)
+        }}</template>
+        <template #request_date-cell="{ row }">{{
+          formatAppDateOnly(row.original.created_at)
         }}</template>
         <template #client_key_label-cell="{ row }">{{
           row.original.client_key_label || '-'

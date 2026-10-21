@@ -77,7 +77,8 @@ async fn exhausted_opencode_go_bound_key_migrates_to_alternate_key() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
     let services =
-        super::super::tests::session_affinity_services(runtime_state.clone(), replay_cache.clone());
+        super::super::tests::querying_test_services(runtime_state.clone(), replay_cache.clone())
+            .await;
     let mut candidate = super::super::tests::session_affinity_candidate();
     let target = candidate.targets.first_mut().expect("target exists");
     target.key_lb_enabled = true;
@@ -164,7 +165,8 @@ async fn missing_monthly_window_still_migrates_when_rolling_exhausted() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
     let services =
-        super::super::tests::session_affinity_services(runtime_state.clone(), replay_cache.clone());
+        super::super::tests::querying_test_services(runtime_state.clone(), replay_cache.clone())
+            .await;
     let mut candidate = super::super::tests::session_affinity_candidate();
     let target = candidate.targets.first_mut().expect("target exists");
     target.key_lb_enabled = true;
@@ -242,7 +244,8 @@ async fn payg_opencode_go_bound_key_without_windows_is_still_honored() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
     let services =
-        super::super::tests::session_affinity_services(runtime_state.clone(), replay_cache.clone());
+        super::super::tests::querying_test_services(runtime_state.clone(), replay_cache.clone())
+            .await;
     let mut candidate = super::super::tests::session_affinity_candidate();
     let target = candidate.targets.first_mut().expect("target exists");
     target.key_lb_enabled = true;

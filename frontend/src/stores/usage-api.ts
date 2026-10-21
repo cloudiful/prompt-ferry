@@ -16,6 +16,7 @@ import { fetchRequestOverview } from '../api/request-overview'
 import type {
   RequestRecordClearForm,
   RequestRecordFilterModel,
+  RequestRecordMcpScope,
   RequestRecordRowView,
 } from '../models'
 import type { RequestRecordOverviewResponse } from '../generated/admin-api'
@@ -28,6 +29,7 @@ export async function fetchUsageOverview(input: {
   range: RequestRecordOverviewRange
   start: string
   end: string
+  mcpScope?: RequestRecordMcpScope
 }): Promise<RequestRecordOverviewResponse | null> {
   return fetchRequestOverview({
     requestCategory: input.requestCategory,
@@ -35,6 +37,7 @@ export async function fetchUsageOverview(input: {
     range: input.range,
     start: input.start || undefined,
     end: input.end || undefined,
+    mcpScope: input.mcpScope,
   })
 }
 
@@ -48,6 +51,7 @@ export async function fetchUsageRecords(input: {
   sortOrder: -1 | 0 | 1
   start: string
   end: string
+  mcpScope?: RequestRecordMcpScope
 }): Promise<{
   rows: RequestRecordRowView[]
   total: number
@@ -73,12 +77,14 @@ export async function fetchUsageFacets(
   requestCategory: RequestRecordCategory,
   start?: string,
   end?: string,
+  mcpScope?: RequestRecordMcpScope,
 ): Promise<RequestRecordFacets> {
   return expectData(
     await requestRecordFacets<true>(
       withData({
         query: {
           request_category: requestCategory,
+          mcp_scope: mcpScope,
           start: start || undefined,
           end: end || undefined,
         },

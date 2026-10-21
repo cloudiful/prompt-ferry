@@ -9,7 +9,7 @@ import {
   groupQuotaTrendSeries,
   quotaTrendLegendEntries,
 } from '@/quota-observation-charts'
-import { formatAppDateTime } from '@/format/datetime'
+import { currentDisplayTimeZone, formatAppDateTime } from '@/format/datetime'
 import type { KeyQuotaTrendRange } from '@/composables/useKeyQuotaObservationTrend'
 import { themeMode } from '@/theme/appTheme'
 
@@ -34,6 +34,10 @@ const optionInput = computed(() => {
   // `themeMode` is a reactive dependency so a light/dark switch rebuilds the
   // tokenized options, not just re-renders the canvases.
   void themeMode.value
+  // The axis labels are formatted when the chart draws them, so the display
+  // time zone is read here to rebuild the options when the preference
+  // changes.
+  void currentDisplayTimeZone()
   const kinds: Record<CanonicalQuotaWindowKind, string> = {
     five_hour: props.t('tokenPlanInterval'),
     rolling: props.t('tokenPlanRolling'),

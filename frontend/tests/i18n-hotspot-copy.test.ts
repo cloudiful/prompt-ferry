@@ -80,3 +80,19 @@ test('MCP connection copy states the user consequence, not the mechanism', () =>
   expect(messages['zh-CN'].lifecyclePolicyHint).not.toContain('server/discover')
   expect(messages['en-US'].lifecyclePolicyHint).not.toContain('server/discover')
 })
+
+test('the display time zone names one consequence in both locales', async () => {
+  const tab = await source('../src/components/settings/SettingsGeneralTab.vue')
+
+  expect(messages['zh-CN'].displayTimeZone).toBe('显示时区')
+  expect(messages['en-US'].displayTimeZone).toBe('Display time zone')
+  expect(messages['zh-CN'].displayTimeZoneEffect).toBe(
+    '仅影响时间显示，不改变统计周期。',
+  )
+  expect(messages['en-US'].displayTimeZoneEffect).toBe(
+    'Affects how times are displayed only; it does not change the reporting period.',
+  )
+  expect(tab).toContain("t('displayTimeZone')")
+  expect(tab).toContain("t('displayTimeZoneEffect')")
+  expect(tab).not.toContain("t('displayTimeZoneDesc')")
+})

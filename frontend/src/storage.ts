@@ -1,6 +1,7 @@
 export const LOCALE_STORAGE_KEY = 'prompt-ferry:locale'
 export const THEME_MODE_STORAGE_KEY = 'prompt-ferry:theme-mode'
 export const LOGIN_NAME_STORAGE_KEY = 'prompt-ferry:login-name'
+export const DISPLAY_TIME_ZONE_STORAGE_KEY = 'prompt-ferry:display-time-zone'
 
 // Firefox-family hardening (LibreWolf `dom.storage.enabled=false`, partitioned
 // or blocked origins) can make any localStorage access throw. Callers read as

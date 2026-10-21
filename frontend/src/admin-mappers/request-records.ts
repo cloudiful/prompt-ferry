@@ -4,6 +4,7 @@ import type {
   RequestRecordListRow,
   SessionRouteOptionsResponse,
 } from '../generated/admin-api'
+import { formatAppDateOnly } from '../format/datetime'
 import type {
   ConversationEndpointOverrideView,
   RequestRecordDetailView,
@@ -74,7 +75,7 @@ export function createRequestRecordRowView(
     is_session_recognized: sessionRecognized,
     model_key: record.model || '-',
     model_display: deriveModelDisplay(record),
-    request_date: record.created_at.slice(0, 10),
+    request_date: formatAppDateOnly(record.created_at),
     session_state: sessionRecognized ? 'recognized' : 'unrecognized',
     session_short_id: record.conversation_id?.slice(0, 8) || '-',
     target: label,
@@ -106,7 +107,7 @@ export function createRequestRecordDetailView(
     is_sub_session: sessionParentId.length > 0,
     model_key: record.model || '-',
     model_display: deriveModelDisplay(record),
-    request_date: record.created_at.slice(0, 10),
+    request_date: formatAppDateOnly(record.created_at),
     request_user_agent: recordWithUserAgent.request_user_agent ?? null,
     session_state: sessionRecognized ? 'recognized' : 'unrecognized',
     session_short_id: record.conversation_id?.slice(0, 8) || '-',

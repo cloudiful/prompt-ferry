@@ -3,6 +3,7 @@ import type {
   RequestRecordOverviewResponse,
   RequestRecordOverviewRange,
 } from './generated/admin-api'
+import type { RequestRecordMcpScope } from './models/usage'
 
 export type { RequestRecordOverviewResponse, RequestRecordOverviewRange }
 
@@ -23,6 +24,12 @@ export type RequestOverviewDrilldown = {
   model?: string | null
   mcp_server_id?: string | null
   mcp_bearer_token_slot?: number | null
+  /**
+   * The MCP scope the drilldown opens, taken from the scope the distribution
+   * row was grouped by. A gateway row opens the gateway scope instead of the
+   * unfiltered "all" records.
+   */
+  mcp_scope?: RequestRecordMcpScope | null
 }
 
 /**
@@ -77,6 +84,25 @@ export function splitFailedOnlyDetailEntries<
 }
 
 /**
+ * The label of a trend bucket.
+ *
+ * The server reports the granularity it selected for the window. A day bucket
+ * is a logical UTC calendar date, so its label keeps that date instead of
+ * moving onto the previous day in a negative-offset zone. An hour bucket is an
+ * instant, so its label follows the display time zone.
+ */
+export function formatTrendBucketLabel(
+  granularity: string | null | undefined,
+  bucketAt: string,
+  formatInstant: (value: string) => string,
+  formatUtcDate: (value: string) => string,
+): string {
+  return granularity === 'day'
+    ? formatUtcDate(bucketAt)
+    : formatInstant(bucketAt)
+}
+
+/**
  * Map a clicked distribution row to the record filter it should open.
  *
  * The request category decides the filter axis first so the MCP distribution is
@@ -84,6 +110,12 @@ export function splitFailedOnlyDetailEntries<
  * and AI rows branch on the perspective. An upstream `(direct)` row has no
  * endpoint identity, so it returns `null` and opens no misleading unfiltered
  * record list.
+ *
+ * An MCP row carries the scope its records were grouped by, so the drilldown
+ * never infers a scope from a null server id or from a display label: a
+ * gateway row opens the gateway scope, a service row with a server id opens
+ * that server, and a name-only service row opens the service scope filtered by
+ * its stored server name.
  */
 export function breakdownDrilldownForPerspective(
   perspective: RequestOverviewPerspective,
@@ -91,7 +123,14 @@ export function breakdownDrilldownForPerspective(
   row: RequestRecordOverviewBreakdownRow,
 ): RequestOverviewDrilldown | null {
   if (category === 'mcp') {
-    return { model: null, mcp_server_id: row.mcp_server_id ?? null }
+    const mcpServerId = row.mcp_server_id ?? null
+    if (row.mcp_scope === 'gateway') {
+      return { model: null, mcp_server_id: null, mcp_scope: 'gateway' }
+    }
+    if (mcpServerId) {
+      return { model: null, mcp_server_id: mcpServerId, mcp_scope: 'service' }
+    }
+    return { model: row.label, mcp_server_id: null, mcp_scope: 'service' }
   }
   if (perspective === 'upstream') {
     return row.endpoint_id ? { endpoint_id: row.endpoint_id } : null

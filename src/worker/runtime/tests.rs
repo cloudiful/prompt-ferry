@@ -26,6 +26,14 @@ mod test_db_url {
     ));
 }
 
+#[allow(dead_code)]
+mod test_pg_target {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/test_pg_target.rs"
+    ));
+}
+
 use super::ai::upstream::upstream_url_for_route;
 use super::connect::is_expected_relay_disconnect;
 use super::routing::{
@@ -324,7 +332,7 @@ fn unified_pool_draw_weights_shift_the_distribution() {
 #[tokio::test]
 async fn session_affinity_uses_preferred_endpoint() {
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), ReplayCache::for_tests());
+    let services = querying_test_services(runtime_state.clone(), ReplayCache::for_tests()).await;
     let candidate = session_affinity_candidate();
     let preferred = candidate.targets[0].endpoint_id;
     let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {
@@ -365,7 +373,7 @@ async fn session_affinity_uses_preferred_endpoint() {
 #[tokio::test]
 async fn session_affinity_draws_and_pins_a_new_identity() {
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), ReplayCache::for_tests());
+    let services = querying_test_services(runtime_state.clone(), ReplayCache::for_tests()).await;
     let candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
     let request_ctx = RequestExecutionContext::new(RequestExecutionContextParams {
@@ -548,7 +556,34 @@ pub(super) fn session_affinity_services(
     runtime_state: WorkerRuntimeState,
     replay_cache: ReplayCache,
 ) -> RuntimeServices {
-    let pool = test_db_url::lazy_test_pool();
+    session_affinity_services_with_pool(runtime_state, replay_cache, test_db_url::lazy_test_pool())
+}
+
+/// Route selection refreshes every candidate target, and a target without a
+/// seeded quota observation reaches `db::get_endpoint`. Those tests must query
+/// the dedicated test database rather than a lazy placeholder pool: the
+/// sanctioned target is confirmed by the operator, the fixture endpoint ids are
+/// fresh UUIDs, and the lookup is a read-only `provider_endpoints` probe.
+pub(super) async fn querying_test_services(
+    runtime_state: WorkerRuntimeState,
+    replay_cache: ReplayCache,
+) -> RuntimeServices {
+    let pool = test_pg_target::required_pool(1)
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "the routing tests that read provider_endpoints need the confirmed dedicated test \
+             database; run them through scripts/ci/with-test-env.sh: {error}"
+            )
+        });
+    session_affinity_services_with_pool(runtime_state, replay_cache, pool)
+}
+
+fn session_affinity_services_with_pool(
+    runtime_state: WorkerRuntimeState,
+    replay_cache: ReplayCache,
+    pool: sqlx::PgPool,
+) -> RuntimeServices {
     let catalog_cache = McpCatalogCache::new();
     let admin_state = AdminState::new(AdminStateInit {
         pool: pool.clone(),

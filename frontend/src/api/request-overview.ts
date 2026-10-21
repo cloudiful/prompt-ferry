@@ -6,6 +6,7 @@ import {
 } from '../generated/admin-api'
 import { expectData, withData } from '../api'
 import type { RequestOverviewPerspective } from '../request-overview'
+import type { RequestRecordMcpScope } from '../models/usage'
 
 export async function fetchRequestOverview(input: {
   requestCategory: RequestRecordCategory
@@ -13,6 +14,7 @@ export async function fetchRequestOverview(input: {
   range: RequestRecordOverviewRange
   start?: string
   end?: string
+  mcpScope?: RequestRecordMcpScope
 }): Promise<RequestRecordOverviewResponse> {
   return expectData(
     await requestRecordOverview<true>(
@@ -21,6 +23,7 @@ export async function fetchRequestOverview(input: {
           request_category: input.requestCategory,
           perspective:
             input.requestCategory === 'ai' ? input.perspective : 'model',
+          mcp_scope: input.mcpScope,
           range: input.range,
           start: input.start || undefined,
           end: input.end || undefined,

@@ -1,7 +1,7 @@
 use super::super::{
     WorkerRuntimeState,
     prompt_log::RequestPromptLog,
-    tests::{sample_request, session_affinity_candidate, session_affinity_services},
+    tests::{querying_test_services, sample_request, session_affinity_candidate},
 };
 use super::{select_route_for_candidate, session_affinity_tests::request_context};
 use crate::{
@@ -17,7 +17,7 @@ use crate::{
 async fn ignores_preferred_endpoint_from_another_model_route() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache);
+    let services = querying_test_services(runtime_state.clone(), replay_cache).await;
     let candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
     let foreign_endpoint_id = uuid::Uuid::new_v4();
@@ -69,7 +69,7 @@ async fn ignores_preferred_endpoint_from_another_model_route() {
 async fn rebinds_when_the_bound_endpoint_leaves_the_route() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
     let request_ctx = request_context(
@@ -140,7 +140,7 @@ async fn rebinds_when_the_bound_endpoint_leaves_the_route() {
 async fn reports_unavailable_when_no_replacement_unit_is_usable() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
     let request_ctx = request_context(
@@ -216,7 +216,7 @@ async fn reports_unavailable_when_no_replacement_unit_is_usable() {
 async fn auto_rebind_after_stale_endpoint() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
     let request_ctx = request_context(
@@ -284,7 +284,7 @@ async fn auto_rebind_after_stale_endpoint() {
 async fn auto_rebind_after_stale_key() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let candidate = session_affinity_candidate();
     let conversation_id = uuid::Uuid::new_v4();
     let request_ctx = request_context(
@@ -354,7 +354,7 @@ async fn auto_rebind_after_stale_key() {
 async fn does_not_rebind_when_quota_exhausted() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache.clone());
+    let services = querying_test_services(runtime_state.clone(), replay_cache.clone()).await;
     let candidate = session_affinity_candidate();
     let bound_target = candidate.targets.first().expect("bound target exists");
     let endpoint_id = bound_target.endpoint_id;
@@ -424,7 +424,8 @@ async fn auto_rebind_delete_failure_maps_to_backend_unavailable() {
         .await
         .expect_err("unavailable backend must fail delete");
 
-    let services = session_affinity_services(WorkerRuntimeState::default(), ReplayCache::default());
+    let services =
+        querying_test_services(WorkerRuntimeState::default(), ReplayCache::default()).await;
     let candidate = session_affinity_candidate();
     let error = match select_route_for_candidate(
         &services,

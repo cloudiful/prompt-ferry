@@ -6,7 +6,7 @@ use crate::{
     replay_cache::ReplayCache,
     worker::runtime::prompt_log::RequestPromptLog,
     worker::runtime::request_assembly::BufferedBridgeRequest,
-    worker::runtime::tests::{session_affinity_candidate, session_affinity_services},
+    worker::runtime::tests::{querying_test_services, session_affinity_candidate},
     worker_admin::token_plan_cache::TokenPlanQuotaCache,
     worker_admin_types::{
         CommandCodeBalances, CommandCodeWindowUsage, TokenPlanKeyUsage, TokenPlanModelUsage,
@@ -438,7 +438,7 @@ async fn quota_key_lb_still_routes_payg_command_code_key_without_windows() {
 async fn unified_pool_skips_a_target_with_no_remaining_quota() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state.clone(), replay_cache);
+    let services = querying_test_services(runtime_state.clone(), replay_cache).await;
     let mut candidate = session_affinity_candidate();
     candidate.routing_strategy = db::ModelRouteRoutingStrategy::ResponsesSessionAffinity;
     let exhausted_endpoint = candidate.targets[0].endpoint_id;

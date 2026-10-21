@@ -5,6 +5,7 @@ import { computed } from 'vue'
 import type { RequestRecordFilterModel, RequestRecordRowView } from '@/models'
 import type { RequestRecordFormatting } from '@/models/request-record-formatting'
 import type { UsageWorkspaceView } from '@/models/usage'
+import { formatAppDateOnly } from '@/format/datetime'
 import { useRequestRecordsStore } from '@/stores/usage'
 import { REQUEST_RECORD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
 import { formatRequestStateBadges } from '@/composables/useUsageFormatting'
@@ -143,6 +144,9 @@ const sorting = computed<SortingState>({
         </template>
         <template #created_at-cell="{ row }">{{
           formatting.formatTime(row.original.created_at)
+        }}</template>
+        <template #request_date-cell="{ row }">{{
+          formatAppDateOnly(row.original.created_at)
         }}</template>
         <template #client_key_label-cell="{ row }">{{
           row.original.client_key_label || '-'

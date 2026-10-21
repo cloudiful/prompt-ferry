@@ -2,6 +2,7 @@ import type {
   ClientKeyFacet,
   RequestRecordFacets,
   RequestRecordFullResponse,
+  RequestRecordMcpScope,
   RequestRecordOverviewRange,
   RequestRecordState,
 } from '../generated/admin-api'
@@ -20,6 +21,17 @@ export type UsageFacetOptionsView = {
   request_state_options: Option<RequestRecordState>[]
   request_redaction_options: Option<boolean>[]
 }
+
+/**
+ * Which MCP records the usage surfaces cover.
+ *
+ * `service` keeps the records that reached an MCP server, `gateway` keeps the
+ * gateway chatter that carries no server identity, and `all` keeps both. The
+ * scope only applies to the MCP category.
+ */
+export type { RequestRecordMcpScope }
+
+export const DEFAULT_REQUEST_RECORD_MCP_SCOPE: RequestRecordMcpScope = 'service'
 
 export type UsageDetailWorkspaceView = {
   record: RequestRecordDetailView | null
@@ -44,6 +56,7 @@ export type UsageWorkspaceView = {
   sort_field: string
   sort_order: -1 | 0 | 1
   facets: UsageFacetOptionsView
+  mcp_scope: RequestRecordMcpScope
   detail: UsageDetailWorkspaceView
 }
 
@@ -154,6 +167,7 @@ function createUsageClientKeyOptions(
 export function createUsageWorkspaceView(options: {
   busy: boolean
   facets: UsageFacetOptionsView
+  mcpScope: RequestRecordMcpScope
   detail: UsageWorkspaceDetailInput
   records: UsageWorkspaceRecordsInput
 }): UsageWorkspaceView {
@@ -167,6 +181,7 @@ export function createUsageWorkspaceView(options: {
     sort_field: options.records.sortField,
     sort_order: options.records.sortOrder,
     facets: options.facets,
+    mcp_scope: options.mcpScope,
     detail: {
       affinity_resetting: options.detail.affinityResetting,
       record: options.detail.detailRecord,

@@ -2,7 +2,7 @@ import type {
   RequestRecordCategory,
   RequestRecordOverviewRange,
 } from '../generated/admin-api'
-import type { RequestRecordFilterModel } from '../models'
+import type { RequestRecordFilterModel, RequestRecordMcpScope } from '../models'
 
 export function createDefaultRequestRecordFilters(): RequestRecordFilterModel {
   return {
@@ -28,6 +28,7 @@ export function buildRequestRecordListQuery(input: {
   sortOrder: -1 | 0 | 1
   start: string
   end: string
+  mcpScope?: RequestRecordMcpScope
 }): Record<string, string | number | boolean | undefined> {
   const {
     filters,
@@ -39,11 +40,13 @@ export function buildRequestRecordListQuery(input: {
     range,
     start,
     end,
+    mcpScope,
   } = input
   return {
     first,
     rows,
     request_category: requestCategory,
+    mcp_scope: mcpScope,
     sort_field: sortField,
     sort_order: sortOrder,
     range,

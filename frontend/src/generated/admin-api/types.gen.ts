@@ -1882,6 +1882,17 @@ export type RequestRecordListRow = {
     user_login_name?: string | null;
 };
 
+/**
+ * Which MCP records a query covers.
+ *
+ * The split is by record identity, never by path or display label: a record
+ * belongs to a *service* when it carries an MCP server id or a stored server
+ * name, and to the *gateway* when it carries neither. A name-only failed
+ * attempt and a historical id-only record for a deleted server therefore stay
+ * on the service side, and the gateway keeps its own history.
+ */
+export type RequestRecordMcpScope = 'service' | 'gateway' | 'all';
+
 export type RequestRecordOverviewBreakdownRow = {
     /**
      * Average output tokens per second for completed AI requests with
@@ -1905,6 +1916,7 @@ export type RequestRecordOverviewBreakdownRow = {
      */
     error_rate?: number | null;
     label: string;
+    mcp_scope?: null | RequestRecordMcpScope;
     mcp_server_id?: string | null;
     model?: string | null;
     /**
@@ -1972,6 +1984,12 @@ export type RequestRecordOverviewResponse = {
     breakdown: Array<RequestRecordOverviewBreakdownRow>;
     summary: RequestRecordOverviewSummary;
     trend: Array<RequestRecordOverviewTrendBucket>;
+    /**
+     * Trend bucket granularity the server selected for this window: `hour`
+     * for short windows and `day` for longer ones. The client uses it to
+     * label the buckets without re-deriving the server's window logic.
+     */
+    trend_granularity: string;
 };
 
 export type RequestRecordOverviewSummary = {
@@ -3787,6 +3805,16 @@ export type ListRequestRecordsData = {
     path?: never;
     query?: {
         request_category?: RequestRecordCategory;
+        /**
+         * Which MCP records a query covers.
+         *
+         * The split is by record identity, never by path or display label: a record
+         * belongs to a *service* when it carries an MCP server id or a stored server
+         * name, and to the *gateway* when it carries neither. A name-only failed
+         * attempt and a historical id-only record for a deleted server therefore stay
+         * on the service side, and the gateway keeps its own history.
+         */
+        mcp_scope?: 'service' | 'gateway' | 'all';
         range?: RequestRecordOverviewRange;
         first?: number;
         rows?: number;
@@ -3838,6 +3866,16 @@ export type RequestRecordFacetsData = {
     path?: never;
     query?: {
         request_category?: RequestRecordCategory;
+        /**
+         * Which MCP records a query covers.
+         *
+         * The split is by record identity, never by path or display label: a record
+         * belongs to a *service* when it carries an MCP server id or a stored server
+         * name, and to the *gateway* when it carries neither. A name-only failed
+         * attempt and a historical id-only record for a deleted server therefore stay
+         * on the service side, and the gateway keeps its own history.
+         */
+        mcp_scope?: 'service' | 'gateway' | 'all';
         range?: RequestRecordOverviewRange;
         start?: string;
         end?: string;
@@ -3865,6 +3903,16 @@ export type RequestRecordOverviewData = {
          * full filtered window by endpoint identity and shows a per-model hover.
          */
         perspective?: 'model' | 'upstream';
+        /**
+         * Which MCP records a query covers.
+         *
+         * The split is by record identity, never by path or display label: a record
+         * belongs to a *service* when it carries an MCP server id or a stored server
+         * name, and to the *gateway* when it carries neither. A name-only failed
+         * attempt and a historical id-only record for a deleted server therefore stay
+         * on the service side, and the gateway keeps its own history.
+         */
+        mcp_scope?: 'service' | 'gateway' | 'all';
         range?: RequestRecordOverviewRange;
         start?: string;
         end?: string;

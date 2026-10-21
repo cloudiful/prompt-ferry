@@ -1,9 +1,11 @@
 import type { Locale } from '../i18n'
 import { locale } from '../composables/useLocale'
+import { effectiveTimeZone } from './timezone'
 
 export type DateTimeInput = string | number | Date | null | undefined
 
 const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>()
+const dateOnlyFormatters = new Map<string, Intl.DateTimeFormat>()
 const numberFormatters = new Map<string, Intl.NumberFormat>()
 
 // Match the date-and-time shape of Date#toLocaleString, which these displays
@@ -32,14 +34,28 @@ const SHAPE_KEYS = [
   'timeZoneName',
 ] as const
 
+function withDisplayZone(
+  options: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormatOptions {
+  // The display time zone is the default, and an explicit `timeZone` always
+  // wins.
+  if ('timeZone' in options) return options
+  return { ...options, timeZone: effectiveTimeZone() }
+}
+
 function resolvedOptions(
   options?: Intl.DateTimeFormatOptions,
 ): Intl.DateTimeFormatOptions {
-  if (!options) return DEFAULT_DATE_TIME_OPTIONS
+  const base = options ?? DEFAULT_DATE_TIME_OPTIONS
   // A caller may pass only modifiers such as `timeZone`; those keep the
   // date-and-time shape, while any field that selects the shape wins.
-  const definesShape = SHAPE_KEYS.some((key) => key in options)
-  return definesShape ? options : { ...DEFAULT_DATE_TIME_OPTIONS, ...options }
+  const definesShape = SHAPE_KEYS.some((key) => key in base)
+  const resolved = definesShape
+    ? base
+    : { ...DEFAULT_DATE_TIME_OPTIONS, ...base }
+  // The zone is part of the resolved options, so the formatter cache keeps
+  // one entry per zone.
+  return withDisplayZone(resolved)
 }
 
 function dateTimeFormatter(
@@ -93,6 +109,55 @@ export function formatAppDateTime(
   options?: Intl.DateTimeFormatOptions,
 ): string {
   return formatDateTime(value, locale.value, options)
+}
+
+/**
+ * The date-only label of an instant, always written as `YYYY-MM-DD`.
+ *
+ * The parts are read from the formatter instead of the rendered text, so the
+ * label never depends on the locale's punctuation. The zone follows the
+ * display preference unless the caller names one, which keeps a logical UTC
+ * calendar bucket on its own date.
+ */
+export function formatDateOnly(
+  value: DateTimeInput,
+  localeValue: Locale,
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  if (value == null || value === '') return '-'
+  const date = toDate(value)
+  if (!date) return typeof value === 'string' ? value : '-'
+  const resolved = withDisplayZone({
+    ...(options ?? {}),
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+  const key = `${localeValue}:${JSON.stringify(resolved)}`
+  let formatter = dateOnlyFormatters.get(key)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(localeValue, resolved)
+    dateOnlyFormatters.set(key, formatter)
+  }
+  const parts = formatter.formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((entry) => entry.type === type)?.value ?? ''
+  return `${part('year')}-${part('month')}-${part('day')}`
+}
+
+export function formatAppDateOnly(
+  value: DateTimeInput,
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  return formatDateOnly(value, locale.value, options)
+}
+
+/**
+ * The zone the shared formatter renders with. A caller that needs the zone
+ * itself — to rebuild a chart when the preference changes — reads it here.
+ */
+export function currentDisplayTimeZone(): string {
+  return effectiveTimeZone()
 }
 
 export function formatNumber(

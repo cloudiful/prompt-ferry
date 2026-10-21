@@ -2,7 +2,7 @@
 //! remaining quota, ignores endpoint identity, honors quota urgency, and
 //! deflects concurrent bursts. Shared fixtures live in `unified_pool_fixtures`.
 
-use super::super::tests::session_affinity_services;
+use super::super::tests::querying_test_services;
 use super::unified_pool_fixtures::{
     candidate, endpoint_key, opencode_go_urgent_key, opencode_go_urgent_usage, opencode_go_usage,
     route_selected_endpoint, target,
@@ -13,7 +13,7 @@ use crate::replay_cache::ReplayCache;
 async fn pool_distributes_globally_by_remaining_quota() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state, replay_cache);
+    let services = querying_test_services(runtime_state, replay_cache).await;
     let endpoint_a = uuid::Uuid::new_v4();
     let endpoint_b = uuid::Uuid::new_v4();
     let heavy_key = uuid::Uuid::new_v4();
@@ -79,7 +79,7 @@ async fn pool_distributes_globally_by_remaining_quota() {
 async fn draw_does_not_depend_on_endpoint_id() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state, replay_cache);
+    let services = querying_test_services(runtime_state, replay_cache).await;
     let shared_target_a = uuid::Uuid::new_v4();
     let shared_target_b = uuid::Uuid::new_v4();
     let shared_key_a = uuid::Uuid::new_v4();
@@ -133,7 +133,7 @@ async fn draw_does_not_depend_on_endpoint_id() {
 async fn urgency_favors_a_bottleneck_that_resets_soon() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state, replay_cache);
+    let services = querying_test_services(runtime_state, replay_cache).await;
     let endpoint_x = uuid::Uuid::new_v4();
     let endpoint_y = uuid::Uuid::new_v4();
     let key_x = uuid::Uuid::new_v4();
@@ -206,7 +206,7 @@ async fn urgency_favors_a_bottleneck_that_resets_soon() {
 async fn reservations_deflect_a_concurrent_burst() {
     let replay_cache = ReplayCache::for_tests();
     let runtime_state = super::super::WorkerRuntimeState::default();
-    let services = session_affinity_services(runtime_state, replay_cache);
+    let services = querying_test_services(runtime_state, replay_cache).await;
     let endpoint = uuid::Uuid::new_v4();
     let hot_key = uuid::Uuid::new_v4();
     let cool_key = uuid::Uuid::new_v4();

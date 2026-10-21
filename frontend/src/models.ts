@@ -263,6 +263,7 @@ export type {
 } from './models/mcp'
 
 export type {
+  RequestRecordMcpScope,
   UsageDetailWorkspaceView,
   UsageFacetOptionsView,
   UsageWorkspaceView,

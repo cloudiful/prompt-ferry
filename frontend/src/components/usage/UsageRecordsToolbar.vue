@@ -1,13 +1,18 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { RequestRecordCategory } from '@/generated/admin-api'
 import type { RequestRecordFilterModel } from '@/models'
-import type { UsageFacetOptionsView } from '@/models/usage'
+import type {
+  RequestRecordMcpScope,
+  UsageFacetOptionsView,
+} from '@/models/usage'
 import UsageFilterSelect from './UsageFilterSelect.vue'
 
-defineProps<{
+const props = defineProps<{
   category: RequestRecordCategory
   facets: UsageFacetOptionsView
   isAdmin: boolean
+  mcpScope?: RequestRecordMcpScope
   t: TranslateFn
 }>()
 
@@ -18,8 +23,15 @@ const filters = defineModel<RequestRecordFilterModel>('filters', {
 const emit = defineEmits<{
   filter: []
   openClearDialog: []
+  scopeChange: [scope: RequestRecordMcpScope]
   search: []
 }>()
+
+const scopeOptions = computed(() => [
+  { label: props.t('mcpScopeService'), value: 'service' },
+  { label: props.t('mcpScopeGateway'), value: 'gateway' },
+  { label: props.t('mcpScopeAll'), value: 'all' },
+])
 
 function applyFilter(): void {
   emit('filter')
@@ -57,6 +69,17 @@ function applyFilter(): void {
       :options="facets.request_model_options"
       :placeholder="category === 'ai' ? t('allModels') : t('mcpServer')"
       @change="applyFilter"
+    />
+    <USelect
+      v-if="category === 'mcp'"
+      :model-value="mcpScope"
+      class="w-36"
+      size="sm"
+      :aria-label="t('mcpScope')"
+      :items="scopeOptions"
+      label-key="label"
+      value-key="value"
+      @update:model-value="emit('scopeChange', $event as RequestRecordMcpScope)"
     />
     <UsageFilterSelect
       v-model="filters.request_state.value"

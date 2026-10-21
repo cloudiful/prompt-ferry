@@ -109,6 +109,7 @@ pub(super) async fn usage_overview(
             None
         },
         query.perspective.unwrap_or_default(),
+        query.mcp_scope.unwrap_or_default(),
     )
     .await
     {
@@ -184,6 +185,7 @@ pub(super) async fn usage_facets(
         user.is_admin,
         start,
         end,
+        query.mcp_scope.unwrap_or_default(),
     )
     .await
     {

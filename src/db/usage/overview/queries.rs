@@ -3,18 +3,31 @@ use chrono::{DateTime, Utc};
 use sqlx::FromRow;
 
 use crate::db::{
-    RequestRecordCategory, RequestRecordOverviewBreakdownRow, RequestRecordOverviewPerspective,
-    RequestRecordOverviewSummary, RequestRecordOverviewTrendBucket,
-    RequestRecordOverviewUpstreamBreakdown,
+    RequestRecordCategory, RequestRecordMcpScope, RequestRecordOverviewBreakdownRow,
+    RequestRecordOverviewPerspective, RequestRecordOverviewSummary,
+    RequestRecordOverviewTrendBucket, RequestRecordOverviewUpstreamBreakdown,
 };
 
 use super::OverviewWindow;
-use super::presentation::{error_rate, opt_error_rate, ratio, summary_from_metrics, token_usage};
+use super::presentation::{
+    breakdown_mcp_scope, error_rate, opt_error_rate, ratio, summary_from_metrics, token_usage,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverviewBucket {
     Hour,
     Day,
+}
+
+impl OverviewBucket {
+    /// The trend granularity the client needs to label the buckets: `hour`
+    /// buckets are instants, `day` buckets are logical UTC calendar dates.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Hour => "hour",
+            Self::Day => "day",
+        }
+    }
 }
 
 #[derive(Debug, FromRow, Clone, Copy)]
@@ -68,6 +81,8 @@ struct BreakdownRow {
     model: Option<String>,
     mcp_server_id: Option<uuid::Uuid>,
     server_provider_kind: Option<String>,
+    /// The record identity of the group: `service` or `gateway`.
+    mcp_scope: Option<String>,
     request_count: i64,
     request_share: f64,
     success_count: i64,
@@ -156,6 +171,7 @@ pub async fn query_summary(
     request_category: RequestRecordCategory,
     window: OverviewWindow,
     user: Option<&str>,
+    mcp_scope: RequestRecordMcpScope,
 ) -> Result<RequestRecordOverviewSummary> {
     let row = sqlx::query_file_as!(
         MetricsRow,
@@ -165,6 +181,7 @@ pub async fn query_summary(
         window.start,
         window.end,
         user,
+        mcp_scope.as_str(),
     )
     .fetch_one(pool)
     .await?;
@@ -178,6 +195,7 @@ pub async fn query_trend(
     request_category: RequestRecordCategory,
     window: OverviewWindow,
     user: Option<&str>,
+    mcp_scope: RequestRecordMcpScope,
 ) -> Result<Vec<RequestRecordOverviewTrendBucket>> {
     let rows = match window.bucket {
         OverviewBucket::Hour => {
@@ -189,6 +207,7 @@ pub async fn query_trend(
                 window.start,
                 window.end,
                 user,
+                mcp_scope.as_str(),
             )
             .fetch_all(pool)
             .await?
@@ -202,6 +221,7 @@ pub async fn query_trend(
                 window.start,
                 window.end,
                 user,
+                mcp_scope.as_str(),
             )
             .fetch_all(pool)
             .await?
@@ -261,6 +281,7 @@ fn ai_upstream_totals(row: AiUpstreamBreakdownRow) -> RequestRecordOverviewBreak
         model: None,
         endpoint_id: row.endpoint_id,
         mcp_server_id: None,
+        mcp_scope: None,
         server_provider_kind: None,
         usage_unit: None,
         avg_output_tokens_per_second: row.avg_output_tokens_per_second,
@@ -274,6 +295,7 @@ pub async fn query_breakdown(
     window: OverviewWindow,
     user: Option<&str>,
     perspective: RequestRecordOverviewPerspective,
+    mcp_scope: RequestRecordMcpScope,
 ) -> Result<Vec<RequestRecordOverviewBreakdownRow>> {
     match request_category {
         RequestRecordCategory::Ai => match perspective {
@@ -335,6 +357,7 @@ pub async fn query_breakdown(
                             model: row.model,
                             endpoint_id: None,
                             mcp_server_id: row.mcp_server_id,
+                            mcp_scope: None,
                             server_provider_kind: None,
                             usage_unit: None,
                             avg_output_tokens_per_second: row.avg_output_tokens_per_second,
@@ -352,6 +375,7 @@ pub async fn query_breakdown(
                 window.start,
                 window.end,
                 user,
+                mcp_scope.as_str(),
             )
             .fetch_all(pool)
             .await?;
@@ -385,6 +409,7 @@ pub async fn query_breakdown(
                         model: row.model,
                         endpoint_id: None,
                         mcp_server_id: row.mcp_server_id,
+                        mcp_scope: breakdown_mcp_scope(row.mcp_scope.as_deref()),
                         server_provider_kind,
                         usage_unit,
                         avg_output_tokens_per_second: row.avg_output_tokens_per_second,
