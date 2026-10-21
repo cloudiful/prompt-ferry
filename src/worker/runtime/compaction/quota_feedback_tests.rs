@@ -78,6 +78,7 @@ fn route(address: SocketAddr) -> RouteConfig {
         thinking_effort_override: None,
         compact_mode: CompactMode::SelfSummarize,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
     }
 }
 

@@ -125,6 +125,7 @@ fn opencode_go_route(endpoint_id: Uuid, keys: Vec<db::EndpointApiKey>) -> db::Ro
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
     }
 }
 

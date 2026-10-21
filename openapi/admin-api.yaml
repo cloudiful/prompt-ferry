@@ -776,7 +776,7 @@ paths:
           format: uuid
       responses:
         '200':
-          description: Upstream model identifiers
+          description: Upstream model identifiers; a ChatGPT subscription endpoint answers from the Codex model table
           content:
             application/json:
               schema:
@@ -1254,6 +1254,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EndpointTestResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/admin/endpoints/{endpoint_id}/token-plan-usage:
     get:
       tags:
@@ -4533,6 +4545,8 @@ components:
         Issue #993 P1: the upstream model identifiers one endpoint advertises.
         Sorted and de-duplicated. A discovery failure is a bounded admin error
         and never blocks editing the target that points at the endpoint.
+        Issue #1004 P1: a ChatGPT subscription endpoint answers from the Codex
+        model table instead of an upstream discovery call.
       required:
       - models
       properties:
@@ -4665,10 +4679,18 @@ components:
             expose just `has_admin_api_key`.
         api_key:
           type: string
+          description: |-
+            Legacy single-key field. Every provider except OpenAI requires at
+            least one API key; an OpenAI endpoint may be saved without any key so
+            the ChatGPT device login can be completed first.
         api_keys:
           type: array
           items:
             $ref: '#/components/schemas/EndpointApiKeyRequest'
+          description: |-
+            Per-key rows. Every provider except OpenAI requires at least one key
+            row; an OpenAI endpoint may be saved with no key row at all, and an
+            update that submits none keeps the stored keys.
         base_url:
           type: string
         enabled:
@@ -4764,6 +4786,10 @@ components:
           minimum: 0
         message:
           type: string
+          description: |-
+            Issue #1004 P1: a ChatGPT subscription endpoint is probed with its
+            device credential (token refresh plus the Codex usage GET), so the
+            message reports a credential check and not a generation probe.
         model_count:
           type:
           - integer
@@ -5855,10 +5881,22 @@ components:
           format: uuid
     ModelRouteTestResponse:
       type: object
+      description: |-
+        The model-route test result.
+
+        The top-level fields describe one representative outcome (the preferred
+        target's outcome when it was tested, otherwise the first outcome) so a
+        client that only knows the single-result shape keeps working. `results`
+        carries every eligible target's outcome in the configured order, `passed`
+        and `total` the aggregate counts, and `ok` is true only when every tested
+        target passed.
       required:
       - ok
       - duration_ms
       - message
+      - results
+      - passed
+      - total
       properties:
         duration_ms:
           type: integer
@@ -5885,6 +5923,10 @@ components:
           - 'null'
         ok:
           type: boolean
+        passed:
+          type: integer
+          format: int32
+          minimum: 0
         preferred_endpoint_id:
           type:
           - string
@@ -5894,6 +5936,10 @@ components:
           type:
           - string
           - 'null'
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelRouteTestTargetResult'
         rule_id:
           type:
           - string
@@ -5905,6 +5951,58 @@ components:
           - 'null'
           format: int32
           minimum: 0
+        total:
+          type: integer
+          format: int32
+          minimum: 0
+    ModelRouteTestTargetResult:
+      type: object
+      description: |-
+        Issue #1004 P2: the outcome of one model-route target.
+
+        The target identity is preserved (`target_id` plus the endpoint id and
+        name), so two targets of the same endpoint stay separate outcomes. The
+        message never carries a credential.
+      required:
+      - target_id
+      - endpoint_id
+      - endpoint_name
+      - ok
+      - duration_ms
+      - message
+      - preferred
+      properties:
+        duration_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        endpoint_id:
+          type: string
+          format: uuid
+        endpoint_name:
+          type: string
+        message:
+          type: string
+        model:
+          type:
+          - string
+          - 'null'
+        ok:
+          type: boolean
+        preferred:
+          type: boolean
+          description: |-
+            The preferred target of the rule. It is metadata for the reader, never
+            a filter: every eligible target is tested.
+        status:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        target_id:
+          type: string
+          format: uuid
     ModelRouteWhitelistRequest:
       type: object
       required:

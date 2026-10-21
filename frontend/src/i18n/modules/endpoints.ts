@@ -51,6 +51,12 @@ export const endpointMessages = {
     modelRouteNativeApi: '端口类型',
     modelRouteNativeApiHint:
       '目标级端口类型，默认按调用端自动；显式值优先于上游节点设置。',
+    modelRouteTestDetails: '测试结果',
+    modelRouteTestPreferred: '首选目标',
+    modelRouteTestNoneEligible:
+      '当前没有生效的目标，请启用目标或放宽其时间窗口。',
+    modelRouteTestPassed: '{passed}/{total} 个目标通过',
+    modelRouteTestClose: '关闭',
     newEndpoint: '新增上游节点',
     newModelRoute: '新增模型路由',
     noModelRoutes: '暂无模型路由',
@@ -285,6 +291,12 @@ export const endpointMessages = {
     modelRouteNativeApi: 'Native API',
     modelRouteNativeApiHint:
       'Per-target port type; Auto follows the caller. An explicit value wins over the upstream endpoint setting.',
+    modelRouteTestDetails: 'Test results',
+    modelRouteTestPreferred: 'Preferred target',
+    modelRouteTestNoneEligible:
+      'No target is currently active; enable a target or widen its schedule window.',
+    modelRouteTestPassed: '{passed}/{total} targets passed',
+    modelRouteTestClose: 'Close',
     newEndpoint: 'New endpoint',
     newModelRoute: 'New model route',
     noModelRoutes: 'No model routes',

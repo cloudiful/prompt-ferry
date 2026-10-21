@@ -55,10 +55,21 @@ async fn resolve_standalone_route(
 ) -> anyhow::Result<RouteResolution> {
     let user_id = request_ctx.user_id.or(request.user_id).unwrap_or_default();
     let snapshot = state.snapshot().await;
+    // Issue #1004 P1: the standalone deployment keeps its OAuth tokens in the
+    // same SQLite store, so the token-id existence query hydrates the
+    // non-secret subscription eligibility flag for the candidate targets.
+    let subscription_endpoints = state
+        .config_repository()
+        .list_endpoint_oauth_token_ids()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
     if let Some(candidate) = crate::worker::runtime::standalone::standalone_model_route_candidate(
         &snapshot,
         user_id,
         request_ctx.request_model.as_deref(),
+        &subscription_endpoints,
     ) {
         let selected = select_route_for_candidate(
             services,
@@ -211,6 +222,9 @@ fn default_route_for_user(config: &WorkerConfig, user_id: i64) -> db::RouteConfi
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        // Issue #1004 P1: a static upstream route never carries a ChatGPT
+        // subscription credential.
+        has_oauth_token: false,
     }
 }
 

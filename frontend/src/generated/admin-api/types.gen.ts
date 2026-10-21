@@ -531,6 +531,8 @@ export type EndpointApiKeyRequest = {
  * Issue #993 P1: the upstream model identifiers one endpoint advertises.
  * Sorted and de-duplicated. A discovery failure is a bounded admin error
  * and never blocks editing the target that points at the endpoint.
+ * Issue #1004 P1: a ChatGPT subscription endpoint answers from the Codex
+ * model table instead of an upstream discovery call.
  */
 export type EndpointModelsResponse = {
     models: Array<string>;
@@ -586,7 +588,17 @@ export type EndpointRequest = {
      * expose just `has_admin_api_key`.
      */
     admin_api_key?: string | null;
+    /**
+     * Legacy single-key field. Every provider except OpenAI requires at
+     * least one API key; an OpenAI endpoint may be saved without any key so
+     * the ChatGPT device login can be completed first.
+     */
     api_key: string;
+    /**
+     * Per-key rows. Every provider except OpenAI requires at least one key
+     * row; an OpenAI endpoint may be saved with no key row at all, and an
+     * update that submits none keeps the stored keys.
+     */
     api_keys?: Array<EndpointApiKeyRequest>;
     base_url: string;
     enabled?: boolean | null;
@@ -630,6 +642,11 @@ export type EndpointSettingResponse = {
 
 export type EndpointTestResponse = {
     duration_ms: number;
+    /**
+     * Issue #1004 P1: a ChatGPT subscription endpoint is probed with its
+     * device credential (token refresh plus the Codex usage GET), so the
+     * message reports a credential check and not a generation probe.
+     */
     message: string;
     model_count?: number | null;
     native_api?: string | null;
@@ -1096,6 +1113,16 @@ export type ModelRouteTestRequest = {
     rule_id: string;
 };
 
+/**
+ * The model-route test result.
+ *
+ * The top-level fields describe one representative outcome (the preferred
+ * target's outcome when it was tested, otherwise the first outcome) so a
+ * client that only knows the single-result shape keeps working. `results`
+ * carries every eligible target's outcome in the configured order, `passed`
+ * and `total` the aggregate counts, and `ok` is true only when every tested
+ * target passed.
+ */
 export type ModelRouteTestResponse = {
     duration_ms: number;
     endpoint_id?: string | null;
@@ -1104,10 +1131,36 @@ export type ModelRouteTestResponse = {
     model?: string | null;
     model_pattern?: string | null;
     ok: boolean;
+    passed: number;
     preferred_endpoint_id?: string | null;
     preferred_endpoint_name?: string | null;
+    results: Array<ModelRouteTestTargetResult>;
     rule_id?: string | null;
     status?: number | null;
+    total: number;
+};
+
+/**
+ * Issue #1004 P2: the outcome of one model-route target.
+ *
+ * The target identity is preserved (`target_id` plus the endpoint id and
+ * name), so two targets of the same endpoint stay separate outcomes. The
+ * message never carries a credential.
+ */
+export type ModelRouteTestTargetResult = {
+    duration_ms: number;
+    endpoint_id: string;
+    endpoint_name: string;
+    message: string;
+    model?: string | null;
+    ok: boolean;
+    /**
+     * The preferred target of the rule. It is metadata for the reader, never
+     * a filter: every eligible target is tested.
+     */
+    preferred: boolean;
+    status?: number | null;
+    target_id: string;
 };
 
 export type ModelRouteWhitelistRequest = {
@@ -2964,7 +3017,7 @@ export type EndpointModelsError = EndpointModelsErrors[keyof EndpointModelsError
 
 export type EndpointModelsResponses = {
     /**
-     * Upstream model identifiers
+     * Upstream model identifiers; a ChatGPT subscription endpoint answers from the Codex model table
      */
     200: EndpointModelsResponse;
 };
@@ -3305,6 +3358,13 @@ export type TestEndpointData = {
     query?: never;
     url: '/api/v1/admin/endpoints/{endpoint_id}/test';
 };
+
+export type TestEndpointErrors = {
+    400: ErrorEnvelope;
+    404: ErrorEnvelope;
+};
+
+export type TestEndpointError = TestEndpointErrors[keyof TestEndpointErrors];
 
 export type TestEndpointResponses = {
     /**

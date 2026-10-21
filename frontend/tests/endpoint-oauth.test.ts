@@ -158,6 +158,37 @@ function slotStub(name: string, slot = 'default') {
   }
 }
 
+/** A button that keeps the real disabled and loading state. */
+function buttonStub() {
+  return {
+    name: 'UButton',
+    inheritAttrs: false,
+    props: ['disabled', 'loading', 'label', 'type', 'size', 'color', 'variant'],
+    setup(
+      props: Record<string, unknown>,
+      {
+        slots,
+        attrs,
+      }: {
+        slots: Record<string, (() => unknown) | undefined>
+        attrs: Record<string, unknown>
+      },
+    ) {
+      return () =>
+        h(
+          'button',
+          {
+            ...attrs,
+            type: 'button',
+            disabled: props.disabled === true,
+            'data-loading': props.loading === true ? 'true' : 'false',
+          },
+          slots.default?.(),
+        )
+    },
+  }
+}
+
 const apiKeysStub = {
   name: 'EndpointApiKeysEditor',
   render: () => h('div', { 'data-testid': 'api-keys' }),
@@ -270,16 +301,16 @@ test('new endpoints keep the save-first login guidance', async () => {
   expect(html).toContain(API_KEYS_MARKER)
 })
 
-test('OpenAI endpoints mount the Admin API Key and organization usage sections', async () => {
+test('the editor no longer mounts the organization usage or Admin key blocks', async () => {
   const html = await renderDialog({
     ...subscriptionForm(),
     plan: 'platform_api_key',
   })
-  expect(html).toContain('data-stub="EndpointAdminApiKeyFields.vue"')
-  expect(html).toContain('data-stub="EndpointOrganizationUsage.vue"')
+  expect(html).not.toContain('data-stub="EndpointAdminApiKeyFields.vue"')
+  expect(html).not.toContain('data-stub="EndpointOrganizationUsage.vue"')
 })
 
-test('non-OpenAI endpoints hide the Admin API Key and organization usage sections', async () => {
+test('non-OpenAI endpoints hide the organization usage and Admin key blocks', async () => {
   const html = await renderDialog({
     ...createEmptyEndpointForm(),
     name: 'generic',
@@ -304,11 +335,6 @@ test('ChatGPT OAuth copy exists in both locales', () => {
     'endpointOAuthExpiresAt',
     'endpointOAuthRefresh',
     'endpointOAuthClear',
-    'endpointOAuthQuota',
-    'endpointOAuthQuotaHint',
-    'endpointOAuthQuotaPrimary',
-    'endpointOAuthQuotaSecondary',
-    'endpointOAuthQuotaUnavailable',
     'endpointOAuthDeviceLogin',
     'endpointOAuthDeviceStart',
     'endpointOAuthDeviceHint',
@@ -333,22 +359,10 @@ test('ChatGPT OAuth copy exists in both locales', () => {
   }
 })
 
-// P3: the OAuth quota section renders the same canonical rows as the dialog
-// through the shared row component, so subscription `model.windows` data no
-// longer depends on the old hardcoded `model_remains[0].interval/weekly` pair.
+// Issue #1004 P1: the editor shows the ChatGPT login state only. The
+// subscription quota lives on the standalone quota surface, so the section
+// neither fetches nor renders it.
 import { ref } from 'vue'
-import type {
-  CanonicalQuotaWindow,
-  TokenPlanKeyUsage,
-  TokenPlanUsageResponse,
-} from '../src/generated/admin-api'
-import * as canonicalQuota from '../src/composables/useCanonicalQuotaWindows'
-import * as tokenPlanFormatting from '../src/composables/useTokenPlanWindowEntries'
-import * as subscriptionQuota from '../src/composables/subscriptionQuotaWindows'
-
-const FIXED_NOW = Date.parse('2026-10-11T00:00:00.000Z')
-const FUTURE_ISO = new Date(FIXED_NOW + 3_600_000).toISOString()
-const PAST_ISO = new Date(FIXED_NOW - 3_600_000).toISOString()
 
 const oauthSource = await Bun.file(
   new URL(
@@ -357,53 +371,41 @@ const oauthSource = await Bun.file(
   ),
 ).text()
 
-const oauthRowSource = await Bun.file(
-  new URL(
-    '../src/components/endpoints/TokenPlanQuotaWindowRow.vue',
-    import.meta.url,
-  ),
+const statusSource = await Bun.file(
+  new URL('../src/composables/useEndpointOAuthStatus.ts', import.meta.url),
 ).text()
 
-// Controllable OAuth state: each test sets `status`/`quota` before render,
-// so the section reads canonical rows without any network or store.
 const mockStatus = ref<unknown>(null)
-const mockQuota = ref<TokenPlanUsageResponse | null>(null)
-const mockQuotaError = ref('')
 const mockStatusError = ref('')
+const mockDeviceStarting = ref(false)
+const mockBrowserBusy = ref(false)
+const mockRefreshing = ref(false)
+const mockClearing = ref(false)
 
 const mockOAuthActions = {
   useEndpointOAuthActions: () => ({
     browserFlow: {
       browser: ref(null),
-      busy: ref(false),
+      busy: mockBrowserBusy,
       completeBrowser: async () => {},
       message: ref(''),
       redirectUrl: ref(''),
       startBrowser: async () => {},
     },
     clearToken: async () => {},
-    clearing: ref(false),
+    clearing: mockClearing,
     deviceFlow: {
       device: ref(null),
       message: ref(''),
       polling: ref(false),
       startDevice: async () => {},
-      starting: ref(false),
+      starting: mockDeviceStarting,
     },
-    quota: mockQuota,
-    quotaError: mockQuotaError,
     refreshToken: async () => {},
-    refreshing: ref(false),
+    refreshing: mockRefreshing,
     status: mockStatus,
     statusError: mockStatusError,
   }),
-}
-
-// The ticker is time, not quota logic: freeze it so reset freshness is
-// deterministic while every other formatting helper stays real.
-const mockWindowEntries = {
-  ...tokenPlanFormatting,
-  useTokenPlanTicker: () => ref(FIXED_NOW),
 }
 
 function compileSfc(source: string, filename: string, id: string) {
@@ -411,25 +413,6 @@ function compileSfc(source: string, filename: string, id: string) {
   const script = compileScript(descriptor, { id, inlineTemplate: true })
   return rewriteSfcImports(script.content).replace(/export default/, 'return')
 }
-
-const oauthRowComponent = ((): unknown => {
-  const js = new Bun.Transpiler({ loader: 'ts' }).transformSync(
-    compileSfc(
-      oauthRowSource,
-      'TokenPlanQuotaWindowRow.vue',
-      'oauth-quota-row',
-    ),
-  )
-  const resolve = (spec: string): unknown => {
-    if (spec === 'vue') return vue
-    if (spec === '@/composables/useCanonicalQuotaWindows') return canonicalQuota
-    if (spec === '@/composables/useTokenPlanWindowEntries') {
-      return tokenPlanFormatting
-    }
-    return slotStub(spec.split('/').pop() ?? spec)
-  }
-  return new Function('__resolve', `"use strict";\n${js}`)(resolve)
-})()
 
 const oauthComponent = ((): Parameters<typeof h>[0] => {
   const js = new Bun.Transpiler({ loader: 'ts' }).transformSync(
@@ -441,17 +424,8 @@ const oauthComponent = ((): Parameters<typeof h>[0] => {
   )
   const resolve = (spec: string): unknown => {
     if (spec === 'vue') return vue
-    if (spec === '@/composables/useEndpointOAuthActions')
+    if (spec === '@/composables/useEndpointOAuthActions') {
       return mockOAuthActions
-    if (spec === '@/composables/useCanonicalQuotaWindows') return canonicalQuota
-    if (spec === '@/composables/useTokenPlanWindowEntries') {
-      return mockWindowEntries
-    }
-    if (spec === '@/composables/subscriptionQuotaWindows') {
-      return subscriptionQuota
-    }
-    if (spec === '@/components/endpoints/TokenPlanQuotaWindowRow.vue') {
-      return oauthRowComponent
     }
     return slotStub(spec.split('/').pop() ?? spec)
   }
@@ -465,12 +439,7 @@ async function renderOAuth(): Promise<string> {
     render: () =>
       h(oauthComponent, {
         endpointId: 'endpoint-1',
-        t: (key: string, args?: Record<string, unknown>) => {
-          if (key === 'tokenPlanDurationWindow') {
-            return `Window (${String((args as Record<string, unknown>)?.duration ?? '')})`
-          }
-          return key
-        },
+        t: (key: string) => key,
       }),
   })
   app.component('UModal', slotStub('UModal', 'body'))
@@ -480,241 +449,271 @@ async function renderOAuth(): Promise<string> {
   return renderToString(app)
 }
 
-function oauthKey(
-  overrides: Partial<TokenPlanKeyUsage> = {},
-): TokenPlanKeyUsage {
-  return {
-    key_id: 'k-oauth',
-    key_label: 'oauth key',
-    ok: true,
-    model_remains: [],
-    ...overrides,
-  } as TokenPlanKeyUsage
-}
+test('the editor neither fetches nor renders the subscription quota', () => {
+  expect(statusSource).not.toContain('getEndpointTokenPlanUsage')
+  expect(oauthSource).not.toContain('endpointOAuthQuota')
+})
 
-function loggedInWithQuota(quota: TokenPlanUsageResponse | null): void {
+test('the OAuth section shows the login state without a quota surface', async () => {
   mockStatus.value = {
     has_oauth_token: true,
     plan: 'chatgpt_subscription',
     expired: false,
     expires_at: null,
   }
-  mockQuota.value = quota
-  mockQuotaError.value = ''
-  mockStatusError.value = ''
-}
-
-test('OAuth renders actual subscription windows with the same values as the dialog', async () => {
-  loggedInWithQuota({
-    keys: [
-      oauthKey({
-        model_remains: [
-          {
-            model_name: 'plus',
-            interval: null,
-            weekly: null,
-            windows: [
-              {
-                source_window: 'primary',
-                window_seconds: 18_000,
-                used_percent: 2,
-                remaining_percent: 98,
-                reset_at: FUTURE_ISO,
-                reset_after_seconds: null,
-                availability: 'known',
-              },
-              {
-                source_window: 'secondary',
-                window_seconds: 604_800,
-                used_percent: null,
-                remaining_percent: null,
-                reset_at: FUTURE_ISO,
-                reset_after_seconds: null,
-                availability: 'unknown',
-              },
-            ],
-          },
-        ],
-      }),
-    ],
-    provider: 'openai',
-    provider_region: null,
-  } as unknown as TokenPlanUsageResponse)
-  const html = await renderOAuth()
-  // The 5h window keeps its honest percent; the unknown secondary degrades
-  // to the same dash the dialog shows instead of a fabricated bar.
-  expect(html).toContain('98.0%')
-  expect(html).toContain('—')
-  expect(html).not.toContain(' endpointOAuthQuotaPrimary')
-})
-
-test('OAuth prefers canonical observations over legacy fields', async () => {
-  loggedInWithQuota({
-    keys: [
-      {
-        ...oauthKey({
-          model_remains: [
-            {
-              model_name: 'plus',
-              interval: null,
-              weekly: null,
-              windows: [
-                {
-                  source_window: 'primary',
-                  window_seconds: 18_000,
-                  used_percent: 2,
-                  remaining_percent: 98,
-                  reset_at: FUTURE_ISO,
-                  reset_after_seconds: null,
-                  availability: 'known',
-                },
-              ],
-            },
-          ],
-        }),
-        quota_windows: [
-          {
-            source_id: 'subscription:primary',
-            kind: 'custom',
-            source_model: 'plus',
-            unit: null,
-            duration_seconds: 18_000,
-            is_default_scope: false,
-            availability: 'known',
-            remaining_percent: 60,
-            current: null,
-            limit: null,
-            remaining: null,
-            reset_at: FUTURE_ISO,
-          },
-        ],
-      } as unknown as TokenPlanKeyUsage,
-    ],
-    provider: 'openai',
-    provider_region: null,
-  } as unknown as TokenPlanUsageResponse)
-  const html = await renderOAuth()
-  // Canonical 60 wins over legacy 98: observations are preferred, never merged.
-  expect(html).toContain('60.0%')
-  expect(html).not.toContain('98.0%')
-})
-
-test('OAuth shows the actual custom duration instead of a hardcoded slot', async () => {
-  loggedInWithQuota({
-    keys: [
-      oauthKey({
-        model_remains: [
-          {
-            model_name: 'plus',
-            interval: null,
-            weekly: null,
-            windows: [
-              {
-                source_window: 'extra',
-                window_seconds: 3_600,
-                used_percent: 10,
-                remaining_percent: 90,
-                reset_at: FUTURE_ISO,
-                reset_after_seconds: null,
-                availability: 'known',
-              },
-            ],
-          },
-        ],
-      }),
-    ],
-    provider: 'openai',
-    provider_region: null,
-  } as unknown as TokenPlanUsageResponse)
-  const html = await renderOAuth()
-  expect(html).toContain('90.0%')
-  expect(html).toContain('Window (1h)')
-})
-
-test('OAuth renders an expired window as unknown without keeping its percent', async () => {
-  loggedInWithQuota({
-    keys: [
-      oauthKey({
-        quota_windows: [
-          {
-            source_id: 'subscription:primary',
-            kind: 'custom',
-            source_model: 'plus',
-            unit: null,
-            duration_seconds: 18_000,
-            is_default_scope: false,
-            availability: 'known',
-            remaining_percent: 75,
-            current: null,
-            limit: null,
-            remaining: null,
-            reset_at: PAST_ISO,
-          },
-        ] as CanonicalQuotaWindow[],
-      }),
-    ],
-    provider: 'openai',
-    provider_region: null,
-  } as unknown as TokenPlanUsageResponse)
-  const html = await renderOAuth()
-  expect(html).toContain('—')
-  expect(html).not.toContain('75.0%')
-})
-
-test('OAuth renders a genuine zero as an exhausted 0% bar', async () => {
-  loggedInWithQuota({
-    keys: [
-      oauthKey({
-        quota_windows: [
-          {
-            source_id: 'subscription:primary',
-            kind: 'custom',
-            source_model: 'plus',
-            unit: null,
-            duration_seconds: 18_000,
-            is_default_scope: false,
-            availability: 'known',
-            remaining_percent: 0,
-            current: null,
-            limit: null,
-            remaining: null,
-            reset_at: FUTURE_ISO,
-          },
-        ] as CanonicalQuotaWindow[],
-      }),
-    ],
-    provider: 'openai',
-    provider_region: null,
-  } as unknown as TokenPlanUsageResponse)
-  const html = await renderOAuth()
-  expect(html).toContain('0.0%')
-  expect(html).not.toContain('—')
-})
-
-test('OAuth keeps quota errors and the login surface untouched', async () => {
-  mockStatus.value = {
-    has_oauth_token: true,
-    plan: 'chatgpt_subscription',
-    expired: false,
-    expires_at: null,
-  }
-  mockQuota.value = {
-    keys: [],
-    provider: 'openai',
-    provider_region: null,
-  } as unknown as TokenPlanUsageResponse
-  mockQuotaError.value = 'quota boom'
   mockStatusError.value = ''
   const html = await renderOAuth()
-  expect(html).toContain('quota boom')
-  // Logging out still shows the device/browser login, not quota rows.
+  expect(html).toContain('endpointOAuthLoggedIn')
+  expect(html).toContain('endpointPlanChatgptSubscription')
+  expect(html).not.toContain('endpointOAuthQuota')
+})
+
+test('the OAuth section keeps the login controls for a logged-out endpoint', async () => {
   mockStatus.value = {
     has_oauth_token: false,
     plan: 'platform_api_key',
     expired: false,
     expires_at: null,
   }
-  mockQuota.value = null
-  const loggedOut = await renderOAuth()
-  expect(loggedOut).toContain('data-stub="EndpointOAuthDeviceLogin.vue"')
+  const html = await renderOAuth()
+  expect(html).toContain('data-stub="EndpointOAuthDeviceLogin.vue"')
+  expect(html).toContain('data-stub="EndpointOAuthBrowserLogin.vue"')
+  expect(html).toContain('endpointOAuthNotLoggedIn')
+})
+
+// Issue #1004 P1: the parent page binds the OAuth action handler with a
+// kebab-case attribute, which Vue normalizes to a camelCase prop name. The
+// dialog has to declare that exact name, or the handler never arrives and the
+// login controls stay disabled. The regression renders the real page binding
+// against the real dialog and the real login section.
+const pageSource = await Bun.file(
+  new URL('../src/pages/EndpointsPage.vue', import.meta.url),
+).text()
+
+const deviceSource = await Bun.file(
+  new URL(
+    '../src/components/endpoints/EndpointOAuthDeviceLogin.vue',
+    import.meta.url,
+  ),
+).text()
+
+const browserSource = await Bun.file(
+  new URL(
+    '../src/components/endpoints/EndpointOAuthBrowserLogin.vue',
+    import.meta.url,
+  ),
+).text()
+
+/** The attribute the real parent binds the OAuth action handler with. */
+function parentOAuthActionAttribute(): string {
+  const template = parse(pageSource, { filename: 'EndpointsPage.vue' })
+    .descriptor.template!.content
+  const match = template.match(/:([a-z0-9-]+)="runEndpointOAuthAction"/)
+  if (!match?.[1]) {
+    throw new Error('the parent does not bind the OAuth action handler')
+  }
+  return match[1]
+}
+
+/** The prop name Vue derives from a kebab-case attribute. */
+function normalizedPropName(attribute: string): string {
+  return attribute.replace(/-([a-z0-9])/g, (_, character: string) =>
+    character.toUpperCase(),
+  )
+}
+
+function compileRealSfc(
+  source: string,
+  filename: string,
+  id: string,
+  resolve: (spec: string) => unknown,
+): Component {
+  const js = new Bun.Transpiler({ loader: 'ts' }).transformSync(
+    compileSfc(source, filename, id),
+  )
+  return new Function('__resolve', `"use strict";\n${js}`)(resolve) as Component
+}
+
+const deviceComponent = compileRealSfc(
+  deviceSource,
+  'EndpointOAuthDeviceLogin.vue',
+  'endpoint-oauth-device-login',
+  (spec) => (spec === 'vue' ? vue : slotStub(spec.split('/').pop() ?? spec)),
+)
+
+const browserComponent = compileRealSfc(
+  browserSource,
+  'EndpointOAuthBrowserLogin.vue',
+  'endpoint-oauth-browser-login',
+  (spec) => (spec === 'vue' ? vue : slotStub(spec.split('/').pop() ?? spec)),
+)
+
+const oauthSectionComponent = compileRealSfc(
+  oauthSource,
+  'EndpointOAuthSection.vue',
+  'endpoint-oauth-section-real',
+  (spec) => {
+    if (spec === 'vue') return vue
+    if (spec === '@/composables/useEndpointOAuthActions')
+      return mockOAuthActions
+    if (spec.endsWith('EndpointOAuthDeviceLogin.vue')) return deviceComponent
+    if (spec.endsWith('EndpointOAuthBrowserLogin.vue')) return browserComponent
+    return slotStub(spec.split('/').pop() ?? spec)
+  },
+)
+
+const dialogWithRealSection = compileRealSfc(
+  dialogSource,
+  'EndpointDialog.vue',
+  'endpoint-dialog-real',
+  (spec) => {
+    if (spec === 'vue') return vue
+    if (spec === '@/admin-mappers') return adminMappers
+    if (spec === '@/composables/useEndpointDialogValidation') {
+      return endpointDialogValidation
+    }
+    if (spec.endsWith('EndpointApiKeysEditor.vue')) return apiKeysStub
+    if (spec.endsWith('EndpointOAuthSection.vue')) return oauthSectionComponent
+    return slotStub(spec.split('/').pop() ?? spec)
+  },
+)
+
+async function renderPageBoundDialog(
+  form: EndpointForm,
+  runAction: unknown,
+): Promise<string> {
+  const attribute = parentOAuthActionAttribute()
+  const app = createSSRApp({
+    render: () =>
+      h(dialogWithRealSection, {
+        form,
+        visible: true,
+        busy: false,
+        header: 'endpoint',
+        t: (key: string) => key,
+        users: [],
+        // The parent binds the handler with the kebab-case attribute; Vue
+        // normalizes it to the camelCase prop the dialog declares.
+        [attribute]: runAction,
+      }),
+  })
+  app.component('UModal', slotStub('UModal', 'body'))
+  app.component('USelect', slotStub('USelect'))
+  app.component('USwitch', slotStub('USwitch'))
+  app.component('UButton', buttonStub())
+  app.component('UTooltip', slotStub('UTooltip'))
+  app.component('UIcon', slotStub('UIcon'))
+  app.component('UInput', slotStub('UInput'))
+  app.component('UBadge', slotStub('UBadge'))
+  app.component('UProgress', slotStub('UProgress'))
+  return renderToString(app)
+}
+
+/** Whether a control of the rendered section carries the disabled state. */
+function controlStates(html: string): Record<string, boolean> {
+  const buttons = Array.from(
+    html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g),
+  ).map((match) => ({
+    disabled: match[0]!.includes('disabled'),
+    label: match[1]!.replace(/<[^>]*>/g, '').trim(),
+  }))
+  const states: Record<string, boolean> = {}
+  for (const button of buttons) {
+    states[button.label] = button.disabled
+  }
+  return states
+}
+
+test('the parent binding reaches the real login section', async () => {
+  const attribute = parentOAuthActionAttribute()
+  expect(attribute).toBe('run-oauth-action')
+  // The dialog must declare the prop name Vue derives from that attribute.
+  expect(normalizedPropName(attribute)).toBe('runOauthAction')
+  expect(dialogSource).toContain('runOauthAction?: RunEndpointOAuthAction')
+  expect(dialogSource).toContain(':run-action="runOauthAction"')
+})
+
+test('the idle login controls are enabled through the parent binding', async () => {
+  mockStatus.value = {
+    has_oauth_token: false,
+    plan: 'platform_api_key',
+    expired: false,
+    expires_at: null,
+  }
+  const handler = async () => {}
+  const html = await renderPageBoundDialog(subscriptionForm(), handler)
+  const states = controlStates(html)
+  expect(states['endpointOAuthDeviceStart']).toBe(false)
+  expect(states['endpointOAuthBrowserStart']).toBe(false)
+  // The section itself is the real one, not a stub.
+  expect(html).toContain('endpointOAuthNotLoggedIn')
+})
+
+test('the refresh and clear controls are enabled through the parent binding', async () => {
+  mockStatus.value = {
+    has_oauth_token: true,
+    plan: 'chatgpt_subscription',
+    expired: false,
+    expires_at: null,
+  }
+  const handler = async () => {}
+  const html = await renderPageBoundDialog(subscriptionForm(), handler)
+  const states = controlStates(html)
+  expect(states['endpointOAuthRefresh']).toBe(false)
+  expect(states['endpointOAuthClear']).toBe(false)
+})
+
+test('the login controls stay disabled without a handler', async () => {
+  mockStatus.value = {
+    has_oauth_token: true,
+    plan: 'chatgpt_subscription',
+    expired: false,
+    expires_at: null,
+  }
+  const html = await renderPageBoundDialog(subscriptionForm(), undefined)
+  const states = controlStates(html)
+  expect(states['endpointOAuthRefresh']).toBe(true)
+  expect(states['endpointOAuthClear']).toBe(true)
+})
+
+test('a pending login keeps its control disabled', async () => {
+  mockStatus.value = {
+    has_oauth_token: false,
+    plan: 'platform_api_key',
+    expired: false,
+    expires_at: null,
+  }
+  mockDeviceStarting.value = true
+  const html = await renderPageBoundDialog(subscriptionForm(), async () => {})
+  // The device login reports the pending state instead of offering a second
+  // start.
+  expect(html).toContain('data-loading="true"')
+  mockDeviceStarting.value = false
+})
+
+test('a busy browser login keeps its control disabled', async () => {
+  mockStatus.value = {
+    has_oauth_token: false,
+    plan: 'platform_api_key',
+    expired: false,
+    expires_at: null,
+  }
+  mockBrowserBusy.value = true
+  const html = await renderPageBoundDialog(subscriptionForm(), async () => {})
+  const states = controlStates(html)
+  expect(states['endpointOAuthBrowserStart']).toBe(true)
+  mockBrowserBusy.value = false
+})
+
+test('a failed status read is reported next to the controls', async () => {
+  mockStatus.value = {
+    has_oauth_token: true,
+    plan: 'chatgpt_subscription',
+    expired: false,
+    expires_at: null,
+  }
+  mockStatusError.value = 'the login state could not be read'
+  const html = await renderPageBoundDialog(subscriptionForm(), async () => {})
+  expect(html).toContain('the login state could not be read')
+  mockStatusError.value = ''
 })

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import type { ModelRouteListItemView } from '@/models/endpoints'
+import { modelRouteTestCounts } from '@/models/endpoints/model-route-item'
+import ModelRouteTestResultsDialog from './ModelRouteTestResultsDialog.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -34,6 +36,15 @@ const targetsLabel = computed(
   () =>
     props.item.targets.map((target) => target.endpoint_label).join(', ') || '-',
 )
+
+const detailsOpen = ref(false)
+
+// The card shows the counts next to the icon, so the result is readable
+// without relying on the color alone.
+const countsLabel = computed(() => {
+  const counts = modelRouteTestCounts(props.item.test_results)
+  return counts.total ? `${counts.passed}/${counts.total}` : ''
+})
 </script>
 
 <template>
@@ -78,6 +89,9 @@ const targetsLabel = computed(
           <TestResultPopover
             :message="item.test_message"
             :severity="item.test_severity"
+            :detail-label="countsLabel"
+            interactive
+            @select="detailsOpen = true"
           />
         </div>
       </div>
@@ -125,5 +139,11 @@ const targetsLabel = computed(
         >{{ t('delete') }}</UButton
       >
     </div>
+
+    <ModelRouteTestResultsDialog
+      v-model:visible="detailsOpen"
+      :results="item.test_results"
+      :t="t"
+    />
   </article>
 </template>

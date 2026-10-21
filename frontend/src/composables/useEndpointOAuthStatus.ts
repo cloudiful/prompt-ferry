@@ -1,13 +1,7 @@
 import { onScopeDispose, ref, watch, type Ref } from 'vue'
-import type {
-  EndpointOAuthStatusResponse,
-  TokenPlanUsageResponse,
-} from '@/generated/admin-api'
+import type { EndpointOAuthStatusResponse } from '@/generated/admin-api'
 import { formatApiError } from '@/api'
-import {
-  getEndpointOAuthStatus,
-  getEndpointTokenPlanUsage,
-} from '@/api/endpoint-oauth'
+import { getEndpointOAuthStatus } from '@/api/endpoint-oauth'
 
 export type EndpointOAuthStatusPayload = Pick<
   EndpointOAuthStatusResponse,
@@ -24,10 +18,11 @@ type Options = {
   onStatus: (payload: EndpointOAuthStatusPayload) => void
 }
 
+// Issue #1004 P1: the editor shows the login state only. The subscription
+// quota lives on the standalone quota surface, so the editor no longer
+// fetches or renders it.
 export function useEndpointOAuthStatus(options: Options) {
   const status = ref<EndpointOAuthStatusResponse | null>(null)
-  const quota = ref<TokenPlanUsageResponse | null>(null)
-  const quotaError = ref('')
   const statusError = ref('')
   let generation = 0
   let readGeneration = 0
@@ -60,37 +55,13 @@ export function useEndpointOAuthStatus(options: Options) {
     return true
   }
 
-  async function loadQuota(
-    context: EndpointOAuthStatusContext,
-    requestGeneration: number,
-  ): Promise<void> {
-    if (!isCurrent(context) || requestGeneration !== readGeneration) return
-    quotaError.value = ''
-    try {
-      const next = await getEndpointTokenPlanUsage(context.endpointId)
-      if (isCurrent(context) && requestGeneration === readGeneration) {
-        quota.value = next
-      }
-    } catch (error) {
-      if (!isCurrent(context) || requestGeneration !== readGeneration) return
-      quota.value = null
-      quotaError.value = formatApiError(error)
-    }
-  }
-
   async function applyRefreshedStatus(
     next: EndpointOAuthStatusResponse,
     context: EndpointOAuthStatusContext,
   ): Promise<void> {
     if (!isCurrent(context)) return
-    const requestGeneration = ++readGeneration
-    if (!applyStatus(next, context)) return
-    if (next.has_oauth_token) {
-      await loadQuota(context, requestGeneration)
-    } else if (isCurrent(context) && requestGeneration === readGeneration) {
-      quota.value = null
-      quotaError.value = ''
-    }
+    readGeneration += 1
+    applyStatus(next, context)
   }
 
   async function refreshStatusFor(
@@ -107,12 +78,6 @@ export function useEndpointOAuthStatus(options: Options) {
         !applyStatus(next, context)
       ) {
         return
-      }
-      if (next.has_oauth_token) {
-        await loadQuota(context, requestGeneration)
-      } else if (isCurrent(context) && requestGeneration === readGeneration) {
-        quota.value = null
-        quotaError.value = ''
       }
     } catch (error) {
       if (isCurrent(context) && requestGeneration === readGeneration) {
@@ -131,8 +96,6 @@ export function useEndpointOAuthStatus(options: Options) {
       generation += 1
       readGeneration += 1
       status.value = null
-      quota.value = null
-      quotaError.value = ''
       statusError.value = ''
       if (endpointId) void refreshCurrentStatus()
     },
@@ -148,9 +111,6 @@ export function useEndpointOAuthStatus(options: Options) {
     capture,
     invalidateReads,
     isCurrent,
-    loadQuota,
-    quota,
-    quotaError,
     refreshCurrentStatus,
     refreshStatusFor,
     status,

@@ -48,15 +48,19 @@ impl ChatGptQuotaFetcher for StoredOAuthQuotaFetcher {
                 .await
                 .map_err(|_| ChatGptQuotaError::Storage)?
                 .ok_or(ChatGptQuotaError::NotConfigured)?;
-            let access_token = if chatgpt_backend::access_token_expired(token.expires_at) {
-                match chatgpt_backend::refresh_stored_endpoint_token(
+            // Issue #1004 P1: the admin credential probe and this quota
+            // service share one resolution path, so an expired token is
+            // refreshed (and the rotated credential persisted) identically.
+            let (access_token, account_id) =
+                match chatgpt_backend::resolve_subscription_access_token(
                     repository,
                     &client,
                     endpoint_id,
+                    &token,
                 )
                 .await
                 {
-                    Ok(tokens) => tokens.access_token,
+                    Ok(resolved) => resolved,
                     Err(ChatgptBackendError::InvalidGrant(_)) => {
                         return Err(ChatGptQuotaError::Auth);
                     }
@@ -69,11 +73,7 @@ impl ChatGptQuotaFetcher for StoredOAuthQuotaFetcher {
                     Err(ChatgptBackendError::Upstream { .. }) => {
                         return Err(ChatGptQuotaError::Upstream);
                     }
-                }
-            } else {
-                token.access_token
-            };
-            let account_id = chatgpt_backend::codex_account_id_from_access_token(&access_token);
+                };
             chatgpt_backend::fetch_chatgpt_quota(&client, &access_token, account_id.as_deref())
                 .await
                 .map_err(|error| match error {

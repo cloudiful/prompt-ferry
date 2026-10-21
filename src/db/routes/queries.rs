@@ -121,7 +121,9 @@ pub async fn list_visible_model_route_endpoints_strict(
             thinking_effort_override: None,
             // Issue #502 Task 5: direct routes use passthrough compact.
             compact_mode: crate::db::CompactMode::Passthrough,
+            // Issue #1004 P1: stamped from the token-id existence query.
+            has_oauth_token: false,
         })
         .collect::<Vec<_>>();
-    crate::db::endpoints::attach_route_config_api_keys(pool, routes).await
+    crate::db::endpoints::attach_route_config_credentials(pool, routes).await
 }

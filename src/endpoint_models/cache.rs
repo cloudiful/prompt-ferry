@@ -108,12 +108,8 @@ impl EndpointModelCache {
     }
 
     pub async fn put(&self, route: &RouteConfig, snapshot: EndpointModelSnapshot) {
-        self.put_entry(
-            route.route_id,
-            EndpointSignature::from(route),
-            snapshot,
-        )
-        .await;
+        self.put_entry(route.route_id, EndpointSignature::from(route), snapshot)
+            .await;
     }
 
     /// Cached snapshot for one endpoint, keyed by the endpoint id and the
@@ -214,12 +210,8 @@ impl EndpointModelCache {
     }
 
     async fn lookup_at(&self, route: &RouteConfig, now: Instant) -> CacheLookup {
-        self.lookup_entry(
-            route.route_id,
-            &EndpointSignature::from(route),
-            now,
-        )
-        .await
+        self.lookup_entry(route.route_id, &EndpointSignature::from(route), now)
+            .await
     }
 }
 
@@ -264,6 +256,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
         }
     }
 

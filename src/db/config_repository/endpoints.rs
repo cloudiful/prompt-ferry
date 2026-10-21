@@ -274,11 +274,16 @@ impl super::ConfigRepository {
         }
     }
 
+    /// Issue #1004 P1: an empty stored secret is the absence of a key, never a
+    /// usable credential. A keyless OpenAI endpoint stores the empty string
+    /// (the legacy column is `NOT NULL`), so the read never hands an empty
+    /// bearer to an upstream.
     pub async fn first_endpoint_api_key(&self, endpoint_id: Uuid) -> Result<Option<String>> {
-        match self {
-            Self::Postgres(repo) => repo.first_endpoint_api_key(endpoint_id).await,
-            Self::Sqlite(repo) => repo.first_endpoint_api_key(endpoint_id).await,
-        }
+        let key = match self {
+            Self::Postgres(repo) => repo.first_endpoint_api_key(endpoint_id).await?,
+            Self::Sqlite(repo) => repo.first_endpoint_api_key(endpoint_id).await?,
+        };
+        Ok(key.filter(|value| !value.trim().is_empty()))
     }
 
     /// Issue #368 Phase A: decrypted outbound proxy default for an endpoint.

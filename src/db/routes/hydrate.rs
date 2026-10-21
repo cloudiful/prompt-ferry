@@ -126,6 +126,9 @@ pub(super) async fn model_route_candidates_by_rule(
         &rows.iter().map(|row| row.endpoint_id).collect::<Vec<_>>(),
     )
     .await?;
+    // Issue #1004 P1: one existence query hydrates the non-secret
+    // subscription eligibility flag for every candidate target.
+    let subscription_endpoints = crate::db::endpoints::list_oauth_token_endpoint_ids(pool).await?;
 
     let mut grouped = Vec::<ModelRouteCandidate>::new();
     for row in rows {
@@ -180,6 +183,9 @@ pub(super) async fn model_route_candidates_by_rule(
                 thinking_downgrade_enabled: row.thinking_downgrade_enabled,
                 thinking_effort_override: row.thinking_effort_override.clone(),
                 compact_mode: crate::db::resolve_target_compact_mode(row.compact_mode.as_deref()),
+                // Issue #1004 P1: subscription eligibility, hydrated from the
+                // token-id existence query.
+                has_oauth_token: subscription_endpoints.contains(&row.endpoint_id),
             });
             continue;
         }
@@ -213,6 +219,9 @@ pub(super) async fn model_route_candidates_by_rule(
                 thinking_downgrade_enabled: row.thinking_downgrade_enabled,
                 thinking_effort_override: row.thinking_effort_override,
                 compact_mode: crate::db::resolve_target_compact_mode(row.compact_mode.as_deref()),
+                // Issue #1004 P1: subscription eligibility, hydrated from the
+                // token-id existence query.
+                has_oauth_token: subscription_endpoints.contains(&row.endpoint_id),
             }],
         });
     }

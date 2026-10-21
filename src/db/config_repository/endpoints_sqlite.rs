@@ -36,7 +36,15 @@ pub(super) fn sqlite_endpoint_from_create(
     mcp_enabled: bool,
     timestamps: EndpointTimestamps,
 ) -> Result<ScProviderEndpoint> {
-    if input.api_key.trim().is_empty() && input.api_keys.is_empty() {
+    // Issue #1004 P1: an OpenAI endpoint may be stored without a platform API
+    // key so the ChatGPT device login can be completed first. Every other
+    // provider keeps the mandatory key. The legacy column then holds the
+    // empty string, which the existing envelope representation stores and
+    // reads back unchanged.
+    if input.api_key.trim().is_empty()
+        && input.api_keys.is_empty()
+        && input.provider != crate::db::EndpointProvider::OpenAi
+    {
         anyhow::bail!("endpoint api key is required");
     }
     let api_key = if !input.api_key.trim().is_empty() {

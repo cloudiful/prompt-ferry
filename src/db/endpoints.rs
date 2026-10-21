@@ -1,5 +1,6 @@
 use anyhow::Result;
 use sqlx::PgPool;
+use std::collections::HashSet;
 
 use crate::{
     config::NativeApi,
@@ -65,9 +66,11 @@ pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<R
             // Issue #464: direct routes follow the caller.
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            // Issue #1004 P1: stamped from the token-id existence query.
+            has_oauth_token: false,
         })
         .collect::<Vec<_>>();
-    attach_route_config_api_keys(pool, routes).await
+    attach_route_config_credentials(pool, routes).await
 }
 
 pub async fn list_endpoints_page(pool: &PgPool, first: i64, rows: i64) -> Result<EndpointPage> {
@@ -119,7 +122,7 @@ fn parse_native_api(value: &str) -> NativeApi {
     serde_json::from_value(serde_json::Value::String(value.to_string())).unwrap_or(NativeApi::Chat)
 }
 
-pub(crate) async fn attach_route_config_api_keys(
+pub(crate) async fn attach_route_config_credentials(
     pool: &PgPool,
     mut routes: Vec<RouteConfig>,
 ) -> Result<Vec<RouteConfig>> {
@@ -131,11 +134,26 @@ pub(crate) async fn attach_route_config_api_keys(
             .collect::<Vec<_>>(),
     )
     .await?;
+    // Issue #1004 P1: one existence query hydrates the non-secret
+    // subscription eligibility flag for every route. The token values stay
+    // in the token table and are resolved only in the authentication path.
+    let subscription_endpoints = list_oauth_token_endpoint_ids(pool).await?;
     for route in &mut routes {
         route.api_keys = rows_by_endpoint
             .get(&route.route_id)
             .cloned()
             .unwrap_or_default();
+        route.has_oauth_token = subscription_endpoints.contains(&route.route_id);
     }
     Ok(routes)
+}
+
+/// Issue #1004 P1: endpoint ids that store a ChatGPT OAuth token. Existence
+/// only — no secret is read, and the query reuses the existing token-id
+/// listing so no schema or SQL change is needed.
+pub(crate) async fn list_oauth_token_endpoint_ids(pool: &PgPool) -> Result<HashSet<uuid::Uuid>> {
+    let rows = sqlx::query_file!("src/sql/endpoints/list_endpoint_oauth_token_ids.sql")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(|row| row.endpoint_id).collect())
 }

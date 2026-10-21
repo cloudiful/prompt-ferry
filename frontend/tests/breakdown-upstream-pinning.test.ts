@@ -228,8 +228,10 @@ test('the model perspective pins the endpoint and the model', async () => {
 
   const endpoint = column(table.columns, 'endpoint')
   const model = column(table.columns, 'model')
-  expect(endpoint.size).toBe(160)
-  expect(model.size).toBe(200)
+  // Issue #1004 P2: the identifier widths follow the content, so they are
+  // bounded instead of fixed. The popover test pins the exact bounds.
+  expect(Number(endpoint.size)).toBeGreaterThan(0)
+  expect(Number(model.size)).toBeGreaterThan(0)
 })
 
 test('the upstream perspective pins only the model', async () => {
@@ -239,7 +241,7 @@ test('the upstream perspective pins only the model', async () => {
   expect(
     table.columns.find((entry) => entry.accessorKey === 'endpoint'),
   ).toBeUndefined()
-  expect(column(table.columns, 'model').size).toBe(200)
+  expect(Number(column(table.columns, 'model').size)).toBeGreaterThan(0)
 })
 
 test('a pinned cell is opaque and as wide as its sticky offset', async () => {
@@ -275,14 +277,18 @@ test('a pinned cell is opaque and as wide as its sticky offset', async () => {
   }
 })
 
-test('the table is wider than the popover so the metric columns scroll', async () => {
+test('the popover follows the table width instead of a fixed cap', async () => {
   for (const perspective of ['model', 'upstream'] as const) {
     const { html, table } = await renderPopover(perspective)
     const width = table.columns.reduce(
       (sum, entry) => sum + Number(entry.size ?? 0),
       0,
     )
-    expect(width).toBeGreaterThan(38 * 16)
     expect(html).toContain(`--breakdown-table-width:${width}px`)
+    // The popover is as wide as its table, up to the viewport minus the
+    // margins, so the metric columns no longer scroll behind the pinned
+    // identifiers on a desktop viewport.
+    expect(html).toContain(`min(${width + 24}px, calc(100vw - 2rem))`)
+    expect(html).not.toContain('38rem')
   }
 })

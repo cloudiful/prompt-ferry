@@ -210,6 +210,9 @@ async fn available_models(state: &AdminState, user_id: i64) -> anyhow::Result<Ve
                     thinking_effort_override: None,
                     compact_mode: crate::db::CompactMode::Passthrough,
                     thinking_downgrade_enabled: false,
+                    // Issue #1004 P1: carry the non-secret subscription
+                    // eligibility of the target.
+                    has_oauth_token: target.has_oauth_token,
                 };
                 let snapshot = state
                     .endpoint_model_cache

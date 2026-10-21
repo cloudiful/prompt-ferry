@@ -65,11 +65,7 @@ fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-async fn models_handler(
-    State(state): State<MockState>,
-    uri: Uri,
-    headers: HeaderMap,
-) -> Response {
+async fn models_handler(State(state): State<MockState>, uri: Uri, headers: HeaderMap) -> Response {
     state
         .recorded
         .lock()
@@ -89,9 +85,7 @@ async fn models_handler(
             )
                 .into_response()
         }
-        Upstream::Failure(status) => {
-            (*status, "upstream failure detail").into_response()
-        }
+        Upstream::Failure(status) => (*status, "upstream failure detail").into_response(),
         Upstream::Unreadable => (StatusCode::OK, "not-a-model-listing").into_response(),
     }
 }
@@ -204,9 +198,15 @@ async fn lists_the_sorted_unique_model_ids_of_the_endpoint() -> anyhow::Result<(
 async fn an_anthropic_endpoint_authenticates_with_its_own_protocol() -> anyhow::Result<()> {
     let fixture = Fixture::open().await?;
     let app = worker_admin::router(fixture.state.clone());
-    let upstream = spawn_mock_upstream(Upstream::Models(vec!["claude-sonnet-4".to_string()])).await?;
-    let endpoint_id =
-        create_endpoint(&app, &upstream.base_url, "sk-anthropic", "anthropic_messages").await?;
+    let upstream =
+        spawn_mock_upstream(Upstream::Models(vec!["claude-sonnet-4".to_string()])).await?;
+    let endpoint_id = create_endpoint(
+        &app,
+        &upstream.base_url,
+        "sk-anthropic",
+        "anthropic_messages",
+    )
+    .await?;
 
     let response = app.clone().oneshot(models_request(endpoint_id)).await?;
     assert_eq!(response.status(), StatusCode::OK);
@@ -216,10 +216,7 @@ async fn an_anthropic_endpoint_authenticates_with_its_own_protocol() -> anyhow::
     let recorded = upstream.requests();
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].api_key.as_deref(), Some("sk-anthropic"));
-    assert_eq!(
-        recorded[0].anthropic_version.as_deref(),
-        Some("2023-06-01")
-    );
+    assert_eq!(recorded[0].anthropic_version.as_deref(), Some("2023-06-01"));
     assert!(recorded[0].authorization.is_none());
 
     fixture.cleanup().await;
@@ -230,8 +227,7 @@ async fn an_anthropic_endpoint_authenticates_with_its_own_protocol() -> anyhow::
 async fn a_failing_upstream_is_a_bounded_admin_error() -> anyhow::Result<()> {
     let fixture = Fixture::open().await?;
     let app = worker_admin::router(fixture.state.clone());
-    let upstream =
-        spawn_mock_upstream(Upstream::Failure(StatusCode::UNAUTHORIZED)).await?;
+    let upstream = spawn_mock_upstream(Upstream::Failure(StatusCode::UNAUTHORIZED)).await?;
     let endpoint_id = create_endpoint(&app, &upstream.base_url, "sk-secret", "chat").await?;
 
     let response = app.oneshot(models_request(endpoint_id)).await?;
@@ -290,10 +286,7 @@ async fn the_listing_requires_an_admin_session() -> anyhow::Result<()> {
 
     let anonymous = Request::builder()
         .method("GET")
-        .uri(format!(
-            "/api/v1/admin/endpoints/{}/models",
-            Uuid::new_v4()
-        ))
+        .uri(format!("/api/v1/admin/endpoints/{}/models", Uuid::new_v4()))
         .body(Body::empty())?;
     let response = app.oneshot(anonymous).await?;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);

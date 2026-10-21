@@ -72,7 +72,6 @@ const apiModule = () => ({
   deleteModelRouteById,
   fetchEndpointsPage: mock(),
   fetchModelRoutesPage: mock(),
-  fetchOrganizationUsage: mock(),
   persistEndpoint,
   persistModelRoute,
   runEndpointTest,

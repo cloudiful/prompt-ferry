@@ -108,8 +108,6 @@ export function useEndpointOAuthActions(options: Options) {
     clearToken,
     clearing,
     deviceFlow,
-    quota: statusActions.quota,
-    quotaError: statusActions.quotaError,
     refreshToken,
     refreshing,
     status: statusActions.status,

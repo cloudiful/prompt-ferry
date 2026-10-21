@@ -1,23 +1,34 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-const props = defineProps<{
-  message: string
-  severity: 'success' | 'error' | null
+const props = withDefaults(
+  defineProps<{
+    message: string
+    severity: 'success' | 'warning' | 'error' | null
+    detailLabel?: string
+    interactive?: boolean
+  }>(),
+  { detailLabel: '', interactive: false },
+)
+
+const emit = defineEmits<{
+  select: []
 }>()
 
-// success -> green check, error -> red cross, idle -> gray dash. The
-// popover trigger stays a button so screen readers announce it as a
-// control; the icon is purely visual and the accessible label carries
-// the full test message.
+// success -> green check, warning -> amber triangle, error -> red cross,
+// idle -> gray dash. The popover trigger stays a button so screen readers
+// announce it as a control; the icon is purely visual and the accessible
+// label carries the full test message.
 const iconName = computed(() => {
   if (props.severity === 'success') return 'i-lucide-check'
+  if (props.severity === 'warning') return 'i-lucide-alert-triangle'
   if (props.severity === 'error') return 'i-lucide-x'
   return 'i-lucide-minus'
 })
 
 const iconTone = computed(() => {
   if (props.severity === 'success') return 'text-success'
+  if (props.severity === 'warning') return 'text-warning'
   if (props.severity === 'error') return 'text-error'
   return 'text-muted'
 })
@@ -43,8 +54,12 @@ const iconTone = computed(() => {
       :aria-label="message"
       :title="message"
       class="rounded-full"
+      @click="interactive && emit('select')"
     >
       <UIcon :name="iconName" :class="['h-4 w-4', iconTone]" />
+      <span v-if="detailLabel" class="text-xs text-muted">{{
+        detailLabel
+      }}</span>
     </UButton>
     <template #content>
       <div

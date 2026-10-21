@@ -7,11 +7,18 @@ use crate::{
         RoutingStrategy, StandaloneConfig,
     },
 };
+use std::collections::HashSet;
 
+/// Issue #1004 P1: build the standalone candidate for one request.
+///
+/// `subscription_endpoints` holds the endpoint ids that store a ChatGPT OAuth
+/// token. It hydrates the non-secret subscription eligibility flag on every
+/// target; the token value itself never enters the routing structures.
 pub(crate) fn standalone_model_route_candidate(
     snapshot: &StandaloneConfig,
     user_id: i64,
     model: Option<&str>,
+    subscription_endpoints: &HashSet<uuid::Uuid>,
 ) -> Option<ModelRouteCandidate> {
     let model = model?;
     snapshot
@@ -23,7 +30,7 @@ pub(crate) fn standalone_model_route_candidate(
                 return None;
             }
             let specificity = pattern_specificity(&route.model_pattern, model)?;
-            let candidate = candidate_from_route(snapshot, route)?;
+            let candidate = candidate_from_route(snapshot, route, subscription_endpoints)?;
             Some((index, candidate, specificity))
         })
         .max_by(
@@ -41,6 +48,7 @@ pub(crate) fn standalone_model_route_candidate(
 fn candidate_from_route(
     snapshot: &StandaloneConfig,
     route: &ModelRouteConfig,
+    subscription_endpoints: &HashSet<uuid::Uuid>,
 ) -> Option<ModelRouteCandidate> {
     let targets = route
         .targets
@@ -51,7 +59,11 @@ fn candidate_from_route(
                 .endpoints
                 .iter()
                 .find(|endpoint| endpoint.endpoint_id == target.endpoint_id && endpoint.enabled)?;
-            Some(target_from_endpoint(endpoint, target))
+            Some(target_from_endpoint(
+                endpoint,
+                target,
+                subscription_endpoints.contains(&endpoint.endpoint_id),
+            ))
         })
         .collect::<Vec<_>>();
     (!targets.is_empty()).then_some(ModelRouteCandidate {
@@ -76,6 +88,7 @@ fn candidate_from_route(
 fn target_from_endpoint(
     endpoint: &ProviderEndpointConfig,
     target: &crate::standalone_config::ModelRouteTargetConfig,
+    has_oauth_token: bool,
 ) -> ModelRouteCandidateTarget {
     ModelRouteCandidateTarget {
         target_id: target.target_id,
@@ -130,6 +143,8 @@ fn target_from_endpoint(
         thinking_effort_override: target.thinking_effort_override.clone(),
         // Issue #502 Task 5: per-target compact mode; missing = passthrough.
         compact_mode: db::resolve_target_compact_mode(Some(target.compact_mode.as_str())),
+        // Issue #1004 P1: non-secret subscription eligibility.
+        has_oauth_token,
     }
 }
 
@@ -261,7 +276,8 @@ mod tests {
         };
 
         let candidate =
-            standalone_model_route_candidate(&snapshot, 1, Some("gpt-5")).expect("matching route");
+            standalone_model_route_candidate(&snapshot, 1, Some("gpt-5"), &HashSet::new())
+                .expect("matching route");
         assert_eq!(candidate.model_pattern, "gpt-5");
     }
 
@@ -316,7 +332,8 @@ mod tests {
             ..StandaloneConfig::default()
         };
         let candidate =
-            standalone_model_route_candidate(&snapshot, 1, Some("anything")).expect("candidate");
+            standalone_model_route_candidate(&snapshot, 1, Some("anything"), &HashSet::new())
+                .expect("candidate");
         let target = &candidate.targets[0];
         assert_eq!(target.provider, db::EndpointProvider::Minimax);
         assert_eq!(target.service_tier.as_deref(), Some("priority"));

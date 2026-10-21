@@ -3,12 +3,12 @@ use crate::{
     db,
     worker_admin::openai_org_usage::OpenAiOrganizationUsageResponse,
     worker_admin_types::{
-        EndpointOAuthStatusResponse, EndpointModelsResponse, EndpointPageResponse, EndpointRequest,
+        EndpointModelsResponse, EndpointOAuthStatusResponse, EndpointPageResponse, EndpointRequest,
         EndpointTestResponse, OAuthBrowserCompleteRequest, OAuthBrowserStartResponse,
-        OAuthDeviceStartResponse, OAuthFlowRequest, OAuthLoginResponse, QuotaKeyObservationHistoryQuery,
-        QuotaKeyObservationHistoryResponse, QuotaKeyObservationTrendQuery,
-        QuotaKeyObservationTrendResponse, QuotaSnapshotHistoryQuery, QuotaSnapshotHistoryResponse,
-        TablePageQuery, TokenPlanUsageQuery, TokenPlanUsageResponse,
+        OAuthDeviceStartResponse, OAuthFlowRequest, OAuthLoginResponse,
+        QuotaKeyObservationHistoryQuery, QuotaKeyObservationHistoryResponse,
+        QuotaKeyObservationTrendQuery, QuotaKeyObservationTrendResponse, QuotaSnapshotHistoryQuery,
+        QuotaSnapshotHistoryResponse, TablePageQuery, TokenPlanUsageQuery, TokenPlanUsageResponse,
     },
 };
 
@@ -64,7 +64,11 @@ pub(super) fn delete_endpoint() {}
     post,
     path = "/api/v1/admin/endpoints/{endpoint_id}/test",
     params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
-    responses((status = 200, body = EndpointTestResponse, description = "Endpoint test result")),
+    responses(
+        (status = 200, body = EndpointTestResponse, description = "Endpoint test result"),
+        (status = 400, body = ErrorEnvelope),
+        (status = 404, body = ErrorEnvelope)
+    ),
     tag = "endpoints"
 )]
 pub(super) fn test_endpoint() {}
@@ -74,7 +78,7 @@ pub(super) fn test_endpoint() {}
     path = "/api/v1/admin/endpoints/{endpoint_id}/models",
     params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
     responses(
-        (status = 200, body = EndpointModelsResponse, description = "Upstream model identifiers"),
+        (status = 200, body = EndpointModelsResponse, description = "Upstream model identifiers; a ChatGPT subscription endpoint answers from the Codex model table"),
         (status = 400, body = ErrorEnvelope),
         (status = 404, body = ErrorEnvelope),
         (status = 502, body = ErrorEnvelope)

@@ -365,6 +365,35 @@ pub struct ModelRouteTestRequest {
     pub rule_id: Uuid,
 }
 
+/// Issue #1004 P2: the outcome of one model-route target.
+///
+/// The target identity is preserved (`target_id` plus the endpoint id and
+/// name), so two targets of the same endpoint stay separate outcomes. The
+/// message never carries a credential.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ModelRouteTestTargetResult {
+    pub target_id: Uuid,
+    pub endpoint_id: Uuid,
+    pub endpoint_name: String,
+    pub model: Option<String>,
+    pub ok: bool,
+    pub status: Option<u16>,
+    #[schema(value_type = u64)]
+    pub duration_ms: u128,
+    pub message: String,
+    /// The preferred target of the rule. It is metadata for the reader, never
+    /// a filter: every eligible target is tested.
+    pub preferred: bool,
+}
+
+/// The model-route test result.
+///
+/// The top-level fields describe one representative outcome (the preferred
+/// target's outcome when it was tested, otherwise the first outcome) so a
+/// client that only knows the single-result shape keeps working. `results`
+/// carries every eligible target's outcome in the configured order, `passed`
+/// and `total` the aggregate counts, and `ok` is true only when every tested
+/// target passed.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ModelRouteTestResponse {
     pub ok: bool,
@@ -379,6 +408,9 @@ pub struct ModelRouteTestResponse {
     pub model_pattern: Option<String>,
     pub model: Option<String>,
     pub message: String,
+    pub results: Vec<ModelRouteTestTargetResult>,
+    pub passed: u32,
+    pub total: u32,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

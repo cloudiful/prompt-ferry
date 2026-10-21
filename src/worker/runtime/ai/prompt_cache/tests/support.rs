@@ -30,6 +30,7 @@ pub(super) fn openrouter_route() -> RouteConfig {
         thinking_effort_override: None,
         compact_mode: CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
     }
 }
 
@@ -42,6 +43,7 @@ pub(super) fn targeted_route(
         provider,
         native_api,
         upstream_model: upstream_model.map(str::to_string),
+        has_oauth_token: false,
         ..openrouter_route()
     }
 }

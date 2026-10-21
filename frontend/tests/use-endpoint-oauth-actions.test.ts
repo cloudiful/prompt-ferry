@@ -7,7 +7,6 @@ import {
   oauthStatus,
   clearEndpointOAuthToken,
   getEndpointOAuthStatus,
-  getEndpointTokenPlanUsage,
   refreshEndpointOAuthToken,
 } from './endpoint-oauth-actions.fixtures'
 
@@ -29,15 +28,12 @@ test('OAuth action entry points share the endpoint gate with saves', async () =>
   h.scope.stop()
 })
 
-test('token refresh holds the shared key until its quota read settles', async () => {
+test('token refresh holds the shared key until the refresh settles', async () => {
   const h = freshOAuthHarness(useEndpointOAuthActions)
   await h.settle()
-  const quota =
-    deferred<Awaited<ReturnType<typeof getEndpointTokenPlanUsage>>>()
-  refreshEndpointOAuthToken.mockResolvedValueOnce(
-    oauthStatus({ has_oauth_token: true, plan: 'chatgpt_subscription' }),
-  )
-  getEndpointTokenPlanUsage.mockImplementationOnce(() => quota.promise)
+  const refreshed =
+    deferred<Awaited<ReturnType<typeof getEndpointOAuthStatus>>>()
+  refreshEndpointOAuthToken.mockImplementationOnce(() => refreshed.promise)
 
   const refreshing = h.actions.refreshToken()
   await h.settle()
@@ -48,9 +44,9 @@ test('token refresh holds the shared key until its quota read settles', async ()
     await h.runAction('endpoint-1', async () => 'blocked', 'save'),
   ).toEqual({ executed: false })
 
-  quota.resolve({ keys: [] } as Awaited<
-    ReturnType<typeof getEndpointTokenPlanUsage>
-  >)
+  refreshed.resolve(
+    oauthStatus({ has_oauth_token: true, plan: 'chatgpt_subscription' }),
+  )
   await refreshing
   expect(h.guard.isPending('endpoint:endpoint-1')).toBe(false)
   expect(h.actions.status.value?.plan).toBe('chatgpt_subscription')
@@ -113,7 +109,7 @@ test('OAuth actions reach both login flows through the endpoint owner', async ()
   )
   expect(pageTemplate).toContain(':run-oauth-action="runEndpointOAuthAction"')
   expect(pageTemplate).toContain(':pending-action="endpointPendingAction"')
-  expect(dialogTemplate).toContain(':run-action="runOAuthAction"')
+  expect(dialogTemplate).toContain(':run-action="runOauthAction"')
   expect(dialogTemplate).toContain(':dismissible="!savePending"')
   expect(dialogTemplate).toContain("pendingAction === 'save'")
   expect(oauthTemplate).toContain('@start="startDevice"')

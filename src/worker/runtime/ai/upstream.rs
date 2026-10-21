@@ -586,6 +586,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
         };
         let response = send_upstream_request(
             &Client::new(),
@@ -624,6 +625,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -706,6 +708,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
@@ -767,6 +770,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
@@ -826,6 +830,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
@@ -882,6 +887,7 @@ mod tests {
         let route = RouteConfig {
             base_url: base_url.to_string(),
             native_api,
+            has_oauth_token: false,
             ..generic_route()
         };
         build_upstream_request(
@@ -1096,6 +1102,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
@@ -1156,6 +1163,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
         };
         let conversation_id =
             uuid::Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
@@ -1198,6 +1206,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
         };
         let request = build_upstream_request(
             &Client::new(),
@@ -1249,6 +1258,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
         }
     }
 
@@ -1262,6 +1272,7 @@ mod tests {
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
 
+            has_oauth_token: false,
             ..minimax_route(None)
         }
     }
@@ -1323,6 +1334,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
             ..minimax_route(None)
         };
         let echo = br#"{"include":["reasoning.encrypted_content"],"input":[{"id":"resp_1_rs","type":"reasoning","encrypted_content":"minimax-resp_1_rs","summary":[{"type":"summary_text","text":"think"}]}]}"#;
@@ -1374,6 +1386,7 @@ mod tests {
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
 
+            has_oauth_token: false,
             ..minimax_route(None)
         }
     }
@@ -1435,6 +1448,7 @@ mod tests {
                 thinking_effort_override: None,
                 compact_mode: crate::db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                has_oauth_token: false,
                 ..deepseek_route(NativeApi::Chat)
             };
             assert_eq!(apply_deepseek_thinking(&route, body).as_ref(), body);
@@ -1550,6 +1564,7 @@ mod tests {
                 thinking_effort_override: None,
                 compact_mode: crate::db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                has_oauth_token: false,
                 ..minimax_route(None)
             };
             assert_eq!(
@@ -1704,6 +1719,7 @@ mod tests {
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
 
+            has_oauth_token: false,
             ..minimax_route(None)
         }
     }
@@ -1717,6 +1733,7 @@ mod tests {
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
 
+            has_oauth_token: false,
             ..route.clone()
         }
     }
@@ -1771,6 +1788,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
             ..minimax_route(None)
         };
         assert_eq!(
@@ -1784,6 +1802,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
+            has_oauth_token: false,
             ..minimax_route(None)
         };
         assert_eq!(
@@ -1863,6 +1882,7 @@ mod tests {
             compact_mode: crate::db::CompactMode::Passthrough,
             thinking_downgrade_enabled: false,
 
+            has_oauth_token: false,
             ..minimax_route(None)
         }
     }

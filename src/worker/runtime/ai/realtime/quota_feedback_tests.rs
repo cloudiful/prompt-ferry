@@ -37,6 +37,7 @@ fn route() -> RouteConfig {
         thinking_effort_override: None,
         compact_mode: CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
     }
 }
 

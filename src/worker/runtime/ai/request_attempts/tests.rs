@@ -25,6 +25,7 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+mod chatgpt_auth;
 mod quota_feedback;
 mod responses_framing;
 mod responses_usage;
@@ -81,6 +82,7 @@ fn test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
     }
 }
 
@@ -643,6 +645,7 @@ fn glm_test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
     }
 }
 
@@ -1171,6 +1174,7 @@ fn quota_failover_route(base_url: &str) -> RouteConfig {
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
     }
 }
 

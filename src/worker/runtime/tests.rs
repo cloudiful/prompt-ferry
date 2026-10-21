@@ -625,6 +625,7 @@ fn sample_candidate() -> ModelRouteCandidate {
                 thinking_effort_override: None,
                 compact_mode: crate::db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                has_oauth_token: false,
             },
             ModelRouteCandidateTarget {
                 target_id: uuid::Uuid::new_v4(),
@@ -658,6 +659,7 @@ fn sample_candidate() -> ModelRouteCandidate {
                 thinking_effort_override: None,
                 compact_mode: crate::db::CompactMode::Passthrough,
                 thinking_downgrade_enabled: false,
+                has_oauth_token: false,
             },
         ],
     }
@@ -735,6 +737,7 @@ fn endpoint_key_lb_uses_stable_selection_and_first_key_fallback() {
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
     };
     let sticky_prompt_log = RequestPromptLog {
         request_conversation_key: Some("conv_123".to_string()),
@@ -767,6 +770,7 @@ fn endpoint_key_lb_uses_stable_selection_and_first_key_fallback() {
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
         ..route
     };
     let disabled_pick =
@@ -820,6 +824,7 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
     };
     let fixed_prompt_log = RequestPromptLog {
         conversation_override_endpoint_key_id: Some(fixed_key_id),
@@ -848,6 +853,7 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
         ..route.clone()
     };
     let disabled = materialize_route_api_key_selection(
@@ -869,6 +875,7 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
         ..route.clone()
     };
     let deleted = materialize_route_api_key_selection(&deleted_route, &sample_request(), &deleted);
@@ -891,6 +898,7 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
         ..route
     };
     let cross_endpoint =
@@ -1136,6 +1144,7 @@ fn url_mapping_route(
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
     }
 }
 

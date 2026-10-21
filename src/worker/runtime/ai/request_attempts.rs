@@ -1017,6 +1017,11 @@ fn chatgpt_repository(services: &RuntimeServices) -> Option<db::ConfigRepository
 /// token, or an unreadable credential). `Ok(Some(auth))` routes the turn to the
 /// Codex backend. `Err` is a clear client error for a stored login that is
 /// already known to be revoked.
+///
+/// Issue #1004 P1: a route that was hydrated as subscription-eligible must
+/// never fall back to the platform path with an empty bearer. A missing or
+/// unreadable credential therefore fails closed with an actionable login
+/// prerequisite instead of sending an empty `Authorization` header.
 async fn resolve_chatgpt_auth(
     services: &RuntimeServices,
     route: &db::RouteConfig,
@@ -1029,7 +1034,14 @@ async fn resolve_chatgpt_auth(
     };
     let token = match repository.get_endpoint_oauth_token(route.route_id).await {
         Ok(Some(token)) => token,
-        Ok(None) => return Ok(None),
+        Ok(None) => {
+            if route.has_oauth_token {
+                return Err(chatgpt_login_required(
+                    "the ChatGPT subscription login for this endpoint is no longer stored",
+                ));
+            }
+            return Ok(None);
+        }
         Err(err) => {
             tracing::warn!(
                 event = "chatgpt_token_read_failed",
@@ -1037,6 +1049,11 @@ async fn resolve_chatgpt_auth(
                 error = %err,
                 "falling back to the platform route after a ChatGPT token read failure"
             );
+            if route.has_oauth_token {
+                return Err(chatgpt_login_required(
+                    "the ChatGPT subscription credential for this endpoint could not be read",
+                ));
+            }
             return Ok(None);
         }
     };
@@ -1076,6 +1093,16 @@ async fn resolve_chatgpt_auth(
             Ok(Some(CodexAuth::new(token.access_token, false)))
         }
     }
+}
+
+/// Issue #1004 P1: the actionable prerequisite for a subscription route whose
+/// credential is gone. The message never carries a token or an account claim.
+fn chatgpt_login_required(message: &str) -> CompatError {
+    CompatError::new(
+        reqwest::StatusCode::UNAUTHORIZED,
+        "chatgpt_login_required",
+        format!("{message}; complete the ChatGPT login for this endpoint again"),
+    )
 }
 
 #[cfg(test)]

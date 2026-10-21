@@ -54,12 +54,14 @@ fn responses_route(provider: EndpointProvider, tier: Option<&str>) -> RouteConfi
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
         thinking_downgrade_enabled: false,
+        has_oauth_token: false,
     }
 }
 
 fn route_with_protocol(route: &RouteConfig, native_api: NativeApi) -> RouteConfig {
     RouteConfig {
         native_api,
+        has_oauth_token: false,
         ..route.clone()
     }
 }

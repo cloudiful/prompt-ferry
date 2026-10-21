@@ -44,6 +44,9 @@ pub struct EndpointRequest {
     #[serde(default)]
     pub service_tier: Option<String>,
     pub base_url: String,
+    /// Legacy single-key field. Every provider except OpenAI requires at
+    /// least one API key; an OpenAI endpoint may be saved without any key so
+    /// the ChatGPT device login can be completed first.
     pub api_key: String,
     /// Issue #589: optional OpenAI Admin API key, accepted only for the
     /// OpenAI provider. `None` (omitted) keeps the stored value on PATCH
@@ -54,6 +57,9 @@ pub struct EndpointRequest {
     #[serde(default)]
     pub admin_api_key: Option<String>,
     #[serde(default)]
+    /// Per-key rows. Every provider except OpenAI requires at least one key
+    /// row; an OpenAI endpoint may be saved with no key row at all, and an
+    /// update that submits none keeps the stored keys.
     pub api_keys: Vec<EndpointApiKeyRequest>,
     #[serde(default)]
     pub key_lb_enabled: bool,
@@ -165,6 +171,8 @@ impl From<db::EndpointPage> for EndpointPageResponse {
 /// Issue #993 P1: the upstream model identifiers one endpoint advertises.
 /// Sorted and de-duplicated. A discovery failure is a bounded admin error
 /// and never blocks editing the target that points at the endpoint.
+/// Issue #1004 P1: a ChatGPT subscription endpoint answers from the Codex
+/// model table instead of an upstream discovery call.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct EndpointModelsResponse {
     pub models: Vec<String>,
@@ -179,6 +187,9 @@ pub struct EndpointTestResponse {
     pub model_count: Option<usize>,
     pub native_api: Option<String>,
     pub native_api_source: Option<String>,
+    /// Issue #1004 P1: a ChatGPT subscription endpoint is probed with its
+    /// device credential (token refresh plus the Codex usage GET), so the
+    /// message reports a credential check and not a generation probe.
     pub message: String,
 }
 

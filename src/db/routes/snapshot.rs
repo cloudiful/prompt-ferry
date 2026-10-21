@@ -28,10 +28,12 @@ pub async fn effective_route(pool: &PgPool, user_id: i64) -> Result<Option<Route
             thinking_effort_override: None,
             // Issue #502 Task 5: direct fallback uses passthrough compact.
             compact_mode: crate::db::CompactMode::Passthrough,
+            // Issue #1004 P1: stamped from the token-id existence query.
+            has_oauth_token: false,
         });
     match route {
         Some(route) => Ok(
-            crate::db::endpoints::attach_route_config_api_keys(pool, vec![route])
+            crate::db::endpoints::attach_route_config_credentials(pool, vec![route])
                 .await?
                 .into_iter()
                 .next(),

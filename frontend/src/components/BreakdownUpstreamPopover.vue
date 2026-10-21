@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import type { RequestRecordOverviewBreakdownRow } from '@/generated/admin-api'
 import { useLocale } from '@/composables/useLocale'
@@ -36,31 +36,68 @@ const { t } = useLocale()
 
 const isUpstream = computed(() => props.perspective === 'upstream')
 
-// Explicit widths keep the pinned columns aligned with their sticky offsets:
-// the table is laid out with fixed columns, so the declared size and the
-// rendered width are the same value.
-const COLUMN_WIDTHS: Record<string, number> = {
-  endpoint: 160,
-  model: 200,
-  request_count: 96,
-  request_share: 96,
-  total_tokens: 104,
-  token_share: 96,
-  cache_rate: 88,
-  error_rate: 88,
-  avg_output_tokens_per_second: 140,
+// The rendered widths, the TanStack size and the table sum are the same
+// value: the table is laid out with fixed columns, so the declared size and
+// the rendered width must agree for the sticky offsets to stay aligned. The
+// metric columns are as wide as their formatted value needs, and the
+// identifier columns follow their content.
+const METRIC_COLUMN_WIDTHS: Record<string, number> = {
+  request_count: 88,
+  request_share: 80,
+  total_tokens: 96,
+  token_share: 80,
+  cache_rate: 80,
+  error_rate: 80,
+  avg_output_tokens_per_second: 112,
 }
+
+// The identifier columns are content aware: the width follows the longest
+// displayed identifier and the header, so a short name does not waste space
+// and a long one is bounded instead of pushing the metrics out of the
+// popover. A truncated identifier keeps its full value in the title.
+const IDENTIFIER_MIN_WIDTH = 96
+const IDENTIFIER_MAX_WIDTH = 220
+const IDENTIFIER_CHAR_WIDTH = 6.5
+const IDENTIFIER_CELL_PADDING = 16
+
+// The popover padding on both sides; the popover is as wide as its table.
+const POPOVER_PADDING = 24
+
+// Below this width the popover cannot show two identifiers and the metrics
+// at the same time, so the pinned set shrinks to one identifier and the
+// metrics stay reachable.
+const NARROW_VIEWPORT = '(max-width: 640px)'
 
 // A pinned cell must hide the metric columns that scroll behind it, so it
 // carries the popover background instead of the translucent table default.
 const PINNED_BACKGROUND = 'var(--ui-bg)'
 
+function textWidth(value: string): number {
+  let width = IDENTIFIER_CELL_PADDING
+  for (const character of value) {
+    // A wide character takes about twice the space of a latin one.
+    width +=
+      character.codePointAt(0)! > 0x2e80
+        ? IDENTIFIER_CHAR_WIDTH * 2
+        : IDENTIFIER_CHAR_WIDTH
+  }
+  return Math.round(width)
+}
+
+function boundedIdentifierWidth(values: string[]): number {
+  const width = values.reduce(
+    (widest, value) => Math.max(widest, textWidth(value)),
+    0,
+  )
+  return Math.min(Math.max(width, IDENTIFIER_MIN_WIDTH), IDENTIFIER_MAX_WIDTH)
+}
+
 function detailColumn(
   accessorKey: string,
   header: string,
   pinned: boolean,
+  width: number,
 ): TableColumn<DetailEntry> {
-  const width = COLUMN_WIDTHS[accessorKey] ?? 120
   const size = `${width}px`
   const style: Record<string, Record<string, string>> = {
     th: { width: size, minWidth: size, maxWidth: size },
@@ -144,23 +181,75 @@ watch(
   },
 )
 
+// The identifier widths follow the identifiers this table shows, so the
+// metric columns keep the space they need. The hidden failed-only rows are
+// part of the set, so a revealed row never overflows its column.
+const identifierWidths = computed(() => ({
+  endpoint: boundedIdentifierWidth([
+    t('overviewUpstreamEndpoint'),
+    ...entries.value.map((entry) => entry.endpoint),
+  ]),
+  model: boundedIdentifierWidth([
+    t('model'),
+    ...entries.value.map((entry) => entry.model),
+  ]),
+}))
+
 const columns = computed<TableColumn<DetailEntry>[]>(() => {
   const headers: TableColumn<DetailEntry>[] = []
   if (!isUpstream.value) {
-    headers.push(detailColumn('endpoint', t('overviewUpstreamEndpoint'), true))
+    headers.push(
+      detailColumn(
+        'endpoint',
+        t('overviewUpstreamEndpoint'),
+        true,
+        identifierWidths.value.endpoint,
+      ),
+    )
   }
   headers.push(
-    detailColumn('model', t('model'), true),
-    detailColumn('request_count', t('requests'), false),
-    detailColumn('request_share', t('overviewRequestShare'), false),
-    detailColumn('total_tokens', t('overviewTotalTokens'), false),
-    detailColumn('token_share', t('overviewTokenShare'), false),
-    detailColumn('cache_rate', t('overviewCacheRate'), false),
-    detailColumn('error_rate', t('overviewErrorRate'), false),
+    detailColumn('model', t('model'), true, identifierWidths.value.model),
+    detailColumn(
+      'request_count',
+      t('requests'),
+      false,
+      METRIC_COLUMN_WIDTHS.request_count,
+    ),
+    detailColumn(
+      'request_share',
+      t('overviewRequestShare'),
+      false,
+      METRIC_COLUMN_WIDTHS.request_share,
+    ),
+    detailColumn(
+      'total_tokens',
+      t('overviewTotalTokens'),
+      false,
+      METRIC_COLUMN_WIDTHS.total_tokens,
+    ),
+    detailColumn(
+      'token_share',
+      t('overviewTokenShare'),
+      false,
+      METRIC_COLUMN_WIDTHS.token_share,
+    ),
+    detailColumn(
+      'cache_rate',
+      t('overviewCacheRate'),
+      false,
+      METRIC_COLUMN_WIDTHS.cache_rate,
+    ),
+    detailColumn(
+      'error_rate',
+      t('overviewErrorRate'),
+      false,
+      METRIC_COLUMN_WIDTHS.error_rate,
+    ),
     detailColumn(
       'avg_output_tokens_per_second',
       t('overviewAvgOutputRate'),
       false,
+      METRIC_COLUMN_WIDTHS.avg_output_tokens_per_second,
     ),
   )
   return headers
@@ -168,15 +257,49 @@ const columns = computed<TableColumn<DetailEntry>[]>(() => {
 
 // The identifier columns stay visible while the metric columns scroll behind
 // them. The model perspective keeps the endpoint and the model; the upstream
-// perspective only knows the model.
+// perspective only knows the model. A narrow viewport keeps one identifier
+// pinned, so the metrics stay readable.
+function narrowViewport(): boolean {
+  return (
+    typeof globalThis.matchMedia === 'function' &&
+    globalThis.matchMedia(NARROW_VIEWPORT).matches
+  )
+}
+
+const isNarrow = ref(narrowViewport())
+let narrowQuery: MediaQueryList | undefined
+
+function onNarrowChange(event: MediaQueryListEvent): void {
+  isNarrow.value = event.matches
+}
+
+onMounted(() => {
+  if (typeof globalThis.matchMedia !== 'function') {
+    return
+  }
+  narrowQuery = globalThis.matchMedia(NARROW_VIEWPORT)
+  isNarrow.value = narrowQuery.matches
+  narrowQuery.addEventListener('change', onNarrowChange)
+})
+
+onBeforeUnmount(() => {
+  narrowQuery?.removeEventListener('change', onNarrowChange)
+})
+
 const columnPinning = computed(() => ({
-  left: isUpstream.value ? ['model'] : ['endpoint', 'model'],
+  left: isUpstream.value || isNarrow.value ? ['model'] : ['endpoint', 'model'],
   right: [] as string[],
 }))
 
-// The table is wider than the popover, so the metric columns scroll.
+// The table is wider than the popover on a narrow viewport, so the metric
+// columns scroll. The popover itself follows the table and never grows past
+// the viewport.
 const tableWidth = computed(() =>
   columns.value.reduce((sum, column) => sum + (column.size ?? 0), 0),
+)
+
+const popoverWidth = computed(
+  () => `min(${tableWidth.value + POPOVER_PADDING}px, calc(100vw - 2rem))`,
 )
 </script>
 
@@ -184,6 +307,7 @@ const tableWidth = computed(() =>
   <UPopover
     v-if="visible"
     mode="hover"
+    :enable-touch="true"
     :content="{
       side: 'bottom',
       align: 'start',
@@ -206,8 +330,11 @@ const tableWidth = computed(() =>
     />
     <template #content>
       <div
-        class="max-h-[50vh] w-[min(38rem,calc(100vw-2rem))] overflow-auto p-3"
-        :style="{ '--breakdown-table-width': `${tableWidth}px` }"
+        class="max-h-[50vh] overflow-auto p-3"
+        :style="{
+          '--breakdown-table-width': `${tableWidth}px`,
+          width: popoverWidth,
+        }"
       >
         <div class="mb-2 text-xs font-semibold text-highlighted">
           {{
@@ -253,12 +380,14 @@ const tableWidth = computed(() =>
           <template #endpoint-cell="{ row }">
             <span
               class="block max-w-full truncate font-medium text-highlighted"
+              :title="row.original.endpoint"
               >{{ row.original.endpoint }}</span
             >
           </template>
           <template #model-cell="{ row }">
             <span
               class="block max-w-full truncate font-medium text-highlighted"
+              :title="row.original.model"
               >{{ row.original.model }}</span
             >
           </template>

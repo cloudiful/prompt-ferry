@@ -141,6 +141,12 @@ pub struct RouteConfig {
     // `passthrough` (no new default semantics). `self_summarize` triggers
     // ferry-side handoff summarization for non-Responses targets.
     pub compact_mode: CompactMode,
+    // Issue #1004 P1: non-secret subscription eligibility. `true` when the
+    // endpoint stores a ChatGPT OAuth token, so the route authenticates with
+    // the subscription credential instead of a platform API key. The flag is
+    // hydrated from the token-id existence query; the token value itself is
+    // resolved only in the authentication path.
+    pub has_oauth_token: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -355,6 +361,11 @@ pub struct ModelRouteCandidateTarget {
     /// Issue #502 Task 5: resolved per-target compact mode; defaults to
     /// `passthrough`.
     pub compact_mode: CompactMode,
+    // Issue #1004 P1: non-secret subscription eligibility. `true` when the
+    // endpoint stores a ChatGPT OAuth token, so the target routes through the
+    // subscription credential instead of a platform API key. The token value
+    // itself never travels with the target.
+    pub has_oauth_token: bool,
 }
 
 #[derive(Debug, Clone)]

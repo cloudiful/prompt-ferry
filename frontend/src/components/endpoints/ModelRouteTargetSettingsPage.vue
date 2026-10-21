@@ -162,6 +162,14 @@ const compactMode = computed({
       <USelect
         v-model="thinkingEffort"
         class="w-full"
+        :ui="{
+          // Issue #1004 P1: the reasoning list scrolls only when the
+          // available viewport space is insufficient. The content follows the
+          // height Reka measured for this instance and stays inside the
+          // viewport.
+          content:
+            'max-h-[min(var(--reka-select-content-available-height,calc(100vh_-_4rem)),calc(100vh_-_4rem))]',
+        }"
         :items="[
           { label: t('thinkingEffortInherit'), value: 'inherit' },
           { label: 'none', value: 'none' },

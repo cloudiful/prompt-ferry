@@ -5,10 +5,8 @@ import { useEndpointDialogValidation } from '@/composables/useEndpointDialogVali
 import type { User } from '@/generated/admin-api'
 import type { EndpointForm } from '@/models'
 import type { RunEndpointOAuthAction } from '@/stores/endpoint-oauth-action-types'
-import EndpointAdminApiKeyFields from '@/components/endpoints/EndpointAdminApiKeyFields.vue'
 import EndpointApiKeysEditor from '@/components/endpoints/EndpointApiKeysEditor.vue'
 import EndpointOAuthSection from '@/components/endpoints/EndpointOAuthSection.vue'
-import EndpointOrganizationUsage from '@/components/endpoints/EndpointOrganizationUsage.vue'
 import EndpointProviderFields from '@/components/endpoints/EndpointProviderFields.vue'
 import ServiceTierOverrideField from '@/components/shared/ServiceTierOverrideField.vue'
 import ProxySettingsFields from '@/components/shared/ProxySettingsFields.vue'
@@ -25,11 +23,15 @@ const props = withDefaults(
     header: string
     savePending?: boolean
     pendingAction?: string
-    runOAuthAction?: RunEndpointOAuthAction
+    // Issue #1004 P1: the parent binds `run-oauth-action`, which Vue
+    // normalizes to `runOauthAction`. The prop has to carry that exact name,
+    // or the parent's handler never reaches the login controls and they stay
+    // disabled.
+    runOauthAction?: RunEndpointOAuthAction
     t: TranslateFn
     users: User[]
   }>(),
-  { savePending: false, pendingAction: 'save', runOAuthAction: undefined },
+  { savePending: false, pendingAction: 'save', runOauthAction: undefined },
 )
 
 const visible = defineModel<boolean>('visible', { required: true })
@@ -140,24 +142,12 @@ function applyOAuthStatus(next: {
             />
             <div
               v-if="form.provider === 'openai'"
-              class="grid gap-3 border-t border-default pt-3"
-            >
-              <EndpointAdminApiKeyFields v-model:form="form" :t="t" />
-              <EndpointOrganizationUsage
-                :endpoint-id="form.endpoint_id"
-                :provider="form.provider"
-                :has-admin-api-key="form.has_admin_api_key"
-                :t="t"
-              />
-            </div>
-            <div
-              v-if="form.provider === 'openai'"
               class="border-t border-default pt-3"
             >
               <EndpointOAuthSection
                 v-if="form.endpoint_id"
                 :endpoint-id="form.endpoint_id"
-                :run-action="runOAuthAction"
+                :run-action="runOauthAction"
                 :t="t"
                 @status="applyOAuthStatus"
               />

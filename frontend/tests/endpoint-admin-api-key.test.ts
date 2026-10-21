@@ -14,7 +14,6 @@ import type {
 import { messages } from '../src/i18n'
 import { endpointOpenAiMessages } from '../src/i18n/modules/endpoints.openai'
 import type { EndpointApiKeyForm, EndpointForm } from '../src/models'
-import { isOrganizationUsageEligible } from '../src/models/endpoints/quota'
 
 function endpointFixture(
   overrides: Partial<ProviderEndpoint> = {},
@@ -145,28 +144,6 @@ test('switching provider away from OpenAI drops the typed Admin API Key', () => 
   expect(form.admin_api_key).toBe('')
 })
 
-test('organization usage eligibility is OpenAI Admin-Key only', () => {
-  expect(
-    isOrganizationUsageEligible({
-      provider: 'openai',
-      has_admin_api_key: true,
-    }),
-  ).toBe(true)
-  expect(isOrganizationUsageEligible({ provider: 'openai' })).toBe(false)
-  expect(
-    isOrganizationUsageEligible({
-      provider: 'openai',
-      has_admin_api_key: false,
-    }),
-  ).toBe(false)
-  expect(
-    isOrganizationUsageEligible({
-      provider: 'generic',
-      has_admin_api_key: true,
-    }),
-  ).toBe(false)
-})
-
 test('extracted OpenAI module keeps flat keys and zh/en parity', () => {
   const zhKeys = Object.keys(endpointOpenAiMessages['zh-CN']).sort()
   const enKeys = Object.keys(endpointOpenAiMessages['en-US']).sort()
@@ -179,43 +156,6 @@ test('extracted OpenAI module keeps flat keys and zh/en parity', () => {
   const merged = messages['zh-CN'] as Record<string, string>
   for (const key of zhKeys) {
     expect(typeof merged[key]).toBe('string')
-  }
-})
-
-test('Admin API Key and organization usage copy exists in both locales', () => {
-  for (const locale of ['zh-CN', 'en-US'] as const) {
-    const endpointMessages = endpointOpenAiMessages[locale]
-    const merged = messages[locale]
-    for (const key of [
-      'endpointAdminApiKey',
-      'endpointAdminApiKeyHint',
-      'endpointAdminApiKeyOptionalOnEdit',
-      'endpointAdminApiKeyClear',
-      'endpointAdminApiKeyPendingClear',
-      'endpointAdminApiKeyClearedOnSave',
-      'endpointAdminApiKeyKeepHint',
-      'endpointOrganizationUsage',
-      'endpointOrganizationUsageHint',
-      'endpointOrganizationUsageSaveFirst',
-      'endpointOrganizationUsageRequiredKey',
-      'endpointOrganizationUsageLoad',
-      'endpointOrganizationUsageReload',
-      'endpointOrganizationUsageInputTokens',
-      'endpointOrganizationUsageOutputTokens',
-      'endpointOrganizationUsageTotalTokens',
-      'endpointOrganizationUsageCost',
-      'endpointOrganizationUsageFetchedAt',
-      'endpointOrganizationUsageCached',
-      'endpointOrganizationUsageTruncated',
-    ] as const) {
-      expect(endpointMessages[key].length).toBeGreaterThan(0)
-      // The extracted block stays flat: the same key resolves through the
-      // merged locale object (MessageKey union unchanged).
-      expect(merged[key]).toBe(endpointMessages[key])
-    }
-    // The org-level / UTC scope and the separation from subscription quota
-    // must be stated where the operator reads it.
-    expect(endpointMessages.endpointOrganizationUsageHint).toContain('UTC')
   }
 })
 

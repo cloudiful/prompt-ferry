@@ -5,7 +5,6 @@ import {
   loadOAuthActions,
   oauthStatus,
   getEndpointOAuthStatus,
-  getEndpointTokenPlanUsage,
 } from './endpoint-oauth-actions.fixtures'
 
 const { useEndpointOAuthActions } = await loadOAuthActions()
@@ -41,26 +40,17 @@ test('a late status response cannot replace the newly selected endpoint', async 
   h.scope.stop()
 })
 
-test('a late quota response is ignored after the endpoint changes', async () => {
-  const oldQuota =
-    deferred<Awaited<ReturnType<typeof getEndpointTokenPlanUsage>>>()
+test('the editor reads the login state only and never the subscription quota', async () => {
   const h = freshOAuthHarness(useEndpointOAuthActions, 'endpoint-1', () => {
     getEndpointOAuthStatus.mockImplementation(async (id) =>
       oauthStatus({ endpoint_id: id, has_oauth_token: id === 'endpoint-1' }),
     )
-    getEndpointTokenPlanUsage.mockImplementationOnce(() => oldQuota.promise)
   })
   await h.settle()
 
-  h.id.value = 'endpoint-2'
-  await h.settle()
-  oldQuota.resolve({ keys: [] } as Awaited<
-    ReturnType<typeof getEndpointTokenPlanUsage>
-  >)
-  await h.settle()
-
-  expect(h.actions.status.value?.endpoint_id).toBe('endpoint-2')
-  expect(h.actions.status.value?.has_oauth_token).toBe(false)
-  expect(h.actions.quota.value).toBeNull()
+  expect(h.actions.status.value?.endpoint_id).toBe('endpoint-1')
+  expect(h.actions.status.value?.has_oauth_token).toBe(true)
+  expect('quota' in h.actions).toBe(false)
+  expect('quotaError' in h.actions).toBe(false)
   h.scope.stop()
 })

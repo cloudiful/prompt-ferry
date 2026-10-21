@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import TablePagination from '@/components/shared/TablePagination.vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import type { ModelRouteListItemView } from '@/models/endpoints'
+import { modelRouteTestCounts } from '@/models/endpoints/model-route-item'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
+import ModelRouteTestResultsDialog from './ModelRouteTestResultsDialog.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -27,6 +29,27 @@ function isPending(ruleId: string): boolean {
 
 function pendingAction(ruleId: string): string {
   return props.pendingKeys[ruleId] ?? ''
+}
+
+const detailsRuleId = ref('')
+const detailsOpen = ref(false)
+const detailsResults = computed(() => {
+  const item = props.items.find(
+    (entry) => entry.rule_id === detailsRuleId.value,
+  )
+  return item?.test_results ?? []
+})
+
+function openDetails(ruleId: string): void {
+  detailsRuleId.value = ruleId
+  detailsOpen.value = true
+}
+
+// The row shows the counts next to the icon, so the result is readable
+// without relying on the color alone.
+function countsLabel(item: ModelRouteListItemView): string {
+  const counts = modelRouteTestCounts(item.test_results)
+  return counts.total ? `${counts.passed}/${counts.total}` : ''
 }
 
 const columns = computed<TableColumn<ModelRouteListItemView>[]>(() => [
@@ -120,6 +143,9 @@ defineEmits<{
           <TestResultPopover
             :message="row.original.test_message"
             :severity="row.original.test_severity"
+            :detail-label="countsLabel(row.original)"
+            interactive
+            @select="openDetails(row.original.rule_id)"
           />
         </div>
       </template>
@@ -161,6 +187,11 @@ defineEmits<{
       :total="total"
       :page-size-options="STANDARD_PAGE_SIZE_OPTIONS"
       @change="$emit('modelRoutePage', $event)"
+    />
+    <ModelRouteTestResultsDialog
+      v-model:visible="detailsOpen"
+      :results="detailsResults"
+      :t="t"
     />
   </div>
 </template>

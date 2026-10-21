@@ -80,15 +80,3 @@ test('MCP connection copy states the user consequence, not the mechanism', () =>
   expect(messages['zh-CN'].lifecyclePolicyHint).not.toContain('server/discover')
   expect(messages['en-US'].lifecyclePolicyHint).not.toContain('server/discover')
 })
-
-test('organization usage explains scope and time basis without routing internals', () => {
-  const zh = messages['zh-CN'].endpointOrganizationUsageHint
-  const en = messages['en-US'].endpointOrganizationUsageHint
-
-  expect(zh).toContain('UTC 月初至今')
-  expect(zh).toContain('不是 ChatGPT 订阅额度')
-  expect(zh).not.toContain('路由权重')
-  expect(en).toContain('UTC month to date')
-  expect(en).toContain('ChatGPT subscription quota')
-  expect(en).not.toContain('routing weight')
-})

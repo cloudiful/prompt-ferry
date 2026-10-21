@@ -155,6 +155,7 @@ pub(super) fn target(
         thinking_downgrade_enabled: false,
         thinking_effort_override: None,
         compact_mode: crate::db::CompactMode::Passthrough,
+        has_oauth_token: false,
     }
 }
 

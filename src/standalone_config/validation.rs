@@ -70,7 +70,12 @@ impl StandaloneConfig {
             if !normalized_base.starts_with("http://") && !normalized_base.starts_with("https://") {
                 return invalid("base_url", "must use http:// or https://");
             }
-            required("endpoint api_key", &endpoint.api_key)?;
+            // Issue #1004 P1: an OpenAI endpoint may be stored without a
+            // platform API key so the ChatGPT device login can be completed
+            // first. Every other provider keeps the mandatory key.
+            if provider != crate::db::EndpointProvider::OpenAi {
+                required("endpoint api_key", &endpoint.api_key)?;
+            }
             let mut key_ids = HashSet::new();
             for key in &endpoint.api_keys {
                 if !key_ids.insert(key.key_id) {

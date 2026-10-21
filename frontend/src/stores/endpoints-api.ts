@@ -6,7 +6,6 @@ import {
   endpointModels,
   listEndpoints,
   listModelRoutes,
-  organizationUsage,
   quotaKeyObservationHistory,
   quotaKeyObservationTrend,
   quotaSnapshotHistory,
@@ -25,7 +24,6 @@ import type {
   ModelRoutePageResponse,
   ModelRouteRequest,
   ModelRouteTestResponse,
-  OpenAiOrganizationUsageResponse,
   ProviderEndpoint,
   QuotaKeyObservationHistoryResponse,
   QuotaKeyObservationTrendResponse,
@@ -173,16 +171,6 @@ export async function fetchKeyQuotaObservationTrend(
 
 // Issue #589 P2c: OpenAI Platform organization usage for the endpoint's
 // separate Admin API Key. Display-only; never part of routing or quota math.
-export async function fetchOrganizationUsage(
-  endpointId: string,
-): Promise<OpenAiOrganizationUsageResponse> {
-  return expectData(
-    await organizationUsage<true>(
-      withData({ path: { endpoint_id: endpointId } }),
-    ),
-  )
-}
-
 export async function updateEndpointEnabled(
   endpoint: ProviderEndpoint,
   enabled: boolean,

@@ -307,6 +307,18 @@ pub(super) async fn list_endpoint_models(
         Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
         Err(err) => return internal(&state, err),
     };
+    // Issue #1004 P1: a ChatGPT subscription endpoint has no Platform API key
+    // and no Platform model listing. Its suggestions come from the Codex
+    // model table, so the request never reaches `api.openai.com` and the
+    // platform model cache stays free of subscription snapshots.
+    if endpoint.plan == db::EndpointPlan::ChatgptSubscription {
+        let mut models = chatgpt_backend::codex_models()
+            .iter()
+            .map(|model| (*model).to_string())
+            .collect::<Vec<_>>();
+        models.sort();
+        return Json(EndpointModelsResponse { models }).into_response();
+    }
     let api_key = match state
         .config_repository
         .first_endpoint_api_key(endpoint_id)
@@ -460,6 +472,18 @@ pub(super) async fn test_endpoint(
         Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
         Err(err) => return internal(&state, err),
     };
+    // Issue #1004 P1: a ChatGPT subscription endpoint authenticates with its
+    // device credential, so the probe uses that credential instead of a
+    // Platform API key.
+    if endpoint.plan == db::EndpointPlan::ChatgptSubscription {
+        return test_chatgpt_subscription_endpoint(
+            &state,
+            endpoint_id,
+            endpoint.native_api,
+            endpoint.native_api_source.clone(),
+        )
+        .await;
+    }
     let api_key = match state
         .config_repository
         .first_endpoint_api_key(endpoint_id)
@@ -583,6 +607,117 @@ pub(super) async fn test_endpoint(
             native_api: None,
             native_api_source: None,
             message: truncate_message(&maybe_redact(&state, &err.to_string())),
+        })
+        .into_response(),
+    }
+}
+
+/// Issue #1004 P1: probe a ChatGPT subscription endpoint with its device
+/// credential.
+///
+/// The probe refreshes an expired access token and then performs the Codex
+/// usage GET with the account headers, so it is a credential and
+/// connectivity check. It is not a generation probe and never claims that a
+/// chat or responses turn would succeed. The token, the account claims and
+/// the refresh secret stay inside the request path; only the outcome reaches
+/// the response.
+async fn test_chatgpt_subscription_endpoint(
+    state: &AdminState,
+    endpoint_id: Uuid,
+    native_api: NativeApi,
+    native_api_source: String,
+) -> Response {
+    let proxy_url = match state
+        .config_repository
+        .endpoint_proxy_url(endpoint_id)
+        .await
+    {
+        Ok(value) => value,
+        Err(err) => return internal(state, err),
+    };
+    let client = match crate::endpoint_protocol::endpoint_protocol_client_for_endpoint(
+        proxy_url.as_deref(),
+        &chatgpt_backend::chatgpt_backend_base_url(),
+    ) {
+        Ok(client) => client,
+        Err(message) => {
+            tracing::warn!(
+                endpoint_id = %endpoint_id,
+                "rejecting the ChatGPT subscription probe with an invalid proxy configuration"
+            );
+            return Json(EndpointTestResponse {
+                ok: false,
+                status: None,
+                duration_ms: 0,
+                model_count: None,
+                native_api: None,
+                native_api_source: None,
+                message: truncate_message(&maybe_redact(state, &message)),
+            })
+            .into_response();
+        }
+    };
+    let token = match state
+        .config_repository
+        .get_endpoint_oauth_token(endpoint_id)
+        .await
+    {
+        Ok(Some(token)) => token,
+        Ok(None) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "oauth_login_required",
+                "complete the ChatGPT login for this endpoint first",
+            );
+        }
+        Err(err) => return internal(state, err),
+    };
+    let started = Instant::now();
+    let (access_token, account_id) = match chatgpt_backend::resolve_subscription_access_token(
+        &state.config_repository,
+        &client,
+        endpoint_id,
+        &token,
+    )
+    .await
+    {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            return Json(EndpointTestResponse {
+                ok: false,
+                status: None,
+                duration_ms: started.elapsed().as_millis(),
+                model_count: None,
+                native_api: None,
+                native_api_source: None,
+                message: truncate_message(&maybe_redact(state, &err.to_string())),
+            })
+            .into_response();
+        }
+    };
+    match chatgpt_backend::fetch_chatgpt_quota(&client, &access_token, account_id.as_deref()).await
+    {
+        Ok(_) => Json(EndpointTestResponse {
+            ok: true,
+            status: Some(200),
+            duration_ms: started.elapsed().as_millis(),
+            model_count: None,
+            native_api: Some(native_api.as_str().to_string()),
+            native_api_source: Some(native_api_source),
+            message: "OK, ChatGPT subscription credential verified".to_string(),
+        })
+        .into_response(),
+        Err(err) => Json(EndpointTestResponse {
+            ok: false,
+            status: match &err {
+                chatgpt_backend::ChatgptBackendError::Upstream { status, .. } => *status,
+                _ => None,
+            },
+            duration_ms: started.elapsed().as_millis(),
+            model_count: None,
+            native_api: None,
+            native_api_source: None,
+            message: truncate_message(&maybe_redact(state, &err.to_string())),
         })
         .into_response(),
     }

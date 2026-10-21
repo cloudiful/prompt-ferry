@@ -4,6 +4,7 @@ import type {
   ProviderEndpoint,
   ModelEndpointRule,
   ModelRouteTestResponse,
+  ModelRouteTestTargetResult,
 } from '../generated/admin-api'
 import type { Option } from '../models'
 import {
@@ -56,7 +57,8 @@ export type ModelRouteListItemView = {
   testing: boolean
   toggling: boolean
   test_message: string
-  test_severity: 'success' | 'error' | null
+  test_severity: 'success' | 'warning' | 'error' | null
+  test_results: ModelRouteTestTargetResult[]
 }
 
 // Endpoint picker option: the label/value pair plus the provider token so
@@ -83,6 +85,8 @@ type EndpointViewLabels = {
   endpointSourceAuto: string
   endpointSourceDetected: string
   endpointSourceManual: string
+  modelRouteTestNoneEligible: string
+  modelRouteTestPassed: (passed: number, total: number) => string
   nativeApiAnthropicMessages: string
   nativeApiChat: string
   nativeApiResponses: string
@@ -141,6 +145,8 @@ export function createEndpointsWorkspaceView(options: {
   }
   const modelRouteLabels: ModelRouteViewItemLabels = {
     endpointTestIdle: options.labels.endpointTestIdle,
+    modelRouteTestNoneEligible: options.labels.modelRouteTestNoneEligible,
+    modelRouteTestPassed: options.labels.modelRouteTestPassed,
     ownerLabel: options.labels.owner,
     scopeAdmin: options.labels.scopeAdmin,
     scopeUser: options.labels.scopeUser,

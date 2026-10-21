@@ -33,6 +33,25 @@ fn route_units(
     context: QuotaContext<'_>,
 ) -> QuotaPool<RouteKeyUnit> {
     let mut pool = QuotaPool::default();
+    // Issue #1004 P1: a subscription route carries no platform key row. It
+    // contributes exactly one key-id-less unit so the request can be routed,
+    // and the unit bypasses the platform-key quota eligibility.
+    if route.has_oauth_token {
+        let key = db::EndpointApiKeySelection {
+            key_id: None,
+            key_label: None,
+            secret: String::new(),
+        };
+        pool.consider(
+            key_pool::subscription_eligibility(cache, route.route_id),
+            |weight| RouteKeyUnit {
+                key,
+                unit_id: route.route_id,
+                weight,
+            },
+        );
+        return pool;
+    }
     let keys = eligible_route_keys(route);
     if keys.is_empty() {
         if !route.api_key.trim().is_empty() {
@@ -73,6 +92,17 @@ pub(in crate::worker::runtime) struct EndpointApiKeySelectionResult {
     pub selection: db::EndpointApiKeySelection,
     pub invalid_conversation_override: bool,
     pub quota_probe: Option<QuotaProbePermit>,
+}
+
+/// Issue #1004 P1: actionable reason for a route without any credential. An
+/// OpenAI endpoint without a stored key is either waiting for the ChatGPT
+/// login or missing a Platform API key, so the message names both.
+fn missing_credential_message(route: &db::RouteConfig) -> &'static str {
+    if route.provider == db::EndpointProvider::OpenAi {
+        "route has no configured API key; complete the ChatGPT login for this endpoint or store a Platform API key"
+    } else {
+        "route has no configured API key"
+    }
 }
 
 pub(super) fn materialize(
@@ -118,7 +148,7 @@ pub(super) fn materialize(
                 None => pool.units.first(),
             };
             unit.map(|unit| unit.key.clone())
-                .ok_or_else(|| anyhow::anyhow!("route has no configured API key"))?
+                .ok_or_else(|| anyhow::anyhow!(missing_credential_message(route)))?
         };
         match quota_probe::claim(cache, route.route_id, selection.key_id) {
             ProbeClaim::NotRequired => {
@@ -151,4 +181,107 @@ pub(super) fn materialize(
         }
     }
     Err(crate::worker::runtime::routing::QuotaUnavailableError.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::EndpointProvider;
+
+    fn route(has_oauth_token: bool, api_key: &str) -> db::RouteConfig {
+        db::RouteConfig {
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://api.openai.com".to_string(),
+            api_key: api_key.to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: crate::config::NativeApi::Responses,
+            upstream_model: None,
+            route_selection_reason: db::RouteSelectionReason::Default,
+            provider: EndpointProvider::OpenAi,
+            service_tier: None,
+            proxy_url: None,
+            dev_system_normalize: false,
+            thinking_effort_override: None,
+            compact_mode: db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
+            has_oauth_token,
+        }
+    }
+
+    fn request() -> BufferedBridgeRequest {
+        BufferedBridgeRequest {
+            request_id: uuid::Uuid::new_v4().to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: br#"{"model":"gpt-5","input":"ping"}"#.to_vec(),
+            request_deadline_unix_ms: 0,
+            user_id: Some(1),
+            client_key_hash: None,
+            request_user_agent: None,
+            http_request_content_encoding: None,
+            http_request_compressed: false,
+            http_request_compressed_bytes: None,
+            http_request_decompressed_bytes: None,
+            http_request_compression_ratio: None,
+        }
+    }
+
+    fn context() -> QuotaContext<'static> {
+        QuotaContext {
+            model: None,
+            path: "/v1/responses",
+        }
+    }
+
+    #[test]
+    fn a_subscription_route_contributes_exactly_one_keyless_unit() {
+        let route = route(true, "");
+        let pool = route_units(&route, None, context());
+        assert_eq!(pool.units.len(), 1);
+        let unit = &pool.units[0];
+        assert_eq!(unit.key.key_id, None);
+        assert!(
+            unit.key.secret.is_empty(),
+            "a subscription unit never carries a bearer secret"
+        );
+        assert_eq!(unit.unit_id, route.route_id);
+    }
+
+    #[test]
+    fn a_keyless_route_without_a_login_contributes_no_unit() {
+        let route = route(false, "");
+        let pool = route_units(&route, None, context());
+        assert!(
+            pool.units.is_empty(),
+            "an endpoint without any credential must not be routable"
+        );
+    }
+
+    #[test]
+    fn a_keyless_route_without_a_login_fails_with_an_actionable_prerequisite() {
+        let route = route(false, "");
+        let error = match materialize(&route, &request(), &RequestPromptLog::default(), None) {
+            Ok(_) => panic!("a route without a credential cannot be materialized"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("ChatGPT login"),
+            "the error must name the missing prerequisite: {error}"
+        );
+    }
+
+    #[test]
+    fn materializing_a_subscription_route_yields_a_keyless_selection() {
+        let route = route(true, "");
+        let selected = materialize(&route, &request(), &RequestPromptLog::default(), None)
+            .expect("a subscription route is selectable");
+        assert_eq!(selected.selection.key_id, None);
+        assert!(selected.selection.secret.is_empty());
+    }
 }

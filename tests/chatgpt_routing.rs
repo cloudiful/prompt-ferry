@@ -955,6 +955,139 @@ async fn admin_token_plan_usage_returns_chatgpt_windows_and_requires_a_login() {
     fixture.cleanup().await;
 }
 
+// ---- Issue #1004 P1: subscription-aware admin operations ----
+
+#[tokio::test]
+async fn admin_model_listing_answers_from_the_codex_table_for_a_subscription_endpoint() {
+    let _guard = ENV_LOCK.lock().await;
+    let fixture = AdminFixture::open().await;
+    let endpoint_id = fixture.create_endpoint(EndpointProvider::OpenAi).await;
+    // A stored platform key must not change the subscription answer: the
+    // listing comes from the Codex table and never reaches the Platform.
+    fixture.store_token(endpoint_id).await;
+    let app = worker_admin::router(fixture.state.clone());
+
+    let response = app
+        .oneshot(route_request(
+            "GET",
+            format!("/api/v1/admin/endpoints/{endpoint_id}/models"),
+            None,
+            true,
+        ))
+        .await
+        .expect("models request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let models = response_json(response).await;
+    let ids = models["models"].as_array().expect("model list").clone();
+    assert!(
+        ids.iter().any(|model| model == "gpt-5.1-codex"),
+        "the Codex model table must be served: {ids:?}"
+    );
+    assert!(
+        ids.iter().all(|model| model.as_str().is_some()),
+        "every model id must be a string: {ids:?}"
+    );
+
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn admin_endpoint_test_probes_the_subscription_credential() {
+    let _guard = ENV_LOCK.lock().await;
+    let fixture = AdminFixture::open().await;
+    let endpoint_id = fixture.create_endpoint(EndpointProvider::OpenAi).await;
+    fixture.store_token(endpoint_id).await;
+    let usage_ref = Arc::new(UsageServerState::default());
+    let backend = spawn_usage_server(usage_ref.clone()).await;
+    set_env(CHATGPT_BACKEND_URL_ENV, &backend);
+    let app = worker_admin::router(fixture.state.clone());
+
+    let response = app
+        .clone()
+        .oneshot(route_request(
+            "POST",
+            format!("/api/v1/admin/endpoints/{endpoint_id}/test"),
+            None,
+            true,
+        ))
+        .await
+        .expect("test request");
+    remove_env(CHATGPT_BACKEND_URL_ENV);
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["ok"], true);
+    assert_eq!(
+        usage_ref.paths.lock().unwrap().as_slice(),
+        ["/wham/usage"],
+        "the subscription probe must use the Codex usage GET"
+    );
+    assert_eq!(
+        usage_ref.authorizations.lock().unwrap().as_slice(),
+        ["Bearer access-token"]
+    );
+
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn keyless_openai_endpoints_save_without_an_api_key() {
+    let _guard = ENV_LOCK.lock().await;
+    let fixture = AdminFixture::open().await;
+    let app = worker_admin::router(fixture.state.clone());
+
+    let keyless = app
+        .clone()
+        .oneshot(route_request(
+            "POST",
+            "/api/v1/admin/endpoints".to_string(),
+            Some(json!({
+                "scope": "admin",
+                "name": "keyless openai",
+                "provider": "openai",
+                "base_url": "https://api.openai.com",
+                "api_key": "",
+                "api_keys": [],
+                "protocol_mode": "manual",
+                "native_api_override": "responses",
+            })),
+            true,
+        ))
+        .await
+        .expect("create request");
+    assert_eq!(keyless.status(), StatusCode::OK);
+    let created = response_json(keyless).await;
+    assert_eq!(created["provider"], "openai");
+    assert_eq!(created["has_oauth_token"], false);
+    assert_eq!(created["plan"], "platform_api_key");
+
+    // Every other provider keeps the mandatory API key.
+    let rejected = app
+        .oneshot(route_request(
+            "POST",
+            "/api/v1/admin/endpoints".to_string(),
+            Some(json!({
+                "scope": "admin",
+                "name": "keyless generic",
+                "provider": "generic",
+                "base_url": "https://api.example.test",
+                "api_key": "",
+                "api_keys": [],
+                "protocol_mode": "manual",
+                "native_api_override": "responses",
+            })),
+            true,
+        ))
+        .await
+        .expect("create request");
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(rejected).await["error"]["code"],
+        "bad_request"
+    );
+
+    fixture.cleanup().await;
+}
+
 #[tokio::test]
 async fn oauth_completion_rechecks_the_provider_gate() {
     let _guard = ENV_LOCK.lock().await;

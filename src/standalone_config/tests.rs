@@ -2076,3 +2076,168 @@ async fn replay_snapshot_persists_across_reopen_and_raw_body_is_excluded() {
     }
     cleanup(reopened, path).await;
 }
+
+/// Issue #1004 P1: an OpenAI endpoint may be stored without a platform API
+/// key so the ChatGPT device login can be completed first. The stored secret
+/// is the empty envelope, never a bearer, and the endpoint reads back with no
+/// key row.
+#[tokio::test]
+async fn a_keyless_openai_endpoint_round_trips_through_the_store() {
+    let (store, path) = open_store().await;
+    let store = Arc::new(store);
+    let manager = manager(13);
+    let repo = crate::db::ConfigRepository::sqlite(store.clone(), manager.clone());
+    let endpoint_id = Uuid::new_v4();
+    repo.create_endpoint(
+        endpoint_id,
+        keyless_endpoint_input(crate::db::EndpointProvider::OpenAi),
+        false,
+    )
+    .await
+    .expect("create the keyless openai endpoint");
+
+    let stored = store
+        .get_endpoint(&manager, endpoint_id)
+        .await
+        .expect("read the endpoint")
+        .expect("endpoint present");
+    assert_eq!(stored.api_key, "");
+    assert!(
+        stored.api_keys.is_empty(),
+        "a keyless endpoint must not store a key row"
+    );
+
+    let endpoint = repo
+        .get_endpoint(endpoint_id)
+        .await
+        .expect("read the endpoint")
+        .expect("endpoint present");
+    assert!(!endpoint.has_oauth_token);
+    assert!(endpoint.api_keys.is_empty());
+    assert_eq!(endpoint.plan, crate::db::EndpointPlan::PlatformApiKey);
+
+    // The empty secret is still sealed: the stored column holds ciphertext,
+    // never a plaintext key.
+    let row = sqlx::query(
+        "SELECT api_key_ciphertext FROM standalone_provider_endpoints WHERE endpoint_id = ?",
+    )
+    .bind(endpoint_id.to_string())
+    .fetch_one(store.pool())
+    .await
+    .expect("endpoint row");
+    let blob = row
+        .try_get::<Vec<u8>, _>("api_key_ciphertext")
+        .expect("ciphertext blob");
+    assert!(
+        !blob.is_empty(),
+        "the empty secret is stored as an encrypted envelope"
+    );
+
+    // A later save without a key keeps the endpoint keyless.
+    repo.update_endpoint(
+        endpoint_id,
+        keyless_endpoint_input(crate::db::EndpointProvider::OpenAi),
+    )
+    .await
+    .expect("update the endpoint")
+    .expect("endpoint present");
+    let updated = store
+        .get_endpoint(&manager, endpoint_id)
+        .await
+        .expect("read the endpoint")
+        .expect("endpoint present");
+    assert_eq!(updated.api_key, "");
+
+    drop(repo);
+    let store = Arc::try_unwrap(store).expect("sole store owner after the repository is dropped");
+    cleanup(store, path).await;
+}
+
+/// Issue #1004 P1: only OpenAI may be stored without a key. Every other
+/// provider keeps the mandatory key.
+#[tokio::test]
+async fn a_keyless_endpoint_of_another_provider_is_rejected() {
+    let (store, path) = open_store().await;
+    let store = Arc::new(store);
+    let manager = manager(13);
+    let repo = crate::db::ConfigRepository::sqlite(store.clone(), manager.clone());
+    let error = repo
+        .create_endpoint(
+            Uuid::new_v4(),
+            keyless_endpoint_input(crate::db::EndpointProvider::Generic),
+            false,
+        )
+        .await
+        .expect_err("a keyless endpoint of another provider must be rejected");
+    assert!(
+        error.to_string().contains("endpoint api key is required"),
+        "unexpected error: {error}"
+    );
+
+    drop(repo);
+    let store = Arc::try_unwrap(store).expect("sole store owner after the repository is dropped");
+    cleanup(store, path).await;
+}
+
+/// Issue #1004 P1: the keyless representation must not change how an
+/// existing encrypted key is stored or read back.
+#[tokio::test]
+async fn an_existing_encrypted_key_still_decrypts_unchanged() {
+    let (store, path) = open_store().await;
+    let store = Arc::new(store);
+    let manager = manager(13);
+    let repo = crate::db::ConfigRepository::sqlite(store.clone(), manager.clone());
+    let endpoint_id = Uuid::new_v4();
+    let mut input = keyless_endpoint_input(crate::db::EndpointProvider::OpenAi);
+    input.api_key = "sk-existing".to_string();
+    repo.create_endpoint(endpoint_id, input, false)
+        .await
+        .expect("create the endpoint with a key");
+
+    let stored = store
+        .get_endpoint(&manager, endpoint_id)
+        .await
+        .expect("read the endpoint")
+        .expect("endpoint present");
+    assert_eq!(stored.api_key, "sk-existing");
+
+    let row = sqlx::query(
+        "SELECT api_key_ciphertext FROM standalone_provider_endpoints WHERE endpoint_id = ?",
+    )
+    .bind(endpoint_id.to_string())
+    .fetch_one(store.pool())
+    .await
+    .expect("endpoint row");
+    let blob = row
+        .try_get::<Vec<u8>, _>("api_key_ciphertext")
+        .expect("ciphertext blob");
+    assert!(
+        !String::from_utf8_lossy(&blob).contains("sk-existing"),
+        "the stored key must stay encrypted"
+    );
+
+    drop(repo);
+    let store = Arc::try_unwrap(store).expect("sole store owner after the repository is dropped");
+    cleanup(store, path).await;
+}
+
+fn keyless_endpoint_input(provider: crate::db::EndpointProvider) -> crate::db::EndpointCreate {
+    // Issue #1004 P1: an endpoint input without any API key.
+    crate::db::EndpointCreate {
+        scope: "admin".to_string(),
+        owner_user_id: None,
+        name: format!("keyless-{}", Uuid::new_v4()),
+        provider,
+        provider_region: None,
+        service_tier: Default::default(),
+        base_url: "https://api.openai.com/v1".to_string(),
+        native_api: NativeApi::Responses,
+        native_api_source: NativeApiSource::Manual,
+        api_key: String::new(),
+        api_keys: Vec::new(),
+        key_lb_enabled: false,
+        enabled: true,
+        proxy_url: None,
+        active_windows: None,
+    }
+}

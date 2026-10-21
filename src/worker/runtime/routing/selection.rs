@@ -278,6 +278,10 @@ pub(super) fn route_from_target(
         // Issue #502 Task 5: carry the per-target compact mode;
         // `passthrough` is the default (no new default semantics).
         compact_mode: target.compact_mode,
+        // Issue #1004 P1: carry the non-secret subscription eligibility so
+        // the request path can pick the subscription credential instead of a
+        // platform API key.
+        has_oauth_token: target.has_oauth_token,
     }
 }
 
@@ -396,6 +400,7 @@ mod tests {
             thinking_downgrade_enabled: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            has_oauth_token: false,
         }
     }
 
@@ -427,6 +432,7 @@ mod tests {
             thinking_downgrade_enabled: false,
             thinking_effort_override: None,
             compact_mode: crate::db::CompactMode::Passthrough,
+            has_oauth_token: false,
         }
     }
 

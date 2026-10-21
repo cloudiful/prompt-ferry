@@ -24,7 +24,7 @@ use super::codex_claims;
 use super::oauth_client::{
     CHATGPT_ISSUER, ChatgptOAuthError, OAuthTokenResponse, refresh_chatgpt_tokens,
 };
-use crate::db::{ConfigRepository, EndpointOAuthTokenSet};
+use crate::db::{ConfigRepository, EndpointOAuthToken, EndpointOAuthTokenSet};
 
 /// Codex backend root (the `/codex/responses` path is appended by the mapper).
 pub const CHATGPT_BACKEND_BASE_URL: &str = "https://chatgpt.com/backend-api";
@@ -131,6 +131,16 @@ fn known_codex_model(name: &str) -> Option<&'static str> {
         .iter()
         .find(|model| model.eq_ignore_ascii_case(name))
         .copied()
+}
+
+/// The Codex model table the subscription backend serves.
+///
+/// Issue #1004 P1: a ChatGPT subscription endpoint has no model listing
+/// endpoint, so the admin model discovery answers from this table instead of
+/// calling the Platform `/v1/models` route. The list is the known Codex
+/// vocabulary, not a live account-specific discovery.
+pub fn codex_models() -> &'static [&'static str] {
+    &CODEX_MODELS
 }
 
 /// Responses parameters the ChatGPT (Codex) subscription backend rejects.
@@ -457,6 +467,29 @@ fn string_field(value: &Value, field: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+/// Resolve a usable ChatGPT access token for one endpoint.
+///
+/// Issue #1004 P1: the admin credential probe and the quota service share
+/// this path, so an expired token is refreshed (and the rotated credential
+/// persisted) exactly once per probe. The token itself never leaves the
+/// request path: it is only used as a bearer credential.
+pub async fn resolve_subscription_access_token(
+    repository: &ConfigRepository,
+    client: &Client,
+    endpoint_id: Uuid,
+    stored: &EndpointOAuthToken,
+) -> Result<(String, Option<String>), ChatgptBackendError> {
+    let access_token = if access_token_expired(stored.expires_at) {
+        refresh_stored_endpoint_token(repository, client, endpoint_id)
+            .await?
+            .access_token
+    } else {
+        stored.access_token.clone()
+    };
+    let account_id = codex_account_id_from_access_token(&access_token);
+    Ok((access_token, account_id))
 }
 
 /// Refresh the stored OAuth token for an endpoint and persist the rotated

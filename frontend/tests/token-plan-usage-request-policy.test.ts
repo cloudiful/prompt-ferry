@@ -39,7 +39,6 @@ mock.module('../src/stores/endpoints-api', () => ({
     rows: 10,
     total: 0,
   })),
-  fetchOrganizationUsage: mock(async () => undefined),
   fetchTokenPlanUsage,
   listEndpoints: mock(async () => undefined),
   listModelRoutes: mock(async () => undefined),

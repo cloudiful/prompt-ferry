@@ -57,6 +57,62 @@ its requested position, so a cycle never sends two keys to the same slot. A
 request whose positions or key claims collide is refused before any statement
 runs.
 
+## Keyless OpenAI endpoints and the subscription credential
+
+An OpenAI endpoint may be saved before it holds any credential. The save writes
+the endpoint row and an empty key set, and the endpoint stays out of routing
+until a credential exists. Every other provider still requires at least one API
+key, and a keyless create for one of them is refused.
+
+A ChatGPT subscription endpoint keeps its credential in the OAuth token store,
+not in the key table. The token ids are what mark an endpoint and its routes as
+subscription-eligible, so:
+
+- A subscription endpoint has no key row, and no placeholder key row is written
+  for it.
+- A subscription route contributes exactly one credential-less routing unit. It
+  bypasses the Platform-key quota scopes, because the subscription quota is
+  tracked per endpoint.
+- An endpoint with neither a Platform key nor a stored token contributes no
+  routing unit at all.
+
+A save that submits no key keeps the stored keys, and it keeps a stored
+subscription credential as well: the Platform plan clears the credential, the
+subscription plan does not. A stored Platform key stays usable after a
+subscription token is cleared.
+
+An empty stored secret is the absence of a key, not an empty credential. No
+outgoing request carries an empty `Authorization` header. A route that was
+resolved as subscription-eligible but whose stored credential is missing or
+unreadable fails with an actionable login prerequisite instead of falling back
+to the Platform path.
+
+The standalone deployment follows the same rules. It stores an endpoint without
+a key as an empty encrypted envelope, and the stored token ids hydrate the
+subscription eligibility of its routes.
+
+## Model route test
+
+A model route test probes every target of a rule that can serve a request
+right now: the enabled rule, target and endpoint rows whose schedule window
+covers the captured time. A disabled target and a target outside its window
+are not tested, and the remaining targets keep their configured order.
+
+Each eligible target is probed once. The probes run with a bounded
+concurrency, a per-target budget of 20 seconds and an overall budget of 60
+seconds; a target that runs out of budget reports that as its outcome instead
+of disappearing from the result.
+
+The result carries one outcome per tested target (its target id, endpoint,
+model, status, duration and message) and the aggregate counts. The aggregate
+is green only when every tested target passed, and a rule without an eligible
+target is never green.
+
+A platform target is probed with one currently enabled configured key. A
+target without a usable credential is a failed outcome with an actionable
+message; it is never probed with an empty key. A ChatGPT subscription target
+keeps the credential probe of the device login.
+
 ## Key deletion and the foreign key indexes
 
 `usage_charges.endpoint_key_id` and `conversation_endpoint_overrides.endpoint_key_id`

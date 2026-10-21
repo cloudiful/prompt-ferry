@@ -242,20 +242,41 @@ pub(super) async fn resolve_endpoint_input(
         });
     }
     if api_keys.is_empty() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "bad_request",
-            "at least one endpoint api key is required",
-        ));
+        // Issue #1004 P1: an OpenAI endpoint may be saved without any API
+        // key so the device login can be completed first. Every other
+        // provider keeps the mandatory key. An update that submits no key
+        // row keeps the stored keys instead of erasing them.
+        if body.provider != db::EndpointProvider::OpenAi {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                "at least one endpoint api key is required",
+            ));
+        }
+        for existing in existing_api_keys.iter() {
+            api_keys.push(db::EndpointApiKeyCreate {
+                key_label: existing.key_label.clone(),
+                api_key: existing.api_key.clone(),
+                position: i32::try_from(existing.position).unwrap_or(i32::MAX),
+                enabled: existing.enabled,
+                key_id: Some(existing.key_id),
+            });
+        }
     }
-    if !api_keys.iter().any(|key| key.enabled) {
+    if !api_keys.is_empty() && !api_keys.iter().any(|key| key.enabled) {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "bad_request",
             "at least one endpoint api key must be enabled",
         ));
     }
-    let api_key = api_keys[0].api_key.clone();
+    // Issue #1004 P1: a keyless OpenAI endpoint has no platform key at all;
+    // the legacy single-key column stays empty instead of indexing an empty
+    // list.
+    let api_key = api_keys
+        .first()
+        .map(|key| key.api_key.clone())
+        .unwrap_or_default();
     // Issue #368 Phase B: outbound proxy default. `None` (omitted/null)
     // carries the stored value on PATCH (`None` on create means direct);
     // empty/whitespace clears to direct; non-empty must pass the scheme

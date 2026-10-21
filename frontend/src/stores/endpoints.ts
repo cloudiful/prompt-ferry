@@ -70,6 +70,9 @@ export const useEndpointsStore = defineStore('endpoints', () => {
         endpointSourceAuto: t('endpointSourceAuto'),
         endpointSourceDetected: t('endpointSourceDetected'),
         endpointSourceManual: t('endpointSourceManual'),
+        modelRouteTestNoneEligible: t('modelRouteTestNoneEligible'),
+        modelRouteTestPassed: (passed: number, total: number) =>
+          t('modelRouteTestPassed', { passed, total }),
         nativeApiAnthropicMessages: t('nativeApiAnthropicMessages'),
         nativeApiChat: t('nativeApiChat'),
         nativeApiResponses: t('nativeApiResponses'),
