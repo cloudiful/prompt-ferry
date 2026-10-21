@@ -288,6 +288,165 @@ pub(super) async fn delete_endpoint(
     }
 }
 
+/// Issue #993 P1: the model identifiers one endpoint advertises.
+///
+/// The listing is an upstream discovery read, so it follows the endpoint's
+/// own base URL, proxy, and protocol auth instead of a provider allowlist.
+/// The response carries sorted, de-duplicated identifiers; a failure is a
+/// bounded admin error that never echoes the credential or the upstream body.
+pub(super) async fn list_endpoint_models(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Path(endpoint_id): Path<Uuid>,
+) -> Response {
+    if let Err(response) = ensure_admin(&state, &headers).await {
+        return response.into_response();
+    }
+    let endpoint = match state.config_repository.get_endpoint(endpoint_id).await {
+        Ok(Some(endpoint)) => endpoint,
+        Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
+        Err(err) => return internal(&state, err),
+    };
+    let api_key = match state
+        .config_repository
+        .first_endpoint_api_key(endpoint_id)
+        .await
+    {
+        Ok(Some(key)) => key,
+        Ok(None) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "missing_endpoint_api_key",
+                "endpoint is missing an API key",
+            );
+        }
+        Err(err) => return internal(&state, err),
+    };
+    let proxy_url = match state
+        .config_repository
+        .endpoint_proxy_url(endpoint_id)
+        .await
+    {
+        Ok(value) => value,
+        Err(err) => return internal(&state, err),
+    };
+    // The endpoint proxy applies to the discovery request as well. An invalid
+    // proxy fails closed instead of falling back to a direct request.
+    let client = match crate::endpoint_protocol::endpoint_protocol_client_for_endpoint(
+        proxy_url.as_deref(),
+        &endpoint.base_url,
+    ) {
+        Ok(client) => client,
+        Err(_) => {
+            tracing::warn!(
+                endpoint_id = %endpoint_id,
+                "rejecting endpoint model discovery with an invalid proxy configuration"
+            );
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_endpoint_proxy",
+                "endpoint proxy configuration is invalid",
+            );
+        }
+    };
+
+    let cached = state
+        .endpoint_model_cache
+        .lookup_endpoint(
+            endpoint_id,
+            &endpoint.base_url,
+            &api_key,
+            endpoint.native_api,
+        )
+        .await;
+    if let crate::endpoint_models::CacheLookup::Fresh(snapshot) = cached {
+        return Json(EndpointModelsResponse {
+            models: snapshot.sorted_model_ids(),
+        })
+        .into_response();
+    }
+
+    let url = crate::endpoint_models::models_url(&endpoint.base_url, endpoint.provider);
+    let request = client.get(url);
+    let request = if endpoint.native_api == NativeApi::AnthropicMessages {
+        request
+            .header("x-api-key", &api_key)
+            .header("anthropic-version", "2023-06-01")
+    } else {
+        request.bearer_auth(&api_key)
+    };
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(err) => {
+            tracing::warn!(
+                endpoint_id = %endpoint_id,
+                error = %err,
+                "upstream model discovery request failed"
+            );
+            return discovery_failed();
+        }
+    };
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        tracing::warn!(
+            endpoint_id = %endpoint_id,
+            status = status.as_u16(),
+            "upstream model discovery answered with an error status"
+        );
+        return discovery_failed();
+    }
+    let payload = match serde_json::from_str::<serde_json::Value>(&body) {
+        Ok(payload) => payload,
+        Err(err) => {
+            tracing::warn!(
+                endpoint_id = %endpoint_id,
+                error = %err,
+                "upstream model discovery answered with an unreadable body"
+            );
+            return discovery_failed();
+        }
+    };
+    let Some(items) = payload.get("data").and_then(serde_json::Value::as_array) else {
+        tracing::warn!(
+            endpoint_id = %endpoint_id,
+            "upstream model discovery answered without a model list"
+        );
+        return discovery_failed();
+    };
+    let snapshot = crate::endpoint_models::EndpointModelSnapshot::from_model_ids(
+        items
+            .iter()
+            .filter_map(|item| item.get("id").and_then(serde_json::Value::as_str))
+            .map(str::trim)
+            .filter(|id| !id.is_empty()),
+    );
+    state
+        .endpoint_model_cache
+        .put_endpoint(
+            endpoint_id,
+            &endpoint.base_url,
+            &api_key,
+            endpoint.native_api,
+            snapshot.clone(),
+        )
+        .await;
+    Json(EndpointModelsResponse {
+        models: snapshot.sorted_model_ids(),
+    })
+    .into_response()
+}
+
+/// Bounded answer for a failed upstream discovery. The upstream body and the
+/// endpoint credential stay in the server log, never in the response.
+fn discovery_failed() -> Response {
+    error(
+        StatusCode::BAD_GATEWAY,
+        "model_discovery_failed",
+        "upstream model discovery failed",
+    )
+}
+
 pub(super) async fn test_endpoint(
     State(state): State<AdminState>,
     headers: HeaderMap,

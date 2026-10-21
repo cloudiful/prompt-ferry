@@ -761,6 +761,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/admin/endpoints/{endpoint_id}/models:
+    get:
+      tags:
+      - endpoints
+      operationId: endpoint_models
+      parameters:
+      - name: endpoint_id
+        in: path
+        description: Endpoint ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Upstream model identifiers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EndpointModelsResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '502':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/admin/endpoints/{endpoint_id}/oauth:
     get:
       tags:
@@ -4489,6 +4527,19 @@ components:
           description: Stable key identity; when omitted or null the key is matched by key_label on update
         key_label:
           type: string
+    EndpointModelsResponse:
+      type: object
+      description: |-
+        Issue #993 P1: the upstream model identifiers one endpoint advertises.
+        Sorted and de-duplicated. A discovery failure is a bounded admin error
+        and never blocks editing the target that points at the endpoint.
+      required:
+      - models
+      properties:
+        models:
+          type: array
+          items:
+            type: string
     EndpointOAuthStatusResponse:
       type: object
       description: |-

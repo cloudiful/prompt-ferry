@@ -3,9 +3,9 @@ use crate::{
     db,
     worker_admin::openai_org_usage::OpenAiOrganizationUsageResponse,
     worker_admin_types::{
-        EndpointOAuthStatusResponse, EndpointPageResponse, EndpointRequest, EndpointTestResponse,
-        OAuthBrowserCompleteRequest, OAuthBrowserStartResponse, OAuthDeviceStartResponse,
-        OAuthFlowRequest, OAuthLoginResponse, QuotaKeyObservationHistoryQuery,
+        EndpointOAuthStatusResponse, EndpointModelsResponse, EndpointPageResponse, EndpointRequest,
+        EndpointTestResponse, OAuthBrowserCompleteRequest, OAuthBrowserStartResponse,
+        OAuthDeviceStartResponse, OAuthFlowRequest, OAuthLoginResponse, QuotaKeyObservationHistoryQuery,
         QuotaKeyObservationHistoryResponse, QuotaKeyObservationTrendQuery,
         QuotaKeyObservationTrendResponse, QuotaSnapshotHistoryQuery, QuotaSnapshotHistoryResponse,
         TablePageQuery, TokenPlanUsageQuery, TokenPlanUsageResponse,
@@ -68,6 +68,20 @@ pub(super) fn delete_endpoint() {}
     tag = "endpoints"
 )]
 pub(super) fn test_endpoint() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/endpoints/{endpoint_id}/models",
+    params(("endpoint_id" = uuid::Uuid, Path, description = "Endpoint ID")),
+    responses(
+        (status = 200, body = EndpointModelsResponse, description = "Upstream model identifiers"),
+        (status = 400, body = ErrorEnvelope),
+        (status = 404, body = ErrorEnvelope),
+        (status = 502, body = ErrorEnvelope)
+    ),
+    tag = "endpoints"
+)]
+pub(super) fn endpoint_models() {}
 
 #[utoipa::path(
     get,

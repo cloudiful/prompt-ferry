@@ -528,6 +528,15 @@ export type EndpointApiKeyRequest = {
 };
 
 /**
+ * Issue #993 P1: the upstream model identifiers one endpoint advertises.
+ * Sorted and de-duplicated. A discovery failure is a bounded admin error
+ * and never blocks editing the target that points at the endpoint.
+ */
+export type EndpointModelsResponse = {
+    models: Array<string>;
+};
+
+/**
  * Issue #599 R2b: stored-token state for the login UI. `expires_at`/`expired`
  * drive the refresh-on-expiry display; no secret is ever echoed.
  */
@@ -2932,6 +2941,35 @@ export type UpdateEndpointResponses = {
 };
 
 export type UpdateEndpointResponse = UpdateEndpointResponses[keyof UpdateEndpointResponses];
+
+export type EndpointModelsData = {
+    body?: never;
+    path: {
+        /**
+         * Endpoint ID
+         */
+        endpoint_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/endpoints/{endpoint_id}/models';
+};
+
+export type EndpointModelsErrors = {
+    400: ErrorEnvelope;
+    404: ErrorEnvelope;
+    502: ErrorEnvelope;
+};
+
+export type EndpointModelsError = EndpointModelsErrors[keyof EndpointModelsErrors];
+
+export type EndpointModelsResponses = {
+    /**
+     * Upstream model identifiers
+     */
+    200: EndpointModelsResponse;
+};
+
+export type EndpointModelsResponse2 = EndpointModelsResponses[keyof EndpointModelsResponses];
 
 export type OauthClearData = {
     body?: never;

@@ -130,6 +130,7 @@ pub async fn json_body(response: axum::response::Response) -> Value {
 /// OpenAI platform create/update payload. `api_key` is required by the admin
 /// contract; the subscription plan is never requested here (that path needs a
 /// stored OAuth token).
+#[allow(dead_code)]
 pub fn openai_endpoint_body(name: &str, api_key: &str) -> Value {
     json!({
         "scope": "admin",

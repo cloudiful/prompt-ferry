@@ -171,6 +171,7 @@ export const endpointMessages = {
     tokenPlanExpired: '已到期',
     updatedAt: '更新时间',
     upstreamModelOptional: '上游模型名（可选，留空沿用原始模型）',
+    upstreamModelSuggestionsFailed: '无法加载上游模型列表。',
     proxyUrl: '代理地址',
     proxyUrlHint:
       '可选出站代理，支持 http/https/socks5/socks5h；留空直连。已保存代理直接保存会保留，仅清除或选择直连并保存才会移除。',
@@ -409,6 +410,7 @@ export const endpointMessages = {
     updatedAt: 'Updated at',
     upstreamModelOptional:
       'Upstream model name (optional, leave blank to keep the original model)',
+    upstreamModelSuggestionsFailed: 'Could not load the upstream model list.',
     proxyUrl: 'Proxy URL',
     proxyUrlHint:
       'Optional outbound proxy (http/https/socks5/socks5h). Empty means direct. Saving without changes keeps the stored proxy; only Clear or Direct + Save removes it.',

@@ -36,6 +36,48 @@ const { t } = useLocale()
 
 const isUpstream = computed(() => props.perspective === 'upstream')
 
+// Explicit widths keep the pinned columns aligned with their sticky offsets:
+// the table is laid out with fixed columns, so the declared size and the
+// rendered width are the same value.
+const COLUMN_WIDTHS: Record<string, number> = {
+  endpoint: 160,
+  model: 200,
+  request_count: 96,
+  request_share: 96,
+  total_tokens: 104,
+  token_share: 96,
+  cache_rate: 88,
+  error_rate: 88,
+  avg_output_tokens_per_second: 140,
+}
+
+// A pinned cell must hide the metric columns that scroll behind it, so it
+// carries the popover background instead of the translucent table default.
+const PINNED_BACKGROUND = 'var(--ui-bg)'
+
+function detailColumn(
+  accessorKey: string,
+  header: string,
+  pinned: boolean,
+): TableColumn<DetailEntry> {
+  const width = COLUMN_WIDTHS[accessorKey] ?? 120
+  const size = `${width}px`
+  const style: Record<string, Record<string, string>> = {
+    th: { width: size, minWidth: size, maxWidth: size },
+    td: { width: size, minWidth: size, maxWidth: size },
+  }
+  if (pinned) {
+    style.th.backgroundColor = PINNED_BACKGROUND
+    style.td.backgroundColor = PINNED_BACKGROUND
+  }
+  return {
+    accessorKey,
+    header,
+    size: width,
+    meta: { style },
+  } as TableColumn<DetailEntry>
+}
+
 function endpointLabel(
   endpointName: string | null | undefined,
   endpointId: string | null | undefined,
@@ -105,26 +147,37 @@ watch(
 const columns = computed<TableColumn<DetailEntry>[]>(() => {
   const headers: TableColumn<DetailEntry>[] = []
   if (!isUpstream.value) {
-    headers.push({
-      accessorKey: 'endpoint',
-      header: t('overviewUpstreamEndpoint'),
-    })
+    headers.push(detailColumn('endpoint', t('overviewUpstreamEndpoint'), true))
   }
   headers.push(
-    { accessorKey: 'model', header: t('model') },
-    { accessorKey: 'request_count', header: t('requests') },
-    { accessorKey: 'request_share', header: t('overviewRequestShare') },
-    { accessorKey: 'total_tokens', header: t('overviewTotalTokens') },
-    { accessorKey: 'token_share', header: t('overviewTokenShare') },
-    { accessorKey: 'cache_rate', header: t('overviewCacheRate') },
-    { accessorKey: 'error_rate', header: t('overviewErrorRate') },
-    {
-      accessorKey: 'avg_output_tokens_per_second',
-      header: t('overviewAvgOutputRate'),
-    },
+    detailColumn('model', t('model'), true),
+    detailColumn('request_count', t('requests'), false),
+    detailColumn('request_share', t('overviewRequestShare'), false),
+    detailColumn('total_tokens', t('overviewTotalTokens'), false),
+    detailColumn('token_share', t('overviewTokenShare'), false),
+    detailColumn('cache_rate', t('overviewCacheRate'), false),
+    detailColumn('error_rate', t('overviewErrorRate'), false),
+    detailColumn(
+      'avg_output_tokens_per_second',
+      t('overviewAvgOutputRate'),
+      false,
+    ),
   )
   return headers
 })
+
+// The identifier columns stay visible while the metric columns scroll behind
+// them. The model perspective keeps the endpoint and the model; the upstream
+// perspective only knows the model.
+const columnPinning = computed(() => ({
+  left: isUpstream.value ? ['model'] : ['endpoint', 'model'],
+  right: [] as string[],
+}))
+
+// The table is wider than the popover, so the metric columns scroll.
+const tableWidth = computed(() =>
+  columns.value.reduce((sum, column) => sum + (column.size ?? 0), 0),
+)
 </script>
 
 <template>
@@ -154,6 +207,7 @@ const columns = computed<TableColumn<DetailEntry>[]>(() => {
     <template #content>
       <div
         class="max-h-[50vh] w-[min(38rem,calc(100vw-2rem))] overflow-auto p-3"
+        :style="{ '--breakdown-table-width': `${tableWidth}px` }"
       >
         <div class="mb-2 text-xs font-semibold text-highlighted">
           {{
@@ -188,21 +242,25 @@ const columns = computed<TableColumn<DetailEntry>[]>(() => {
           v-if="shownEntries.length"
           :data="shownEntries"
           :columns="columns"
+          :column-pinning="columnPinning"
           class="w-full"
           :ui="{
+            base: 'table-fixed w-[var(--breakdown-table-width)]',
             th: 'whitespace-nowrap px-2 py-1 text-xs',
             td: 'px-2 py-1 text-xs',
           }"
         >
           <template #endpoint-cell="{ row }">
-            <span class="font-medium text-highlighted">{{
-              row.original.endpoint
-            }}</span>
+            <span
+              class="block max-w-full truncate font-medium text-highlighted"
+              >{{ row.original.endpoint }}</span
+            >
           </template>
           <template #model-cell="{ row }">
-            <span class="font-medium text-highlighted">{{
-              row.original.model
-            }}</span>
+            <span
+              class="block max-w-full truncate font-medium text-highlighted"
+              >{{ row.original.model }}</span
+            >
           </template>
           <template #request_count-cell="{ row }">{{
             formatting.formatCount(row.original.request_count)

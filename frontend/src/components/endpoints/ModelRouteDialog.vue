@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import ProviderIcon from '@/components/providers/ProviderIcon.vue'
+import EndpointModelInput from '@/components/endpoints/EndpointModelInput.vue'
 import ModelRouteTargetSettingsPage from '@/components/endpoints/ModelRouteTargetSettingsPage.vue'
+import ProviderIcon from '@/components/providers/ProviderIcon.vue'
 import {
   canSaveTargets,
   createTargetColumns,
@@ -209,18 +210,18 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
                 <template #order-cell="{ row }">
                   <div
                     class="flex items-center gap-1"
-                    draggable="true"
-                    @dragstart="onRowDragStart($event, row.index)"
                     @dragover="onRowDragOver($event, row.index)"
                     @drop="onDrop($event, row.index)"
                     @dragend="onDragEnd"
                   >
                     <div
                       data-target-drag-handle
+                      draggable="true"
                       tabindex="0"
                       role="button"
                       class="inline-flex cursor-grab items-center justify-center rounded p-1 text-muted focus-visible:outline-2 focus-visible:outline-primary active:cursor-grabbing"
                       :aria-label="t('target')"
+                      @dragstart="onRowDragStart($event, row.index)"
                       @keydown="onGripKeydown($event, row.index)"
                     >
                       <UIcon name="i-lucide-grip-vertical" class="h-4 w-4" />
@@ -230,11 +231,8 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
                 <template #endpoint-cell="{ row }">
                   <div
                     class="grid gap-2"
-                    draggable="true"
-                    @dragstart="onRowDragStart($event, row.index)"
                     @dragover="onRowDragOver($event, row.index)"
                     @drop="onDrop($event, row.index)"
-                    @dragend="onDragEnd"
                   >
                     <div
                       class="grid gap-2 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_auto]"
@@ -251,10 +249,11 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
                           <ProviderIcon :provider="item.provider" size="sm" />
                         </template>
                       </USelect>
-                      <UInput
+                      <EndpointModelInput
                         v-model="row.original.upstream_model"
-                        class="w-full"
+                        :endpoint-id="row.original.endpoint_id"
                         :placeholder="t('upstreamModelOptional')"
+                        :t="t"
                       />
                       <div class="flex items-center gap-1">
                         <div
@@ -303,11 +302,8 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
                 <template #status-cell="{ row }">
                   <div
                     class="flex min-h-8 items-center justify-center"
-                    draggable="true"
-                    @dragstart="onRowDragStart($event, row.index)"
                     @dragover="onRowDragOver($event, row.index)"
                     @drop="onDrop($event, row.index)"
-                    @dragend="onDragEnd"
                   >
                     <USwitch
                       v-model="row.original.enabled"
@@ -318,11 +314,8 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
                 <template #actions-cell="{ row }">
                   <div
                     class="flex items-center"
-                    draggable="true"
-                    @dragstart="onRowDragStart($event, row.index)"
                     @dragover="onRowDragOver($event, row.index)"
                     @drop="onDrop($event, row.index)"
-                    @dragend="onDragEnd"
                   >
                     <UButton
                       type="button"

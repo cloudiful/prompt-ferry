@@ -248,6 +248,10 @@ fn api_router(state: AdminState) -> Router<AdminState> {
         )
         .route("/admin/endpoints/{endpoint_id}/test", post(test_endpoint))
         .route(
+            "/admin/endpoints/{endpoint_id}/models",
+            get(list_endpoint_models),
+        )
+        .route(
             "/admin/endpoints/{endpoint_id}/token-plan-usage",
             get(token_plan_usage),
         )

@@ -162,6 +162,14 @@ impl From<db::EndpointPage> for EndpointPageResponse {
     }
 }
 
+/// Issue #993 P1: the upstream model identifiers one endpoint advertises.
+/// Sorted and de-duplicated. A discovery failure is a bounded admin error
+/// and never blocks editing the target that points at the endpoint.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EndpointModelsResponse {
+    pub models: Vec<String>,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct EndpointTestResponse {
     pub ok: bool,

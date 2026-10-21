@@ -3,6 +3,7 @@ import {
   createModelRoute,
   deleteEndpoint,
   deleteModelRoute,
+  endpointModels,
   listEndpoints,
   listModelRoutes,
   organizationUsage,
@@ -16,6 +17,7 @@ import {
   updateModelRoute,
 } from '../generated/admin-api'
 import type {
+  EndpointModelsResponse,
   EndpointPageResponse,
   EndpointRequest,
   EndpointTestResponse,
@@ -90,6 +92,17 @@ export async function runEndpointTest(
 ): Promise<EndpointTestResponse> {
   return expectData(
     await testEndpoint<true>(withData({ path: { endpoint_id: endpointId } })),
+  )
+}
+
+// Issue #993 P1: the model identifiers the endpoint's upstream advertises.
+// Read-only discovery: the model override stays free-form, so a failed or
+// empty listing never blocks editing.
+export async function fetchEndpointModels(
+  endpointId: string,
+): Promise<EndpointModelsResponse> {
+  return expectData(
+    await endpointModels<true>(withData({ path: { endpoint_id: endpointId } })),
   )
 }
 

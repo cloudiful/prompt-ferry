@@ -36,6 +36,14 @@ impl EndpointModelSnapshot {
     pub fn model_ids(&self) -> impl Iterator<Item = &str> + '_ {
         self.model_ids.iter().map(String::as_str)
     }
+
+    /// The identifiers in a stable order. The snapshot already holds every
+    /// identifier once, so this is the sorted, de-duplicated listing.
+    pub fn sorted_model_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.model_ids.iter().cloned().collect();
+        ids.sort();
+        ids
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,13 +67,19 @@ struct EndpointSignature {
     native_api: NativeApi,
 }
 
+impl EndpointSignature {
+    fn new(base_url: &str, api_key: &str, native_api: NativeApi) -> Self {
+        Self {
+            base_url: base_url.to_string(),
+            api_key: api_key.to_string(),
+            native_api,
+        }
+    }
+}
+
 impl From<&RouteConfig> for EndpointSignature {
     fn from(route: &RouteConfig) -> Self {
-        Self {
-            base_url: route.base_url.clone(),
-            api_key: route.api_key.clone(),
-            native_api: route.native_api,
-        }
+        Self::new(&route.base_url, &route.api_key, route.native_api)
     }
 }
 
@@ -94,12 +108,79 @@ impl EndpointModelCache {
     }
 
     pub async fn put(&self, route: &RouteConfig, snapshot: EndpointModelSnapshot) {
+        self.put_entry(
+            route.route_id,
+            EndpointSignature::from(route),
+            snapshot,
+        )
+        .await;
+    }
+
+    /// Cached snapshot for one endpoint, keyed by the endpoint id and the
+    /// endpoint's own configuration signature. The admin model listing uses
+    /// it so a repeated read of the same endpoint never re-queries the
+    /// upstream inside the cache TTL.
+    pub async fn lookup_endpoint(
+        &self,
+        endpoint_id: Uuid,
+        base_url: &str,
+        api_key: &str,
+        native_api: NativeApi,
+    ) -> CacheLookup {
+        self.lookup_entry(
+            endpoint_id,
+            &EndpointSignature::new(base_url, api_key, native_api),
+            Instant::now(),
+        )
+        .await
+    }
+
+    pub async fn put_endpoint(
+        &self,
+        endpoint_id: Uuid,
+        base_url: &str,
+        api_key: &str,
+        native_api: NativeApi,
+        snapshot: EndpointModelSnapshot,
+    ) {
+        self.put_entry(
+            endpoint_id,
+            EndpointSignature::new(base_url, api_key, native_api),
+            snapshot,
+        )
+        .await;
+    }
+
+    async fn lookup_entry(
+        &self,
+        key: Uuid,
+        signature: &EndpointSignature,
+        now: Instant,
+    ) -> CacheLookup {
+        let Some(entry) = self.inner.read().await.get(&key).cloned() else {
+            return CacheLookup::Missing;
+        };
+        if &entry.signature != signature {
+            return CacheLookup::Missing;
+        }
+        if now.duration_since(entry.fetched_at) <= self.ttl {
+            return CacheLookup::Fresh(entry.snapshot);
+        }
+        CacheLookup::Stale(entry.snapshot)
+    }
+
+    async fn put_entry(
+        &self,
+        key: Uuid,
+        signature: EndpointSignature,
+        snapshot: EndpointModelSnapshot,
+    ) {
         let mut inner = self.inner.write().await;
         inner.insert(
-            route.route_id,
+            key,
             CacheEntry {
                 fetched_at: Instant::now(),
-                signature: EndpointSignature::from(route),
+                signature,
                 snapshot,
             },
         );
@@ -133,16 +214,12 @@ impl EndpointModelCache {
     }
 
     async fn lookup_at(&self, route: &RouteConfig, now: Instant) -> CacheLookup {
-        let Some(entry) = self.inner.read().await.get(&route.route_id).cloned() else {
-            return CacheLookup::Missing;
-        };
-        if entry.signature != EndpointSignature::from(route) {
-            return CacheLookup::Missing;
-        }
-        if now.duration_since(entry.fetched_at) <= self.ttl {
-            return CacheLookup::Fresh(entry.snapshot);
-        }
-        CacheLookup::Stale(entry.snapshot)
+        self.lookup_entry(
+            route.route_id,
+            &EndpointSignature::from(route),
+            now,
+        )
+        .await
     }
 }
 
