@@ -774,6 +774,15 @@ paths:
         schema:
           type: string
           format: uuid
+      - name: native_api
+        in: query
+        description: |-
+          Issue #1032: optionally scope the endpoint model catalog to one
+          protocol. Omitted keeps the endpoint's own protocol semantics (an
+          `auto` endpoint returns the deduplicated union of its catalogs).
+        required: false
+        schema:
+          $ref: '#/components/schemas/NativeApi'
       responses:
         '200':
           description: Upstream model identifiers; a ChatGPT subscription endpoint answers from the Codex model table
@@ -5775,6 +5784,17 @@ components:
             Issue #392 Phase K: developer->system normalization switch.
             `false` (default) skips `normalize_chat_request_for_native`;
             `true` rewrites `developer` to `system`. Always sent (no omit).
+        embedding_dimensions_override:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: |-
+            Issue #1032: per-target embedding dimension override. `None`
+            (null/omitted) inherits the caller's dimensions; `Some(dimensions)`
+            forces the dimension count for the target. It is an override, never
+            a cap, and must be a positive i32.
+          minimum: 1
         enabled:
           type: boolean
         endpoint_enabled:
@@ -5870,6 +5890,18 @@ components:
             Issue #392 Phase K: developer->system normalization switch.
             Always sent (no omit semantics); `false` (default) skips
             `normalize_chat_request_for_native` in Chat passthrough.
+        embedding_dimensions_override:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: |-
+            Issue #1032: per-target embedding dimension override. The field is
+            `Option<Option<i32>>` so an omitted field (`None`) carries the stored
+            value on PATCH, an explicit `null` (`Some(None)`) clears it to
+            inherit, and an integer (`Some(Some(value))`) sets a positive i32.
+            Omitting must never clear a saved dimension.
+          minimum: 1
         enabled:
           type:
           - boolean
@@ -6085,6 +6117,7 @@ components:
       - auto
       - anthropic_messages
       - chat
+      - embeddings
       - responses
       - realtime
     OAuthBrowserCompleteRequest:

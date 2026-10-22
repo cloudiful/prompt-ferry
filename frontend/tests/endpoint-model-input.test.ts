@@ -339,3 +339,128 @@ test('clearing the control empties the value', async () => {
   emit?.('clear')
   expect(model.value).toBe('')
 })
+
+// ---------------------------------------------------------------------------
+// Issue #1032: the effective target protocol scopes the suggestion catalog. The
+// consumer passes it through, and the cache is protocol-distinct for one
+// endpoint.
+// ---------------------------------------------------------------------------
+
+type SelectorCapture = {
+  endpointId: { value: string | null | undefined } | null
+  nativeApi: { value: string | null | undefined } | null
+}
+
+const selectorCapture: SelectorCapture = { endpointId: null, nativeApi: null }
+
+const inputComponentWithSelectorCapture: Component = compileComponent(
+  inputSource,
+  'EndpointModelInput.vue',
+  (spec) => {
+    if (spec === 'vue') return vue
+    if (spec === '@/composables/useEndpointModels') {
+      return {
+        useEndpointModels: (
+          endpointId: { value: string | null | undefined },
+          nativeApi?: { value: string | null | undefined },
+        ) => {
+          selectorCapture.endpointId = endpointId
+          selectorCapture.nativeApi = nativeApi ?? null
+          return listing
+        },
+      }
+    }
+    return { default: { render: () => h('div') } }
+  },
+)
+
+async function renderInputWithSelector(
+  nativeApi: string | null,
+): Promise<string> {
+  const app = createSSRApp({
+    render: () =>
+      h(inputComponentWithSelectorCapture, {
+        modelValue: 'gpt-4o',
+        endpointId: 'endpoint-1',
+        nativeApi,
+        placeholder: 'upstream model',
+        t: (key: string) => key,
+      }),
+  })
+  app.component('UInputMenu', inputMenuStub)
+  return renderToString(app)
+}
+
+test('the control forwards the effective protocol as the catalog selector', async () => {
+  selectorCapture.nativeApi = null
+  await renderInputWithSelector('embeddings')
+  expect(selectorCapture.endpointId?.value).toBe('endpoint-1')
+  expect(selectorCapture.nativeApi?.value).toBe('embeddings')
+})
+
+test('an omitted protocol leaves the endpoint catalog unscoped', async () => {
+  selectorCapture.nativeApi = null
+  await renderInputWithSelector(null)
+  expect(selectorCapture.nativeApi?.value).toBeNull()
+})
+
+test('the listing cache is protocol-distinct for one endpoint', async () => {
+  fetchEndpointModels.mockClear()
+  fetchEndpointModels.mockImplementation(async () => ({
+    models: ['shared-model'],
+  }))
+
+  const endpointId = ref('endpoint-protocol')
+  const selector = ref<'chat' | 'embeddings' | null>('chat')
+  const selection = useEndpointModels(endpointId, selector)
+  await flush()
+  expect(selection.models.value).toEqual(['shared-model'])
+  expect(fetchEndpointModels).toHaveBeenCalledTimes(1)
+  expect(fetchEndpointModels.mock.calls[0]?.[1]).toBe('chat')
+
+  // The selector is part of the cache key: a different protocol reads again.
+  selector.value = 'embeddings'
+  await flush()
+  expect(fetchEndpointModels).toHaveBeenCalledTimes(2)
+  expect(fetchEndpointModels.mock.calls[1]?.[1]).toBe('embeddings')
+
+  // Repeating a protocol is served from its own cached entry.
+  selector.value = 'chat'
+  await flush()
+  expect(fetchEndpointModels).toHaveBeenCalledTimes(2)
+
+  // Back to the endpoint's own semantics (`null`) is yet another entry.
+  selector.value = null
+  await flush()
+  expect(fetchEndpointModels).toHaveBeenCalledTimes(3)
+  expect(fetchEndpointModels.mock.calls[2]?.[1]).toBeNull()
+})
+
+test('a protocol change isolates the previous list and keeps the latest result', async () => {
+  fetchEndpointModels.mockClear()
+  const releases: Record<string, (value: EndpointModelsResponse) => void> = {}
+  fetchEndpointModels.mockImplementation(
+    (_endpointId: string, nativeApi?: string | null) =>
+      new Promise<EndpointModelsResponse>((resolve) => {
+        releases[String(nativeApi ?? 'auto')] = resolve
+      }),
+  )
+
+  const endpointId = ref('endpoint-latest')
+  const selector = ref<'chat' | 'embeddings' | null>('chat')
+  const selection = useEndpointModels(endpointId, selector)
+
+  // The protocol changes before the chat answer arrives: the chat list must
+  // never populate the embeddings control.
+  selector.value = 'embeddings'
+  await flush()
+
+  releases['embeddings']?.({ models: ['embedding-model'] })
+  await flush()
+  expect(selection.models.value).toEqual(['embedding-model'])
+
+  // A late chat answer is dropped.
+  releases['chat']?.({ models: ['chat-model'] })
+  await flush()
+  expect(selection.models.value).toEqual(['embedding-model'])
+})

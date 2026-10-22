@@ -1,22 +1,37 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import ProxySettingsFields from '@/components/shared/ProxySettingsFields.vue'
 import ScheduleWindowsFields from '@/components/shared/ScheduleWindowsFields.vue'
 import ServiceTierOverrideField from '@/components/shared/ServiceTierOverrideField.vue'
 import SettingsFieldRow from '@/components/shared/SettingsFieldRow.vue'
-import type { EndpointProvider } from '@/generated/admin-api'
+import { parseEmbeddingDimensionsInput } from '@/admin-mappers'
 import type { ModelRouteTargetForm } from '@/models'
-import { supportsServiceTierFor } from '@/models/endpoints/service-tier'
+import type { NativeApi } from '@/generated/admin-api'
+import {
+  effectiveTargetProtocol,
+  normalizeNativeApiAxis,
+  supportsChatAdaptationFor,
+  supportsEmbeddingDimensionOverrideFor,
+  supportsServiceTierFor,
+} from '@/models/endpoints/service-tier'
 
-defineProps<{
+const props = defineProps<{
   t: TranslateFn
-  // Issue #644: the endpoint provider travels from the endpoint picker but no
-  // longer gates the override; the configured target tier is exposed for every
-  // provider, so the prop is kept for caller compatibility only.
-  endpointProvider?: EndpointProvider | null
+  // Issue #1032: the endpoint's own protocol. A target with `auto` inherits it,
+  // so the settings page can resolve the effective protocol without guessing
+  // from the model name.
+  endpointProtocol?: NativeApi | null
 }>()
 
 const target = defineModel<ModelRouteTargetForm>('target', { required: true })
+
+const endpointProtocolAxis = computed<NativeApi>(() =>
+  normalizeNativeApiAxis(props.endpointProtocol),
+)
+
+const effectiveProtocol = computed(() =>
+  effectiveTargetProtocol(target.value?.native_api, endpointProtocolAxis.value),
+)
 
 const proxyUrl = computed({
   get: () => target.value?.proxy_url_override ?? '',
@@ -42,28 +57,78 @@ const windows = computed({
 // Issue #409 Phase 2: per-target port type, default Auto (follow caller).
 // Reuses EndpointProviderFields USelect paradigm + endpoint i18n labels.
 const nativeApiSelection = computed({
-  get(): 'auto' | 'anthropic_messages' | 'chat' | 'responses' | 'realtime' {
+  get():
+    | 'auto'
+    | 'anthropic_messages'
+    | 'chat'
+    | 'embeddings'
+    | 'responses'
+    | 'realtime' {
     const value = target.value?.native_api ?? 'auto'
     return value === 'anthropic_messages' ||
       value === 'responses' ||
       value === 'chat' ||
+      value === 'embeddings' ||
       value === 'realtime'
       ? value
       : 'auto'
   },
   set(
-    value: 'auto' | 'anthropic_messages' | 'chat' | 'responses' | 'realtime',
+    value:
+      | 'auto'
+      | 'anthropic_messages'
+      | 'chat'
+      | 'embeddings'
+      | 'responses'
+      | 'realtime',
   ) {
     if (target.value) target.value.native_api = value
   },
 })
 
-// Issue #644: the free-form target override is exposed for every provider on
-// the HTTP JSON protocols; Realtime carries WebSocket frames instead, so it
-// stays hidden there.
-const serviceTierEligible = computed(() =>
-  supportsServiceTierFor(nativeApiSelection.value),
+// Issue #1032: an embeddings target carries only the dimension override; the
+// chat-only controls (service tier, thinking effort, thinking downgrade,
+// compact mode, developer->system normalize) have no meaning there and stay
+// hidden. `auto` keeps them because the runtime resolves the operation per
+// request and the UI never guesses.
+const chatAdaptationEligible = computed(() =>
+  supportsChatAdaptationFor(effectiveProtocol.value),
 )
+const serviceTierEligible = computed(() =>
+  supportsServiceTierFor(effectiveProtocol.value),
+)
+const dimensionEligible = computed(() =>
+  supportsEmbeddingDimensionOverrideFor(effectiveProtocol.value),
+)
+
+// Issue #1032: the dimension control. `null` inherits the caller's dimensions;
+// a positive integer forces the target's dimension count. The raw text is kept
+// locally so a malformed entry stays visible (and blocks save) instead of
+// being silently turned into inherit.
+const dimensionText = ref('')
+watch(
+  () => target.value,
+  (value) => {
+    dimensionText.value =
+      value?.embedding_dimensions_override == null
+        ? ''
+        : String(value.embedding_dimensions_override)
+    if (value) value.embedding_dimensions_invalid = false
+  },
+  { immediate: true },
+)
+
+const dimensionInvalid = computed(
+  () => target.value?.embedding_dimensions_invalid === true,
+)
+
+function onDimensionInput(raw: string): void {
+  dimensionText.value = raw
+  if (!target.value) return
+  const parsed = parseEmbeddingDimensionsInput(raw)
+  target.value.embedding_dimensions_invalid = parsed.invalid
+  if (!parsed.invalid) target.value.embedding_dimensions_override = parsed.value
+}
 
 const serviceTier = computed({
   get: () => target.value?.service_tier ?? null,
@@ -118,6 +183,7 @@ const compactMode = computed({
         :items="[
           { label: t('endpointSourceAuto'), value: 'auto' },
           { label: t('nativeApiChat'), value: 'chat' },
+          { label: t('nativeApiEmbeddings'), value: 'embeddings' },
           { label: t('nativeApiResponses'), value: 'responses' },
           {
             label: t('nativeApiAnthropicMessages'),
@@ -129,8 +195,36 @@ const compactMode = computed({
         value-key="value"
       />
     </SettingsFieldRow>
+    <SettingsFieldRow
+      v-if="dimensionEligible"
+      :label="t('embeddingDimensionsOverride')"
+      :hint="t('embeddingDimensionsOverrideHint')"
+      for-id="target-embedding-dimensions"
+    >
+      <div class="grid gap-1">
+        <UInput
+          id="target-embedding-dimensions"
+          :model-value="dimensionText"
+          class="w-full"
+          inputmode="numeric"
+          :placeholder="t('embeddingDimensionsInherit')"
+          :aria-invalid="dimensionInvalid"
+          :aria-describedby="
+            dimensionInvalid ? 'target-embedding-dimensions-error' : undefined
+          "
+          @update:model-value="onDimensionInput"
+        />
+        <p
+          v-if="dimensionInvalid"
+          id="target-embedding-dimensions-error"
+          class="text-xs text-error"
+        >
+          {{ t('embeddingDimensionsInvalid') }}
+        </p>
+      </div>
+    </SettingsFieldRow>
     <ServiceTierOverrideField
-      v-if="serviceTierEligible"
+      v-if="chatAdaptationEligible && serviceTierEligible"
       v-model="serviceTier"
       :t="t"
       input-id="target-service-tier"
@@ -156,6 +250,7 @@ const compactMode = computed({
       />
     </SettingsFieldRow>
     <SettingsFieldRow
+      v-if="chatAdaptationEligible"
       :label="t('thinkingEffortOverride')"
       :hint="t('thinkingEffortOverrideHint')"
     >
@@ -184,7 +279,11 @@ const compactMode = computed({
         value-key="value"
       />
     </SettingsFieldRow>
-    <SettingsFieldRow :label="t('compactMode')" :hint="t('compactModeHint')">
+    <SettingsFieldRow
+      v-if="chatAdaptationEligible"
+      :label="t('compactMode')"
+      :hint="t('compactModeHint')"
+    >
       <USelect
         v-model="compactMode"
         class="w-full"
@@ -197,7 +296,11 @@ const compactMode = computed({
         value-key="value"
       />
     </SettingsFieldRow>
-    <SettingsFieldRow :label="t('normalizeLabel')" :hint="t('normalizeHint')">
+    <SettingsFieldRow
+      v-if="chatAdaptationEligible"
+      :label="t('normalizeLabel')"
+      :hint="t('normalizeHint')"
+    >
       <div class="flex md:justify-end">
         <USwitch
           v-model="target.dev_system_normalize"
@@ -206,6 +309,7 @@ const compactMode = computed({
       </div>
     </SettingsFieldRow>
     <SettingsFieldRow
+      v-if="chatAdaptationEligible"
       :label="t('thinkingDowngradeLabel')"
       :hint="t('thinkingDowngradeHint')"
     >

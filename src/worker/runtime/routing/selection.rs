@@ -241,6 +241,9 @@ pub(super) fn route_from_target(
     route_selection_reason: db::RouteSelectionReason,
 ) -> db::RouteConfig {
     db::RouteConfig {
+        // Issue #1032: carry the resolved per-target dimension override;
+        // `None` inherits the caller's dimensions.
+        embedding_dimensions_override: target.embedding_dimensions_override,
         route_id: target.endpoint_id,
         user_id,
         model_route_rule_id: Some(rule_id),
@@ -378,6 +381,7 @@ mod tests {
         proxy_override: Option<&str>,
     ) -> db::ModelRouteCandidateTarget {
         db::ModelRouteCandidateTarget {
+            embedding_dimensions_override: None,
             target_id: uuid::Uuid::new_v4(),
             endpoint_id: uuid::Uuid::new_v4(),
             endpoint_name: "e".to_string(),
@@ -410,6 +414,7 @@ mod tests {
     ) -> db::ModelRouteCandidateTarget {
         let native_api = db::resolve_target_native_api(target_native_api, endpoint_native_api);
         db::ModelRouteCandidateTarget {
+            embedding_dimensions_override: None,
             target_id: uuid::Uuid::new_v4(),
             endpoint_id: uuid::Uuid::new_v4(),
             endpoint_name: "e".to_string(),

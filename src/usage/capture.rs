@@ -12,6 +12,9 @@ pub struct TokenUsage {
 
 pub struct UsageCapture {
     is_sse: bool,
+    /// Issue #1032: an embeddings response reports input tokens only; output is
+    /// canonicalized to zero and dimensions are never converted into tokens.
+    embedding_response: bool,
     pub model: Option<String>,
     pub response_id: Option<String>,
     pub provider_conversation_key: Option<String>,
@@ -24,12 +27,16 @@ pub struct UsageCapture {
     json_body: Vec<u8>,
     json_body_truncated: bool,
     saw_output: bool,
+    /// Issue #1032: set once the complete embeddings body supplied the
+    /// accounting metadata, so `finish` never re-parses or overwrites it.
+    embedding_body_observed: bool,
 }
 
 impl UsageCapture {
     pub fn new(is_sse: bool, model: Option<String>) -> Self {
         Self {
             is_sse,
+            embedding_response: false,
             model,
             response_id: None,
             provider_conversation_key: None,
@@ -42,6 +49,7 @@ impl UsageCapture {
             json_body: Vec::new(),
             json_body_truncated: false,
             saw_output: false,
+            embedding_body_observed: false,
         }
     }
 
@@ -50,17 +58,49 @@ impl UsageCapture {
         self.truncate_response_text();
     }
 
+    /// Issue #1032: mark this capture as an embeddings response so the usage is
+    /// read with the input-only embeddings semantics instead of the chat shape.
+    pub fn set_embedding_response(&mut self) {
+        self.embedding_response = true;
+    }
+
+    /// Issue #1032: account a complete embeddings response body.
+    ///
+    /// The forward path already owns the buffered body, so the accounting is one
+    /// metadata-only typed deserialization over a borrowed slice: the vectors
+    /// are skipped without being materialized and no body is retained. The
+    /// capture keeps its initial request-model priority and first-observed
+    /// id/conversation behavior.
+    pub fn observe_embedding_body(&mut self, body: &[u8]) {
+        self.embedding_body_observed = true;
+        let metadata = text::extract_embedding_body_metadata(body);
+        if self.model.is_none() {
+            self.model = metadata.model;
+        }
+        if self.response_id.is_none() {
+            self.response_id = metadata.id;
+        }
+        if self.provider_conversation_key.is_none() {
+            self.provider_conversation_key = metadata.conversation;
+        }
+        if let Some(usage) = metadata.usage {
+            self.usage = merge_embedding_usage(&self.usage, &usage);
+        }
+    }
+
     pub fn observe_chunk(&mut self, chunk: &[u8]) -> bool {
         let had_output = self.saw_output;
         if self.is_sse {
             self.observe_sse_chunk(chunk);
-        } else if !self.json_body_truncated {
-            const MAX_JSON_CAPTURE: usize = 1024 * 1024;
-            if self.json_body.len().saturating_add(chunk.len()) <= MAX_JSON_CAPTURE {
-                self.json_body.extend_from_slice(chunk);
-            } else {
-                self.json_body.clear();
-                self.json_body_truncated = true;
+        } else if !self.embedding_response {
+            if !self.json_body_truncated {
+                const MAX_JSON_CAPTURE: usize = 1024 * 1024;
+                if self.json_body.len().saturating_add(chunk.len()) <= MAX_JSON_CAPTURE {
+                    self.json_body.extend_from_slice(chunk);
+                } else {
+                    self.json_body.clear();
+                    self.json_body_truncated = true;
+                }
             }
         }
         !had_output && self.saw_output
@@ -75,7 +115,8 @@ impl UsageCapture {
             if let Ok(Some(line)) = self.sse_decoder.finish() {
                 self.observe_sse_line(&line);
             }
-        } else if !self.json_body_truncated
+        } else if !self.embedding_body_observed
+            && !self.json_body_truncated
             && let Ok(value) = serde_json::from_slice::<Value>(&self.json_body)
         {
             self.observe_json_value(&value);
@@ -105,6 +146,13 @@ impl UsageCapture {
         };
         let data = data.trim();
         if data.is_empty() || data == "[DONE]" {
+            return;
+        }
+        if self.embedding_response {
+            // Issue #1032: an unexpected Embeddings SSE event is handled only by
+            // the typed metadata extractor; it never reaches the generic parse,
+            // so no response text or vector value is captured.
+            self.observe_embedding_body(data.as_bytes());
             return;
         }
         if let Ok(value) = serde_json::from_str::<Value>(data) {
@@ -138,7 +186,9 @@ impl UsageCapture {
                 .and_then(Value::as_str)
                 .map(str::to_string);
         }
-        if let Some(usage) = extract_usage(payload).or_else(|| extract_usage(value)) {
+        if self.embedding_response {
+            // Embedding usage comes from the metadata-only body entry point.
+        } else if let Some(usage) = extract_usage(payload).or_else(|| extract_usage(value)) {
             self.usage = merge_usage(&self.usage, &usage);
         } else if let Some(diagnosis) = response_usage_diagnostics::diagnose(payload, value) {
             diagnosis.record();
@@ -166,6 +216,36 @@ impl UsageCapture {
         }
         self.response_text.truncate(end);
         self.response_text_truncated = true;
+    }
+}
+
+/// Issue #1032: merge successive raw embedding usage observations.
+///
+/// Both sides already come from the typed metadata extractor, where the
+/// invariant is established: with an input the output is zero and an absent
+/// explicit total falls back to the actual input; without an input no
+/// output/completion/cache meter is carried and only an explicitly reported
+/// total survives. The merge only keeps those invariants.
+fn merge_embedding_usage(current: &TokenUsage, next: &TokenUsage) -> TokenUsage {
+    let input_tokens = next.input_tokens.or(current.input_tokens);
+    let total_tokens = next.total_tokens.or(current.total_tokens);
+    match input_tokens {
+        Some(input) => TokenUsage {
+            input_tokens: Some(input),
+            output_tokens: Some(0),
+            total_tokens: total_tokens.or(Some(input)),
+            cached_tokens: next.cached_tokens.or(current.cached_tokens),
+            cache_read_tokens: next.cache_read_tokens.or(current.cache_read_tokens),
+            cache_write_tokens: next.cache_write_tokens.or(current.cache_write_tokens),
+        },
+        None => TokenUsage {
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens,
+            cached_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+        },
     }
 }
 
@@ -290,5 +370,221 @@ mod tests {
         assert_eq!(capture.usage.cache_read_tokens, Some(30));
         assert_eq!(capture.usage.cache_write_tokens, Some(7));
         assert_eq!(capture.usage.cached_tokens, Some(30));
+    }
+
+    #[test]
+    fn embeddings_usage_is_input_only_with_zero_output() {
+        // Issue #1032: an embeddings response reports input only; the
+        // canonical usage has output zero and the reported total, and the
+        // vector length never becomes a token count.
+        let mut capture = UsageCapture::new(false, None);
+        capture.set_embedding_response();
+        capture.observe_embedding_body(
+            br#"{"object":"list","data":[{"embedding":[0.1,0.2,0.3]}],"usage":{"prompt_tokens":7,"total_tokens":7}}"#,
+        );
+        capture.finish();
+        assert_eq!(capture.usage.input_tokens, Some(7));
+        assert_eq!(capture.usage.output_tokens, Some(0));
+        assert_eq!(capture.usage.total_tokens, Some(7));
+        // The three-dimension vector must not be counted as tokens.
+        assert_ne!(capture.usage.output_tokens, Some(3));
+    }
+
+    #[test]
+    fn embeddings_usage_stays_unknown_when_the_provider_reports_none() {
+        // Issue #1032: a missing upstream usage stays unknown; no local guess.
+        let mut capture = UsageCapture::new(false, None);
+        capture.set_embedding_response();
+        capture.observe_embedding_body(br#"{"object":"list","data":[]}"#);
+        capture.finish();
+        assert_eq!(capture.usage.input_tokens, None);
+        assert_eq!(capture.usage.output_tokens, None);
+        assert_eq!(capture.usage.total_tokens, None);
+    }
+
+    fn embedding_body_usage(body: &str) -> crate::usage::TokenUsage {
+        let mut capture = UsageCapture::new(false, None);
+        capture.set_embedding_response();
+        capture.observe_embedding_body(body.as_bytes());
+        capture.finish();
+        capture.usage
+    }
+
+    fn embedding_usage(usage: &str) -> crate::usage::TokenUsage {
+        embedding_body_usage(&format!(
+            r#"{{"data":[{{"embedding":[0.1]}}],"usage":{usage}}}"#
+        ))
+    }
+
+    #[test]
+    fn embeddings_usage_reads_only_the_reported_raw_fields() {
+        let with_total =
+            embedding_usage(r#"{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}"#);
+        assert_eq!(
+            (
+                with_total.input_tokens,
+                with_total.output_tokens,
+                with_total.total_tokens
+            ),
+            (Some(4), Some(0), Some(7)),
+            "an explicit upstream total is preserved"
+        );
+        let without_total = embedding_usage(r#"{"prompt_tokens":4,"completion_tokens":3}"#);
+        assert_eq!(
+            (
+                without_total.input_tokens,
+                without_total.output_tokens,
+                without_total.total_tokens
+            ),
+            (Some(4), Some(0), Some(4)),
+            "an absent total falls back to the actual input, not input+completion"
+        );
+        // An output/completion-only shape carries no billable embedding meter.
+        let output_only = embedding_usage(r#"{"completion_tokens":3,"output_tokens":3}"#);
+        assert_eq!(
+            (
+                output_only.input_tokens,
+                output_only.output_tokens,
+                output_only.total_tokens
+            ),
+            (None, None, None),
+            "no input and no reported total stays unknown"
+        );
+        assert!(crate::db::NormalizedBillingUsage::from_usage(&output_only).is_none());
+        // An explicit total without input stays factual metadata, with no
+        // positive output meter.
+        let total_only = embedding_usage(r#"{"total_tokens":9}"#);
+        assert_eq!(
+            (
+                total_only.input_tokens,
+                total_only.output_tokens,
+                total_only.total_tokens
+            ),
+            (None, None, Some(9))
+        );
+        assert_eq!(
+            crate::db::NormalizedBillingUsage::from_usage(&total_only)
+                .map(|usage| usage.output_tokens),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn a_large_embedding_batch_still_reports_usage_without_retaining_vectors() {
+        // Issue #1032: the general 1 MiB JSON capture cap must not discard the
+        // accounting of a valid large batch, and the vectors stay unretained.
+        let mut body = String::from(
+            r#"{"object":"list","data":[{"object":"embedding","index":0,"embedding":["#,
+        );
+        for _ in 0..110_000 {
+            body.push_str("0.1234567,");
+        }
+        body.push_str("0.7654321]}],\"usage\":{\"prompt_tokens\":11,\"total_tokens\":11}}");
+        assert!(
+            body.len() > 1024 * 1024,
+            "the batch must exceed the general capture cap"
+        );
+
+        let mut capture = UsageCapture::new(false, None);
+        capture.set_embedding_response();
+        capture.observe_embedding_body(body.as_bytes());
+        capture.finish();
+
+        assert_eq!(capture.usage.input_tokens, Some(11));
+        assert_eq!(capture.usage.output_tokens, Some(0));
+        assert_eq!(capture.usage.total_tokens, Some(11));
+        assert!(
+            capture.json_body.is_empty(),
+            "an embedding body must never be retained by the capture"
+        );
+        assert!(
+            !capture.response_text.contains("0.1234567"),
+            "no vector digits may be retained as response text"
+        );
+    }
+
+    #[test]
+    fn short_and_large_embedding_bodies_report_identical_usage() {
+        let usage = r#""usage":{"prompt_tokens":13,"total_tokens":13}"#;
+        let small = format!(r#"{{"data":[{{"embedding":[0.1]}}],{usage}}}"#);
+        let mut large = String::from(r#"{"data":[{"embedding":["#);
+        large.push_str(&"0.1,".repeat(300_000));
+        large.push_str("0.1]}],");
+        large.push_str(usage);
+        large.push('}');
+        assert!(large.len() > 1024 * 1024);
+
+        let small_usage = embedding_body_usage(&small);
+        let large_usage = embedding_body_usage(&large);
+        assert_eq!(small_usage, large_usage);
+        assert_eq!(large_usage.input_tokens, Some(13));
+    }
+
+    #[test]
+    fn embedding_metadata_uses_the_root_payload_not_strings_or_nested_objects() {
+        // A model string equal to the old marker and a nested extension object
+        // carrying its own usage must not divert the root usage.
+        let body = r#"{"object":"list","model":"usage","metadata":{"usage":{"prompt_tokens":999,"total_tokens":999}},"data":[{"object":"embedding","embedding":[0.1]}],"usage":{"prompt_tokens":11,"total_tokens":11}}"#;
+        let usage = embedding_body_usage(body);
+        assert_eq!(usage.input_tokens, Some(11));
+        assert_eq!(usage.total_tokens, Some(11));
+        assert_eq!(usage.output_tokens, Some(0));
+
+        // Field order does not matter, and an escaped model string is not a
+        // metadata source.
+        let before = r#"{"usage":{"prompt_tokens":5},"model":"a\"usage\"b","data":[{"embedding":[0.1]}],"metadata":{"usage":{"prompt_tokens":999}}}"#;
+        assert_eq!(embedding_body_usage(before).input_tokens, Some(5));
+    }
+
+    #[test]
+    fn embedding_metadata_provenance_and_type_tolerance() {
+        // A wrapper without its own usage falls back to the root usage, and its
+        // own metadata still supplies the id.
+        let wrapped = r#"{"message":{"id":"m1"},"usage":{"prompt_tokens":7,"total_tokens":7}}"#;
+        let mut capture = UsageCapture::new(false, None);
+        capture.set_embedding_response();
+        capture.observe_embedding_body(wrapped.as_bytes());
+        capture.finish();
+        assert_eq!(capture.usage.input_tokens, Some(7));
+        assert_eq!(capture.response_id.as_deref(), Some("m1"));
+
+        // A present but unusable usage (null or wrong type) stays unknown and
+        // is never replaced by an unrelated object elsewhere in the body.
+        for shape in ["null", "7", "\"usage\"", "[]"] {
+            let body =
+                format!(r#"{{"usage":{shape},"data":[{{"usage":{{"prompt_tokens":999}}}}]}}"#);
+            let captured = embedding_body_usage(&body);
+            assert_eq!(captured.input_tokens, None, "shape {shape}");
+            assert_eq!(captured.total_tokens, None, "shape {shape}");
+        }
+
+        // Wrong-typed sibling fields do not discard the usable ones.
+        let mixed = r#"{"usage":{"prompt_tokens":"4","total_tokens":9,"cache_read_input_tokens":{"nested":1}}}"#;
+        let mixed_usage = embedding_body_usage(mixed);
+        assert_eq!(mixed_usage.input_tokens, None);
+        assert_eq!(mixed_usage.total_tokens, Some(9));
+        assert_eq!(mixed_usage.output_tokens, None);
+
+        // A malformed or truncated body yields no usage and no panic.
+        let malformed = embedding_body_usage(r#"{"usage":{"prompt_tokens":4"#);
+        assert_eq!(malformed.input_tokens, None);
+        assert_eq!(malformed.total_tokens, None);
+    }
+
+    #[test]
+    fn embedding_sse_events_use_the_same_metadata_extractor() {
+        let mut capture = UsageCapture::new(true, None);
+        capture.set_embedding_response();
+        capture.observe_chunk(
+            br#"data: {"object":"list","data":[{"embedding":[0.1]}],"usage":{"prompt_tokens":9,"total_tokens":9}}
+
+"#,
+        );
+        // A malformed event is ignored rather than poisoning the accounting.
+        capture.observe_chunk(b"data: {\"usage\":\n\n");
+        capture.finish();
+        assert_eq!(capture.usage.input_tokens, Some(9));
+        assert_eq!(capture.usage.output_tokens, Some(0));
+        assert_eq!(capture.usage.total_tokens, Some(9));
     }
 }

@@ -11,6 +11,7 @@ const TARGET_NATIVE_APIS: readonly NativeApi[] = [
   'auto',
   'anthropic_messages',
   'chat',
+  'embeddings',
   'responses',
   'realtime',
 ]
@@ -53,6 +54,44 @@ function normalizeThinkingEffort(value: unknown): string | null {
     : null
 }
 
+// Issue #1032: the largest value the server accepts for a forced embedding
+// dimension (positive i32).
+export const MAX_EMBEDDING_DIMENSIONS = 2147483647
+
+// Issue #1032: normalize a stored embedding dimension. Only a positive integer
+// within the i32 range survives; anything else (including a legacy payload
+// without the field) means inherit (`null`). It never invents a value.
+export function normalizeEmbeddingDimensions(value: unknown): number | null {
+  return typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 1 &&
+    value <= MAX_EMBEDDING_DIMENSIONS
+    ? value
+    : null
+}
+
+// Issue #1032: parse the dimension control's raw text. An empty entry means
+// inherit (`value: null`, valid); a malformed entry (zero, negative, fraction,
+// non-numeric, out of range) is reported invalid so save is blocked instead of
+// silently turning the entry into inherit.
+export function parseEmbeddingDimensionsInput(raw: string | null | undefined): {
+  value: number | null
+  invalid: boolean
+} {
+  const trimmed = (raw ?? '').trim()
+  if (trimmed === '') return { value: null, invalid: false }
+  if (!/^\d+$/.test(trimmed)) return { value: null, invalid: true }
+  const parsed = Number(trimmed)
+  if (
+    !Number.isSafeInteger(parsed) ||
+    parsed < 1 ||
+    parsed > MAX_EMBEDDING_DIMENSIONS
+  ) {
+    return { value: null, invalid: true }
+  }
+  return { value: parsed, invalid: false }
+}
+
 export function createEmptyModelRouteForm(): ModelRouteForm {
   return {
     rule_id: '',
@@ -84,6 +123,9 @@ export function createEmptyModelRouteForm(): ModelRouteForm {
         compact_mode: 'passthrough',
         // Issue #409 Phase 2: default Auto (follow caller).
         native_api: 'auto',
+        // Issue #1032: inherit the caller's dimensions by default; no guessed
+        // dimension is ever filled in.
+        embedding_dimensions_override: null,
       },
     ],
   }
@@ -166,6 +208,12 @@ export function modelRouteToForm(route: ModelEndpointRule): ModelRouteForm {
       // (means Auto). Round-trips Auto default.
       native_api: normalizeTargetNativeApi(
         (target as { native_api?: unknown } | undefined)?.native_api,
+      ),
+      // Issue #1032: per-target dimension override; legacy payloads miss it
+      // (means inherit). Only a positive i32 survives; never a guessed value.
+      embedding_dimensions_override: normalizeEmbeddingDimensions(
+        (target as { embedding_dimensions_override?: unknown } | undefined)
+          ?.embedding_dimensions_override,
       ),
     })),
   }
@@ -258,6 +306,13 @@ export function modelRouteFormToRequest(
           // Issue #409 Phase 2: always sent (Auto default follows caller;
           // explicit wins over endpoint). Normalize legacy/undefined to Auto.
           native_api: normalizeTargetNativeApi(target?.native_api),
+          // Issue #1032: always sent explicitly — `null` clears to inherit,
+          // an integer forces the dimension. A malformed entry is blocked by
+          // the dialog validation before save, so the committed value is the
+          // only thing sent.
+          embedding_dimensions_override: normalizeEmbeddingDimensions(
+            target?.embedding_dimensions_override,
+          ),
         }
       }),
   }

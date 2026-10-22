@@ -14,6 +14,16 @@ use crate::{
 mod subscription_windows;
 pub use subscription_windows::*;
 
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ModelCatalogQuery {
+    /// Issue #1032: optionally scope the endpoint model catalog to one
+    /// protocol. Omitted keeps the endpoint's own protocol semantics (an
+    /// `auto` endpoint returns the deduplicated union of its catalogs).
+    #[serde(default)]
+    pub native_api: Option<NativeApi>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct EndpointApiKeyRequest {
     pub key_label: String,

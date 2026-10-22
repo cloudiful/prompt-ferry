@@ -26,6 +26,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 mod chatgpt_auth;
+mod embeddings;
 mod quota_feedback;
 mod responses_framing;
 mod responses_usage;
@@ -63,6 +64,7 @@ fn test_request() -> BufferedBridgeRequest {
 
 fn test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
     RouteConfig {
+        embedding_dimensions_override: None,
         route_id: uuid::Uuid::new_v4(),
         user_id: 1,
         model_route_rule_id: None,
@@ -626,6 +628,7 @@ async fn does_not_retry_when_relay_bridge_is_closed() {
 
 fn glm_test_route(base_url: &str, native_api: NativeApi) -> RouteConfig {
     RouteConfig {
+        embedding_dimensions_override: None,
         route_id: uuid::Uuid::new_v4(),
         user_id: 1,
         model_route_rule_id: None,
@@ -1152,6 +1155,7 @@ fn quota_failover_route(base_url: &str) -> RouteConfig {
             updated_at: chrono::Utc::now(),
         };
     RouteConfig {
+        embedding_dimensions_override: None,
         route_id: endpoint_id,
         user_id: 1,
         model_route_rule_id: None,

@@ -20,7 +20,7 @@ use crate::relay_secrets::RelaySecretManager;
 #[path = "audit.rs"]
 mod audit;
 
-const CURRENT_SCHEMA_VERSION: i64 = 36;
+const CURRENT_SCHEMA_VERSION: i64 = 37;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BootstrapOutcome {

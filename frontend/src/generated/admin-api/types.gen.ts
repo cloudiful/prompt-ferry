@@ -1004,6 +1004,13 @@ export type ModelRouteTarget = {
      * `true` rewrites `developer` to `system`. Always sent (no omit).
      */
     dev_system_normalize?: boolean;
+    /**
+     * Issue #1032: per-target embedding dimension override. `None`
+     * (null/omitted) inherits the caller's dimensions; `Some(dimensions)`
+     * forces the dimension count for the target. It is an override, never
+     * a cap, and must be a positive i32.
+     */
+    embedding_dimensions_override?: number | null;
     enabled: boolean;
     endpoint_enabled: boolean;
     endpoint_id: string;
@@ -1069,6 +1076,14 @@ export type ModelRouteTargetRequest = {
      * `normalize_chat_request_for_native` in Chat passthrough.
      */
     dev_system_normalize?: boolean;
+    /**
+     * Issue #1032: per-target embedding dimension override. The field is
+     * `Option<Option<i32>>` so an omitted field (`None`) carries the stored
+     * value on PATCH, an explicit `null` (`Some(None)`) clears it to
+     * inherit, and an integer (`Some(Some(value))`) sets a positive i32.
+     * Omitting must never clear a saved dimension.
+     */
+    embedding_dimensions_override?: number | null;
     enabled?: boolean | null;
     endpoint_id: string;
     /**
@@ -1173,7 +1188,7 @@ export type ModelRouteWhitelistResponse = {
     enabled: boolean;
 };
 
-export type NativeApi = 'auto' | 'anthropic_messages' | 'chat' | 'responses' | 'realtime';
+export type NativeApi = 'auto' | 'anthropic_messages' | 'chat' | 'embeddings' | 'responses' | 'realtime';
 
 /**
  * Issue #599 R2b: browser login completion. `redirect_url` is the full URL
@@ -3023,7 +3038,14 @@ export type EndpointModelsData = {
          */
         endpoint_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Issue #1032: optionally scope the endpoint model catalog to one
+         * protocol. Omitted keeps the endpoint's own protocol semantics (an
+         * `auto` endpoint returns the deduplicated union of its catalogs).
+         */
+        native_api?: NativeApi;
+    };
     url: '/api/v1/admin/endpoints/{endpoint_id}/models';
 };
 

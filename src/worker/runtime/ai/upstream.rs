@@ -567,6 +567,7 @@ mod tests {
         });
 
         let route = RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
             model_route_rule_id: None,
@@ -606,6 +607,7 @@ mod tests {
     #[test]
     fn forwards_anthropic_version_and_beta_without_forwarding_client_key() {
         let route = RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
             model_route_rule_id: None,
@@ -689,6 +691,7 @@ mod tests {
     #[test]
     fn opencode_passthrough_preserves_caller_session_and_user_agent() {
         let route = RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
             model_route_rule_id: None,
@@ -751,6 +754,7 @@ mod tests {
     #[test]
     fn opencode_synthesizes_session_and_user_agent_when_missing() {
         let route = RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
             model_route_rule_id: None,
@@ -811,6 +815,7 @@ mod tests {
     #[test]
     fn opencode_empty_header_treated_as_missing_and_synthesized() {
         let route = RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
             model_route_rule_id: None,
@@ -1083,6 +1088,7 @@ mod tests {
     #[test]
     fn non_opencode_does_not_forward_or_synthesize() {
         let route = RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
             model_route_rule_id: None,
@@ -1144,6 +1150,7 @@ mod tests {
         // detection is host-only. Here we use non-opencode host with model hint in headers
         // but ensure no synthesis.
         let route = RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
             model_route_rule_id: None,
@@ -1187,6 +1194,7 @@ mod tests {
     #[test]
     fn opencode_host_case_insensitive_and_trims_values() {
         let route = RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
             model_route_rule_id: None,
@@ -1239,6 +1247,7 @@ mod tests {
 
     fn minimax_route(tier: Option<&str>) -> RouteConfig {
         RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
             model_route_rule_id: None,

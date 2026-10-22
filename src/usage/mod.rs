@@ -19,5 +19,8 @@ pub use prompt::{
     REQUEST_FULL_BYTES_LIMIT, append_delta, derive_conversation_id, normalize_prompt_request,
     prompt_block_hash, prompt_message_refs,
 };
-pub use request::{extract_request_prompt, model_from_body, rewrite_model_in_body, upstream_body};
-pub use text::{extract_usage, truncate_chars};
+pub use request::{
+    apply_embedding_dimensions_override, extract_request_prompt, model_from_body,
+    rewrite_model_in_body, upstream_body,
+};
+pub use text::{extract_embedding_usage, extract_usage, truncate_chars};

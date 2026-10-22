@@ -129,6 +129,7 @@ pub(super) fn target(
     keys: Vec<db::EndpointApiKey>,
 ) -> db::ModelRouteCandidateTarget {
     db::ModelRouteCandidateTarget {
+        embedding_dimensions_override: None,
         target_id: uuid::Uuid::new_v4(),
         endpoint_id,
         endpoint_name: format!("endpoint-{position}"),

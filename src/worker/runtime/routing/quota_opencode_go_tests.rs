@@ -103,6 +103,7 @@ fn opencode_go_request() -> BufferedBridgeRequest {
 
 fn opencode_go_route(endpoint_id: Uuid, keys: Vec<db::EndpointApiKey>) -> db::RouteConfig {
     db::RouteConfig {
+        embedding_dimensions_override: None,
         route_id: endpoint_id,
         user_id: 1,
         model_route_rule_id: None,

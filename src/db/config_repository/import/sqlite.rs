@@ -219,5 +219,6 @@ fn convert_target(
         thinking_effort_override: target.thinking_effort_override.clone(),
         compact_mode: target.compact_mode.clone(),
         service_tier: target.service_tier.clone(),
+        embedding_dimensions_override: target.embedding_dimensions_override,
     })
 }

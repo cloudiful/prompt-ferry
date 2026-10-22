@@ -28,6 +28,7 @@ pub enum NativeApi {
     Auto,
     AnthropicMessages,
     Chat,
+    Embeddings,
     Responses,
     Realtime,
 }
@@ -81,6 +82,9 @@ pub const MINIMAX_GLOBAL_BASE_URL: &str = "https://api.minimax.io";
 /// Anthropic Messages keeps the standard `/v1/messages` path because the
 /// Anthropic root does not carry a version segment, Responses uses the
 /// `/api/v1` root, and Chat/Realtime share the `/api/coding/paas/v4` root.
+/// Embeddings uses the `/api/v1` root as well: it is the OpenAI-compatible
+/// family that carries the `/v1/embeddings` path, and it is not a chat
+/// protocol.
 ///
 /// `Auto` is resolved to a concrete protocol before derivation at every
 /// request-time call site. When an unresolved `Auto` still reaches here
@@ -100,7 +104,7 @@ pub fn preset_base_url(
         },
         EndpointProvider::Glm => Some(match native_api {
             NativeApi::AnthropicMessages => GLM_ANTHROPIC_BASE_URL,
-            NativeApi::Responses => GLM_RESPONSES_BASE_URL,
+            NativeApi::Responses | NativeApi::Embeddings => GLM_RESPONSES_BASE_URL,
             NativeApi::Auto | NativeApi::Chat | NativeApi::Realtime => GLM_CHAT_BASE_URL,
         }),
         EndpointProvider::CommandCode => Some(COMMAND_CODE_BASE_URL),

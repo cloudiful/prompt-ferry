@@ -106,6 +106,7 @@ async fn sqlite_snapshot_covers_restorable_domains_and_excludes_runtime_history(
             routing_strategy: ModelRouteRoutingStrategy::default(),
             enabled: true,
             targets: vec![ModelRouteTargetCreate {
+                embedding_dimensions_override: None,
                 endpoint_id,
                 enabled: true,
                 upstream_model: Some("gpt-4o".to_string()),

@@ -629,6 +629,7 @@ fn sample_candidate() -> ModelRouteCandidate {
         updated_at: Utc::now(),
         targets: vec![
             ModelRouteCandidateTarget {
+                embedding_dimensions_override: None,
                 target_id: uuid::Uuid::new_v4(),
                 endpoint_id: endpoint_a,
                 endpoint_name: "primary".to_string(),
@@ -663,6 +664,7 @@ fn sample_candidate() -> ModelRouteCandidate {
                 has_oauth_token: false,
             },
             ModelRouteCandidateTarget {
+                embedding_dimensions_override: None,
                 target_id: uuid::Uuid::new_v4(),
                 endpoint_id: endpoint_b,
                 endpoint_name: "secondary".to_string(),
@@ -732,6 +734,7 @@ fn endpoint_key_lb_uses_stable_selection_and_first_key_fallback() {
     let primary_key_id = uuid::Uuid::new_v4();
     let secondary_key_id = uuid::Uuid::new_v4();
     let route = db::RouteConfig {
+        embedding_dimensions_override: None,
         route_id: endpoint_id,
         user_id: 1,
         model_route_rule_id: None,
@@ -819,6 +822,7 @@ fn endpoint_key_override_wins_and_invalid_override_falls_back() {
     let endpoint_id = uuid::Uuid::new_v4();
     let fixed_key_id = uuid::Uuid::new_v4();
     let route = db::RouteConfig {
+        embedding_dimensions_override: None,
         route_id: endpoint_id,
         user_id: 1,
         model_route_rule_id: None,
@@ -1160,6 +1164,7 @@ fn url_mapping_route(
     native_api: crate::config::NativeApi,
 ) -> db::RouteConfig {
     db::RouteConfig {
+        embedding_dimensions_override: None,
         route_id: uuid::Uuid::new_v4(),
         user_id: 1,
         model_route_rule_id: None,

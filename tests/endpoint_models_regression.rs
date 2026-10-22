@@ -160,6 +160,58 @@ fn models_request(endpoint_id: Uuid) -> Request<Body> {
     )
 }
 
+/// Issue #1032: the optional protocol selector scopes the catalog listing.
+fn models_request_with_selector(endpoint_id: Uuid, native_api: &str) -> Request<Body> {
+    request(
+        "GET",
+        format!("/api/v1/admin/endpoints/{endpoint_id}/models?native_api={native_api}"),
+        None,
+    )
+}
+
+// Issue #1032: the listing cache is keyed by the effective protocol, so a
+/// chat listing never satisfies an embeddings ask for the same endpoint, while
+/// a repeat of the same ask is served from the cache.
+#[tokio::test]
+async fn the_catalog_selector_scopes_the_listing_cache_per_protocol() -> anyhow::Result<()> {
+    let fixture = Fixture::open().await?;
+    let app = worker_admin::router(fixture.state.clone());
+    let upstream = spawn_mock_upstream(Upstream::Models(vec!["gpt-4o".to_string()])).await?;
+    let endpoint_id = create_endpoint(&app, &upstream.base_url, "sk-mock", "chat").await?;
+
+    // The endpoint's own protocol (chat) lists and caches once.
+    let response = app.clone().oneshot(models_request(endpoint_id)).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response).await["models"], json!(["gpt-4o"]));
+    assert_eq!(upstream.requests().len(), 1);
+
+    let response = app.clone().oneshot(models_request(endpoint_id)).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response).await["models"], json!(["gpt-4o"]));
+    assert_eq!(
+        upstream.requests().len(),
+        1,
+        "a repeat of the same catalog must be served from the cache"
+    );
+
+    // An explicit embeddings selector is a distinct cache entry, so it reads
+    // the upstream again instead of reusing the chat answer.
+    let response = app
+        .clone()
+        .oneshot(models_request_with_selector(endpoint_id, "embeddings"))
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response).await["models"], json!(["gpt-4o"]));
+    assert_eq!(
+        upstream.requests().len(),
+        2,
+        "a protocol-scoped listing must not reuse another protocol's cache entry"
+    );
+
+    fixture.cleanup().await;
+    Ok(())
+}
+
 #[tokio::test]
 async fn lists_the_sorted_unique_model_ids_of_the_endpoint() -> anyhow::Result<()> {
     let fixture = Fixture::open().await?;

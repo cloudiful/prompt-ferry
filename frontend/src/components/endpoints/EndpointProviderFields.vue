@@ -86,7 +86,13 @@ const planHint = computed(() =>
 const protocolSelection = computed({
   get: () => endpointFormProtocol(form.value),
   set(
-    value: 'auto' | 'anthropic_messages' | 'responses' | 'chat' | 'realtime',
+    value:
+      | 'auto'
+      | 'anthropic_messages'
+      | 'responses'
+      | 'chat'
+      | 'embeddings'
+      | 'realtime',
   ) {
     if (value === 'auto') {
       form.value.protocol_mode = 'auto'
@@ -141,6 +147,7 @@ const baseUrlHint = computed(() =>
           value: 'anthropic_messages',
         },
         { label: t('nativeApiChat'), value: 'chat' },
+        { label: t('nativeApiEmbeddings'), value: 'embeddings' },
         { label: t('nativeApiResponses'), value: 'responses' },
         { label: t('nativeApiRealtime'), value: 'realtime' },
       ]"

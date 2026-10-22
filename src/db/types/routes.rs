@@ -148,6 +148,10 @@ pub struct RouteConfig {
     // hydrated from the token-id existence query; the token value itself is
     // resolved only in the authentication path.
     pub has_oauth_token: bool,
+    /// Issue #1032: resolved per-target embedding dimension override.
+    /// `None` inherits the caller's dimensions; `Some(dimensions)` forces
+    /// the dimension count for the target. It is an override, never a cap.
+    pub embedding_dimensions_override: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -216,6 +220,13 @@ pub struct ModelRouteTarget {
     /// intact when the endpoint is blank too).
     #[serde(default)]
     pub service_tier: Option<String>,
+    /// Issue #1032: per-target embedding dimension override. `None`
+    /// (null/omitted) inherits the caller's dimensions; `Some(dimensions)`
+    /// forces the dimension count for the target. It is an override, never
+    /// a cap, and must be a positive i32.
+    #[serde(default)]
+    #[schema(minimum = 1)]
+    pub embedding_dimensions_override: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -291,6 +302,13 @@ pub struct ModelRouteTargetCreate {
     /// means inherit the endpoint value.
     #[serde(default)]
     pub service_tier: Option<String>,
+    /// Issue #1032: per-target embedding dimension override. `None`/null
+    /// means inherit the caller's dimensions; `Some(dimensions)` forces the
+    /// dimension count for the target. It is an override, never a cap, and
+    /// must be a positive i32.
+    #[serde(default)]
+    #[schema(minimum = 1)]
+    pub embedding_dimensions_override: Option<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -370,6 +388,10 @@ pub struct ModelRouteCandidateTarget {
     // subscription credential instead of a platform API key. The token value
     // itself never travels with the target.
     pub has_oauth_token: bool,
+    /// Issue #1032: per-target embedding dimension override. `None` inherits
+    /// the caller's dimensions; `Some(dimensions)` forces the dimension
+    /// count for the target. It is an override, never a cap.
+    pub embedding_dimensions_override: Option<i32>,
 }
 
 #[derive(Debug, Clone)]
@@ -423,6 +445,20 @@ pub fn normalize_thinking_effort_override(
             Ok(Some(value.to_string()))
         }
         _ => Err("thinking_effort must be one of none, minimal, low, medium, high, xhigh, max"),
+    }
+}
+
+/// Issue #1032: validate the per-target embedding dimension override.
+/// `None` means inherit (follow the caller's dimensions). A value must be a
+/// positive i32; it is an override, never a cap, so it is never clamped and
+/// never replaced by a default.
+pub fn normalize_embedding_dimensions_override(
+    raw: Option<i32>,
+) -> Result<Option<i32>, &'static str> {
+    match raw {
+        None => Ok(None),
+        Some(value) if value >= 1 => Ok(Some(value)),
+        Some(_) => Err("embedding_dimensions_override must be a positive integer"),
     }
 }
 

@@ -35,7 +35,12 @@ export type EndpointForm = {
   key_lb_enabled: boolean
   protocol_mode: 'auto' | 'manual'
   native_api_override:
-    'anthropic_messages' | 'responses' | 'chat' | 'realtime' | null
+    | 'anthropic_messages'
+    | 'responses'
+    | 'chat'
+    | 'embeddings'
+    | 'realtime'
+    | null
   // Issue #599 R2c: upstream plan axis (`platform_api_key` |
   // `chatgpt_subscription`). Sent on save; `chatgpt_subscription` requires a
   // completed OAuth login (the server rejects it otherwise) and
@@ -113,6 +118,16 @@ export type ModelRouteTargetForm = {
   // (ModelRouteDialog addTarget); missing means Auto (follow caller).
   // Mapper normalizes to Auto and always sends the value.
   native_api?: NativeApi
+  // Issue #1032: per-target embedding dimension override. `null` inherits the
+  // caller's dimensions; a positive integer forces the dimension count for the
+  // target. It is an override, never a cap, and only the embeddings protocol
+  // shows the control.
+  embedding_dimensions_override: number | null
+  // Issue #1032: transient validation flag for the dimension control. A
+  // malformed entry (zero, negative, fraction, non-numeric, out of range)
+  // blocks save instead of being silently turned into inherit; the committed
+  // value above is unchanged until the entry becomes valid.
+  embedding_dimensions_invalid?: boolean
 }
 
 export type StreamDeltaBatchingForm = {

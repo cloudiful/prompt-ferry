@@ -18,9 +18,10 @@ Codex 和其他 API 客户端。请求经由 relay-worker 通道转发到一个�
 
 ## 核心功能
 
-- 兼容 OpenAI Chat Completions 和 Responses，并提供原生 Anthropic Messages 和 Models 接口。
+- 兼容 OpenAI Chat Completions、Responses 和 Embeddings，并提供原生 Anthropic Messages 和 Models 接口。
 - 内置 MiniMax、CommandCode、OpencodeGo、OpenRouter、GLM、DeepSeek 和 OpenAI Platform 上游预设；其他 OpenAI 兼容服务使用显式填写 base URL 的通用 provider。
 - 按请求控制思考强度，包括 Chat `reasoning_effort`、Responses `reasoning.effort` 和 Anthropic `output_config.effort`。
+- 一等公民的 Embeddings 转发：目标级向量维度覆盖、失效即拒绝的脱敏与仅输入计费（[文档](docs/embeddings.zh-CN.md)）。
 - 用户、客户端 API key、上游端点、模型路由、key 分流以及多 relay。
 - 可配置的转发内容、日志和用量明细脱敏。
 - 管理控制台提供默认文本额度汇总与逐 key 明细；在 PostgreSQL 下还包含 OpenAI 订阅的 30 天历史快照。
@@ -99,4 +100,4 @@ Compose 已写入数据的数据库，请先把 Compose 卷中的
 
 ## 相关文档
 
-[配额反馈](docs/quota-feedback.zh-CN.md) · [配额快照](docs/quota-snapshots.zh-CN.md) · [端点 key 持久化](docs/endpoint-key-persistence.zh-CN.md) · [前端异步操作](docs/frontend-async-actions.zh-CN.md) · [安全策略](SECURITY.md) · [贡献指南](CONTRIBUTING.md) · [许可证](LICENSE)
+[Embeddings](docs/embeddings.zh-CN.md) · [配额反馈](docs/quota-feedback.zh-CN.md) · [配额快照](docs/quota-snapshots.zh-CN.md) · [端点 key 持久化](docs/endpoint-key-persistence.zh-CN.md) · [前端异步操作](docs/frontend-async-actions.zh-CN.md) · [安全策略](SECURITY.md) · [贡献指南](CONTRIBUTING.md) · [许可证](LICENSE)

@@ -1,4 +1,5 @@
 pub(super) mod artifact;
+pub(super) mod embeddings;
 pub(super) mod errors;
 pub(super) mod forward;
 pub(super) mod glm_envelope;

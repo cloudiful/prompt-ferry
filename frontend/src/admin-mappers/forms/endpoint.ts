@@ -108,6 +108,24 @@ export function isSubmittedEndpointApiKey(
   )
 }
 
+// Issue #409/#1032: the manual protocol override axis. `auto` is represented by
+// `protocol_mode: 'auto'` with a null override, so only the explicit protocols
+// survive here; anything else (including `auto` or an unknown legacy value)
+// normalizes to null.
+const ENDPOINT_NATIVE_API_OVERRIDES: readonly NonNullable<
+  EndpointForm['native_api_override']
+>[] = ['anthropic_messages', 'responses', 'chat', 'embeddings', 'realtime']
+
+export function normalizeEndpointNativeApiOverride(
+  value: unknown,
+): EndpointForm['native_api_override'] {
+  return ENDPOINT_NATIVE_API_OVERRIDES.includes(
+    value as NonNullable<EndpointForm['native_api_override']>,
+  )
+    ? (value as NonNullable<EndpointForm['native_api_override']>)
+    : null
+}
+
 export function createEmptyEndpointForm(): EndpointForm {
   return {
     endpoint_id: '',
@@ -156,13 +174,9 @@ export function endpointToForm(endpoint: ProviderEndpoint): EndpointForm {
   // normalize everything so the dialog always has a renderable form.
   const source = (endpoint ?? {}) as Partial<ProviderEndpoint>
   const endpointApiKeys = source.api_keys ?? []
-  const nativeApiOverride =
-    source.native_api === 'anthropic_messages' ||
-    source.native_api === 'responses' ||
-    source.native_api === 'chat' ||
-    source.native_api === 'realtime'
-      ? source.native_api
-      : null
+  const nativeApiOverride = normalizeEndpointNativeApiOverride(
+    source.native_api,
+  )
   return {
     endpoint_id: source.endpoint_id ?? '',
     scope: source.scope === 'user' ? 'user' : 'admin',

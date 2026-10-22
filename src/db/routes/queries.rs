@@ -98,6 +98,7 @@ pub async fn list_visible_model_route_endpoints_strict(
     let routes = rows
         .into_iter()
         .map(|row| RouteConfig {
+            embedding_dimensions_override: None,
             route_id: row.endpoint_id,
             user_id,
             model_route_rule_id: None,

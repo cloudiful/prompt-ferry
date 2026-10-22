@@ -69,8 +69,27 @@ pub async fn fetch_endpoint_model_ids(
     client: &Client,
     route: &RouteConfig,
 ) -> Result<EndpointModelSnapshot> {
+    let mut model_ids = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for url in models_urls(&route.base_url, route.provider, route.native_api) {
+        for id in fetch_model_ids_from_url(client, route, &url).await? {
+            if seen.insert(id.clone()) {
+                model_ids.push(id);
+            }
+        }
+    }
+    Ok(EndpointModelSnapshot::from_model_ids(
+        model_ids.iter().map(String::as_str),
+    ))
+}
+
+async fn fetch_model_ids_from_url(
+    client: &Client,
+    route: &RouteConfig,
+    url: &str,
+) -> Result<Vec<String>> {
     let response = client
-        .get(models_url(&route.base_url, route.provider))
+        .get(url)
         .bearer_auth(&route.api_key)
         .send()
         .await
@@ -102,11 +121,11 @@ pub async fn fetch_endpoint_model_ids(
             )
         })?;
 
-    Ok(EndpointModelSnapshot::from_model_ids(
-        items
-            .iter()
-            .filter_map(|item| item.get("id").and_then(serde_json::Value::as_str)),
-    ))
+    Ok(items
+        .iter()
+        .filter_map(|item| item.get("id").and_then(serde_json::Value::as_str))
+        .map(str::to_string)
+        .collect())
 }
 
 /// Build the upstream model-listing URL.
@@ -116,7 +135,17 @@ pub async fn fetch_endpoint_model_ids(
 /// models at `{base}/models` because the Chat family root already encodes the
 /// protocol version; every other provider (including Generic) keeps the
 /// plain `{base}/v1/models` join.
-pub fn models_url(base_url: &str, provider: EndpointProvider) -> String {
+///
+/// Issue #1032: an explicit `Embeddings` protocol lists the provider's
+/// embeddings catalog where it differs from the chat catalog (OpenRouter:
+/// `{base}/v1/embeddings/models`). Every chat protocol keeps the chat listing.
+pub fn models_url(
+    base_url: &str,
+    provider: EndpointProvider,
+    native_api: crate::config::NativeApi,
+) -> String {
+    // The base derivation keeps the pre-#1032 behavior (Chat family root) for
+    // every protocol; only the catalog path varies for embeddings.
     let base = crate::upstream_presets::route_base_or_stored(
         provider.into(),
         base_url,
@@ -125,8 +154,31 @@ pub fn models_url(base_url: &str, provider: EndpointProvider) -> String {
     let base = base.trim_end_matches('/');
     match provider {
         EndpointProvider::Glm => format!("{base}/models"),
+        EndpointProvider::OpenRouter if native_api == crate::config::NativeApi::Embeddings => {
+            format!("{base}/v1/embeddings/models")
+        }
         _ => format!("{base}/v1/models"),
     }
+}
+
+/// Issue #1032: every catalog URL that applies to one endpoint/target.
+///
+/// An `Auto` OpenRouter endpoint serves chat and embeddings, so its listing is
+/// the deduplicated union of both catalogs. Every other combination has a
+/// single catalog: the embeddings list for an explicit embeddings protocol,
+/// the chat list otherwise.
+pub fn models_urls(
+    base_url: &str,
+    provider: EndpointProvider,
+    native_api: crate::config::NativeApi,
+) -> Vec<String> {
+    if provider == EndpointProvider::OpenRouter && native_api == crate::config::NativeApi::Auto {
+        return vec![
+            models_url(base_url, provider, crate::config::NativeApi::Chat),
+            models_url(base_url, provider, crate::config::NativeApi::Embeddings),
+        ];
+    }
+    vec![models_url(base_url, provider, native_api)]
 }
 
 fn truncate_message(message: &str) -> String {
@@ -149,6 +201,7 @@ mod tests {
 
     fn route_with_proxy(proxy: Option<&str>, base: &str) -> RouteConfig {
         RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 7,
             model_route_rule_id: None,
@@ -245,11 +298,19 @@ mod tests {
         // a stored `/api` base intentionally keeps its `/v1/models`
         // convention (the base is not normalized for models listing).
         assert_eq!(
-            models_url("https://example.com/api", EndpointProvider::Generic),
+            models_url(
+                "https://example.com/api",
+                EndpointProvider::Generic,
+                crate::config::NativeApi::Chat
+            ),
             "https://example.com/api/v1/models"
         );
         assert_eq!(
-            models_url("https://api.openai.com/v1", EndpointProvider::Generic),
+            models_url(
+                "https://api.openai.com/v1",
+                EndpointProvider::Generic,
+                crate::config::NativeApi::Chat
+            ),
             "https://api.openai.com/v1/v1/models"
         );
         // GLM (issue #230 P2 / #248) derives the Chat family root and lists
@@ -261,26 +322,74 @@ mod tests {
             "https://open.bigmodel.cn/api",
         ] {
             assert_eq!(
-                models_url(stored, EndpointProvider::Glm),
+                models_url(
+                    stored,
+                    EndpointProvider::Glm,
+                    crate::config::NativeApi::Chat
+                ),
                 "https://open.bigmodel.cn/api/coding/paas/v4/models",
                 "stored GLM base {stored}"
             );
         }
         // Other presets self-heal a mangled stored `/v1` suffix.
         assert_eq!(
-            models_url("https://openrouter.ai/api/v1", EndpointProvider::OpenRouter),
+            models_url(
+                "https://openrouter.ai/api/v1",
+                EndpointProvider::OpenRouter,
+                crate::config::NativeApi::Chat
+            ),
             "https://openrouter.ai/api/v1/models"
         );
         assert_eq!(
             models_url(
                 "https://api.commandcode.ai/provider/v1",
-                EndpointProvider::CommandCode
+                EndpointProvider::CommandCode,
+                crate::config::NativeApi::Chat
             ),
             "https://api.commandcode.ai/provider/v1/models"
         );
         assert_eq!(
-            models_url("https://api.minimaxi.com", EndpointProvider::Minimax),
+            models_url(
+                "https://api.minimaxi.com",
+                EndpointProvider::Minimax,
+                crate::config::NativeApi::Chat
+            ),
             "https://api.minimaxi.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn embeddings_catalogs_are_protocol_distinct() {
+        // Issue #1032: OpenRouter exposes a separate embeddings catalog; an
+        // Auto OpenRouter endpoint lists the deduplicated union of both.
+        assert_eq!(
+            models_url(
+                "https://openrouter.ai/api/v1",
+                EndpointProvider::OpenRouter,
+                crate::config::NativeApi::Embeddings,
+            ),
+            "https://openrouter.ai/api/v1/embeddings/models"
+        );
+        let urls = models_urls(
+            "https://openrouter.ai/api/v1",
+            EndpointProvider::OpenRouter,
+            crate::config::NativeApi::Auto,
+        );
+        assert_eq!(
+            urls,
+            vec![
+                "https://openrouter.ai/api/v1/models".to_string(),
+                "https://openrouter.ai/api/v1/embeddings/models".to_string(),
+            ]
+        );
+        // A generic endpoint keeps the OpenAI-compatible path for both.
+        assert_eq!(
+            models_urls(
+                "https://example.com/api",
+                EndpointProvider::Generic,
+                crate::config::NativeApi::Embeddings,
+            ),
+            vec!["https://example.com/api/v1/models".to_string()]
         );
     }
 }

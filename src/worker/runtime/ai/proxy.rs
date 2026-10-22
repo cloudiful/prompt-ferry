@@ -87,6 +87,7 @@ mod tests {
 
     fn route_with_proxy(proxy: Option<&str>, base: &str) -> db::RouteConfig {
         db::RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
             model_route_rule_id: None,

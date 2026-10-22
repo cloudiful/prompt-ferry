@@ -177,6 +177,32 @@ pub fn restore_text(text: &str, session: &UpstreamRedactionSession) -> Result<Re
     Ok(restored)
 }
 
+/// Issue #1032: side-effect-free preview of whether the effective upstream
+/// redaction policy *would* replace anything in `fragments`.
+///
+/// It runs the same stateful processor as the live redaction path (same user
+/// policy snapshot, same optional prior session) but never calls
+/// `finish_state`, so no session is minted or persisted, and it returns only a
+/// boolean — the redacted text never leaves this function and is never logged.
+/// It is used by the embeddings path to fail closed when a replacement would
+/// change the embedding input, instead of silently forwarding redacted text
+/// whose vector can no longer be restored.
+pub fn would_redact_fragments<'a>(
+    user_id: Option<i64>,
+    external_id: Option<&str>,
+    prior: Option<&UpstreamRedactionSession>,
+    fragments: impl IntoIterator<Item = &'a str>,
+) -> Result<bool, RedactorError> {
+    let mut processor = UpstreamRedactionProcessor::new(user_id, external_id, prior)?;
+    for text in fragments {
+        processor.redact_fragment(text, InputKind::Text)?;
+        if processor.has_applied_replacements() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Persisted `BIGINT` form of the running policy generation, used to gate
 /// `conversation_redaction_sessions.policy_version` reads.
 pub fn current_policy_version() -> i64 {

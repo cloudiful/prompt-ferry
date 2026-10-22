@@ -221,6 +221,7 @@ async fn endpoint_proxy_round_trips_with_encrypted_envelope() {
         routing_strategy: ModelRouteRoutingStrategy::ResponsesSessionAffinity,
         enabled: true,
         targets: vec![ModelRouteTargetCreate {
+            embedding_dimensions_override: None,
             endpoint_id,
             enabled: true,
             upstream_model: None,
@@ -619,6 +620,7 @@ async fn model_route_crud_round_trips_with_target_persistence() {
         routing_strategy: ModelRouteRoutingStrategy::ResponsesSessionAffinity,
         enabled: true,
         targets: vec![ModelRouteTargetCreate {
+            embedding_dimensions_override: None,
             endpoint_id,
             enabled: true,
             upstream_model: Some("gpt-4o-mini".to_string()),

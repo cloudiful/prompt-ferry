@@ -18,9 +18,10 @@ Client -> relay /v1/* <-> worker WebSocket -> upstream API
 
 ## Capabilities
 
-- OpenAI Chat Completions and Responses, plus native Anthropic Messages and Models.
+- OpenAI Chat Completions, Responses and Embeddings, plus native Anthropic Messages and Models.
 - Upstream presets for MiniMax, CommandCode, OpencodeGo, OpenRouter, GLM, DeepSeek and OpenAI Platform; other OpenAI-compatible hosts use the Generic provider with an explicit base URL.
 - Per-request reasoning controls, including Chat `reasoning_effort`, Responses `reasoning.effort`, and Anthropic `output_config.effort`.
+- First-class Embeddings forwarding with per-target dimension overrides, fail-closed redaction and input-only metering ([docs](docs/embeddings.md)).
 - Users, client API keys, upstream endpoints, model routes, key balancing, and multiple relays.
 - Configurable redaction for forwarded content, logs and usage details.
 - Admin console with effective default-text quota summaries, per-key detail, and 30-day OpenAI subscription history on PostgreSQL.
@@ -102,4 +103,4 @@ bootstrap password file is written only on initial creation when no admin exists
 
 ## Documentation
 
-[Quota feedback](docs/quota-feedback.md) · [Quota snapshots](docs/quota-snapshots.md) · [Endpoint key persistence](docs/endpoint-key-persistence.md) · [Frontend async actions](docs/frontend-async-actions.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE)
+[Embeddings](docs/embeddings.md) · [Quota feedback](docs/quota-feedback.md) · [Quota snapshots](docs/quota-snapshots.md) · [Endpoint key persistence](docs/endpoint-key-persistence.md) · [Frontend async actions](docs/frontend-async-actions.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE)

@@ -24,6 +24,7 @@ import type {
   ModelRoutePageResponse,
   ModelRouteRequest,
   ModelRouteTestResponse,
+  NativeApi,
   ProviderEndpoint,
   QuotaKeyObservationHistoryResponse,
   QuotaKeyObservationTrendResponse,
@@ -96,11 +97,20 @@ export async function runEndpointTest(
 // Issue #993 P1: the model identifiers the endpoint's upstream advertises.
 // Read-only discovery: the model override stays free-form, so a failed or
 // empty listing never blocks editing.
+// Issue #1032: the optional selector scopes the listing to one protocol
+// (`chat`/`embeddings`); omitted keeps the endpoint's own protocol semantics
+// (an `auto` endpoint returns the union of its catalogs).
 export async function fetchEndpointModels(
   endpointId: string,
+  nativeApi?: NativeApi | null,
 ): Promise<EndpointModelsResponse> {
   return expectData(
-    await endpointModels<true>(withData({ path: { endpoint_id: endpointId } })),
+    await endpointModels<true>(
+      withData({
+        path: { endpoint_id: endpointId },
+        query: nativeApi ? { native_api: nativeApi } : {},
+      }),
+    ),
   )
 }
 

@@ -22,6 +22,22 @@ pub fn rewrite_model_in_body(body: &[u8], model: &str) -> Vec<u8> {
     serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
 }
 
+/// Issue #1032: force the embeddings `dimensions` field to a configured value.
+///
+/// It is a forced override, never a cap: the caller's `dimensions` is replaced
+/// and no other field is touched, so every unknown OpenAI-compatible provider
+/// extension survives. Non-JSON or non-object bodies are returned unchanged.
+pub fn apply_embedding_dimensions_override(body: &[u8], dimensions: i32) -> Vec<u8> {
+    let Ok(mut value) = serde_json::from_slice::<Value>(body) else {
+        return body.to_vec();
+    };
+    let Some(object) = value.as_object_mut() else {
+        return body.to_vec();
+    };
+    object.insert("dimensions".to_string(), Value::from(dimensions));
+    serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
+}
+
 pub fn upstream_body(path: &str, body: &[u8]) -> Vec<u8> {
     if path != "/v1/chat/completions" {
         return body.to_vec();

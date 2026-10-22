@@ -87,6 +87,7 @@ struct ModelRouteTargetRow {
     thinking_effort_override: Option<String>,
     compact_mode: Option<String>,
     service_tier: Option<String>,
+    embedding_dimensions_override: Option<i32>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }

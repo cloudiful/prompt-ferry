@@ -352,6 +352,9 @@ pub(crate) async fn insert_route(
             })
             // Issue #637: free-form override; blank means inherit (NULL).
             .bind(target.service_tier.as_deref())
+            // Issue #1032: nullable positive dimension override; `None`
+            // inherits the caller's dimensions.
+            .bind(target.embedding_dimensions_override)
             .execute(&mut **transaction)
             .await?;
     }
@@ -405,6 +408,9 @@ pub(crate) async fn insert_encrypted_route(
             })
             // Issue #637: free-form override; blank means inherit (NULL).
             .bind(target.target.service_tier.as_deref())
+            // Issue #1032: nullable positive dimension override; `None`
+            // inherits the caller's dimensions.
+            .bind(target.target.embedding_dimensions_override)
             .execute(&mut **transaction)
             .await?;
     }

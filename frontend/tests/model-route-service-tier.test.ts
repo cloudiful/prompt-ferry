@@ -12,10 +12,9 @@ import {
   hasTargetServiceTier,
   hasTargetSettings,
 } from '../src/components/endpoints/modelRouteTargetHelpers'
-import type {
-  EndpointProvider,
-  ModelEndpointRule,
-} from '../src/generated/admin-api'
+import * as adminMappers from '../src/admin-mappers'
+import type { ModelEndpointRule } from '../src/generated/admin-api'
+import type { NativeApi } from '../src/generated/admin-api'
 import type { ModelRouteTargetForm } from '../src/models'
 import * as serviceTierHelpers from '../src/models/endpoints/service-tier'
 
@@ -178,6 +177,7 @@ const settingsPageComponent: Component = (() => {
   const resolve = (spec: string): unknown => {
     if (spec === 'vue') return vue
     if (spec === '@/models/endpoints/service-tier') return serviceTierHelpers
+    if (spec === '@/admin-mappers') return adminMappers
     return slotStub(spec.split('/').pop() ?? spec)
   }
   return new Function('__resolve', `"use strict";\n${js}`)(resolve) as Component
@@ -187,18 +187,19 @@ const TIER_MARKER = 'data-stub="ServiceTierOverrideField.vue"'
 
 async function renderTargetSettings(
   target: ModelRouteTargetForm,
-  endpointProvider: EndpointProvider,
+  endpointProtocol: NativeApi = 'chat',
 ): Promise<string> {
   const app = createSSRApp({
     render: () =>
       h(settingsPageComponent, {
         target,
-        endpointProvider,
+        endpointProtocol,
         t: (key: string) => key,
       }),
   })
   app.component('USelect', slotStub('USelect'))
   app.component('USwitch', slotStub('USwitch'))
+  app.component('UInput', slotStub('UInput'))
   return renderToString(app)
 }
 
@@ -210,33 +211,55 @@ function targetForm(native_api: ModelRouteTargetForm['native_api']) {
   return target
 }
 
-test('the target settings subpage exposes the tier for every provider on JSON protocols', async () => {
-  for (const provider of [
-    'generic',
-    'minimax',
-    'command_code',
-    'opencode_go',
-    'openrouter',
-    'glm',
-    'deepseek',
-    'openai',
+test('the target settings subpage exposes the tier on every HTTP JSON protocol', async () => {
+  for (const native_api of [
+    'chat',
+    'responses',
+    'anthropic_messages',
   ] as const) {
-    for (const native_api of [
-      'chat',
-      'responses',
-      'anthropic_messages',
-    ] as const) {
-      const html = await renderTargetSettings(targetForm(native_api), provider)
-      expect(html).toContain(TIER_MARKER)
-    }
-    // Auto resolves at request time, so it stays eligible.
-    expect(await renderTargetSettings(targetForm('auto'), provider)).toContain(
+    expect(await renderTargetSettings(targetForm(native_api))).toContain(
       TIER_MARKER,
     )
   }
+  // Auto resolves at request time, so it stays eligible.
+  expect(await renderTargetSettings(targetForm('auto'))).toContain(TIER_MARKER)
 })
 
-test('the target settings subpage hides the tier on Realtime', async () => {
-  const html = await renderTargetSettings(targetForm('realtime'), 'minimax')
+test('the target settings subpage hides the tier on Realtime and Embeddings', async () => {
+  expect(await renderTargetSettings(targetForm('realtime'))).not.toContain(
+    TIER_MARKER,
+  )
+  // Issue #1032: embeddings have no service_tier field at all.
+  expect(await renderTargetSettings(targetForm('embeddings'))).not.toContain(
+    TIER_MARKER,
+  )
+})
+
+test('an embeddings target inherits the endpoint protocol for its capability set', async () => {
+  // Issue #1032: a target left on Auto inherits the endpoint protocol, so an
+  // embeddings endpoint hides the chat-only tier control for that target.
+  const html = await renderTargetSettings(targetForm('auto'), 'embeddings')
   expect(html).not.toContain(TIER_MARKER)
+  // `auto` on an `auto` endpoint never guesses; the tier stays available.
+  expect(await renderTargetSettings(targetForm('auto'), 'auto')).toContain(
+    TIER_MARKER,
+  )
+})
+
+test('an embeddings target shows the dimension control and hides the chat-only controls', async () => {
+  const html = await renderTargetSettings(targetForm('embeddings'))
+  expect(html).toContain('target-embedding-dimensions')
+  expect(html).toContain('embeddingDimensionsOverride')
+  // The chat-only thinking and compact controls are absent.
+  expect(html).not.toContain('thinkingEffortOverride')
+  expect(html).not.toContain('compactMode')
+  expect(html).not.toContain('normalizeLabel')
+  expect(html).not.toContain('thinkingDowngradeLabel')
+})
+
+test('a chat target keeps its chat controls and never shows a dimension field', async () => {
+  const html = await renderTargetSettings(targetForm('chat'))
+  expect(html).not.toContain('target-embedding-dimensions')
+  expect(html).toContain('thinkingEffortOverride')
+  expect(html).toContain('compactMode')
 })

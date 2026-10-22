@@ -516,6 +516,34 @@ pub(super) fn response_logging_payload(
     )
 }
 
+/// Issue #1032: route-aware response logging payload.
+///
+/// An embeddings response carries vectors, and a vector must reach only the
+/// caller. Whatever the configured logging mode, neither the normalized
+/// response text nor the raw body of an embeddings response enters a request
+/// record or the raw payload store.
+pub(super) fn response_logging_payload_for_route(
+    route: &crate::db::RouteConfig,
+    response_text: &str,
+    body: &[u8],
+    content_logging_enabled: bool,
+    raw_content_logging_enabled: bool,
+    redact_content: bool,
+    user_id: Option<i64>,
+) -> (Option<String>, Option<String>) {
+    if route.native_api == crate::config::NativeApi::Embeddings {
+        return (None, None);
+    }
+    response_logging_payload(
+        response_text,
+        body,
+        content_logging_enabled,
+        raw_content_logging_enabled,
+        redact_content,
+        user_id,
+    )
+}
+
 fn logged_response_prompt(
     response_text: &str,
     content_logging_enabled: bool,
@@ -619,8 +647,65 @@ mod status_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::response_logging_payload;
+    use super::{response_logging_payload, response_logging_payload_for_route};
     use crate::redact_test_support::secret_redaction;
+
+    fn route(native_api: crate::config::NativeApi) -> crate::db::RouteConfig {
+        crate::db::RouteConfig {
+            embedding_dimensions_override: None,
+            route_id: uuid::Uuid::nil(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "https://example.test".to_string(),
+            api_key: "key".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api,
+            upstream_model: None,
+            route_selection_reason: crate::db::RouteSelectionReason::Default,
+            provider: crate::db::EndpointProvider::Generic,
+            service_tier: None,
+            proxy_url: None,
+            dev_system_normalize: false,
+            thinking_effort_override: None,
+            compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
+            has_oauth_token: false,
+        }
+    }
+
+    #[test]
+    fn embedding_vectors_never_reach_the_response_log_or_the_raw_payload() {
+        // Issue #1032: even with normalized and raw capture on, an embeddings
+        // response records neither the response text nor the raw body.
+        let embeddings = route(crate::config::NativeApi::Embeddings);
+        let (prompt, raw) = response_logging_payload_for_route(
+            &embeddings,
+            "0.1,0.2,0.3",
+            br#"{"data":[{"embedding":[0.1,0.2,0.3]}]}"#,
+            true,
+            true,
+            false,
+            Some(1),
+        );
+        assert!(prompt.is_none(), "no normalized response text");
+        assert!(raw.is_none(), "no raw response body");
+
+        // A chat route keeps the existing logging behavior.
+        let chat = route(crate::config::NativeApi::Chat);
+        let (_prompt, raw) = response_logging_payload_for_route(
+            &chat,
+            "hello",
+            br#"{"ok":true}"#,
+            true,
+            true,
+            false,
+            Some(1),
+        );
+        assert!(raw.is_some(), "a chat route keeps its raw body");
+    }
 
     #[test]
     fn normalized_and_raw_logs_only_plain_raw_response() {

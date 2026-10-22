@@ -46,6 +46,7 @@ export const endpointMessages = {
     modelRouteWhitelistHint: '开启后，只允许命中模型路由的模型调用。',
     nativeApiAnthropicMessages: 'Anthropic Messages',
     nativeApiChat: 'Chat',
+    nativeApiEmbeddings: 'Embeddings',
     nativeApiResponses: 'Responses',
     nativeApiRealtime: 'Realtime',
     modelRouteNativeApi: '端口类型',
@@ -238,6 +239,10 @@ export const endpointMessages = {
     compactModePassthrough: '透传（原生）',
     compactModeSelfSummarize: '自研摘要',
     compactModeOff: '关闭',
+    embeddingDimensionsOverride: '向量维度覆盖',
+    embeddingDimensionsOverrideHint: '覆盖客户端维度；留空沿用客户端。',
+    embeddingDimensionsInherit: '沿用客户端',
+    embeddingDimensionsInvalid: '请输入正整数（最大 2147483647）。',
   },
   'en-US': {
     addTarget: 'Add target',
@@ -286,6 +291,7 @@ export const endpointMessages = {
     modelRouteWhitelistHint: 'Allow only models matched by a model route.',
     nativeApiAnthropicMessages: 'Anthropic Messages',
     nativeApiChat: 'Chat',
+    nativeApiEmbeddings: 'Embeddings',
     nativeApiResponses: 'Responses',
     nativeApiRealtime: 'Realtime',
     modelRouteNativeApi: 'Native API',
@@ -485,5 +491,10 @@ export const endpointMessages = {
     compactModePassthrough: 'Passthrough (native)',
     compactModeSelfSummarize: 'Self-summarize',
     compactModeOff: 'Off',
+    embeddingDimensionsOverride: 'Vector dimensions override',
+    embeddingDimensionsOverrideHint:
+      'Overrides the client dimensions; leave empty to inherit.',
+    embeddingDimensionsInherit: 'Inherit from client',
+    embeddingDimensionsInvalid: 'Enter a positive integer (max 2147483647).',
   },
 } as const

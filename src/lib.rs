@@ -93,6 +93,7 @@ impl From<config::NativeApi> for upstream_presets::NativeApi {
             config::NativeApi::Auto => Self::Auto,
             config::NativeApi::AnthropicMessages => Self::AnthropicMessages,
             config::NativeApi::Chat => Self::Chat,
+            config::NativeApi::Embeddings => Self::Embeddings,
             config::NativeApi::Responses => Self::Responses,
             config::NativeApi::Realtime => Self::Realtime,
         }

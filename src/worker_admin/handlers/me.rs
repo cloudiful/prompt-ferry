@@ -186,6 +186,9 @@ async fn available_models(state: &AdminState, user_id: i64) -> anyhow::Result<Ve
 
             for target in candidate.targets {
                 let route = db::RouteConfig {
+                    // Issue #1032: model listing carries the target dimension
+                    // override; `None` inherits the caller's dimensions.
+                    embedding_dimensions_override: target.embedding_dimensions_override,
                     route_id: target.endpoint_id,
                     user_id,
                     model_route_rule_id: Some(candidate.rule_id),

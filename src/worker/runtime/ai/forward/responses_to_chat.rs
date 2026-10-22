@@ -89,14 +89,19 @@ pub(super) async fn forward_non_stream_responses_to_chat_response(
     let mut usage_capture = UsageCapture::new(false, request_ctx.request_model.clone());
     usage_capture
         .set_response_text_capture_limit(services.response_limits.max_response_text_capture_bytes);
-    let _ = usage_capture.observe_chunk(&restored_body);
+    if route_ctx.route.native_api == crate::config::NativeApi::Embeddings {
+        usage_capture.observe_embedding_body(&restored_body);
+    } else {
+        let _ = usage_capture.observe_chunk(&restored_body);
+    }
     usage_capture.finish();
     let captured_artifact = responses_capture.artifact();
     let raw_body_truncated = body.len() > services.response_limits.max_raw_response_capture_bytes;
     let raw_body = &body[..body
         .len()
         .min(services.response_limits.max_raw_response_capture_bytes)];
-    let (response_prompt, response_raw_body) = super::response_logging_payload(
+    let (response_prompt, response_raw_body) = super::response_logging_payload_for_route(
+        &route_ctx.route,
         &usage_capture.response_text,
         raw_body,
         content_logging_enabled,

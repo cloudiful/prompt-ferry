@@ -32,6 +32,7 @@ const ALL_PROVIDERS: [EndpointProvider; 8] = [
 
 fn responses_route(provider: EndpointProvider, tier: Option<&str>) -> RouteConfig {
     RouteConfig {
+        embedding_dimensions_override: None,
         route_id: uuid::Uuid::new_v4(),
         user_id: 1,
         model_route_rule_id: None,
@@ -83,6 +84,8 @@ fn configured_override_is_provider_agnostic_while_caller_bit_stays_scoped() {
         );
     }
     assert!(!crate::db::supports_service_tier_for(NativeApi::Realtime));
+    // Issue #1032: embeddings carry no service_tier field.
+    assert!(!crate::db::supports_service_tier_for(NativeApi::Embeddings));
     assert_eq!(crate::db::SERVICE_TIER_WIRE_KEY, "service_tier");
 
     for provider in [EndpointProvider::Minimax, EndpointProvider::OpenAi] {

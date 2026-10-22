@@ -81,6 +81,8 @@ pub enum NativeApi {
     Auto,
     AnthropicMessages,
     Chat,
+    /// Issue #1032: OpenAI-compatible embeddings protocol.
+    Embeddings,
     #[default]
     Responses,
     Realtime,
@@ -92,6 +94,7 @@ impl NativeApi {
             Self::Auto => "auto",
             Self::AnthropicMessages => "anthropic_messages",
             Self::Chat => "chat",
+            Self::Embeddings => "embeddings",
             Self::Responses => "responses",
             Self::Realtime => "realtime",
         }
@@ -102,6 +105,7 @@ impl NativeApi {
             Self::Auto => unreachable!("auto protocol must be resolved before path lookup"),
             Self::AnthropicMessages => "/v1/messages",
             Self::Chat => "/v1/chat/completions",
+            Self::Embeddings => "/v1/embeddings",
             Self::Responses => "/v1/responses",
             Self::Realtime => "/v1/realtime",
         }

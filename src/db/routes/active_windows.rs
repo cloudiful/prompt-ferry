@@ -530,6 +530,7 @@ mod tests {
             endpoint_raw: Option<&str>,
         ) -> ModelRouteCandidateTarget {
             ModelRouteCandidateTarget {
+                embedding_dimensions_override: None,
                 target_id: uuid::Uuid::new_v4(),
                 endpoint_id: uuid::Uuid::new_v4(),
                 endpoint_name: "e".to_string(),
@@ -602,6 +603,7 @@ mod tests {
     fn disabled_target_is_always_out_and_fail_closed_message_carries_route_time_windows() {
         use crate::db::types::ModelRouteCandidateTarget;
         let active = ModelRouteCandidateTarget {
+            embedding_dimensions_override: None,
             target_id: uuid::Uuid::new_v4(),
             endpoint_id: uuid::Uuid::new_v4(),
             endpoint_name: "day".to_string(),

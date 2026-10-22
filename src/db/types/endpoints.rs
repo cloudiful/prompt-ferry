@@ -125,10 +125,15 @@ pub const SERVICE_TIER_WIRE_KEY: &str = "service_tier";
 /// Responses, Anthropic Messages). `Auto` is resolved to one of those before
 /// forwarding. Realtime is excluded because it carries WebSocket frames
 /// instead of the common JSON request body and never runs the JSON body
-/// transform. The caller-compatibility translation stays separately gated by
+/// transform; embeddings (issue #1032) are excluded because the protocol has
+/// no `service_tier` field. The caller-compatibility translation stays
+/// separately gated by
 /// [`EndpointProvider::supports_service_tier`].
 pub fn supports_service_tier_for(native_api: NativeApi) -> bool {
-    !matches!(native_api, NativeApi::Realtime)
+    // Issue #1032: embeddings have no `service_tier` field at all, so the
+    // override is never injected for that protocol (like Realtime, which
+    // carries WebSocket frames instead of the common JSON request body).
+    !matches!(native_api, NativeApi::Realtime | NativeApi::Embeddings)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -671,6 +676,8 @@ mod tests {
             assert!(supports_service_tier_for(native_api), "{native_api:?}");
         }
         assert!(!supports_service_tier_for(NativeApi::Realtime));
+        // Issue #1032: embeddings carry no service_tier field.
+        assert!(!supports_service_tier_for(NativeApi::Embeddings));
     }
 
     #[test]

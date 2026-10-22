@@ -418,6 +418,21 @@ pub(crate) fn route_target(
         Err(sqlx::Error::ColumnNotFound(_)) => None,
         Err(error) => return Err(error.into()),
     };
+    // Issue #1032: 0037 `embedding_dimensions_override` INTEGER NULL;
+    // pre-migration rows lack the column and read as inherit (`None`).
+    let embedding_dimensions_override =
+        match row.try_get::<Option<i64>, _>("embedding_dimensions_override") {
+            Ok(value) => match value {
+                Some(value) => Some(i32::try_from(value).map_err(|_| {
+                    StandaloneConfigError::CorruptDatabase(
+                        "route target embedding dimensions are outside i32 range".to_string(),
+                    )
+                })?),
+                None => None,
+            },
+            Err(sqlx::Error::ColumnNotFound(_)) => None,
+            Err(error) => return Err(error.into()),
+        };
     Ok((
         uuid(row, "rule_id")?,
         ModelRouteTargetConfig {
@@ -438,6 +453,7 @@ pub(crate) fn route_target(
             thinking_effort_override,
             compact_mode,
             service_tier,
+            embedding_dimensions_override,
         },
         envelope_opt(row, "proxy_url_override")?,
     ))
@@ -496,6 +512,7 @@ fn parse_native_api(value: &str) -> Result<NativeApi> {
         "auto" => Ok(NativeApi::Auto),
         "anthropic_messages" => Ok(NativeApi::AnthropicMessages),
         "chat" => Ok(NativeApi::Chat),
+        "embeddings" => Ok(NativeApi::Embeddings),
         "responses" => Ok(NativeApi::Responses),
         "realtime" => Ok(NativeApi::Realtime),
         _ => Err(StandaloneConfigError::CorruptDatabase(format!(
@@ -512,6 +529,7 @@ fn parse_native_api_lossy(value: &str) -> NativeApi {
         "auto" => NativeApi::Auto,
         "anthropic_messages" => NativeApi::AnthropicMessages,
         "chat" => NativeApi::Chat,
+        "embeddings" => NativeApi::Embeddings,
         "responses" => NativeApi::Responses,
         "realtime" => NativeApi::Realtime,
         _ => NativeApi::Auto,

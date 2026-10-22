@@ -1,6 +1,8 @@
 import type { TableColumn } from '@nuxt/ui'
 import type { Ref } from 'vue'
+import type { NativeApi } from '@/generated/admin-api'
 import type { ModelRouteForm, ModelRouteTargetForm } from '@/models'
+import { effectiveTargetProtocol } from '@/models/endpoints/service-tier'
 
 type ScheduleWindow = { start: string; end: string; days?: number[] }
 
@@ -97,7 +99,8 @@ export function hasTargetSettings(
     (target.thinking_downgrade_enabled ?? false) ||
     hasTargetThinkingEffort(target) ||
     hasTargetCompactMode(target) ||
-    hasTargetServiceTier(target)
+    hasTargetServiceTier(target) ||
+    hasTargetEmbeddingDimensions(target)
   )
 }
 
@@ -120,6 +123,22 @@ export function hasTargetCompactMode(
 ): boolean {
   const mode = (target?.compact_mode ?? '').trim()
   return mode !== '' && mode !== 'passthrough'
+}
+
+// Issue #1032: a configured dimension override is non-default, so it lights up
+// the target settings gear like the other overrides.
+export function hasTargetEmbeddingDimensions(
+  target: ModelRouteTargetForm | null | undefined,
+): boolean {
+  return (target?.embedding_dimensions_override ?? null) !== null
+}
+
+// Issue #1032: a malformed dimension entry blocks save instead of being
+// silently turned into inherit.
+export function isTargetEmbeddingDimensionsValid(
+  target: ModelRouteTargetForm | null | undefined,
+): boolean {
+  return target?.embedding_dimensions_invalid !== true
 }
 
 export function isTargetProxyValid(
@@ -148,7 +167,10 @@ export function canSaveTargets(
   targets: Array<ModelRouteTargetForm | null | undefined>,
 ): boolean {
   return targets.every(
-    (target) => isTargetProxyValid(target) && isTargetScheduleValid(target),
+    (target) =>
+      isTargetProxyValid(target) &&
+      isTargetScheduleValid(target) &&
+      isTargetEmbeddingDimensionsValid(target),
   )
 }
 
@@ -170,4 +192,22 @@ export function createTargetMeta(dragOver: Ref<number | null>) {
         row.index === dragOver.value ? 'bg-elevated' : '',
     },
   }
+}
+
+// Issue #1032: the effective protocol of one target, used to scope that row's
+// model suggestions. An explicit target protocol wins; `auto` inherits the
+// endpoint protocol. When both are `auto` the runtime resolves the operation
+// per request, so the suggestion listing stays unscoped (`undefined`) and the
+// endpoint's own union is preserved.
+export function suggestProtocolForTarget(
+  target:
+    Pick<ModelRouteTargetForm, 'native_api' | 'endpoint_id'> | null | undefined,
+  endpointProtocolFor: (endpointId: string) => NativeApi,
+): NativeApi | undefined {
+  if (!target) return undefined
+  const protocol = effectiveTargetProtocol(
+    target.native_api,
+    endpointProtocolFor(target.endpoint_id),
+  )
+  return protocol === 'auto' ? undefined : protocol
 }

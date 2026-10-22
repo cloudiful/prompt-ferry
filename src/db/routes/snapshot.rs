@@ -5,6 +5,7 @@ pub async fn effective_route(pool: &PgPool, user_id: i64) -> Result<Option<Route
         .fetch_optional(pool)
         .await?
         .map(|row| RouteConfig {
+            embedding_dimensions_override: None,
             route_id: row.route_id,
             user_id: row.user_id,
             model_route_rule_id: None,

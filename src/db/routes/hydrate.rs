@@ -86,6 +86,9 @@ async fn load_targets(pool: &PgPool, rule_ids: &[uuid::Uuid]) -> Result<Vec<Mode
                 // Issue #637: free-form per-target override; blank means
                 // inherit (NULL).
                 service_tier: crate::db::normalize_service_tier(row.service_tier.as_deref()),
+                // Issue #1032: nullable positive dimension override; `None`
+                // inherits the caller's dimensions.
+                embedding_dimensions_override: row.embedding_dimensions_override,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
             }
@@ -126,6 +129,9 @@ pub(super) async fn model_route_candidates_by_rule(
         &rows.iter().map(|row| row.endpoint_id).collect::<Vec<_>>(),
     )
     .await?;
+    // Issue #1032: the per-target dimension override is read through the
+    // target projection, so the candidate join stays unchanged.
+    let dimensions = load_target_dimensions(pool, &rows).await?;
     // Issue #1004 P1: one existence query hydrates the non-secret
     // subscription eligibility flag for every candidate target.
     let subscription_endpoints = crate::db::endpoints::list_oauth_token_endpoint_ids(pool).await?;
@@ -186,6 +192,9 @@ pub(super) async fn model_route_candidates_by_rule(
                 // Issue #1004 P1: subscription eligibility, hydrated from the
                 // token-id existence query.
                 has_oauth_token: subscription_endpoints.contains(&row.endpoint_id),
+                // Issue #1032: copied target dimension override; `None`
+                // inherits the caller's dimensions.
+                embedding_dimensions_override: dimensions.get(&row.target_id).copied().flatten(),
             });
             continue;
         }
@@ -222,8 +231,29 @@ pub(super) async fn model_route_candidates_by_rule(
                 // Issue #1004 P1: subscription eligibility, hydrated from the
                 // token-id existence query.
                 has_oauth_token: subscription_endpoints.contains(&row.endpoint_id),
+                // Issue #1032: copied target dimension override; `None`
+                // inherits the caller's dimensions.
+                embedding_dimensions_override: dimensions.get(&row.target_id).copied().flatten(),
             }],
         });
     }
     Ok(grouped)
+}
+
+/// Issue #1032: the per-target dimension override, keyed by target id.
+/// The value is read through the target projection so the candidate query
+/// itself stays unchanged.
+async fn load_target_dimensions(
+    pool: &PgPool,
+    rows: &[ModelRouteCandidateRow],
+) -> Result<std::collections::HashMap<uuid::Uuid, Option<i32>>> {
+    let rule_ids = rows.iter().map(|row| row.rule_id).collect::<Vec<_>>();
+    if rule_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let targets = load_targets(pool, &rule_ids).await?;
+    Ok(targets
+        .into_iter()
+        .map(|target| (target.target_id, target.embedding_dimensions_override))
+        .collect())
 }

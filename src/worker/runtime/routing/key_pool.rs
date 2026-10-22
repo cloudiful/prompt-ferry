@@ -226,6 +226,7 @@ mod tests {
             .map(|key| key.endpoint_id)
             .unwrap_or_else(uuid::Uuid::new_v4);
         db::ModelRouteCandidateTarget {
+            embedding_dimensions_override: None,
             target_id: uuid::Uuid::new_v4(),
             endpoint_id,
             endpoint_name: "endpoint".to_string(),

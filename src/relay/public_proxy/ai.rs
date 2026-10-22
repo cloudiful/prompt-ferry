@@ -184,6 +184,32 @@ pub(super) async fn proxy_compact(
     .await
 }
 
+/// Issue #1032: the public embeddings relay route.
+///
+/// It is a real AI relay route (client-key authorization + the public-IP
+/// policy + the same body limit as the other AI routes), never the admin
+/// fallback. The worker resolves whether the target is an Auto endpoint or an
+/// explicit embeddings target; an incompatible target refuses before any
+/// upstream contact.
+pub(super) async fn proxy_embeddings(
+    State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<RemoteAddr>,
+    Extension(compression): Extension<HttpRequestCompressionContext>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    proxy_request(
+        state,
+        peer_addr.0.ip(),
+        headers,
+        compression,
+        Method::POST,
+        "/v1/embeddings",
+        body,
+    )
+    .await
+}
+
 pub(super) async fn proxy_conversations(
     State(state): State<AppState>,
     ConnectInfo(peer_addr): ConnectInfo<RemoteAddr>,

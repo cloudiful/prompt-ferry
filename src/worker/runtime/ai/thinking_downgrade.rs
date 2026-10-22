@@ -141,6 +141,8 @@ pub(super) fn body_thinking_signals(
         NativeApi::Auto | NativeApi::AnthropicMessages | NativeApi::Realtime => {
             BodyThinkingSignals::default()
         }
+        // Issue #1032: an embeddings request carries no thinking signals.
+        NativeApi::Embeddings => BodyThinkingSignals::default(),
     }
 }
 
@@ -254,6 +256,9 @@ pub(super) fn apply_thinking_off(native_api: NativeApi, body: Vec<u8>) -> Vec<u8
             }
         }
         NativeApi::Auto | NativeApi::AnthropicMessages | NativeApi::Realtime => return body,
+        // Issue #1032: an embeddings body carries no thinking field, so the
+        // downgrade never rewrites it.
+        NativeApi::Embeddings => return body,
     }
     serde_json::to_vec(&value).unwrap_or(body)
 }

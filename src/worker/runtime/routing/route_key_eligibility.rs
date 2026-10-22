@@ -190,6 +190,7 @@ mod tests {
 
     fn route(has_oauth_token: bool, api_key: &str) -> db::RouteConfig {
         db::RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::new_v4(),
             user_id: 1,
             model_route_rule_id: None,

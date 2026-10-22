@@ -64,15 +64,25 @@ pub(super) async fn process_models_request(
     let mut last_error_status = StatusCode::BAD_GATEWAY;
     let mut last_error_body = String::new();
 
-    let mut requests = futures::stream::iter(routes.into_iter().map(|route| {
+    let catalog_requests = routes
+        .into_iter()
+        .flat_map(|route| {
+            // Issue #1032: an Auto OpenRouter endpoint serves chat and
+            // embeddings, so its listing is the deduplicated union of both
+            // catalogs; every other route has one protocol-specific catalog.
+            crate::endpoint_models::models_urls(&route.base_url, route.provider, route.native_api)
+                .into_iter()
+                .map(move |url| (route.clone(), url))
+        })
+        .collect::<Vec<_>>();
+
+    let mut requests = futures::stream::iter(catalog_requests.into_iter().map(|(route, url)| {
         let client = client.clone();
         async move {
             // GLM (issue #230 P2) lists models at `{base}/models`; every
-            // other provider keeps the plain `/v1/models` join.
-            let request = client.get(crate::endpoint_models::models_url(
-                &route.base_url,
-                route.provider,
-            ));
+            // other provider keeps the plain `/v1/models` join. An embeddings
+            // protocol lists the provider's embeddings catalog.
+            let request = client.get(url);
             let request = match route.native_api {
                 crate::config::NativeApi::AnthropicMessages => {
                     super::upstream::with_anthropic_headers(

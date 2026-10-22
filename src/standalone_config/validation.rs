@@ -112,6 +112,17 @@ impl StandaloneConfig {
                 if !target_ids.insert(target.target_id) {
                     return invalid("target_id", "must be unique per route");
                 }
+                // Issue #1032: the dimension override is a positive i32 or
+                // inherit; never clamped.
+                if target
+                    .embedding_dimensions_override
+                    .is_some_and(|dimensions| dimensions < 1)
+                {
+                    return invalid(
+                        "embedding_dimensions_override",
+                        "must be a positive integer",
+                    );
+                }
             }
             if route.targets.is_empty() {
                 return invalid("targets", "must contain at least one target");

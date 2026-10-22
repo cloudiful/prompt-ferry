@@ -105,6 +105,7 @@ fn endpoint_create() -> EndpointCreate {
 
 fn openai_route(endpoint_id: uuid::Uuid, has_oauth_token: bool) -> crate::db::RouteConfig {
     crate::db::RouteConfig {
+        embedding_dimensions_override: None,
         route_id: endpoint_id,
         user_id: 1,
         model_route_rule_id: None,

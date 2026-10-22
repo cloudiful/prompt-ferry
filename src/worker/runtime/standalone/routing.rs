@@ -91,6 +91,9 @@ fn target_from_endpoint(
     has_oauth_token: bool,
 ) -> ModelRouteCandidateTarget {
     ModelRouteCandidateTarget {
+        // Issue #1032: copy the configured target dimension override;
+        // `None` inherits the caller's dimensions.
+        embedding_dimensions_override: target.embedding_dimensions_override,
         target_id: target.target_id,
         endpoint_id: endpoint.endpoint_id,
         endpoint_name: endpoint.name.clone(),
@@ -233,6 +236,7 @@ mod tests {
                     routing_strategy: RoutingStrategy::ResponsesSessionAffinity,
                     enabled: true,
                     targets: vec![ModelRouteTargetConfig {
+                        embedding_dimensions_override: None,
                         target_id: Uuid::new_v4(),
                         endpoint_id,
                         position: 0,
@@ -256,6 +260,7 @@ mod tests {
                     routing_strategy: RoutingStrategy::ResponsesSessionAffinity,
                     enabled: true,
                     targets: vec![ModelRouteTargetConfig {
+                        embedding_dimensions_override: None,
                         target_id: Uuid::new_v4(),
                         endpoint_id,
                         position: 0,
@@ -313,6 +318,7 @@ mod tests {
                 routing_strategy: RoutingStrategy::ResponsesSessionAffinity,
                 enabled: true,
                 targets: vec![ModelRouteTargetConfig {
+                    embedding_dimensions_override: None,
                     target_id: Uuid::new_v4(),
                     endpoint_id,
                     position: 0,

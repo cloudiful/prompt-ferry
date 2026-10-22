@@ -9,13 +9,15 @@ import {
   createTargetMeta,
   hasTargetSchedule,
   hasTargetSettings,
+  suggestProtocolForTarget,
   targetProxySummary,
   targetScheduleSummary,
   targetScheduleTooltip,
 } from '@/components/endpoints/modelRouteTargetHelpers'
 import { useModelRouteTargetDrag } from '@/components/endpoints/useModelRouteTargetDrag'
+import { normalizeNativeApiAxis } from '@/models/endpoints/service-tier'
 import type { ModelRouteForm } from '@/models'
-import type { ProviderEndpoint, User } from '@/generated/admin-api'
+import type { NativeApi, ProviderEndpoint, User } from '@/generated/admin-api'
 import type { EndpointOption } from '@/models/endpoints'
 
 const props = withDefaults(
@@ -87,6 +89,8 @@ function addTarget(): void {
     compact_mode: 'passthrough',
     // Issue #409: default Auto (follow caller), like createEmptyModelRouteForm.
     native_api: 'auto',
+    // Issue #1032: inherit the caller's dimensions by default.
+    embedding_dimensions_override: null,
   })
 }
 
@@ -125,10 +129,30 @@ const selectedEndpointLabel = computed(
   () => selectedEndpoint.value?.label ?? '',
 )
 
-// Issue #637: the target settings view needs the selected endpoint's provider
-// to decide whether the free-form service-tier override applies.
-const selectedEndpointProvider = computed(
-  () => selectedEndpoint.value?.provider ?? null,
+// Issue #1032: the target settings page resolves the effective protocol (an
+// `auto` target inherits the endpoint protocol). The full endpoint record is
+// already loaded for the dialog, so its `native_api` axis is read here instead
+// of re-deriving it from the model name.
+function endpointProtocolFor(endpointId: string): NativeApi {
+  return normalizeNativeApiAxis(
+    props.endpoints.find((endpoint) => endpoint.endpoint_id === endpointId)
+      ?.native_api,
+  )
+}
+
+// Issue #1032: the effective protocol of one target row, used to scope its
+// model suggestions. `auto` (an `auto` target on an `auto` endpoint) stays
+// undefined so the endpoint's own union listing is preserved.
+function targetSuggestionProtocol(
+  target: ModelRouteForm['targets'][number],
+): NativeApi | undefined {
+  return suggestProtocolForTarget(target, (endpointId) =>
+    endpointProtocolFor(endpointId),
+  )
+}
+
+const selectedEndpointProtocol = computed<NativeApi>(() =>
+  endpointProtocolFor(selectedTargetModel.value?.endpoint_id ?? ''),
 )
 
 const canSaveOuter = computed(() => canSaveTargets(form.value?.targets ?? []))
@@ -252,6 +276,7 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
                       <EndpointModelInput
                         v-model="row.original.upstream_model"
                         :endpoint-id="row.original.endpoint_id"
+                        :native-api="targetSuggestionProtocol(row.original)"
                         :placeholder="t('upstreamModelOptional')"
                         :t="t"
                       />
@@ -352,7 +377,7 @@ const targetTableMeta = computed(() => createTargetMeta(dragOverIndex))
             <ModelRouteTargetSettingsPage
               v-if="selectedTargetModel"
               v-model:target="selectedTargetModel"
-              :endpoint-provider="selectedEndpointProvider"
+              :endpoint-protocol="selectedEndpointProtocol"
               :t="t"
             />
           </template>

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,\n       COALESCE(e.enabled, FALSE) AS \"endpoint_enabled!\",\n       t.position, t.enabled, t.upstream_model,\n       COALESCE(t.native_api, 'auto') AS \"native_api!\",\n        t.proxy_url_override,\n        t.active_windows,\n        COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\",\n        COALESCE(t.thinking_downgrade_enabled, FALSE) AS \"thinking_downgrade_enabled!\",\n        t.thinking_effort_override,\n        t.compact_mode,\n        t.service_tier,\n       t.created_at, t.updated_at\nFROM model_route_targets t\nLEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE t.rule_id = ANY($1)\nORDER BY t.rule_id ASC, t.position ASC, t.created_at ASC\n",
+  "query": "SELECT t.target_id, t.rule_id, t.endpoint_id, e.name AS endpoint_name,\n       COALESCE(e.enabled, FALSE) AS \"endpoint_enabled!\",\n       t.position, t.enabled, t.upstream_model,\n       COALESCE(t.native_api, 'auto') AS \"native_api!\",\n        t.proxy_url_override,\n        t.active_windows,\n        COALESCE(t.dev_system_normalize, FALSE) AS \"dev_system_normalize!\",\n        COALESCE(t.thinking_downgrade_enabled, FALSE) AS \"thinking_downgrade_enabled!\",\n        t.thinking_effort_override,\n        t.compact_mode,\n        t.service_tier,\n        t.embedding_dimensions_override,\n       t.created_at, t.updated_at\nFROM model_route_targets t\nLEFT JOIN provider_endpoints e ON e.endpoint_id = t.endpoint_id\nWHERE t.rule_id = ANY($1)\nORDER BY t.rule_id ASC, t.position ASC, t.created_at ASC\n",
   "describe": {
     "columns": [
       {
@@ -161,6 +161,17 @@
       },
       {
         "ordinal": 16,
+        "name": "embedding_dimensions_override",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "model_route_targets",
+            "name": "embedding_dimensions_override"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -171,7 +182,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -204,9 +215,10 @@
       true,
       false,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "9a2c4c7758e68a4045ea8c965b04d682e5a7bbc79d425b9ec05e864a1f043744"
+  "hash": "844a03f555350f7b321f011719a417f25380ecb40b9381398d466271ffcffa2b"
 }

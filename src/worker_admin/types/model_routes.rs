@@ -41,6 +41,7 @@ impl ModelRouteRequest {
             state,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            &DimensionOverrideCarry::default(),
         )
         .await
     }
@@ -52,11 +53,14 @@ impl ModelRouteRequest {
     /// `Some(url)` replaces after scheme validation.
     /// Issue #378 Phase I: same omit-when-untouched carry applies to
     /// `active_windows` via `existing_windows` (`None` means all-day).
+    /// Issue #1032: same carry applies to `embedding_dimensions_override`
+    /// via `existing_dimensions`; an omitted field keeps the stored value.
     pub async fn into_create_with_existing(
         self,
         state: &AdminState,
         existing_overrides: &std::collections::HashMap<Uuid, Option<String>>,
         existing_windows: &std::collections::HashMap<Uuid, Vec<db::ActiveWindow>>,
+        existing_dimensions: &DimensionOverrideCarry,
     ) -> Result<db::ModelEndpointRuleCreate, ApiError> {
         let targets = self
             .targets
@@ -82,6 +86,8 @@ impl ModelRouteRequest {
                         compact_mode: None,
                         // Issue #637: inherit the endpoint override.
                         service_tier: None,
+                        // Issue #1032: omitted; no existing target to carry.
+                        embedding_dimensions_override: None,
                     })
                     .collect()
             })
@@ -130,10 +136,39 @@ impl ModelRouteRequest {
                 // Issue #502 Task 5: always sent; unknown/empty normalizes
                 // to `passthrough` (no new default semantics, no reject).
                 let compact_mode = db::normalize_compact_mode(target.compact_mode.as_deref());
+                // Issue #1032: omitted keeps the stored value; explicit null
+                // clears to inherit; an integer must be a positive i32 and
+                // is rejected with a 400 otherwise (never clamped).
+                let upstream_model =
+                    normalize_upstream_model(target.upstream_model.as_deref());
+                let embedding_dimensions_override = match target.embedding_dimensions_override {
+                    None => match existing_dimensions
+                        .lookup(target.endpoint_id, upstream_model.as_deref())
+                    {
+                        DimensionCarryLookup::Value(value) => value,
+                        DimensionCarryLookup::Absent => None,
+                        DimensionCarryLookup::Ambiguous => {
+                            return Err(ApiError::new(
+                                StatusCode::BAD_REQUEST,
+                                "ambiguous_embedding_dimensions_override",
+                                "multiple stored targets share this endpoint and normalized upstream model with different embedding dimension overrides; send an explicit dimensions value or null",
+                            ))
+                        }
+                    },
+                    Some(None) => None,
+                    Some(Some(value)) => db::normalize_embedding_dimensions_override(Some(value))
+                        .map_err(|message| {
+                        ApiError::new(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_embedding_dimensions",
+                            message,
+                        )
+                    })?,
+                };
                 Ok(db::ModelRouteTargetCreate {
                     endpoint_id: target.endpoint_id,
                     enabled: target.enabled.unwrap_or(true),
-                    upstream_model: normalize_upstream_model(target.upstream_model.as_deref()),
+                    upstream_model,
                     // Issue #409 Phase 1: target port type, default `Auto`
                     // (always sent, no omit/carry like `dev_system_normalize`).
                     native_api: target.native_api.unwrap_or(crate::config::NativeApi::Auto),
@@ -147,6 +182,9 @@ impl ModelRouteRequest {
                     compact_mode,
                     // Issue #637: always sent; blank normalizes to inherit.
                     service_tier: db::normalize_service_tier(target.service_tier.as_deref()),
+                    // Issue #1032: omitted carries the stored value; null
+                    // clears; a positive i32 sets the forced dimensions.
+                    embedding_dimensions_override,
                 })
             });
         let targets = futures::future::try_join_all(targets).await?;
@@ -280,6 +318,17 @@ impl ModelRouteRequest {
                     message,
                 ));
             }
+            // Issue #1032: the explicit dimension override must be a positive
+            // i32; omitted/null is inherit and never rejected.
+            if let Some(Some(value)) = target.embedding_dimensions_override
+                && let Err(message) = db::normalize_embedding_dimensions_override(Some(value))
+            {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_embedding_dimensions",
+                    message,
+                ));
+            }
         }
         let rules = db::list_model_endpoint_rules(&state.pool)
             .await
@@ -359,6 +408,24 @@ pub struct ModelRouteTargetRequest {
     /// is trimmed and wins over the endpoint override.
     #[serde(default)]
     pub service_tier: Option<String>,
+    /// Issue #1032: per-target embedding dimension override. The field is
+    /// `Option<Option<i32>>` so an omitted field (`None`) carries the stored
+    /// value on PATCH, an explicit `null` (`Some(None)`) clears it to
+    /// inherit, and an integer (`Some(Some(value))`) sets a positive i32.
+    /// Omitting must never clear a saved dimension.
+    #[serde(default, deserialize_with = "deserialize_nullable_override")]
+    #[schema(minimum = 1)]
+    pub embedding_dimensions_override: Option<Option<i32>>,
+}
+
+/// Issue #1032: distinguish an omitted field from an explicit `null` for a
+/// nullable numeric override. `serde` would otherwise deserialize both as
+/// `None`, which would silently clear a stored dimension on PATCH.
+fn deserialize_nullable_override<'de, D>(deserializer: D) -> Result<Option<Option<i32>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<i32>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -462,6 +529,74 @@ fn target_dedup_key(endpoint_id: Uuid, upstream_model: Option<&str>) -> (Uuid, O
 /// normalized upstream model.
 fn has_duplicate_targets(keys: &[(Uuid, Option<String>)]) -> bool {
     keys.iter().collect::<std::collections::HashSet<_>>().len() != keys.len()
+}
+
+/// Issue #1032: stored per-target dimension overrides for a PATCH that omits
+/// the field.
+///
+/// The request can only name a target by `endpoint_id` plus `upstream_model`,
+/// and the endpoint+model pair is not unique in storage (the primary key is
+/// `target_id`). The carry is therefore keyed by the same canonical identity
+/// the request expresses: endpoint id plus the normalized upstream model.
+/// Distinct models on one endpoint keep independent values, and an existing
+/// pair with conflicting stored values is reported as ambiguous instead of
+/// being copied arbitrarily.
+#[derive(Debug, Default, Clone)]
+pub struct DimensionOverrideCarry {
+    values: std::collections::HashMap<(Uuid, Option<String>), Option<i32>>,
+    ambiguous: std::collections::HashSet<(Uuid, Option<String>)>,
+}
+
+/// The carry answer for one requested target identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DimensionCarryLookup {
+    /// No stored target has this identity; the value stays inherit.
+    Absent,
+    /// Every matching stored target agrees on this value (which may be inherit).
+    Value(Option<i32>),
+    /// Matching stored targets disagree; the caller must be explicit.
+    Ambiguous,
+}
+
+impl DimensionOverrideCarry {
+    /// Build the carry from stored targets. `upstream_model` is normalized with
+    /// the same rule the request path uses.
+    pub fn from_targets(
+        targets: impl IntoIterator<Item = (Uuid, Option<String>, Option<i32>)>,
+    ) -> Self {
+        let mut grouped: std::collections::HashMap<
+            (Uuid, Option<String>),
+            std::collections::HashSet<Option<i32>>,
+        > = std::collections::HashMap::new();
+        for (endpoint_id, upstream_model, dimensions) in targets {
+            grouped
+                .entry(target_dedup_key(endpoint_id, upstream_model.as_deref()))
+                .or_default()
+                .insert(dimensions);
+        }
+        let mut carry = Self::default();
+        for (key, values) in grouped {
+            if values.len() == 1 {
+                if let Some(value) = values.into_iter().next() {
+                    carry.values.insert(key, value);
+                }
+            } else {
+                carry.ambiguous.insert(key);
+            }
+        }
+        carry
+    }
+
+    fn lookup(&self, endpoint_id: Uuid, upstream_model: Option<&str>) -> DimensionCarryLookup {
+        let key = target_dedup_key(endpoint_id, upstream_model);
+        if self.ambiguous.contains(&key) {
+            return DimensionCarryLookup::Ambiguous;
+        }
+        match self.values.get(&key) {
+            Some(value) => DimensionCarryLookup::Value(*value),
+            None => DimensionCarryLookup::Absent,
+        }
+    }
 }
 
 /// Issue #368 Phase B: normalize and validate an outbound proxy URL.
@@ -578,6 +713,7 @@ mod tests {
             thinking_effort_override: None,
             compact_mode: None,
             service_tier: None,
+            embedding_dimensions_override: None,
         })
         .expect("serialize off");
         assert_eq!(
@@ -604,6 +740,7 @@ mod tests {
             // passthrough.
             compact_mode: Some("self_summarize".to_string()),
             service_tier: Some("fast".to_string()),
+            embedding_dimensions_override: None,
         })
         .expect("serialize on");
         assert_eq!(

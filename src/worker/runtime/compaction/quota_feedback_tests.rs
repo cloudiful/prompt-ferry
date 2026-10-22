@@ -59,6 +59,7 @@ async fn spawn_response(
 
 fn route(address: SocketAddr) -> RouteConfig {
     RouteConfig {
+        embedding_dimensions_override: None,
         route_id: uuid::Uuid::new_v4(),
         user_id: 1,
         model_route_rule_id: None,

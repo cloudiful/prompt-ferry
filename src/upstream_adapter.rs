@@ -108,6 +108,16 @@ pub fn prepare_upstream_request_for_provider(
     thinking_effort_override: Option<&str>,
     compact_mode: crate::db::CompactMode,
 ) -> Result<PreparedUpstreamRequest, CompatError> {
+    // Issue #1032: an embeddings target serves only `/v1/embeddings`. Reject
+    // every other path here, before the compact/self-summarize shortcut below
+    // can route it into a chat pipeline.
+    if native_api == NativeApi::Embeddings && request_path != "/v1/embeddings" {
+        return Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "unsupported_upstream",
+            "an embeddings-native endpoint target only serves POST /v1/embeddings",
+        ));
+    }
     if request_path == "/v1/responses/compact" {
         if compact_mode == crate::db::CompactMode::Off {
             return Err(CompatError::new(
@@ -220,13 +230,124 @@ fn apply_thinking_effort_override_for_path(
                 serde_json::Value::String(effort.to_string()),
             );
         }
-    } else {
+    } else if request_path == "/v1/chat/completions" {
         object.insert(
             "reasoning_effort".to_string(),
             serde_json::Value::String(effort.to_string()),
         );
+    } else {
+        // Issue #1032: no other path (including /v1/embeddings) receives a
+        // thinking-effort field.
+        return body;
     }
     serde_json::to_vec(&value).unwrap_or(body)
+}
+
+/// Issue #1032: validate an OpenAI-compatible embeddings request body before
+/// it reaches the upstream.
+///
+/// The standard shape is enforced: a required non-empty `model` string, a
+/// required `input` that is a non-empty text string, a homogeneous batch of
+/// non-empty text strings, a batch of nonnegative token ids, or a batch of
+/// token-id arrays; an optional `dimensions` that must be a positive i32 (no
+/// string/boolean/fraction/zero/negative/overflow, never clamped); an
+/// optional `encoding_format` of `float` or `base64`. `stream: true` is
+/// rejected because embeddings have no streaming variant. Unknown
+/// OpenAI-compatible fields are preserved by construction (the validator only
+/// reads). A `null` `dimensions`/`encoding_format` is treated as absent.
+pub fn validate_embeddings_request_body(request_body: &[u8]) -> Result<(), CompatError> {
+    let invalid = |message: &str| {
+        CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_embeddings_request",
+            message,
+        )
+    };
+    let value: serde_json::Value = serde_json::from_slice(request_body)
+        .map_err(|_| invalid("embeddings request body must be a JSON object"))?;
+    let Some(object) = value.as_object() else {
+        return Err(invalid("embeddings request body must be a JSON object"));
+    };
+    if object.get("stream").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "embeddings_stream_not_supported",
+            "the embeddings protocol does not support streaming",
+        ));
+    }
+    match object.get("model").and_then(serde_json::Value::as_str) {
+        Some(model) if !model.trim().is_empty() => {}
+        _ => {
+            return Err(invalid(
+                "`model` is required and must be a non-empty string",
+            ));
+        }
+    }
+    match object.get("input") {
+        Some(serde_json::Value::String(text)) if !text.is_empty() => {}
+        Some(serde_json::Value::Array(items)) if !items.is_empty() => {
+            validate_embeddings_input_batch(items).map_err(|message| invalid(message))?;
+        }
+        _ => {
+            return Err(invalid(
+                "`input` is required and must be non-empty text or a non-empty text/token batch",
+            ));
+        }
+    }
+    if let Some(dimensions) = object.get("dimensions")
+        && !dimensions.is_null()
+    {
+        let Some(dimensions) = dimensions.as_i64() else {
+            return Err(invalid(
+                "`dimensions` must be a positive integer when present",
+            ));
+        };
+        if !(1..=i64::from(i32::MAX)).contains(&dimensions) {
+            return Err(invalid(
+                "`dimensions` must be a positive integer no greater than 2147483647",
+            ));
+        }
+    }
+    if let Some(encoding_format) = object.get("encoding_format")
+        && !encoding_format.is_null()
+    {
+        match encoding_format.as_str() {
+            Some("float") | Some("base64") => {}
+            _ => {
+                return Err(invalid(
+                    "`encoding_format` must be one of float, base64 when present",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_embeddings_input_batch(items: &[serde_json::Value]) -> Result<(), &'static str> {
+    let all_text = items
+        .iter()
+        .all(|item| item.as_str().is_some_and(|text| !text.is_empty()));
+    if all_text {
+        return Ok(());
+    }
+    let all_tokens = items
+        .iter()
+        .all(|item| item.as_i64().is_some_and(|token| token >= 0));
+    if all_tokens {
+        return Ok(());
+    }
+    let all_token_batches = items.iter().all(|item| {
+        item.as_array().is_some_and(|batch| {
+            !batch.is_empty()
+                && batch
+                    .iter()
+                    .all(|token| token.as_i64().is_some_and(|token| token >= 0))
+        })
+    });
+    if all_token_batches {
+        return Ok(());
+    }
+    Err("`input` batches must be homogeneous non-empty strings or nonnegative token ids")
 }
 
 fn prepare_upstream_request_inner(
@@ -338,6 +459,25 @@ fn prepare_upstream_request_inner(
             StatusCode::BAD_REQUEST,
             "unsupported_upstream",
             "legacy /v1/chat/completions cannot be routed to an anthropic-native endpoint; use /v1/responses",
+        )),
+        // Issue #1032: the embeddings protocol is its own non-streaming,
+        // non-translated pipeline. A chat/responses/messages request must
+        // never be adapted into an embedding response, and an embeddings
+        // request must never reach a chat-native target.
+        ("/v1/embeddings", NativeApi::Embeddings) => {
+            validate_embeddings_request_body(request_body)?;
+            Ok(PreparedUpstreamRequest {
+                path: request_path.to_string(),
+                body: PreparedRequestBody::BufferedBytes(request_body.to_vec()),
+                response_adapter: ResponseAdapter::Passthrough,
+                upstream_redacted_request_json: None,
+                upstream_restore_session: None,
+            })
+        }
+        ("/v1/embeddings", _) => Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "unsupported_upstream",
+            "POST /v1/embeddings requires an embeddings-native endpoint target",
         )),
         _ => Ok(PreparedUpstreamRequest {
             path: request_path.to_string(),
@@ -987,5 +1127,114 @@ mod tests {
         };
         let body: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["service_tier"].as_str(), Some("priority"));
+    }
+
+    #[test]
+    fn embeddings_requests_are_validated_and_forwarded_untranslated() {
+        // Issue #1032: the embeddings arm buffers the body unchanged and never
+        // applies a chat translation.
+        let prepared = super::prepare_upstream_request(
+            "/v1/embeddings",
+            br#"{"model":"qwen/qwen3-embedding-8b","input":["a","b"],"dimensions":7,"unknown_field":true}"#,
+            NativeApi::Embeddings,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(prepared.path, "/v1/embeddings");
+        assert!(matches!(
+            prepared.response_adapter,
+            ResponseAdapter::Passthrough
+        ));
+        let PreparedRequestBody::BufferedBytes(body) = prepared.body else {
+            panic!("embeddings must be buffered");
+        };
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["dimensions"], 7);
+        assert_eq!(body["unknown_field"], true);
+    }
+
+    #[test]
+    fn embeddings_request_validation_rejects_malformed_shapes() {
+        let prepare = |body: &str| {
+            super::prepare_upstream_request(
+                "/v1/embeddings",
+                body.as_bytes(),
+                NativeApi::Embeddings,
+                false,
+                None,
+            )
+        };
+        // Valid shapes are accepted.
+        assert!(prepare(r#"{"model":"m","input":"hello"}"#).is_ok());
+        assert!(prepare(r#"{"model":"m","input":[1,2,3]}"#).is_ok());
+        assert!(prepare(r#"{"model":"m","input":[[1,2],[3]]}"#).is_ok());
+        assert!(prepare(r#"{"model":"m","input":"x","encoding_format":"base64"}"#).is_ok());
+        assert!(prepare(r#"{"model":"m","input":"x","dimensions":null}"#).is_ok());
+        // Rejected shapes.
+        for body in [
+            r#"{"input":"hello"}"#,
+            r#"{"model":"","input":"hello"}"#,
+            r#"{"model":"m"}"#,
+            r#"{"model":"m","input":""}"#,
+            r#"{"model":"m","input":[]}"#,
+            r#"{"model":"m","input":["a",1]}"#,
+            r#"{"model":"m","input":[-1]}"#,
+            r#"{"model":"m","input":"x","dimensions":0}"#,
+            r#"{"model":"m","input":"x","dimensions":-1}"#,
+            r#"{"model":"m","input":"x","dimensions":1.5}"#,
+            r#"{"model":"m","input":"x","dimensions":2147483648}"#,
+            r#"{"model":"m","input":"x","dimensions":"7"}"#,
+            r#"{"model":"m","input":"x","encoding_format":"hex"}"#,
+        ] {
+            let error = prepare(body).expect_err("must be rejected");
+            assert_eq!(error.code, "invalid_embeddings_request", "body {body}");
+        }
+        let error = prepare(r#"{"model":"m","input":"x","stream":true}"#)
+            .expect_err("streaming must be rejected");
+        assert_eq!(error.code, "embeddings_stream_not_supported");
+    }
+
+    #[test]
+    fn an_embeddings_target_only_serves_the_embeddings_path() {
+        // Issue #1032: a chat request is never adapted into an embedding
+        // response and vice versa.
+        let error = super::prepare_upstream_request(
+            "/v1/chat/completions",
+            br#"{"model":"m","messages":[]}"#,
+            NativeApi::Embeddings,
+            false,
+            None,
+        )
+        .expect_err("a chat request to an embeddings target must be rejected");
+        assert_eq!(error.code, "unsupported_upstream");
+
+        let error = super::prepare_upstream_request(
+            "/v1/embeddings",
+            br#"{"model":"m","input":"x"}"#,
+            NativeApi::Chat,
+            false,
+            None,
+        )
+        .expect_err("an embeddings request to a chat target must be rejected");
+        assert_eq!(error.code, "unsupported_upstream");
+    }
+
+    #[test]
+    fn an_embeddings_body_never_gains_a_thinking_effort_field() {
+        // Issue #1032: a stored chat override is never applied to embeddings.
+        let prepared = super::prepare_upstream_request(
+            "/v1/embeddings",
+            br#"{"model":"m","input":"x"}"#,
+            NativeApi::Embeddings,
+            false,
+            Some("high"),
+        )
+        .unwrap();
+        let PreparedRequestBody::BufferedBytes(body) = prepared.body else {
+            panic!("embeddings must be buffered");
+        };
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert!(body.get("reasoning_effort").is_none());
     }
 }

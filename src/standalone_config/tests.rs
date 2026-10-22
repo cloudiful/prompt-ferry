@@ -79,6 +79,7 @@ fn sample_config() -> StandaloneConfig {
             routing_strategy: RoutingStrategy::ResponsesSessionAffinity,
             enabled: true,
             targets: vec![ModelRouteTargetConfig {
+                embedding_dimensions_override: None,
                 target_id: Uuid::new_v4(),
                 endpoint_id,
                 position: 0,
@@ -2240,4 +2241,414 @@ fn keyless_endpoint_input(provider: crate::db::EndpointProvider) -> crate::db::E
         proxy_url: None,
         active_windows: None,
     }
+}
+
+/// Issue #1032 P0: the standalone migration set, so a test can build the
+/// database in the schema version that predates the embeddings capability.
+static STANDALONE_MIGRATIONS: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/standalone");
+
+/// Issue #1032 P0: the schema version that predates the embeddings capability.
+const PRE_EMBEDDING_SCHEMA_VERSION: i64 = 36;
+
+/// Issue #1032 P0: the schema version that carries the embeddings capability.
+const EMBEDDING_SCHEMA_VERSION: i64 = 37;
+
+/// Issue #1032 P0: canonical text projection of every row the 0037 upgrade
+/// must leave byte-identical. The projection deliberately skips the new
+/// dimension column, which does not exist before the upgrade.
+const PRESERVED_ROW_PROJECTIONS: &[(&str, &str)] = &[
+    (
+        "standalone_provider_endpoints",
+        "SELECT endpoint_id || '|' || name || '|' || provider || '|' || coalesce(provider_region, '') || '|' || base_url || '|' || native_api || '|' || native_api_source || '|' || cast(key_lb_enabled AS TEXT) || '|' || cast(enabled AS TEXT) || '|' || cast(mcp_enabled AS TEXT) || '|' || hex(api_key_ciphertext) || '|' || hex(api_key_nonce) || '|' || cast(api_key_key_version AS TEXT) || '|' || coalesce(hex(proxy_url_ciphertext), '') || '|' || coalesce(hex(proxy_url_nonce), '') || '|' || cast(coalesce(proxy_url_key_version, 0) AS TEXT) || '|' || coalesce(active_windows, '') || '|' || created_at || '|' || updated_at || '|' || coalesce(service_tier, '') FROM standalone_provider_endpoints ORDER BY endpoint_id",
+    ),
+    (
+        "standalone_endpoint_keys",
+        "SELECT key_id || '|' || endpoint_id || '|' || key_label || '|' || cast(enabled AS TEXT) || '|' || cast(position AS TEXT) || '|' || hex(api_key_ciphertext) || '|' || hex(api_key_nonce) || '|' || cast(api_key_key_version AS TEXT) || '|' || created_at || '|' || updated_at FROM standalone_endpoint_keys ORDER BY key_id",
+    ),
+    (
+        "standalone_endpoint_oauth_tokens",
+        "SELECT endpoint_id || '|' || coalesce(hex(access_token_ciphertext), '') || '|' || coalesce(hex(access_token_nonce), '') || '|' || cast(coalesce(access_token_key_version, 0) AS TEXT) || '|' || coalesce(hex(refresh_token_ciphertext), '') || '|' || coalesce(hex(refresh_token_nonce), '') || '|' || cast(coalesce(refresh_token_key_version, 0) AS TEXT) || '|' || coalesce(expires_at, '') || '|' || created_at || '|' || updated_at FROM standalone_endpoint_oauth_tokens ORDER BY endpoint_id",
+    ),
+    (
+        "standalone_endpoint_admin_keys",
+        "SELECT endpoint_id || '|' || coalesce(hex(admin_api_key_ciphertext), '') || '|' || coalesce(hex(admin_api_key_nonce), '') || '|' || cast(coalesce(admin_api_key_key_version, 0) AS TEXT) || '|' || created_at || '|' || updated_at FROM standalone_endpoint_admin_keys ORDER BY endpoint_id",
+    ),
+    (
+        "standalone_model_routes",
+        "SELECT rule_id || '|' || scope || '|' || cast(coalesce(owner_user_id, -1) AS TEXT) || '|' || model_pattern || '|' || routing_strategy || '|' || cast(enabled AS TEXT) || '|' || created_at || '|' || updated_at FROM standalone_model_routes ORDER BY rule_id",
+    ),
+    (
+        "standalone_model_route_targets",
+        "SELECT target_id || '|' || rule_id || '|' || endpoint_id || '|' || cast(position AS TEXT) || '|' || cast(enabled AS TEXT) || '|' || coalesce(upstream_model, '') || '|' || created_at || '|' || updated_at || '|' || coalesce(hex(proxy_url_override_ciphertext), '') || '|' || coalesce(hex(proxy_url_override_nonce), '') || '|' || cast(coalesce(proxy_url_override_key_version, 0) AS TEXT) || '|' || coalesce(active_windows, '') || '|' || cast(dev_system_normalize AS TEXT) || '|' || native_api || '|' || coalesce(thinking_effort_override, '') || '|' || compact_mode || '|' || cast(thinking_downgrade_enabled AS TEXT) || '|' || coalesce(service_tier, '') FROM standalone_model_route_targets ORDER BY target_id",
+    ),
+];
+
+async fn open_pool_at_pre_embedding_schema(path: &std::path::Path) -> sqlx::SqlitePool {
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .foreign_keys(true);
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .expect("connect to the pre-37 database");
+    STANDALONE_MIGRATIONS
+        .run_to(PRE_EMBEDDING_SCHEMA_VERSION, &pool)
+        .await
+        .expect("apply the standalone migrations up to schema 36");
+    pool
+}
+
+async fn seed_pre_embedding_rows(pool: &sqlx::SqlitePool) {
+    sqlx::query(
+        r#"INSERT INTO standalone_provider_endpoints
+           (endpoint_id, name, provider, provider_region, base_url, native_api,
+            native_api_source, key_lb_enabled, enabled, mcp_enabled,
+            api_key_ciphertext, api_key_nonce, api_key_key_version,
+            proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version,
+            active_windows, created_at, updated_at, service_tier)
+           VALUES ('endpoint-1', 'seeded-endpoint', 'openrouter', 'global',
+                   'https://openrouter.ai/api/v1', 'chat', 'manual', 1, 1, 0,
+                   X'AABBCC', X'1122', 7, X'DDEE', X'3344', 2, '["mon"]',
+                   '2026-01-01 00:00:00', '2026-01-02 00:00:00', 'priority')"#,
+    )
+    .execute(pool)
+    .await
+    .expect("seed the endpoint");
+    sqlx::query(
+        r#"INSERT INTO standalone_endpoint_keys
+           (key_id, endpoint_id, key_label, enabled, position,
+            api_key_ciphertext, api_key_nonce, api_key_key_version,
+            created_at, updated_at)
+           VALUES ('key-1', 'endpoint-1', 'primary', 1, 0, X'0102', X'0304', 5,
+                   '2026-01-01 00:00:00', '2026-01-02 00:00:00')"#,
+    )
+    .execute(pool)
+    .await
+    .expect("seed the endpoint key");
+    sqlx::query(
+        r#"INSERT INTO standalone_endpoint_oauth_tokens
+           (endpoint_id, access_token_ciphertext, access_token_nonce,
+            access_token_key_version, refresh_token_ciphertext,
+            refresh_token_nonce, refresh_token_key_version, expires_at,
+            created_at, updated_at)
+           VALUES ('endpoint-1', X'AA11', X'BB22', 3, X'CC33', X'DD44', 4,
+                   '2030-01-01 00:00:00', '2026-01-01 00:00:00',
+                   '2026-01-02 00:00:00')"#,
+    )
+    .execute(pool)
+    .await
+    .expect("seed the oauth token");
+    sqlx::query(
+        r#"INSERT INTO standalone_endpoint_admin_keys
+           (endpoint_id, admin_api_key_ciphertext, admin_api_key_nonce,
+            admin_api_key_key_version, created_at, updated_at)
+           VALUES ('endpoint-1', X'EE55', X'FF66', 6, '2026-01-01 00:00:00',
+                   '2026-01-02 00:00:00')"#,
+    )
+    .execute(pool)
+    .await
+    .expect("seed the admin key");
+    sqlx::query(
+        r#"INSERT INTO standalone_model_routes
+           (rule_id, scope, owner_user_id, model_pattern, routing_strategy,
+            enabled, created_at, updated_at)
+           VALUES ('route-1', 'admin', NULL, 'text-embedding-*',
+                   'responses_session_affinity', 1, '2026-01-01 00:00:00',
+                   '2026-01-02 00:00:00')"#,
+    )
+    .execute(pool)
+    .await
+    .expect("seed the model route");
+    sqlx::query(
+        r#"INSERT INTO standalone_model_route_targets
+           (target_id, rule_id, endpoint_id, position, enabled, upstream_model,
+            created_at, updated_at, proxy_url_override_ciphertext,
+            proxy_url_override_nonce, proxy_url_override_key_version,
+            active_windows, dev_system_normalize, native_api,
+            thinking_effort_override, compact_mode, thinking_downgrade_enabled,
+            service_tier)
+           VALUES ('target-1', 'route-1', 'endpoint-1', 0, 1,
+                   'qwen/qwen3-embedding-8b', '2026-01-01 00:00:00',
+                   '2026-01-02 00:00:00', X'1234', X'5678', 1, '["tue"]', 0,
+                   'auto', NULL, 'passthrough', 0, 'priority')"#,
+    )
+    .execute(pool)
+    .await
+    .expect("seed the route target");
+}
+
+async fn snapshot_preserved_rows(pool: &sqlx::SqlitePool) -> Vec<String> {
+    let mut rows = Vec::new();
+    for (table, projection) in PRESERVED_ROW_PROJECTIONS {
+        let fetched = sqlx::query(*projection)
+            .fetch_all(pool)
+            .await
+            .unwrap_or_else(|error| panic!("read {table}: {error}"));
+        for row in fetched {
+            let value: String = row
+                .try_get(0)
+                .unwrap_or_else(|error| panic!("read {table} column: {error}"));
+            rows.push(format!("{table}|{value}"));
+        }
+    }
+    rows
+}
+
+/// Issue #1032 P0: the standalone upgrade from schema 36 to 37 must keep
+/// every seeded row, link and encrypted envelope byte-identical.
+#[tokio::test]
+async fn the_standalone_upgrade_from_36_keeps_seeded_rows_and_links() {
+    let path = database_path();
+    let pool = open_pool_at_pre_embedding_schema(&path).await;
+    seed_pre_embedding_rows(&pool).await;
+    let before = snapshot_preserved_rows(&pool).await;
+    let version: i64 = sqlx::query_scalar("SELECT schema_version FROM standalone_schema_meta")
+        .fetch_one(&pool)
+        .await
+        .expect("read the pre-upgrade schema version");
+    assert_eq!(
+        version, PRE_EMBEDDING_SCHEMA_VERSION,
+        "the fixture must start at the pre-embeddings schema version"
+    );
+    pool.close().await;
+
+    let store = StandaloneConfigStore::open(&path)
+        .await
+        .expect("open the upgraded store");
+    let upgraded: i64 = sqlx::query_scalar("SELECT schema_version FROM standalone_schema_meta")
+        .fetch_one(store.pool())
+        .await
+        .expect("read the upgraded schema version");
+    assert_eq!(
+        upgraded, EMBEDDING_SCHEMA_VERSION,
+        "the standalone migration and the store version must agree"
+    );
+    let after = snapshot_preserved_rows(store.pool()).await;
+    assert_eq!(
+        before, after,
+        "the upgrade must not change any stored row, link or encrypted envelope"
+    );
+    cleanup(store, path).await;
+}
+
+/// Issue #1032 P0: the upgraded standalone store accepts the embeddings
+/// protocol and the target dimension override, and rejects a dimension that
+/// is not a positive i32.
+#[tokio::test]
+async fn the_upgraded_standalone_store_accepts_embeddings_and_dimensions() {
+    let path = database_path();
+    let pool = open_pool_at_pre_embedding_schema(&path).await;
+    seed_pre_embedding_rows(&pool).await;
+    pool.close().await;
+
+    let store = StandaloneConfigStore::open(&path)
+        .await
+        .expect("open the upgraded store");
+    let dimension: Option<i64> = sqlx::query_scalar(
+        "SELECT embedding_dimensions_override FROM standalone_model_route_targets WHERE target_id = 'target-1'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .expect("read the inherited dimension");
+    assert!(
+        dimension.is_none(),
+        "an existing target inherits the caller dimensions"
+    );
+
+    sqlx::query(
+        r#"INSERT INTO standalone_provider_endpoints
+           (endpoint_id, name, provider, provider_region, base_url, native_api,
+            native_api_source, key_lb_enabled, enabled, mcp_enabled,
+            api_key_ciphertext, api_key_nonce, api_key_key_version)
+           VALUES ('endpoint-2', 'embedding-endpoint', 'openrouter', 'global',
+                   'https://openrouter.ai/api/v1', 'embeddings', 'manual', 0, 1, 0,
+                   X'0101', X'0202', 1)"#,
+    )
+    .execute(store.pool())
+    .await
+    .expect("an embeddings endpoint is accepted after the upgrade");
+    insert_dimension(store.pool(), "target-2", 1, 1536_i64)
+        .await
+        .expect("a positive dimension is accepted after the upgrade");
+    insert_dimension(store.pool(), "target-minimum", 2, 1_i64)
+        .await
+        .expect("the smallest positive dimension is accepted");
+    insert_dimension(store.pool(), "target-i32-maximum", 3, 2147483647_i64)
+        .await
+        .expect("the i32 maximum is accepted");
+    let stored: (i64, String) = sqlx::query_as(
+        "SELECT embedding_dimensions_override, typeof(embedding_dimensions_override) FROM standalone_model_route_targets WHERE target_id = 'target-2'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .expect("read the stored dimension");
+    assert_eq!(
+        stored,
+        (1536, "integer".to_string()),
+        "a valid dimension is stored as an integer"
+    );
+
+    // The column has INTEGER affinity, so a range-only CHECK would accept a
+    // fractional or non-numeric value. Every invalid value below must be
+    // rejected instead of stored.
+    for (target_id, position, value) in [
+        ("target-zero", 4_i64, 0_i64),
+        ("target-negative", 5, -1_i64),
+        ("target-overflow", 6, 2147483648_i64),
+    ] {
+        let error = insert_dimension(store.pool(), target_id, position, value)
+            .await
+            .expect_err("an invalid dimension must be rejected");
+        assert!(
+            error.to_string().contains("CHECK constraint failed"),
+            "unexpected error for {target_id}: {error}"
+        );
+    }
+    for (target_id, position, value) in [("target-fractional", 7_i64, 1.5_f64)] {
+        let error = insert_dimension(store.pool(), target_id, position, value)
+            .await
+            .expect_err("a fractional dimension must be rejected");
+        assert!(
+            error.to_string().contains("CHECK constraint failed"),
+            "unexpected error for {target_id}: {error}"
+        );
+    }
+    for (target_id, position, value) in [
+        ("target-nonnumeric", 8_i64, "many".to_string()),
+        ("target-fractional-text", 9, "1.5".to_string()),
+    ] {
+        let error = insert_dimension(store.pool(), target_id, position, value)
+            .await
+            .expect_err("a non-numeric dimension must be rejected");
+        assert!(
+            error.to_string().contains("CHECK constraint failed"),
+            "unexpected error for {target_id}: {error}"
+        );
+    }
+    cleanup(store, path).await;
+}
+
+/// Issue #1032 P0: insert a route target with one dimension value, so the
+/// constraint regression can bind every storage class the column accepts or
+/// must reject.
+async fn insert_dimension<T>(
+    pool: &sqlx::SqlitePool,
+    target_id: &str,
+    position: i64,
+    value: T,
+) -> std::result::Result<(), sqlx::Error>
+where
+    T: for<'q> sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + 'static,
+{
+    sqlx::query(
+        r#"INSERT INTO standalone_model_route_targets
+           (target_id, rule_id, endpoint_id, position, enabled, upstream_model,
+            embedding_dimensions_override)
+           VALUES (?, 'route-1', 'endpoint-2', ?, 1, 'qwen/qwen3-embedding-8b', ?)"#,
+    )
+    .bind(target_id)
+    .bind(position)
+    .bind(value)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// Issue #1032 P0: a fresh standalone database carries the same embeddings
+/// capability as the upgraded one.
+#[tokio::test]
+async fn a_fresh_standalone_store_carries_the_embeddings_capability() {
+    let (store, path) = open_store().await;
+    let version: i64 = sqlx::query_scalar("SELECT schema_version FROM standalone_schema_meta")
+        .fetch_one(store.pool())
+        .await
+        .expect("read the schema version");
+    assert_eq!(version, EMBEDDING_SCHEMA_VERSION);
+
+    sqlx::query(
+        r#"INSERT INTO standalone_provider_endpoints
+           (endpoint_id, name, provider, provider_region, base_url, native_api,
+            native_api_source, key_lb_enabled, enabled, mcp_enabled,
+            api_key_ciphertext, api_key_nonce, api_key_key_version)
+           VALUES ('endpoint-1', 'embedding-endpoint', 'openrouter', 'global',
+                   'https://openrouter.ai/api/v1', 'embeddings', 'manual', 0, 1, 0,
+                   X'0101', X'0202', 1)"#,
+    )
+    .execute(store.pool())
+    .await
+    .expect("a fresh store accepts an embeddings endpoint");
+    cleanup(store, path).await;
+}
+
+/// Issue #1032 P1: the per-target dimension override and the embeddings
+/// protocol round-trip through the standalone SQLite store; a non-positive
+/// dimension is rejected by the snapshot validator before any write.
+#[tokio::test]
+async fn the_standalone_store_round_trips_the_embeddings_dimension() {
+    let (store, path) = open_store().await;
+    let manager = manager(23);
+    let config = sample_config();
+    let endpoint = config.endpoints[0].clone();
+    store
+        .save_endpoint(&manager, &endpoint)
+        .await
+        .expect("save the endpoint");
+
+    let mut route = config.routes[0].clone();
+    route.targets[0].native_api = NativeApi::Embeddings;
+    route.targets[0].embedding_dimensions_override = Some(1536);
+    store
+        .save_route_direct(&manager, &route)
+        .await
+        .expect("save the route with a forced dimension");
+    let stored = store
+        .get_route(&manager, route.rule_id)
+        .await
+        .expect("read the route")
+        .expect("the route exists");
+    assert_eq!(
+        stored.targets[0].embedding_dimensions_override,
+        Some(1536),
+        "the forced dimension round-trips"
+    );
+    assert_eq!(
+        stored.targets[0].native_api,
+        NativeApi::Embeddings,
+        "the embeddings protocol round-trips"
+    );
+
+    // An inherit value round-trips as `None`.
+    route.targets[0].embedding_dimensions_override = None;
+    store
+        .save_route_direct(&manager, &route)
+        .await
+        .expect("save the route with an inherited dimension");
+    let stored = store
+        .get_route(&manager, route.rule_id)
+        .await
+        .expect("read the route")
+        .expect("the route exists");
+    assert_eq!(
+        stored.targets[0].embedding_dimensions_override, None,
+        "an inherited dimension round-trips as None"
+    );
+
+    // The snapshot validator rejects a non-positive dimension before the
+    // write reaches the SQLite CHECK.
+    route.targets[0].embedding_dimensions_override = Some(0);
+    let error = StandaloneConfig {
+        endpoints: vec![endpoint],
+        routes: vec![route],
+        ..StandaloneConfig::default()
+    }
+    .validate()
+    .expect_err("a non-positive dimension must be rejected");
+    assert!(
+        error.to_string().contains("embedding_dimensions_override"),
+        "unexpected error: {error}"
+    );
+
+    cleanup(store, path).await;
 }

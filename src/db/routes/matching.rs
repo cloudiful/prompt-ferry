@@ -9,6 +9,7 @@ pub async fn get_route(pool: &PgPool, route_id: uuid::Uuid) -> Result<Option<Rou
         .fetch_optional(pool)
         .await?
         .map(|row| RouteConfig {
+            embedding_dimensions_override: None,
             route_id: row.route_id,
             user_id: row.user_id,
             model_route_rule_id: None,

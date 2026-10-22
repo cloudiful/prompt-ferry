@@ -101,6 +101,9 @@ async fn sync_model_route_targets(
             target.thinking_effort_override,
             target.compact_mode.as_str(),
             service_tier.as_deref(),
+            // Issue #1032: nullable positive dimension override; `None`
+            // inherits the caller's dimensions.
+            target.embedding_dimensions_override,
         )
         .execute(&mut **tx)
         .await?;

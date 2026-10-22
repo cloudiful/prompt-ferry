@@ -21,6 +21,7 @@ async fn quota_key_lb_skips_a_key_with_no_remaining_window() {
     let exhausted_key_id = uuid::Uuid::new_v4();
     let available_key_id = uuid::Uuid::new_v4();
     let route = db::RouteConfig {
+        embedding_dimensions_override: None,
         route_id: endpoint_id,
         user_id: 1,
         model_route_rule_id: None,
@@ -266,6 +267,7 @@ fn command_code_route(
     available_key_id: uuid::Uuid,
 ) -> db::RouteConfig {
     db::RouteConfig {
+        embedding_dimensions_override: None,
         route_id: endpoint_id,
         user_id: 1,
         model_route_rule_id: None,
@@ -388,6 +390,7 @@ async fn quota_key_lb_still_routes_payg_command_code_key_without_windows() {
     let endpoint_id = uuid::Uuid::new_v4();
     let payg_key_id = uuid::Uuid::new_v4();
     let route = db::RouteConfig {
+        embedding_dimensions_override: None,
         route_id: endpoint_id,
         user_id: 1,
         model_route_rule_id: None,

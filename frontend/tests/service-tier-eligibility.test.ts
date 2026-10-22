@@ -25,6 +25,12 @@ test('realtime is the only excluded protocol', () => {
   expect(supportsServiceTierFor('realtime')).toBe(false)
 })
 
+test('embeddings are excluded from the service-tier override', () => {
+  // Issue #1032: the embeddings protocol has no `service_tier` field, so the
+  // runtime gate (`supports_service_tier_for`) excludes it like Realtime.
+  expect(supportsServiceTierFor('embeddings')).toBe(false)
+})
+
 test('endpointFormProtocol resolves the endpoint protocol axis', () => {
   expect(
     endpointFormProtocol({ protocol_mode: 'auto', native_api_override: null }),

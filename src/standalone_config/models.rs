@@ -434,6 +434,13 @@ pub struct ModelRouteTargetConfig {
     /// TEXT column (NULL means inherit).
     #[serde(default)]
     pub service_tier: Option<String>,
+    /// Issue #1032: per-target embedding dimension override. `None`/null
+    /// inherits the caller's dimensions; `Some(dimensions)` forces the
+    /// dimension count for the target. It is an override, never a cap, and
+    /// must be a positive i32. SQLite persists the 0037
+    /// `embedding_dimensions_override` INTEGER column.
+    #[serde(default)]
+    pub embedding_dimensions_override: Option<i32>,
 }
 
 impl fmt::Debug for ModelRouteTargetConfig {

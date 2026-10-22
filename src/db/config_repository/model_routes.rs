@@ -55,6 +55,10 @@ pub struct UnifiedModelRouteTarget {
     /// Issue #637: per-target free-form service-tier override surfaced in the
     /// unified admin shape; `None`/blank means inherit the endpoint value.
     pub service_tier: Option<String>,
+    /// Issue #1032: per-target embedding dimension override surfaced in the
+    /// unified admin shape; `None`/null means inherit the caller's
+    /// dimensions, `Some(dimensions)` forces them.
+    pub embedding_dimensions_override: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,6 +125,8 @@ fn target_to_pg(target: UnifiedModelRouteTarget) -> PgModelRouteTarget {
         compact_mode: target.compact_mode,
         // Issue #637: carry the free-form target override through.
         service_tier: target.service_tier,
+        // Issue #1032: carry the nullable dimension override through.
+        embedding_dimensions_override: target.embedding_dimensions_override,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }

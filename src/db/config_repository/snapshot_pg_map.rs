@@ -112,6 +112,7 @@ pub(super) fn convert_route(route: ModelEndpointRule) -> ModelRouteSnapshot {
                 thinking_effort_override: target.thinking_effort_override,
                 compact_mode: target.compact_mode.as_str().to_string(),
                 service_tier: target.service_tier,
+                embedding_dimensions_override: target.embedding_dimensions_override,
             })
             .collect(),
     }

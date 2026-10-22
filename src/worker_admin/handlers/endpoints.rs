@@ -298,6 +298,7 @@ pub(super) async fn list_endpoint_models(
     State(state): State<AdminState>,
     headers: HeaderMap,
     Path(endpoint_id): Path<Uuid>,
+    Query(query): Query<ModelCatalogQuery>,
 ) -> Response {
     if let Err(response) = ensure_admin(&state, &headers).await {
         return response.into_response();
@@ -307,6 +308,10 @@ pub(super) async fn list_endpoint_models(
         Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "endpoint not found"),
         Err(err) => return internal(&state, err),
     };
+    // Issue #1032: an explicit selector scopes the catalog to one protocol
+    // (an embeddings target sees only the embeddings list); absence keeps the
+    // endpoint's own protocol semantics (auto lists the union).
+    let catalog_protocol = query.native_api.unwrap_or(endpoint.native_api);
     // Issue #1004 P1: a ChatGPT subscription endpoint has no Platform API key
     // and no Platform model listing. Its suggestions come from the Codex
     // model table, so the request never reaches `api.openai.com` and the
@@ -364,12 +369,7 @@ pub(super) async fn list_endpoint_models(
 
     let cached = state
         .endpoint_model_cache
-        .lookup_endpoint(
-            endpoint_id,
-            &endpoint.base_url,
-            &api_key,
-            endpoint.native_api,
-        )
+        .lookup_endpoint(endpoint_id, &endpoint.base_url, &api_key, catalog_protocol)
         .await;
     if let crate::endpoint_models::CacheLookup::Fresh(snapshot) = cached {
         return Json(EndpointModelsResponse {
@@ -378,60 +378,77 @@ pub(super) async fn list_endpoint_models(
         .into_response();
     }
 
-    let url = crate::endpoint_models::models_url(&endpoint.base_url, endpoint.provider);
-    let request = client.get(url);
-    let request = if endpoint.native_api == NativeApi::AnthropicMessages {
-        request
-            .header("x-api-key", &api_key)
-            .header("anthropic-version", "2023-06-01")
-    } else {
-        request.bearer_auth(&api_key)
-    };
-    let response = match request.send().await {
-        Ok(response) => response,
-        Err(err) => {
+    // Issue #1032: an Auto OpenRouter endpoint lists the deduplicated union of
+    // its chat and embeddings catalogs; every other protocol lists one
+    // catalog.
+    let urls = crate::endpoint_models::models_urls(
+        &endpoint.base_url,
+        endpoint.provider,
+        catalog_protocol,
+    );
+    let mut model_ids = Vec::<String>::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    for url in urls {
+        let request = client.get(url);
+        let request = if endpoint.native_api == NativeApi::AnthropicMessages {
+            request
+                .header("x-api-key", &api_key)
+                .header("anthropic-version", "2023-06-01")
+        } else {
+            request.bearer_auth(&api_key)
+        };
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(err) => {
+                tracing::warn!(
+                    endpoint_id = %endpoint_id,
+                    error = %err,
+                    "upstream model discovery request failed"
+                );
+                return discovery_failed();
+            }
+        };
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        if !status.is_success() {
             tracing::warn!(
                 endpoint_id = %endpoint_id,
-                error = %err,
-                "upstream model discovery request failed"
+                status = status.as_u16(),
+                "upstream model discovery answered with an error status"
             );
             return discovery_failed();
         }
-    };
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    if !status.is_success() {
-        tracing::warn!(
-            endpoint_id = %endpoint_id,
-            status = status.as_u16(),
-            "upstream model discovery answered with an error status"
-        );
-        return discovery_failed();
-    }
-    let payload = match serde_json::from_str::<serde_json::Value>(&body) {
-        Ok(payload) => payload,
-        Err(err) => {
+        let payload = match serde_json::from_str::<serde_json::Value>(&body) {
+            Ok(payload) => payload,
+            Err(err) => {
+                tracing::warn!(
+                    endpoint_id = %endpoint_id,
+                    error = %err,
+                    "upstream model discovery answered with an unreadable body"
+                );
+                return discovery_failed();
+            }
+        };
+        let Some(items) = payload.get("data").and_then(serde_json::Value::as_array) else {
             tracing::warn!(
                 endpoint_id = %endpoint_id,
-                error = %err,
-                "upstream model discovery answered with an unreadable body"
+                "upstream model discovery answered without a model list"
             );
             return discovery_failed();
-        }
-    };
-    let Some(items) = payload.get("data").and_then(serde_json::Value::as_array) else {
-        tracing::warn!(
-            endpoint_id = %endpoint_id,
-            "upstream model discovery answered without a model list"
-        );
-        return discovery_failed();
-    };
-    let snapshot = crate::endpoint_models::EndpointModelSnapshot::from_model_ids(
-        items
+        };
+        for id in items
             .iter()
             .filter_map(|item| item.get("id").and_then(serde_json::Value::as_str))
             .map(str::trim)
-            .filter(|id| !id.is_empty()),
+            .filter(|id| !id.is_empty())
+        {
+            if seen.insert(id.to_string()) {
+                model_ids.push(id.to_string());
+            }
+        }
+    }
+    let snapshot = crate::endpoint_models::EndpointModelSnapshot::from_model_ids(
+        model_ids.iter().map(String::as_str),
     );
     state
         .endpoint_model_cache
@@ -439,7 +456,7 @@ pub(super) async fn list_endpoint_models(
             endpoint_id,
             &endpoint.base_url,
             &api_key,
-            endpoint.native_api,
+            catalog_protocol,
             snapshot.clone(),
         )
         .await;
@@ -537,7 +554,13 @@ pub(super) async fn test_endpoint(
             .into_response();
         }
     };
-    let url = crate::endpoint_models::models_url(&endpoint.base_url, endpoint.provider);
+    // Issue #1032: an embeddings endpoint is probed against its embeddings
+    // catalog; other protocols keep the chat catalog.
+    let url = crate::endpoint_models::models_url(
+        &endpoint.base_url,
+        endpoint.provider,
+        endpoint.native_api,
+    );
     let started = Instant::now();
     let request = client.get(url);
     let request = if endpoint.native_api == NativeApi::AnthropicMessages {

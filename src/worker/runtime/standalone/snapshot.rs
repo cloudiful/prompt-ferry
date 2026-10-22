@@ -189,6 +189,7 @@ mod tests {
                 routing_strategy: RoutingStrategy::ResponsesSessionAffinity,
                 enabled: true,
                 targets: vec![ModelRouteTargetConfig {
+                    embedding_dimensions_override: None,
                     target_id: Uuid::new_v4(),
                     endpoint_id,
                     position: 0,

@@ -44,6 +44,7 @@ pub async fn list_visible_endpoints(pool: &PgPool, user_id: i64) -> Result<Vec<R
     let routes = rows
         .into_iter()
         .map(|row| RouteConfig {
+            embedding_dimensions_override: None,
             route_id: row.route_id,
             user_id: row.user_id,
             model_route_rule_id: None,

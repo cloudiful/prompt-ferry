@@ -139,6 +139,13 @@ pub(super) async fn prepare_upstream_request_for_route(
     request: &BufferedBridgeRequest,
     conversation_id: Option<uuid::Uuid>,
 ) -> Result<PreparedRouteRequest, CompatError> {
+    // Issue #1032: the embeddings protocol has its own preparation path. It
+    // is never redacted (a redacted input changes the embedding and there is
+    // no vector to restore), so a policy that would replace any input text
+    // refuses the request instead.
+    if route.native_api == crate::config::NativeApi::Embeddings {
+        return prepare_embeddings_request(admin_state, route, request, conversation_id).await;
+    }
     let effective_request_body = effective_request_body(route, request.body.as_slice());
     let redaction_enabled =
         redact::redaction_enabled_for_user(request.user_id.filter(|id| *id > 0));
@@ -289,11 +296,99 @@ async fn load_prior_session(
 }
 
 fn effective_request_body(route: &db::RouteConfig, request_body: &[u8]) -> Vec<u8> {
-    route
+    let body = route
         .upstream_model
         .as_deref()
         .map(|model| crate::usage::rewrite_model_in_body(request_body, model))
-        .unwrap_or_else(|| request_body.to_vec())
+        .unwrap_or_else(|| request_body.to_vec());
+    // Issue #1032: a configured target dimension is a forced override, never a
+    // cap. Only the `dimensions` key is set, so every other OpenAI-compatible
+    // field (including unknown provider extensions) survives verbatim. The
+    // caller's own `dimensions` is replaced when the target forces a value;
+    // with no override the caller's value is left untouched.
+    match (route.native_api, route.embedding_dimensions_override) {
+        (crate::config::NativeApi::Embeddings, Some(dimensions)) => {
+            crate::usage::apply_embedding_dimensions_override(&body, dimensions)
+        }
+        _ => body,
+    }
+}
+
+/// Issue #1032: prepare an embeddings request.
+///
+/// Embeddings are forwarded verbatim: no translation, no thinking/tier/compact
+/// injection, no streaming, and no redaction transformation. Because a
+/// redaction replacement would silently change the embedding vector and
+/// nothing could restore it, the request is refused with HTTP 400
+/// `embedding_input_redaction_conflict` when the effective policy *would*
+/// replace any text input. A token-only input never conflicts. No request is
+/// sent upstream and no redaction session is minted or persisted.
+async fn prepare_embeddings_request(
+    admin_state: Option<&AdminState>,
+    route: &db::RouteConfig,
+    request: &BufferedBridgeRequest,
+    conversation_id: Option<uuid::Uuid>,
+) -> Result<PreparedRouteRequest, CompatError> {
+    if route.has_oauth_token {
+        return Err(CompatError::new(
+            StatusCode::BAD_REQUEST,
+            "embeddings_not_supported_for_subscription",
+            "a ChatGPT subscription endpoint cannot serve embeddings; use a Platform API key",
+        ));
+    }
+    // Issue #1032: validate the caller's own body before any target override.
+    // The effective body is validated again below (post-override), but a
+    // configured valid dimension must never hide a malformed caller dimension.
+    // The embeddings protocol only owns `/v1/embeddings`; another path on this
+    // target keeps its protocol-mismatch error from the compat matrix.
+    if request.path == "/v1/embeddings" {
+        crate::upstream_adapter::validate_embeddings_request_body(&request.body)?;
+    }
+    let effective_request_body = effective_request_body(route, request.body.as_slice());
+    let redaction_enabled =
+        redact::redaction_enabled_for_user(request.user_id.filter(|id| *id > 0));
+    if redaction_enabled {
+        let prior_session = load_prior_session(admin_state, conversation_id).await?;
+        let external_id = conversation_id.as_ref().map(uuid::Uuid::to_string);
+        let fragments = super::embeddings::embedding_text_inputs(&effective_request_body);
+        let would_redact = crate::redact_upstream::would_redact_fragments(
+            request.user_id.filter(|id| *id > 0),
+            external_id.as_deref(),
+            prior_session.as_ref(),
+            fragments.iter().map(String::as_str),
+        )
+        .map_err(|err| {
+            // The effective policy could not be inspected: fail closed
+            // rather than forward an input that might be replaced.
+            CompatError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "embedding_input_redaction_check_failed",
+                format!("failed to evaluate the upstream redaction policy: {err}"),
+            )
+        })?;
+        if would_redact {
+            return Err(CompatError::new(
+                StatusCode::BAD_REQUEST,
+                "embedding_input_redaction_conflict",
+                "the request input matches an upstream redaction rule, which would change the embedding; the request was refused",
+            ));
+        }
+    }
+    let prepared = prepare_upstream_request_for_provider(
+        &request.path,
+        &effective_request_body,
+        route.native_api,
+        Some(route.provider),
+        route.dev_system_normalize,
+        route.thinking_effort_override.as_deref(),
+        route.compact_mode,
+    )?;
+    Ok(PreparedRouteRequest {
+        prepared,
+        // No session is minted or persisted for embeddings and nothing is
+        // cleared, so a stored chat session is never touched by this path.
+        redaction: route_redaction_state(redaction_enabled, false, None, None),
+    })
 }
 
 fn extract_function_call_output_ids(input: &[Value]) -> Vec<String> {

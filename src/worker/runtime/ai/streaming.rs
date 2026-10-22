@@ -272,7 +272,12 @@ pub(super) async fn forward_streaming_response(
     let response_adapter = context.response_adapter;
     let services = context.services;
     let emits_sse = response_adapter != ResponseAdapter::Passthrough || is_sse;
-    if !emits_sse && upstream_restore_session.is_some() {
+    // Issue #1032: an embeddings response is not streamed by us (a client
+    // `stream: true` is refused before forwarding), so its complete body is
+    // buffered by the existing non-SSE forwarder and the accounting runs over
+    // that borrowed body.
+    let embedding_route = route_ctx.route.native_api == crate::config::NativeApi::Embeddings;
+    if !emits_sse && (upstream_restore_session.is_some() || embedding_route) {
         debug!(
             request_id = %request.request_id,
             path = %request.path,
@@ -298,6 +303,9 @@ pub(super) async fn forward_streaming_response(
             | ResponseAdapter::AnthropicMessagesToResponses
     ) || is_sse;
     let mut capture = UsageCapture::new(capture_is_sse, request_ctx.request_model.clone());
+    if route_ctx.route.native_api == crate::config::NativeApi::Embeddings {
+        capture.set_embedding_response();
+    }
     capture
         .set_response_text_capture_limit(services.response_limits.max_response_text_capture_bytes);
     let response_content_type = if matches!(
@@ -434,7 +442,8 @@ pub(super) async fn forward_streaming_response(
                         let error = anyhow!(err).context("failed reading upstream response");
                         let safe_err = safe_error(&error, redact_content, request_ctx.user_id);
                         let (response_prompt, response_raw_body) =
-                            super::forward::response_logging_payload(
+                            super::forward::response_logging_payload_for_route(
+                                &route_ctx.route,
                                 &capture.response_text,
                                 &raw_response_body,
                                 content_logging_enabled,
@@ -859,7 +868,8 @@ pub(super) async fn forward_streaming_response(
                 .as_ref()
                 .and_then(|capture| capture.artifact())
         });
-    let (response_prompt, response_raw_body) = super::forward::response_logging_payload(
+    let (response_prompt, response_raw_body) = super::forward::response_logging_payload_for_route(
+        &route_ctx.route,
         &capture.response_text,
         &raw_response_body,
         content_logging_enabled,
@@ -935,16 +945,14 @@ async fn forward_buffered_non_sse_response(
     let request = context.request;
     let request_ctx = context.request_ctx;
     let upstream_redacted_request_json = context.upstream_redacted_request_json.clone();
-    let upstream_restore_session = context
-        .upstream_restore_session
-        .clone()
-        .ok_or_else(|| anyhow!("missing upstream restore session"))?;
+    let upstream_restore_session = context.upstream_restore_session.clone();
     let redact_content = context.logging.redact_content;
     let content_logging_enabled = context.logging.content_logging_enabled;
     let raw_content_logging_enabled = context.logging.raw_content_logging_enabled;
     let response_adapter = context.response_adapter;
     let services = context.services;
     let status = response.status();
+    let response_headers = forwarded_response_headers(response.headers());
     let response_content_type = upstream_content_type;
     let mut stream_diag = UpstreamStreamDiag::new(
         request.request_id.clone(),
@@ -1008,20 +1016,21 @@ async fn forward_buffered_non_sse_response(
     }
 
     let buffered_bytes = output.len();
-    let restored_output = match restore_ai_response_json_blocking(
-        request.path.clone(),
-        output,
-        upstream_restore_session.clone(),
-    )
-    .await
-    {
-        Ok(restored_output) => restored_output,
-        Err(err) => {
-            stream_diag.record_timings(request_ctx.elapsed_ms(), None);
-            stream_diag.mark_terminal("restore_validation_error", Some(err.to_string()));
-            stream_diag.finish();
-            return Err(err);
+    let restored_output = match upstream_restore_session.as_ref() {
+        Some(session) => {
+            match restore_ai_response_json_blocking(request.path.clone(), output, session.clone())
+                .await
+            {
+                Ok(restored_output) => restored_output,
+                Err(err) => {
+                    stream_diag.record_timings(request_ctx.elapsed_ms(), None);
+                    stream_diag.mark_terminal("restore_validation_error", Some(err.to_string()));
+                    stream_diag.finish();
+                    return Err(err);
+                }
+            }
         }
+        None => output,
     };
     debug!(
         request_id = %request.request_id,
@@ -1033,15 +1042,23 @@ async fn forward_buffered_non_sse_response(
         "completed buffered non-SSE restore path"
     );
 
-    let mut capture = UsageCapture::new(
-        response_content_type
-            .as_deref()
-            .is_some_and(|value| value.contains("text/event-stream")),
-        request_ctx.request_model.clone(),
-    );
+    let response_is_sse = response_content_type
+        .as_deref()
+        .is_some_and(|value| value.contains("text/event-stream"));
+    let mut capture = UsageCapture::new(response_is_sse, request_ctx.request_model.clone());
+    let embedding_route = route_ctx.route.native_api == crate::config::NativeApi::Embeddings;
+    if embedding_route {
+        capture.set_embedding_response();
+    }
     capture
         .set_response_text_capture_limit(services.response_limits.max_response_text_capture_bytes);
-    let _ = capture.observe_chunk(&restored_output);
+    if embedding_route && !response_is_sse {
+        // The buffered body is already owned here, so the embeddings accounting
+        // runs directly over it instead of accumulating the body in the capture.
+        capture.observe_embedding_body(&restored_output);
+    } else {
+        let _ = capture.observe_chunk(&restored_output);
+    }
     capture.finish();
 
     send_stream_message(
@@ -1050,7 +1067,7 @@ async fn forward_buffered_non_sse_response(
             request_id: request.request_id.clone(),
             status: status.as_u16(),
             content_type: response_content_type,
-            headers: Vec::new(),
+            headers: response_headers,
         }),
         &mut stream_diag,
     )
@@ -1088,7 +1105,8 @@ async fn forward_buffered_non_sse_response(
                 .as_ref()
                 .and_then(|capture| capture.artifact())
         });
-    let (response_prompt, response_raw_body) = super::forward::response_logging_payload(
+    let (response_prompt, response_raw_body) = super::forward::response_logging_payload_for_route(
+        &route_ctx.route,
         &capture.response_text,
         &raw_response_body,
         content_logging_enabled,
@@ -1100,9 +1118,9 @@ async fn forward_buffered_non_sse_response(
         services.record_usage_event(
             ai_route_usage_log(request_ctx, request, route_ctx)
                 .with_upstream_redaction(
-                    true,
+                    upstream_restore_session.is_some(),
                     upstream_redacted_request_json,
-                    Some(upstream_restore_session),
+                    upstream_restore_session,
                 )
                 .with_state(
                     db::UsageEventKind::Request,

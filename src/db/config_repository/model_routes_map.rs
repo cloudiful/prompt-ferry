@@ -53,6 +53,8 @@ pub(super) fn from_postgres_target(target: crate::db::ModelRouteTarget) -> Unifi
         compact_mode: target.compact_mode,
         // Issue #637: free-form target override surfaced unchanged.
         service_tier: target.service_tier,
+        // Issue #1032: nullable dimension override surfaced unchanged.
+        embedding_dimensions_override: target.embedding_dimensions_override,
     }
 }
 
@@ -130,6 +132,9 @@ where
                 // Issue #637: 0034 plaintext free-form override; `rows`
                 // already normalized blank to inherit (`None`).
                 service_tier: target.service_tier,
+                // Issue #1032: 0037 nullable positive dimension override;
+                // `None` inherits the caller's dimensions.
+                embedding_dimensions_override: target.embedding_dimensions_override,
             }
         })
         .collect();
@@ -201,6 +206,13 @@ pub(super) fn sqlite_route_from_create(
                 // Issue #637: free-form override; blank normalizes to
                 // inherit (`None`).
                 service_tier: crate::db::normalize_service_tier(target.service_tier.as_deref()),
+                // Issue #1032: nullable positive dimension override;
+                // `None` inherits the caller's dimensions. Rejected when
+                // non-positive (400 `invalid_embedding_dimensions`).
+                embedding_dimensions_override: crate::db::normalize_embedding_dimensions_override(
+                    target.embedding_dimensions_override,
+                )
+                .map_err(|message| anyhow::anyhow!(message))?,
             })
         })
         .collect::<Result<Vec<_>>>()?;

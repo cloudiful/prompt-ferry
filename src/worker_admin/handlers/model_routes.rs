@@ -67,9 +67,16 @@ pub(super) async fn update_model_route(
     // route shape is redacted, so load the stored overrides separately;
     // omitted per-target `proxy_url_override` keeps the stored value.
     // Issue #378 Phase I: same carry for `active_windows` (omitted keeps).
-    let (existing_overrides, existing_windows) = load_existing_route_carry(&state, rule_id).await;
+    // Issue #1032: same carry for the per-target dimension (omitted keeps).
+    let (existing_overrides, existing_windows, existing_dimensions) =
+        load_existing_route_carry(&state, rule_id).await;
     let input = match body
-        .into_create_with_existing(&state, &existing_overrides, &existing_windows)
+        .into_create_with_existing(
+            &state,
+            &existing_overrides,
+            &existing_windows,
+            &existing_dimensions,
+        )
         .await
     {
         Ok(input) => input,
@@ -98,12 +105,15 @@ pub(super) async fn update_model_route(
 /// for unknown rules.
 /// Issue #378 Phase I: also loads stored `active_windows` for the same
 /// omit-when-untouched carry (`None`/empty means all-day).
+/// Issue #1032: also loads the stored per-target embedding dimension
+/// override, keyed by the target identity the request can express.
 async fn load_existing_route_carry(
     state: &AdminState,
     rule_id: Uuid,
 ) -> (
     HashMap<Uuid, Option<String>>,
     HashMap<Uuid, Vec<db::ActiveWindow>>,
+    crate::worker_admin_types::DimensionOverrideCarry,
 ) {
     if let Some(pool) = state.config_repository.as_postgres() {
         if let Ok(Some(rule)) = db::get_model_endpoint_rule(pool, rule_id).await {
@@ -113,14 +123,20 @@ async fn load_existing_route_carry(
                     .map(|target| {
                         (
                             target.endpoint_id,
+                            target.upstream_model.clone(),
                             target.proxy_url_override.clone(),
                             target.active_windows.clone(),
+                            target.embedding_dimensions_override,
                         )
                     })
                     .collect(),
             );
         }
-        return (HashMap::new(), HashMap::new());
+        return (
+            HashMap::new(),
+            HashMap::new(),
+            crate::worker_admin_types::DimensionOverrideCarry::default(),
+        );
     }
     if let Some(repo) = state.config_repository.as_sqlite()
         && let Ok(Some(route)) = repo
@@ -136,25 +152,39 @@ async fn load_existing_route_carry(
                 .map(|target| {
                     (
                         target.endpoint_id,
+                        target.upstream_model.clone(),
                         target.proxy_url_override.clone(),
                         parse_sqlite_windows(&target.active_windows),
+                        target.embedding_dimensions_override,
                     )
                 })
                 .collect(),
         );
     }
-    (HashMap::new(), HashMap::new())
+    (
+        HashMap::new(),
+        HashMap::new(),
+        crate::worker_admin_types::DimensionOverrideCarry::default(),
+    )
 }
 
 fn carry_from_targets(
-    targets: Vec<(Uuid, Option<String>, Vec<db::ActiveWindow>)>,
+    targets: Vec<(
+        Uuid,
+        Option<String>,
+        Option<String>,
+        Vec<db::ActiveWindow>,
+        Option<i32>,
+    )>,
 ) -> (
     HashMap<Uuid, Option<String>>,
     HashMap<Uuid, Vec<db::ActiveWindow>>,
+    crate::worker_admin_types::DimensionOverrideCarry,
 ) {
     let mut overrides = HashMap::new();
     let mut windows = HashMap::new();
-    for (endpoint_id, proxy_override, active_windows) in targets {
+    let mut dimensions = Vec::new();
+    for (endpoint_id, upstream_model, proxy_override, active_windows, dimension) in targets {
         overrides.insert(
             endpoint_id,
             proxy_override
@@ -164,8 +194,13 @@ fn carry_from_targets(
                 .map(str::to_string),
         );
         windows.insert(endpoint_id, active_windows);
+        dimensions.push((endpoint_id, upstream_model, dimension));
     }
-    (overrides, windows)
+    (
+        overrides,
+        windows,
+        crate::worker_admin_types::DimensionOverrideCarry::from_targets(dimensions),
+    )
 }
 
 fn parse_sqlite_windows(raw: &Option<String>) -> Vec<db::ActiveWindow> {
@@ -527,9 +562,17 @@ async fn probe_model_route_target(
     // keeps the plain `/v1/models` join. The probe URL composition
     // further down is routed through `upstream_url_for_route_parts`
     // so the per-`native_api` `/v1` strip applies uniformly.
+    // Issue #1032: an explicit embeddings target lists the embeddings
+    // catalog; every other protocol (and `auto`, which answers before the
+    // protocol test) keeps the chat catalog.
+    let catalog_protocol = match target.native_api {
+        NativeApi::Embeddings => NativeApi::Embeddings,
+        _ => NativeApi::Chat,
+    };
     let models_request = client.get(crate::endpoint_models::models_url(
         &target.base_url,
         target.provider,
+        catalog_protocol,
     ));
     let models_request = match target.native_api {
         NativeApi::AnthropicMessages => models_request
@@ -645,6 +688,22 @@ async fn probe_model_route_target(
         ),
         NativeApi::Auto => unreachable!("auto model routes return before protocol test"),
         NativeApi::Realtime => unreachable!(),
+        // Issue #1032: the embeddings probe posts the smallest valid
+        // embedding request to the target's actual model and reports the
+        // success payload and usage without echoing a vector.
+        NativeApi::Embeddings => {
+            let mut payload = serde_json::json!({
+                "model": model,
+                "input": "ping",
+                "encoding_format": "float",
+            });
+            if let Some(dimensions) = target.embedding_dimensions_override
+                && let Some(object) = payload.as_object_mut()
+            {
+                object.insert("dimensions".to_string(), serde_json::json!(dimensions));
+            }
+            (NativeApi::Embeddings.path(), payload)
+        }
     };
     // Issue #644: keep probe behavior consistent with live forwarding. The
     // configured free-form tier is provider-agnostic
@@ -678,11 +737,57 @@ async fn probe_model_route_target(
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     let message = if status.is_success() {
-        format!("OK ({})", target.native_api.as_str())
+        match target.native_api {
+            // Issue #1032: summarize the embeddings success (count, vector
+            // dimensions, reported usage) without ever echoing a vector.
+            NativeApi::Embeddings => embeddings_probe_summary(&body)
+                .unwrap_or_else(|| format!("OK ({})", target.native_api.as_str())),
+            _ => format!("OK ({})", target.native_api.as_str()),
+        }
     } else {
         truncate_message(&maybe_redact(state, body.trim()))
     };
     Ok((model, status, message))
+}
+
+/// Issue #1032: bounded embeddings probe summary.
+///
+/// It reports the number of returned vectors, their dimension count, and the
+/// upstream-reported token usage. The vectors themselves (and the raw body)
+/// are never included, so a probe result can never leak embedding data.
+fn embeddings_probe_summary(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let data = value.get("data").and_then(serde_json::Value::as_array)?;
+    let dimensions = data
+        .iter()
+        .filter_map(|item| item.get("embedding"))
+        .find_map(|embedding| match embedding {
+            // A float vector reports its length directly; a base64 vector
+            // cannot be measured without decoding, so it is reported as
+            // "base64".
+            serde_json::Value::Array(values) => Some(values.len().to_string()),
+            serde_json::Value::String(_) => Some("base64".to_string()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    let usage = value.get("usage");
+    let input = usage
+        .and_then(|usage| usage.get("prompt_tokens"))
+        .and_then(serde_json::Value::as_i64);
+    let total = usage
+        .and_then(|usage| usage.get("total_tokens"))
+        .and_then(serde_json::Value::as_i64);
+    Some(format!(
+        "OK (embeddings; {} vector(s), dimensions {}; prompt_tokens {}, total_tokens {})",
+        data.len(),
+        dimensions,
+        input
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        total
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+    ))
 }
 
 /// Issue #1004 P1: probe a ChatGPT subscription model-route target.
@@ -919,6 +1024,7 @@ mod route_test_probe_tests {
         keys: Vec<db::EndpointApiKey>,
     ) -> db::ModelRouteCandidateTarget {
         db::ModelRouteCandidateTarget {
+            embedding_dimensions_override: None,
             target_id: uuid::Uuid::new_v4(),
             endpoint_id,
             endpoint_name: "endpoint".to_string(),

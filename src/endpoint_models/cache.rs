@@ -237,6 +237,7 @@ mod tests {
 
     fn route(id: Uuid, base_url: &str) -> RouteConfig {
         RouteConfig {
+            embedding_dimensions_override: None,
             route_id: id,
             user_id: 7,
             base_url: base_url.to_string(),

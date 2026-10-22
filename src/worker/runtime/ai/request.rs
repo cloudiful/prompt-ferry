@@ -230,13 +230,14 @@ pub(super) fn resolve_auto_protocol(
     }
     route.native_api = match request_path {
         "/v1/chat/completions" => NativeApi::Chat,
+        "/v1/embeddings" => NativeApi::Embeddings,
         "/v1/responses" | "/v1/responses/compact" => NativeApi::Responses,
         "/v1/messages" => NativeApi::AnthropicMessages,
         _ => {
             return Err(CompatError::new(
                 StatusCode::BAD_REQUEST,
                 "unsupported_auto_protocol",
-                "automatic endpoints support only /v1/chat/completions, /v1/responses, /v1/responses/compact, and /v1/messages",
+                "automatic endpoints support only /v1/chat/completions, /v1/embeddings, /v1/responses, /v1/responses/compact, and /v1/messages",
             ));
         }
     };
@@ -250,6 +251,7 @@ mod auto_protocol_tests {
 
     fn route(native_api: NativeApi) -> db::RouteConfig {
         db::RouteConfig {
+            embedding_dimensions_override: None,
             route_id: uuid::Uuid::nil(),
             user_id: 1,
             model_route_rule_id: None,
@@ -291,9 +293,24 @@ mod auto_protocol_tests {
     #[test]
     fn rejects_unsupported_auto_path() {
         let mut route = route(NativeApi::Auto);
-        let error = resolve_auto_protocol(&mut route, "/v1/embeddings").unwrap_err();
+        let error = resolve_auto_protocol(&mut route, "/v1/unknown").unwrap_err();
         assert_eq!(error.code, "unsupported_auto_protocol");
         assert_eq!(route.native_api, NativeApi::Auto);
+    }
+
+    #[test]
+    fn resolves_auto_embeddings_from_request_path() {
+        // Issue #1032: an Auto endpoint serves embeddings by request path.
+        let mut route = route(NativeApi::Auto);
+        resolve_auto_protocol(&mut route, "/v1/embeddings").unwrap();
+        assert_eq!(route.native_api, NativeApi::Embeddings);
+    }
+
+    #[test]
+    fn an_explicit_embeddings_target_is_not_re_resolved() {
+        let mut route = route(NativeApi::Embeddings);
+        resolve_auto_protocol(&mut route, "/v1/embeddings").unwrap();
+        assert_eq!(route.native_api, NativeApi::Embeddings);
     }
 
     #[test]

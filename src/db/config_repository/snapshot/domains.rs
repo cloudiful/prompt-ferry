@@ -111,6 +111,10 @@ pub struct ModelRouteTargetSnapshot {
     pub thinking_effort_override: Option<String>,
     pub compact_mode: String,
     pub service_tier: Option<String>,
+    /// Issue #1032: nullable positive embedding dimension override. Legacy
+    /// archives omit it, so it deserializes as inherit (`None`).
+    #[serde(default)]
+    pub embedding_dimensions_override: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

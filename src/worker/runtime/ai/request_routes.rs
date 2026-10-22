@@ -201,6 +201,7 @@ fn default_route(config: &WorkerConfig, request: &BufferedBridgeRequest) -> db::
 
 fn default_route_for_user(config: &WorkerConfig, user_id: i64) -> db::RouteConfig {
     db::RouteConfig {
+        embedding_dimensions_override: None,
         route_id: uuid::Uuid::nil(),
         user_id,
         model_route_rule_id: None,
@@ -313,6 +314,7 @@ mod tests {
                 routing_strategy: RoutingStrategy::ResponsesSessionAffinity,
                 enabled: true,
                 targets: vec![ModelRouteTargetConfig {
+                    embedding_dimensions_override: None,
                     target_id: uuid::Uuid::new_v4(),
                     endpoint_id,
                     position: 0,
