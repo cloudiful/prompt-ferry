@@ -1,4 +1,5 @@
 use super::*;
+use crate::session_affinity::{apply_opencode_headers, opencode_headers_apply};
 
 pub(super) async fn list_endpoints(
     State(state): State<AdminState>,
@@ -367,103 +368,60 @@ pub(super) async fn list_endpoint_models(
         }
     };
 
-    let cached = state
+    // Issue #1052 P1: an OpenCode endpoint answers a catalog read only with a
+    // routing session, so the admin read carries one stable non-secret
+    // session for every catalog URL of this endpoint.
+    let opencode_session = format!("ses_{endpoint_id}");
+    // Issue #1052 P2: the listing reads the shared catalog cache. The
+    // endpoint, the provider, the base, the requested protocol, and the
+    // credential identify the entry, so the same read never mixes catalogs
+    // of another protocol, provider, address, or credential.
+    let catalog_request = crate::endpoint_models::CatalogRequest {
+        endpoint_id,
+        provider: endpoint.provider,
+        base_url: &endpoint.base_url,
+        native_api: catalog_protocol,
+        credential: &api_key,
+        auth: if endpoint.native_api == NativeApi::AnthropicMessages {
+            crate::endpoint_models::CatalogAuth::ApiKey
+        } else {
+            crate::endpoint_models::CatalogAuth::Bearer
+        },
+        session: &opencode_session,
+    };
+    let catalog_key = catalog_request.key();
+    match state
         .endpoint_model_cache
-        .lookup_endpoint(endpoint_id, &endpoint.base_url, &api_key, catalog_protocol)
-        .await;
-    if let crate::endpoint_models::CacheLookup::Fresh(snapshot) = cached {
-        return Json(EndpointModelsResponse {
+        .get_or_fetch(&catalog_key, || {
+            crate::endpoint_models::fetch_catalog(&client, &catalog_request)
+        })
+        .await
+    {
+        Ok(crate::endpoint_models::CatalogHit::Fresh(snapshot)) => Json(EndpointModelsResponse {
             models: snapshot.sorted_model_ids(),
         })
-        .into_response();
-    }
-
-    // Issue #1032: an Auto OpenRouter endpoint lists the deduplicated union of
-    // its chat and embeddings catalogs; every other protocol lists one
-    // catalog.
-    let urls = crate::endpoint_models::models_urls(
-        &endpoint.base_url,
-        endpoint.provider,
-        catalog_protocol,
-    );
-    let mut model_ids = Vec::<String>::new();
-    let mut seen = std::collections::HashSet::<String>::new();
-    for url in urls {
-        let request = client.get(url);
-        let request = if endpoint.native_api == NativeApi::AnthropicMessages {
-            request
-                .header("x-api-key", &api_key)
-                .header("anthropic-version", "2023-06-01")
-        } else {
-            request.bearer_auth(&api_key)
-        };
-        let response = match request.send().await {
-            Ok(response) => response,
-            Err(err) => {
-                tracing::warn!(
-                    endpoint_id = %endpoint_id,
-                    error = %err,
-                    "upstream model discovery request failed"
-                );
-                return discovery_failed();
-            }
-        };
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        if !status.is_success() {
+        .into_response(),
+        // Issue #1052 P2: a failed refresh is never reported as a fresh
+        // listing; the admin answers its bounded discovery error.
+        Ok(crate::endpoint_models::CatalogHit::Stale { failure, .. }) => {
             tracing::warn!(
                 endpoint_id = %endpoint_id,
-                status = status.as_u16(),
-                "upstream model discovery answered with an error status"
+                status = ?failure.status,
+                error = %maybe_redact(&state, &failure.detail),
+                "upstream model discovery refresh failed"
             );
-            return discovery_failed();
+            discovery_failed()
         }
-        let payload = match serde_json::from_str::<serde_json::Value>(&body) {
-            Ok(payload) => payload,
-            Err(err) => {
-                tracing::warn!(
-                    endpoint_id = %endpoint_id,
-                    error = %err,
-                    "upstream model discovery answered with an unreadable body"
-                );
-                return discovery_failed();
-            }
-        };
-        let Some(items) = payload.get("data").and_then(serde_json::Value::as_array) else {
+        Err(failure) => {
             tracing::warn!(
                 endpoint_id = %endpoint_id,
-                "upstream model discovery answered without a model list"
+                status = ?failure.status,
+                error = %maybe_redact(&state, &failure.detail),
+                "upstream model discovery failed"
             );
-            return discovery_failed();
-        };
-        for id in items
-            .iter()
-            .filter_map(|item| item.get("id").and_then(serde_json::Value::as_str))
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-        {
-            if seen.insert(id.to_string()) {
-                model_ids.push(id.to_string());
-            }
+            discovery_failed()
         }
     }
-    let snapshot = crate::endpoint_models::EndpointModelSnapshot::from_model_ids(
-        model_ids.iter().map(String::as_str),
-    );
-    state
-        .endpoint_model_cache
-        .put_endpoint(
-            endpoint_id,
-            &endpoint.base_url,
-            &api_key,
-            catalog_protocol,
-            snapshot.clone(),
-        )
-        .await;
-    Json(EndpointModelsResponse {
-        models: snapshot.sorted_model_ids(),
-    })
-    .into_response()
 }
 
 /// Bounded answer for a failed upstream discovery. The upstream body and the
@@ -562,6 +520,11 @@ pub(super) async fn test_endpoint(
         endpoint.native_api,
     );
     let started = Instant::now();
+    // Issue #1052 P1: the endpoint test reads the upstream catalog, so an
+    // OpenCode endpoint needs the same routing session the catalog read uses.
+    let opencode_session = format!("ses_{endpoint_id}");
+    let opencode = opencode_headers_apply(Some(endpoint.provider), &url)
+        || opencode_headers_apply(Some(endpoint.provider), &endpoint.base_url);
     let request = client.get(url);
     let request = if endpoint.native_api == NativeApi::AnthropicMessages {
         request
@@ -569,6 +532,11 @@ pub(super) async fn test_endpoint(
             .header("anthropic-version", "2023-06-01")
     } else {
         request.bearer_auth(&api_key)
+    };
+    let request = if opencode {
+        apply_opencode_headers(request, &[], &opencode_session)
+    } else {
+        request
     };
     let result = request.send().await;
 

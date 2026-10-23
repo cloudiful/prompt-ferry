@@ -1,4 +1,5 @@
 use super::*;
+use crate::session_affinity::{apply_opencode_headers, opencode_headers_apply};
 
 pub(super) async fn list_model_routes(
     State(state): State<AdminState>,
@@ -526,7 +527,7 @@ async fn probe_model_route_target(
     state: &AdminState,
     candidate: &db::ModelRouteCandidate,
     target: &db::ModelRouteCandidateTarget,
-) -> Result<(String, StatusCode, String), reqwest::Error> {
+) -> Result<(String, StatusCode, String), anyhow::Error> {
     // Issue #368 Phase D: the test probe uses the same resolved proxy
     // (`override ?? endpoint`) as live forwarding so the "test" button is
     // representative. Invalid proxy fails closed as BAD_GATEWAY without
@@ -569,31 +570,73 @@ async fn probe_model_route_target(
         NativeApi::Embeddings => NativeApi::Embeddings,
         _ => NativeApi::Chat,
     };
-    let models_request = client.get(crate::endpoint_models::models_url(
-        &target.base_url,
-        target.provider,
-        catalog_protocol,
-    ));
-    let models_request = match target.native_api {
-        NativeApi::AnthropicMessages => models_request
-            .header("x-api-key", &credential)
-            .header("anthropic-version", "2023-06-01"),
-        _ => models_request.bearer_auth(&credential),
+    // Issue #1052 P1: an OpenCode target answers only with a routing session.
+    // The probe derives one non-secret session from the target and reuses it
+    // for the catalog read and the protocol request below.
+    let probe_session = format!("ses_{}", target.target_id);
+    // Issue #1052 P2: the probe reads the shared catalog cache, so the same
+    // endpoint, protocol, and credential share one upstream catalog read and
+    // the generation request below still runs per target.
+    let catalog_request = crate::endpoint_models::CatalogRequest {
+        endpoint_id: target.endpoint_id,
+        provider: target.provider,
+        base_url: &target.base_url,
+        native_api: catalog_protocol,
+        credential: &credential,
+        auth: if target.native_api == NativeApi::AnthropicMessages {
+            crate::endpoint_models::CatalogAuth::ApiKey
+        } else {
+            crate::endpoint_models::CatalogAuth::Bearer
+        },
+        session: &probe_session,
     };
-    let models_response = models_request.send().await?;
-    let models_status = models_response.status();
-    let models_body = models_response.text().await?;
-    if !models_status.is_success() {
-        return Ok((
-            candidate.model_pattern.clone(),
-            models_status,
-            truncate_message(&maybe_redact(state, models_body.trim())),
-        ));
-    }
+    let catalog_key = catalog_request.key();
+    let catalog = state
+        .endpoint_model_cache
+        .get_or_fetch(&catalog_key, || {
+            crate::endpoint_models::fetch_catalog(&client, &catalog_request)
+        })
+        .await;
+    let model_ids = match catalog {
+        // Issue #1052 P2 attempt 2: the probe keeps the upstream encounter
+        // order, so a wildcard pattern selects the first model the upstream
+        // listed, as it did before the catalog was cached.
+        Ok(crate::endpoint_models::CatalogHit::Fresh(snapshot)) => {
+            snapshot.model_ids().map(str::to_string).collect::<Vec<_>>()
+        }
+        // Issue #1052 P2: a failed refresh is reported as the real failure,
+        // never as a fresh catalog.
+        Ok(crate::endpoint_models::CatalogHit::Stale { failure, .. }) => {
+            let status = failure
+                .status
+                .and_then(|status| StatusCode::from_u16(status).ok())
+                .unwrap_or(StatusCode::BAD_GATEWAY);
+            return Ok((
+                candidate.model_pattern.clone(),
+                status,
+                truncate_message(&maybe_redact(state, &failure.detail)),
+            ));
+        }
+        Err(failure) => {
+            // Issue #1052 P2 attempt 3: an upstream status is kept on the
+            // cold branch, exactly as on the stale branch, so an
+            // authentication or rate-limit answer stays diagnosable. Only a
+            // read that never reached the upstream has no status.
+            let Some(status) = failure.status else {
+                return Err(anyhow::anyhow!(failure.detail));
+            };
+            let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
+            return Ok((
+                candidate.model_pattern.clone(),
+                status,
+                truncate_message(&maybe_redact(state, &failure.detail)),
+            ));
+        }
+    };
     let Some(model) = target
         .upstream_model
         .clone()
-        .or_else(|| select_test_model(&candidate.model_pattern, &models_body))
+        .or_else(|| select_test_model(&candidate.model_pattern, &model_ids))
     else {
         return Ok((
             candidate.model_pattern.clone(),
@@ -719,19 +762,25 @@ async fn probe_model_route_target(
     // GLM `/v1` strip applies (a GLM Chat base
     // `.../api/coding/paas/v4` joins `/chat/completions`, not
     // `/v1/chat/completions`).
-    let request = client
-        .post(crate::worker::upstream_url_for_route_parts(
-            &target.base_url,
-            target.provider,
-            target.native_api,
-            path,
-        ))
-        .json(&payload);
+    let generation_url = crate::worker::upstream_url_for_route_parts(
+        &target.base_url,
+        target.provider,
+        target.native_api,
+        path,
+    );
+    let opencode = opencode_headers_apply(Some(target.provider), &generation_url)
+        || opencode_headers_apply(Some(target.provider), &target.base_url);
+    let request = client.post(generation_url).json(&payload);
     let request = match target.native_api {
         NativeApi::AnthropicMessages => request
             .header("x-api-key", &credential)
             .header("anthropic-version", "2023-06-01"),
         _ => request.bearer_auth(&credential),
+    };
+    let request = if opencode {
+        apply_opencode_headers(request, &[], &probe_session)
+    } else {
+        request
     };
     let response = request.send().await?;
     let status = response.status();
@@ -917,14 +966,11 @@ fn probe_client_for_target(
     })
 }
 
-fn select_test_model(pattern: &str, models_body: &str) -> Option<String> {
-    let body = serde_json::from_str::<serde_json::Value>(models_body).ok()?;
-    let models = body.get("data")?.as_array()?;
-    models
+fn select_test_model(pattern: &str, model_ids: &[String]) -> Option<String> {
+    model_ids
         .iter()
-        .filter_map(|item| item.get("id").and_then(|value| value.as_str()))
         .find(|model| db::model_pattern_matches(pattern, model))
-        .map(str::to_string)
+        .cloned()
 }
 
 fn model_route_test_routing_key(candidate: &db::ModelRouteCandidate) -> Option<&'static str> {
@@ -978,6 +1024,23 @@ mod service_tier_probe_tests {
             assert_eq!(payload["service_tier"], "priority", "{native_api:?}");
             assert_eq!(payload["model"], "m");
         }
+    }
+
+    #[test]
+    fn probe_selects_the_first_matching_model_in_the_upstream_order() {
+        // Issue #1052 P2 attempt 2: a wildcard pattern selects the first
+        // model the upstream listed, not the alphabetically first one.
+        let model_ids = vec!["probe-order-zzz".to_string(), "probe-order-aaa".to_string()];
+        assert_eq!(
+            select_test_model("probe-order-*", &model_ids),
+            Some("probe-order-zzz".to_string())
+        );
+        assert_eq!(
+            select_test_model("probe-order-a*", &model_ids),
+            Some("probe-order-aaa".to_string()),
+            "a narrower pattern still selects the first matching model"
+        );
+        assert_eq!(select_test_model("other-*", &model_ids), None);
     }
 
     #[test]
