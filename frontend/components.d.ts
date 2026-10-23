@@ -62,6 +62,7 @@ declare module 'vue' {
     ModelRouteMobileCard: typeof import('./src/components/endpoints/ModelRouteMobileCard.vue')['default']
     ModelRoutesTable: typeof import('./src/components/endpoints/ModelRoutesTable.vue')['default']
     ModelRouteTargetSettingsPage: typeof import('./src/components/endpoints/ModelRouteTargetSettingsPage.vue')['default']
+    ModelRouteTargetsSummary: typeof import('./src/components/endpoints/ModelRouteTargetsSummary.vue')['default']
     ModelRouteTestResultsDialog: typeof import('./src/components/endpoints/ModelRouteTestResultsDialog.vue')['default']
     PageIntro: typeof import('./src/components/PageIntro.vue')['default']
     PreviewExpansionActions: typeof import('./src/components/shared/PreviewExpansionActions.vue')['default']

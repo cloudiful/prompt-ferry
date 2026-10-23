@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import type { ModelRouteListItemView } from '@/models/endpoints'
 import { modelRouteTestCounts } from '@/models/endpoints/model-route-item'
+import ModelRouteTargetsSummary from './ModelRouteTargetsSummary.vue'
 import ModelRouteTestResultsDialog from './ModelRouteTestResultsDialog.vue'
 
 const props = withDefaults(
@@ -32,11 +33,6 @@ defineEmits<{
   toggleModelRouteEnabled: [ruleId: string, enabled: boolean]
 }>()
 
-const targetsLabel = computed(
-  () =>
-    props.item.targets.map((target) => target.endpoint_label).join(', ') || '-',
-)
-
 const detailsOpen = ref(false)
 
 // The card shows the counts next to the icon, so the result is readable
@@ -64,8 +60,8 @@ const countsLabel = computed(() => {
         >
           {{ t('endpoint') }}
         </div>
-        <div class="break-words text-[0.76rem] leading-[1.38] text-default">
-          {{ targetsLabel }}
+        <div class="min-w-0 text-[0.76rem] leading-[1.38] text-default">
+          <ModelRouteTargetsSummary :targets="item.targets" :t="t" />
         </div>
       </div>
       <div class="grid gap-px">
