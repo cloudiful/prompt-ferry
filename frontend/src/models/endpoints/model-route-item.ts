@@ -4,7 +4,10 @@ import type {
   ModelRouteTestTargetResult,
 } from '@/generated/admin-api'
 
-import type { ModelRouteListItemView } from '../endpoints'
+import type {
+  ModelRouteListItemView,
+  ModelRouteTargetItemView,
+} from '../endpoints'
 
 export type ModelRouteViewItemLabels = {
   endpointTestIdle: string
@@ -37,6 +40,7 @@ export function createModelRouteListItemView(
     targets: route.targets.map((target) => ({
       target_id: target.target_id,
       endpoint_label: target.endpoint_name || target.endpoint_id,
+      enabled: target.enabled,
       endpoint_enabled: target.endpoint_enabled,
       upstream_model: target.upstream_model ?? null,
     })),
@@ -46,6 +50,65 @@ export function createModelRouteListItemView(
     test_severity: modelRouteTestSeverity(result),
     test_results: result?.results ?? [],
   }
+}
+
+/**
+ * How many target pairs a route row shows before the rest move into the
+ * disclosure.
+ */
+export const ROUTE_TARGET_PREVIEW_LIMIT = 2
+
+/**
+ * The configured targets a route row may show: the target itself is enabled
+ * and its endpoint still exists and is enabled. A target on a deleted or
+ * disabled endpoint is never listed, and the configured order is kept.
+ */
+export function enabledRouteTargets(
+  targets: readonly ModelRouteTargetItemView[],
+): ModelRouteTargetItemView[] {
+  return targets.filter((target) => target.enabled && target.endpoint_enabled)
+}
+
+/**
+ * The pairs shown inline, at most {@link ROUTE_TARGET_PREVIEW_LIMIT}.
+ */
+export function routeTargetPreview(
+  targets: readonly ModelRouteTargetItemView[],
+): ModelRouteTargetItemView[] {
+  return enabledRouteTargets(targets).slice(0, ROUTE_TARGET_PREVIEW_LIMIT)
+}
+
+/**
+ * How many enabled targets the disclosure still holds.
+ */
+export function hiddenRouteTargetCount(
+  targets: readonly ModelRouteTargetItemView[],
+): number {
+  return Math.max(
+    0,
+    enabledRouteTargets(targets).length - ROUTE_TARGET_PREVIEW_LIMIT,
+  )
+}
+
+/**
+ * The upstream model override of a target, or null when it has none. A blank
+ * override is the same as no override.
+ */
+export function routeTargetOverride(
+  target: ModelRouteTargetItemView,
+): string | null {
+  const override = target.upstream_model?.trim() ?? ''
+  return override === '' ? null : override
+}
+
+/**
+ * The full name of a target pair, endpoint and model override together.
+ */
+export function routeTargetPairLabel(target: ModelRouteTargetItemView): string {
+  const override = routeTargetOverride(target)
+  return override
+    ? `${target.endpoint_label} · ${override}`
+    : target.endpoint_label
 }
 
 /**

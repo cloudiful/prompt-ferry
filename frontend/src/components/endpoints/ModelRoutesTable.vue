@@ -6,6 +6,7 @@ import TestResultPopover from '@/components/shared/TestResultPopover.vue'
 import type { ModelRouteListItemView } from '@/models/endpoints'
 import { modelRouteTestCounts } from '@/models/endpoints/model-route-item'
 import { STANDARD_PAGE_SIZE_OPTIONS } from '@/table-pagination'
+import ModelRouteTargetsSummary from './ModelRouteTargetsSummary.vue'
 import ModelRouteTestResultsDialog from './ModelRouteTestResultsDialog.vue'
 
 const props = withDefaults(
@@ -90,28 +91,13 @@ defineEmits<{
       </template>
       <template #targets-cell="{ row }">
         <div class="grid min-w-0 gap-1.5">
-          <div
-            v-if="row.original.targets.length"
-            class="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overflow-y-hidden whitespace-nowrap pb-px [&>*]:flex-none"
-          >
-            <span
-              v-for="target in row.original.targets"
-              :key="target.target_id"
-              :class="
-                target.endpoint_enabled
-                  ? 'inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border border-default bg-default px-2 py-px text-[0.73rem] leading-[1.35] text-default'
-                  : 'inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border border-default bg-muted px-2 py-px text-[0.73rem] leading-[1.35] text-muted opacity-72'
-              "
-            >
-              {{ target.endpoint_label }}
-            </span>
-            <UBadge
-              :label="row.original.owner_label"
-              color="neutral"
-              variant="subtle"
-            />
-          </div>
-          <div v-else class="text-xs text-dimmed">-</div>
+          <ModelRouteTargetsSummary :targets="row.original.targets" :t="t" />
+          <UBadge
+            :label="row.original.owner_label"
+            color="neutral"
+            variant="subtle"
+            class="w-fit"
+          />
         </div>
       </template>
       <template #status-cell="{ row }">

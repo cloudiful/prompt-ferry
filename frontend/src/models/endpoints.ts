@@ -42,6 +42,7 @@ export type EndpointListItemView = {
 export type ModelRouteTargetItemView = {
   target_id: string
   endpoint_label: string
+  enabled: boolean
   endpoint_enabled: boolean
   upstream_model: string | null
 }

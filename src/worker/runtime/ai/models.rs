@@ -2,6 +2,7 @@ use super::super::{REQUEST_RECORD_LEASE_SECONDS, elapsed_ms};
 use crate::{
     db,
     protocol::{BridgeMessage, ResponseChunk, ResponseEnd, ResponseStart},
+    session_affinity::{apply_opencode_headers, opencode_headers_apply, resolve_opencode_session},
     usage::truncate_chars,
     worker::runtime::context::BridgeSender,
     worker::runtime::request_assembly::BufferedBridgeRequest,
@@ -78,20 +79,12 @@ pub(super) async fn process_models_request(
 
     let mut requests = futures::stream::iter(catalog_requests.into_iter().map(|(route, url)| {
         let client = client.clone();
+        // Issue #1052 P1: an OpenCode endpoint answers the catalog read only
+        // with a routing session, so the client model listing carries the
+        // caller's own session or the request's stable one.
+        let session = resolve_opencode_session(request_headers, None, request_id);
         async move {
-            // GLM (issue #230 P2) lists models at `{base}/models`; every
-            // other provider keeps the plain `/v1/models` join. An embeddings
-            // protocol lists the provider's embeddings catalog.
-            let request = client.get(url);
-            let request = match route.native_api {
-                crate::config::NativeApi::AnthropicMessages => {
-                    super::upstream::with_anthropic_headers(
-                        request.header("x-api-key", &route.api_key),
-                        request_headers,
-                    )
-                }
-                _ => request.bearer_auth(&route.api_key),
-            };
+            let request = catalog_request(&client, &route, &url, request_headers, &session);
             let response = request.send().await;
             (route, response)
         }
@@ -295,6 +288,37 @@ pub(super) async fn process_models_request(
     Ok(())
 }
 
+/// The catalog request for one route.
+///
+/// The request keeps the route's own protocol authentication and adds the
+/// OpenCode routing session when the route is an OpenCode endpoint.
+fn catalog_request(
+    client: &Client,
+    route: &db::RouteConfig,
+    url: &str,
+    request_headers: &[(String, String)],
+    session: &str,
+) -> reqwest::RequestBuilder {
+    // GLM (issue #230 P2) lists models at `{base}/models`; every other
+    // provider keeps the plain `/v1/models` join. An embeddings protocol
+    // lists the provider's embeddings catalog.
+    let opencode = opencode_headers_apply(Some(route.provider), url)
+        || opencode_headers_apply(Some(route.provider), &route.base_url);
+    let request = client.get(url);
+    let request = match route.native_api {
+        crate::config::NativeApi::AnthropicMessages => super::upstream::with_anthropic_headers(
+            request.header("x-api-key", &route.api_key),
+            request_headers,
+        ),
+        _ => request.bearer_auth(&route.api_key),
+    };
+    if opencode {
+        apply_opencode_headers(request, request_headers, session)
+    } else {
+        request
+    }
+}
+
 fn anthropic_model_item(item: serde_json::Value) -> serde_json::Value {
     let id = item
         .get("id")
@@ -314,4 +338,88 @@ fn anthropic_model_item(item: serde_json::Value) -> serde_json::Value {
             .unwrap_or_else(|| item.get("id").and_then(serde_json::Value::as_str).unwrap_or("unknown")),
         "created_at": created_at,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{RouteConfig, RouteSelectionReason};
+
+    fn route(provider: db::EndpointProvider) -> RouteConfig {
+        RouteConfig {
+            embedding_dimensions_override: None,
+            route_id: uuid::Uuid::new_v4(),
+            user_id: 1,
+            model_route_rule_id: None,
+            base_url: "http://127.0.0.1:9".to_string(),
+            api_key: "sk-client".to_string(),
+            endpoint_key_id: None,
+            endpoint_key_label: None,
+            api_keys: Vec::new(),
+            key_lb_enabled: false,
+            native_api: crate::config::NativeApi::Chat,
+            upstream_model: None,
+            route_selection_reason: RouteSelectionReason::Default,
+            provider,
+            service_tier: None,
+            proxy_url: None,
+            dev_system_normalize: false,
+            thinking_effort_override: None,
+            compact_mode: crate::db::CompactMode::Passthrough,
+            thinking_downgrade_enabled: false,
+            has_oauth_token: false,
+        }
+    }
+
+    #[test]
+    fn an_opencode_route_reads_its_catalog_with_a_routing_session() {
+        // Issue #1052 P1: the OpenCode gateway rejects a catalog read without a
+        // routing session, so the client model listing sends one.
+        let route = route(db::EndpointProvider::OpencodeGo);
+        let request = catalog_request(
+            &Client::new(),
+            &route,
+            "http://127.0.0.1:9/v1/models",
+            &[],
+            "ses_client",
+        )
+        .build()
+        .expect("catalog request");
+
+        assert_eq!(
+            request
+                .headers()
+                .get("x-opencode-session")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "ses_client"
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "Bearer sk-client",
+            "the catalog read keeps the route's own authentication"
+        );
+    }
+
+    #[test]
+    fn a_generic_route_reads_its_catalog_without_an_opencode_session() {
+        let route = route(db::EndpointProvider::Generic);
+        let request = catalog_request(
+            &Client::new(),
+            &route,
+            "http://127.0.0.1:9/v1/models",
+            &[],
+            "ses_client",
+        )
+        .build()
+        .expect("catalog request");
+
+        assert!(request.headers().get("x-opencode-session").is_none());
+    }
 }

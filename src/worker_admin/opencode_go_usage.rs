@@ -6,6 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::{json_scalars::truncate_message, opencode_go_parsing::*};
+use crate::session_affinity::{apply_opencode_headers, opencode_headers_apply};
 use crate::worker_admin_types::TokenPlanKeyUsage;
 
 // Keep the cache call path stable after the parsing split.
@@ -21,6 +22,29 @@ fn usage_url(base: &str) -> String {
     format!("{base}/usage")
 }
 
+/// The usage request for one key.
+///
+/// Issue #1052 P1: the OpenCode gateway rejects a usage read without a routing
+/// session, so the query carries one non-secret session derived from the key
+/// it reports on.
+fn usage_request(
+    client: &Client,
+    base: &str,
+    key_id: Uuid,
+    secret: &str,
+) -> reqwest::RequestBuilder {
+    let url = usage_url(base);
+    let request = client
+        .get(url.clone())
+        .bearer_auth(secret)
+        .header("Content-Type", "application/json");
+    if opencode_headers_apply(Some(crate::db::EndpointProvider::OpencodeGo), &url) {
+        apply_opencode_headers(request, &[], &format!("ses_{key_id}"))
+    } else {
+        request
+    }
+}
+
 /// One key through the single `/usage` call. Missing windows degrade to None;
 /// only transport failure and the 401/403 business errors are fatal.
 pub(crate) async fn fetch_opencode_go_key_usage(
@@ -30,12 +54,7 @@ pub(crate) async fn fetch_opencode_go_key_usage(
     key_label: String,
     secret: String,
 ) -> TokenPlanKeyUsage {
-    let response = client
-        .get(usage_url(base))
-        .bearer_auth(secret)
-        .header("Content-Type", "application/json")
-        .send()
-        .await;
+    let response = usage_request(&client, base, key_id, &secret).send().await;
     let response = match response {
         Ok(response) => response,
         Err(error) => {
@@ -160,5 +179,35 @@ mod tests {
         let usage = parse_opencode_go_usage(&body).expect("usage");
         assert_eq!(usage.rolling.as_ref().unwrap().percent, Some(65.0));
         assert!(usage.monthly.is_none());
+    }
+
+    #[test]
+    fn the_usage_request_carries_the_opencode_routing_session() {
+        // Issue #1052 P1: the OpenCode gateway rejects a usage read without a
+        // routing session, so the query sends one derived from the key.
+        let key_id = Uuid::new_v4();
+        let request = usage_request(&Client::new(), OPENCODE_GO_BASE, key_id, "sk-usage")
+            .build()
+            .expect("usage request");
+
+        assert_eq!(
+            request
+                .headers()
+                .get("x-opencode-session")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!("ses_{key_id}")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "Bearer sk-usage",
+            "the usage request keeps its own authentication"
+        );
     }
 }

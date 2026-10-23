@@ -1,4 +1,6 @@
-use crate::session_affinity::resolve_session_affinity;
+use crate::session_affinity::{
+    apply_opencode_headers, opencode_headers_apply, resolve_opencode_session,
+};
 use crate::{db, upstream_adapter::PreparedRequestBody};
 use bytes::Bytes;
 use futures::StreamExt;
@@ -53,7 +55,9 @@ pub(super) fn build_upstream_request(
         ),
         _ => request_builder.bearer_auth(&route.api_key),
     };
-    let request_builder = if is_opencode_host(&route.base_url) || is_opencode_host(url) {
+    let request_builder = if opencode_headers_apply(Some(route.provider), &route.base_url)
+        || opencode_headers_apply(Some(route.provider), url)
+    {
         with_opencode_headers(
             request_builder,
             request_headers,
@@ -287,42 +291,6 @@ pub(super) fn should_mint_minimax_reasoning_echo(
         && native_api == crate::config::NativeApi::Responses
 }
 
-pub(super) fn is_opencode_host(url: &str) -> bool {
-    let host = if let Ok(parsed) = reqwest::Url::parse(url) {
-        parsed.host_str().map(|h| h.to_ascii_lowercase())
-    } else {
-        // Fallback manual parsing for robustness in tests with non-standard urls.
-        let trimmed = url.trim();
-        let without_scheme = if let Some(idx) = trimmed.find("://") {
-            &trimmed[idx + 3..]
-        } else {
-            trimmed
-        };
-        let host_part = without_scheme
-            .split('/')
-            .next()
-            .unwrap_or("")
-            .split(':')
-            .next()
-            .unwrap_or("")
-            .split('?')
-            .next()
-            .unwrap_or("")
-            .split('#')
-            .next()
-            .unwrap_or("");
-        if host_part.is_empty() {
-            None
-        } else {
-            Some(host_part.to_ascii_lowercase())
-        }
-    };
-    match host {
-        Some(host) => host == "opencode.ai" || host.ends_with(".opencode.ai"),
-        None => false,
-    }
-}
-
 /// Build the upstream URL for a resolved route.
 ///
 /// Preset providers (MiniMax, GLM, CommandCode, OpencodeGo, OpenRouter)
@@ -389,76 +357,19 @@ fn join_base_path(base: &str, path: &str) -> String {
     format!("{}{}", base.trim_end_matches('/'), path)
 }
 
+/// Apply the OpenCode upstream headers (issue #1052 P1).
+///
+/// The session resolution and the header policy live in
+/// [`crate::session_affinity`] so the admin catalog, probe, usage, and client
+/// model paths share one implementation with the inference path.
 fn with_opencode_headers(
     builder: reqwest::RequestBuilder,
     request_headers: &[(String, String)],
     conversation_id: Option<uuid::Uuid>,
     request_id: uuid::Uuid,
 ) -> reqwest::RequestBuilder {
-    // Issue #884: OpenCode needs a nonblank session on every request, so a
-    // stateless caller (git-ai-commit) that sends no session headers and has no
-    // stored conversation still gets a deterministic routing session. Precedence:
-    // caller-supplied canonical header, then the shared session alias, then the
-    // conversation-derived session, then the request's own id. Blank values are
-    // absent; no global fallback and no per-attempt UUID is minted here.
-    let session_value = request_headers
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("x-opencode-session"))
-        .map(|(_, value)| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string())
-        .or_else(|| resolve_session_affinity(request_headers))
-        .or_else(|| {
-            conversation_id
-                .filter(|id| !id.is_nil())
-                .map(|id| format!("ses_{id}"))
-        })
-        .unwrap_or_else(|| format!("ses_{request_id}"));
-
-    let builder = builder.header("x-opencode-session", session_value);
-
-    // Preserve caller User-Agent, else synthesize prompt-ferry/<version>.
-    let user_agent_value = request_headers
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("user-agent"))
-        .map(|(_, value)| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string());
-
-    let builder = if let Some(value) = user_agent_value {
-        builder.header(header::USER_AGENT, value)
-    } else {
-        builder.header(
-            header::USER_AGENT,
-            format!("prompt-ferry/{}", env!("CARGO_PKG_VERSION")),
-        )
-    };
-
-    // Forward other safe OpenCode identity headers (x-opencode-*) that are non-empty.
-    // This keeps the relay's safe header policy for OpenCode without leaking auth/hop-by-hop.
-    let mut builder = builder;
-    for (name, value) in request_headers {
-        if name.eq_ignore_ascii_case("x-opencode-session")
-            || name.eq_ignore_ascii_case("user-agent")
-        {
-            continue;
-        }
-        if name.to_ascii_lowercase().starts_with("x-opencode-") {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            // Avoid forwarding auth/hop-by-hop even if mis-prefixed; x-opencode-* is safe, but keep guard.
-            if matches!(
-                name.to_ascii_lowercase().as_str(),
-                "authorization" | "cookie" | "x-api-key" | "host" | "connection"
-            ) {
-                continue;
-            }
-            builder = builder.header(name.as_str(), trimmed);
-        }
-    }
-    builder
+    let session = resolve_opencode_session(request_headers, conversation_id, request_id);
+    apply_opencode_headers(builder, request_headers, &session)
 }
 
 pub(super) fn with_anthropic_headers(
@@ -534,6 +445,7 @@ mod tests {
     use crate::{
         config::NativeApi,
         db::{RouteConfig, RouteSelectionReason},
+        session_affinity::{is_opencode_host, resolve_session_affinity},
         worker::runtime::ai::thinking_downgrade,
     };
     use axum::{Router, http::StatusCode, routing::post};
@@ -915,6 +827,66 @@ mod tests {
             .headers()
             .get("x-opencode-session")
             .map(|value| value.to_str().unwrap().to_string())
+    }
+
+    #[test]
+    fn an_opencode_provider_route_carries_a_session_on_any_host() {
+        // Issue #1052 P1: the OpenCode provider needs the routing session even
+        // when the endpoint is reached through a local mock, so the provider
+        // itself opens the gate.
+        let request_id = uuid::Uuid::new_v4();
+        let route = RouteConfig {
+            base_url: "http://127.0.0.1:9".to_string(),
+            native_api: NativeApi::Responses,
+            provider: crate::db::EndpointProvider::OpencodeGo,
+            has_oauth_token: false,
+            ..generic_route()
+        };
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "http://127.0.0.1:9/v1/responses",
+            &route,
+            "/v1/responses",
+            &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            &[],
+            None,
+            request_id,
+        )
+        .build()
+        .unwrap();
+
+        assert_eq!(
+            opencode_session(&request).as_deref(),
+            Some(format!("ses_{request_id}").as_str())
+        );
+    }
+
+    #[test]
+    fn a_generic_provider_route_on_an_unrelated_host_carries_no_session() {
+        let request_id = uuid::Uuid::new_v4();
+        let route = RouteConfig {
+            base_url: "http://127.0.0.1:9".to_string(),
+            native_api: NativeApi::Responses,
+            has_oauth_token: false,
+            ..generic_route()
+        };
+        let request = build_upstream_request(
+            &Client::new(),
+            &Method::POST,
+            "http://127.0.0.1:9/v1/responses",
+            &route,
+            "/v1/responses",
+            &PreparedRequestBody::BufferedBytes(br#"{"model":"m"}"#.to_vec()),
+            &[],
+            None,
+            request_id,
+        )
+        .build()
+        .unwrap();
+
+        assert!(opencode_session(&request).is_none());
+        assert!(request.headers().get(header::USER_AGENT).is_none());
     }
 
     #[test]

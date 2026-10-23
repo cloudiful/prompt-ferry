@@ -1,13 +1,15 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use reqwest::{Client, Proxy};
 
 use crate::db::{self, EndpointProvider, RouteConfig};
+use crate::session_affinity::{apply_opencode_headers, opencode_headers_apply};
 
 use super::EndpointModelSnapshot;
+use super::cache::{CatalogAuth, CatalogFailure, CatalogFailureKind, CatalogKey};
 
 // Issue #375 Phase G: per-`(proxy_url, base_host)` reqwest client pool for
 // model-list fetches. Direct routes reuse the caller-passed client unchanged;
@@ -65,14 +67,57 @@ pub fn client_for_route(route: &RouteConfig, direct: &Client) -> Result<Client, 
     Ok(client)
 }
 
-pub async fn fetch_endpoint_model_ids(
+/// One catalog read.
+///
+/// It carries the endpoint identity, the requested protocol, the credential
+/// the read actually sends, and the request context the upstream call needs.
+/// The cache identity of the read is derived from it, so a read and its cache
+/// entry can never disagree about the endpoint, the protocol, or the
+/// credential.
+pub struct CatalogRequest<'a> {
+    /// The endpoint the catalog belongs to.
+    pub endpoint_id: uuid::Uuid,
+    /// The provider, which selects the catalog shape.
+    pub provider: EndpointProvider,
+    /// The configured base of the endpoint.
+    pub base_url: &'a str,
+    /// The requested catalog protocol.
+    pub native_api: crate::config::NativeApi,
+    /// The credential this read actually sends.
+    pub credential: &'a str,
+    /// How the credential is sent.
+    pub auth: CatalogAuth,
+    /// The OpenCode routing session of the request.
+    pub session: &'a str,
+}
+
+impl CatalogRequest<'_> {
+    /// The cache identity of this read.
+    pub fn key(&self) -> CatalogKey {
+        CatalogKey::new(
+            self.endpoint_id,
+            self.provider,
+            self.base_url,
+            self.native_api,
+            self.auth,
+            self.credential,
+        )
+    }
+}
+
+/// The shared catalog read of one endpoint.
+///
+/// The provider and the protocol select the catalog URLs, the credential is
+/// sent in its own mode, and an OpenCode endpoint carries its routing
+/// session. Only a successfully parsed catalog is returned.
+pub async fn fetch_catalog(
     client: &Client,
-    route: &RouteConfig,
-) -> Result<EndpointModelSnapshot> {
+    request: &CatalogRequest<'_>,
+) -> Result<EndpointModelSnapshot, CatalogFailure> {
     let mut model_ids = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for url in models_urls(&route.base_url, route.provider, route.native_api) {
-        for id in fetch_model_ids_from_url(client, route, &url).await? {
+    let mut seen = HashSet::new();
+    for url in models_urls(request.base_url, request.provider, request.native_api) {
+        for id in fetch_model_ids_from_url(client, request, &url).await? {
             if seen.insert(id.clone()) {
                 model_ids.push(id);
             }
@@ -85,47 +130,92 @@ pub async fn fetch_endpoint_model_ids(
 
 async fn fetch_model_ids_from_url(
     client: &Client,
-    route: &RouteConfig,
+    request: &CatalogRequest<'_>,
     url: &str,
-) -> Result<Vec<String>> {
-    let response = client
-        .get(url)
-        .bearer_auth(&route.api_key)
+) -> Result<Vec<String>, CatalogFailure> {
+    let builder = client.get(url);
+    let builder = match request.auth {
+        CatalogAuth::ApiKey => builder
+            .header("x-api-key", request.credential)
+            .header("anthropic-version", "2023-06-01"),
+        CatalogAuth::Bearer => builder.bearer_auth(request.credential),
+    };
+    // Issue #1052 P1: the OpenCode gateway rejects a catalog read without a
+    // routing session, so the read carries one stable non-secret session.
+    let builder = if opencode_headers_apply(Some(request.provider), request.base_url)
+        || opencode_headers_apply(Some(request.provider), url)
+    {
+        apply_opencode_headers(builder, &[], request.session)
+    } else {
+        builder
+    };
+    let response = builder
         .send()
         .await
-        .with_context(|| format!("failed to fetch models from endpoint {}", route.route_id))?;
+        .map_err(|error| CatalogFailure::transport(format!("failed to fetch models: {error}")))?;
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(anyhow!(
-            "models request failed for endpoint {} with status {}: {}",
-            route.route_id,
-            status,
-            truncate_message(body.trim())
-        ));
+        return Err(CatalogFailure::status(status.as_u16(), body.trim()));
     }
 
-    let payload = serde_json::from_str::<serde_json::Value>(&body).with_context(|| {
-        format!(
-            "invalid /v1/models response for endpoint {}",
-            route.route_id
-        )
-    })?;
+    let payload = serde_json::from_str::<serde_json::Value>(&body)
+        .map_err(|_| CatalogFailure::parse("invalid /v1/models response"))?;
     let items = payload
         .get("data")
         .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| {
-            anyhow!(
-                "models response missing data array for endpoint {}",
-                route.route_id
-            )
-        })?;
+        .ok_or_else(|| CatalogFailure::parse("models response missing data array"))?;
 
     Ok(items
         .iter()
         .filter_map(|item| item.get("id").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
         .map(str::to_string)
         .collect())
+}
+
+/// The runtime catalog read of one route.
+///
+/// The route's own credential is sent as a bearer token, and the failure
+/// keeps the runtime's error wording.
+pub async fn fetch_endpoint_model_ids(
+    client: &Client,
+    route: &RouteConfig,
+) -> Result<EndpointModelSnapshot> {
+    let session = format!("ses_{}", uuid::Uuid::new_v4());
+    let request = CatalogRequest {
+        endpoint_id: route.route_id,
+        provider: route.provider,
+        base_url: &route.base_url,
+        native_api: route.native_api,
+        credential: &route.api_key,
+        auth: CatalogAuth::Bearer,
+        session: &session,
+    };
+    fetch_catalog(client, &request)
+        .await
+        .map_err(|failure| catalog_failure_for_route(route, failure))
+}
+
+/// The runtime wording of one catalog failure.
+fn catalog_failure_for_route(route: &RouteConfig, failure: CatalogFailure) -> anyhow::Error {
+    match failure.kind {
+        CatalogFailureKind::Transport => anyhow!(
+            "failed to fetch models from endpoint {}: {}",
+            route.route_id,
+            failure.detail
+        ),
+        CatalogFailureKind::Status => anyhow!(
+            "models request failed for endpoint {} with status {}: {}",
+            route.route_id,
+            failure.status.unwrap_or_default(),
+            failure.detail
+        ),
+        CatalogFailureKind::Parse => {
+            anyhow!("{} for endpoint {}", failure.detail, route.route_id)
+        }
+    }
 }
 
 /// Build the upstream model-listing URL.
@@ -181,23 +271,11 @@ pub fn models_urls(
     vec![models_url(base_url, provider, native_api)]
 }
 
-fn truncate_message(message: &str) -> String {
-    const LIMIT: usize = 240;
-    if message.chars().count() <= LIMIT {
-        return message.to_string();
-    }
-    let mut truncated = String::new();
-    for ch in message.chars().take(LIMIT - 3) {
-        truncated.push(ch);
-    }
-    truncated.push_str("...");
-    truncated
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::{EndpointProvider, RouteSelectionReason};
+    use std::sync::Arc;
 
     fn route_with_proxy(proxy: Option<&str>, base: &str) -> RouteConfig {
         RouteConfig {
@@ -223,6 +301,198 @@ mod tests {
             thinking_downgrade_enabled: false,
             has_oauth_token: false,
         }
+    }
+
+    /// A route for the catalog fetch, with an explicit provider.
+    fn route_for_provider(provider: EndpointProvider, base: &str) -> RouteConfig {
+        RouteConfig {
+            provider,
+            base_url: base.to_string(),
+            ..route_with_proxy(None, base)
+        }
+    }
+
+    /// A loopback catalog upstream that records the OpenCode session header.
+    async fn spawn_catalog_upstream() -> (String, Arc<Mutex<Option<String>>>) {
+        let recorded = Arc::new(Mutex::new(None));
+        let handler_recorded = recorded.clone();
+        let app = axum::Router::new().route(
+            "/v1/models",
+            axum::routing::get(move |headers: axum::http::HeaderMap| {
+                let handler_recorded = handler_recorded.clone();
+                async move {
+                    let session = headers
+                        .get("x-opencode-session")
+                        .and_then(|value| value.to_str().ok())
+                        .map(str::to_string);
+                    *handler_recorded.lock().expect("recorded session") = session;
+                    (
+                        axum::http::StatusCode::OK,
+                        axum::Json(serde_json::json!({"data": [{"id": "gpt-4o"}]})),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{address}"), recorded)
+    }
+
+    fn catalog_request<'a>(
+        provider: EndpointProvider,
+        base: &'a str,
+        credential: &'a str,
+        session: &'a str,
+    ) -> CatalogRequest<'a> {
+        CatalogRequest {
+            endpoint_id: uuid::Uuid::new_v4(),
+            provider,
+            base_url: base,
+            native_api: crate::config::NativeApi::Chat,
+            credential,
+            auth: CatalogAuth::Bearer,
+            session,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_opencode_route_fetches_its_catalog_with_a_routing_session() {
+        // Issue #1052 P1: the shared catalog fetcher reads an OpenCode
+        // endpoint with a routing session, so the gateway accepts the read.
+        let (base, recorded) = spawn_catalog_upstream().await;
+        let route = route_for_provider(EndpointProvider::OpencodeGo, &base);
+
+        let snapshot = fetch_endpoint_model_ids(&Client::new(), &route)
+            .await
+            .expect("catalog fetch");
+
+        assert_eq!(snapshot.sorted_model_ids(), vec!["gpt-4o".to_string()]);
+        let session = recorded
+            .lock()
+            .expect("recorded session")
+            .clone()
+            .expect("the catalog read carries a session");
+        assert!(
+            !session.trim().is_empty(),
+            "the routing session must not be blank"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_generic_route_fetches_its_catalog_without_an_opencode_session() {
+        let (base, recorded) = spawn_catalog_upstream().await;
+        let route = route_for_provider(EndpointProvider::Generic, &base);
+
+        let snapshot = fetch_endpoint_model_ids(&Client::new(), &route)
+            .await
+            .expect("catalog fetch");
+
+        assert_eq!(snapshot.sorted_model_ids(), vec!["gpt-4o".to_string()]);
+        assert!(
+            recorded.lock().expect("recorded session").is_none(),
+            "a generic upstream must not receive an OpenCode session"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_ordered_union_keeps_the_catalog_order() {
+        // Issue #1052 P2 attempt 2: an automatic OpenRouter catalog is the
+        // union of the chat and embeddings catalogs, in the order the
+        // upstream listed them.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move {
+            let app = axum::Router::new()
+                .route(
+                    "/v1/models",
+                    axum::routing::get(|| async {
+                        (
+                            axum::http::StatusCode::OK,
+                            axum::Json(serde_json::json!({"data": [{"id": "zzz-chat"}]})),
+                        )
+                    }),
+                )
+                .route(
+                    "/v1/embeddings/models",
+                    axum::routing::get(|| async {
+                        (
+                            axum::http::StatusCode::OK,
+                            axum::Json(serde_json::json!({"data": [{"id": "aaa-embeddings"}]})),
+                        )
+                    }),
+                );
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let base = format!("http://{address}");
+        let request = CatalogRequest {
+            endpoint_id: uuid::Uuid::new_v4(),
+            provider: EndpointProvider::OpenRouter,
+            base_url: &base,
+            native_api: crate::config::NativeApi::Auto,
+            credential: "sk-test",
+            auth: CatalogAuth::Bearer,
+            session: "ses_test",
+        };
+        let snapshot = fetch_catalog(&Client::new(), &request)
+            .await
+            .expect("catalog fetch");
+
+        assert_eq!(
+            snapshot.model_ids().collect::<Vec<_>>(),
+            vec!["zzz-chat", "aaa-embeddings"],
+            "the union keeps the catalog order"
+        );
+        assert_eq!(
+            snapshot.sorted_model_ids(),
+            vec!["aaa-embeddings".to_string(), "zzz-chat".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failing_upstream_reports_its_status() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept");
+            let mut buffer = [0_u8; 1024];
+            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buffer).await;
+            let body = "upstream failure detail";
+            let response = format!(
+                "HTTP/1.1 502 Bad Gateway\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = tokio::io::AsyncWriteExt::write_all(&mut socket, response.as_bytes()).await;
+        });
+
+        let base = format!("http://{address}");
+        let request = catalog_request(EndpointProvider::Generic, &base, "sk-test", "ses_test");
+        let failure = fetch_catalog(&Client::new(), &request)
+            .await
+            .expect_err("the upstream failed");
+        assert_eq!(failure.status, Some(502));
+        assert_eq!(failure.kind, CatalogFailureKind::Status);
+        assert!(failure.detail.contains("upstream failure detail"));
+    }
+
+    #[tokio::test]
+    async fn the_runtime_failure_keeps_its_wording() {
+        let route = route_with_proxy(None, "https://models.test");
+        let failure = CatalogFailure::status(502, "upstream failure detail");
+        let error = catalog_failure_for_route(&route, failure).to_string();
+        assert!(error.contains("models request failed for endpoint"));
+        assert!(error.contains("502"));
+        assert!(error.contains("upstream failure detail"));
     }
 
     #[test]
@@ -313,7 +583,7 @@ mod tests {
             ),
             "https://api.openai.com/v1/v1/models"
         );
-        // GLM (issue #230 P2 / #248) derives the Chat family root and lists
+        // GLM (issue #230 P2) derives the Chat family root and lists
         // at `{base}/models`; the api.z.ai mirror is dropped for the
         // domestic open.bigmodel.cn root.
         for stored in [
