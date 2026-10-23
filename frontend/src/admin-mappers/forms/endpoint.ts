@@ -4,6 +4,7 @@ import type {
   ProviderEndpoint,
 } from '../../generated/admin-api'
 import type { EndpointApiKeyForm, EndpointForm } from '../../models'
+import { normalizeScheduleWindowTimes } from '../../models/endpoints/schedule-windows'
 
 // Issue #637: service tiers are free-form strings, not a fixed enum. Trim the
 // value and treat blank/whitespace-only input as inherit (`null`) so the
@@ -262,9 +263,12 @@ export function endpointFormToRequest(form: EndpointForm): EndpointRequest {
                 ),
               ].sort((a, b) => a - b)
             : undefined
+          // Issue #1045: a row with both times empty is the all-day form of
+          // that row and is sent as the canonical `00:00`-`24:00` window.
+          const times = normalizeScheduleWindowTimes(window)
           return {
-            start: (window?.start ?? '').trim(),
-            end: (window?.end ?? '').trim(),
+            start: times.start,
+            end: times.end,
             ...(days && days.length > 0 && days.length < 7 ? { days } : {}),
           }
         })

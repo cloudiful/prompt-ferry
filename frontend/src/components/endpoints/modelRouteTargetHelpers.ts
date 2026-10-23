@@ -3,13 +3,12 @@ import type { Ref } from 'vue'
 import type { NativeApi } from '@/generated/admin-api'
 import type { ModelRouteForm, ModelRouteTargetForm } from '@/models'
 import { effectiveTargetProtocol } from '@/models/endpoints/service-tier'
+import {
+  isScheduleRowValid,
+  scheduleWindowsForDisplay,
+} from '@/models/endpoints/schedule-windows'
 
 type ScheduleWindow = { start: string; end: string; days?: number[] }
-
-// Issue #457: `end` may additionally be `24:00` (exclusive midnight);
-// `start` stays within `00:00-23:59`.
-const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
-const HHMM_END_RE = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/
 
 export function hasTargetProxy(
   target: ModelRouteTargetForm | null | undefined,
@@ -34,20 +33,11 @@ export function sortedTargetWindows(
   const windows = Array.isArray(target?.active_windows)
     ? (target?.active_windows ?? [])
     : []
-  return [...windows]
-    .map((window) => ({
-      start: (window?.start ?? '').trim(),
-      end: (window?.end ?? '').trim(),
-      days: Array.isArray(window?.days)
-        ? [...(window.days as number[])]
-        : undefined,
-    }))
-    .filter((window) => window.start !== '' && window.end !== '')
-    .sort((a, b) =>
-      a.start === b.start
-        ? a.end.localeCompare(b.end)
-        : a.start.localeCompare(b.start),
-    )
+  return scheduleWindowsForDisplay(windows).sort((a, b) =>
+    a.start === b.start
+      ? a.end.localeCompare(b.end)
+      : a.start.localeCompare(b.start),
+  )
 }
 
 export function hasTargetSchedule(
@@ -154,13 +144,9 @@ export function isTargetProxyValid(
 export function isTargetScheduleValid(
   target: ModelRouteTargetForm | null | undefined,
 ): boolean {
-  return (target?.active_windows ?? []).every((window) => {
-    const start = (window?.start ?? '').trim()
-    const end = (window?.end ?? '').trim()
-    if (!start || !end) return false
-    if (!HHMM_RE.test(start) || !HHMM_END_RE.test(end)) return false
-    return start !== end
-  })
+  return (target?.active_windows ?? []).every((window) =>
+    isScheduleRowValid(window),
+  )
 }
 
 export function canSaveTargets(

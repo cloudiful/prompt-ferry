@@ -1,9 +1,14 @@
 import { computed, type Ref } from 'vue'
 import type { EndpointForm } from '@/models'
+import {
+  scheduleRowError,
+  scheduleWindowsForDisplay,
+} from '@/models/endpoints/schedule-windows'
 
 // Issue #589 P2c: the endpoint dialog's proxy/schedule validation and settings
 // predicates live here so the dialog stays a thin composition shell. The
-// proxy (#368 Phase C) and schedule (#457 / #392 Phase L) rules are unchanged.
+// proxy (#368 Phase C) rules are unchanged; the schedule rules come from the
+// shared helper (#457 / #392 Phase L, #1045).
 export function useEndpointDialogValidation(
   form: Ref<EndpointForm | undefined>,
   t: TranslateFn,
@@ -26,20 +31,8 @@ export function useEndpointDialogValidation(
     return true
   })
 
-  // Issue #457: `end` may additionally be `24:00` (exclusive midnight);
-  // `start` stays within `00:00-23:59`.
-  const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
-  const HHMM_END_RE = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/
-
   function endpointRowError(window: { start: string; end: string }): string {
-    const start = (window?.start ?? '').trim()
-    const end = (window?.end ?? '').trim()
-    if (!start || !end) return t('scheduleRequired')
-    if (!HHMM_RE.test(start) || !HHMM_END_RE.test(end)) {
-      return t('scheduleInvalid')
-    }
-    if (start === end) return t('scheduleEqual')
-    return ''
+    return scheduleRowError(window, t)
   }
 
   const isScheduleValid = computed(() =>
@@ -61,12 +54,8 @@ export function useEndpointDialogValidation(
   }
 
   function sortedEndpointWindows(): Array<{ start: string; end: string }> {
-    return [...endpointWindows()]
-      .map((window) => ({
-        start: (window?.start ?? '').trim(),
-        end: (window?.end ?? '').trim(),
-      }))
-      .filter((window) => window.start !== '' && window.end !== '')
+    return scheduleWindowsForDisplay(endpointWindows())
+      .map((window) => ({ start: window.start, end: window.end }))
       .sort((a, b) =>
         a.start === b.start
           ? a.end.localeCompare(b.end)

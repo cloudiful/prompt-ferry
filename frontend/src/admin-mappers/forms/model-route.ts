@@ -5,6 +5,7 @@ import type {
   StreamDeltaBatchingSettings,
 } from '../../generated/admin-api'
 import type { ModelRouteForm, StreamDeltaBatchingForm } from '../../models'
+import { normalizeScheduleWindowTimes } from '../../models/endpoints/schedule-windows'
 import { normalizeServiceTier } from './endpoint'
 
 const TARGET_NATIVE_APIS: readonly NativeApi[] = [
@@ -268,9 +269,13 @@ export function modelRouteFormToRequest(
                       ),
                     ].sort((a, b) => a - b)
                   : undefined
+                // Issue #1045: a row with both times empty is the all-day form
+                // of that row and is sent as the canonical `00:00`-`24:00`
+                // window.
+                const times = normalizeScheduleWindowTimes(window)
                 return {
-                  start: (window?.start ?? '').trim(),
-                  end: (window?.end ?? '').trim(),
+                  start: times.start,
+                  end: times.end,
                   ...(days && days.length > 0 && days.length < 7
                     ? { days }
                     : {}),

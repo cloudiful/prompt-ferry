@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { scheduleRowError } from '@/models/endpoints/schedule-windows'
 
 type ScheduleWindow = { start: string; end: string; days?: number[] }
 
@@ -10,23 +11,12 @@ const props = defineProps<{
 const windows = defineModel<ScheduleWindow[]>('windows', { required: true })
 const touched = defineModel<boolean>('touched', { required: true })
 
-// Issue #457: `end` may additionally be `24:00` (exclusive midnight);
-// `start` stays within `00:00-23:59`.
-const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
-const HHMM_END_RE = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/
-
 function markTouched(): void {
   touched.value = true
 }
 
 function rowError(row: ScheduleWindow): string {
-  const start = (row?.start ?? '').trim()
-  const end = (row?.end ?? '').trim()
-  if (!start || !end) return props.t('scheduleRequired')
-  if (!HHMM_RE.test(start) || !HHMM_END_RE.test(end))
-    return props.t('scheduleInvalid')
-  if (start === end) return props.t('scheduleEqual')
-  return ''
+  return scheduleRowError(row, props.t)
 }
 
 const rowErrors = computed(() => (windows.value ?? []).map(rowError))
