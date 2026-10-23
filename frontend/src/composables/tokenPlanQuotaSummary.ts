@@ -60,15 +60,17 @@ const BLOCKED_PRIORITY: readonly TokenPlanQuotaState[] = [
 export function keyShortPercent(
   key: TokenPlanKeyUsage,
   _provider: EndpointProvider,
+  now: number = Date.now(),
 ): number | null {
-  return canonicalBandPercent(toCanonicalQuotaRows(key, Date.now()), 'short')
+  return canonicalBandPercent(toCanonicalQuotaRows(key, now), 'short')
 }
 
 export function keyLongPercent(
   key: TokenPlanKeyUsage,
   _provider: EndpointProvider,
+  now: number = Date.now(),
 ): number | null {
-  return canonicalBandPercent(toCanonicalQuotaRows(key, Date.now()), 'long')
+  return canonicalBandPercent(toCanonicalQuotaRows(key, now), 'long')
 }
 
 function mean(values: number[]): number | null {
@@ -156,8 +158,11 @@ export function summarizeTokenPlanQuota(
   provider: EndpointProvider,
   keys: readonly TokenPlanKeyUsage[],
   fetchState: TokenPlanFetchState,
+  now: number = Date.now(),
 ): TokenPlanQuotaSummary {
-  const effective = tokenPlanEffectiveKeys(keys, fetchState)
+  // One clock for the whole summary: the effective-state projection and the
+  // canonical windows are selected against the same moment.
+  const effective = tokenPlanEffectiveKeys(keys, fetchState, now)
   if (provider === 'command_code') {
     for (const entry of effective) {
       // A blocked CommandCode key contributes no capacity either: its empty
@@ -179,16 +184,20 @@ export function summarizeTokenPlanQuota(
     .filter((entry) => entry.hasCapacity)
     .map((entry) => entry.key)
   const shorts = capacityKeys
-    .map((key) => keyShortPercent(key, provider))
+    .map((key) => keyShortPercent(key, provider, now))
     .filter((value): value is number => value !== null)
   const longs = capacityKeys
-    .map((key) => keyLongPercent(key, provider))
+    .map((key) => keyLongPercent(key, provider, now))
     .filter((value): value is number => value !== null)
   let short = mean(shorts)
   let long = mean(longs)
   if (state.allExhausted) {
-    if (keys.some((key) => keyShortPercent(key, provider) !== null)) short = 0
-    if (keys.some((key) => keyLongPercent(key, provider) !== null)) long = 0
+    if (keys.some((key) => keyShortPercent(key, provider, now) !== null)) {
+      short = 0
+    }
+    if (keys.some((key) => keyLongPercent(key, provider, now) !== null)) {
+      long = 0
+    }
   }
   return {
     ...state,

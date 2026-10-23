@@ -519,15 +519,16 @@ test('a refresh failure preserves raw data but marks the cached quota stale', as
   // Stale retains the last-known balance alongside the explicit unknown
   // hint, never the amount as fresh capacity.
   expect(badges.deepseekBalances).toEqual([{ currency: 'CNY', total: 3 }])
+  // Stale retains the last-known balance; the generic quota placeholder is
+  // not shown next to it.
   expect(tokenPlanBadgePills(badges, t).map((pill) => pill.label)).toEqual([
     '¥3.00',
-    'tokenPlanQuotaUnknown',
   ])
   expect(badges.usage).toEqual(usage)
   jest.setSystemTime()
 })
 
-test('a stale exhausted window keeps actual numbers with an explicit stale hint', async () => {
+test('a stale exhausted window keeps actual numbers with the unknown title', async () => {
   const { minimaxQuotaKey } =
     await import('./helpers/token-plan-quota-fixtures')
   const usage = {
@@ -553,7 +554,6 @@ test('a stale exhausted window keeps actual numbers with an explicit stale hint'
   expect(pills.map((pill) => pill.label)).toEqual([
     'tokenPlanShortBadge 0%',
     'tokenPlanLongBadge 40%',
-    'tokenPlanQuotaUnknown',
   ])
   // Every retained percentage carries the unknown tooltip, never a fresh hint.
   expect(
@@ -576,7 +576,7 @@ test('a ready exhausted window keeps the existing zero control', async () => {
   expect([badges.short, badges.long]).toEqual([0, 0])
 })
 
-test('stale expired feedback keeps numbers with an explicit unknown hint', async () => {
+test('stale expired feedback keeps numbers with the unknown title', async () => {
   const { minimaxQuotaKey } =
     await import('./helpers/token-plan-quota-fixtures')
   const { summarizeTokenPlanQuota } =
@@ -620,7 +620,6 @@ test('stale expired feedback keeps numbers with an explicit unknown hint', async
     expect(pills.map((pill) => pill.label)).toEqual([
       'tokenPlanShortBadge 60%',
       'tokenPlanLongBadge 40%',
-      'tokenPlanQuotaUnknown',
     ])
   }
 })

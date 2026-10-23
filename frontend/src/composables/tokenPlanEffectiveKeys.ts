@@ -4,6 +4,10 @@ import type {
   TokenPlanQuotaStatus,
 } from '@/generated/admin-api'
 import type { TokenPlanFetchState } from '@/models/endpoints/quota'
+import {
+  canonicalBandPercent,
+  toCanonicalQuotaRows,
+} from './useCanonicalQuotaWindows'
 
 // States produced by feedback rather than by a provider snapshot. They carry a
 // retry deadline; once that deadline has passed the block is over and the badge
@@ -49,6 +53,19 @@ export type EffectiveTokenPlanKey = {
   hasCapacity: boolean
 }
 
+// Display evidence for a key whose coarse quota status is unknown: a
+// canonical window that is genuinely known still describes the account's
+// capacity, so the badge may show it. Only an actually known short/long band
+// counts — a missing, unknown or expired window contributes nothing, and the
+// unknown state itself never becomes usable quota.
+function hasKnownQuotaWindow(key: TokenPlanKeyUsage, now: number): boolean {
+  const rows = toCanonicalQuotaRows(key, now)
+  return (
+    canonicalBandPercent(rows, 'short') !== null ||
+    canonicalBandPercent(rows, 'long') !== null
+  )
+}
+
 export function tokenPlanEffectiveKeys(
   keys: readonly TokenPlanKeyUsage[],
   fetchState: TokenPlanFetchState,
@@ -62,8 +79,9 @@ export function tokenPlanEffectiveKeys(
     // live feedback block is retained, and expired feedback stays demoted. A
     // stale non-feedback observation (exhausted/available/unknown) is not a
     // current claim, so it projects to unknown; exhausted, available, and
-    // expired feedback keep their historical windows as evidence while
-    // unknown keeps none. An absent window still yields null downstream.
+    // expired feedback keep their historical windows as evidence, and an
+    // unknown observation keeps the windows it actually reports. An absent
+    // window still yields null downstream.
     if (fetchState === 'stale') {
       if (metadata?.scope === 'text_inference') {
         const rawState = key.quota_status?.state
@@ -87,7 +105,12 @@ export function tokenPlanEffectiveKeys(
           state: 'unknown',
           usable: false,
           legacy: false,
-          hasCapacity: rawState != null && rawState !== 'unknown',
+          hasCapacity:
+            (rawState != null && rawState !== 'unknown') ||
+            // A provider that reports an unknown coarse status can still
+            // report real windows; the last-known numbers stay visible as
+            // historical evidence, never as current capacity.
+            (rawState === 'unknown' && hasKnownQuotaWindow(key, now)),
         }
       }
       return {
@@ -109,6 +132,7 @@ export function tokenPlanEffectiveKeys(
     }
     if (metadata?.scope === 'text_inference') {
       const state = metadata.state
+      const rawState = key.quota_status?.state
       return {
         key,
         state,
@@ -117,7 +141,11 @@ export function tokenPlanEffectiveKeys(
         hasCapacity:
           state === 'available' ||
           state === 'rate_limited' ||
-          state === 'upstream_unavailable',
+          state === 'upstream_unavailable' ||
+          // The coarse status is unknown while the provider still reports
+          // real windows: those numbers describe the account and belong in
+          // the display, without ever making the key usable.
+          (rawState === 'unknown' && hasKnownQuotaWindow(key, now)),
       }
     }
     return {

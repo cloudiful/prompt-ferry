@@ -315,28 +315,24 @@ export function tokenPlanBadgePills(
       source.openrouterBalance !== null || source.openrouterRemaining !== null
     if (state === 'cooling' || state === 'exhausted') {
       pills.push(quotaStatePill(state, t, source.cooldownUntil))
-    } else if (state === 'unknown' && !hasBalance) {
-      pills.push(quotaStatePill('unknown', t))
     } else if (state === 'available' && !hasBalance) {
       pills.push(quotaStatePill('available', t))
-    } else {
+    } else if (hasBalance) {
       pills.push({
         label:
           source.openrouterBalance !== null
             ? `${t('tokenPlanOpenRouterRemaining')} ${formatMoney('USD', source.openrouterBalance)}`
-            : `${t('tokenPlanOpenRouterRemaining')} ${t('tokenPlanQuotaUnknown')}`,
+            : t('tokenPlanBalanceUnknown'),
         color:
           source.openrouterRemaining !== null
             ? badgeColorForPercent(source.openrouterRemaining)
             : '',
         title: t('tokenPlanOpenRouterBalanceHint'),
       })
-      if (
-        state === 'unknown' &&
-        (source.quotaMetadataPresent || source.status === 'stale')
-      ) {
-        pills.push(quotaStatePill('unknown', t))
-      }
+    } else {
+      // Nothing about the balance is known: the balance-specific unknown says
+      // so, never a generic default-text quota placeholder.
+      pills.push(namedPill(t('tokenPlanBalanceUnknown')))
     }
     if (isTransientState(state)) {
       pills.push(quotaStatePill(state, t, source.cooldownUntil))
@@ -355,20 +351,12 @@ export function tokenPlanBadgePills(
   }
   if (source.mode === 'deepseek') {
     const pills: TokenPlanBadgePill[] = []
-    // Stale with known amounts shows both: the last-known balance plus an
-    // explicit unknown/stale hint, never the amount as fresh capacity.
-    const hasKnownDeepseek = source.deepseekBalances.some(
-      (amount) => amount.total !== null,
-    )
     if (state === 'cooling' || state === 'exhausted') {
       pills.push(quotaStatePill(state, t, source.cooldownUntil))
-    } else if (
-      state === 'unknown' &&
-      (source.quotaMetadataPresent || source.status === 'stale') &&
-      !(source.status === 'stale' && hasKnownDeepseek)
-    ) {
-      pills.push(quotaStatePill('unknown', t))
     } else {
+      // The balance is the provider's own report: it stays visible whatever
+      // the coarse quota status says, and an unknown amount is named by the
+      // balance-specific unknown instead of a generic quota placeholder.
       const legacyUnavailable =
         !source.quotaMetadataPresent && source.deepseekState === 'unavailable'
       const color = legacyUnavailable
@@ -400,11 +388,6 @@ export function tokenPlanBadgePills(
       if (state === 'partial') pills.push(quotaStatePill('partial', t))
       if (isTransientState(state)) {
         pills.push(quotaStatePill(state, t, source.cooldownUntil))
-      }
-      // Nonexclusive stale adjunct: retained amounts stay visible alongside
-      // the explicit unknown hint, never as fresh capacity.
-      if (source.status === 'stale' && state === 'unknown') {
-        pills.push(quotaStatePill('unknown', t))
       }
     }
     if (source.localTodayTokens !== null) {
@@ -447,21 +430,10 @@ export function tokenPlanBadgePills(
           : t('tokenPlanLongBadgeHint'),
     })
   }
-  if (
-    state === 'unknown' &&
-    pills.length === 0 &&
-    (source.quotaMetadataPresent || source.status === 'stale')
-  ) {
-    pills.push(quotaStatePill('unknown', t))
-  } else if (
-    state === 'unknown' &&
-    source.status === 'stale' &&
-    pills.length > 0
-  ) {
-    // Stale historical numbers stay visible but never as current capacity:
-    // name the unknown observation alongside the retained percentages.
-    pills.push(quotaStatePill('unknown', t))
-  } else if (state === 'partial') {
+  // An unknown quota state never adds a generic placeholder pill: the
+  // reported windows above stay visible with the unknown title, and a state
+  // without any known window leaves the cell empty.
+  if (state === 'partial') {
     pills.push(quotaStatePill('partial', t))
   } else if (isTransientState(state)) {
     // Throttling and an unavailable upstream never hide the provider
@@ -490,8 +462,13 @@ function localTodayPill(tokens: number, t: TranslateFn): TokenPlanBadgePill {
   }
 }
 
+// A quota state that is worth showing as its own pill. The generic unknown
+// state is not one of them: it has no pill, only a title on the numbers that
+// are actually known.
+type TokenPlanBadgeState = Exclude<TokenPlanQuotaSummaryState, 'unknown'>
+
 function quotaStatePill(
-  state: TokenPlanQuotaSummaryState,
+  state: TokenPlanBadgeState,
   t: TranslateFn,
   cooldownUntil?: string | null,
 ): TokenPlanBadgePill {
@@ -506,9 +483,7 @@ function quotaStatePill(
             ? t('tokenPlanUpstreamUnavailable')
             : state === 'exhausted'
               ? t('tokenPlanUnavailable')
-              : state === 'partial'
-                ? t('tokenPlanQuotaPartial')
-                : t('tokenPlanQuotaUnknown')
+              : t('tokenPlanQuotaPartial')
   const pill = namedPill(
     label,
     state === 'exhausted'

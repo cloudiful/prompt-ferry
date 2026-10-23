@@ -62,10 +62,11 @@ test('stale observations stay unknown without usable capacity but retain numbers
   const unknown = minimaxQuotaKey('unknown', 'unknown', 80, 80)
   const summary = summarizeTokenPlanQuota('minimax', [stale, unknown], 'stale')
   expect(summary.state).toBe('unknown')
-  // Historical numeric evidence stays visible; the unknown key contributes
-  // nothing, and neither observation counts as usable/current capacity.
-  expect(summary.short).toBe(90)
-  expect(summary.long).toBe(95)
+  // Historical numeric evidence stays visible; the unknown key now adds the
+  // windows it actually reports, and neither observation counts as
+  // usable/current capacity.
+  expect(summary.short).toBe(85)
+  expect(summary.long).toBe(87.5)
   expect(summary.usableKeys).toEqual([])
 
   const partial = summarizeTokenPlanQuota(
@@ -74,8 +75,8 @@ test('stale observations stay unknown without usable capacity but retain numbers
     'ready',
   )
   expect(partial.state).toBe('partial')
-  expect(partial.short).toBe(40)
-  expect(partial.long).toBe(60)
+  expect(partial.short).toBe(60)
+  expect(partial.long).toBe(70)
 })
 
 test('legacy responses keep numeric detail but do not claim availability', () => {
@@ -111,7 +112,9 @@ test('ChatGPT uses reported short and long durations and preserves unknown windo
   ]
   const unknown = summarizeTokenPlanQuota('openai', [key], 'ready')
   expect(unknown.state).toBe('unknown')
-  expect([unknown.short, unknown.long]).toEqual([null, null])
+  // The unknown short window stays unknown, while the long window the
+  // provider really reports is shown next to it.
+  expect([unknown.short, unknown.long]).toEqual([null, 35])
 })
 
 test('a transient block keeps the provider percentages and names its cause', () => {
@@ -170,9 +173,10 @@ test('one usable key keeps a mixed pool out of the blocked rollup', () => {
   expect(summary.state).toBe('partial')
   expect(summary.allExhausted).toBe(false)
   expect(summary.usableKeys.map((key) => key.key_id)).toEqual(['available'])
-  // The throttled key still has capacity, so its windows join the average; the
-  // unknown one contributes nothing.
-  expect([summary.short, summary.long]).toEqual([25, 35])
+  // The throttled key still has capacity and the unknown key reports real
+  // windows, so both join the average; a key without any known window would
+  // still contribute nothing.
+  expect([summary.short, summary.long]).toEqual([20, 80 / 3])
 })
 
 test('an expired retry deadline is demoted to unknown in both surfaces', () => {

@@ -717,8 +717,10 @@ test('tokenPlanBadgePills falls back to local tokens when OpenRouter has no spen
     },
     t,
   )
+  // The balance is unknown, so the balance-specific unknown names it; the
+  // generic default-text quota placeholder is never shown.
   expect(pills.map((pill) => pill.label)).toEqual([
-    'tokenPlanQuotaUnknown',
+    'tokenPlanBalanceUnknown',
     'tokenPlanLocalTodayTokens 0',
   ])
 })
