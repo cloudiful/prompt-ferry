@@ -58,6 +58,12 @@ docker compose up -d prompt-ferry
 
 - 管理控制台：<http://127.0.0.1:8789>，使用 `admin` 登录。
 - OpenAI 兼容 base URL：`http://127.0.0.1:8787/v1`。
+- 关闭：SIGTERM 停止接收新请求，已接受的推理轮次最多在
+  `PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS`（120 秒）内完成。relay 等待
+  `PROMPT_FERRY_RELAY__SHUTDOWN_DRAIN_SECONDS`（130 秒），Compose 在 SIGKILL
+  前允许 150 秒。修改时保持 worker < relay < `stop_grace_period`。集成模式会
+  等待两边排空完成；仅 worker 的进程依赖其远程 relay 的预算，停止宽限到期或
+  SIGKILL 不是优雅关闭。
 
 如果 `PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD` 留空且尚无管理员，
 系统会一次性生成强密码并写入数据卷：

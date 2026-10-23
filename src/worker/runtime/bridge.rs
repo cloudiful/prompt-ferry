@@ -1,7 +1,7 @@
-use std::{fmt, sync::Arc};
+use std::{fmt, sync::Arc, time::Duration};
 
 use crate::protocol::{BridgeMessage, McpResponseChunk, ResponseChunk};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 const BRIDGE_OUTBOUND_MAX_BYTES: usize = 16 * 1024 * 1024;
 
@@ -9,6 +9,8 @@ const BRIDGE_OUTBOUND_MAX_BYTES: usize = 16 * 1024 * 1024;
 pub(super) struct BridgeSender {
     data_tx: mpsc::Sender<BridgeData>,
     control_tx: mpsc::UnboundedSender<BridgeMessage>,
+    flush_tx: mpsc::UnboundedSender<oneshot::Sender<()>>,
+    flush_rx: Arc<std::sync::Mutex<Option<mpsc::UnboundedReceiver<oneshot::Sender<()>>>>>,
     queued_bytes: Arc<Semaphore>,
 }
 
@@ -67,15 +69,45 @@ impl BridgeSender {
     ) {
         let (control_tx, control_rx) = mpsc::unbounded_channel();
         let (data_tx, data_rx) = mpsc::channel(256);
+        let (flush_tx, flush_rx) = mpsc::unbounded_channel();
         (
             Self {
                 data_tx,
                 control_tx,
+                flush_tx,
+                flush_rx: Arc::new(std::sync::Mutex::new(Some(flush_rx))),
                 queued_bytes: Arc::new(Semaphore::new(byte_budget)),
             },
             control_rx,
             data_rx,
         )
+    }
+
+    /// Hand the single ordered-flush request receiver to the session writer.
+    ///
+    /// The writer drains both outbound queues and flushes its websocket sink
+    /// before acknowledging; the caller drops every producer first so nothing
+    /// can be queued behind the marker.
+    pub(super) fn take_flush_receiver(
+        &self,
+    ) -> Option<mpsc::UnboundedReceiver<oneshot::Sender<()>>> {
+        self.flush_rx
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+    }
+
+    /// Ask the writer to flush everything queued before this call.
+    ///
+    /// Returns `false` when the writer is gone, the socket write fails, or the
+    /// bounded allowance expires; a closed or failing socket never reports a
+    /// successful flush.
+    pub(super) async fn flush(&self, allowance: Duration) -> bool {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        if self.flush_tx.send(ack_tx).is_err() {
+            return false;
+        }
+        matches!(tokio::time::timeout(allowance, ack_rx).await, Ok(Ok(())))
     }
 
     #[cfg(test)]
@@ -196,5 +228,58 @@ fn build_chunk_message(request_id: String, data: Vec<u8>, is_mcp: bool) -> Bridg
         BridgeMessage::McpResponseChunk(McpResponseChunk { request_id, data })
     } else {
         BridgeMessage::ResponseChunk(ResponseChunk { request_id, data })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::BridgeSender;
+    use crate::protocol::{BridgeMessage, ResponseChunk};
+
+    fn response_chunk() -> BridgeMessage {
+        BridgeMessage::ResponseChunk(ResponseChunk {
+            request_id: "request-1".to_string(),
+            data: vec![1],
+        })
+    }
+
+    #[tokio::test]
+    async fn flush_acknowledges_after_the_writer_drains_queued_data() {
+        let (sender, _control_rx, mut data_rx) = BridgeSender::channel();
+        let mut flush_rx = sender.take_flush_receiver().expect("writer receiver");
+        sender.send(response_chunk()).await.expect("queued data");
+
+        let writer = tokio::spawn(async move {
+            let item = data_rx.recv().await.expect("queued data reached writer");
+            drop(item);
+            let ack = flush_rx.recv().await.expect("flush request reached writer");
+            ack.send(()).expect("flush acknowledgement accepted");
+        });
+
+        assert!(sender.flush(Duration::from_secs(1)).await);
+        writer.await.expect("writer task ran");
+    }
+
+    #[tokio::test]
+    async fn flush_without_a_writer_reports_failure() {
+        let (sender, _control_rx, _data_rx) = BridgeSender::channel();
+        drop(sender.take_flush_receiver());
+
+        assert!(!sender.flush(Duration::from_millis(50)).await);
+    }
+
+    #[tokio::test]
+    async fn flush_reports_failure_when_the_writer_drops_the_acknowledgement() {
+        let (sender, _control_rx, _data_rx) = BridgeSender::channel();
+        let mut flush_rx = sender.take_flush_receiver().expect("writer receiver");
+        let writer = tokio::spawn(async move {
+            let ack = flush_rx.recv().await.expect("flush request reached writer");
+            drop(ack);
+        });
+
+        assert!(!sender.flush(Duration::from_secs(1)).await);
+        writer.await.expect("writer task ran");
     }
 }

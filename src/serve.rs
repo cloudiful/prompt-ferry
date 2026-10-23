@@ -19,7 +19,7 @@ use crate::{
     browser::{LaunchContext, SystemBrowserLauncher, open_admin_ui},
     cli::ServeArgs,
     config::{
-        AppConfig, HostRole, IntegratedStartup,
+        AppConfig, HostRole, IntegratedStartup, RelayConfig, WorkerConfig,
         binds::{ReservedBind, local_ui_url, reserve_bind},
         host_startup, integrated_bridge, management_token,
     },
@@ -36,6 +36,10 @@ const ADMIN_READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long a requested restart lets in-flight requests finish before the
 /// components it is replacing are dropped.
 const RESTART_DRAIN: Duration = Duration::from_secs(5);
+
+/// The relay must outlive the worker drain by at least this margin so an
+/// accepted response can still cross the bridge after the worker stops.
+const RELAY_WORKER_DRAIN_MARGIN: Duration = Duration::from_secs(5);
 
 /// Which entrypoint reached this startup.
 ///
@@ -288,6 +292,7 @@ async fn run_integrated(
     let (mut relay_config, worker_config) =
         integrated_bridge::bridge_connected_configs(app_config, &worker_bridge, &admin);
     management_token::resolve(&mut relay_config)?;
+    warn_on_drain_budget_mismatch(&relay_config, &worker_config);
 
     // The admin socket stays reserved from here until the worker adopts it, so
     // a fixed admin port cannot be taken while the worker runs its database
@@ -307,6 +312,23 @@ async fn run_integrated(
     report_worker_admin_ready(startup, Some(relay_admin_url), None);
     tokio::try_join!(relay, worker::run_embedded(worker_config))?;
     Ok(())
+}
+
+/// Report a detectable mismatch between the integrated halves' configured
+/// shutdown budgets. Docker's own stop timeout is outside the process, so this
+/// never claims to validate it.
+fn warn_on_drain_budget_mismatch(relay_config: &RelayConfig, worker_config: &WorkerConfig) {
+    let worker_drain = Duration::from_secs(worker_config.shutdown_drain_seconds.max(1));
+    let relay_drain = Duration::from_secs(relay_config.shutdown_drain_seconds.max(1));
+    if relay_drain < worker_drain + RELAY_WORKER_DRAIN_MARGIN {
+        warn!(
+            worker_drain_seconds = worker_drain.as_secs(),
+            relay_drain_seconds = relay_drain.as_secs(),
+            margin_seconds = RELAY_WORKER_DRAIN_MARGIN.as_secs(),
+            "relay shutdown drain does not exceed the worker drain plus margin; an accepted response \
+             may be cut off before it crosses the bridge",
+        );
+    }
 }
 
 /// Start the worker alone.

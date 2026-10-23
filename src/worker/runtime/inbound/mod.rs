@@ -382,3 +382,259 @@ async fn send_mcp_too_large_response(out_tx: &super::context::BridgeSender, requ
 fn warn_unexpected() {
     tracing::warn!("relay sent unexpected response message");
 }
+
+/// Close the long-lived realtime sessions on admission shutdown through the
+/// same close signal the relay path uses. They are not accepted inference
+/// rounds, so they must not hold the drain open: every send shares one deadline
+/// and a saturated queue is abandoned rather than awaited individually.
+pub(super) async fn close_realtime_sessions(
+    state: &super::WorkerRuntimeState,
+    deadline: tokio::time::Instant,
+) {
+    let senders = {
+        let sessions = state.pending_realtime_sessions.lock().await;
+        sessions.values().cloned().collect::<Vec<_>>()
+    };
+    let sends = senders.into_iter().map(|sender| async move {
+        let _ = tokio::time::timeout_at(
+            deadline,
+            sender.send(RealtimeInboundMessage::Close {
+                code: Some(1001),
+                reason: Some("worker is shutting down".to_string()),
+            }),
+        )
+        .await;
+    });
+    futures::future::join_all(sends).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::super::WorkerRuntimeState;
+    use super::super::context::{BridgeSender, ResponseLimits, RuntimeServices};
+    use super::handle_relay_bridge_message;
+    use crate::protocol::{
+        BridgeMessage, BridgeRequestStart, McpRequestCancel, McpRequestEnd, McpRequestStart,
+        McpResponseStart, ResponseError,
+    };
+    use reqwest::StatusCode;
+
+    fn request_start(request_id: &str) -> BridgeMessage {
+        BridgeMessage::RequestStart(BridgeRequestStart {
+            request_id: request_id.to_string(),
+            method: "POST".to_string(),
+            path: "/v1/chat/completions".to_string(),
+            headers: Vec::new(),
+            request_deadline_unix_ms: 0,
+            user_id: None,
+            route_id: None,
+            client_key_hash: None,
+            request_user_agent: None,
+            http_request_content_encoding: None,
+            http_request_compressed: false,
+            http_request_compressed_bytes: None,
+        })
+    }
+
+    fn mcp_start(request_id: &str) -> BridgeMessage {
+        BridgeMessage::McpRequestStart(McpRequestStart {
+            request_id: request_id.to_string(),
+            server_name: None,
+            method: "POST".to_string(),
+            path: "/mcp".to_string(),
+            headers: Vec::new(),
+            user_id: None,
+            http_request_content_encoding: None,
+            http_request_compressed: false,
+            http_request_compressed_bytes: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn ai_start_after_admission_shutdown_is_refused_without_a_guard() {
+        let runtime_state = WorkerRuntimeState::default();
+        runtime_state.control.begin_shutdown();
+        let (sender, mut control_rx, _data_rx) = BridgeSender::channel();
+        let services = RuntimeServices::new(
+            None,
+            sender,
+            reqwest::Client::new(),
+            runtime_state,
+            ResponseLimits::default(),
+        );
+
+        handle_relay_bridge_message(
+            request_start("refused-ai"),
+            &crate::config::WorkerConfig::default(),
+            &services,
+        )
+        .await;
+
+        let message = tokio::time::timeout(Duration::from_secs(1), control_rx.recv())
+            .await
+            .expect("refusal arrives")
+            .expect("control channel open");
+        let BridgeMessage::ResponseError(ResponseError {
+            request_id,
+            status,
+            code,
+            ..
+        }) = message
+        else {
+            panic!("unexpected refusal message: {message:?}");
+        };
+        assert_eq!(request_id, "refused-ai");
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE.as_u16());
+        assert_eq!(code, "worker_shutting_down");
+        assert_eq!(
+            services
+                .runtime_state
+                .control
+                .wait_for_drain(Duration::from_millis(10))
+                .await,
+            0,
+            "a refused start must not hold a drain guard"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_start_after_admission_shutdown_is_refused_without_a_guard() {
+        let runtime_state = WorkerRuntimeState::default();
+        runtime_state.control.begin_shutdown();
+        let (sender, _control_rx, mut data_rx) = BridgeSender::channel();
+        let services = RuntimeServices::new(
+            None,
+            sender,
+            reqwest::Client::new(),
+            runtime_state,
+            ResponseLimits::default(),
+        );
+
+        handle_relay_bridge_message(
+            mcp_start("refused-mcp"),
+            &crate::config::WorkerConfig::default(),
+            &services,
+        )
+        .await;
+
+        let start = tokio::time::timeout(Duration::from_secs(1), data_rx.recv())
+            .await
+            .expect("refusal arrives")
+            .expect("data channel open");
+        let BridgeMessage::McpResponseStart(McpResponseStart {
+            request_id, status, ..
+        }) = start.message
+        else {
+            panic!("unexpected MCP refusal");
+        };
+        assert_eq!(request_id, "refused-mcp");
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE.as_u16());
+        assert_eq!(
+            services
+                .runtime_state
+                .control
+                .wait_for_drain(Duration::from_millis(10))
+                .await,
+            0,
+            "a refused MCP start must not hold a drain guard"
+        );
+    }
+
+    #[tokio::test]
+    async fn saturated_realtime_queues_share_one_bounded_close_budget() {
+        let runtime_state = WorkerRuntimeState::default();
+        let mut stalled_receivers = Vec::new();
+        for index in 0..3 {
+            let (sender, receiver) = tokio::sync::mpsc::channel(1);
+            sender
+                .send(super::RealtimeInboundMessage::Event("queued".to_string()))
+                .await
+                .expect("fill the realtime queue");
+            runtime_state
+                .pending_realtime_sessions
+                .lock()
+                .await
+                .insert(format!("stalled-realtime-{index}"), sender);
+            // Keep each stalled consumer alive without draining its queue.
+            stalled_receivers.push(receiver);
+        }
+
+        let started = tokio::time::Instant::now();
+        super::close_realtime_sessions(&runtime_state, started + Duration::from_millis(30)).await;
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "N saturated realtime queues must not multiply the shared deadline: {:?}",
+            started.elapsed()
+        );
+        drop(stalled_receivers);
+    }
+
+    #[tokio::test]
+    async fn admitted_mcp_round_holds_the_drain_guard_until_it_finishes() {
+        let runtime_state = WorkerRuntimeState::default();
+        let (sender, _control_rx, _data_rx) = BridgeSender::channel();
+        let services = RuntimeServices::new(
+            None,
+            sender,
+            reqwest::Client::new(),
+            runtime_state,
+            ResponseLimits::default(),
+        );
+
+        handle_relay_bridge_message(
+            mcp_start("admitted-mcp"),
+            &crate::config::WorkerConfig::default(),
+            &services,
+        )
+        .await;
+        assert_eq!(
+            services
+                .runtime_state
+                .control
+                .wait_for_drain(Duration::from_millis(30))
+                .await,
+            1,
+            "an admitted MCP round must hold the drain guard"
+        );
+
+        handle_relay_bridge_message(
+            BridgeMessage::McpRequestCancel(McpRequestCancel {
+                request_id: "admitted-mcp".to_string(),
+                reason: "client_cancel".to_string(),
+                response_started: false,
+            }),
+            &crate::config::WorkerConfig::default(),
+            &services,
+        )
+        .await;
+        handle_relay_bridge_message(
+            BridgeMessage::McpRequestEnd(McpRequestEnd {
+                request_id: "admitted-mcp".to_string(),
+                http_request_compressed_bytes: None,
+                http_request_decompressed_bytes: None,
+                http_request_compression_ratio: None,
+            }),
+            &crate::config::WorkerConfig::default(),
+            &services,
+        )
+        .await;
+
+        let remaining = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let remaining = services
+                    .runtime_state
+                    .control
+                    .wait_for_drain(Duration::from_millis(10))
+                    .await;
+                if remaining == 0 {
+                    return remaining;
+                }
+            }
+        })
+        .await
+        .expect("cancelled MCP round releases its guard");
+        assert_eq!(remaining, 0);
+    }
+}

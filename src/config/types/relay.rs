@@ -35,6 +35,12 @@ pub struct RelayConfig {
     pub client_token: String,
     pub worker_token: String,
     pub request_timeout_seconds: u64,
+    /// Grace given to the public listener after shutdown is signalled.
+    ///
+    /// It must exceed the worker's own drain so an already accepted response
+    /// can still travel through the bridge before the relay drops it. Defaults
+    /// to 130 seconds: the 120-second worker default plus a flush margin.
+    pub shutdown_drain_seconds: u64,
     pub worker_heartbeat_timeout_seconds: u64,
     pub response_stream_buffer: usize,
     pub response_stream_max_bytes: usize,
@@ -71,6 +77,7 @@ impl Default for RelayConfig {
             client_token: "change-me-client-token".to_string(),
             worker_token: "change-me-worker-token".to_string(),
             request_timeout_seconds: 300,
+            shutdown_drain_seconds: 130,
             worker_heartbeat_timeout_seconds: 90,
             response_stream_buffer: 256,
             response_stream_max_bytes: 16 * 1024 * 1024,
@@ -166,6 +173,11 @@ mod tests {
         assert_eq!(config.response_stream_buffer, 256);
         assert_eq!(config.response_stream_max_bytes, 16 * 1024 * 1024);
         assert_eq!(config.response_stream_backpressure_timeout_ms, 5_000);
+    }
+
+    #[test]
+    fn shutdown_drain_default_outlives_the_worker_drain() {
+        assert_eq!(RelayConfig::default().shutdown_drain_seconds, 130);
     }
 
     #[test]

@@ -14,7 +14,7 @@ use super::{
         relay_fingerprint as managed_relay_fingerprint, relay_targets,
     },
     run_relay_loop,
-    support::MissingRelayTarget,
+    support::{MissingRelayTarget, SESSION_TEARDOWN_ALLOWANCE},
 };
 use crate::worker::runtime::standalone::StandaloneRuntimeState;
 use crate::worker_admin;
@@ -45,7 +45,7 @@ pub(super) async fn spawn_managed_relay_supervisor(
         missing.observe(!tasks.is_empty(), "managed relay list");
         loop {
             tokio::select! {
-                _ = runtime_state.wait_for_shutdown() => break,
+                _ = runtime_state.control.wait_for_session_stop() => break,
                 maybe_command = rx.recv() => {
                     let Some(command) = maybe_command else {
                         break;
@@ -79,11 +79,26 @@ pub(super) async fn spawn_managed_relay_supervisor(
                 }
             }
         }
-        for (_, task) in tasks {
-            task.handle.abort();
-        }
+        join_relay_handles(tasks.into_iter().map(|(_, task)| task.handle)).await;
     });
     Ok(())
+}
+
+/// Give each session supervisor bounded time to finish its own flush, then
+/// abort whatever is still running. The allowance is global, so N draining
+/// sessions never add up to an unbounded serial wait.
+async fn join_relay_handles(handles: impl IntoIterator<Item = JoinHandle<()>>) {
+    let deadline = tokio::time::sleep(SESSION_TEARDOWN_ALLOWANCE);
+    tokio::pin!(deadline);
+    for mut handle in handles {
+        tokio::select! {
+            _ = &mut handle => {}
+            _ = &mut deadline => {
+                handle.abort();
+                let _ = handle.await;
+            }
+        }
+    }
 }
 
 async fn reconcile_managed_relays(
@@ -93,6 +108,9 @@ async fn reconcile_managed_relays(
     runtime_state: &WorkerRuntimeState,
     tasks: &mut HashMap<Uuid, ManagedRelayTask>,
 ) -> anyhow::Result<()> {
+    if runtime_state.is_shutting_down() {
+        return Ok(());
+    }
     let desired_relays = crate::db::list_enabled_managed_relays(&admin_state.pool).await?;
     let desired_ids = desired_relays
         .iter()
@@ -167,6 +185,9 @@ async fn reconnect_managed_relay(
     tasks: &mut HashMap<Uuid, ManagedRelayTask>,
     relay_id: Uuid,
 ) -> anyhow::Result<()> {
+    if runtime_state.is_shutting_down() {
+        return Ok(());
+    }
     let relay = crate::db::get_managed_relay(&admin_state.pool, relay_id)
         .await?
         .ok_or_else(|| anyhow!("relay not found"))?;
@@ -234,7 +255,7 @@ pub(super) async fn spawn_standalone_relay_supervisor(
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
-                _ = runtime_state.wait_for_shutdown() => break,
+                _ = runtime_state.control.wait_for_session_stop() => break,
                 _ = interval.tick() => {
                     match standalone_state.reload_snapshot().await {
                         Ok(true) => {
@@ -269,9 +290,7 @@ pub(super) async fn spawn_standalone_relay_supervisor(
                 }
             }
         }
-        for (_, task) in tasks {
-            task.handle.abort();
-        }
+        join_relay_handles(tasks.into_iter().map(|(_, task)| task.handle)).await;
     });
     Ok(())
 }
@@ -299,6 +318,9 @@ async fn reconcile_standalone_relays(
     targets: RelayTargets,
     tasks: &mut HashMap<String, StandaloneRelayTask>,
 ) -> anyhow::Result<()> {
+    if runtime_state.is_shutting_down() {
+        return Ok(());
+    }
     let relays =
         super::config::standalone_relay_connection_configs(config, standalone_state, targets)
             .await?;

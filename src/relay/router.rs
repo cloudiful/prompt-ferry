@@ -24,10 +24,6 @@ use tokio::{
 use tokio_rustls::TlsAcceptor;
 use tracing::{info, warn};
 
-/// Grace given to the public listener *after* shutdown is signalled. Long-lived
-/// SSE / Realtime streams that outlast it are dropped so the process still exits
-/// inside the orchestrator stop grace period.
-const RELAY_PUBLIC_DRAIN_BUDGET: Duration = Duration::from_secs(8);
 /// Extra headroom on top of the public budget for the worker bridge, so pending
 /// relay -> worker reply frames get a chance to flush after the public side has
 /// stopped accepting new client traffic.
@@ -99,6 +95,7 @@ async fn run_with_tokio_listeners(
     worker_listener: TcpListener,
     admin_listener: TcpListener,
 ) -> anyhow::Result<()> {
+    let public_drain_budget = Duration::from_secs(config.shutdown_drain_seconds.max(1));
     let tls_mode = config.tls_mode;
     let worker_tls_mode = config.worker_tls_mode;
     let public_config = config.clone();
@@ -189,13 +186,13 @@ async fn run_with_tokio_listeners(
             "public",
             public_server,
             shutdown_rx.clone(),
-            RELAY_PUBLIC_DRAIN_BUDGET,
+            public_drain_budget,
         ),
         drain_within(
             "worker-bridge",
             worker_server,
             shutdown_rx.clone(),
-            RELAY_PUBLIC_DRAIN_BUDGET + RELAY_WORKER_BRIDGE_EXTRA_DRAIN,
+            public_drain_budget + RELAY_WORKER_BRIDGE_EXTRA_DRAIN,
         ),
         drain_within(
             "management",

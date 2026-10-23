@@ -30,8 +30,14 @@ impl RequestCancellation {
     }
 
     pub(super) async fn cancelled(&self) {
-        while !self.is_cancelled() {
-            self.notify.notified().await;
+        loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
         }
     }
 }

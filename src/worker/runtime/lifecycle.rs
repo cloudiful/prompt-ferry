@@ -1,5 +1,5 @@
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use std::time::Duration;
@@ -21,6 +21,9 @@ pub(super) struct RuntimeControl {
     worker_instance_id: Uuid,
     shutting_down: Arc<AtomicBool>,
     shutdown_notify: Arc<Notify>,
+    admission_lock: Arc<Mutex<()>>,
+    session_stopped: Arc<AtomicBool>,
+    session_stop_notify: Arc<Notify>,
     active_requests: Arc<AtomicUsize>,
     active_notify: Arc<Notify>,
 }
@@ -31,6 +34,9 @@ impl RuntimeControl {
             worker_instance_id: Uuid::new_v4(),
             shutting_down: Arc::new(AtomicBool::new(false)),
             shutdown_notify: Arc::new(Notify::new()),
+            admission_lock: Arc::new(Mutex::new(())),
+            session_stopped: Arc::new(AtomicBool::new(false)),
+            session_stop_notify: Arc::new(Notify::new()),
             active_requests: Arc::new(AtomicUsize::new(0)),
             active_notify: Arc::new(Notify::new()),
         }
@@ -45,17 +51,47 @@ impl RuntimeControl {
     }
 
     pub(super) fn begin_shutdown(&self) {
+        let _admission = self
+            .admission_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if !self.shutting_down.swap(true, Ordering::SeqCst) {
             self.shutdown_notify.notify_waiters();
             self.active_notify.notify_waiters();
         }
     }
 
+    pub(super) fn is_session_stopped(&self) -> bool {
+        self.session_stopped.load(Ordering::SeqCst)
+    }
+
+    /// Close the bridge sessions once the accepted rounds have drained. It is
+    /// separate from admission shutdown so a supervisor keeps its existing
+    /// session loops alive while those rounds are still running.
+    pub(super) fn begin_session_stop(&self) {
+        if !self.session_stopped.swap(true, Ordering::SeqCst) {
+            self.session_stop_notify.notify_waiters();
+        }
+    }
+
     pub(super) async fn wait_for_shutdown(&self) {
+        let notified = self.shutdown_notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
         if self.is_shutting_down() {
             return;
         }
-        self.shutdown_notify.notified().await;
+        notified.await;
+    }
+
+    pub(super) async fn wait_for_session_stop(&self) {
+        let notified = self.session_stop_notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if self.is_session_stopped() {
+            return;
+        }
+        notified.await;
     }
 
     pub(super) fn current_lease(&self) -> (Uuid, DateTime<Utc>, DateTime<Utc>) {
@@ -66,34 +102,34 @@ impl RuntimeControl {
     }
 
     pub(super) fn try_track_request(&self) -> Option<ActiveRequestGuard> {
+        let _admission = self
+            .admission_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if self.is_shutting_down() {
             return None;
         }
         self.active_requests.fetch_add(1, Ordering::SeqCst);
-        if self.is_shutting_down() {
-            self.finish_request();
-            return None;
-        }
         Some(ActiveRequestGuard {
             control: self.clone(),
         })
     }
 
-    pub(super) async fn wait_for_drain(&self, timeout: Duration) {
-        if self.active_requests.load(Ordering::SeqCst) == 0 {
-            return;
-        }
-
+    pub(super) async fn wait_for_drain(&self, timeout: Duration) -> usize {
         let deadline = time::sleep(timeout);
         tokio::pin!(deadline);
 
         loop {
-            if self.active_requests.load(Ordering::SeqCst) == 0 {
-                return;
+            let notified = self.active_notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let remaining = self.active_requests.load(Ordering::SeqCst);
+            if remaining == 0 {
+                return 0;
             }
             tokio::select! {
-                _ = &mut deadline => return,
-                _ = self.active_notify.notified() => {}
+                _ = &mut deadline => return remaining,
+                _ = notified => {}
             }
         }
     }
@@ -422,4 +458,74 @@ async fn abort_requests_missing_valkey_leases(
         .collect::<Vec<_>>();
     diagnostics.pool_source = "lease_pool";
     db::abort_request_records_by_ids(&state.lease_pool, &missing).await
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::RuntimeControl;
+
+    #[tokio::test]
+    async fn drain_returns_once_the_last_guard_drops() {
+        let control = RuntimeControl::new();
+        let guard = control.try_track_request().expect("admission is open");
+
+        let drain = tokio::spawn({
+            let control = control.clone();
+            async move { control.wait_for_drain(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        drop(guard);
+
+        assert_eq!(drain.await.expect("drain task ran"), 0);
+    }
+
+    #[tokio::test]
+    async fn drain_reports_remaining_requests_at_the_deadline() {
+        let control = RuntimeControl::new();
+        let _guard = control.try_track_request().expect("admission is open");
+
+        let remaining = control.wait_for_drain(Duration::from_millis(20)).await;
+
+        assert_eq!(remaining, 1);
+    }
+
+    #[tokio::test]
+    async fn admission_shutdown_rejects_new_guards_but_keeps_the_admitted_round() {
+        let control = RuntimeControl::new();
+        let guard = control.try_track_request().expect("admission is open");
+
+        control.begin_shutdown();
+        assert!(control.try_track_request().is_none());
+        assert_eq!(
+            control.wait_for_drain(Duration::from_millis(20)).await,
+            1,
+            "the admitted round still holds the drain open"
+        );
+
+        drop(guard);
+        assert_eq!(control.wait_for_drain(Duration::from_secs(1)).await, 0);
+    }
+
+    #[tokio::test]
+    async fn session_stop_stays_independent_from_admission_shutdown() {
+        let control = RuntimeControl::new();
+        control.begin_shutdown();
+        assert!(!control.is_session_stopped());
+
+        let waiting = tokio::spawn({
+            let control = control.clone();
+            async move { control.wait_for_session_stop().await }
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(
+            !waiting.is_finished(),
+            "session stop has not been signalled"
+        );
+
+        control.begin_session_stop();
+        waiting.await.expect("session stop wait ran");
+        assert!(control.is_session_stopped());
+    }
 }

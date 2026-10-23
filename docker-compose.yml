@@ -69,8 +69,9 @@ services:
     image: ${PROMPT_FERRY_IMAGE:?set PROMPT_FERRY_IMAGE in .env}
     restart: unless-stopped
     stop_signal: SIGTERM
-    # Must stay above the drain budget below so in-flight requests finish first.
-    stop_grace_period: 30s
+    # Must stay above the relay drain below (130s default) so an already
+    # accepted response can finish before Docker sends SIGKILL.
+    stop_grace_period: 150s
     # The image ships `relay` as its default command; an empty command starts
     # the integrated relay + worker default of the binary.
     command: []
@@ -85,12 +86,15 @@ services:
       PROMPT_FERRY_LOGGING__LEVEL: ${PROMPT_FERRY_LOGGING__LEVEL:-info}
       PROMPT_FERRY_RELAY__BIND: 0.0.0.0:8787
       PROMPT_FERRY_RELAY__CLIENT_TOKEN: ${PROMPT_FERRY_RELAY__CLIENT_TOKEN:?set PROMPT_FERRY_RELAY__CLIENT_TOKEN in .env}
+      # The relay must outlive the worker drain so a response can still cross
+      # the bridge, and this must fit inside stop_grace_period above.
+      PROMPT_FERRY_RELAY__SHUTDOWN_DRAIN_SECONDS: ${PROMPT_FERRY_RELAY__SHUTDOWN_DRAIN_SECONDS:-130}
       # Optional: empty keeps the worker bridge unauthenticated, which is only
       # safe because the bridge stays on an internal loopback bind. The worker
       # token is authoritative for both halves in integrated mode.
       PROMPT_FERRY_WORKER__WORKER_TOKEN: ${PROMPT_FERRY_WORKER__WORKER_TOKEN:-}
       PROMPT_FERRY_WORKER__ADMIN_BIND: 0.0.0.0:80
-      PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS: ${PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS:-6}
+      PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS: ${PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS:-120}
       PROMPT_FERRY_WORKER__MCP_WARMUP: ${PROMPT_FERRY_WORKER__MCP_WARMUP:-all}
       PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN: ${PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_LOGIN:-admin}
       # Optional: empty generates a strong password once and writes it to

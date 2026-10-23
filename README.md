@@ -62,6 +62,12 @@ docker compose up -d prompt-ferry
 
 - Admin console: <http://127.0.0.1:8789> — log in as `admin`.
 - OpenAI-compatible base URL: `http://127.0.0.1:8787/v1`.
+- Shutdown: SIGTERM stops new requests and lets accepted inference rounds finish
+  for up to `PROMPT_FERRY_WORKER__SHUTDOWN_DRAIN_SECONDS` (120 s). The relay
+  waits `PROMPT_FERRY_RELAY__SHUTDOWN_DRAIN_SECONDS` (130 s) and Compose allows
+  150 s before SIGKILL. Keep worker < relay < `stop_grace_period` if you change
+  them. Integrated mode waits for both drains; a worker-only process relies on
+  its remote relay's budget, and a stop-grace expiry or SIGKILL is not graceful.
 
 If you left `PROMPT_FERRY_WORKER__BOOTSTRAP_ADMIN_PASSWORD` empty and no admin
 exists yet, a strong password was generated once and written to the data volume:

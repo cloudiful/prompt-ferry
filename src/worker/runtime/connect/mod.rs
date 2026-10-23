@@ -7,7 +7,7 @@ mod support;
 
 use super::{
     STALE_REQUEST_SWEEP_SECONDS, WorkerRuntimeState, WorkerShutdown, ai::abort_waiting_approvals,
-    build_admin_state, build_standalone_state,
+    build_admin_state, build_standalone_state, inbound::close_realtime_sessions,
     lifecycle_standalone::spawn_standalone_stale_lease_reconciler, validate_config,
 };
 use crate::{
@@ -18,7 +18,7 @@ use anyhow::Context;
 use reqwest::Client;
 use std::time::Duration;
 pub(super) use support::is_expected_relay_disconnect;
-use support::shutdown_signal;
+use support::{SESSION_TEARDOWN_ALLOWANCE, shutdown_signal};
 use tokio::task::JoinSet;
 use tracing::{info, warn};
 
@@ -192,75 +192,134 @@ pub(super) async fn run_embedded(config: WorkerConfig) -> anyhow::Result<()> {
         .await?;
     }
 
+    // Admission is closed, but the accepted rounds keep their bridge session
+    // and its writer: only the waiting human approvals and the long-lived
+    // realtime sessions stop here, using their existing cancellation paths.
     runtime_state.wait_for_shutdown().await;
-    if let Some(state) = runtime_admin_state.as_ref() {
-        abort_waiting_approvals(state, &client).await;
-    }
-    relay_tasks.abort_all();
-    while relay_tasks.join_next().await.is_some() {}
-
-    // Bound the in-flight drain so the process exits inside the compose
-    // stop grace even when individual requests are slow. The abort calls
-    // above already cancelled anything still being processed; this just
-    // waits for the worker bookkeeping to settle. Run both pieces under
-    // the same budget so neither blocks the other.
     let drain_budget = Duration::from_secs(config.shutdown_drain_seconds.max(1));
-    let maintenance_wait = async {
-        if let Some(task) = raw_maintenance_task {
-            match tokio::time::timeout(drain_budget, task).await {
-                Ok(Ok(())) => {}
-                Ok(Err(join_error)) => warn!(
-                    error = %join_error,
-                    "raw maintenance task join failed during shutdown",
-                ),
-                Err(_) => warn!(
-                    budget_seconds = drain_budget.as_secs(),
-                    "raw maintenance task did not stop within drain budget; exiting anyway",
-                ),
-            }
-        }
-        if let Some(task) = cache_alert_task {
-            match tokio::time::timeout(drain_budget, task).await {
-                Ok(Ok(())) => {}
-                Ok(Err(join_error)) => warn!(
-                    error = %join_error,
-                    "cache alert task join failed during shutdown",
-                ),
-                Err(_) => warn!(
-                    budget_seconds = drain_budget.as_secs(),
-                    "cache alert task did not stop within drain budget; exiting anyway",
-                ),
-            }
-        }
-        if let Some(task) = chatgpt_quota_task {
-            match tokio::time::timeout(drain_budget, task).await {
-                Ok(Ok(())) => {}
-                Ok(Err(join_error)) => warn!(
-                    error = %join_error,
-                    "ChatGPT quota collector task join failed during shutdown",
-                ),
-                Err(_) => warn!(
-                    budget_seconds = drain_budget.as_secs(),
-                    "ChatGPT quota collector task did not stop within drain budget; exiting anyway",
-                ),
-            }
-        }
-        if let Some(task) = quota_observation_task {
-            match tokio::time::timeout(drain_budget, task).await {
-                Ok(Ok(())) => {}
-                Ok(Err(join_error)) => warn!(
-                    error = %join_error,
-                    "quota observation collector task join failed during shutdown",
-                ),
-                Err(_) => warn!(
-                    budget_seconds = drain_budget.as_secs(),
-                    "quota observation collector task did not stop within drain budget; exiting anyway",
-                ),
-            }
+    let shutdown_deadline = tokio::time::Instant::now() + drain_budget;
+    info!(
+        budget_seconds = drain_budget.as_secs(),
+        "worker shutdown admission closed; draining accepted request rounds"
+    );
+    let approvals = async {
+        if let Some(state) = runtime_admin_state.as_ref() {
+            abort_waiting_approvals(state, &client).await;
         }
     };
-    tokio::join!(maintenance_wait, runtime_state.wait_for_drain(drain_budget));
+    let realtime_close = close_realtime_sessions(&runtime_state, shutdown_deadline);
+    if tokio::time::timeout_at(shutdown_deadline, async {
+        tokio::join!(approvals, realtime_close);
+    })
+    .await
+    .is_err()
+    {
+        warn!(
+            budget_seconds = drain_budget.as_secs(),
+            "worker shutdown pre-drain cleanup reached the shared deadline"
+        );
+    }
+
+    let maintenance_wait = async {
+        let join_background = async {
+            if let Some(task) = raw_maintenance_task {
+                match task.await {
+                    Ok(()) => {}
+                    Err(join_error) => warn!(
+                        error = %join_error,
+                        "raw maintenance task join failed during shutdown",
+                    ),
+                }
+            }
+            if let Some(task) = cache_alert_task {
+                match task.await {
+                    Ok(()) => {}
+                    Err(join_error) => warn!(
+                        error = %join_error,
+                        "cache alert task join failed during shutdown",
+                    ),
+                }
+            }
+            if let Some(task) = chatgpt_quota_task {
+                match task.await {
+                    Ok(()) => {}
+                    Err(join_error) => warn!(
+                        error = %join_error,
+                        "ChatGPT quota collector task join failed during shutdown",
+                    ),
+                }
+            }
+            if let Some(task) = quota_observation_task {
+                match task.await {
+                    Ok(()) => {}
+                    Err(join_error) => warn!(
+                        error = %join_error,
+                        "quota observation collector task join failed during shutdown",
+                    ),
+                }
+            }
+        };
+        if tokio::time::timeout(SESSION_TEARDOWN_ALLOWANCE, join_background)
+            .await
+            .is_err()
+        {
+            warn!(
+                allowance_seconds = SESSION_TEARDOWN_ALLOWANCE.as_secs(),
+                "background tasks did not stop within the teardown allowance; exiting anyway",
+            );
+        }
+    };
+    let remaining_drain_budget =
+        shutdown_deadline.saturating_duration_since(tokio::time::Instant::now());
+    let (remaining, ()) = tokio::join!(
+        runtime_state.control.wait_for_drain(remaining_drain_budget),
+        maintenance_wait
+    );
+    if remaining > 0 {
+        warn!(
+            remaining,
+            budget_seconds = drain_budget.as_secs(),
+            "worker shutdown drain deadline reached; cancelling remaining requests",
+        );
+        cancel_in_flight_requests(&runtime_state).await;
+    }
+
+    // The registered rounds are drained; close the bridge sessions and give
+    // each writer its bounded flush before the supervisors are torn down.
+    runtime_state.control.begin_session_stop();
+    let supervisors = async { while relay_tasks.join_next().await.is_some() {} };
+    if tokio::time::timeout(
+        SESSION_TEARDOWN_ALLOWANCE + Duration::from_secs(1),
+        supervisors,
+    )
+    .await
+    .is_err()
+    {
+        warn!(
+            allowance_seconds = SESSION_TEARDOWN_ALLOWANCE.as_secs(),
+            "relay supervisors did not finish session teardown within the allowance; aborting them",
+        );
+        relay_tasks.abort_all();
+        while relay_tasks.join_next().await.is_some() {}
+    }
     Ok(())
+}
+
+/// Cancel every still-registered request through the same `RequestCancellation`
+/// the bridge cancel path uses. At this point no new request can be admitted,
+/// so the remaining set only shrinks.
+async fn cancel_in_flight_requests(runtime_state: &WorkerRuntimeState) {
+    let requests = {
+        let cancellations = runtime_state.request_cancellations.lock().await;
+        cancellations.values().cloned().collect::<Vec<_>>()
+    };
+    let mcp_requests = {
+        let cancellations = runtime_state.mcp_request_cancellations.lock().await;
+        cancellations.values().cloned().collect::<Vec<_>>()
+    };
+    for cancellation in requests.into_iter().chain(mcp_requests) {
+        cancellation.cancel();
+    }
 }
 
 pub(super) async fn connect_for_test(config: WorkerConfig, client: Client) -> anyhow::Result<()> {

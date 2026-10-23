@@ -44,11 +44,12 @@ pub struct WorkerConfig {
     pub session_ttl_seconds: u64,
     pub local_session_max_entries: usize,
     /// Hard ceiling on the relay drain that runs on shutdown. The runtime
-    /// blocks the in-flight requests for at most this duration before
-    /// returning a synthetic shutdown response. Keep this below the
-    /// `docker stop --time` grace period so the process exits cleanly
-    /// without a SIGKILL from the orchestrator. Defaults to 6 seconds to
-    /// match the common 10s compose stop with headroom for socket teardown.
+    /// stops admitting new requests immediately and keeps already accepted
+    /// inference rounds alive for at most this duration before returning a
+    /// synthetic shutdown response. Keep this below the relay drain and the
+    /// `docker stop --time` grace period so the process exits cleanly without
+    /// a SIGKILL from the orchestrator. Defaults to 120 seconds to cover a
+    /// slow full response, not just worker bookkeeping.
     pub shutdown_drain_seconds: u64,
     /// MCP startup warmup strategy.
     /// * `all` (default) — eagerly warm every enabled MCP server in the
@@ -106,7 +107,7 @@ impl Default for WorkerConfig {
             valkey_ttl_seconds: 24 * 60 * 60,
             session_ttl_seconds: 7 * 24 * 60 * 60,
             local_session_max_entries: 10_000,
-            shutdown_drain_seconds: 6,
+            shutdown_drain_seconds: 120,
             mcp_warmup: McpWarmupMode::All,
             max_upstream_response_bytes: 64 * 1024 * 1024,
             max_raw_response_capture_bytes: 4 * 1024 * 1024,
@@ -266,6 +267,11 @@ mod tests {
         let config: WorkerConfig = serde_json::from_str(&json).expect("both key names parse");
         assert_eq!(config.worker_config_encryption_key, KEY_A);
         assert_eq!(config.relay_secret_master_key, KEY_B);
+    }
+
+    #[test]
+    fn shutdown_drain_default_covers_a_slow_response_round() {
+        assert_eq!(WorkerConfig::default().shutdown_drain_seconds, 120);
     }
 
     #[test]

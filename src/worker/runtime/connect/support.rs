@@ -1,8 +1,18 @@
 use anyhow::Error;
+use std::time::Duration;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tracing::info;
 
 use crate::usage::truncate_chars;
+
+/// Bounded allowance for one draining session to flush queued bridge frames to
+/// its websocket sink. Concurrent sessions each get this allowance, never a
+/// serial per-session wait.
+pub(super) const BRIDGE_FLUSH_ALLOWANCE: Duration = Duration::from_secs(2);
+
+/// Global bound on joining session supervisors after the bridge session stop
+/// signal, so a stuck session cannot hold the process.
+pub(super) const SESSION_TEARDOWN_ALLOWANCE: Duration = Duration::from_secs(5);
 
 pub(crate) fn ws_connect_error_detail(err: &WsError) -> String {
     if let WsError::Http(response) = err {
